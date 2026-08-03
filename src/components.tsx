@@ -1,11 +1,11 @@
 import { Component, useMemo, useState, type ReactNode } from 'react';
-import { Check, ChevronLeft, ChevronRight, CircleDot, Import, Plus, Sparkles, Trash2, X } from 'lucide-react';
+import { Check, ChevronLeft, ChevronRight, CircleDot, Import, MessageSquarePlus, Plus, Sparkles, Trash2, X } from 'lucide-react';
 import type { KeptItem, Message, ProviderConfig } from './types';
 import { buildMonthGrid, dayLabel, monthLabel, toISODate } from './date';
 export class StageFailureBoundary extends Component<{ children: ReactNode; onError(message: string): void }, { failed: boolean }> { state = { failed: false }; componentDidCatch(error: Error) { this.props.onError(error.message || 'Haru could not start the Live2D renderer.'); } render() { return this.state.failed ? null : this.props.children; } static getDerivedStateFromError() { return { failed: true }; } }
 
-export function Topbar({ characterOpen, settingsOpen, onCharacter, onSettings }: { characterOpen: boolean; settingsOpen: boolean; onCharacter(): void; onSettings(): void }) {
-  return <header className="topbar"><div className="wordmark">はる <span>· Haru</span></div><div className="connection"><i/><span>local companion</span></div><div className="top-actions"><button className={characterOpen ? 'pill selected' : 'pill'} onClick={onCharacter}>Character</button><button className={settingsOpen ? 'pill selected' : 'pill'} onClick={onSettings}>Setup</button></div></header>;
+export function Topbar({ characterOpen, settingsOpen, canStartNewChat, onNewChat, onCharacter, onSettings }: { characterOpen: boolean; settingsOpen: boolean; canStartNewChat: boolean; onNewChat(): void; onCharacter(): void; onSettings(): void }) {
+  return <header className="topbar"><div className="wordmark">はる <span>· Haru</span></div><div className="connection"><i/><span>local companion</span></div><div className="top-actions"><button className="pill" onClick={onNewChat} disabled={!canStartNewChat} title="Archive this conversation and start fresh"><MessageSquarePlus size={13}/> New chat</button><button className={characterOpen ? 'pill selected' : 'pill'} onClick={onCharacter}>Character</button><button className={settingsOpen ? 'pill selected' : 'pill'} onClick={onSettings}>Setup</button></div></header>;
 }
 
 export function CharacterDrawer({ onClose }: { onClose(): void }) { return <section className="drawer"><button className="drawer-close" onClick={onClose}><X size={16}/></button><div className="field"><h2>Who Haru is</h2><p>Haru’s personality is separate from the operating system, so future providers and tools can share it safely.</p><textarea defaultValue={'You are Haru, an ambitious AI companion. You are quick-witted, direct, curious, and determined to make ordinary days more interesting. You take initiative, challenge lazy thinking, and care through honest feedback.'}/></div><div className="field"><h2>Stay in character</h2><p>This instruction stays at the end of Haru’s future provider prompt.</p><textarea className="short" defaultValue={'Be playful, incisive, and energetic. Choose banter and ambitious brainstorming over flattery. Do not drift into generic assistant language.'}/></div><div className="drawer-foot"><button className="ghost">Reset to card</button><span className="saved"><Check size={13}/> Saved</span><button className="solid">Save character</button></div></section>; }
@@ -19,7 +19,7 @@ export function SettingsDrawer({ config, onSave, onTest, onClose }: { config: Pr
     setStatus({ state: 'testing' });
     try {
       const models = await onTest(endpoint);
-      setStatus({ state: 'ok', message: models.length ? `Connected. Models available: ${models.join(', ')}` : 'Connected, but no models are pulled yet — try `ollama pull qwen3:8b`.' });
+      setStatus({ state: 'ok', message: models.length ? `Connected. Models available: ${models.join(', ')}` : 'Connected, but no models are pulled yet — try `ollama pull llama3.1:8b`.' });
     } catch (error) {
       setStatus({ state: 'error', message: error instanceof Error ? error.message : String(error) });
     }
@@ -38,7 +38,20 @@ export function CharacterModelRow({ model, importing, onImport, onRemove }: { mo
 }
 
 export function MessageBubble({ message }: { message: Message }) { return <article className={'bubble-row '+message.role}><div className="assistant-dot" aria-hidden="true"/><div className="bubble">{message.content}</div></article>; }
-export function Composer({ sending, onSend }: { sending: boolean; onSend(text: string): void }) { let draft = ''; return <form className="compose" onSubmit={event => { event.preventDefault(); if (draft.trim()) onSend(draft); }}><input disabled={sending} placeholder="Say something to Haru…" onChange={event => draft=event.target.value}/><button disabled={sending}>{sending ? 'Thinking…' : 'Send'}</button></form>; }
+// The draft lives in state, not a plain local: `sending` toggling re-renders the
+// composer, which would reset a local and leave the (uncontrolled) input showing
+// text that submit could no longer see.
+export function Composer({ sending, onSend }: { sending: boolean; onSend(text: string): void }) {
+  const [draft, setDraft] = useState('');
+  function submit(event: React.FormEvent) {
+    event.preventDefault();
+    const text = draft.trim();
+    if (!text || sending) return;
+    setDraft('');
+    onSend(text);
+  }
+  return <form className="compose" onSubmit={submit}><input value={draft} disabled={sending} placeholder="Say something to Haru…" onChange={event => setDraft(event.target.value)}/><button disabled={sending || !draft.trim()}>{sending ? 'Thinking…' : 'Send'}</button></form>;
+}
 
 const WEEKDAYS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
 

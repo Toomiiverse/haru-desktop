@@ -3,6 +3,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 type Live2DModel = { path: string; name: string; url: string };
 type Message = { id: string; role: 'user' | 'assistant'; content: string; time: string };
 type ProviderConfig = { provider: string; model: string; endpoint: string; temperature: number };
+type KeptItem = { id: string; title: string; date: string; time?: string; kind: 'reminder' | 'event'; done: boolean };
 
 contextBridge.exposeInMainWorld('haru', {
   settings: { get: (key: string) => ipcRenderer.invoke('settings:get', key), set: (key: string, value: unknown) => ipcRenderer.invoke('settings:set', key, value) },
@@ -10,6 +11,7 @@ contextBridge.exposeInMainWorld('haru', {
     getMessages: () => ipcRenderer.invoke('chat:getMessages') as Promise<Message[]>,
     setMessages: (messages: Message[]) => ipcRenderer.invoke('chat:setMessages', messages),
     getArchive: () => ipcRenderer.invoke('chat:getArchive') as Promise<Record<string, Message[]>>,
+    newConversation: () => ipcRenderer.invoke('chat:newConversation') as Promise<void>,
     onReset: (callback: () => void) => {
       const listener = () => callback();
       ipcRenderer.on('chat:reset', listener);
@@ -19,6 +21,16 @@ contextBridge.exposeInMainWorld('haru', {
   ai: {
     send: (messages: { role: string; content: string }[], config: ProviderConfig) => ipcRenderer.invoke('ai:send', messages, config) as Promise<string>,
     test: (endpoint: string) => ipcRenderer.invoke('ai:test', endpoint) as Promise<string[]>,
+  },
+  kept: {
+    get: () => ipcRenderer.invoke('kept:get') as Promise<KeptItem[]>,
+    toggle: (id: string) => ipcRenderer.invoke('kept:toggle', id) as Promise<void>,
+    remove: (id: string) => ipcRenderer.invoke('kept:remove', id) as Promise<void>,
+    onChange: (callback: (items: KeptItem[]) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, items: KeptItem[]) => callback(items);
+      ipcRenderer.on('kept:changed', listener);
+      return () => ipcRenderer.removeListener('kept:changed', listener);
+    },
   },
   live2d: {
     import: () => ipcRenderer.invoke('live2d:import'),

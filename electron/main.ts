@@ -1,13 +1,15 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, type MenuItemConstructorOptions, nativeTheme, net, protocol, screen } from 'electron';
 import path from 'node:path';
-import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync } from 'node:fs';
+import { createHash, randomUUID } from 'node:crypto';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import AdmZip from 'adm-zip';
 import Store from 'electron-store';
+import { localDateKey, resolveDate, zonedNow } from './dates';
 
 type Bounds = { x: number; y: number; width: number; height: number };
 type Live2DModel = { path: string; name: string; url: string };
+type KeptItem = { id: string; title: string; date: string; time?: string; kind: 'reminder' | 'event'; done: boolean };
 
 const COMPANION_DEFAULT_WIDTH = 300;
 const COMPANION_ASPECT = 360 / 300;
@@ -37,16 +39,80 @@ function modelResult(modelPath: string): Live2DModel {
   return { path: modelPath, name: path.basename(modelPath), url: `haru-model://local/${id}/${encodeURIComponent(path.basename(modelPath))}` };
 }
 
+type ZipEntry = ReturnType<InstanceType<typeof AdmZip>['getEntries']>[number];
+
+// ZIPs written by localized Windows tools store filenames in the machine's own
+// codepage without setting the UTF-8 flag. Decoding those as UTF-8 mangles any
+// non-ASCII name — irreversibly, since the bad bytes become U+FFFD — so the
+// assets model3.json points at stop matching what lands on disk and every
+// texture 404s. The model's own references are the ground truth for what the
+// names should be, so try the plausible codepages and keep whichever resolves
+// the most of them.
+const ZIP_NAME_ENCODINGS = ['utf-8', 'gbk', 'shift_jis', 'euc-kr', 'big5'];
+
+function decodeEntryName(raw: Buffer, encoding: string) {
+  try {
+    return new TextDecoder(encoding).decode(raw).replace(/\\/g, '/');
+  } catch {
+    return raw.toString('utf8').replace(/\\/g, '/');
+  }
+}
+
+function modelReferences(json: unknown): string[] {
+  const files = (json as { FileReferences?: Record<string, unknown> } | null)?.FileReferences;
+  if (!files) return [];
+  const references: string[] = [];
+  const add = (value: unknown) => { if (typeof value === 'string') references.push(value); };
+  add(files.Moc); add(files.Physics); add(files.Pose); add(files.DisplayInfo); add(files.UserData);
+  if (Array.isArray(files.Textures)) files.Textures.forEach(add);
+  if (Array.isArray(files.Expressions)) files.Expressions.forEach(entry => add((entry as { File?: unknown })?.File));
+  if (files.Motions && typeof files.Motions === 'object') {
+    for (const group of Object.values(files.Motions as Record<string, unknown>)) {
+      if (Array.isArray(group)) group.forEach(entry => add((entry as { File?: unknown })?.File));
+    }
+  }
+  return references;
+}
+
+// References inside model3.json are relative to its own folder, which is not the
+// archive root when the ZIP wraps everything in a directory — so they are scored
+// against that prefix, not against bare entry names.
+function pickNameEncoding(entries: ZipEntry[], model: ZipEntry, references: string[]) {
+  if (!references.length) return 'utf-8';
+  let best = { encoding: 'utf-8', score: -1 };
+  for (const encoding of ZIP_NAME_ENCODINGS) {
+    const names = new Set(entries.map(entry => decodeEntryName(entry.rawEntryName, encoding)));
+    const modelName = decodeEntryName(model.rawEntryName, encoding);
+    const prefix = modelName.slice(0, modelName.lastIndexOf('/') + 1);
+    const score = references.filter(reference => names.has(prefix + reference)).length;
+    if (score > best.score) best = { encoding, score };
+  }
+  return best.encoding;
+}
+
 function unpackModel(archivePath: string) {
   const zip = new AdmZip(archivePath);
   const entries = zip.getEntries();
-  const model = entries.find(entry => !entry.isDirectory && entry.entryName.toLowerCase().endsWith('.model3.json'));
+  // Matched on the raw bytes: the suffix is ASCII, so it survives any codepage.
+  const model = entries.find(entry => !entry.isDirectory && entry.rawEntryName.toString('latin1').toLowerCase().endsWith('.model3.json'));
   if (!model) throw new Error('This ZIP does not contain a .model3.json Live2D model.');
-  if (entries.some(entry => entry.entryName.split('/').includes('..') || path.isAbsolute(entry.entryName))) throw new Error('This ZIP contains an unsafe path and was not imported.');
+  let references: string[] = [];
+  try {
+    references = modelReferences(JSON.parse(zip.readAsText(model).replace(/^﻿/, '')));
+  } catch {
+    // Unreadable model3.json still extracts; the loader reports the real problem.
+  }
+  const encoding = pickNameEncoding(entries, model, references);
   const destination = path.join(app.getPath('userData'), 'live2d-models', createHash('sha256').update(`${archivePath}:${Date.now()}`).digest('hex').slice(0, 16));
   mkdirSync(destination, { recursive: true });
-  zip.extractAllTo(destination, true);
-  return path.join(destination, model.entryName);
+  for (const entry of entries) {
+    if (entry.isDirectory) continue;
+    const target = path.resolve(destination, decodeEntryName(entry.rawEntryName, encoding));
+    if (target !== destination && !target.startsWith(destination + path.sep)) throw new Error('This ZIP contains an unsafe path and was not imported.');
+    mkdirSync(path.dirname(target), { recursive: true });
+    writeFileSync(target, entry.getData());
+  }
+  return path.join(destination, decodeEntryName(model.rawEntryName, encoding));
 }
 
 function broadcastLive2DChange(model: Live2DModel | null) {
@@ -55,25 +121,6 @@ function broadcastLive2DChange(model: Live2DModel | null) {
 
 function broadcastChatReset() {
   for (const win of BrowserWindow.getAllWindows()) win.webContents.send('chat:reset');
-}
-
-// Reads the wall-clock date/time in `timeZone` as local Date fields, so day-boundary
-// math (getDate/getHours/etc.) reflects that zone regardless of the OS's own timezone.
-function zonedNow(timeZone: string): Date {
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone, hour12: false,
-    year: 'numeric', month: '2-digit', day: '2-digit',
-    hour: '2-digit', minute: '2-digit', second: '2-digit',
-  }).formatToParts(new Date());
-  const get = (type: string) => Number(parts.find(p => p.type === type)?.value ?? 0);
-  return new Date(get('year'), get('month') - 1, get('day'), get('hour') % 24, get('minute'), get('second'));
-}
-
-function localDateKey(d: Date) {
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
 }
 
 // The "chat day" runs from CHAT_RESET_HOUR to CHAT_RESET_HOUR the next day, not
@@ -85,19 +132,51 @@ function currentChatDayKey(): string {
   return localDateKey(now);
 }
 
+// Archives under the day key, suffixing when that day already has an entry —
+// starting a chat manually and then letting the 5am reset fire would otherwise
+// have the second archive overwrite the first.
+function archiveMessages(messages: unknown[], dayKey: string) {
+  const archive = (store.get('chat.archive') as Record<string, unknown[]> | undefined) ?? {};
+  let key = dayKey;
+  for (let n = 2; archive[key]; n++) key = `${dayKey}#${n}`;
+  archive[key] = messages;
+  store.set('chat.archive', archive);
+}
+
+function startNewConversation() {
+  const messages = store.get('chat.messages') as unknown[] | undefined;
+  if (messages?.length) archiveMessages(messages, currentChatDayKey());
+  store.delete('chat.messages');
+  broadcastChatReset();
+}
+
 function performChatResetIfDue() {
   const key = currentChatDayKey();
   const previousKey = store.get('chat.dayKey') as string | undefined;
   if (previousKey === key) return;
   const previousMessages = store.get('chat.messages') as unknown[] | undefined;
-  if (previousKey && previousMessages?.length) {
-    const archive = (store.get('chat.archive') as Record<string, unknown[]> | undefined) ?? {};
-    archive[previousKey] = previousMessages;
-    store.set('chat.archive', archive);
-  }
+  if (previousKey && previousMessages?.length) archiveMessages(previousMessages, previousKey);
   store.set('chat.dayKey', key);
   store.delete('chat.messages');
   broadcastChatReset();
+}
+
+// Kept items live in the main process because the chat tool loop runs here —
+// the model's tool calls write straight to the store, and every window is told
+// to re-read rather than each keeping its own copy.
+function getKept(): KeptItem[] {
+  return (store.get('kept.items') as KeptItem[] | undefined) ?? [];
+}
+
+function setKept(items: KeptItem[]) {
+  store.set('kept.items', items);
+  for (const win of BrowserWindow.getAllWindows()) win.webContents.send('kept:changed', items);
+}
+
+function addKeptItem(item: Omit<KeptItem, 'id' | 'done'>): KeptItem {
+  const created: KeptItem = { ...item, id: randomUUID(), done: false };
+  setKept([...getKept(), created]);
+  return created;
 }
 
 type ProviderConfig = { provider: string; model: string; endpoint: string; temperature: number };
@@ -106,17 +185,124 @@ function trimEndpoint(endpoint: string) {
   return endpoint.replace(/\/+$/, '');
 }
 
-async function ollamaChat(messages: { role: string; content: string }[], config: ProviderConfig) {
+type ToolCall = { function?: { name?: string; arguments?: unknown } };
+type OllamaMessage = { role: string; content?: string; tool_calls?: ToolCall[]; tool_name?: string };
+
+const MAX_TOOL_ROUNDS = 4;
+// Ollama's default context reserves a KV cache big enough to push a 14B model
+// partly onto the CPU on a 16GB card — measured at 10 tok/s vs 54 tok/s once it
+// fits entirely in VRAM. Chat is wiped daily, so a day's history never needs the
+// larger window.
+const CHAT_NUM_CTX = 8192;
+
+const CHAT_TOOLS = [{
+  type: 'function',
+  function: {
+    name: 'create_kept_item',
+    description: "Save a reminder or appointment to the user's calendar. Call this whenever the user asks to be reminded of something or mentions an appointment — writing it out in your reply does not save anything.",
+    parameters: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'Short description of what to do, e.g. "Get milk".' },
+        date: { type: 'string', description: 'When it happens, copied from how the user said it: "today", "tomorrow", a weekday such as "thursday" or "next monday", a day of the month such as "the 15th", or "in 3 days". Do not work the calendar date out yourself — pass the wording through and it will be resolved.' },
+        time: { type: 'string', description: 'Time of day such as "8:00 AM". Omit for an all-day item.' },
+        kind: { type: 'string', enum: ['reminder', 'event'], description: 'Use "event" for appointments, "reminder" for tasks.' },
+      },
+      required: ['title', 'date', 'kind'],
+    },
+  },
+}];
+
+// Listing what is saved directly in the prompt rather than behind a read tool:
+// asked "anything tomorrow?", the model answered "nothing" outright instead of
+// choosing to look, so the answer has to already be in front of it. Each entry
+// carries its own relative label so no date arithmetic is needed to match
+// "tomorrow" against a row.
+function keptSummary(now: Date) {
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const items = getKept()
+    .filter(item => item.date >= localDateKey(startOfToday))
+    .sort((a, b) => a.date.localeCompare(b.date) || (a.time ?? '').localeCompare(b.time ?? ''))
+    .slice(0, 25);
+  if (!items.length) return 'The user has nothing saved from today onward.';
+  const weekday = new Intl.DateTimeFormat('en-US', { weekday: 'long' });
+  const lines = items.map(item => {
+    const [year, month, day] = item.date.split('-').map(Number);
+    const when = new Date(year, month - 1, day);
+    const offset = Math.round((when.getTime() - startOfToday.getTime()) / 86_400_000);
+    const relative = offset === 0 ? 'today' : offset === 1 ? 'tomorrow' : weekday.format(when);
+    return `${item.date} (${relative}) ${item.time ?? 'all day'} - ${item.title}${item.done ? ' [done]' : ''}`;
+  });
+  return `Saved items from today onward: ${lines.join('; ')}.`;
+}
+
+function chatSystemPrompt() {
+  const now = zonedNow(CHAT_TIMEZONE);
+  const weekday = new Intl.DateTimeFormat('en-US', { weekday: 'long' }).format(now);
+  return [
+    'You are Haru, an ambitious desktop companion: playful, direct and energetic. Skip flattery and generic assistant language.',
+    `Today is ${weekday}, ${localDateKey(now)}, in the user's timezone (${CHAT_TIMEZONE}).`,
+    keptSummary(now),
+    'Answer questions about what is coming up from that list, and never say nothing is saved without checking it first.',
+    'When the user wants to be reminded of something or mentions an appointment, call create_kept_item so it is actually saved. Once saved, confirm it in a sentence or two rather than repeating it back as a formatted block.',
+  ].join(' ');
+}
+
+function toolArguments(call: ToolCall): Record<string, unknown> {
+  const args = call.function?.arguments;
+  // Ollama hands back a parsed object, but older builds send a JSON string.
+  if (typeof args === 'string') { try { return JSON.parse(args) as Record<string, unknown>; } catch { return {}; } }
+  return args && typeof args === 'object' ? args as Record<string, unknown> : {};
+}
+
+// Errors are returned to the model rather than thrown, so it can correct a bad
+// argument and try again instead of the whole turn failing.
+function runChatTool(call: ToolCall): string {
+  const name = call.function?.name;
+  if (name !== 'create_kept_item') return JSON.stringify({ error: `Unknown tool "${name}".` });
+  const args = toolArguments(call);
+  const title = typeof args.title === 'string' ? args.title.trim() : '';
+  // An omitted date means the user never named one ("remind me to stretch"),
+  // which reads as today rather than as a failure.
+  const requested = typeof args.date === 'string' && args.date.trim() ? args.date.trim() : 'today';
+  if (!title) return JSON.stringify({ error: 'title is required.' });
+  const date = resolveDate(requested, zonedNow(CHAT_TIMEZONE));
+  if (!date) return JSON.stringify({ error: `Could not understand the date "${requested}". Use the user's own wording, such as "tomorrow", "thursday", "next monday" or "the 15th".` });
+  const time = typeof args.time === 'string' && args.time.trim() ? args.time.trim() : undefined;
+  const item = addKeptItem({ title, date, time, kind: args.kind === 'event' ? 'event' : 'reminder' });
+  console.log(`[ai] saved ${item.kind}: "${item.title}" on ${item.date}${item.time ? ` at ${item.time}` : ''}`);
+  return JSON.stringify({ saved: true, title: item.title, date: item.date, time: item.time ?? null, kind: item.kind });
+}
+
+async function ollamaPost(conversation: OllamaMessage[], config: ProviderConfig) {
   const response = await net.fetch(`${trimEndpoint(config.endpoint)}/api/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: config.model, messages, stream: false, options: { temperature: config.temperature } }),
+    body: JSON.stringify({ model: config.model, messages: conversation, tools: CHAT_TOOLS, stream: false, options: { temperature: config.temperature, num_ctx: CHAT_NUM_CTX } }),
   });
   if (!response.ok) throw new Error(`Ollama returned ${response.status}: ${(await response.text().catch(() => '')) || response.statusText}`);
-  const data = await response.json() as { message?: { content?: string }; error?: string };
+  const data = await response.json() as { message?: OllamaMessage; error?: string };
   if (data.error) throw new Error(data.error);
-  if (!data.message?.content) throw new Error('Ollama response did not include any message content.');
-  return data.message.content;
+  if (!data.message) throw new Error('Ollama response did not include a message.');
+  return data.message;
+}
+
+async function ollamaChat(messages: { role: string; content: string }[], config: ProviderConfig) {
+  console.log(`[ai] chat request: model=${config.model} endpoint=${config.endpoint} messages=${messages.length}`);
+  const started = Date.now();
+  const conversation: OllamaMessage[] = [{ role: 'system', content: chatSystemPrompt() }, ...messages];
+  for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+    const message = await ollamaPost(conversation, config);
+    if (message.tool_calls?.length) {
+      conversation.push(message);
+      for (const call of message.tool_calls) conversation.push({ role: 'tool', tool_name: call.function?.name, content: runChatTool(call) });
+      continue;
+    }
+    if (!message.content) throw new Error('Ollama response did not include any message content.');
+    console.log(`[ai] chat reply in ${Date.now() - started}ms, ${message.content.length} chars`);
+    return message.content;
+  }
+  throw new Error('Haru kept calling tools without settling on a reply.');
 }
 
 async function ollamaTags(endpoint: string) {
@@ -261,6 +447,10 @@ app.whenReady().then(() => {
   });
   ipcMain.handle('chat:setMessages', (_e, messages) => { store.set('chat.messages', messages); });
   ipcMain.handle('chat:getArchive', () => store.get('chat.archive') ?? {});
+  ipcMain.handle('chat:newConversation', () => startNewConversation());
+  ipcMain.handle('kept:get', () => getKept());
+  ipcMain.handle('kept:toggle', (_e, id: string) => { setKept(getKept().map(item => item.id === id ? { ...item, done: !item.done } : item)); });
+  ipcMain.handle('kept:remove', (_e, id: string) => { setKept(getKept().filter(item => item.id !== id)); });
   ipcMain.handle('ai:send', (_e, messages: { role: string; content: string }[], config: ProviderConfig) => ollamaChat(messages, config));
   ipcMain.handle('ai:test', (_e, endpoint: string) => ollamaTags(endpoint));
   ipcMain.handle('live2d:import', async () => {
