@@ -100,6 +100,32 @@ function performChatResetIfDue() {
   broadcastChatReset();
 }
 
+type ProviderConfig = { provider: string; model: string; endpoint: string; temperature: number };
+
+function trimEndpoint(endpoint: string) {
+  return endpoint.replace(/\/+$/, '');
+}
+
+async function ollamaChat(messages: { role: string; content: string }[], config: ProviderConfig) {
+  const response = await net.fetch(`${trimEndpoint(config.endpoint)}/api/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model: config.model, messages, stream: false, options: { temperature: config.temperature } }),
+  });
+  if (!response.ok) throw new Error(`Ollama returned ${response.status}: ${(await response.text().catch(() => '')) || response.statusText}`);
+  const data = await response.json() as { message?: { content?: string }; error?: string };
+  if (data.error) throw new Error(data.error);
+  if (!data.message?.content) throw new Error('Ollama response did not include any message content.');
+  return data.message.content;
+}
+
+async function ollamaTags(endpoint: string) {
+  const response = await net.fetch(`${trimEndpoint(endpoint)}/api/tags`);
+  if (!response.ok) throw new Error(`Ollama returned ${response.status}: ${response.statusText}`);
+  const data = await response.json() as { models?: { name: string }[] };
+  return (data.models ?? []).map(model => model.name);
+}
+
 function readExpressionNames(): string[] {
   const saved = store.get('live2d.model') as { path?: string } | undefined;
   if (!saved?.path) return [];
@@ -235,6 +261,8 @@ app.whenReady().then(() => {
   });
   ipcMain.handle('chat:setMessages', (_e, messages) => { store.set('chat.messages', messages); });
   ipcMain.handle('chat:getArchive', () => store.get('chat.archive') ?? {});
+  ipcMain.handle('ai:send', (_e, messages: { role: string; content: string }[], config: ProviderConfig) => ollamaChat(messages, config));
+  ipcMain.handle('ai:test', (_e, endpoint: string) => ollamaTags(endpoint));
   ipcMain.handle('live2d:import', async () => {
     const result = await dialog.showOpenDialog(mainWindow!, { title: 'Import Live2D Cubism model', properties: ['openFile'], filters: [{ name: 'Live2D model package', extensions: ['zip', 'json'] }] });
     if (result.canceled || !result.filePaths[0]) return null;

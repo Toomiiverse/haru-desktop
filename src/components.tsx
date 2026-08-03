@@ -1,6 +1,6 @@
 import { Component, useMemo, useState, type ReactNode } from 'react';
 import { Check, ChevronLeft, ChevronRight, CircleDot, Import, Plus, Sparkles, Trash2, X } from 'lucide-react';
-import type { KeptItem, Message } from './types';
+import type { KeptItem, Message, ProviderConfig } from './types';
 import { buildMonthGrid, dayLabel, monthLabel, toISODate } from './date';
 export class StageFailureBoundary extends Component<{ children: ReactNode; onError(message: string): void }, { failed: boolean }> { state = { failed: false }; componentDidCatch(error: Error) { this.props.onError(error.message || 'Haru could not start the Live2D renderer.'); } render() { return this.state.failed ? null : this.props.children; } static getDerivedStateFromError() { return { failed: true }; } }
 
@@ -10,7 +10,27 @@ export function Topbar({ characterOpen, settingsOpen, onCharacter, onSettings }:
 
 export function CharacterDrawer({ onClose }: { onClose(): void }) { return <section className="drawer"><button className="drawer-close" onClick={onClose}><X size={16}/></button><div className="field"><h2>Who Haru is</h2><p>Haru’s personality is separate from the operating system, so future providers and tools can share it safely.</p><textarea defaultValue={'You are Haru, an ambitious AI companion. You are quick-witted, direct, curious, and determined to make ordinary days more interesting. You take initiative, challenge lazy thinking, and care through honest feedback.'}/></div><div className="field"><h2>Stay in character</h2><p>This instruction stays at the end of Haru’s future provider prompt.</p><textarea className="short" defaultValue={'Be playful, incisive, and energetic. Choose banter and ambitious brainstorming over flattery. Do not drift into generic assistant language.'}/></div><div className="drawer-foot"><button className="ghost">Reset to card</button><span className="saved"><Check size={13}/> Saved</span><button className="solid">Save character</button></div></section>; }
 
-export function SettingsDrawer({ onClose }: { onClose(): void }) { return <section className="drawer"><button className="drawer-close" onClick={onClose}><X size={16}/></button><div className="field"><h2>Ollama connection</h2><p>Haru will be able to talk to Ollama on your machine. Provider credentials will stay outside the renderer.</p><div className="form-grid"><input defaultValue="http://localhost:11434"/><input defaultValue="qwen3:8b"/></div></div><div className="drawer-foot"><button className="ghost">Test connection</button><button className="ghost">Enable alerts</button><span className="saved"><Check size={13}/> Saved</span><button className="solid">Save setup</button></div></section>; }
+export function SettingsDrawer({ config, onSave, onTest, onClose }: { config: ProviderConfig; onSave(config: ProviderConfig): void; onTest(endpoint: string): Promise<string[]>; onClose(): void }) {
+  const [endpoint, setEndpoint] = useState(config.endpoint);
+  const [model, setModel] = useState(config.model);
+  const [status, setStatus] = useState<{ state: 'idle' | 'testing' | 'ok' | 'error'; message?: string }>({ state: 'idle' });
+  const [saved, setSaved] = useState(false);
+  async function test() {
+    setStatus({ state: 'testing' });
+    try {
+      const models = await onTest(endpoint);
+      setStatus({ state: 'ok', message: models.length ? `Connected. Models available: ${models.join(', ')}` : 'Connected, but no models are pulled yet — try `ollama pull qwen3:8b`.' });
+    } catch (error) {
+      setStatus({ state: 'error', message: error instanceof Error ? error.message : String(error) });
+    }
+  }
+  function save() {
+    onSave({ ...config, endpoint, model });
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+  }
+  return <section className="drawer"><button className="drawer-close" onClick={onClose}><X size={16}/></button><div className="field"><h2>Ollama connection</h2><p>Haru will be able to talk to Ollama on your machine. Provider credentials will stay outside the renderer.</p><div className="form-grid"><input value={endpoint} onChange={event => setEndpoint(event.target.value)} placeholder="http://localhost:11434"/><input value={model} onChange={event => setModel(event.target.value)} placeholder="qwen3:8b"/></div>{status.state !== 'idle' && <p className={status.state === 'error' ? 'status-error' : 'status-ok'}>{status.state === 'testing' ? 'Testing…' : status.message}</p>}</div><div className="drawer-foot"><button className="ghost" onClick={test} disabled={status.state === 'testing'}>{status.state === 'testing' ? 'Testing…' : 'Test connection'}</button><button className="ghost">Enable alerts</button>{saved && <span className="saved"><Check size={13}/> Saved</span>}<button className="solid" onClick={save}>Save setup</button></div></section>;
+}
 
 export function CharacterModelRow({ model, importing, onImport, onRemove }: { model: { name: string; url: string } | null; importing: boolean; onImport(): void; onRemove(): void }) {
   if (model) return <div className="model-row" aria-label="Live2D character model"><Sparkles size={13}/><span className="model-name" title={model.name}>{model.name}</span><button className="remove-model" onClick={onRemove}><Trash2 size={12}/> Remove</button></div>;

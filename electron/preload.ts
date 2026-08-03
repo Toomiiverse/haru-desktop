@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 
 type Live2DModel = { path: string; name: string; url: string };
 type Message = { id: string; role: 'user' | 'assistant'; content: string; time: string };
+type ProviderConfig = { provider: string; model: string; endpoint: string; temperature: number };
 
 contextBridge.exposeInMainWorld('haru', {
   settings: { get: (key: string) => ipcRenderer.invoke('settings:get', key), set: (key: string, value: unknown) => ipcRenderer.invoke('settings:set', key, value) },
@@ -14,6 +15,10 @@ contextBridge.exposeInMainWorld('haru', {
       ipcRenderer.on('chat:reset', listener);
       return () => ipcRenderer.removeListener('chat:reset', listener);
     },
+  },
+  ai: {
+    send: (messages: { role: string; content: string }[], config: ProviderConfig) => ipcRenderer.invoke('ai:send', messages, config) as Promise<string>,
+    test: (endpoint: string) => ipcRenderer.invoke('ai:test', endpoint) as Promise<string[]>,
   },
   live2d: {
     import: () => ipcRenderer.invoke('live2d:import'),
