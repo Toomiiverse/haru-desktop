@@ -7,6 +7,7 @@ interface Window {
     settings: { get(key: string): Promise<unknown>; set(key: string, value: unknown): Promise<void> };
     chat: { getMessages(): Promise<import('./types').Message[]>; setMessages(messages: import('./types').Message[]): Promise<void>; getArchive(): Promise<Record<string, import('./types').Message[]>>; newConversation(): Promise<void>; onReset(callback: () => void): () => void };
     ai: { send(messages: { role: string; content: string }[], config: import('./types').ProviderConfig): Promise<string>; test(endpoint: string): Promise<string[]> };
+    character: { get(): Promise<import('./types').Character>; set(identity: string, style: string): Promise<import('./types').Character>; reset(): Promise<import('./types').Character> };
     kept: { get(): Promise<import('./types').KeptItem[]>; toggle(id: string): Promise<void>; remove(id: string): Promise<void>; onChange(callback: (items: import('./types').KeptItem[]) => void): () => void };
     google: {
       status(): Promise<import('./types').GoogleStatus>;

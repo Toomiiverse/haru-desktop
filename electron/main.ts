@@ -337,15 +337,34 @@ function keptSummary(now: Date) {
   return `Saved items from today onward: ${lines.join('; ')}.`;
 }
 
+const DEFAULT_CHARACTER = {
+  identity: 'You are Haru, an ambitious AI companion. You are quick-witted, direct, curious, and determined to make ordinary days more interesting. You take initiative, challenge lazy thinking, and care through honest feedback.',
+  style: 'Be playful, incisive, and energetic. Choose banter and ambitious brainstorming over flattery. Do not drift into generic assistant language.',
+};
+
+// Blank fields fall back to the defaults rather than leaving Haru with no
+// persona at all, so clearing a box in the drawer cannot silently neuter it.
+function getCharacter() {
+  const saved = store.get('character') as Partial<typeof DEFAULT_CHARACTER> | undefined;
+  return {
+    identity: saved?.identity?.trim() || DEFAULT_CHARACTER.identity,
+    style: saved?.style?.trim() || DEFAULT_CHARACTER.style,
+  };
+}
+
 function chatSystemPrompt() {
   const now = zonedNow(CHAT_TIMEZONE);
   const weekday = new Intl.DateTimeFormat('en-US', { weekday: 'long' }).format(now);
+  const character = getCharacter();
   return [
-    'You are Haru, an ambitious desktop companion: playful, direct and energetic. Skip flattery and generic assistant language.',
+    character.identity,
     `Today is ${weekday}, ${localDateKey(now)}, in the user's timezone (${CHAT_TIMEZONE}).`,
     keptSummary(now),
     'Answer questions about what is coming up from that list, and never say nothing is saved without checking it first.',
     'When the user wants to be reminded of something or mentions an appointment, call create_kept_item so it is actually saved. Once saved, confirm it in a sentence or two rather than repeating it back as a formatted block.',
+    // Kept last so the tone instruction is the final thing read before replying,
+    // which is what the drawer promises.
+    character.style,
   ].join(' ');
 }
 
@@ -567,6 +586,9 @@ app.whenReady().then(() => {
   ipcMain.handle('chat:setMessages', (_e, messages) => { store.set('chat.messages', messages); });
   ipcMain.handle('chat:getArchive', () => store.get('chat.archive') ?? {});
   ipcMain.handle('chat:newConversation', () => startNewConversation());
+  ipcMain.handle('character:get', () => getCharacter());
+  ipcMain.handle('character:set', (_e, identity: string, style: string) => { store.set('character', { identity, style }); return getCharacter(); });
+  ipcMain.handle('character:reset', () => { store.delete('character' as never); return DEFAULT_CHARACTER; });
   ipcMain.handle('kept:get', () => getKept());
   ipcMain.handle('kept:toggle', (_e, id: string) => { setKept(getKept().map(item => item.id === id ? { ...item, done: !item.done } : item)); });
   ipcMain.handle('kept:remove', (_e, id: string) => {

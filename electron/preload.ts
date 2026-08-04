@@ -5,6 +5,7 @@ type Message = { id: string; role: 'user' | 'assistant'; content: string; time: 
 type ProviderConfig = { provider: string; model: string; endpoint: string; temperature: number };
 type KeptItem = { id: string; title: string; date: string; time?: string; kind: 'reminder' | 'event'; done: boolean; googleEventId?: string };
 type GoogleStatus = { hasCredentials: boolean; connected: boolean; email?: string; lastSync?: string; lastError?: string };
+type Character = { identity: string; style: string };
 
 contextBridge.exposeInMainWorld('haru', {
   settings: { get: (key: string) => ipcRenderer.invoke('settings:get', key), set: (key: string, value: unknown) => ipcRenderer.invoke('settings:set', key, value) },
@@ -34,6 +35,11 @@ contextBridge.exposeInMainWorld('haru', {
       ipcRenderer.on('google:changed', listener);
       return () => ipcRenderer.removeListener('google:changed', listener);
     },
+  },
+  character: {
+    get: () => ipcRenderer.invoke('character:get') as Promise<Character>,
+    set: (identity: string, style: string) => ipcRenderer.invoke('character:set', identity, style) as Promise<Character>,
+    reset: () => ipcRenderer.invoke('character:reset') as Promise<Character>,
   },
   kept: {
     get: () => ipcRenderer.invoke('kept:get') as Promise<KeptItem[]>,

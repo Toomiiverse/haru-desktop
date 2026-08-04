@@ -1,6 +1,6 @@
 import { Component, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Check, ChevronLeft, ChevronRight, CircleDot, Import, MessageSquarePlus, Plus, Sparkles, Trash2, X } from 'lucide-react';
-import type { GoogleStatus, KeptItem, Message, ProviderConfig } from './types';
+import type { Character, GoogleStatus, KeptItem, Message, ProviderConfig } from './types';
 import { buildMonthGrid, dayLabel, monthLabel, toISODate } from './date';
 export class StageFailureBoundary extends Component<{ children: ReactNode; onError(message: string): void }, { failed: boolean }> { state = { failed: false }; componentDidCatch(error: Error) { this.props.onError(error.message || 'Haru could not start the Live2D renderer.'); } render() { return this.state.failed ? null : this.props.children; } static getDerivedStateFromError() { return { failed: true }; } }
 
@@ -8,7 +8,34 @@ export function Topbar({ characterOpen, settingsOpen, canStartNewChat, onNewChat
   return <header className="topbar"><div className="wordmark">はる <span>· Haru</span></div><div className="connection"><i/><span>local companion</span></div><div className="top-actions"><button className="pill" onClick={onNewChat} disabled={!canStartNewChat} title="Archive this conversation and start fresh"><MessageSquarePlus size={13}/> New chat</button><button className={characterOpen ? 'pill selected' : 'pill'} onClick={onCharacter}>Character</button><button className={settingsOpen ? 'pill selected' : 'pill'} onClick={onSettings}>Setup</button></div></header>;
 }
 
-export function CharacterDrawer({ onClose }: { onClose(): void }) { return <section className="drawer"><button className="drawer-close" onClick={onClose}><X size={16}/></button><div className="field"><h2>Who Haru is</h2><p>Haru’s personality is separate from the operating system, so future providers and tools can share it safely.</p><textarea defaultValue={'You are Haru, an ambitious AI companion. You are quick-witted, direct, curious, and determined to make ordinary days more interesting. You take initiative, challenge lazy thinking, and care through honest feedback.'}/></div><div className="field"><h2>Stay in character</h2><p>This instruction stays at the end of Haru’s future provider prompt.</p><textarea className="short" defaultValue={'Be playful, incisive, and energetic. Choose banter and ambitious brainstorming over flattery. Do not drift into generic assistant language.'}/></div><div className="drawer-foot"><button className="ghost">Reset to card</button><span className="saved"><Check size={13}/> Saved</span><button className="solid">Save character</button></div></section>; }
+export function CharacterDrawer({ onClose }: { onClose(): void }) {
+  const [character, setCharacter] = useState<Character>({ identity: '', style: '' });
+  const [loaded, setLoaded] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { window.haru?.character.get().then(current => { setCharacter(current); setLoaded(true); }); }, []);
+
+  async function apply(action: () => Promise<Character>) {
+    setBusy(true);
+    try {
+      setCharacter(await action());
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const edit = (field: keyof Character) => (event: React.ChangeEvent<HTMLTextAreaElement>) => setCharacter(current => ({ ...current, [field]: event.target.value }));
+  return <section className="drawer"><button className="drawer-close" onClick={onClose}><X size={16}/></button>
+    <div className="field"><h2>Who Haru is</h2><p>This opens Haru’s prompt, so it shapes how she answers everywhere — chat, reminders and all.</p><textarea value={character.identity} disabled={!loaded} onChange={edit('identity')}/></div>
+    <div className="field"><h2>Stay in character</h2><p>This instruction sits at the very end of the prompt, the last thing read before Haru replies.</p><textarea className="short" value={character.style} disabled={!loaded} onChange={edit('style')}/></div>
+    <div className="drawer-foot">
+      <button className="ghost" disabled={!loaded || busy} onClick={() => apply(() => window.haru!.character.reset())}>Reset to card</button>
+      {saved && <span className="saved"><Check size={13}/> Saved</span>}
+      <button className="solid" disabled={!loaded || busy} onClick={() => apply(() => window.haru!.character.set(character.identity, character.style))}>Save character</button>
+    </div></section>;
+}
 
 export function SettingsDrawer({ config, onSave, onTest, onClose }: { config: ProviderConfig; onSave(config: ProviderConfig): void; onTest(endpoint: string): Promise<string[]>; onClose(): void }) {
   const [endpoint, setEndpoint] = useState(config.endpoint);
