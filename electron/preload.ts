@@ -6,6 +6,8 @@ type ProviderConfig = { provider: string; model: string; endpoint: string; tempe
 type KeptItem = { id: string; title: string; date: string; time?: string; kind: 'reminder' | 'event'; done: boolean; googleEventId?: string };
 type GoogleStatus = { hasCredentials: boolean; connected: boolean; email?: string; lastSync?: string; lastError?: string };
 type Character = { identity: string; style: string };
+type Profile = { nickname: string; occupation: string; about: string };
+type Memory = { id: string; text: string; createdAt: string };
 
 contextBridge.exposeInMainWorld('haru', {
   settings: { get: (key: string) => ipcRenderer.invoke('settings:get', key), set: (key: string, value: unknown) => ipcRenderer.invoke('settings:set', key, value) },
@@ -34,6 +36,21 @@ contextBridge.exposeInMainWorld('haru', {
       const listener = (_event: Electron.IpcRendererEvent, status: GoogleStatus) => callback(status);
       ipcRenderer.on('google:changed', listener);
       return () => ipcRenderer.removeListener('google:changed', listener);
+    },
+  },
+  profile: {
+    get: () => ipcRenderer.invoke('profile:get') as Promise<Profile>,
+    set: (profile: Profile) => ipcRenderer.invoke('profile:set', profile) as Promise<Profile>,
+  },
+  memory: {
+    list: () => ipcRenderer.invoke('memory:list') as Promise<Memory[]>,
+    add: (text: string) => ipcRenderer.invoke('memory:add', text) as Promise<Memory[]>,
+    remove: (id: string) => ipcRenderer.invoke('memory:remove', id) as Promise<Memory[]>,
+    clear: () => ipcRenderer.invoke('memory:clear') as Promise<Memory[]>,
+    onChange: (callback: (items: Memory[]) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, items: Memory[]) => callback(items);
+      ipcRenderer.on('memory:changed', listener);
+      return () => ipcRenderer.removeListener('memory:changed', listener);
     },
   },
   character: {

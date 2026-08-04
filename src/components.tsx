@@ -1,11 +1,63 @@
 import { Component, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Check, ChevronLeft, ChevronRight, CircleDot, Import, MessageSquarePlus, Plus, Sparkles, Trash2, X } from 'lucide-react';
-import type { Character, GoogleStatus, KeptItem, Message, ProviderConfig } from './types';
+import { Check, ChevronLeft, ChevronRight, CircleDot, Import, MessageSquarePlus, Plus, Sparkles, ThumbsDown, ThumbsUp, Trash2, X } from 'lucide-react';
+import type { Character, GoogleStatus, KeptItem, Memory, Message, Profile, ProviderConfig, Reaction } from './types';
 import { buildMonthGrid, dayLabel, monthLabel, toISODate } from './date';
 export class StageFailureBoundary extends Component<{ children: ReactNode; onError(message: string): void }, { failed: boolean }> { state = { failed: false }; componentDidCatch(error: Error) { this.props.onError(error.message || 'Haru could not start the Live2D renderer.'); } render() { return this.state.failed ? null : this.props.children; } static getDerivedStateFromError() { return { failed: true }; } }
 
-export function Topbar({ characterOpen, settingsOpen, canStartNewChat, onNewChat, onCharacter, onSettings }: { characterOpen: boolean; settingsOpen: boolean; canStartNewChat: boolean; onNewChat(): void; onCharacter(): void; onSettings(): void }) {
-  return <header className="topbar"><div className="wordmark">はる <span>· Haru</span></div><div className="connection"><i/><span>local companion</span></div><div className="top-actions"><button className="pill" onClick={onNewChat} disabled={!canStartNewChat} title="Archive this conversation and start fresh"><MessageSquarePlus size={13}/> New chat</button><button className={characterOpen ? 'pill selected' : 'pill'} onClick={onCharacter}>Character</button><button className={settingsOpen ? 'pill selected' : 'pill'} onClick={onSettings}>Setup</button></div></header>;
+export function Topbar({ characterOpen, profileOpen, settingsOpen, canStartNewChat, onNewChat, onCharacter, onProfile, onSettings }: { characterOpen: boolean; profileOpen: boolean; settingsOpen: boolean; canStartNewChat: boolean; onNewChat(): void; onCharacter(): void; onProfile(): void; onSettings(): void }) {
+  return <header className="topbar"><div className="wordmark">はる <span>· Haru</span></div><div className="connection"><i/><span>local companion</span></div><div className="top-actions"><button className="pill" onClick={onNewChat} disabled={!canStartNewChat} title="Archive this conversation and start fresh"><MessageSquarePlus size={13}/> New chat</button><button className={profileOpen ? 'pill selected' : 'pill'} onClick={onProfile}>You</button><button className={characterOpen ? 'pill selected' : 'pill'} onClick={onCharacter}>Character</button><button className={settingsOpen ? 'pill selected' : 'pill'} onClick={onSettings}>Setup</button></div></header>;
+}
+
+export function ProfileDrawer({ onClose }: { onClose(): void }) {
+  const [profile, setProfile] = useState<Profile>({ nickname: '', occupation: '', about: '' });
+  const [memories, setMemories] = useState<Memory[]>([]);
+  const [draft, setDraft] = useState('');
+  const [loaded, setLoaded] = useState(false);
+  const [saved, setSaved] = useState(false);
+  useEffect(() => {
+    if (!window.haru) return;
+    window.haru.profile.get().then(current => { setProfile(current); setLoaded(true); });
+    window.haru.memory.list().then(setMemories);
+    // Haru writes memories mid-conversation, so the list follows along rather
+    // than going stale while the drawer sits open.
+    return window.haru.memory.onChange(setMemories);
+  }, []);
+
+  async function save() {
+    setProfile(await window.haru!.profile.set(profile));
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+  }
+
+  async function addMemory() {
+    const text = draft.trim();
+    if (!text) return;
+    setDraft('');
+    setMemories(await window.haru!.memory.add(text));
+  }
+
+  const edit = (field: keyof Profile) => (event: { target: { value: string } }) => setProfile(current => ({ ...current, [field]: event.target.value }));
+  if (!window.haru) return null;
+  return <section className="drawer"><button className="drawer-close" onClick={onClose}><X size={16}/></button>
+    <div className="field"><h2>About you</h2><p>Haru sees this in every conversation, so it can talk to you as a person it already knows.</p>
+      <div className="form-grid"><input value={profile.nickname} disabled={!loaded} onChange={edit('nickname')} placeholder="What should Haru call you?"/><input value={profile.occupation} disabled={!loaded} onChange={edit('occupation')} placeholder="What do you do?"/></div>
+      <textarea className="short" value={profile.about} disabled={!loaded} onChange={edit('about')} placeholder="Anything else worth knowing — how you like to be spoken to, what you're working on, who's in your life."/>
+    </div>
+    <div className="field"><h2>What Haru remembers{memories.length > 0 && <span className="kept-count">{memories.length}</span>}</h2>
+      <p>Picked up as you chat. Remove anything you would rather it forgot.</p>
+      {memories.length === 0
+        ? <p className="nothing">Nothing remembered yet.</p>
+        : <ul className="memory-list">{memories.map(memory => <li key={memory.id}><span>{memory.text}</span><button className="remove-model" onClick={async () => setMemories(await window.haru!.memory.remove(memory.id))} aria-label={`Forget: ${memory.text}`}><Trash2 size={12}/></button></li>)}</ul>}
+      <div className="row-actions">
+        <input value={draft} onChange={event => setDraft(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); void addMemory(); } }} placeholder="Add something yourself…"/>
+        <button className="ghost" disabled={!draft.trim()} onClick={addMemory}>Add</button>
+      </div>
+    </div>
+    <div className="drawer-foot">
+      <button className="ghost" disabled={!memories.length} onClick={async () => setMemories(await window.haru!.memory.clear())}>Forget everything</button>
+      {saved && <span className="saved"><Check size={13}/> Saved</span>}
+      <button className="solid" disabled={!loaded} onClick={save}>Save profile</button>
+    </div></section>;
 }
 
 export function CharacterDrawer({ onClose }: { onClose(): void }) {
@@ -118,7 +170,16 @@ export function CharacterModelRow({ model, importing, onImport, onRemove }: { mo
   return <div className="model-row" aria-label="Live2D character model"><Sparkles size={13}/><span className="model-name muted">No character model imported</span><button className="import-model" onClick={onImport} disabled={importing}><Import size={13}/>{importing ? 'Opening…' : 'Import model'}</button></div>;
 }
 
-export function MessageBubble({ message }: { message: Message }) { return <article className={'bubble-row '+message.role}><div className="assistant-dot" aria-hidden="true"/><div className="bubble">{message.content}</div></article>; }
+export function MessageBubble({ message, onReact }: { message: Message; onReact?(reaction: Reaction): void }) {
+  // Only Haru's own replies are rated, and the greeting is not a real reply.
+  const ratable = onReact && message.role === 'assistant' && message.id !== 'greeting';
+  return <article className={'bubble-row '+message.role}><div className="assistant-dot" aria-hidden="true"/><div className="bubble-stack"><div className="bubble">{message.content}</div>
+    {ratable && <div className={message.reaction ? 'reactions rated' : 'reactions'}>
+      <button className={message.reaction === 'up' ? 'reaction reacted' : 'reaction'} onClick={() => onReact('up')} aria-pressed={message.reaction === 'up'} title="Good response"><ThumbsUp size={13}/></button>
+      <button className={message.reaction === 'down' ? 'reaction reacted' : 'reaction'} onClick={() => onReact('down')} aria-pressed={message.reaction === 'down'} title="Poor response"><ThumbsDown size={13}/></button>
+    </div>}
+  </div></article>;
+}
 // The draft lives in state, not a plain local: `sending` toggling re-renders the
 // composer, which would reset a local and leave the (uncontrolled) input showing
 // text that submit could no longer see.

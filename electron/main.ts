@@ -11,6 +11,8 @@ import { connectGoogle, disconnectGoogle, googleStatus, pullEvents, pushItem, re
 type Bounds = { x: number; y: number; width: number; height: number };
 type Live2DModel = { path: string; name: string; url: string };
 type KeptItem = { id: string; title: string; date: string; time?: string; kind: 'reminder' | 'event'; done: boolean; googleEventId?: string };
+type Profile = { nickname: string; occupation: string; about: string };
+type Memory = { id: string; text: string; createdAt: string };
 
 const COMPANION_DEFAULT_WIDTH = 300;
 const COMPANION_ASPECT = 360 / 300;
@@ -326,6 +328,19 @@ const CHAT_TOOLS = [{
       required: ['title', 'date', 'kind'],
     },
   },
+}, {
+  type: 'function',
+  function: {
+    name: 'remember_about_user',
+    description: "Save a lasting fact about the user — how they like to be spoken to, what they do, the people, pets and projects in their life — so it is still known in later conversations. Use it when they mention something worth carrying forward, not for one-off logistics, which belong in create_kept_item.",
+    parameters: {
+      type: 'object',
+      properties: {
+        fact: { type: 'string', description: 'One short third-person statement, e.g. "Has a dog called Rex" or "Prefers short answers without preamble".' },
+      },
+      required: ['fact'],
+    },
+  },
 }];
 
 // Listing what is saved directly rather than behind a read tool: asked "anything
@@ -350,6 +365,47 @@ function keptSummary(now: Date) {
   return `Saved items from today onward: ${lines.join('; ')}.`;
 }
 
+// Capped so the prompt cannot grow without bound as memories accumulate; the
+// oldest fall away once the list is full.
+const MAX_MEMORIES = 60;
+
+function getProfile(): Profile {
+  const saved = store.get('profile') as Partial<Profile> | undefined;
+  return { nickname: saved?.nickname ?? '', occupation: saved?.occupation ?? '', about: saved?.about ?? '' };
+}
+
+function getMemories(): Memory[] {
+  return (store.get('memories') as Memory[] | undefined) ?? [];
+}
+
+function setMemories(items: Memory[]) {
+  store.set('memories', items);
+  for (const win of BrowserWindow.getAllWindows()) win.webContents.send('memory:changed', items);
+}
+
+function addMemory(text: string): Memory | null {
+  const fact = text.trim();
+  if (!fact) return null;
+  const existing = getMemories();
+  // The model re-states things it already knows, so near-duplicates are dropped
+  // rather than piling up and crowding the prompt.
+  if (existing.some(memory => memory.text.trim().toLowerCase() === fact.toLowerCase())) return null;
+  const created: Memory = { id: randomUUID(), text: fact, createdAt: new Date().toISOString() };
+  setMemories([...existing, created].slice(-MAX_MEMORIES));
+  return created;
+}
+
+function profileSummary() {
+  const profile = getProfile();
+  const lines: string[] = [];
+  if (profile.nickname.trim()) lines.push(`They go by ${profile.nickname.trim()}.`);
+  if (profile.occupation.trim()) lines.push(`Their work: ${profile.occupation.trim()}.`);
+  if (profile.about.trim()) lines.push(profile.about.trim());
+  const memories = getMemories();
+  if (memories.length) lines.push(`Things you have learned about them: ${memories.map(memory => memory.text).join('; ')}.`);
+  return lines.length ? `About the user: ${lines.join(' ')}` : '';
+}
+
 const DEFAULT_CHARACTER = {
   identity: 'You are Haru, an ambitious AI companion. You are quick-witted, direct, curious, and determined to make ordinary days more interesting. You take initiative, challenge lazy thinking, and care through honest feedback.',
   style: 'Be playful, incisive, and energetic. Choose banter and ambitious brainstorming over flattery. Do not drift into generic assistant language.',
@@ -365,6 +421,20 @@ function getCharacter() {
   };
 }
 
+// Reactions ride along on the stored messages, so the ratings are read back from
+// there rather than kept in a second place that could drift out of step.
+function feedbackSummary() {
+  const messages = (store.get('chat.messages') as { role?: string; content?: string; reaction?: string }[] | undefined) ?? [];
+  const rated = messages.filter(message => message.role === 'assistant' && message.reaction);
+  if (!rated.length) return '';
+  const lines: string[] = [];
+  const disliked = rated.filter(message => message.reaction === 'down').slice(-4);
+  const liked = rated.filter(message => message.reaction === 'up').slice(-3);
+  if (disliked.length) lines.push(`The user marked these replies of yours as poor: ${disliked.map(message => `"${(message.content ?? '').slice(0, 140)}"`).join(' / ')}. Work out what fell flat and steer away from it.`);
+  if (liked.length) lines.push(`They marked these as good: ${liked.map(message => `"${(message.content ?? '').slice(0, 140)}"`).join(' / ')}. More of that.`);
+  return lines.join(' ');
+}
+
 function chatSystemPrompt() {
   const now = zonedNow(CHAT_TIMEZONE);
   const weekday = new Intl.DateTimeFormat('en-US', { weekday: 'long' }).format(now);
@@ -372,13 +442,16 @@ function chatSystemPrompt() {
   return [
     character.identity,
     `Today is ${weekday}, ${localDateKey(now)}, in the user's timezone (${CHAT_TIMEZONE}).`,
+    profileSummary(),
+    feedbackSummary(),
     keptSummary(now),
     'Answer questions about what is coming up from that list, and never say nothing is saved without checking it first.',
     'When the user wants to be reminded of something or mentions an appointment, call create_kept_item so it is actually saved. Once saved, confirm it in a sentence or two rather than repeating it back as a formatted block.',
+    'Whenever the user states anything about themselves — their job, where they live, how they like to be spoken to, the people and pets in their life, what they are working on — call remember_about_user with it. Do this even when they mention it in passing, and even while you are answering something else. Do not announce that you are saving it or repeat back what you already know unprompted.',
     // Kept last so the tone instruction is the final thing read before replying,
     // which is what the drawer promises.
     character.style,
-  ].join(' ');
+  ].filter(Boolean).join(' ');
 }
 
 const DENIAL = /(don'?t have any|no reminders|nothing (?:saved|scheduled|on|planned)|there are no|don'?t see any)/i;
@@ -408,8 +481,15 @@ function toolArguments(call: ToolCall): Record<string, unknown> {
 // argument and try again instead of the whole turn failing.
 function runChatTool(call: ToolCall): string {
   const name = call.function?.name;
-  if (name !== 'create_kept_item') return JSON.stringify({ error: `Unknown tool "${name}".` });
   const args = toolArguments(call);
+  if (name === 'remember_about_user') {
+    const fact = typeof args.fact === 'string' ? args.fact.trim() : '';
+    if (!fact) return JSON.stringify({ error: 'fact is required.' });
+    const saved = addMemory(fact);
+    console.log(`[ai] ${saved ? 'remembered' : 'already knew'}: "${fact}"`);
+    return JSON.stringify(saved ? { saved: true, fact } : { saved: false, reason: 'Already remembered.' });
+  }
+  if (name !== 'create_kept_item') return JSON.stringify({ error: `Unknown tool "${name}".` });
   const title = typeof args.title === 'string' ? args.title.trim() : '';
   // An omitted date means the user never named one ("remind me to stretch"),
   // which reads as today rather than as a failure.
@@ -600,6 +680,12 @@ app.whenReady().then(() => {
   ipcMain.handle('chat:setMessages', (_e, messages) => { store.set('chat.messages', messages); });
   ipcMain.handle('chat:getArchive', () => store.get('chat.archive') ?? {});
   ipcMain.handle('chat:newConversation', () => startNewConversation());
+  ipcMain.handle('profile:get', () => getProfile());
+  ipcMain.handle('profile:set', (_e, profile: Profile) => { store.set('profile', profile); return getProfile(); });
+  ipcMain.handle('memory:list', () => getMemories());
+  ipcMain.handle('memory:add', (_e, text: string) => { addMemory(text); return getMemories(); });
+  ipcMain.handle('memory:remove', (_e, id: string) => { setMemories(getMemories().filter(memory => memory.id !== id)); return getMemories(); });
+  ipcMain.handle('memory:clear', () => { setMemories([]); return getMemories(); });
   ipcMain.handle('character:get', () => getCharacter());
   ipcMain.handle('character:set', (_e, identity: string, style: string) => { store.set('character', { identity, style }); return getCharacter(); });
   ipcMain.handle('character:reset', () => { store.delete('character' as never); return DEFAULT_CHARACTER; });
