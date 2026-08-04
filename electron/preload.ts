@@ -8,6 +8,8 @@ type GoogleStatus = { hasCredentials: boolean; connected: boolean; email?: strin
 type Character = { identity: string; style: string };
 type Profile = { nickname: string; occupation: string; about: string };
 type Memory = { id: string; text: string; createdAt: string };
+type ChatResult = { content: string; ignored: boolean; irritation: number; ego: number };
+type Mood = { irritation: number; ego: number };
 
 contextBridge.exposeInMainWorld('haru', {
   settings: { get: (key: string) => ipcRenderer.invoke('settings:get', key), set: (key: string, value: unknown) => ipcRenderer.invoke('settings:set', key, value) },
@@ -23,7 +25,7 @@ contextBridge.exposeInMainWorld('haru', {
     },
   },
   ai: {
-    send: (messages: { role: string; content: string }[], config: ProviderConfig) => ipcRenderer.invoke('ai:send', messages, config) as Promise<string>,
+    send: (messages: { role: string; content: string }[], config: ProviderConfig) => ipcRenderer.invoke('ai:send', messages, config) as Promise<ChatResult>,
     test: (endpoint: string) => ipcRenderer.invoke('ai:test', endpoint) as Promise<string[]>,
     retort: (disliked: string, config: ProviderConfig) => ipcRenderer.invoke('ai:retort', disliked, config) as Promise<string>,
   },
@@ -38,6 +40,10 @@ contextBridge.exposeInMainWorld('haru', {
       ipcRenderer.on('google:changed', listener);
       return () => ipcRenderer.removeListener('google:changed', listener);
     },
+  },
+  mood: {
+    get: () => ipcRenderer.invoke('mood:get') as Promise<Mood>,
+    react: (reaction: 'up' | 'down') => ipcRenderer.invoke('mood:react', reaction) as Promise<Mood>,
   },
   profile: {
     get: () => ipcRenderer.invoke('profile:get') as Promise<Profile>,

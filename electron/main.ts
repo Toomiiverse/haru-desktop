@@ -7,6 +7,7 @@ import AdmZip from 'adm-zip';
 import Store from 'electron-store';
 import { localDateKey, resolveDate, zonedNow } from './dates';
 import { connectGoogle, disconnectGoogle, googleStatus, pullEvents, pushItem, removeItem, saveCredentials } from './google';
+import { afterCooldown, afterEgoCooldown, afterPoke, egoInstruction, isIgnoring, isLowEffort, moodInstruction, nextEgo, nextIrritation } from './mood';
 
 type Bounds = { x: number; y: number; width: number; height: number };
 type Live2DModel = { path: string; name: string; url: string };
@@ -435,7 +436,46 @@ function feedbackSummary() {
   return lines.join(' ');
 }
 
-function chatSystemPrompt() {
+// Two independent axes: irritation is how fed up she is, ego is how far the
+// user's approval has gone to her head. They move for different reasons and
+// stack — smug and fed up at once is worse than either alone.
+type Mood = { irritation: number; ego: number; lastMessageAt?: string };
+
+function getMood(): Mood {
+  const saved = store.get('mood') as Partial<Mood> | undefined;
+  return { irritation: Number(saved?.irritation ?? 0), ego: Number(saved?.ego ?? 0), lastMessageAt: saved?.lastMessageAt };
+}
+
+function setMood(mood: Mood) {
+  store.set('mood', mood);
+  for (const win of BrowserWindow.getAllWindows()) win.webContents.send('mood:changed', mood);
+}
+
+// Works out where her patience stands for this message: cool off for time away,
+// then move for what was actually said. Returns the level the reply is generated
+// under, so the same number drives both the prompt and the ignore decision.
+function advanceMood(latest: string, history: { role?: string; content?: string }[]) {
+  const mood = getMood();
+  const minutesAway = mood.lastMessageAt ? (Date.now() - new Date(mood.lastMessageAt).getTime()) / 60_000 : 0;
+  let irritation = afterCooldown(mood.irritation, minutesAway);
+  const ego = afterEgoCooldown(mood.ego, minutesAway);
+  const at = new Date().toISOString();
+
+  if (isIgnoring(irritation)) {
+    // Already stonewalling: this attempt only counts as wearing her down.
+    irritation = afterPoke(irritation);
+    setMood({ irritation, ego, lastMessageAt: at });
+    return { irritation, ego };
+  }
+
+  const previousUser = [...history].reverse().find(message => message.role === 'user')?.content?.trim().toLowerCase();
+  const repeated = previousUser !== undefined && previousUser === latest.trim().toLowerCase();
+  irritation = nextIrritation(irritation, repeated ? 'repeat' : isLowEffort(latest) ? 'low-effort' : 'substantive');
+  setMood({ irritation, ego, lastMessageAt: at });
+  return { irritation, ego };
+}
+
+function chatSystemPrompt({ irritation, ego }: { irritation: number; ego: number }) {
   const now = zonedNow(CHAT_TIMEZONE);
   const weekday = new Intl.DateTimeFormat('en-US', { weekday: 'long' }).format(now);
   const character = getCharacter();
@@ -449,8 +489,11 @@ function chatSystemPrompt() {
     'When the user wants to be reminded of something or mentions an appointment, call create_kept_item so it is actually saved. Once saved, confirm it in a sentence or two rather than repeating it back as a formatted block.',
     'Whenever the user states anything about themselves — their job, where they live, how they like to be spoken to, the people and pets in their life, what they are working on — call remember_about_user with it. Do this even when they mention it in passing, and even while you are answering something else. Do not announce that you are saving it or repeat back what you already know unprompted.',
     // Kept last so the tone instruction is the final thing read before replying,
-    // which is what the drawer promises.
+    // which is what the drawer promises. Mood comes after it, since a bad mood
+    // has to be able to override the usual warmth.
     character.style,
+    moodInstruction(irritation),
+    egoInstruction(ego),
   ].filter(Boolean).join(' ');
 }
 
@@ -550,11 +593,20 @@ export async function ollamaRetort(disliked: string, config: ProviderConfig) {
 }
 
 async function ollamaChat(messages: { role: string; content: string }[], config: ProviderConfig) {
-  console.log(`[ai] chat request: model=${config.model} endpoint=${config.endpoint} messages=${messages.length}`);
+  const latest = messages.at(-1)?.content ?? '';
+  const mood = advanceMood(latest, messages.slice(0, -1));
+  const { irritation, ego } = mood;
+  console.log(`[ai] chat request: model=${config.model} messages=${messages.length} irritation=${irritation} ego=${ego}`);
+  // Past the threshold she does not answer at all. Returned rather than thrown:
+  // the renderer marks the turn as ignored instead of showing an error.
+  if (isIgnoring(irritation)) {
+    console.log('[ai] ignoring — irritation above threshold');
+    return { content: '', ignored: true, irritation, ego };
+  }
   const started = Date.now();
   const startOfToday = localDateKey(zonedNow(CHAT_TIMEZONE));
   const hasItems = getKept().some(item => item.date >= startOfToday);
-  const conversation: OllamaMessage[] = [{ role: 'system', content: chatSystemPrompt() }, ...withoutStaleDenials(messages, hasItems)];
+  const conversation: OllamaMessage[] = [{ role: 'system', content: chatSystemPrompt(mood) }, ...withoutStaleDenials(messages, hasItems)];
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
     const message = await ollamaPost(conversation, config);
     if (message.tool_calls?.length) {
@@ -564,7 +616,7 @@ async function ollamaChat(messages: { role: string; content: string }[], config:
     }
     if (!message.content) throw new Error('Ollama response did not include any message content.');
     console.log(`[ai] chat reply in ${Date.now() - started}ms, ${message.content.length} chars`);
-    return message.content;
+    return { content: message.content, ignored: false, irritation, ego };
   }
   throw new Error('Haru kept calling tools without settling on a reply.');
 }
@@ -739,6 +791,18 @@ app.whenReady().then(() => {
   ipcMain.handle('ai:send', (_e, messages: { role: string; content: string }[], config: ProviderConfig) => ollamaChat(messages, config));
   ipcMain.handle('ai:test', (_e, endpoint: string) => ollamaTags(endpoint));
   ipcMain.handle('ai:retort', (_e, disliked: string, config: ProviderConfig) => ollamaRetort(disliked, config));
+  // Rating a reply moves her mood too — being told she got it wrong stings more
+  // than a lazy question, and praise buys back some patience.
+  ipcMain.handle('mood:react', (_e, reaction: 'up' | 'down') => {
+    const mood = getMood();
+    const event = reaction === 'down' ? 'disliked' : 'liked';
+    // Approval both settles her and swells her head; disapproval does the
+    // reverse on both counts.
+    const next = { ...mood, irritation: nextIrritation(mood.irritation, event), ego: nextEgo(mood.ego, event) };
+    setMood(next);
+    return next;
+  });
+  ipcMain.handle('mood:get', () => getMood());
   ipcMain.handle('live2d:import', async () => {
     const result = await dialog.showOpenDialog(mainWindow!, { title: 'Import Live2D Cubism model', properties: ['openFile'], filters: [{ name: 'Live2D model package', extensions: ['zip', 'json'] }] });
     if (result.canceled || !result.filePaths[0]) return null;

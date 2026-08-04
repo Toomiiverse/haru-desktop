@@ -47,6 +47,7 @@ export default function App() {
     const target = messages.find(message => message.id === id);
     if (!target || target.reaction === reaction) return;
     setMessages(current => current.map(message => message.id === id ? { ...message, reaction } : message));
+    void window.haru?.mood.react(reaction);
     if (reaction === 'down') void snapBack(target.content);
   }
 
@@ -71,7 +72,11 @@ export default function App() {
     try {
       const reply = await getProvider(providerConfig).send([...messages, user], providerConfig);
       if (conversation.current !== epoch) return;
-      setMessages(current => [...current, { id: crypto.randomUUID(), role: 'assistant', content: reply, time: 'now' }]);
+      // She has stopped answering. Marked rather than left blank so it reads as
+      // her ignoring you, not as the app having dropped the message.
+      setMessages(current => [...current, reply.ignored
+        ? { id: crypto.randomUUID(), role: 'assistant', content: 'Haru is ignoring you.', time: 'now', ignored: true }
+        : { id: crypto.randomUUID(), role: 'assistant', content: reply.content, time: 'now' }]);
     } catch (error) {
       if (conversation.current !== epoch) return;
       const detail = error instanceof Error ? error.message : String(error);

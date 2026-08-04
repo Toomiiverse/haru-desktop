@@ -172,8 +172,9 @@ export function CharacterModelRow({ model, importing, onImport, onRemove }: { mo
 
 export function MessageBubble({ message, onReact }: { message: Message; onReact?(reaction: Reaction): void }) {
   // Only Haru's own replies are rated, and the greeting is not a real reply.
-  const ratable = onReact && message.role === 'assistant' && message.id !== 'greeting';
-  return <article className={'bubble-row '+message.role}><div className="assistant-dot" aria-hidden="true"/><div className="bubble-stack"><div className="bubble">{message.content}</div>
+  // Nothing to rate when she did not actually say anything.
+  const ratable = onReact && message.role === 'assistant' && message.id !== 'greeting' && !message.ignored;
+  return <article className={'bubble-row '+message.role}><div className="assistant-dot" aria-hidden="true"/><div className="bubble-stack"><div className={message.ignored ? 'bubble ignored' : 'bubble'}>{message.content}</div>
     {ratable && <div className={message.reaction ? 'reactions rated' : 'reactions'}>
       <button className={message.reaction === 'up' ? 'reaction reacted' : 'reaction'} onClick={() => onReact('up')} aria-pressed={message.reaction === 'up'} title="Good response"><ThumbsUp size={13}/></button>
       <button className={message.reaction === 'down' ? 'reaction reacted' : 'reaction'} onClick={() => onReact('down')} aria-pressed={message.reaction === 'down'} title="Poor response"><ThumbsDown size={13}/></button>
