@@ -26,6 +26,7 @@ const GOOGLE_SYNC_INTERVAL_MS = 15 * 60_000;
 // Long enough for the window to be up and the first paint done, so a slow network
 // call is not competing with startup.
 const GOOGLE_SYNC_STARTUP_DELAY_MS = 10_000;
+const GOOGLE_FOCUS_SYNC_MIN_GAP_MS = 30_000;
 
 const store = new Store<Record<string, unknown>>();
 const live2dRoots = new Map<string, string>();
@@ -272,13 +273,25 @@ async function performSync() {
 
 // Scheduled syncs are best-effort: a laptop that was asleep or offline should
 // retry on the next tick, not surface a dialog or leave the timer dead.
+function backgroundSync() {
+  if (!googleStatus(store).connected) return;
+  syncFromGoogle().catch(error => console.error('[google] background sync failed:', error instanceof Error ? error.message : error));
+}
+
 function scheduleBackgroundSync() {
-  const tick = () => {
-    if (!googleStatus(store).connected) return;
-    syncFromGoogle().catch(error => console.error('[google] scheduled sync failed:', error instanceof Error ? error.message : error));
-  };
-  setTimeout(tick, GOOGLE_SYNC_STARTUP_DELAY_MS);
-  setInterval(tick, GOOGLE_SYNC_INTERVAL_MS);
+  setTimeout(backgroundSync, GOOGLE_SYNC_STARTUP_DELAY_MS);
+  setInterval(backgroundSync, GOOGLE_SYNC_INTERVAL_MS);
+}
+
+let lastFocusSync = 0;
+
+// Coming back to the window is the moment a stale calendar is most obvious —
+// waiting out the rest of the interval to see a change made seconds ago on a
+// phone reads as broken. Rate-limited so alt-tabbing does not sync repeatedly.
+function syncOnFocus() {
+  if (Date.now() - lastFocusSync < GOOGLE_FOCUS_SYNC_MIN_GAP_MS) return;
+  lastFocusSync = Date.now();
+  backgroundSync();
 }
 
 type ProviderConfig = { provider: string; model: string; endpoint: string; temperature: number };
@@ -504,6 +517,7 @@ function createWindow() {
   mainWindow = new BrowserWindow({ width: 1240, height: 800, minWidth: 980, minHeight: 640, titleBarStyle: 'hiddenInset', backgroundColor: '#0d0d12', webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true } });
   const devUrl = process.env.VITE_DEV_SERVER_URL;
   if (devUrl) mainWindow.loadURL(devUrl); else mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
+  mainWindow.on('focus', syncOnFocus);
 }
 
 function createCompanionWindow() {
