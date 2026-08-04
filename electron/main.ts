@@ -206,6 +206,21 @@ async function syncFromGoogle() {
   const status = googleStatus(store);
   if (!status.connected) throw new Error('Haru is not connected to Google Calendar.');
   const today = localDateKey(zonedNow(CHAT_TIMEZONE));
+
+  // Anything saved before the account was connected has no remote event yet, and
+  // the push on creation only covers items made since. Sending them here is what
+  // makes "Sync now" two-way rather than pull-only.
+  for (const item of getKept()) {
+    if (item.googleEventId || item.date < today) continue;
+    try {
+      const googleEventId = await pushItem(store, item, CHAT_TIMEZONE);
+      setKept(getKept().map(current => current.id === item.id ? { ...current, googleEventId } : current));
+    } catch (error) {
+      console.error(`[google] push failed for "${item.title}":`, error);
+      throw error;
+    }
+  }
+
   const events = await pullEvents(store, today, GOOGLE_SYNC_DAYS, CHAT_TIMEZONE);
   const existing = getKept();
   const byGoogleId = new Map(existing.filter(item => item.googleEventId).map(item => [item.googleEventId!, item]));

@@ -11,7 +11,8 @@ import { formatTimeOfDay, parseTimeOfDay } from './dates';
 const AUTH_ENDPOINT = 'https://accounts.google.com/o/oauth2/v2/auth';
 const TOKEN_ENDPOINT = 'https://oauth2.googleapis.com/token';
 const CALENDAR_API = 'https://www.googleapis.com/calendar/v3';
-const SCOPES = ['https://www.googleapis.com/auth/calendar.events', 'openid', 'email'];
+const CALENDAR_SCOPE = 'https://www.googleapis.com/auth/calendar.events';
+const SCOPES = [CALENDAR_SCOPE, 'openid', 'email'];
 const CONSENT_TIMEOUT_MS = 5 * 60_000;
 // Refresh a little early so a token cannot expire mid-request.
 const TOKEN_EXPIRY_MARGIN_MS = 60_000;
@@ -150,6 +151,15 @@ export async function connectGoogle(store: StoreLike) {
     code, client_id: clientId, client_secret: clientSecret,
     redirect_uri: redirectUri, grant_type: 'authorization_code', code_verifier: verifier,
   });
+  // Google's consent screen lets each permission be ticked separately, so a token
+  // can come back valid but without calendar access. Checked here rather than
+  // letting the first sync fail with an opaque 403 about insufficient scopes.
+  const granted = typeof tokens.scope === 'string' ? tokens.scope.split(' ') : [];
+  console.log(`[google] granted scopes: ${granted.join(', ') || '(none reported)'}`);
+  if (!granted.includes(CALENDAR_SCOPE)) {
+    disconnectGoogle(store);
+    throw new Error('Calendar permission was not granted. Connect again and tick the checkbox asking Haru to see and edit events on your calendars.');
+  }
   const refreshToken = tokens.refresh_token as string | undefined;
   if (!refreshToken) throw new Error('Google did not return a refresh token. Revoke Haru under myaccount.google.com/permissions and connect again.');
   setSecret(store, 'google.refreshToken', refreshToken);
@@ -181,7 +191,13 @@ async function authorisedFetch(store: StoreLike, path: string, init: RequestInit
     accessToken = null;
     throw new Error('Google rejected the saved sign-in. Reconnect in Setup.');
   }
-  if (!response.ok) throw new Error(`Google Calendar returned ${response.status}: ${(await response.text().catch(() => '')) || response.statusText}`);
+  const body = response.ok ? null : await response.text().catch(() => '');
+  // A 403 naming scopes means the account connected without ticking the calendar
+  // permission; no amount of retrying fixes that, only reconnecting does.
+  if (response.status === 403 && /scope|insufficient/i.test(body ?? '')) {
+    throw new Error('This Google connection has no calendar permission. Disconnect, connect again, and tick the checkbox letting Haru see and edit your events.');
+  }
+  if (!response.ok) throw new Error(`Google Calendar returned ${response.status}: ${body || response.statusText}`);
   return response.status === 204 ? {} : await response.json() as Record<string, unknown>;
 }
 
