@@ -14,6 +14,7 @@ interface Window {
       connect(): Promise<import('./types').GoogleStatus>;
       disconnect(): Promise<import('./types').GoogleStatus>;
       sync(): Promise<import('./types').GoogleStatus>;
+      onChange(callback: (status: import('./types').GoogleStatus) => void): () => void;
     };
     live2d: { import(): Promise<Live2DModel | null>; get(): Promise<Live2DModel | null>; remove(): Promise<void>; onChange(callback: (model: Live2DModel | null) => void): () => void };
     companion: {

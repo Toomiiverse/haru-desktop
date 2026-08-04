@@ -38,7 +38,13 @@ function GoogleCalendarField() {
   const [clientSecret, setClientSecret] = useState('');
   const [busy, setBusy] = useState<'saving' | 'connecting' | 'syncing' | null>(null);
   const [message, setMessage] = useState<{ text: string; error?: boolean } | null>(null);
-  useEffect(() => { window.haru?.google.status().then(setStatus); }, []);
+  // Subscribed as well as fetched: a sync running on the timer updates the panel
+  // without the drawer having to be reopened.
+  useEffect(() => {
+    if (!window.haru) return;
+    window.haru.google.status().then(setStatus);
+    return window.haru.google.onChange(setStatus);
+  }, []);
 
   async function run(kind: 'saving' | 'connecting' | 'syncing', action: () => Promise<GoogleStatus>, done: string) {
     setBusy(kind); setMessage(null);

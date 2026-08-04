@@ -29,6 +29,11 @@ contextBridge.exposeInMainWorld('haru', {
     connect: () => ipcRenderer.invoke('google:connect') as Promise<GoogleStatus>,
     disconnect: () => ipcRenderer.invoke('google:disconnect') as Promise<GoogleStatus>,
     sync: () => ipcRenderer.invoke('google:sync') as Promise<GoogleStatus>,
+    onChange: (callback: (status: GoogleStatus) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, status: GoogleStatus) => callback(status);
+      ipcRenderer.on('google:changed', listener);
+      return () => ipcRenderer.removeListener('google:changed', listener);
+    },
   },
   kept: {
     get: () => ipcRenderer.invoke('kept:get') as Promise<KeptItem[]>,

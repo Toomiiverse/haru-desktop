@@ -22,6 +22,10 @@ const CHAT_TIMEZONE = 'Australia/Perth'; // UTC+8 year-round, no DST
 const CHAT_RESET_HOUR = 5;
 const CHAT_RESET_POLL_MS = 60_000;
 const GOOGLE_SYNC_DAYS = 30;
+const GOOGLE_SYNC_INTERVAL_MS = 15 * 60_000;
+// Long enough for the window to be up and the first paint done, so a slow network
+// call is not competing with startup.
+const GOOGLE_SYNC_STARTUP_DELAY_MS = 10_000;
 
 const store = new Store<Record<string, unknown>>();
 const live2dRoots = new Map<string, string>();
@@ -202,7 +206,33 @@ async function syncItemToGoogle(item: KeptItem) {
 // Pulls Google's events in as kept items, matched on the remote id so repeated
 // syncs update rather than duplicate. Items Haru created are refreshed in place;
 // anything already deleted locally is not resurrected.
-async function syncFromGoogle() {
+function broadcastGoogleStatus() {
+  const status = googleStatus(store);
+  for (const win of BrowserWindow.getAllWindows()) win.webContents.send('google:changed', status);
+}
+
+let inFlightSync: Promise<ReturnType<typeof googleStatus>> | null = null;
+
+// Manual and scheduled syncs share whichever run is already going, so pressing
+// "Sync now" while the timer is mid-sync joins that one instead of starting a
+// second pass that would push the same items twice.
+function syncFromGoogle() {
+  if (!inFlightSync) inFlightSync = runSync().finally(() => { inFlightSync = null; });
+  return inFlightSync;
+}
+
+async function runSync() {
+  try {
+    return await performSync();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    store.set('google.lastError', message);
+    broadcastGoogleStatus();
+    throw error;
+  }
+}
+
+async function performSync() {
   const status = googleStatus(store);
   if (!status.connected) throw new Error('Haru is not connected to Google Calendar.');
   const today = localDateKey(zonedNow(CHAT_TIMEZONE));
@@ -236,7 +266,19 @@ async function syncFromGoogle() {
   setKept(merged);
   store.set('google.lastSync', new Date().toISOString());
   store.delete('google.lastError' as never);
+  broadcastGoogleStatus();
   return googleStatus(store);
+}
+
+// Scheduled syncs are best-effort: a laptop that was asleep or offline should
+// retry on the next tick, not surface a dialog or leave the timer dead.
+function scheduleBackgroundSync() {
+  const tick = () => {
+    if (!googleStatus(store).connected) return;
+    syncFromGoogle().catch(error => console.error('[google] scheduled sync failed:', error instanceof Error ? error.message : error));
+  };
+  setTimeout(tick, GOOGLE_SYNC_STARTUP_DELAY_MS);
+  setInterval(tick, GOOGLE_SYNC_INTERVAL_MS);
 }
 
 type ProviderConfig = { provider: string; model: string; endpoint: string; temperature: number };
@@ -536,8 +578,8 @@ app.whenReady().then(() => {
   });
   ipcMain.handle('google:status', () => googleStatus(store));
   ipcMain.handle('google:saveCredentials', (_e, clientId: string, clientSecret: string) => { saveCredentials(store, clientId, clientSecret); return googleStatus(store); });
-  ipcMain.handle('google:connect', () => connectGoogle(store));
-  ipcMain.handle('google:disconnect', () => { disconnectGoogle(store); return googleStatus(store); });
+  ipcMain.handle('google:connect', async () => { const status = await connectGoogle(store); broadcastGoogleStatus(); return status; });
+  ipcMain.handle('google:disconnect', () => { disconnectGoogle(store); broadcastGoogleStatus(); return googleStatus(store); });
   ipcMain.handle('google:sync', () => syncFromGoogle());
   ipcMain.handle('ai:send', (_e, messages: { role: string; content: string }[], config: ProviderConfig) => ollamaChat(messages, config));
   ipcMain.handle('ai:test', (_e, endpoint: string) => ollamaTags(endpoint));
@@ -602,6 +644,7 @@ app.whenReady().then(() => {
   createCompanionWindow();
   performChatResetIfDue();
   setInterval(performChatResetIfDue, CHAT_RESET_POLL_MS);
+  scheduleBackgroundSync();
   app.on('activate', () => { if (!mainWindow || mainWindow.isDestroyed()) createWindow(); });
 });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
