@@ -8,6 +8,13 @@ interface Window {
     chat: { getMessages(): Promise<import('./types').Message[]>; setMessages(messages: import('./types').Message[]): Promise<void>; getArchive(): Promise<Record<string, import('./types').Message[]>>; newConversation(): Promise<void>; onReset(callback: () => void): () => void };
     ai: { send(messages: { role: string; content: string }[], config: import('./types').ProviderConfig): Promise<string>; test(endpoint: string): Promise<string[]> };
     kept: { get(): Promise<import('./types').KeptItem[]>; toggle(id: string): Promise<void>; remove(id: string): Promise<void>; onChange(callback: (items: import('./types').KeptItem[]) => void): () => void };
+    google: {
+      status(): Promise<import('./types').GoogleStatus>;
+      saveCredentials(clientId: string, clientSecret: string): Promise<import('./types').GoogleStatus>;
+      connect(): Promise<import('./types').GoogleStatus>;
+      disconnect(): Promise<import('./types').GoogleStatus>;
+      sync(): Promise<import('./types').GoogleStatus>;
+    };
     live2d: { import(): Promise<Live2DModel | null>; get(): Promise<Live2DModel | null>; remove(): Promise<void>; onChange(callback: (model: Live2DModel | null) => void): () => void };
     companion: {
       moveBy(dx: number, dy: number): Promise<void>;

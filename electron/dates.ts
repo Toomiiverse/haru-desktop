@@ -22,6 +22,30 @@ export function localDateKey(d: Date) {
   return `${year}-${month}-${day}`;
 }
 
+// Kept items store a human time like "8:00 AM"; Google Calendar wants 24-hour
+// clock fields. These two are the boundary between the formats.
+export function parseTimeOfDay(input: string): { hour: number; minute: number } | null {
+  const text = input.trim().toLowerCase().replace(/\./g, '');
+  const match = text.match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/);
+  if (!match) return null;
+  let hour = Number(match[1]);
+  const minute = match[2] ? Number(match[2]) : 0;
+  const meridiem = match[3];
+  if (minute > 59) return null;
+  if (meridiem) {
+    if (hour < 1 || hour > 12) return null;
+    if (meridiem === 'pm' && hour !== 12) hour += 12;
+    if (meridiem === 'am' && hour === 12) hour = 0;
+  } else if (hour > 23) return null;
+  return { hour, minute };
+}
+
+export function formatTimeOfDay(hour: number, minute: number) {
+  const meridiem = hour < 12 ? 'AM' : 'PM';
+  const display = hour % 12 === 0 ? 12 : hour % 12;
+  return `${display}:${String(minute).padStart(2, '0')} ${meridiem}`;
+}
+
 // Date arithmetic is done here, not by the model. Asked to convert "thursday"
 // into a calendar date the model was reliably a day out, and spelling the whole
 // calendar out in the prompt did not fix it — so the chat tool passes the user's

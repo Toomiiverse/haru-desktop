@@ -1,6 +1,6 @@
-import { Component, useMemo, useState, type ReactNode } from 'react';
+import { Component, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Check, ChevronLeft, ChevronRight, CircleDot, Import, MessageSquarePlus, Plus, Sparkles, Trash2, X } from 'lucide-react';
-import type { KeptItem, Message, ProviderConfig } from './types';
+import type { GoogleStatus, KeptItem, Message, ProviderConfig } from './types';
 import { buildMonthGrid, dayLabel, monthLabel, toISODate } from './date';
 export class StageFailureBoundary extends Component<{ children: ReactNode; onError(message: string): void }, { failed: boolean }> { state = { failed: false }; componentDidCatch(error: Error) { this.props.onError(error.message || 'Haru could not start the Live2D renderer.'); } render() { return this.state.failed ? null : this.props.children; } static getDerivedStateFromError() { return { failed: true }; } }
 
@@ -29,7 +29,55 @@ export function SettingsDrawer({ config, onSave, onTest, onClose }: { config: Pr
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
   }
-  return <section className="drawer"><button className="drawer-close" onClick={onClose}><X size={16}/></button><div className="field"><h2>Ollama connection</h2><p>Haru will be able to talk to Ollama on your machine. Provider credentials will stay outside the renderer.</p><div className="form-grid"><input value={endpoint} onChange={event => setEndpoint(event.target.value)} placeholder="http://localhost:11434"/><input value={model} onChange={event => setModel(event.target.value)} placeholder="qwen3:8b"/></div>{status.state !== 'idle' && <p className={status.state === 'error' ? 'status-error' : 'status-ok'}>{status.state === 'testing' ? 'Testing…' : status.message}</p>}</div><div className="drawer-foot"><button className="ghost" onClick={test} disabled={status.state === 'testing'}>{status.state === 'testing' ? 'Testing…' : 'Test connection'}</button><button className="ghost">Enable alerts</button>{saved && <span className="saved"><Check size={13}/> Saved</span>}<button className="solid" onClick={save}>Save setup</button></div></section>;
+  return <section className="drawer"><button className="drawer-close" onClick={onClose}><X size={16}/></button><div className="field"><h2>Ollama connection</h2><p>Haru will be able to talk to Ollama on your machine. Provider credentials will stay outside the renderer.</p><div className="form-grid"><input value={endpoint} onChange={event => setEndpoint(event.target.value)} placeholder="http://localhost:11434"/><input value={model} onChange={event => setModel(event.target.value)} placeholder="qwen3:8b"/></div>{status.state !== 'idle' && <p className={status.state === 'error' ? 'status-error' : 'status-ok'}>{status.state === 'testing' ? 'Testing…' : status.message}</p>}</div><GoogleCalendarField/><div className="drawer-foot"><button className="ghost" onClick={test} disabled={status.state === 'testing'}>{status.state === 'testing' ? 'Testing…' : 'Test connection'}</button><button className="ghost">Enable alerts</button>{saved && <span className="saved"><Check size={13}/> Saved</span>}<button className="solid" onClick={save}>Save setup</button></div></section>;
+}
+
+function GoogleCalendarField() {
+  const [status, setStatus] = useState<GoogleStatus | null>(null);
+  const [clientId, setClientId] = useState('');
+  const [clientSecret, setClientSecret] = useState('');
+  const [busy, setBusy] = useState<'saving' | 'connecting' | 'syncing' | null>(null);
+  const [message, setMessage] = useState<{ text: string; error?: boolean } | null>(null);
+  useEffect(() => { window.haru?.google.status().then(setStatus); }, []);
+
+  async function run(kind: 'saving' | 'connecting' | 'syncing', action: () => Promise<GoogleStatus>, done: string) {
+    setBusy(kind); setMessage(null);
+    try {
+      setStatus(await action());
+      setMessage({ text: done });
+      // Credentials live in the main process from here on; no need to keep the
+      // secret sitting in renderer state.
+      if (kind === 'saving') { setClientId(''); setClientSecret(''); }
+    } catch (error) {
+      setMessage({ text: error instanceof Error ? error.message : String(error), error: true });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  if (!window.haru) return null;
+  return <div className="field"><h2>Google Calendar</h2>
+    {!status?.hasCredentials
+      ? <>
+          <p>Create an OAuth client of type <b>Desktop app</b> in Google Cloud Console with the Calendar API enabled, then paste its ID and secret here. Both are encrypted before they touch the disk.</p>
+          <div className="form-grid"><input value={clientId} onChange={event => setClientId(event.target.value)} placeholder="Client ID"/><input type="password" value={clientSecret} onChange={event => setClientSecret(event.target.value)} placeholder="Client secret"/></div>
+          <div className="row-actions"><button className="ghost" disabled={busy !== null || !clientId.trim() || !clientSecret.trim()} onClick={() => run('saving', () => window.haru!.google.saveCredentials(clientId, clientSecret), 'Credentials saved. Now connect your account.')}>{busy === 'saving' ? 'Saving…' : 'Save credentials'}</button></div>
+        </>
+      : <>
+          <p>{status.connected ? `Connected${status.email ? ` as ${status.email}` : ''}. Reminders Haru saves are added to your calendar.` : 'Credentials saved. Connect your account to start syncing.'}</p>
+          <div className="row-actions">
+            {status.connected
+              ? <>
+                  <button className="ghost" disabled={busy !== null} onClick={() => run('syncing', () => window.haru!.google.sync(), 'Calendar synced.')}>{busy === 'syncing' ? 'Syncing…' : 'Sync now'}</button>
+                  <button className="ghost" disabled={busy !== null} onClick={() => run('connecting', () => window.haru!.google.disconnect(), 'Disconnected from Google.')}>Disconnect</button>
+                </>
+              : <button className="ghost" disabled={busy !== null} onClick={() => run('connecting', () => window.haru!.google.connect(), 'Connected to Google Calendar.')}>{busy === 'connecting' ? 'Waiting for your browser…' : 'Connect Google account'}</button>}
+          </div>
+          {status.lastSync && !message && <p className="status-ok">Last synced {new Date(status.lastSync).toLocaleString()}</p>}
+        </>}
+    {message && <p className={message.error ? 'status-error' : 'status-ok'}>{message.text}</p>}
+    {!message && status?.lastError && <p className="status-error">{status.lastError}</p>}
+  </div>;
 }
 
 export function CharacterModelRow({ model, importing, onImport, onRemove }: { model: { name: string; url: string } | null; importing: boolean; onImport(): void; onRemove(): void }) {

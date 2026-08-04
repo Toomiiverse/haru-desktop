@@ -3,7 +3,8 @@ import { contextBridge, ipcRenderer } from 'electron';
 type Live2DModel = { path: string; name: string; url: string };
 type Message = { id: string; role: 'user' | 'assistant'; content: string; time: string };
 type ProviderConfig = { provider: string; model: string; endpoint: string; temperature: number };
-type KeptItem = { id: string; title: string; date: string; time?: string; kind: 'reminder' | 'event'; done: boolean };
+type KeptItem = { id: string; title: string; date: string; time?: string; kind: 'reminder' | 'event'; done: boolean; googleEventId?: string };
+type GoogleStatus = { hasCredentials: boolean; connected: boolean; email?: string; lastSync?: string; lastError?: string };
 
 contextBridge.exposeInMainWorld('haru', {
   settings: { get: (key: string) => ipcRenderer.invoke('settings:get', key), set: (key: string, value: unknown) => ipcRenderer.invoke('settings:set', key, value) },
@@ -21,6 +22,13 @@ contextBridge.exposeInMainWorld('haru', {
   ai: {
     send: (messages: { role: string; content: string }[], config: ProviderConfig) => ipcRenderer.invoke('ai:send', messages, config) as Promise<string>,
     test: (endpoint: string) => ipcRenderer.invoke('ai:test', endpoint) as Promise<string[]>,
+  },
+  google: {
+    status: () => ipcRenderer.invoke('google:status') as Promise<GoogleStatus>,
+    saveCredentials: (clientId: string, clientSecret: string) => ipcRenderer.invoke('google:saveCredentials', clientId, clientSecret) as Promise<GoogleStatus>,
+    connect: () => ipcRenderer.invoke('google:connect') as Promise<GoogleStatus>,
+    disconnect: () => ipcRenderer.invoke('google:disconnect') as Promise<GoogleStatus>,
+    sync: () => ipcRenderer.invoke('google:sync') as Promise<GoogleStatus>,
   },
   kept: {
     get: () => ipcRenderer.invoke('kept:get') as Promise<KeptItem[]>,

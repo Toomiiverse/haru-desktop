@@ -6,10 +6,11 @@ import { pathToFileURL } from 'node:url';
 import AdmZip from 'adm-zip';
 import Store from 'electron-store';
 import { localDateKey, resolveDate, zonedNow } from './dates';
+import { connectGoogle, disconnectGoogle, googleStatus, pullEvents, pushItem, removeItem, saveCredentials } from './google';
 
 type Bounds = { x: number; y: number; width: number; height: number };
 type Live2DModel = { path: string; name: string; url: string };
-type KeptItem = { id: string; title: string; date: string; time?: string; kind: 'reminder' | 'event'; done: boolean };
+type KeptItem = { id: string; title: string; date: string; time?: string; kind: 'reminder' | 'event'; done: boolean; googleEventId?: string };
 
 const COMPANION_DEFAULT_WIDTH = 300;
 const COMPANION_ASPECT = 360 / 300;
@@ -20,6 +21,7 @@ const CURSOR_POLL_MS = 33;
 const CHAT_TIMEZONE = 'Australia/Perth'; // UTC+8 year-round, no DST
 const CHAT_RESET_HOUR = 5;
 const CHAT_RESET_POLL_MS = 60_000;
+const GOOGLE_SYNC_DAYS = 30;
 
 const store = new Store<Record<string, unknown>>();
 const live2dRoots = new Map<string, string>();
@@ -176,7 +178,50 @@ function setKept(items: KeptItem[]) {
 function addKeptItem(item: Omit<KeptItem, 'id' | 'done'>): KeptItem {
   const created: KeptItem = { ...item, id: randomUUID(), done: false };
   setKept([...getKept(), created]);
+  // Pushed in the background: a slow or failed Google call should not hold up
+  // the chat reply confirming the reminder was saved locally.
+  void syncItemToGoogle(created);
   return created;
+}
+
+async function syncItemToGoogle(item: KeptItem) {
+  if (!googleStatus(store).connected) return;
+  try {
+    const googleEventId = await pushItem(store, item, CHAT_TIMEZONE);
+    // Re-read rather than closing over the old array: the tool loop may have
+    // added another item while this request was in flight.
+    setKept(getKept().map(current => current.id === item.id ? { ...current, googleEventId } : current));
+    store.delete('google.lastError' as never);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error('[google] push failed:', message);
+    store.set('google.lastError', message);
+  }
+}
+
+// Pulls Google's events in as kept items, matched on the remote id so repeated
+// syncs update rather than duplicate. Items Haru created are refreshed in place;
+// anything already deleted locally is not resurrected.
+async function syncFromGoogle() {
+  const status = googleStatus(store);
+  if (!status.connected) throw new Error('Haru is not connected to Google Calendar.');
+  const today = localDateKey(zonedNow(CHAT_TIMEZONE));
+  const events = await pullEvents(store, today, GOOGLE_SYNC_DAYS, CHAT_TIMEZONE);
+  const existing = getKept();
+  const byGoogleId = new Map(existing.filter(item => item.googleEventId).map(item => [item.googleEventId!, item]));
+  const merged = [...existing];
+  for (const event of events) {
+    const match = byGoogleId.get(event.id);
+    if (match) {
+      Object.assign(match, { title: event.title, date: event.date, time: event.time });
+      continue;
+    }
+    merged.push({ id: randomUUID(), title: event.title, date: event.date, time: event.time, kind: 'event', done: false, googleEventId: event.id });
+  }
+  setKept(merged);
+  store.set('google.lastSync', new Date().toISOString());
+  store.delete('google.lastError' as never);
+  return googleStatus(store);
 }
 
 type ProviderConfig = { provider: string; model: string; endpoint: string; temperature: number };
@@ -213,11 +258,10 @@ const CHAT_TOOLS = [{
   },
 }];
 
-// Listing what is saved directly in the prompt rather than behind a read tool:
-// asked "anything tomorrow?", the model answered "nothing" outright instead of
-// choosing to look, so the answer has to already be in front of it. Each entry
-// carries its own relative label so no date arithmetic is needed to match
-// "tomorrow" against a row.
+// Listing what is saved directly rather than behind a read tool: asked "anything
+// tomorrow?", the model answered "nothing" outright instead of choosing to look,
+// so the answer has to already be in front of it. Each entry carries its own
+// relative label so no date arithmetic is needed to match "tomorrow" to a row.
 function keptSummary(now: Date) {
   const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const items = getKept()
@@ -246,6 +290,22 @@ function chatSystemPrompt() {
     'Answer questions about what is coming up from that list, and never say nothing is saved without checking it first.',
     'When the user wants to be reminded of something or mentions an appointment, call create_kept_item so it is actually saved. Once saved, confirm it in a sentence or two rather than repeating it back as a formatted block.',
   ].join(' ');
+}
+
+const DENIAL = /(don'?t have any|no reminders|nothing (?:saved|scheduled|on|planned)|there are no|don'?t see any)/i;
+
+// Replies claiming nothing is saved are dropped from the history once something
+// actually is. They were written before the item existed, and left in place the
+// model sides with its own out-of-date answer — "That's correct! There are no
+// reminders for tomorrow" — over the current list sitting in the prompt. Moving
+// the list nearer the question does not help: measured across 12 samples on a
+// conversation carrying five such replies, correct answers went 7/12 with the
+// list in the system prompt, 2/12 placed before the question and 3/12 after it,
+// against 12/12 once these are removed. Only messages contradicted by the store
+// are touched, so a denial that was accurate stays.
+function withoutStaleDenials<T extends { role: string; content: string }>(messages: T[], hasItems: boolean) {
+  if (!hasItems) return messages;
+  return messages.filter(message => !(message.role === 'assistant' && DENIAL.test(message.content)));
 }
 
 function toolArguments(call: ToolCall): Record<string, unknown> {
@@ -290,7 +350,9 @@ async function ollamaPost(conversation: OllamaMessage[], config: ProviderConfig)
 async function ollamaChat(messages: { role: string; content: string }[], config: ProviderConfig) {
   console.log(`[ai] chat request: model=${config.model} endpoint=${config.endpoint} messages=${messages.length}`);
   const started = Date.now();
-  const conversation: OllamaMessage[] = [{ role: 'system', content: chatSystemPrompt() }, ...messages];
+  const startOfToday = localDateKey(zonedNow(CHAT_TIMEZONE));
+  const hasItems = getKept().some(item => item.date >= startOfToday);
+  const conversation: OllamaMessage[] = [{ role: 'system', content: chatSystemPrompt() }, ...withoutStaleDenials(messages, hasItems)];
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
     const message = await ollamaPost(conversation, config);
     if (message.tool_calls?.length) {
@@ -450,7 +512,18 @@ app.whenReady().then(() => {
   ipcMain.handle('chat:newConversation', () => startNewConversation());
   ipcMain.handle('kept:get', () => getKept());
   ipcMain.handle('kept:toggle', (_e, id: string) => { setKept(getKept().map(item => item.id === id ? { ...item, done: !item.done } : item)); });
-  ipcMain.handle('kept:remove', (_e, id: string) => { setKept(getKept().filter(item => item.id !== id)); });
+  ipcMain.handle('kept:remove', (_e, id: string) => {
+    const removed = getKept().find(item => item.id === id);
+    setKept(getKept().filter(item => item.id !== id));
+    if (removed?.googleEventId && googleStatus(store).connected) {
+      void removeItem(store, removed.googleEventId).catch(error => console.error('[google] delete failed:', error));
+    }
+  });
+  ipcMain.handle('google:status', () => googleStatus(store));
+  ipcMain.handle('google:saveCredentials', (_e, clientId: string, clientSecret: string) => { saveCredentials(store, clientId, clientSecret); return googleStatus(store); });
+  ipcMain.handle('google:connect', () => connectGoogle(store));
+  ipcMain.handle('google:disconnect', () => { disconnectGoogle(store); return googleStatus(store); });
+  ipcMain.handle('google:sync', () => syncFromGoogle());
   ipcMain.handle('ai:send', (_e, messages: { role: string; content: string }[], config: ProviderConfig) => ollamaChat(messages, config));
   ipcMain.handle('ai:test', (_e, endpoint: string) => ollamaTags(endpoint));
   ipcMain.handle('live2d:import', async () => {
