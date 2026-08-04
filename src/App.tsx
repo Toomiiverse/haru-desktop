@@ -44,13 +44,23 @@ export default function App() {
   // Re-picking the same reaction is ignored rather than toggled off, so a stray
   // second click cannot silently withdraw feedback or fire another retort.
   function react(id: string, reaction: Reaction) {
-    setMessages(current => {
-      const target = current.find(message => message.id === id);
-      if (!target || target.reaction === reaction) return current;
-      const rated = current.map(message => message.id === id ? { ...message, reaction } : message);
-      if (reaction !== 'down') return rated;
-      return [...rated, { id: crypto.randomUUID(), role: 'assistant' as const, content: randomRetort(), time: 'now' }];
-    });
+    const target = messages.find(message => message.id === id);
+    if (!target || target.reaction === reaction) return;
+    setMessages(current => current.map(message => message.id === id ? { ...message, reaction } : message));
+    if (reaction === 'down') void snapBack(target.content);
+  }
+
+  // The rating lands immediately and the retort follows a beat later, because
+  // it is written fresh against the disliked reply. The canned lines remain as
+  // a fallback for when the model is unreachable.
+  async function snapBack(disliked: string) {
+    let content = '';
+    try {
+      if (window.haru) content = await window.haru.ai.retort(disliked, providerConfig);
+    } catch {
+      // Falls through to a canned line below.
+    }
+    setMessages(current => [...current, { id: crypto.randomUUID(), role: 'assistant' as const, content: content || randomRetort(), time: 'now' }]);
   }
 
   async function send(content: string) {

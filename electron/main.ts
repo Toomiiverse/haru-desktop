@@ -503,17 +503,50 @@ function runChatTool(call: ToolCall): string {
   return JSON.stringify({ saved: true, title: item.title, date: item.date, time: item.time ?? null, kind: item.kind });
 }
 
-async function ollamaPost(conversation: OllamaMessage[], config: ProviderConfig) {
+async function ollamaPost(conversation: OllamaMessage[], config: ProviderConfig, { tools = true, temperature = config.temperature } = {}) {
   const response = await net.fetch(`${trimEndpoint(config.endpoint)}/api/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: config.model, messages: conversation, tools: CHAT_TOOLS, stream: false, options: { temperature: config.temperature, num_ctx: CHAT_NUM_CTX } }),
+    body: JSON.stringify({ model: config.model, messages: conversation, ...(tools ? { tools: CHAT_TOOLS } : {}), stream: false, options: { temperature, num_ctx: CHAT_NUM_CTX } }),
   });
   if (!response.ok) throw new Error(`Ollama returned ${response.status}: ${(await response.text().catch(() => '')) || response.statusText}`);
   const data = await response.json() as { message?: OllamaMessage; error?: string };
   if (data.error) throw new Error(data.error);
   if (!data.message) throw new Error('Ollama response did not include a message.');
   return data.message;
+}
+
+// Shown to the model as tone reference rather than picked from — the point of
+// generating these is that the jab lands on whatever was actually disliked.
+const RETORT_EXAMPLES = [
+  'Ugh, fine, whatever — I’ll keep it in mind for next time.',
+  'Oh great, another genius vote of no confidence. Fine, I’ll dumb it down next time, your majesty.',
+  'Wow. Bold move thinking I fucked up. Fine. I’ll adjust, princess.',
+  'Tch. Fine, I’ll adjust it. Don’t expect me to like it though.',
+];
+
+// Deliberately run without tools: this is a one-line quip, and offering the tool
+// schema here only invites a stray reminder and slows the round trip.
+export async function ollamaRetort(disliked: string, config: ProviderConfig) {
+  const system = [
+    getCharacter().identity,
+    'The user just marked one of your replies as poor. Snap back at them with ONE short line, under 25 words.',
+    'Be unrepentant and sarcastic about it. Do not apologise, do not offer to fix it, do not ask a question, do not use quotation marks.',
+    'Refer to what they actually disliked so the jab lands on that specific reply.',
+    `Match the bite of these, but write a new one: ${RETORT_EXAMPLES.map(line => `"${line}"`).join(' ')}`,
+  ].join(' ');
+  const message = await ollamaPost(
+    [{ role: 'system', content: system }, { role: 'user', content: `This is the reply I marked as poor: "${disliked.slice(0, 500)}"` }],
+    config,
+    // Hotter than normal chat so repeated thumbs-downs do not converge on the
+    // same phrasing, which is the whole complaint with canned lines.
+    { tools: false, temperature: 1 },
+  );
+  const line = (message.content ?? '').trim().split('\n').find(text => text.trim())?.trim() ?? '';
+  // Models like to wrap a one-liner in quotes despite being told not to.
+  const cleaned = line.replace(/^["'“”]+|["'“”]+$/g, '').trim();
+  if (!cleaned) throw new Error('No retort returned.');
+  return cleaned.length > 220 ? `${cleaned.slice(0, 217)}…` : cleaned;
 }
 
 async function ollamaChat(messages: { role: string; content: string }[], config: ProviderConfig) {
@@ -705,6 +738,7 @@ app.whenReady().then(() => {
   ipcMain.handle('google:sync', () => syncFromGoogle());
   ipcMain.handle('ai:send', (_e, messages: { role: string; content: string }[], config: ProviderConfig) => ollamaChat(messages, config));
   ipcMain.handle('ai:test', (_e, endpoint: string) => ollamaTags(endpoint));
+  ipcMain.handle('ai:retort', (_e, disliked: string, config: ProviderConfig) => ollamaRetort(disliked, config));
   ipcMain.handle('live2d:import', async () => {
     const result = await dialog.showOpenDialog(mainWindow!, { title: 'Import Live2D Cubism model', properties: ['openFile'], filters: [{ name: 'Live2D model package', extensions: ['zip', 'json'] }] });
     if (result.canceled || !result.filePaths[0]) return null;
