@@ -12,6 +12,7 @@ import { applyEvent, chooseIdleAction, DEFAULT_VITALS, driftVitals, nextTickDela
 import { classificationPrompt, emotionToVitals, EMOTION_SCHEMA, NEUTRAL_EMOTION, parseEmotion, type Emotion } from './emotion';
 import { withDiscoveredExpressions } from './expressions';
 import { findItem, formatAgenda, readsAsNotDone } from './agenda';
+import { dropRepeatedParagraphs } from './reply';
 import { formatMemoryPrompt, isWorthKeeping, MEMORY_KINDS, migrateMemories, pruneMemories, rememberInto, selectMemories, summaryPrompt, type MemoryKind, type MemoryRecord, type SessionSummary } from './memory';
 
 type Bounds = { x: number; y: number; width: number; height: number };
@@ -443,6 +444,30 @@ async function performSync() {
     }
   }
 
+  // Anything saved before tasks were supported went to the calendar, so a task
+  // can still be sitting there as an event — tickable here, but with nothing on
+  // the Google side to tick. Moved across on sight. The task is created before
+  // the event is removed: a failure between the two leaves a duplicate, which is
+  // recoverable, where the other order would lose the item outright.
+  if (status.tasksGranted && !tasksProblem) {
+    for (const item of getKept()) {
+      // Any calendar event behind a task is wrong, whether or not a task also
+      // exists. Items that predate task support were pushed a second time once
+      // tasks came online, leaving them in Google twice — so having both ids is
+      // the duplicate case, and the stale event still has to go.
+      if (item.kind !== 'task' || !item.googleEventId) continue;
+      try {
+        const googleTaskId = item.googleTaskId ?? await pushTask(store, item);
+        await removeItem(store, item.googleEventId);
+        setKept(getKept().map(current => current.id === item.id ? { ...current, googleTaskId, googleEventId: undefined } : current));
+        console.log(`[google] ${item.googleTaskId ? `removed the duplicate calendar copy of "${item.title}"` : `moved "${item.title}" from Calendar to Tasks`}`);
+      } catch (error) {
+        noteTaskFailure(error);
+        break;
+      }
+    }
+  }
+
   const events = await pullEvents(store, today, GOOGLE_SYNC_DAYS, CHAT_TIMEZONE);
   const existing = getKept();
   const byGoogleId = new Map(existing.filter(item => item.googleEventId).map(item => [item.googleEventId!, item]));
@@ -677,8 +702,17 @@ function feedbackSummary() {
   const lines: string[] = [];
   const disliked = rated.filter(message => message.reaction === 'down').slice(-4);
   const liked = rated.filter(message => message.reaction === 'up').slice(-3);
-  if (disliked.length) lines.push(`The user marked these replies of yours as poor: ${disliked.map(message => `"${(message.content ?? '').slice(0, 140)}"`).join(' / ')}. Work out what fell flat and steer away from it.`);
-  if (liked.length) lines.push(`They marked these as good: ${liked.map(message => `"${(message.content ?? '').slice(0, 140)}"`).join(' / ')}. More of that.`);
+  // Quoted short and explicitly not for reuse. Handing over 140 characters of her
+  // own reply and saying "more of that" had her reproducing those lines word for
+  // word in the next answer — the excerpt is only there to identify which reply
+  // is meant, and the lesson is meant to be about tone, not text.
+  const excerpt = (text: string | undefined) => {
+    const clean = (text ?? '').replace(/\s+/g, ' ').trim();
+    return clean.length > 70 ? `${clean.slice(0, 70)}…` : clean;
+  };
+  if (disliked.length) lines.push(`The user marked these replies of yours as poor: ${disliked.map(message => `"${excerpt(message.content)}"`).join(' / ')}. Work out what fell flat about them and steer away from it.`);
+  if (liked.length) lines.push(`They marked these as good: ${liked.map(message => `"${excerpt(message.content)}"`).join(' / ')}. Take what worked — the tone, the length, the angle — and do more of that.`);
+  if (lines.length) lines.push('Those excerpts are there to tell you which replies are meant. Never repeat their wording back; you have already said it, and saying it again reads as a glitch.');
   return lines.join(' ');
 }
 
@@ -973,9 +1007,17 @@ async function ollamaChat(messages: { role: string; content: string }[], config:
       continue;
     }
     if (!message.content) throw new Error('Ollama response did not include any message content.');
-    console.log(`[ai] chat reply in ${Date.now() - started}ms, ${message.content.length} chars`);
-    classifyEmotion(message.content, config);
-    return { content: message.content, ignored: false, irritation, ego };
+    // Whole paragraphs of her own recent replies come back verbatim otherwise.
+    // Only the last two are compared: the echo happens back-to-back, and looking
+    // further would start dropping a legitimate restatement — asked what is on
+    // today twice in a conversation, she has to be free to say it twice. Two
+    // covers the case where a retort or gloat sits between the two replies.
+    const recent = messages.filter(entry => entry.role === 'assistant').slice(-2).map(entry => entry.content);
+    const content = dropRepeatedParagraphs(message.content, recent);
+    if (content !== message.content) console.log(`[ai] dropped ${message.content.length - content.length} chars she had already said`);
+    console.log(`[ai] chat reply in ${Date.now() - started}ms, ${content.length} chars`);
+    classifyEmotion(content, config);
+    return { content, ignored: false, irritation, ego };
   }
   throw new Error('Haru kept calling tools without settling on a reply.');
 }

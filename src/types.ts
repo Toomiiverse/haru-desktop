@@ -1,6 +1,10 @@
-export type Role = 'user' | 'assistant';
+// 'system' never enters the stored conversation — it is only used for notes
+// passed alongside a message on the way to the model, such as a reply reference.
+export type Role = 'user' | 'assistant' | 'system';
 export type Reaction = 'up' | 'down';
-export interface Message { id: string; role: Role; content: string; time: string; reaction?: Reaction; ignored?: boolean; }
+// replyTo points at an earlier message of Haru's, so feedback can be aimed at
+// the reply it is actually about rather than at whatever she said last.
+export interface Message { id: string; role: Role; content: string; time: string; reaction?: Reaction; ignored?: boolean; replyTo?: { id: string; excerpt: string }; }
 export interface ChatResult { content: string; ignored: boolean; irritation: number; ego: number; }
 export interface Mood { irritation: number; ego: number; }
 export interface Vitals { energy: number; happiness: number; curiosity: number; affection: number; sleepiness: number; stress: number; focus: number; }

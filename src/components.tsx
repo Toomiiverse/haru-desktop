@@ -1,5 +1,5 @@
 import { Component, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { CalendarDays, Check, CheckSquare, ChevronLeft, ChevronRight, CircleDot, Import, MessageSquarePlus, Plus, Sparkles, ThumbsDown, ThumbsUp, Trash2, X } from 'lucide-react';
+import { CalendarDays, Check, CornerDownRight, Reply, SquareCheck, ChevronLeft, ChevronRight, CircleDot, Import, MessageSquarePlus, Plus, Sparkles, ThumbsDown, ThumbsUp, Trash2, X } from 'lucide-react';
 import type { Character, GoogleStatus, KeptItem, Memory, MemoryKind, Message, Profile, ProviderConfig, Reaction, SessionSummary } from './types';
 import { buildMonthGrid, dayLabel, monthLabel, toISODate } from './date';
 export class StageFailureBoundary extends Component<{ children: ReactNode; onError(message: string): void }, { failed: boolean }> { state = { failed: false }; componentDidCatch(error: Error) { this.props.onError(error.message || 'Haru could not start the Live2D renderer.'); } render() { return this.state.failed ? null : this.props.children; } static getDerivedStateFromError() { return { failed: true }; } }
@@ -199,21 +199,26 @@ export function CharacterModelRow({ model, importing, onImport, onRemove }: { mo
   return <div className="model-row" aria-label="Live2D character model"><Sparkles size={13}/><span className="model-name muted">No character model imported</span><button className="import-model" onClick={onImport} disabled={importing}><Import size={13}/>{importing ? 'Opening…' : 'Import model'}</button></div>;
 }
 
-export function MessageBubble({ message, onReact }: { message: Message; onReact?(reaction: Reaction): void }) {
-  // Only Haru's own replies are rated, and the greeting is not a real reply.
-  // Nothing to rate when she did not actually say anything.
-  const ratable = onReact && message.role === 'assistant' && message.id !== 'greeting' && !message.ignored;
-  return <article className={'bubble-row '+message.role}><div className="assistant-dot" aria-hidden="true"/><div className="bubble-stack"><div className={message.ignored ? 'bubble ignored' : 'bubble'}>{message.content}</div>
-    {ratable && <div className={message.reaction ? 'reactions rated' : 'reactions'}>
+export function MessageBubble({ message, onReact, onReply }: { message: Message; onReact?(reaction: Reaction): void; onReply?(): void }) {
+  // Only Haru's own replies can be rated or replied to, and the greeting is not
+  // a real reply. Nothing to act on when she did not actually say anything.
+  const actionable = message.role === 'assistant' && message.id !== 'greeting' && !message.ignored;
+  return <article className={'bubble-row '+message.role}><div className="assistant-dot" aria-hidden="true"/><div className="bubble-stack">
+    {/* Kept on the message itself, so which reply was meant stays readable long
+        after the exchange rather than only while it is being written. */}
+    {message.replyTo && <div className="reply-quote"><CornerDownRight size={11}/><span>{message.replyTo.excerpt}</span></div>}
+    <div className={message.ignored ? 'bubble ignored' : 'bubble'}>{message.content}</div>
+    {actionable && onReact && <div className={message.reaction ? 'reactions rated' : 'reactions'}>
       <button className={message.reaction === 'up' ? 'reaction reacted' : 'reaction'} onClick={() => onReact('up')} aria-pressed={message.reaction === 'up'} title="Good response"><ThumbsUp size={13}/></button>
       <button className={message.reaction === 'down' ? 'reaction reacted' : 'reaction'} onClick={() => onReact('down')} aria-pressed={message.reaction === 'down'} title="Poor response"><ThumbsDown size={13}/></button>
+      {onReply && <button className="reaction" onClick={onReply} title="Reply to this one — tells her exactly which reply you mean"><Reply size={13}/></button>}
     </div>}
   </div></article>;
 }
 // The draft lives in state, not a plain local: `sending` toggling re-renders the
 // composer, which would reset a local and leave the (uncontrolled) input showing
 // text that submit could no longer see.
-export function Composer({ sending, onSend }: { sending: boolean; onSend(text: string): void }) {
+export function Composer({ sending, replyingTo, onCancelReply, onSend }: { sending: boolean; replyingTo?: { id: string; excerpt: string } | null; onCancelReply?(): void; onSend(text: string): void }) {
   const [draft, setDraft] = useState('');
   function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -222,7 +227,13 @@ export function Composer({ sending, onSend }: { sending: boolean; onSend(text: s
     setDraft('');
     onSend(text);
   }
-  return <form className="compose" onSubmit={submit}><input value={draft} disabled={sending} placeholder="Say something to Haru…" onChange={event => setDraft(event.target.value)}/><button disabled={sending || !draft.trim()}>{sending ? 'Thinking…' : 'Send'}</button></form>;
+  return <div className="compose-wrap">
+    {replyingTo && <div className="replying-to"><CornerDownRight size={12}/><span>Replying to: {replyingTo.excerpt}</span><button onClick={onCancelReply} aria-label="Cancel reply"><X size={12}/></button></div>}
+    <form className="compose" onSubmit={submit}>
+      <input value={draft} disabled={sending} placeholder={replyingTo ? 'What did she get wrong?' : 'Say something to Haru…'} onChange={event => setDraft(event.target.value)}/>
+      <button disabled={sending || !draft.trim()}>{sending ? 'Thinking…' : 'Send'}</button>
+    </form>
+  </div>;
 }
 
 const WEEKDAYS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
@@ -250,7 +261,7 @@ export function Calendar({ items, selected, onSelect }: { items: KeptItem[]; sel
 // the latter is clickable, so the affordance matches what is actually possible.
 function AgendaSection({ label, items, checkable, onToggle }: { label: string; items: KeptItem[]; checkable: boolean; onToggle(id: string): void }) {
   if (!items.length) return null;
-  return <div className="agenda-section"><h4>{checkable ? <CheckSquare size={10}/> : <CalendarDays size={10}/>} {label}</h4>
+  return <div className="agenda-section"><h4>{checkable ? <SquareCheck size={10}/> : <CalendarDays size={10}/>} {label}</h4>
     {items.map(item => {
       const body = <><i className={checkable ? 'tick' : 'dot'}>{checkable ? (item.done ? <Check size={11}/> : null) : <CircleDot size={11}/>}</i><div className="agenda-text"><b>{item.title}</b>{item.time && <small>{item.time}</small>}</div></>;
       return checkable
