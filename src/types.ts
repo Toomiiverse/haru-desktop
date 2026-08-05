@@ -5,6 +5,10 @@ export interface ChatResult { content: string; ignored: boolean; irritation: num
 export interface Mood { irritation: number; ego: number; }
 export interface Vitals { energy: number; happiness: number; curiosity: number; affection: number; sleepiness: number; stress: number; focus: number; }
 export interface LifeTick { vitals: Vitals; action: string | null; night: boolean; }
+export type EmotionName = 'neutral' | 'happy' | 'curious' | 'smug' | 'annoyed' | 'bored' | 'sleepy' | 'surprised' | 'affectionate' | 'embarrassed';
+export type Intent = 'listen' | 'explain' | 'tease' | 'dismiss' | 'celebrate' | 'soothe';
+export type FocusTarget = 'user' | 'self' | 'task' | 'away';
+export interface Emotion { emotion: EmotionName; confidence: number; energy: number; intent: Intent; focus: FocusTarget; }
 export interface KeptItem { id: string; title: string; date: string; time?: string; kind: 'reminder' | 'event'; done: boolean; googleEventId?: string; }
 export interface GoogleStatus { hasCredentials: boolean; connected: boolean; email?: string; lastSync?: string; lastError?: string; }
 export interface Character { identity: string; style: string; }

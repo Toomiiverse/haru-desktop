@@ -6,7 +6,7 @@
 // Coordinates are the model's own focus space: -1..1 on each axis, 0,0 straight
 // ahead. Pure, so the blending can be checked without a canvas.
 
-import type { Vitals } from '../types';
+import type { Emotion, EmotionName, FocusTarget, Vitals } from '../types';
 
 export type Gaze = { x: number; y: number };
 export type Layer = { target: Gaze; weight: number };
@@ -21,6 +21,10 @@ export type BehaviourState = {
   vitals: Vitals;
   /** Seconds of no input anywhere on the machine. */
   idleSeconds: number;
+  /** The most recent reading from the model, if any. */
+  emotion?: Emotion | null;
+  /** 1 while the reading is fresh, easing to 0 as it fades. */
+  emotionStrength: number;
 };
 
 export function blend(layers: Layer[]): Gaze {
@@ -55,11 +59,18 @@ export function restingGaze(vitals: Vitals): Gaze {
 }
 
 export function resolveGaze(state: BehaviourState): Gaze {
-  return blend([
+  const layers: Layer[] = [
     { target: restingGaze(state.vitals), weight: 0.5 },
     { target: state.cursor, weight: attentionWeight(state) },
     { target: state.wander ?? { x: 0, y: 0 }, weight: wanderWeight(state) },
-  ]);
+  ];
+  // The emotion layer sits alongside the others rather than replacing them, so
+  // a reading pulls her gaze without ever freezing out the cursor entirely.
+  if (state.emotion && state.emotionStrength > 0) {
+    const target = focusGaze(state.emotion);
+    if (target) layers.push({ target, weight: emotionWeight(state.emotion) * state.emotionStrength });
+  }
+  return blend(layers);
 }
 
 // Somewhere plausible to look for a glance: off to one side, roughly at eye
@@ -105,4 +116,45 @@ export function pickExpression(mood: ActionShape['expressionMood'], available: s
   if (!available.length) return null;
   const hint = EXPRESSION_HINTS[mood];
   return available.find(name => hint.test(name)) ?? null;
+}
+
+// --- emotion layer ---------------------------------------------------------
+// What the model reported feeling gets translated here, once, into the same
+// vocabulary the idle layers already speak. Nothing downstream knows the names
+// of emotions, so adding one never means touching the animation code.
+
+const EMOTION_MOODS: Record<EmotionName, ActionShape['expressionMood']> = {
+  neutral: 'neutral', happy: 'happy', curious: 'curious', smug: 'happy',
+  annoyed: 'neutral', bored: 'neutral', sleepy: 'sleepy', surprised: 'curious',
+  affectionate: 'happy', embarrassed: 'sleepy',
+};
+
+export function expressionMoodFor(emotion: Emotion): ActionShape['expressionMood'] {
+  return EMOTION_MOODS[emotion.emotion] ?? 'neutral';
+}
+
+// Where the reported focus puts her eyes. Only 'user' keeps her looking out;
+// the rest pull her gaze away, which is what sells thinking or dismissal.
+const FOCUS_GAZE: Record<FocusTarget, Gaze | null> = {
+  user: null,                 // null means "leave attention to the cursor"
+  self: { x: 0, y: -0.45 },   // down, inward
+  task: { x: -0.3, y: -0.35 },// off toward whatever she is doing
+  away: { x: 0.55, y: 0.15 }, // pointedly elsewhere
+};
+
+export function focusGaze(emotion: Emotion): Gaze | null {
+  return FOCUS_GAZE[emotion.focus] ?? null;
+}
+
+// How hard the emotion pulls, so a confident reading moves her and a hedged one
+// leaves the idle layers in charge.
+export function emotionWeight(emotion: Emotion) {
+  return emotion.confidence * (emotion.focus === 'user' ? 0 : 0.9);
+}
+
+// An emotional beat should fade rather than latch: this is how long the reading
+// stays fully applied before the idle layers take back over. Livelier readings
+// hold longer, because a flat one has less to show.
+export function emotionHoldMs(emotion: Emotion) {
+  return 2500 + emotion.energy * 3500;
 }

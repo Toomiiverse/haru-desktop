@@ -27,7 +27,7 @@ interface Window {
       onChange(callback: (status: import('./types').GoogleStatus) => void): () => void;
     };
     live2d: { import(): Promise<Live2DModel | null>; get(): Promise<Live2DModel | null>; remove(): Promise<void>; onChange(callback: (model: Live2DModel | null) => void): () => void };
-    life: { onTick(callback: (payload: import('./types').LifeTick) => void): () => void };
+    life: { onTick(callback: (payload: import('./types').LifeTick) => void): () => void; onEmotion(callback: (emotion: import('./types').Emotion) => void): () => void };
     companion: {
       moveBy(dx: number, dy: number): Promise<void>;
       resizeBy(factor: number): Promise<void>;

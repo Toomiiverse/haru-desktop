@@ -9,6 +9,7 @@ import { localDateKey, resolveDate, zonedNow } from './dates';
 import { connectGoogle, disconnectGoogle, googleStatus, pullEvents, pushItem, removeItem, saveCredentials } from './google';
 import { afterCooldown, afterEgoCooldown, afterPoke, egoInstruction, goodnightInstruction, isGoodnight, isIgnoring, isLowEffort, leverageInstruction, moodInstruction, nextEgo, nextIrritation } from './mood';
 import { applyEvent, chooseIdleAction, DEFAULT_VITALS, driftVitals, nextTickDelayMs, type Environment, type Vitals } from './vitals';
+import { classificationPrompt, emotionToVitals, EMOTION_SCHEMA, NEUTRAL_EMOTION, parseEmotion, type Emotion } from './emotion';
 
 type Bounds = { x: number; y: number; width: number; height: number };
 type Live2DModel = { path: string; name: string; url: string };
@@ -262,6 +263,29 @@ function startLifeLoop() {
 function nudgeVitals(event: Parameters<typeof applyEvent>[1]) {
   vitals = applyEvent(vitals, event);
   broadcastLife(null, readEnvironment());
+}
+
+let currentEmotion: Emotion = NEUTRAL_EMOTION;
+
+// Fire-and-forget: the reply is already on screen by the time this runs, so a
+// slow or failed classification costs an expression rather than the message.
+function classifyEmotion(reply: string, config: ProviderConfig) {
+  const system = classificationPrompt(getMood());
+  ollamaPost(
+    [{ role: 'system', content: system }, { role: 'user', content: `The line she just said: "${reply.slice(0, 600)}"` }],
+    config,
+    // Low temperature because this is a label, not writing; the schema is what
+    // guarantees it comes back parseable.
+    { tools: false, temperature: 0.1, format: EMOTION_SCHEMA, maxTokens: 120 },
+  ).then(message => {
+    const emotion = parseEmotion(message.content ?? '');
+    if (!emotion) { console.warn('[emotion] unparseable classification, keeping previous'); return; }
+    currentEmotion = emotion;
+    vitals = emotionToVitals(emotion, vitals);
+    console.log(`[emotion] ${emotion.emotion} (confidence ${emotion.confidence.toFixed(2)}, energy ${emotion.energy.toFixed(2)}, intent ${emotion.intent}, focus ${emotion.focus})`);
+    for (const win of BrowserWindow.getAllWindows()) win.webContents.send('emotion:changed', emotion);
+    broadcastLife(null, readEnvironment());
+  }).catch(error => console.warn('[emotion] classification failed:', error instanceof Error ? error.message : error));
 }
 
 function broadcastGoogleStatus() {
@@ -615,11 +639,17 @@ function runChatTool(call: ToolCall): string {
   return JSON.stringify({ saved: true, title: item.title, date: item.date, time: item.time ?? null, kind: item.kind });
 }
 
-async function ollamaPost(conversation: OllamaMessage[], config: ProviderConfig, { tools = true, temperature = config.temperature } = {}) {
+async function ollamaPost(conversation: OllamaMessage[], config: ProviderConfig, { tools = true, temperature = config.temperature, format, maxTokens }: { tools?: boolean; temperature?: number; format?: unknown; maxTokens?: number } = {}) {
   const response = await net.fetch(`${trimEndpoint(config.endpoint)}/api/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: config.model, messages: conversation, ...(tools ? { tools: CHAT_TOOLS } : {}), stream: false, options: { temperature, num_ctx: CHAT_NUM_CTX } }),
+    body: JSON.stringify({
+      model: config.model, messages: conversation,
+      ...(tools ? { tools: CHAT_TOOLS } : {}),
+      ...(format ? { format } : {}),
+      stream: false,
+      options: { temperature, num_ctx: CHAT_NUM_CTX, ...(maxTokens ? { num_predict: maxTokens } : {}) },
+    }),
   });
   if (!response.ok) throw new Error(`Ollama returned ${response.status}: ${(await response.text().catch(() => '')) || response.statusText}`);
   const data = await response.json() as { message?: OllamaMessage; error?: string };
@@ -711,6 +741,7 @@ async function ollamaChat(messages: { role: string; content: string }[], config:
     }
     if (!message.content) throw new Error('Ollama response did not include any message content.');
     console.log(`[ai] chat reply in ${Date.now() - started}ms, ${message.content.length} chars`);
+    classifyEmotion(message.content, config);
     return { content: message.content, ignored: false, irritation, ego };
   }
   throw new Error('Haru kept calling tools without settling on a reply.');

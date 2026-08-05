@@ -1,8 +1,8 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { StageFailureBoundary } from './components';
 import type { Live2DModelHandle } from './components/Live2DCanvas';
-import { ACTION_SHAPES, gazeForAction, pickExpression, resolveGaze, type ActionShape, type Gaze } from './companion/behaviour';
-import type { Vitals } from './types';
+import { ACTION_SHAPES, emotionHoldMs, expressionMoodFor, gazeForAction, pickExpression, resolveGaze, type ActionShape, type Gaze } from './companion/behaviour';
+import type { Emotion, Vitals } from './types';
 
 // Only used until the first life tick arrives, a few seconds after launch.
 const RESTING_VITALS: Vitals = { energy: 0.6, happiness: 0.6, curiosity: 0.5, affection: 0.4, sleepiness: 0.2, stress: 0.2, focus: 0.5 };
@@ -53,6 +53,16 @@ export function CompanionWindow() {
   const action = useRef<{ shape: ActionShape; gaze: Gaze | null; startedAt: number } | null>(null);
   const expressions = useRef<string[]>([]);
 
+  // A reading applies immediately, then fades, so an emotional beat colours the
+  // next few seconds rather than latching until the next message.
+  const emotion = useRef<{ value: Emotion; until: number; holdMs: number } | null>(null);
+  useEffect(() => window.haru?.life.onEmotion(value => {
+    const holdMs = emotionHoldMs(value);
+    emotion.current = { value, until: performance.now() + holdMs, holdMs };
+    const expression = pickExpression(expressionMoodFor(value), expressions.current);
+    if (expression) modelHandle.current?.expression(expression);
+  }), []);
+
   useEffect(() => window.haru?.life.onTick(({ vitals, action: name }) => {
     life.current = { ...life.current, vitals };
     const shape = name ? ACTION_SHAPES[name] : undefined;
@@ -71,12 +81,21 @@ export function CompanionWindow() {
       const current = action.current;
       const progress = current ? (performance.now() - current.startedAt) / current.shape.durationMs : 1;
       if (current && progress >= 1) action.current = null;
+      // Linear fade over the back half of the hold, so the reading loosens its
+      // grip instead of dropping off a cliff.
+      const feeling = emotion.current;
+      const remaining = feeling ? feeling.until - performance.now() : 0;
+      if (feeling && remaining <= 0) emotion.current = null;
+      const emotionStrength = feeling && remaining > 0 ? Math.min(1, remaining / (feeling.holdMs * 0.5)) : 0;
+
       const target = resolveGaze({
         cursor: cursor.current,
         wander: current?.gaze ?? null,
         actionProgress: progress,
         vitals: life.current.vitals,
         idleSeconds: life.current.idleSeconds,
+        emotion: feeling?.value ?? null,
+        emotionStrength,
       });
       // Eased toward rather than set: the model's own focus controller adds its
       // own smoothing, and stacking a little here keeps fast cursor moves from
