@@ -11,6 +11,7 @@ import { afterCooldown, afterEgoCooldown, afterPoke, egoInstruction, goodnightIn
 import { applyEvent, chooseIdleAction, DEFAULT_VITALS, driftVitals, nextTickDelayMs, type Environment, type Vitals } from './vitals';
 import { classificationPrompt, emotionToVitals, EMOTION_SCHEMA, NEUTRAL_EMOTION, parseEmotion, type Emotion } from './emotion';
 import { withDiscoveredExpressions } from './expressions';
+import { findItem, formatAgenda } from './agenda';
 import { formatMemoryPrompt, isWorthKeeping, MEMORY_KINDS, migrateMemories, pruneMemories, rememberInto, selectMemories, summaryPrompt, type MemoryKind, type MemoryRecord, type SessionSummary } from './memory';
 
 type Bounds = { x: number; y: number; width: number; height: number };
@@ -445,6 +446,19 @@ const CHAT_TOOLS = [{
 }, {
   type: 'function',
   function: {
+    name: 'complete_kept_item',
+    description: "Mark something on the user's calendar as done, once they say they have done it. Call this when they confirm a reminder or appointment happened, so you stop asking about it.",
+    parameters: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'Roughly what it was, in their words or yours — e.g. "milk" or "the dentist".' },
+      },
+      required: ['title'],
+    },
+  },
+}, {
+  type: 'function',
+  function: {
     name: 'remember_about_user',
     description: "Save a lasting fact about the user — how they like to be spoken to, what they do, the people, pets and projects in their life — so it is still known in later conversations. Use it when they mention something worth carrying forward, not for one-off logistics, which belong in create_kept_item.",
     parameters: {
@@ -464,21 +478,7 @@ const CHAT_TOOLS = [{
 // so the answer has to already be in front of it. Each entry carries its own
 // relative label so no date arithmetic is needed to match "tomorrow" to a row.
 function keptSummary(now: Date) {
-  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const items = getKept()
-    .filter(item => item.date >= localDateKey(startOfToday))
-    .sort((a, b) => a.date.localeCompare(b.date) || (a.time ?? '').localeCompare(b.time ?? ''))
-    .slice(0, 25);
-  if (!items.length) return 'The user has nothing saved from today onward.';
-  const weekday = new Intl.DateTimeFormat('en-US', { weekday: 'long' });
-  const lines = items.map(item => {
-    const [year, month, day] = item.date.split('-').map(Number);
-    const when = new Date(year, month - 1, day);
-    const offset = Math.round((when.getTime() - startOfToday.getTime()) / 86_400_000);
-    const relative = offset === 0 ? 'today' : offset === 1 ? 'tomorrow' : weekday.format(when);
-    return `${item.date} (${relative}) ${item.time ?? 'all day'} - ${item.title}${item.done ? ' [done]' : ''}`;
-  });
-  return `Saved items from today onward: ${lines.join('; ')}.`;
+  return formatAgenda(getKept(), now, localDateKey(now));
 }
 
 // Capped so the prompt cannot grow without bound as memories accumulate; the
@@ -670,6 +670,15 @@ function runChatTool(call: ToolCall): string {
     // Being told it is already known is useful to the model — it stops it
     // announcing a discovery when the user has merely repeated themselves.
     return JSON.stringify({ saved: true, known: !saved.created, mentions: saved.record.mentions, kind });
+  }
+  if (name === 'complete_kept_item') {
+    const title = typeof args.title === 'string' ? args.title.trim() : '';
+    if (!title) return JSON.stringify({ error: 'title is required.' });
+    const match = findItem(getKept().filter(item => !item.done), title);
+    if (!match) return JSON.stringify({ saved: false, reason: `Nothing on the calendar matches "${title}".` });
+    setKept(getKept().map(item => item.id === match.id ? { ...item, done: true } : item));
+    console.log(`[ai] marked done: "${match.title}"`);
+    return JSON.stringify({ saved: true, title: match.title, date: match.date });
   }
   if (name !== 'create_kept_item') return JSON.stringify({ error: `Unknown tool "${name}".` });
   const title = typeof args.title === 'string' ? args.title.trim() : '';
