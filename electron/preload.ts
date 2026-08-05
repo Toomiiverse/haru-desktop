@@ -28,6 +28,7 @@ contextBridge.exposeInMainWorld('haru', {
     send: (messages: { role: string; content: string }[], config: ProviderConfig) => ipcRenderer.invoke('ai:send', messages, config) as Promise<ChatResult>,
     test: (endpoint: string) => ipcRenderer.invoke('ai:test', endpoint) as Promise<string[]>,
     retort: (disliked: string, config: ProviderConfig) => ipcRenderer.invoke('ai:retort', disliked, config) as Promise<string>,
+    gloat: (praised: string, config: ProviderConfig) => ipcRenderer.invoke('ai:gloat', praised, config) as Promise<string>,
   },
   google: {
     status: () => ipcRenderer.invoke('google:status') as Promise<GoogleStatus>,

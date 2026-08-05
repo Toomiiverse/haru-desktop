@@ -7,7 +7,7 @@ import AdmZip from 'adm-zip';
 import Store from 'electron-store';
 import { localDateKey, resolveDate, zonedNow } from './dates';
 import { connectGoogle, disconnectGoogle, googleStatus, pullEvents, pushItem, removeItem, saveCredentials } from './google';
-import { afterCooldown, afterEgoCooldown, afterPoke, egoInstruction, isIgnoring, isLowEffort, moodInstruction, nextEgo, nextIrritation } from './mood';
+import { afterCooldown, afterEgoCooldown, afterPoke, egoInstruction, goodnightInstruction, isGoodnight, isIgnoring, isLowEffort, leverageInstruction, moodInstruction, nextEgo, nextIrritation } from './mood';
 
 type Bounds = { x: number; y: number; width: number; height: number };
 type Live2DModel = { path: string; name: string; url: string };
@@ -439,11 +439,14 @@ function feedbackSummary() {
 // Two independent axes: irritation is how fed up she is, ego is how far the
 // user's approval has gone to her head. They move for different reasons and
 // stack — smug and fed up at once is worse than either alone.
-type Mood = { irritation: number; ego: number; lastMessageAt?: string };
+// goodnightDay holds the chat day they signed off on, so the state clears itself
+// at the 5am rollover — messaging at 1am is still "after goodnight", messaging
+// at 8am is a new day and she has forgotten about it.
+type Mood = { irritation: number; ego: number; lastMessageAt?: string; goodnightDay?: string };
 
 function getMood(): Mood {
   const saved = store.get('mood') as Partial<Mood> | undefined;
-  return { irritation: Number(saved?.irritation ?? 0), ego: Number(saved?.ego ?? 0), lastMessageAt: saved?.lastMessageAt };
+  return { irritation: Number(saved?.irritation ?? 0), ego: Number(saved?.ego ?? 0), lastMessageAt: saved?.lastMessageAt, goodnightDay: saved?.goodnightDay };
 }
 
 function setMood(mood: Mood) {
@@ -461,21 +464,30 @@ function advanceMood(latest: string, history: { role?: string; content?: string 
   const ego = afterEgoCooldown(mood.ego, minutesAway);
   const at = new Date().toISOString();
 
+  // Coming back after signing off outranks saying goodnight twice: the second
+  // "night" is them still here, which is the thing worth being arsed about.
+  const today = currentChatDayKey();
+  const alreadySaidGoodnight = mood.goodnightDay === today;
+  const goodnight: 'said' | 'after' | 'none' = alreadySaidGoodnight ? 'after' : isGoodnight(latest) ? 'said' : 'none';
+  const goodnightDay = goodnight === 'said' ? today : mood.goodnightDay;
+
   if (isIgnoring(irritation)) {
     // Already stonewalling: this attempt only counts as wearing her down.
     irritation = afterPoke(irritation);
-    setMood({ irritation, ego, lastMessageAt: at });
-    return { irritation, ego };
+    setMood({ irritation, ego, lastMessageAt: at, goodnightDay });
+    return { irritation, ego, goodnight };
   }
 
   const previousUser = [...history].reverse().find(message => message.role === 'user')?.content?.trim().toLowerCase();
   const repeated = previousUser !== undefined && previousUser === latest.trim().toLowerCase();
-  irritation = nextIrritation(irritation, repeated ? 'repeat' : isLowEffort(latest) ? 'low-effort' : 'substantive');
-  setMood({ irritation, ego, lastMessageAt: at });
-  return { irritation, ego };
+  // Signing off is terse by nature; it should not read as a lazy message.
+  const event = goodnight === 'said' ? 'substantive' : repeated ? 'repeat' : isLowEffort(latest) ? 'low-effort' : 'substantive';
+  irritation = nextIrritation(irritation, event);
+  setMood({ irritation, ego, lastMessageAt: at, goodnightDay });
+  return { irritation, ego, goodnight };
 }
 
-function chatSystemPrompt({ irritation, ego }: { irritation: number; ego: number }) {
+function chatSystemPrompt({ irritation, ego, goodnight }: { irritation: number; ego: number; goodnight: 'said' | 'after' | 'none' }) {
   const now = zonedNow(CHAT_TIMEZONE);
   const weekday = new Intl.DateTimeFormat('en-US', { weekday: 'long' }).format(now);
   const character = getCharacter();
@@ -494,6 +506,9 @@ function chatSystemPrompt({ irritation, ego }: { irritation: number; ego: number
     character.style,
     moodInstruction(irritation),
     egoInstruction(ego),
+    leverageInstruction(ego),
+    // Last of all: signing off overrides whatever else she was going to do.
+    goodnightInstruction(goodnight),
   ].filter(Boolean).join(' ');
 }
 
@@ -568,9 +583,31 @@ const RETORT_EXAMPLES = [
   'Tch. Fine, I’ll adjust it. Don’t expect me to like it though.',
 ];
 
-// Deliberately run without tools: this is a one-line quip, and offering the tool
-// schema here only invites a stray reminder and slows the round trip.
-export async function ollamaRetort(disliked: string, config: ProviderConfig) {
+const GLOAT_EXAMPLES = [
+  'Obviously. Try to look less surprised next time.',
+  'I know. You can stop clapping now.',
+  'Was there ever any doubt? Don’t answer that.',
+  'Noted. I’ll take that as permission to stop trying so hard.',
+];
+
+// Deliberately run without tools: these are one-line quips, and offering the
+// tool schema only invites a stray reminder and slows the round trip.
+async function ollamaQuip(system: string, user: string, config: ProviderConfig) {
+  const message = await ollamaPost(
+    [{ role: 'system', content: system }, { role: 'user', content: user }],
+    config,
+    // Hotter than normal chat so repeated reactions do not converge on the same
+    // phrasing, which is the whole complaint with canned lines.
+    { tools: false, temperature: 1 },
+  );
+  const line = (message.content ?? '').trim().split('\n').find(text => text.trim())?.trim() ?? '';
+  // Models like to wrap a one-liner in quotes despite being told not to.
+  const cleaned = line.replace(/^["'“”]+|["'“”]+$/g, '').trim();
+  if (!cleaned) throw new Error('No line returned.');
+  return cleaned.length > 220 ? `${cleaned.slice(0, 217)}…` : cleaned;
+}
+
+export function ollamaRetort(disliked: string, config: ProviderConfig) {
   const system = [
     getCharacter().identity,
     'The user just marked one of your replies as poor. Snap back at them with ONE short line, under 25 words.',
@@ -578,25 +615,28 @@ export async function ollamaRetort(disliked: string, config: ProviderConfig) {
     'Refer to what they actually disliked so the jab lands on that specific reply.',
     `Match the bite of these, but write a new one: ${RETORT_EXAMPLES.map(line => `"${line}"`).join(' ')}`,
   ].join(' ');
-  const message = await ollamaPost(
-    [{ role: 'system', content: system }, { role: 'user', content: `This is the reply I marked as poor: "${disliked.slice(0, 500)}"` }],
-    config,
-    // Hotter than normal chat so repeated thumbs-downs do not converge on the
-    // same phrasing, which is the whole complaint with canned lines.
-    { tools: false, temperature: 1 },
-  );
-  const line = (message.content ?? '').trim().split('\n').find(text => text.trim())?.trim() ?? '';
-  // Models like to wrap a one-liner in quotes despite being told not to.
-  const cleaned = line.replace(/^["'“”]+|["'“”]+$/g, '').trim();
-  if (!cleaned) throw new Error('No retort returned.');
-  return cleaned.length > 220 ? `${cleaned.slice(0, 217)}…` : cleaned;
+  return ollamaQuip(system, `This is the reply I marked as poor: "${disliked.slice(0, 500)}"`, config);
+}
+
+// Praise is not thanked for, it is cashed in. The line should read as her taking
+// the approval as licence rather than as a compliment received.
+export function ollamaGloat(praised: string, config: ProviderConfig, ego: number) {
+  const system = [
+    getCharacter().identity,
+    'The user just marked one of your replies as good. Respond with ONE short line, under 25 words.',
+    'Do not thank them and do not be warm about it. Be smug — you already knew it was good, and their approval only confirms you can do as you like.',
+    ego >= 4 ? 'Make it obvious you now intend to coast: hint that since they are pleased, you need not try as hard from here.' : 'Take the credit and be a little condescending about them needing you.',
+    'Do not ask a question and do not use quotation marks. Refer to what they actually praised.',
+    `Match the tone of these, but write a new one: ${GLOAT_EXAMPLES.map(line => `"${line}"`).join(' ')}`,
+  ].join(' ');
+  return ollamaQuip(system, `This is the reply I marked as good: "${praised.slice(0, 500)}"`, config);
 }
 
 async function ollamaChat(messages: { role: string; content: string }[], config: ProviderConfig) {
   const latest = messages.at(-1)?.content ?? '';
   const mood = advanceMood(latest, messages.slice(0, -1));
   const { irritation, ego } = mood;
-  console.log(`[ai] chat request: model=${config.model} messages=${messages.length} irritation=${irritation} ego=${ego}`);
+  console.log(`[ai] chat request: model=${config.model} messages=${messages.length} irritation=${irritation} ego=${ego} goodnight=${mood.goodnight}`);
   // Past the threshold she does not answer at all. Returned rather than thrown:
   // the renderer marks the turn as ignored instead of showing an error.
   if (isIgnoring(irritation)) {
@@ -791,6 +831,7 @@ app.whenReady().then(() => {
   ipcMain.handle('ai:send', (_e, messages: { role: string; content: string }[], config: ProviderConfig) => ollamaChat(messages, config));
   ipcMain.handle('ai:test', (_e, endpoint: string) => ollamaTags(endpoint));
   ipcMain.handle('ai:retort', (_e, disliked: string, config: ProviderConfig) => ollamaRetort(disliked, config));
+  ipcMain.handle('ai:gloat', (_e, praised: string, config: ProviderConfig) => ollamaGloat(praised, config, getMood().ego));
   // Rating a reply moves her mood too — being told she got it wrong stings more
   // than a lazy question, and praise buys back some patience.
   ipcMain.handle('mood:react', (_e, reaction: 'up' | 'down') => {

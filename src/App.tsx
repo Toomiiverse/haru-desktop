@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { CharacterDrawer, Composer, Kept, MessageBubble, ProfileDrawer, SettingsDrawer, Suggestion, Topbar } from './components';
 import { getProvider, testConnection } from './services/ai';
-import { randomRetort } from './retorts';
+import { randomGloat, randomRetort } from './retorts';
 import type { KeptItem, Message, ProviderConfig, Reaction } from './types';
 
 const greeting: Message = { id: 'greeting', role: 'assistant', time: 'now', content: "Hey! About time you showed up. We’ve got work to do. Move it!" };
@@ -47,21 +47,24 @@ export default function App() {
     const target = messages.find(message => message.id === id);
     if (!target || target.reaction === reaction) return;
     setMessages(current => current.map(message => message.id === id ? { ...message, reaction } : message));
-    void window.haru?.mood.react(reaction);
-    if (reaction === 'down') void snapBack(target.content);
+    // The mood shifts before the quip is written, so a thumbs-up that tips her
+    // into coasting is already reflected in what she says about it.
+    void window.haru?.mood.react(reaction).then(() => answerBack(reaction, target.content));
+    if (!window.haru) answerBack(reaction, target.content);
   }
 
-  // The rating lands immediately and the retort follows a beat later, because
-  // it is written fresh against the disliked reply. The canned lines remain as
-  // a fallback for when the model is unreachable.
-  async function snapBack(disliked: string) {
+  // The rating lands immediately and her comeback follows a beat later, since it
+  // is written fresh against the reply you rated. The canned lines stay as a
+  // fallback for when the model is unreachable.
+  async function answerBack(reaction: Reaction, rated: string) {
     let content = '';
     try {
-      if (window.haru) content = await window.haru.ai.retort(disliked, providerConfig);
+      if (window.haru) content = await (reaction === 'down' ? window.haru.ai.retort(rated, providerConfig) : window.haru.ai.gloat(rated, providerConfig));
     } catch {
       // Falls through to a canned line below.
     }
-    setMessages(current => [...current, { id: crypto.randomUUID(), role: 'assistant' as const, content: content || randomRetort(), time: 'now' }]);
+    const fallback = reaction === 'down' ? randomRetort() : randomGloat();
+    setMessages(current => [...current, { id: crypto.randomUUID(), role: 'assistant' as const, content: content || fallback, time: 'now' }]);
   }
 
   async function send(content: string) {

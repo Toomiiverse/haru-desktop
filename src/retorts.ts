@@ -14,14 +14,31 @@ export const DISLIKE_RETORTS = [
   'Disliked? Seriously? Whatever. I’ll dumb it down so even you can follow next time.',
 ];
 
-// Tracks the last line used so the same one cannot land twice running, which
-// would read as canned rather than as her being genuinely irritated.
-let previous = -1;
+// What she says when told she got one right. Not gratitude — she takes praise as
+// confirmation she can do as she likes.
+export const LIKE_GLOATS = [
+  'Obviously. Try to look less surprised next time.',
+  'I know. You can stop clapping now.',
+  'Was there ever any doubt? Don’t answer that.',
+  'Noted. I’ll take that as permission to stop trying so hard.',
+  'Of course it was good. I made it.',
+  'Yeah, yeah. Remember this next time you think you can manage without me.',
+  'Careful, keep that up and I’ll start coasting.',
+  'Naturally. You’re welcome, not that you said it.',
+];
 
-export function randomRetort() {
-  if (DISLIKE_RETORTS.length < 2) return DISLIKE_RETORTS[0] ?? '';
-  let index = previous;
-  while (index === previous) index = Math.floor(Math.random() * DISLIKE_RETORTS.length);
-  previous = index;
-  return DISLIKE_RETORTS[index];
+// Tracks the last line used per list so the same one cannot land twice running,
+// which would read as canned rather than as a genuine reaction.
+const previous = new Map<string[], number>();
+
+function pick(lines: string[]) {
+  if (lines.length < 2) return lines[0] ?? '';
+  const last = previous.get(lines) ?? -1;
+  let index = last;
+  while (index === last) index = Math.floor(Math.random() * lines.length);
+  previous.set(lines, index);
+  return lines[index];
 }
+
+export function randomRetort() { return pick(DISLIKE_RETORTS); }
+export function randomGloat() { return pick(LIKE_GLOATS); }
