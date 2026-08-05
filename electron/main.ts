@@ -5,7 +5,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import AdmZip from 'adm-zip';
 import Store from 'electron-store';
-import { localDateKey, resolveDate, zonedNow } from './dates';
+import { formatTimeOfDay, localDateKey, resolveDate, zonedNow } from './dates';
 import { connectGoogle, disconnectGoogle, googleStatus, pullEvents, pushItem, removeItem, saveCredentials } from './google';
 import { afterCooldown, afterEgoCooldown, afterPoke, egoInstruction, goodnightInstruction, isGoodnight, isIgnoring, isLowEffort, leverageInstruction, moodInstruction, nextEgo, nextIrritation } from './mood';
 import { applyEvent, chooseIdleAction, DEFAULT_VITALS, driftVitals, nextTickDelayMs, type Environment, type Vitals } from './vitals';
@@ -612,7 +612,10 @@ function chatSystemPrompt({ irritation, ego, goodnight, latestMessage }: { irrit
   const character = getCharacter();
   return [
     character.identity,
-    `Today is ${weekday}, ${localDateKey(now)}, in the user's timezone (${CHAT_TIMEZONE}).`,
+    // The time matters as much as the date: without it she invented one when
+    // asked, and she was already reasoning about what had been missed against a
+    // clock she could not actually see.
+    `It is ${formatTimeOfDay(now.getHours(), now.getMinutes())} on ${weekday} ${localDateKey(now)}, in the user's timezone (${CHAT_TIMEZONE}). Use that when asked the time or the date rather than guessing.`,
     profileSummary(latestMessage),
     feedbackSummary(),
     keptSummary(now),
