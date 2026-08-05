@@ -10,8 +10,8 @@ export type Intent = 'listen' | 'explain' | 'tease' | 'dismiss' | 'celebrate' | 
 export type FocusTarget = 'user' | 'self' | 'task' | 'away';
 export interface Emotion { emotion: EmotionName; confidence: number; energy: number; intent: Intent; focus: FocusTarget; }
 export interface Beat { emotion: Emotion; gesture?: 'nod' | 'shake' | 'stare'; }
-export interface KeptItem { id: string; title: string; date: string; time?: string; kind: 'reminder' | 'event'; done: boolean; googleEventId?: string; }
-export interface GoogleStatus { hasCredentials: boolean; connected: boolean; email?: string; lastSync?: string; lastError?: string; }
+export interface KeptItem { id: string; title: string; date: string; time?: string; kind: 'task' | 'event'; done: boolean; googleEventId?: string; googleTaskId?: string; }
+export interface GoogleStatus { hasCredentials: boolean; connected: boolean; email?: string; lastSync?: string; lastError?: string; tasksGranted?: boolean; }
 export interface Character { identity: string; style: string; }
 export interface Profile { nickname: string; occupation: string; about: string; }
 export type MemoryKind = 'preference' | 'relationship' | 'event' | 'fact';

@@ -82,6 +82,17 @@ export function findItem<T extends AgendaItem>(items: T[], phrase: string): T | 
   return best && best.overlap >= 0.5 ? best.item : null;
 }
 
+/**
+ * Whether a message is saying something has NOT been done. Cancelled and
+ * not-yet-done are opposite states, and the model conflates them: told "I never
+ * did get the milk" it reached for delete every time, wording the tool
+ * description could not talk it out of. Deleting there loses work the user still
+ * has to do, so it is refused in code rather than discouraged in prose.
+ */
+export function readsAsNotDone(text: string) {
+  return /(never (did|got|managed)|didn'?t (get|do|make|manage|have time)|did not (get|do|manage)|haven'?t (got|done|had)|have not (got|done)|not done|still (need|have) to|forgot to|no time to)/i.test(text);
+}
+
 function relativeDay(dateKey: string, todayKey: string, weekday: Intl.DateTimeFormat) {
   if (dateKey === todayKey) return 'today';
   if (dateKey === shiftDays(todayKey, 1)) return 'tomorrow';

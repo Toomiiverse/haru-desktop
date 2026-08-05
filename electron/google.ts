@@ -11,15 +11,20 @@ import { formatTimeOfDay, parseTimeOfDay } from './dates';
 const AUTH_ENDPOINT = 'https://accounts.google.com/o/oauth2/v2/auth';
 const TOKEN_ENDPOINT = 'https://oauth2.googleapis.com/token';
 const CALENDAR_API = 'https://www.googleapis.com/calendar/v3';
+// Tasks are a separate product with a separate API and scope — a calendar
+// connection alone cannot see them, which is why they were missing entirely.
+const TASKS_API = 'https://tasks.googleapis.com/tasks/v1';
 const CALENDAR_SCOPE = 'https://www.googleapis.com/auth/calendar.events';
-const SCOPES = [CALENDAR_SCOPE, 'openid', 'email'];
+const TASKS_SCOPE = 'https://www.googleapis.com/auth/tasks';
+const SCOPES = [CALENDAR_SCOPE, TASKS_SCOPE, 'openid', 'email'];
 const CONSENT_TIMEOUT_MS = 5 * 60_000;
 // Refresh a little early so a token cannot expire mid-request.
 const TOKEN_EXPIRY_MARGIN_MS = 60_000;
 
-export type GoogleStatus = { hasCredentials: boolean; connected: boolean; email?: string; lastSync?: string; lastError?: string };
+export type GoogleStatus = { hasCredentials: boolean; connected: boolean; email?: string; lastSync?: string; lastError?: string; tasksGranted?: boolean };
 export type CalendarEvent = { id: string; title: string; date: string; time?: string };
-type KeptForSync = { id: string; title: string; date: string; time?: string; kind: 'reminder' | 'event'; googleEventId?: string };
+export type GoogleTask = { id: string; title: string; date: string; done: boolean };
+type KeptForSync = { id: string; title: string; date: string; time?: string; kind: 'task' | 'event'; googleEventId?: string };
 
 type StoreLike = Pick<Store<Record<string, unknown>>, 'get' | 'set' | 'delete'>;
 
@@ -78,6 +83,7 @@ export function googleStatus(store: StoreLike): GoogleStatus {
     email: store.get('google.email') as string | undefined,
     lastSync: store.get('google.lastSync') as string | undefined,
     lastError: store.get('google.lastError') as string | undefined,
+    tasksGranted: Boolean(store.get('google.tasksGranted')),
   };
 }
 
@@ -160,6 +166,9 @@ export async function connectGoogle(store: StoreLike) {
     disconnectGoogle(store);
     throw new Error('Calendar permission was not granted. Connect again and tick the checkbox asking Haru to see and edit events on your calendars.');
   }
+  // Tasks are optional rather than fatal: the calendar half still works without
+  // them, so this is recorded and surfaced rather than refusing the connection.
+  store.set('google.tasksGranted', granted.includes(TASKS_SCOPE));
   const refreshToken = tokens.refresh_token as string | undefined;
   if (!refreshToken) throw new Error('Google did not return a refresh token. Revoke Haru under myaccount.google.com/permissions and connect again.');
   setSecret(store, 'google.refreshToken', refreshToken);
@@ -174,7 +183,7 @@ export async function connectGoogle(store: StoreLike) {
   return googleStatus(store);
 }
 
-async function authorisedFetch(store: StoreLike, path: string, init: RequestInit = {}) {
+async function authorisedFetch(store: StoreLike, path: string, init: RequestInit = {}, base = CALENDAR_API) {
   if (!accessToken || accessToken.expiresAt - TOKEN_EXPIRY_MARGIN_MS < Date.now()) {
     const { clientId, clientSecret } = credentials(store);
     const refreshToken = getSecret(store, 'google.refreshToken');
@@ -182,7 +191,7 @@ async function authorisedFetch(store: StoreLike, path: string, init: RequestInit
     const tokens = await postForm(TOKEN_ENDPOINT, { client_id: clientId, client_secret: clientSecret, refresh_token: refreshToken, grant_type: 'refresh_token' });
     accessToken = { value: tokens.access_token as string, expiresAt: Date.now() + Number(tokens.expires_in ?? 3600) * 1000 };
   }
-  const response = await net.fetch(`${CALENDAR_API}${path}`, {
+  const response = await net.fetch(`${base}${path}`, {
     ...init,
     headers: { ...(init.headers as Record<string, string> | undefined), Authorization: `Bearer ${accessToken.value}`, 'Content-Type': 'application/json' },
   });
@@ -261,6 +270,64 @@ export function eventToItem(event: Record<string, unknown>, timeZone: string): C
     date: `${part('year')}-${part('month')}-${part('day')}`,
     time: formatTimeOfDay(Number(part('hour')) % 24, Number(part('minute'))),
   };
+}
+
+// --- tasks ------------------------------------------------------------------
+// Google Tasks carry a due date but no time, and can be completed — which is the
+// distinction that matters here. An event happens whether or not you turn up; a
+// task is something you tick off.
+
+export function taskToItem(task: Record<string, unknown>): GoogleTask | null {
+  const id = typeof task.id === 'string' ? task.id : null;
+  const title = typeof task.title === 'string' && task.title.trim() ? task.title.trim() : null;
+  if (!id || !title) return null;
+  // `due` is an RFC-3339 timestamp but Google only honours the date part, so the
+  // day is taken straight off the string rather than through a Date, which would
+  // shift it by the local offset.
+  const due = typeof task.due === 'string' ? task.due.slice(0, 10) : null;
+  if (!due || !/^\d{4}-\d{2}-\d{2}$/.test(due)) return null;
+  return { id, title, date: due, done: task.status === 'completed' };
+}
+
+export async function pullTasks(store: StoreLike, fromDate: string, days: number): Promise<GoogleTask[]> {
+  const until = new Date(`${fromDate}T00:00:00Z`);
+  until.setUTCDate(until.getUTCDate() + days);
+  const query = new URLSearchParams({
+    // Completed ones come back too, so a task ticked off in Google shows as done
+    // here rather than reappearing as outstanding.
+    showCompleted: 'true', showHidden: 'true', maxResults: '100',
+    dueMax: until.toISOString(),
+  });
+  const data = await authorisedFetch(store, `/lists/@default/tasks?${query}`, {}, TASKS_API);
+  const items = Array.isArray(data.items) ? data.items as Record<string, unknown>[] : [];
+  return items.map(taskToItem).filter((task): task is GoogleTask => task !== null && task.date >= fromDate);
+}
+
+export async function pushTask(store: StoreLike, task: { title: string; date: string; done: boolean; googleTaskId?: string }) {
+  const body = {
+    title: task.title,
+    // Google stores the due date at UTC midnight and ignores any time of day.
+    due: `${task.date}T00:00:00.000Z`,
+    status: task.done ? 'completed' : 'needsAction',
+    // Clearing this matters when un-ticking: a task left with a completion
+    // timestamp stays completed in Google whatever the status says.
+    ...(task.done ? {} : { completed: null }),
+  };
+  if (task.googleTaskId) {
+    await authorisedFetch(store, `/lists/@default/tasks/${encodeURIComponent(task.googleTaskId)}`, { method: 'PATCH', body: JSON.stringify(body) }, TASKS_API);
+    return task.googleTaskId;
+  }
+  const created = await authorisedFetch(store, '/lists/@default/tasks', { method: 'POST', body: JSON.stringify(body) }, TASKS_API);
+  return created.id as string;
+}
+
+export async function removeTask(store: StoreLike, googleTaskId: string) {
+  try {
+    await authorisedFetch(store, `/lists/@default/tasks/${encodeURIComponent(googleTaskId)}`, { method: 'DELETE' }, TASKS_API);
+  } catch (error) {
+    // Already gone is the desired end state, not a failure.
+    if (!/ 40[04]/.test(String(error))) throw error;
+  }
 }
 
 export async function pullEvents(store: StoreLike, fromDate: string, days: number, timeZone: string): Promise<CalendarEvent[]> {

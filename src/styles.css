@@ -14,6 +14,16 @@
 .reaction.reacted{color:#f0a8be;background:#241b28;animation:reaction-pop .34s cubic-bezier(.34,1.56,.64,1)}
 @keyframes reaction-pop{0%{transform:scale(1)}45%{transform:scale(1.32)}100%{transform:scale(1)}}
 @media (prefers-reduced-motion:reduce){.reaction.reacted{animation:none}}
+/* Tasks and events are told apart at a glance: a square you can tick versus a
+   dot you cannot. The shape carries the meaning, not just the colour. */
+.agenda-section{margin-bottom:10px}
+.agenda-section h4{margin:6px 0 2px;display:flex;align-items:center;gap:5px;color:#6f7594;font:9px 'JetBrains Mono',monospace;letter-spacing:.14em;text-transform:uppercase}
+.agenda-item.event{cursor:default}
+.agenda-item i.tick{border-radius:3px;border-color:#a8b4f0;color:#a8b4f0}
+.agenda-item.task:hover i.tick{background:#232840}
+.agenda-item.done i.tick{background:#a8b4f0;color:#14162b}
+.agenda-item i.dot{border-color:#a8cfb4;color:#a8cfb4}
+.dot.task{background:#a8b4f0}
 .row-actions{display:flex;gap:8px;margin-top:8px}
 .row-actions input{flex:1}
 .memory-list{list-style:none;margin:8px 0 0;padding:0;display:flex;flex-direction:column;gap:4px;max-height:220px;overflow-y:auto}

@@ -1,5 +1,5 @@
 import { Component, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Check, ChevronLeft, ChevronRight, CircleDot, Import, MessageSquarePlus, Plus, Sparkles, ThumbsDown, ThumbsUp, Trash2, X } from 'lucide-react';
+import { CalendarDays, Check, CheckSquare, ChevronLeft, ChevronRight, CircleDot, Import, MessageSquarePlus, Plus, Sparkles, ThumbsDown, ThumbsUp, Trash2, X } from 'lucide-react';
 import type { Character, GoogleStatus, KeptItem, Memory, MemoryKind, Message, Profile, ProviderConfig, Reaction, SessionSummary } from './types';
 import { buildMonthGrid, dayLabel, monthLabel, toISODate } from './date';
 export class StageFailureBoundary extends Component<{ children: ReactNode; onError(message: string): void }, { failed: boolean }> { state = { failed: false }; componentDidCatch(error: Error) { this.props.onError(error.message || 'Haru could not start the Live2D renderer.'); } render() { return this.state.failed ? null : this.props.children; } static getDerivedStateFromError() { return { failed: true }; } }
@@ -177,7 +177,8 @@ function GoogleCalendarField() {
           <div className="row-actions"><button className="ghost" disabled={busy !== null || !clientId.trim() || !clientSecret.trim()} onClick={() => run('saving', () => window.haru!.google.saveCredentials(clientId, clientSecret), 'Credentials saved. Now connect your account.')}>{busy === 'saving' ? 'Saving…' : 'Save credentials'}</button></div>
         </>
       : <>
-          <p>{status.connected ? `Connected${status.email ? ` as ${status.email}` : ''}. Reminders Haru saves are added to your calendar.` : 'Credentials saved. Connect your account to start syncing.'}</p>
+          <p>{status.connected ? `Connected${status.email ? ` as ${status.email}` : ''}. Events and tasks Haru saves are added to your Google account.` : 'Credentials saved. Connect your account to start syncing.'}</p>
+          {status.connected && !status.tasksGranted && <p className="status-error">Tasks permission was not granted, so only calendar events sync. Disconnect and connect again, ticking the Tasks checkbox, to sync your task list too.</p>}
           <div className="row-actions">
             {status.connected
               ? <>
@@ -230,9 +231,9 @@ export function Calendar({ items, selected, onSelect }: { items: KeptItem[]; sel
   const [cursor, setCursor] = useState(() => { const d = new Date(); return { year: d.getFullYear(), month: d.getMonth() }; });
   const grid = useMemo(() => buildMonthGrid(cursor.year, cursor.month), [cursor.year, cursor.month]);
   const marks = useMemo(() => {
-    const map = new Map<string, { reminder: boolean; event: boolean }>();
+    const map = new Map<string, { task: boolean; event: boolean }>();
     for (const item of items) {
-      const entry = map.get(item.date) ?? { reminder: false, event: false };
+      const entry = map.get(item.date) ?? { task: false, event: false };
       entry[item.kind] = true;
       map.set(item.date, entry);
     }
@@ -241,12 +242,39 @@ export function Calendar({ items, selected, onSelect }: { items: KeptItem[]; sel
   const today = toISODate(new Date());
   function shiftMonth(delta: number) { const d = new Date(cursor.year, cursor.month + delta, 1); setCursor({ year: d.getFullYear(), month: d.getMonth() }); }
   function jumpToday() { const d = new Date(); setCursor({ year: d.getFullYear(), month: d.getMonth() }); onSelect(today); }
-  return <div className="calendar"><div className="calendar-head"><button className="cal-nav" onClick={() => shiftMonth(-1)} aria-label="Previous month"><ChevronLeft size={13}/></button><button className="cal-month" onClick={jumpToday}>{monthLabel(cursor.year, cursor.month)}</button><button className="cal-nav" onClick={() => shiftMonth(1)} aria-label="Next month"><ChevronRight size={13}/></button></div><div className="calendar-weekdays">{WEEKDAYS.map((w, i) => <span key={i}>{w}</span>)}</div><div className="calendar-grid">{grid.map(cell => { const mark = marks.get(cell.date); const classes = ['cal-day']; if (!cell.inMonth) classes.push('outside'); if (cell.date === today) classes.push('today'); if (cell.date === selected) classes.push('selected'); return <button key={cell.date} className={classes.join(' ')} onClick={() => onSelect(cell.date)}><span>{cell.day}</span>{mark && <i className="cal-dots">{mark.event && <em className="dot event"/>}{mark.reminder && <em className="dot reminder"/>}</i>}</button>; })}</div></div>;
+  return <div className="calendar"><div className="calendar-head"><button className="cal-nav" onClick={() => shiftMonth(-1)} aria-label="Previous month"><ChevronLeft size={13}/></button><button className="cal-month" onClick={jumpToday}>{monthLabel(cursor.year, cursor.month)}</button><button className="cal-nav" onClick={() => shiftMonth(1)} aria-label="Next month"><ChevronRight size={13}/></button></div><div className="calendar-weekdays">{WEEKDAYS.map((w, i) => <span key={i}>{w}</span>)}</div><div className="calendar-grid">{grid.map(cell => { const mark = marks.get(cell.date); const classes = ['cal-day']; if (!cell.inMonth) classes.push('outside'); if (cell.date === today) classes.push('today'); if (cell.date === selected) classes.push('selected'); return <button key={cell.date} className={classes.join(' ')} onClick={() => onSelect(cell.date)}><span>{cell.day}</span>{mark && <i className="cal-dots">{mark.event && <em className="dot event"/>}{mark.task && <em className="dot task"/>}</i>}</button>; })}</div></div>;
+}
+
+// Events and tasks are shown apart because they behave differently: an event
+// happens whether or not you turn up, while a task is yours to tick off. Only
+// the latter is clickable, so the affordance matches what is actually possible.
+function AgendaSection({ label, items, checkable, onToggle }: { label: string; items: KeptItem[]; checkable: boolean; onToggle(id: string): void }) {
+  if (!items.length) return null;
+  return <div className="agenda-section"><h4>{checkable ? <CheckSquare size={10}/> : <CalendarDays size={10}/>} {label}</h4>
+    {items.map(item => {
+      const body = <><i className={checkable ? 'tick' : 'dot'}>{checkable ? (item.done ? <Check size={11}/> : null) : <CircleDot size={11}/>}</i><div className="agenda-text"><b>{item.title}</b>{item.time && <small>{item.time}</small>}</div></>;
+      return checkable
+        ? <button key={item.id} className={item.done ? 'agenda-item task done' : 'agenda-item task'} onClick={() => onToggle(item.id)} aria-pressed={item.done} title={item.done ? 'Tick off — done' : 'Mark as done'}>{body}</button>
+        : <div key={item.id} className="agenda-item event" title="An event — nothing to tick off">{body}</div>;
+    })}
+  </div>;
 }
 
 export function Agenda({ items, selected, onToggle }: { items: KeptItem[]; selected: string; onToggle(id: string): void }) {
-  const dayItems = useMemo(() => items.filter(item => item.date === selected).sort((a, b) => Number(a.done) - Number(b.done) || (a.time ?? '').localeCompare(b.time ?? '')), [items, selected]);
-  return <div className="agenda"><h3>{dayLabel(selected)}</h3>{!dayItems.length ? <p className="nothing">Nothing kept for this day.</p> : dayItems.map(item => <button key={item.id} className={item.done ? 'agenda-item done' : 'agenda-item'} onClick={() => onToggle(item.id)}><i>{item.kind === 'event' ? <CircleDot size={11}/> : <Plus size={11}/>}</i><div className="agenda-text"><b>{item.title}</b>{item.time && <small>{item.time}</small>}</div></button>)}</div>;
+  const { tasks, events } = useMemo(() => {
+    const byTime = (a: KeptItem, b: KeptItem) => (a.time ?? '').localeCompare(b.time ?? '');
+    const day = items.filter(item => item.date === selected);
+    return {
+      // Outstanding tasks first: those are the ones still wanting something.
+      tasks: day.filter(item => item.kind === 'task').sort((a, b) => Number(a.done) - Number(b.done) || byTime(a, b)),
+      events: day.filter(item => item.kind === 'event').sort(byTime),
+    };
+  }, [items, selected]);
+  return <div className="agenda"><h3>{dayLabel(selected)}</h3>
+    {!tasks.length && !events.length
+      ? <p className="nothing">Nothing kept for this day.</p>
+      : <><AgendaSection label="Tasks" items={tasks} checkable onToggle={onToggle}/><AgendaSection label="Events" items={events} checkable={false} onToggle={onToggle}/></>}
+  </div>;
 }
 
 export function Kept({ items, model, importing, onImport, onRemove, onToggle }: { items: KeptItem[]; model: { name: string; url: string } | null; importing: boolean; onImport(): void; onRemove(): void; onToggle(id: string): void }) {

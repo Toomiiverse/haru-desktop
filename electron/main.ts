@@ -6,17 +6,21 @@ import { pathToFileURL } from 'node:url';
 import AdmZip from 'adm-zip';
 import Store from 'electron-store';
 import { formatTimeOfDay, localDateKey, resolveDate, zonedNow } from './dates';
-import { connectGoogle, disconnectGoogle, googleStatus, pullEvents, pushItem, removeItem, saveCredentials } from './google';
+import { connectGoogle, disconnectGoogle, googleStatus, pullEvents, pullTasks, pushItem, pushTask, removeItem, removeTask, saveCredentials } from './google';
 import { afterCooldown, afterEgoCooldown, afterPoke, egoInstruction, goodnightInstruction, isGoodnight, isIgnoring, isLowEffort, leverageInstruction, moodInstruction, nextEgo, nextIrritation, shoutInstruction, shoutState, type ShoutState } from './mood';
 import { applyEvent, chooseIdleAction, DEFAULT_VITALS, driftVitals, nextTickDelayMs, type Environment, type Vitals } from './vitals';
 import { classificationPrompt, emotionToVitals, EMOTION_SCHEMA, NEUTRAL_EMOTION, parseEmotion, type Emotion } from './emotion';
 import { withDiscoveredExpressions } from './expressions';
-import { findItem, formatAgenda } from './agenda';
+import { findItem, formatAgenda, readsAsNotDone } from './agenda';
 import { formatMemoryPrompt, isWorthKeeping, MEMORY_KINDS, migrateMemories, pruneMemories, rememberInto, selectMemories, summaryPrompt, type MemoryKind, type MemoryRecord, type SessionSummary } from './memory';
 
 type Bounds = { x: number; y: number; width: number; height: number };
 type Live2DModel = { path: string; name: string; url: string };
-type KeptItem = { id: string; title: string; date: string; time?: string; kind: 'reminder' | 'event'; done: boolean; googleEventId?: string };
+// A task is something you tick off; an event happens whether or not you turn up.
+// Only tasks can be completed, which is why the two are kept apart rather than
+// being one list with a flag. Older records used "reminder" for what is now a
+// task and are read forward on load.
+type KeptItem = { id: string; title: string; date: string; time?: string; kind: 'task' | 'event'; done: boolean; googleEventId?: string; googleTaskId?: string };
 type Profile = { nickname: string; occupation: string; about: string };
 type Memory = { id: string; text: string; createdAt: string };
 
@@ -207,7 +211,8 @@ function performChatResetIfDue() {
 // the model's tool calls write straight to the store, and every window is told
 // to re-read rather than each keeping its own copy.
 function getKept(): KeptItem[] {
-  return (store.get('kept.items') as KeptItem[] | undefined) ?? [];
+  const saved = (store.get('kept.items') as (KeptItem & { kind?: string })[] | undefined) ?? [];
+  return saved.map(item => ({ ...item, kind: item.kind === 'event' ? 'event' : 'task' }));
 }
 
 function setKept(items: KeptItem[]) {
@@ -224,8 +229,56 @@ function addKeptItem(item: Omit<KeptItem, 'id' | 'done'>): KeptItem {
   return created;
 }
 
+// Ticking a task pushes the change back, so completing it here marks it complete
+// in Google too rather than the two drifting apart.
+function toggleKept(id: string, force?: boolean) {
+  const target = getKept().find(item => item.id === id);
+  if (!target || target.kind !== 'task') return null;
+  const done = force ?? !target.done;
+  const updated = { ...target, done };
+  setKept(getKept().map(item => item.id === id ? updated : item));
+  void syncItemToGoogle(updated);
+  return updated;
+}
+
+function removeKept(id: string) {
+  const removed = getKept().find(item => item.id === id);
+  if (!removed) return null;
+  setKept(getKept().filter(item => item.id !== id));
+  if (googleStatus(store).connected) {
+    if (removed.kind === 'task' && removed.googleTaskId) void removeTask(store, removed.googleTaskId).catch(error => console.error('[google] task delete failed:', error));
+    if (removed.kind === 'event' && removed.googleEventId) void removeItem(store, removed.googleEventId).catch(error => console.error('[google] event delete failed:', error));
+  }
+  return removed;
+}
+
+function updateKept(id: string, changes: Partial<Pick<KeptItem, 'title' | 'date' | 'time'>>) {
+  const target = getKept().find(item => item.id === id);
+  if (!target) return null;
+  const updated = { ...target, ...changes };
+  setKept(getKept().map(item => item.id === id ? updated : item));
+  void syncItemToGoogle(updated);
+  return updated;
+}
+
 async function syncItemToGoogle(item: KeptItem) {
-  if (!googleStatus(store).connected) return;
+  const status = googleStatus(store);
+  if (!status.connected) return;
+  // Tasks and events live in different Google products, so which API an item
+  // belongs to follows from its kind rather than from where it came from.
+  if (item.kind === 'task') {
+    if (!status.tasksGranted) return;
+    try {
+      const googleTaskId = await pushTask(store, { ...item, googleTaskId: item.googleTaskId });
+      setKept(getKept().map(current => current.id === item.id ? { ...current, googleTaskId } : current));
+      store.delete('google.lastError' as never);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('[google] task push failed:', message);
+      store.set('google.lastError', message);
+    }
+    return;
+  }
   try {
     const googleEventId = await pushItem(store, item, CHAT_TIMEZONE);
     // Re-read rather than closing over the old array: the tool loop may have
@@ -359,10 +412,17 @@ async function performSync() {
   // the push on creation only covers items made since. Sending them here is what
   // makes "Sync now" two-way rather than pull-only.
   for (const item of getKept()) {
-    if (item.googleEventId || item.date < today) continue;
+    if (item.date < today) continue;
+    if (item.kind === 'task' ? item.googleTaskId : item.googleEventId) continue;
+    if (item.kind === 'task' && !status.tasksGranted) continue;
     try {
-      const googleEventId = await pushItem(store, item, CHAT_TIMEZONE);
-      setKept(getKept().map(current => current.id === item.id ? { ...current, googleEventId } : current));
+      if (item.kind === 'task') {
+        const googleTaskId = await pushTask(store, item);
+        setKept(getKept().map(current => current.id === item.id ? { ...current, googleTaskId } : current));
+      } else {
+        const googleEventId = await pushItem(store, item, CHAT_TIMEZONE);
+        setKept(getKept().map(current => current.id === item.id ? { ...current, googleEventId } : current));
+      }
     } catch (error) {
       console.error(`[google] push failed for "${item.title}":`, error);
       throw error;
@@ -380,6 +440,18 @@ async function performSync() {
       continue;
     }
     merged.push({ id: randomUUID(), title: event.title, date: event.date, time: event.time, kind: 'event', done: false, googleEventId: event.id });
+  }
+
+  if (status.tasksGranted) {
+    const tasks = await pullTasks(store, today, GOOGLE_SYNC_DAYS);
+    const byTaskId = new Map(merged.filter(item => item.googleTaskId).map(item => [item.googleTaskId!, item]));
+    for (const task of tasks) {
+      const match = byTaskId.get(task.id);
+      // Google is authoritative on whether a task is ticked: it can be completed
+      // on a phone, and the local copy should follow rather than fight it.
+      if (match) { Object.assign(match, { title: task.title, date: task.date, done: task.done }); continue; }
+      merged.push({ id: randomUUID(), title: task.title, date: task.date, kind: 'task', done: task.done, googleTaskId: task.id });
+    }
   }
   setKept(merged);
   store.set('google.lastSync', new Date().toISOString());
@@ -438,7 +510,7 @@ const CHAT_TOOLS = [{
         title: { type: 'string', description: 'Short description of what to do, e.g. "Get milk".' },
         date: { type: 'string', description: 'When it happens, copied from how the user said it: "today", "tomorrow", a weekday such as "thursday" or "next monday", a day of the month such as "the 15th", or "in 3 days". Do not work the calendar date out yourself — pass the wording through and it will be resolved.' },
         time: { type: 'string', description: 'Time of day such as "8:00 AM". Omit for an all-day item.' },
-        kind: { type: 'string', enum: ['reminder', 'event'], description: 'Use "event" for appointments, "reminder" for tasks.' },
+        kind: { type: 'string', enum: ['task', 'event'], description: 'Use "event" for something happening at a set time, like an appointment or a meeting. Use "task" for something to be done and ticked off, like an errand or a chore.' },
       },
       required: ['title', 'date', 'kind'],
     },
@@ -447,11 +519,44 @@ const CHAT_TOOLS = [{
   type: 'function',
   function: {
     name: 'complete_kept_item',
-    description: "Mark something on the user's calendar as done, once they say they have done it. Call this when they confirm a reminder or appointment happened, so you stop asking about it.",
+    description: "Tick a task off the user's list once they say they have done it, so you stop asking about it. Only tasks can be ticked off — an event happens whether or not they attend, so this does not apply to appointments or meetings.",
     parameters: {
       type: 'object',
       properties: {
-        title: { type: 'string', description: 'Roughly what it was, in their words or yours — e.g. "milk" or "the dentist".' },
+        title: { type: 'string', description: 'Roughly what it was, in their words or yours — e.g. "milk" or "the washing".' },
+        undo: { type: 'boolean', description: 'Set true if they say it is not done after all, correcting something previously ticked off. Use this rather than deleting it — it still needs doing.' },
+      },
+      required: ['title'],
+    },
+  },
+}, {
+  type: 'function',
+  function: {
+    name: 'update_kept_item',
+    description: "Change a task or event already on the user's list — its wording, its day, or its time. Use this when they want something moved or reworded rather than adding another one.",
+    parameters: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'Roughly what it is now, so it can be found.' },
+        newTitle: { type: 'string', description: 'The new wording, if they are renaming it.' },
+        date: { type: 'string', description: 'The new day, in their words — "tomorrow", "friday", "the 15th".' },
+        time: { type: 'string', description: 'The new time, such as "8:00 AM".' },
+      },
+      required: ['title'],
+    },
+  },
+}, {
+  type: 'function',
+  function: {
+    name: 'delete_kept_item',
+    // "I never did get the milk" was deleting the task outright, which loses
+    // something the user still needs doing. Not-done and cancelled are opposite
+    // states and the description has to separate them.
+    description: "Remove a task or event from the user's list entirely, when they say it is cancelled, called off, or no longer needs doing at all. Never use this because something has not been done yet — an errand they have not got to is still outstanding and must stay on the list. This is also not how you tick something off: use complete_kept_item when they have actually done it.",
+    parameters: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'Roughly what it is, so it can be found.' },
       },
       required: ['title'],
     },
@@ -670,7 +775,7 @@ function toolArguments(call: ToolCall): Record<string, unknown> {
 
 // Errors are returned to the model rather than thrown, so it can correct a bad
 // argument and try again instead of the whole turn failing.
-function runChatTool(call: ToolCall): string {
+function runChatTool(call: ToolCall, latestUserMessage: string): string {
   const name = call.function?.name;
   const args = toolArguments(call);
   if (name === 'remember_about_user') {
@@ -688,11 +793,48 @@ function runChatTool(call: ToolCall): string {
   if (name === 'complete_kept_item') {
     const title = typeof args.title === 'string' ? args.title.trim() : '';
     if (!title) return JSON.stringify({ error: 'title is required.' });
-    const match = findItem(getKept().filter(item => !item.done), title);
-    if (!match) return JSON.stringify({ saved: false, reason: `Nothing on the calendar matches "${title}".` });
-    setKept(getKept().map(item => item.id === match.id ? { ...item, done: true } : item));
-    console.log(`[ai] marked done: "${match.title}"`);
-    return JSON.stringify({ saved: true, title: match.title, date: match.date });
+    const undo = args.undo === true;
+    const kept = getKept();
+    // Searched among tasks only, so "the dentist" cannot tick off an appointment
+    // that was never tickable in the first place.
+    const match = findItem(kept.filter(item => item.kind === 'task' && item.done === undo), title);
+    if (!match) {
+      const asEvent = findItem(kept.filter(item => item.kind === 'event'), title);
+      if (asEvent) return JSON.stringify({ saved: false, reason: `"${asEvent.title}" is an event, not a task, so it cannot be ticked off.` });
+      return JSON.stringify({ saved: false, reason: `No task matches "${title}".` });
+    }
+    toggleKept(match.id, !undo);
+    console.log(`[ai] ${undo ? 'un-ticked' : 'ticked off'}: "${match.title}"`);
+    return JSON.stringify({ saved: true, title: match.title, date: match.date, done: !undo });
+  }
+  if (name === 'update_kept_item' || name === 'delete_kept_item') {
+    const title = typeof args.title === 'string' ? args.title.trim() : '';
+    if (!title) return JSON.stringify({ error: 'title is required.' });
+    const match = findItem(getKept(), title);
+    if (!match) return JSON.stringify({ saved: false, reason: `Nothing on the list matches "${title}".` });
+    if (name === 'delete_kept_item') {
+      // The last line of defence for the not-done-versus-cancelled confusion.
+      // Refused rather than obeyed, with the reason, so she un-ticks instead.
+      if (readsAsNotDone(latestUserMessage) && !match.done) {
+        console.log(`[ai] refused to delete "${match.title}" — the user said it is not done, not cancelled`);
+        return JSON.stringify({ saved: false, reason: `They said "${match.title}" is not done yet, which is not the same as cancelling it. It stays on the list. Use complete_kept_item with undo if it was wrongly ticked off.` });
+      }
+      removeKept(match.id);
+      console.log(`[ai] deleted ${match.kind}: "${match.title}"`);
+      return JSON.stringify({ saved: true, deleted: match.title, kind: match.kind });
+    }
+    const changes: Partial<Pick<KeptItem, 'title' | 'date' | 'time'>> = {};
+    if (typeof args.newTitle === 'string' && args.newTitle.trim()) changes.title = args.newTitle.trim();
+    if (typeof args.time === 'string' && args.time.trim()) changes.time = args.time.trim();
+    if (typeof args.date === 'string' && args.date.trim()) {
+      const resolved = resolveDate(args.date.trim(), zonedNow(CHAT_TIMEZONE));
+      if (!resolved) return JSON.stringify({ error: `Could not understand the date "${args.date}".` });
+      changes.date = resolved;
+    }
+    if (!Object.keys(changes).length) return JSON.stringify({ error: 'Nothing to change — give a new title, date or time.' });
+    const updated = updateKept(match.id, changes);
+    console.log(`[ai] updated ${match.kind}: "${match.title}" -> ${JSON.stringify(changes)}`);
+    return JSON.stringify({ saved: true, title: updated?.title, date: updated?.date, time: updated?.time ?? null, kind: match.kind });
   }
   if (name !== 'create_kept_item') return JSON.stringify({ error: `Unknown tool "${name}".` });
   const title = typeof args.title === 'string' ? args.title.trim() : '';
@@ -703,7 +845,7 @@ function runChatTool(call: ToolCall): string {
   const date = resolveDate(requested, zonedNow(CHAT_TIMEZONE));
   if (!date) return JSON.stringify({ error: `Could not understand the date "${requested}". Use the user's own wording, such as "tomorrow", "thursday", "next monday" or "the 15th".` });
   const time = typeof args.time === 'string' && args.time.trim() ? args.time.trim() : undefined;
-  const item = addKeptItem({ title, date, time, kind: args.kind === 'event' ? 'event' : 'reminder' });
+  const item = addKeptItem({ title, date, time, kind: args.kind === 'event' ? 'event' : 'task' });
   console.log(`[ai] saved ${item.kind}: "${item.title}" on ${item.date}${item.time ? ` at ${item.time}` : ''}`);
   return JSON.stringify({ saved: true, title: item.title, date: item.date, time: item.time ?? null, kind: item.kind });
 }
@@ -805,7 +947,7 @@ async function ollamaChat(messages: { role: string; content: string }[], config:
     const message = await ollamaPost(conversation, config);
     if (message.tool_calls?.length) {
       conversation.push(message);
-      for (const call of message.tool_calls) conversation.push({ role: 'tool', tool_name: call.function?.name, content: runChatTool(call) });
+      for (const call of message.tool_calls) conversation.push({ role: 'tool', tool_name: call.function?.name, content: runChatTool(call, latest) });
       continue;
     }
     if (!message.content) throw new Error('Ollama response did not include any message content.');
@@ -979,14 +1121,10 @@ app.whenReady().then(() => {
   ipcMain.handle('character:set', (_e, identity: string, style: string) => { store.set('character', { identity, style }); return getCharacter(); });
   ipcMain.handle('character:reset', () => { store.delete('character' as never); return DEFAULT_CHARACTER; });
   ipcMain.handle('kept:get', () => getKept());
-  ipcMain.handle('kept:toggle', (_e, id: string) => { setKept(getKept().map(item => item.id === id ? { ...item, done: !item.done } : item)); });
-  ipcMain.handle('kept:remove', (_e, id: string) => {
-    const removed = getKept().find(item => item.id === id);
-    setKept(getKept().filter(item => item.id !== id));
-    if (removed?.googleEventId && googleStatus(store).connected) {
-      void removeItem(store, removed.googleEventId).catch(error => console.error('[google] delete failed:', error));
-    }
-  });
+  // Only tasks can be ticked off — an event happens whether or not you attend,
+  // so there is nothing to complete.
+  ipcMain.handle('kept:toggle', (_e, id: string) => { toggleKept(id); });
+  ipcMain.handle('kept:remove', (_e, id: string) => { removeKept(id); });
   ipcMain.handle('google:status', () => googleStatus(store));
   ipcMain.handle('google:saveCredentials', (_e, clientId: string, clientSecret: string) => { saveCredentials(store, clientId, clientSecret); return googleStatus(store); });
   ipcMain.handle('google:connect', async () => { const status = await connectGoogle(store); broadcastGoogleStatus(); return status; });
