@@ -275,7 +275,10 @@ async function syncItemToGoogle(item: KeptItem) {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.error('[google] task push failed:', message);
-      store.set('google.lastError', message);
+      // Recorded rather than thrown: the item is already saved locally, and a
+      // Google problem should not make creating a task look like it failed.
+      store.set('google.lastError', `Saved here, but not sent to Google Tasks: ${message}`);
+      broadcastGoogleStatus();
     }
     return;
   }
@@ -411,10 +414,20 @@ async function performSync() {
   // Anything saved before the account was connected has no remote event yet, and
   // the push on creation only covers items made since. Sending them here is what
   // makes "Sync now" two-way rather than pull-only.
+  // Tasks and events reach different Google APIs, and either can be unavailable
+  // on its own — an unenabled Tasks API took the whole sync down with it, so the
+  // calendar stopped working over a feature the user had not set up yet. A
+  // failure on one side is recorded and the other still runs.
+  let tasksProblem: string | null = null;
+  const noteTaskFailure = (error: unknown) => {
+    tasksProblem ??= error instanceof Error ? error.message : String(error);
+    console.error('[google] tasks unavailable:', tasksProblem);
+  };
+
   for (const item of getKept()) {
     if (item.date < today) continue;
     if (item.kind === 'task' ? item.googleTaskId : item.googleEventId) continue;
-    if (item.kind === 'task' && !status.tasksGranted) continue;
+    if (item.kind === 'task' && (!status.tasksGranted || tasksProblem)) continue;
     try {
       if (item.kind === 'task') {
         const googleTaskId = await pushTask(store, item);
@@ -424,6 +437,7 @@ async function performSync() {
         setKept(getKept().map(current => current.id === item.id ? { ...current, googleEventId } : current));
       }
     } catch (error) {
+      if (item.kind === 'task') { noteTaskFailure(error); continue; }
       console.error(`[google] push failed for "${item.title}":`, error);
       throw error;
     }
@@ -442,20 +456,28 @@ async function performSync() {
     merged.push({ id: randomUUID(), title: event.title, date: event.date, time: event.time, kind: 'event', done: false, googleEventId: event.id });
   }
 
-  if (status.tasksGranted) {
-    const tasks = await pullTasks(store, today, GOOGLE_SYNC_DAYS);
-    const byTaskId = new Map(merged.filter(item => item.googleTaskId).map(item => [item.googleTaskId!, item]));
-    for (const task of tasks) {
-      const match = byTaskId.get(task.id);
-      // Google is authoritative on whether a task is ticked: it can be completed
-      // on a phone, and the local copy should follow rather than fight it.
-      if (match) { Object.assign(match, { title: task.title, date: task.date, done: task.done }); continue; }
-      merged.push({ id: randomUUID(), title: task.title, date: task.date, kind: 'task', done: task.done, googleTaskId: task.id });
+  if (status.tasksGranted && !tasksProblem) {
+    try {
+      const tasks = await pullTasks(store, today, GOOGLE_SYNC_DAYS);
+      const byTaskId = new Map(merged.filter(item => item.googleTaskId).map(item => [item.googleTaskId!, item]));
+      for (const task of tasks) {
+        const match = byTaskId.get(task.id);
+        // Google is authoritative on whether a task is ticked: it can be
+        // completed on a phone, and the local copy should follow rather than
+        // fight it.
+        if (match) { Object.assign(match, { title: task.title, date: task.date, done: task.done }); continue; }
+        merged.push({ id: randomUUID(), title: task.title, date: task.date, kind: 'task', done: task.done, googleTaskId: task.id });
+      }
+    } catch (error) {
+      noteTaskFailure(error);
     }
   }
   setKept(merged);
   store.set('google.lastSync', new Date().toISOString());
-  store.delete('google.lastError' as never);
+  // The calendar half succeeded, so this is a warning rather than a failure —
+  // surfaced without pretending the sync did not happen.
+  if (tasksProblem) store.set('google.lastError', `Events synced. Tasks did not: ${tasksProblem}`);
+  else store.delete('google.lastError' as never);
   broadcastGoogleStatus();
   return googleStatus(store);
 }

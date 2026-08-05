@@ -201,12 +201,20 @@ async function authorisedFetch(store: StoreLike, path: string, init: RequestInit
     throw new Error('Google rejected the saved sign-in. Reconnect in Setup.');
   }
   const body = response.ok ? null : await response.text().catch(() => '');
-  // A 403 naming scopes means the account connected without ticking the calendar
+  const service = base === TASKS_API ? 'Google Tasks' : 'Google Calendar';
+  // A 403 naming scopes means the account connected without ticking the
   // permission; no amount of retrying fixes that, only reconnecting does.
   if (response.status === 403 && /scope|insufficient/i.test(body ?? '')) {
-    throw new Error('This Google connection has no calendar permission. Disconnect, connect again, and tick the checkbox letting Haru see and edit your events.');
+    throw new Error(`This Google connection has no ${service} permission. Disconnect, connect again, and tick the matching checkbox.`);
   }
-  if (!response.ok) throw new Error(`Google Calendar returned ${response.status}: ${body || response.statusText}`);
+  // A disabled API is a project setting, not anything the user did here. The
+  // raw response is several hundred characters of JSON saying so; this is the
+  // one line that matters, with the link to fix it.
+  if (response.status === 403 && /SERVICE_DISABLED|accessNotConfigured/i.test(body ?? '')) {
+    const activation = (body ?? '').match(/https:\/\/console\.developers\.google\.com\/apis\/api\/[^"\\\s]+/)?.[0];
+    throw new Error(`The ${service} API is not enabled on your Google Cloud project.${activation ? ` Enable it at ${activation} and try again in a minute.` : ''}`);
+  }
+  if (!response.ok) throw new Error(`${service} returned ${response.status}: ${body || response.statusText}`);
   return response.status === 204 ? {} : await response.json() as Record<string, unknown>;
 }
 
