@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, type MenuItemConstructorOptions, nativeTheme, net, protocol, screen } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, type MenuItemConstructorOptions, nativeTheme, net, powerMonitor, protocol, screen } from 'electron';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -8,6 +8,7 @@ import Store from 'electron-store';
 import { localDateKey, resolveDate, zonedNow } from './dates';
 import { connectGoogle, disconnectGoogle, googleStatus, pullEvents, pushItem, removeItem, saveCredentials } from './google';
 import { afterCooldown, afterEgoCooldown, afterPoke, egoInstruction, goodnightInstruction, isGoodnight, isIgnoring, isLowEffort, leverageInstruction, moodInstruction, nextEgo, nextIrritation } from './mood';
+import { applyEvent, chooseIdleAction, DEFAULT_VITALS, driftVitals, nextTickDelayMs, type Environment, type Vitals } from './vitals';
 
 type Bounds = { x: number; y: number; width: number; height: number };
 type Live2DModel = { path: string; name: string; url: string };
@@ -210,6 +211,59 @@ async function syncItemToGoogle(item: KeptItem) {
 // Pulls Google's events in as kept items, matched on the remote id so repeated
 // syncs update rather than duplicate. Items Haru created are refreshed in place;
 // anything already deleted locally is not resurrected.
+// ---------------------------------------------------------------------------
+// The life loop. Runs whether or not anyone is talking to her: reads the
+// machine, drifts her state, and usually decides to do nothing. Stillness is
+// most of the behaviour — movement only reads as deliberate if it is rare.
+// ---------------------------------------------------------------------------
+
+let vitals: Vitals = { ...DEFAULT_VITALS };
+let lastTickAt = Date.now();
+let tickTimer: ReturnType<typeof setTimeout> | undefined;
+
+function readEnvironment(): Environment {
+  return {
+    hour: zonedNow(CHAT_TIMEZONE).getHours(),
+    // Idle time across the whole machine, not just this window — she should
+    // know the difference between being alone and being ignored.
+    idleSeconds: powerMonitor.getSystemIdleTime(),
+    onBattery: powerMonitor.isOnBatteryPower(),
+    windowFocused: BrowserWindow.getAllWindows().some(win => win.isFocused()),
+  };
+}
+
+function broadcastLife(action: string | null, environment: Environment) {
+  const payload = { vitals, action, night: environment.hour >= 23 || environment.hour < 6 };
+  for (const win of BrowserWindow.getAllWindows()) win.webContents.send('life:tick', payload);
+}
+
+function lifeTick() {
+  const now = Date.now();
+  const environment = readEnvironment();
+  vitals = driftVitals(vitals, environment, (now - lastTickAt) / 1000);
+  lastTickAt = now;
+  store.set('vitals', vitals);
+  broadcastLife(chooseIdleAction(vitals, environment), environment);
+  // Rescheduled each time rather than set on an interval, so the gap itself
+  // varies with how alert she is.
+  tickTimer = setTimeout(lifeTick, nextTickDelayMs(vitals));
+}
+
+function startLifeLoop() {
+  const saved = store.get('vitals') as Vitals | undefined;
+  // Resuming where she left off means closing and reopening the app does not
+  // hand back a factory-fresh mood.
+  if (saved) vitals = { ...DEFAULT_VITALS, ...saved };
+  lastTickAt = Date.now();
+  clearTimeout(tickTimer);
+  tickTimer = setTimeout(lifeTick, 4_000);
+}
+
+function nudgeVitals(event: Parameters<typeof applyEvent>[1]) {
+  vitals = applyEvent(vitals, event);
+  broadcastLife(null, readEnvironment());
+}
+
 function broadcastGoogleStatus() {
   const status = googleStatus(store);
   for (const win of BrowserWindow.getAllWindows()) win.webContents.send('google:changed', status);
@@ -634,6 +688,7 @@ export function ollamaGloat(praised: string, config: ProviderConfig, ego: number
 
 async function ollamaChat(messages: { role: string; content: string }[], config: ProviderConfig) {
   const latest = messages.at(-1)?.content ?? '';
+  nudgeVitals('spoken-to');
   const mood = advanceMood(latest, messages.slice(0, -1));
   const { irritation, ego } = mood;
   console.log(`[ai] chat request: model=${config.model} messages=${messages.length} irritation=${irritation} ego=${ego} goodnight=${mood.goodnight}`);
@@ -841,6 +896,7 @@ app.whenReady().then(() => {
     // reverse on both counts.
     const next = { ...mood, irritation: nextIrritation(mood.irritation, event), ego: nextEgo(mood.ego, event) };
     setMood(next);
+    nudgeVitals(reaction === 'down' ? 'criticised' : 'praised');
     return next;
   });
   ipcMain.handle('mood:get', () => getMood());
@@ -906,6 +962,7 @@ app.whenReady().then(() => {
   performChatResetIfDue();
   setInterval(performChatResetIfDue, CHAT_RESET_POLL_MS);
   scheduleBackgroundSync();
+  startLifeLoop();
   app.on('activate', () => { if (!mainWindow || mainWindow.isDestroyed()) createWindow(); });
 });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });

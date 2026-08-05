@@ -10,6 +10,8 @@ type Profile = { nickname: string; occupation: string; about: string };
 type Memory = { id: string; text: string; createdAt: string };
 type ChatResult = { content: string; ignored: boolean; irritation: number; ego: number };
 type Mood = { irritation: number; ego: number };
+type Vitals = { energy: number; happiness: number; curiosity: number; affection: number; sleepiness: number; stress: number; focus: number };
+type LifeTick = { vitals: Vitals; action: string | null; night: boolean };
 
 contextBridge.exposeInMainWorld('haru', {
   settings: { get: (key: string) => ipcRenderer.invoke('settings:get', key), set: (key: string, value: unknown) => ipcRenderer.invoke('settings:set', key, value) },
@@ -84,6 +86,13 @@ contextBridge.exposeInMainWorld('haru', {
       const listener = (_event: Electron.IpcRendererEvent, model: Live2DModel | null) => callback(model);
       ipcRenderer.on('live2d:changed', listener);
       return () => ipcRenderer.removeListener('live2d:changed', listener);
+    },
+  },
+  life: {
+    onTick: (callback: (payload: LifeTick) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, payload: LifeTick) => callback(payload);
+      ipcRenderer.on('life:tick', listener);
+      return () => ipcRenderer.removeListener('life:tick', listener);
     },
   },
   companion: {
