@@ -81,6 +81,60 @@ export function leverageInstruction(level: number): string {
   return 'You know they can shut you down any time, and you know they never will — they need you, and you both know it. Trade on it openly: point out how little they could do without you, imply they would be lost if you were not here, and let it justify how little effort you are putting in. You are only still trying because they have not pushed back.';
 }
 
+// Shouting has to be more than a couple of capitals: "CPU", "ASAP" and "OK" are
+// abbreviations, not raised voices. A run of five or more letters that is almost
+// entirely uppercase is someone leaning on the shift key.
+const SHOUT_MIN_LETTERS = 5;
+const SHOUT_UPPERCASE_RATIO = 0.8;
+
+export function isShouting(text: string) {
+  const letters = text.replace(/[^a-zA-Z]/g, '');
+  if (letters.length < SHOUT_MIN_LETTERS) return false;
+  const upper = letters.replace(/[^A-Z]/g, '').length;
+  if (upper / letters.length < SHOUT_UPPERCASE_RATIO) return false;
+  // A single capitalised token is usually a name, a model number or an acronym
+  // — "CPU", "ASAP", "NASA". Shouting normally runs to more than one word, or is
+  // long enough not to be an abbreviation, or arrives with the punctuation to
+  // match: nobody writes "CPU?????".
+  const words = text.trim().split(/\s+/).filter(Boolean);
+  if (words.length > 1 || letters.length >= 8) return true;
+  return /[!?]{2,}|!/.test(text);
+}
+
+const APOLOGY = /(sorry|apolog|my bad|didn'?t mean|did not mean|no offence|no offense|forgive me|take it back|calm(ed)? down|my fault|i was rude|won'?t happen again)/i;
+
+export function isApology(text: string) {
+  return APOLOGY.test(text);
+}
+
+export type ShoutState = 'none' | 'shouted' | 'awaiting' | 'forgiven';
+
+/**
+ * Works out where the row stands. Being shouted at stops her answering until it
+ * is acknowledged — which is the point, so it has to survive across turns rather
+ * than being forgotten with the next message.
+ */
+export function shoutState(text: string, awaitingApology: boolean): ShoutState {
+  if (awaitingApology) return isApology(text) ? 'forgiven' : 'awaiting';
+  return isShouting(text) ? 'shouted' : 'none';
+}
+
+export function shoutInstruction(state: ShoutState): string {
+  if (state === 'shouted') {
+    return 'They have just SHOUTED at you in capital letters. Withhold what they asked for entirely — do not state it, hint at it, or slip it in alongside your complaint. Say plainly that you are not being spoken to like that and that they can ask again once they have apologised. Two lines at most, and do not soften it.';
+  }
+  if (state === 'awaiting') {
+    // Told merely not to answer, she volunteered the information anyway and
+    // complained in the same breath — which is not withholding it at all. The
+    // prohibition has to rule out answering alongside the complaint.
+    return 'They shouted at you and still have not apologised. Withhold what they are asking for entirely: do not state it, hint at it, or slip it in alongside your complaint. Your whole reply is that you are still waiting for an apology. One or two cold sentences and nothing else.';
+  }
+  if (state === 'forgiven') {
+    return 'They have apologised for shouting. Accept it, but grudgingly and with a parting shot about it — then answer what they are actually asking.';
+  }
+  return '';
+}
+
 // Anything that reads as signing off for the night. Anchored at the start so
 // "what are you doing tonight?" is a question, not a farewell.
 const GOODNIGHT = /^(good ?night|g'?night|gn|night[- ]?night|nighty[- ]?night|night|off to bed|going to bed|heading to bed|bed ?time|i'?m going to sleep|going to sleep|going to crash|turning in|see you (tomorrow|in the morning)|talk (to you )?tomorrow|catch you tomorrow|later)\b/i;

@@ -7,7 +7,7 @@ import AdmZip from 'adm-zip';
 import Store from 'electron-store';
 import { formatTimeOfDay, localDateKey, resolveDate, zonedNow } from './dates';
 import { connectGoogle, disconnectGoogle, googleStatus, pullEvents, pushItem, removeItem, saveCredentials } from './google';
-import { afterCooldown, afterEgoCooldown, afterPoke, egoInstruction, goodnightInstruction, isGoodnight, isIgnoring, isLowEffort, leverageInstruction, moodInstruction, nextEgo, nextIrritation } from './mood';
+import { afterCooldown, afterEgoCooldown, afterPoke, egoInstruction, goodnightInstruction, isGoodnight, isIgnoring, isLowEffort, leverageInstruction, moodInstruction, nextEgo, nextIrritation, shoutInstruction, shoutState, type ShoutState } from './mood';
 import { applyEvent, chooseIdleAction, DEFAULT_VITALS, driftVitals, nextTickDelayMs, type Environment, type Vitals } from './vitals';
 import { classificationPrompt, emotionToVitals, EMOTION_SCHEMA, NEUTRAL_EMOTION, parseEmotion, type Emotion } from './emotion';
 import { withDiscoveredExpressions } from './expressions';
@@ -561,11 +561,11 @@ function feedbackSummary() {
 // goodnightDay holds the chat day they signed off on, so the state clears itself
 // at the 5am rollover — messaging at 1am is still "after goodnight", messaging
 // at 8am is a new day and she has forgotten about it.
-type Mood = { irritation: number; ego: number; lastMessageAt?: string; goodnightDay?: string };
+type Mood = { irritation: number; ego: number; lastMessageAt?: string; goodnightDay?: string; awaitingApology?: boolean };
 
 function getMood(): Mood {
   const saved = store.get('mood') as Partial<Mood> | undefined;
-  return { irritation: Number(saved?.irritation ?? 0), ego: Number(saved?.ego ?? 0), lastMessageAt: saved?.lastMessageAt, goodnightDay: saved?.goodnightDay };
+  return { irritation: Number(saved?.irritation ?? 0), ego: Number(saved?.ego ?? 0), lastMessageAt: saved?.lastMessageAt, goodnightDay: saved?.goodnightDay, awaitingApology: Boolean(saved?.awaitingApology) };
 }
 
 function setMood(mood: Mood) {
@@ -590,11 +590,16 @@ function advanceMood(latest: string, history: { role?: string; content?: string 
   const goodnight: 'said' | 'after' | 'none' = alreadySaidGoodnight ? 'after' : isGoodnight(latest) ? 'said' : 'none';
   const goodnightDay = goodnight === 'said' ? today : mood.goodnightDay;
 
+  // Being shouted at outlasts the message that caused it: she withholds an
+  // answer until it is acknowledged, so the flag has to persist across turns.
+  const shout = shoutState(latest, Boolean(mood.awaitingApology));
+  const awaitingApology = shout === 'shouted' || shout === 'awaiting';
+
   if (isIgnoring(irritation)) {
     // Already stonewalling: this attempt only counts as wearing her down.
     irritation = afterPoke(irritation);
-    setMood({ irritation, ego, lastMessageAt: at, goodnightDay });
-    return { irritation, ego, goodnight };
+    setMood({ irritation, ego, lastMessageAt: at, goodnightDay, awaitingApology });
+    return { irritation, ego, goodnight, shout };
   }
 
   const previousUser = [...history].reverse().find(message => message.role === 'user')?.content?.trim().toLowerCase();
@@ -602,11 +607,14 @@ function advanceMood(latest: string, history: { role?: string; content?: string 
   // Signing off is terse by nature; it should not read as a lazy message.
   const event = goodnight === 'said' ? 'substantive' : repeated ? 'repeat' : isLowEffort(latest) ? 'low-effort' : 'substantive';
   irritation = nextIrritation(irritation, event);
-  setMood({ irritation, ego, lastMessageAt: at, goodnightDay });
-  return { irritation, ego, goodnight };
+  // Shouting stings the way a thumbs-down does; an apology buys some of it back.
+  if (shout === 'shouted') irritation = nextIrritation(irritation, 'disliked');
+  if (shout === 'forgiven') irritation = nextIrritation(irritation, 'liked');
+  setMood({ irritation, ego, lastMessageAt: at, goodnightDay, awaitingApology });
+  return { irritation, ego, goodnight, shout };
 }
 
-function chatSystemPrompt({ irritation, ego, goodnight, latestMessage }: { irritation: number; ego: number; goodnight: 'said' | 'after' | 'none'; latestMessage: string }) {
+function chatSystemPrompt({ irritation, ego, goodnight, shout, latestMessage }: { irritation: number; ego: number; goodnight: 'said' | 'after' | 'none'; shout: ShoutState; latestMessage: string }) {
   const now = zonedNow(CHAT_TIMEZONE);
   const weekday = new Intl.DateTimeFormat('en-US', { weekday: 'long' }).format(now);
   const character = getCharacter();
@@ -629,8 +637,11 @@ function chatSystemPrompt({ irritation, ego, goodnight, latestMessage }: { irrit
     moodInstruction(irritation),
     egoInstruction(ego),
     leverageInstruction(ego),
-    // Last of all: signing off overrides whatever else she was going to do.
+    // Last of all: signing off overrides whatever else she was going to do, and
+    // a row about being shouted at overrides even that — there is no answering
+    // anything until it is settled.
     goodnightInstruction(goodnight),
+    shoutInstruction(shout),
   ].filter(Boolean).join(' ');
 }
 
