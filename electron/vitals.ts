@@ -100,26 +100,52 @@ export function applyEvent(current: Vitals, event: 'praised' | 'criticised' | 's
   return next;
 }
 
-export type IdleAction = 'glance' | 'yawn' | 'stretch' | 'shift' | 'perk-up' | 'settle' | 'doze';
+export type IdleAction = 'blink' | 'glance' | 'smile' | 'stretch' | 'yawn' | 'fidget' | 'tilt' | 'sigh' | 'lean-in' | 'think' | 'settle' | 'doze' | 'sparkle';
+
+// Baseline chances, before her state has any say. Roughly the shape of a person
+// sitting quietly: mostly small eye movements, occasionally something bigger.
+// Every entry must be non-zero: the state scales these, and no multiplier can
+// rescue a baseline of zero — dozing was unreachable in every state until this
+// was 1 rather than 0.
+const BASE_WEIGHTS: Record<IdleAction, number> = {
+  blink: 35, glance: 25, tilt: 10, smile: 8, fidget: 6, stretch: 4,
+  yawn: 2, sigh: 2, think: 3, 'lean-in': 2, settle: 2, doze: 1, sparkle: 1,
+};
 
 // Weighted rather than scheduled: nothing is on a timer, so the same state can
-// produce different behaviour and she never loops visibly. Most ticks are meant
-// to come back null — stillness is what makes the movement read as deliberate.
+// produce different behaviour and she never loops visibly. Her state scales the
+// baseline rather than replacing it, so the character of the idle stays intact
+// while the emphasis shifts — sleepy means more yawning, not a different person.
 export function idleActionWeights(vitals: Vitals, environment: Environment): Record<IdleAction | 'nothing', number> {
-  const { sleepiness, energy, curiosity, focus } = vitals;
+  const { sleepiness, energy, curiosity, focus, happiness } = vitals;
   const night = isNight(environment.hour);
   const alone = environment.idleSeconds > 300;
-  return {
-    // Stillness dominates, and more so when she is winding down.
-    nothing: 6 + sleepiness * 6 + (alone ? 3 : 0),
-    glance: curiosity * 5 + (environment.idleSeconds < 30 ? 2 : 0),
-    yawn: sleepiness > 0.55 ? sleepiness * 4 : 0,
-    stretch: sleepiness < 0.6 && energy < 0.5 ? 2 : 0.4,
-    shift: 1.5 + (1 - focus) * 1.5,
-    'perk-up': focus > 0.7 ? focus * 2.5 : 0,
-    settle: sleepiness > 0.5 ? sleepiness * 2 : 0.2,
-    doze: night && sleepiness > 0.8 && alone ? 4 : 0,
+  const awake = 1 - sleepiness;
+  const scale: Record<IdleAction, number> = {
+    blink: 1,
+    glance: 0.4 + curiosity * 1.4,
+    tilt: 0.3 + curiosity * 1.5,
+    smile: 0.2 + happiness * 1.8,
+    fidget: 0.4 + energy * 1.2,
+    stretch: sleepiness > 0.35 && sleepiness < 0.8 ? 1.8 : 0.4,
+    yawn: sleepiness > 0.5 ? sleepiness * 3 : 0,
+    sigh: (1 - happiness) * 2 + (alone ? 0.8 : 0),
+    think: focus > 0.5 ? focus * 1.6 : 0.3,
+    'lean-in': focus > 0.65 ? focus * 2 : 0,
+    settle: sleepiness * 2,
+    // Only when it is genuinely late, she is tired, and nobody is about.
+    doze: night && sleepiness > 0.8 && alone ? 30 : 0,
+    sparkle: happiness > 0.7 && awake > 0.5 ? happiness * 1.5 : 0,
   };
+  const weights = {} as Record<IdleAction | 'nothing', number>;
+  for (const action of Object.keys(BASE_WEIGHTS) as IdleAction[]) {
+    weights[action] = BASE_WEIGHTS[action] * scale[action];
+  }
+  // Stillness has to outweigh everything else put together, not merely be the
+  // largest single entry — the movements sum to roughly 100 at rest, so this
+  // sits around twice that and she spends most ticks simply being.
+  weights.nothing = 190 + sleepiness * 140 + (alone ? 120 : 0);
+  return weights;
 }
 
 export function chooseIdleAction(vitals: Vitals, environment: Environment, random: () => number = Math.random): IdleAction | null {

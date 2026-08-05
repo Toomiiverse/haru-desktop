@@ -1,7 +1,8 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { StageFailureBoundary } from './components';
 import type { Live2DModelHandle } from './components/Live2DCanvas';
-import { ACTION_SHAPES, emotionHoldMs, expressionForEmotion, gazeForAction, GESTURE_DURATION_MS, pickExpression, resolveGaze, type ActionShape, type Gaze, type Gesture } from './companion/behaviour';
+import { ACTION_SHAPES, emotionHoldMs, expressionForEmotion, gazeForAction, GESTURE_DURATION_MS, resolveGaze, type ActionShape, type Gaze, type Gesture } from './companion/behaviour';
+import { POSES, POSE_TIMING, poseStrength } from './companion/pose';
 import { attachParameterLayer } from './companion/parameters';
 import type { Emotion, Vitals } from './types';
 
@@ -18,7 +19,7 @@ export function CompanionWindow() {
 
   const handleReady = useCallback((handle: Live2DModelHandle | null) => {
     modelHandle.current = handle;
-    if (handle) attachParameterLayer(handle, gesture);
+    if (handle) attachParameterLayer(handle, gesture, () => activePoses());
     // Expression names vary per model, so they are read off the loaded model
     // rather than assumed; behaviour matches against whatever is actually here.
     const definitions = (handle as unknown as { internalModel?: { motionManager?: { expressionManager?: { definitions?: { Name?: string }[] } } } })?.internalModel?.motionManager?.expressionManager?.definitions;
@@ -74,13 +75,33 @@ export function CompanionWindow() {
     manager?.resetExpression?.();
   }, []);
 
+  // Poses are held in a ref and read per frame by the parameter layer, rather
+  // than pushed, so blending always reflects the exact moment it is drawn.
+  const poses = useRef<{ name: string; startedAt: number }[]>([]);
+  const activePoses = useCallback(() => {
+    const now = performance.now();
+    poses.current = poses.current.filter(entry => now - entry.startedAt < (POSE_TIMING[entry.name]?.durationMs ?? 0));
+    return poses.current.flatMap(entry => {
+      const timing = POSE_TIMING[entry.name];
+      const pose = POSES[entry.name];
+      if (!timing || !pose) return [];
+      return [{ pose, weight: poseStrength((now - entry.startedAt) / timing.durationMs, timing.attack) }];
+    });
+  }, []);
+
+  const playPose = useCallback((name: string) => {
+    if (!POSES[name]) return;
+    // Restarting the same pose rather than stacking it, so a repeat reads as one
+    // longer beat instead of doubling in strength.
+    poses.current = [...poses.current.filter(entry => entry.name !== name), { name, startedAt: performance.now() }];
+  }, []);
+
   useEffect(() => window.haru?.life.onTick(({ vitals, action: name }) => {
     life.current = { ...life.current, vitals };
+    if (name) playPose(name);
     const shape = name ? ACTION_SHAPES[name] : undefined;
     if (shape) action.current = { shape, gaze: gazeForAction(shape), startedAt: performance.now() };
-    const expression = shape ? pickExpression(shape.expressionMood, expressions.current) : null;
-    if (expression) modelHandle.current?.expression(expression);
-  }), []);
+  }), [playPose]);
 
   useEffect(() => {
     let frame = 0;

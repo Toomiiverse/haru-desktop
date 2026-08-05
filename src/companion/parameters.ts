@@ -12,6 +12,7 @@
 // following at full travel no matter what the primary was reduced to.
 
 import { GESTURE_DURATION_MS, gestureOffset, type Gesture } from './behaviour';
+import { applyPose, blendPoses, type WeightedPose } from './pose';
 
 // The runtime moves the head a full ±30° to follow the pointer while the eyes
 // only move ±1, which is why she turned to look instead of glancing. Eyes are
@@ -25,16 +26,23 @@ const BODY_FOLLOW = 0.22;
 const HEAD_DEGREES = 30;
 const BODY_DEGREES = 10;
 
-type CoreModel = { addParameterValueById(id: string, value: number): void };
+type CoreModel = {
+  addParameterValueById(id: string, value: number): void;
+  getParameterValueById(id: string): number;
+  setParameterValueById(id: string, value: number): void;
+};
 type Internal = {
   coreModel?: CoreModel;
   focusController?: { x: number; y: number };
   updateFocus?: () => void;
+  on?(event: string, handler: () => void): void;
 };
 
 export type GestureRef = { current: { name: Gesture; startedAt: number } | null };
+/** Supplies whatever poses are currently active, resolved fresh each frame. */
+export type PoseSource = () => WeightedPose[];
 
-export function attachParameterLayer(model: unknown, gesture: GestureRef) {
+export function attachParameterLayer(model: unknown, gesture: GestureRef, poses?: PoseSource) {
   const internal = (model as { internalModel?: Internal })?.internalModel;
   const core = internal?.coreModel;
   const focus = internal?.focusController;
@@ -67,4 +75,15 @@ export function attachParameterLayer(model: unknown, gesture: GestureRef) {
       // Never take the render loop down over a missing parameter.
     }
   };
+
+  // Poses go on last, after focus and gestures, so a yawn can close eyes that
+  // tracking has just been moving and win.
+  internal.on?.('beforeModelUpdate', () => {
+    try {
+      const active = poses?.() ?? [];
+      if (active.length) applyPose(core, blendPoses(active));
+    } catch {
+      // Never take the render loop down over a missing parameter.
+    }
+  });
 }

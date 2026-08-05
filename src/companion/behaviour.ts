@@ -93,14 +93,24 @@ export function randomWanderTarget(random: () => number = Math.random): Gaze {
 // any model rather than only one with a known motion set.
 export type ActionShape = { gaze: 'wander' | 'down' | 'up' | 'hold'; durationMs: number; expressionMood: 'neutral' | 'happy' | 'sleepy' | 'curious' };
 
+// Where each behaviour sends her eyes. The face itself is handled by the pose
+// layer; this is only the gaze half, which is why several entries hold still.
 export const ACTION_SHAPES: Record<string, ActionShape> = {
   glance: { gaze: 'wander', durationMs: 2200, expressionMood: 'curious' },
+  tilt: { gaze: 'wander', durationMs: 2400, expressionMood: 'curious' },
+  fidget: { gaze: 'wander', durationMs: 1600, expressionMood: 'neutral' },
   yawn: { gaze: 'down', durationMs: 2600, expressionMood: 'sleepy' },
-  stretch: { gaze: 'up', durationMs: 2400, expressionMood: 'neutral' },
-  shift: { gaze: 'wander', durationMs: 1600, expressionMood: 'neutral' },
-  'perk-up': { gaze: 'hold', durationMs: 1800, expressionMood: 'happy' },
+  sigh: { gaze: 'down', durationMs: 2000, expressionMood: 'neutral' },
   settle: { gaze: 'down', durationMs: 3000, expressionMood: 'neutral' },
   doze: { gaze: 'down', durationMs: 6000, expressionMood: 'sleepy' },
+  stretch: { gaze: 'up', durationMs: 2400, expressionMood: 'neutral' },
+  think: { gaze: 'up', durationMs: 3000, expressionMood: 'curious' },
+  // These read on the face rather than in the eyes, so the gaze carries on
+  // doing whatever it was doing.
+  blink: { gaze: 'hold', durationMs: 420, expressionMood: 'neutral' },
+  smile: { gaze: 'hold', durationMs: 2600, expressionMood: 'happy' },
+  sparkle: { gaze: 'hold', durationMs: 1800, expressionMood: 'happy' },
+  'lean-in': { gaze: 'hold', durationMs: 2400, expressionMood: 'happy' },
 };
 
 export function gazeForAction(shape: ActionShape, random: () => number = Math.random): Gaze | null {
