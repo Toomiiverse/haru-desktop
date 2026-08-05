@@ -10,6 +10,8 @@ import { connectGoogle, disconnectGoogle, googleStatus, pullEvents, pushItem, re
 import { afterCooldown, afterEgoCooldown, afterPoke, egoInstruction, goodnightInstruction, isGoodnight, isIgnoring, isLowEffort, leverageInstruction, moodInstruction, nextEgo, nextIrritation } from './mood';
 import { applyEvent, chooseIdleAction, DEFAULT_VITALS, driftVitals, nextTickDelayMs, type Environment, type Vitals } from './vitals';
 import { classificationPrompt, emotionToVitals, EMOTION_SCHEMA, NEUTRAL_EMOTION, parseEmotion, type Emotion } from './emotion';
+import { withDiscoveredExpressions } from './expressions';
+import { formatMemoryPrompt, isWorthKeeping, MEMORY_KINDS, migrateMemories, pruneMemories, rememberInto, selectMemories, summaryPrompt, type MemoryKind, type MemoryRecord, type SessionSummary } from './memory';
 
 type Bounds = { x: number; y: number; width: number; height: number };
 type Live2DModel = { path: string; name: string; url: string };
@@ -147,12 +149,39 @@ function currentChatDayKey(): string {
 // Archives under the day key, suffixing when that day already has an entry —
 // starting a chat manually and then letting the 5am reset fire would otherwise
 // have the second archive overwrite the first.
+// Distilled as the day is archived, because the raw transcript is far too big to
+// carry forward and too dull to reread. One line per day is what lets her say
+// "you were dealing with that thing on Tuesday" months later.
+function summariseSession(messages: { role?: string; content?: string }[], day: string) {
+  const config = store.get('ai.config') as ProviderConfig | undefined;
+  if (!config?.model || messages.length < 4) return;
+  if (getSessions().some(session => session.day === day)) return;
+  const transcript = messages
+    .filter(message => message.role === 'user' || message.role === 'assistant')
+    .map(message => `${message.role === 'user' ? 'Them' : 'You'}: ${String(message.content ?? '').slice(0, 300)}`)
+    .join('\n')
+    .slice(0, 6000);
+  ollamaPost(
+    [{ role: 'system', content: summaryPrompt() }, { role: 'user', content: transcript }],
+    config,
+    { tools: false, temperature: 0.2, maxTokens: 80 },
+  ).then(message => {
+    const summary = (message.content ?? '').trim().replace(/^["']|["']$/g, '');
+    if (!isWorthKeeping(summary)) { console.log(`[memory] nothing worth keeping from ${day}`); return; }
+    // Only the recent stretch is kept; older days have already contributed
+    // whatever mattered as long-term records.
+    store.set('memory.sessions', [...getSessions(), { day, summary, createdAt: new Date().toISOString() }].slice(-30));
+    console.log(`[memory] summarised ${day}: ${summary}`);
+  }).catch(error => console.warn('[memory] could not summarise session:', error instanceof Error ? error.message : error));
+}
+
 function archiveMessages(messages: unknown[], dayKey: string) {
   const archive = (store.get('chat.archive') as Record<string, unknown[]> | undefined) ?? {};
   let key = dayKey;
   for (let n = 2; archive[key]; n++) key = `${dayKey}#${n}`;
   archive[key] = messages;
   store.set('chat.archive', archive);
+  summariseSession(messages as { role?: string; content?: string }[], dayKey);
 }
 
 function startNewConversation() {
@@ -266,6 +295,14 @@ function nudgeVitals(event: Parameters<typeof applyEvent>[1]) {
 }
 
 let currentEmotion: Emotion = NEUTRAL_EMOTION;
+// Alternated so repeated praise does not produce the same face every time.
+let lastPraiseWasSmug = false;
+
+function broadcastBeat(emotion: Emotion, gesture?: 'nod' | 'shake' | 'stare') {
+  currentEmotion = emotion;
+  vitals = emotionToVitals(emotion, vitals);
+  for (const win of BrowserWindow.getAllWindows()) win.webContents.send('emotion:changed', { emotion, gesture });
+}
 
 // Fire-and-forget: the reply is already on screen by the time this runs, so a
 // slow or failed classification costs an expression rather than the message.
@@ -280,10 +317,8 @@ function classifyEmotion(reply: string, config: ProviderConfig) {
   ).then(message => {
     const emotion = parseEmotion(message.content ?? '');
     if (!emotion) { console.warn('[emotion] unparseable classification, keeping previous'); return; }
-    currentEmotion = emotion;
-    vitals = emotionToVitals(emotion, vitals);
     console.log(`[emotion] ${emotion.emotion} (confidence ${emotion.confidence.toFixed(2)}, energy ${emotion.energy.toFixed(2)}, intent ${emotion.intent}, focus ${emotion.focus})`);
-    for (const win of BrowserWindow.getAllWindows()) win.webContents.send('emotion:changed', emotion);
+    broadcastBeat(emotion);
     broadcastLife(null, readEnvironment());
   }).catch(error => console.warn('[emotion] classification failed:', error instanceof Error ? error.message : error));
 }
@@ -416,8 +451,10 @@ const CHAT_TOOLS = [{
       type: 'object',
       properties: {
         fact: { type: 'string', description: 'One short third-person statement, e.g. "Has a dog called Rex" or "Prefers short answers without preamble".' },
+        kind: { type: 'string', enum: [...MEMORY_KINDS], description: '"preference" for how they like things done, "relationship" for a person or pet, "event" for something happening in their life, "fact" for anything else.' },
+        subject: { type: 'string', description: 'Who or what it concerns, if there is one — a person, a pet, a project.' },
       },
-      required: ['fact'],
+      required: ['fact', 'kind'],
     },
   },
 }];
@@ -453,35 +490,39 @@ function getProfile(): Profile {
   return { nickname: saved?.nickname ?? '', occupation: saved?.occupation ?? '', about: saved?.about ?? '' };
 }
 
-function getMemories(): Memory[] {
-  return (store.get('memories') as Memory[] | undefined) ?? [];
+function getMemories(): MemoryRecord[] {
+  return migrateMemories(store.get('memories'), new Date().toISOString());
 }
 
-function setMemories(items: Memory[]) {
+function setMemories(items: MemoryRecord[]) {
   store.set('memories', items);
   for (const win of BrowserWindow.getAllWindows()) win.webContents.send('memory:changed', items);
 }
 
-function addMemory(text: string): Memory | null {
-  const fact = text.trim();
-  if (!fact) return null;
-  const existing = getMemories();
-  // The model re-states things it already knows, so near-duplicates are dropped
-  // rather than piling up and crowding the prompt.
-  if (existing.some(memory => memory.text.trim().toLowerCase() === fact.toLowerCase())) return null;
-  const created: Memory = { id: randomUUID(), text: fact, createdAt: new Date().toISOString() };
-  setMemories([...existing, created].slice(-MAX_MEMORIES));
-  return created;
+function getSessions(): SessionSummary[] {
+  return (store.get('memory.sessions') as SessionSummary[] | undefined) ?? [];
 }
 
-function profileSummary() {
+function addMemory(text: string, kind: MemoryKind = 'fact', subject?: string) {
+  const fact = text.trim();
+  if (!fact) return null;
+  // Repeating something counts it rather than discarding it, which is what makes
+  // a recurring topic visible without anything having to classify one.
+  const { memories, created, record } = rememberInto(getMemories(), { text: fact, kind, subject, id: randomUUID(), now: new Date().toISOString() });
+  setMemories(pruneMemories(memories, MAX_MEMORIES));
+  return { created, record };
+}
+
+// Assembled per message: identity-shaping records always, everything else only
+// when it relates to what was just said.
+function profileSummary(message: string) {
   const profile = getProfile();
   const lines: string[] = [];
   if (profile.nickname.trim()) lines.push(`They go by ${profile.nickname.trim()}.`);
   if (profile.occupation.trim()) lines.push(`Their work: ${profile.occupation.trim()}.`);
   if (profile.about.trim()) lines.push(profile.about.trim());
-  const memories = getMemories();
-  if (memories.length) lines.push(`Things you have learned about them: ${memories.map(memory => memory.text).join('; ')}.`);
+  const memoryBlock = formatMemoryPrompt(selectMemories(getMemories(), message), getSessions());
+  if (memoryBlock) lines.push(memoryBlock);
   return lines.length ? `About the user: ${lines.join(' ')}` : '';
 }
 
@@ -565,14 +606,14 @@ function advanceMood(latest: string, history: { role?: string; content?: string 
   return { irritation, ego, goodnight };
 }
 
-function chatSystemPrompt({ irritation, ego, goodnight }: { irritation: number; ego: number; goodnight: 'said' | 'after' | 'none' }) {
+function chatSystemPrompt({ irritation, ego, goodnight, latestMessage }: { irritation: number; ego: number; goodnight: 'said' | 'after' | 'none'; latestMessage: string }) {
   const now = zonedNow(CHAT_TIMEZONE);
   const weekday = new Intl.DateTimeFormat('en-US', { weekday: 'long' }).format(now);
   const character = getCharacter();
   return [
     character.identity,
     `Today is ${weekday}, ${localDateKey(now)}, in the user's timezone (${CHAT_TIMEZONE}).`,
-    profileSummary(),
+    profileSummary(latestMessage),
     feedbackSummary(),
     keptSummary(now),
     'Answer questions about what is coming up from that list, and never say nothing is saved without checking it first.',
@@ -621,9 +662,14 @@ function runChatTool(call: ToolCall): string {
   if (name === 'remember_about_user') {
     const fact = typeof args.fact === 'string' ? args.fact.trim() : '';
     if (!fact) return JSON.stringify({ error: 'fact is required.' });
-    const saved = addMemory(fact);
-    console.log(`[ai] ${saved ? 'remembered' : 'already knew'}: "${fact}"`);
-    return JSON.stringify(saved ? { saved: true, fact } : { saved: false, reason: 'Already remembered.' });
+    const kind = MEMORY_KINDS.includes(args.kind as MemoryKind) ? args.kind as MemoryKind : 'fact';
+    const subject = typeof args.subject === 'string' && args.subject.trim() ? args.subject.trim() : undefined;
+    const saved = addMemory(fact, kind, subject);
+    if (!saved) return JSON.stringify({ error: 'fact is required.' });
+    console.log(`[ai] ${saved.created ? 'remembered' : `heard again (${saved.record.mentions}x)`} [${kind}]: "${fact}"`);
+    // Being told it is already known is useful to the model — it stops it
+    // announcing a discovery when the user has merely repeated themselves.
+    return JSON.stringify({ saved: true, known: !saved.created, mentions: saved.record.mentions, kind });
   }
   if (name !== 'create_kept_item') return JSON.stringify({ error: `Unknown tool "${name}".` });
   const title = typeof args.title === 'string' ? args.title.trim() : '';
@@ -731,7 +777,7 @@ async function ollamaChat(messages: { role: string; content: string }[], config:
   const started = Date.now();
   const startOfToday = localDateKey(zonedNow(CHAT_TIMEZONE));
   const hasItems = getKept().some(item => item.date >= startOfToday);
-  const conversation: OllamaMessage[] = [{ role: 'system', content: chatSystemPrompt(mood) }, ...withoutStaleDenials(messages, hasItems)];
+  const conversation: OllamaMessage[] = [{ role: 'system', content: chatSystemPrompt({ ...mood, latestMessage: latest }) }, ...withoutStaleDenials(messages, hasItems)];
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
     const message = await ollamaPost(conversation, config);
     if (message.tool_calls?.length) {
@@ -875,6 +921,13 @@ app.whenReady().then(() => {
       return new Response('Model file not available', { status: 404 });
     }
     try {
+      // The manifest is rewritten in flight so expressions sitting unreferenced
+      // on disk still reach the runtime. Everything else is served untouched.
+      if (target.toLowerCase().endsWith('.model3.json')) {
+        const { model, added } = withDiscoveredExpressions(JSON.parse(readFileSync(target, 'utf8')), path.dirname(target));
+        if (added) console.log(`[live2d] model declared no expressions; found ${added} on disk`);
+        return new Response(JSON.stringify(model), { headers: { 'Content-Type': 'application/json' } });
+      }
       return await net.fetch(pathToFileURL(target).toString());
     } catch (error) {
       console.error(`[haru-model] failed to read ${target} (requested as ${request.url}):`, error);
@@ -894,7 +947,9 @@ app.whenReady().then(() => {
   ipcMain.handle('profile:get', () => getProfile());
   ipcMain.handle('profile:set', (_e, profile: Profile) => { store.set('profile', profile); return getProfile(); });
   ipcMain.handle('memory:list', () => getMemories());
-  ipcMain.handle('memory:add', (_e, text: string) => { addMemory(text); return getMemories(); });
+  ipcMain.handle('memory:add', (_e, text: string, kind: MemoryKind = 'fact') => { addMemory(text, kind); return getMemories(); });
+  ipcMain.handle('memory:sessions', () => getSessions());
+  ipcMain.handle('memory:forgetSessions', () => { store.set('memory.sessions', []); return []; });
   ipcMain.handle('memory:remove', (_e, id: string) => { setMemories(getMemories().filter(memory => memory.id !== id)); return getMemories(); });
   ipcMain.handle('memory:clear', () => { setMemories([]); return getMemories(); });
   ipcMain.handle('character:get', () => getCharacter());
@@ -928,6 +983,20 @@ app.whenReady().then(() => {
     const next = { ...mood, irritation: nextIrritation(mood.irritation, event), ego: nextEgo(mood.ego, event) };
     setMood(next);
     nudgeVitals(reaction === 'down' ? 'criticised' : 'praised');
+    // Sent straight out rather than waiting on a classification: the reaction
+    // already says exactly how she should take it, and the face should land with
+    // the click rather than a second later.
+    if (reaction === 'down') {
+      broadcastBeat({ emotion: 'annoyed', confidence: 0.95, energy: 0.45, intent: 'dismiss', focus: 'user' }, 'stare');
+    } else {
+      lastPraiseWasSmug = !lastPraiseWasSmug;
+      broadcastBeat(
+        lastPraiseWasSmug
+          ? { emotion: 'smug', confidence: 0.95, energy: 0.65, intent: 'tease', focus: 'user' }
+          : { emotion: 'happy', confidence: 0.95, energy: 0.8, intent: 'celebrate', focus: 'user' },
+        'nod',
+      );
+    }
     return next;
   });
   ipcMain.handle('mood:get', () => getMood());

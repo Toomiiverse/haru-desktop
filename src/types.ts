@@ -9,9 +9,12 @@ export type EmotionName = 'neutral' | 'happy' | 'curious' | 'smug' | 'annoyed' |
 export type Intent = 'listen' | 'explain' | 'tease' | 'dismiss' | 'celebrate' | 'soothe';
 export type FocusTarget = 'user' | 'self' | 'task' | 'away';
 export interface Emotion { emotion: EmotionName; confidence: number; energy: number; intent: Intent; focus: FocusTarget; }
+export interface Beat { emotion: Emotion; gesture?: 'nod' | 'shake' | 'stare'; }
 export interface KeptItem { id: string; title: string; date: string; time?: string; kind: 'reminder' | 'event'; done: boolean; googleEventId?: string; }
 export interface GoogleStatus { hasCredentials: boolean; connected: boolean; email?: string; lastSync?: string; lastError?: string; }
 export interface Character { identity: string; style: string; }
 export interface Profile { nickname: string; occupation: string; about: string; }
-export interface Memory { id: string; text: string; createdAt: string; }
+export type MemoryKind = 'preference' | 'relationship' | 'event' | 'fact';
+export interface Memory { id: string; text: string; kind: MemoryKind; subject?: string; createdAt: string; lastSeenAt: string; mentions: number; }
+export interface SessionSummary { day: string; summary: string; createdAt: string; }
 export interface ProviderConfig { provider: 'ollama' | 'openai' | 'xai'; model: string; endpoint: string; temperature: number; }

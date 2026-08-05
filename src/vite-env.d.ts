@@ -11,7 +11,9 @@ interface Window {
     profile: { get(): Promise<import('./types').Profile>; set(profile: import('./types').Profile): Promise<import('./types').Profile> };
     memory: {
       list(): Promise<import('./types').Memory[]>;
-      add(text: string): Promise<import('./types').Memory[]>;
+      add(text: string, kind?: import('./types').MemoryKind): Promise<import('./types').Memory[]>;
+      sessions(): Promise<import('./types').SessionSummary[]>;
+      forgetSessions(): Promise<import('./types').SessionSummary[]>;
       remove(id: string): Promise<import('./types').Memory[]>;
       clear(): Promise<import('./types').Memory[]>;
       onChange(callback: (items: import('./types').Memory[]) => void): () => void;
@@ -27,7 +29,7 @@ interface Window {
       onChange(callback: (status: import('./types').GoogleStatus) => void): () => void;
     };
     live2d: { import(): Promise<Live2DModel | null>; get(): Promise<Live2DModel | null>; remove(): Promise<void>; onChange(callback: (model: Live2DModel | null) => void): () => void };
-    life: { onTick(callback: (payload: import('./types').LifeTick) => void): () => void; onEmotion(callback: (emotion: import('./types').Emotion) => void): () => void };
+    life: { onTick(callback: (payload: import('./types').LifeTick) => void): () => void; onEmotion(callback: (beat: import('./types').Beat) => void): () => void };
     companion: {
       moveBy(dx: number, dy: number): Promise<void>;
       resizeBy(factor: number): Promise<void>;

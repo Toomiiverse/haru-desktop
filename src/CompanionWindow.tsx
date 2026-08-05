@@ -1,7 +1,8 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { StageFailureBoundary } from './components';
 import type { Live2DModelHandle } from './components/Live2DCanvas';
-import { ACTION_SHAPES, emotionHoldMs, expressionMoodFor, gazeForAction, pickExpression, resolveGaze, type ActionShape, type Gaze } from './companion/behaviour';
+import { ACTION_SHAPES, emotionHoldMs, expressionForEmotion, gazeForAction, GESTURE_DURATION_MS, pickExpression, resolveGaze, type ActionShape, type Gaze, type Gesture } from './companion/behaviour';
+import { attachParameterLayer } from './companion/parameters';
 import type { Emotion, Vitals } from './types';
 
 // Only used until the first life tick arrives, a few seconds after launch.
@@ -17,6 +18,7 @@ export function CompanionWindow() {
 
   const handleReady = useCallback((handle: Live2DModelHandle | null) => {
     modelHandle.current = handle;
+    if (handle) attachParameterLayer(handle, gesture);
     // Expression names vary per model, so they are read off the loaded model
     // rather than assumed; behaviour matches against whatever is actually here.
     const definitions = (handle as unknown as { internalModel?: { motionManager?: { expressionManager?: { definitions?: { Name?: string }[] } } } })?.internalModel?.motionManager?.expressionManager?.definitions;
@@ -56,12 +58,21 @@ export function CompanionWindow() {
   // A reading applies immediately, then fades, so an emotional beat colours the
   // next few seconds rather than latching until the next message.
   const emotion = useRef<{ value: Emotion; until: number; holdMs: number } | null>(null);
-  useEffect(() => window.haru?.life.onEmotion(value => {
+  const gesture = useRef<{ name: Gesture; startedAt: number } | null>(null);
+  useEffect(() => window.haru?.life.onEmotion(({ emotion: value, gesture: name }) => {
     const holdMs = emotionHoldMs(value);
     emotion.current = { value, until: performance.now() + holdMs, holdMs };
-    const expression = pickExpression(expressionMoodFor(value), expressions.current);
+    if (name) gesture.current = { name, startedAt: performance.now() };
+    const expression = expressionForEmotion(value, expressions.current);
     if (expression) modelHandle.current?.expression(expression);
   }), []);
+
+  // Without this she keeps whichever face she last pulled — one happy reply and
+  // she sat on heart eyes indefinitely. Expressions are a beat, not a state.
+  const clearExpression = useCallback(() => {
+    const manager = (modelHandle.current as unknown as { internalModel?: { motionManager?: { expressionManager?: { resetExpression?(): void } } } })?.internalModel?.motionManager?.expressionManager;
+    manager?.resetExpression?.();
+  }, []);
 
   useEffect(() => window.haru?.life.onTick(({ vitals, action: name }) => {
     life.current = { ...life.current, vitals };
@@ -85,8 +96,11 @@ export function CompanionWindow() {
       // grip instead of dropping off a cliff.
       const feeling = emotion.current;
       const remaining = feeling ? feeling.until - performance.now() : 0;
-      if (feeling && remaining <= 0) emotion.current = null;
+      if (feeling && remaining <= 0) { emotion.current = null; clearExpression(); }
       const emotionStrength = feeling && remaining > 0 ? Math.min(1, remaining / (feeling.holdMs * 0.5)) : 0;
+
+      const playing = gesture.current;
+      if (playing && performance.now() - playing.startedAt >= GESTURE_DURATION_MS[playing.name]) gesture.current = null;
 
       const target = resolveGaze({
         cursor: cursor.current,
@@ -96,6 +110,7 @@ export function CompanionWindow() {
         idleSeconds: life.current.idleSeconds,
         emotion: feeling?.value ?? null,
         emotionStrength,
+        gesture: gesture.current?.name ?? null,
       });
       // Eased toward rather than set: the model's own focus controller adds its
       // own smoothing, and stacking a little here keeps fast cursor moves from

@@ -1,6 +1,6 @@
 import { Component, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Check, ChevronLeft, ChevronRight, CircleDot, Import, MessageSquarePlus, Plus, Sparkles, ThumbsDown, ThumbsUp, Trash2, X } from 'lucide-react';
-import type { Character, GoogleStatus, KeptItem, Memory, Message, Profile, ProviderConfig, Reaction } from './types';
+import type { Character, GoogleStatus, KeptItem, Memory, MemoryKind, Message, Profile, ProviderConfig, Reaction, SessionSummary } from './types';
 import { buildMonthGrid, dayLabel, monthLabel, toISODate } from './date';
 export class StageFailureBoundary extends Component<{ children: ReactNode; onError(message: string): void }, { failed: boolean }> { state = { failed: false }; componentDidCatch(error: Error) { this.props.onError(error.message || 'Haru could not start the Live2D renderer.'); } render() { return this.state.failed ? null : this.props.children; } static getDerivedStateFromError() { return { failed: true }; } }
 
@@ -8,16 +8,28 @@ export function Topbar({ characterOpen, profileOpen, settingsOpen, canStartNewCh
   return <header className="topbar"><div className="wordmark">はる <span>· Haru</span></div><div className="connection"><i/><span>local companion</span></div><div className="top-actions"><button className="pill" onClick={onNewChat} disabled={!canStartNewChat} title="Archive this conversation and start fresh"><MessageSquarePlus size={13}/> New chat</button><button className={profileOpen ? 'pill selected' : 'pill'} onClick={onProfile}>You</button><button className={characterOpen ? 'pill selected' : 'pill'} onClick={onCharacter}>Character</button><button className={settingsOpen ? 'pill selected' : 'pill'} onClick={onSettings}>Setup</button></div></header>;
 }
 
+// Grouped because an undifferentiated list reads as trivia, while "how they like
+// things" is the part that actually shapes how she talks.
+const MEMORY_GROUPS: [MemoryKind, string][] = [
+  ['preference', 'How you like things'],
+  ['relationship', 'People and pets'],
+  ['event', 'What’s going on'],
+  ['fact', 'Other things'],
+];
+
 export function ProfileDrawer({ onClose }: { onClose(): void }) {
   const [profile, setProfile] = useState<Profile>({ nickname: '', occupation: '', about: '' });
   const [memories, setMemories] = useState<Memory[]>([]);
+  const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [draft, setDraft] = useState('');
+  const [draftKind, setDraftKind] = useState<MemoryKind>('preference');
   const [loaded, setLoaded] = useState(false);
   const [saved, setSaved] = useState(false);
   useEffect(() => {
     if (!window.haru) return;
     window.haru.profile.get().then(current => { setProfile(current); setLoaded(true); });
     window.haru.memory.list().then(setMemories);
+    window.haru.memory.sessions().then(setSessions);
     // Haru writes memories mid-conversation, so the list follows along rather
     // than going stale while the drawer sits open.
     return window.haru.memory.onChange(setMemories);
@@ -33,7 +45,7 @@ export function ProfileDrawer({ onClose }: { onClose(): void }) {
     const text = draft.trim();
     if (!text) return;
     setDraft('');
-    setMemories(await window.haru!.memory.add(text));
+    setMemories(await window.haru!.memory.add(text, draftKind));
   }
 
   const edit = (field: keyof Profile) => (event: { target: { value: string } }) => setProfile(current => ({ ...current, [field]: event.target.value }));
@@ -44,14 +56,30 @@ export function ProfileDrawer({ onClose }: { onClose(): void }) {
       <textarea className="short" value={profile.about} disabled={!loaded} onChange={edit('about')} placeholder="Anything else worth knowing — how you like to be spoken to, what you're working on, who's in your life."/>
     </div>
     <div className="field"><h2>What Haru remembers{memories.length > 0 && <span className="kept-count">{memories.length}</span>}</h2>
-      <p>Picked up as you chat. Remove anything you would rather it forgot.</p>
+      <p>Picked up as you chat. Anything raised repeatedly is marked, since she treats those as things you keep coming back to.</p>
       {memories.length === 0
         ? <p className="nothing">Nothing remembered yet.</p>
-        : <ul className="memory-list">{memories.map(memory => <li key={memory.id}><span>{memory.text}</span><button className="remove-model" onClick={async () => setMemories(await window.haru!.memory.remove(memory.id))} aria-label={`Forget: ${memory.text}`}><Trash2 size={12}/></button></li>)}</ul>}
+        : MEMORY_GROUPS.map(([kind, label]) => {
+            const group = memories.filter(memory => memory.kind === kind);
+            if (!group.length) return null;
+            return <div key={kind} className="memory-group"><h3>{label}</h3>
+              <ul className="memory-list">{group.map(memory => <li key={memory.id}>
+                <span>{memory.text}{memory.subject && <em> · {memory.subject}</em>}</span>
+                {memory.mentions >= 3 && <span className="recurring" title={`Mentioned ${memory.mentions} times`}>×{memory.mentions}</span>}
+                <button className="remove-model" onClick={async () => setMemories(await window.haru!.memory.remove(memory.id))} aria-label={`Forget: ${memory.text}`}><Trash2 size={12}/></button>
+              </li>)}</ul></div>;
+          })}
       <div className="row-actions">
         <input value={draft} onChange={event => setDraft(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); void addMemory(); } }} placeholder="Add something yourself…"/>
+        <select value={draftKind} onChange={event => setDraftKind(event.target.value as MemoryKind)}>{MEMORY_GROUPS.map(([kind, label]) => <option key={kind} value={kind}>{label}</option>)}</select>
         <button className="ghost" disabled={!draft.trim()} onClick={addMemory}>Add</button>
       </div>
+    </div>
+    <div className="field"><h2>Past conversations{sessions.length > 0 && <span className="kept-count">{sessions.length}</span>}</h2>
+      <p>A line kept from each day, which is what lets her refer back to something you talked about before.</p>
+      {sessions.length === 0
+        ? <p className="nothing">Nothing from previous days yet — these are written when a conversation is archived.</p>
+        : <ul className="memory-list">{sessions.slice().reverse().map(session => <li key={session.day}><span><b>{session.day}</b> — {session.summary}</span></li>)}</ul>}
     </div>
     <div className="drawer-foot">
       <button className="ghost" disabled={!memories.length} onClick={async () => setMemories(await window.haru!.memory.clear())}>Forget everything</button>

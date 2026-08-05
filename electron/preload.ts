@@ -7,12 +7,14 @@ type KeptItem = { id: string; title: string; date: string; time?: string; kind: 
 type GoogleStatus = { hasCredentials: boolean; connected: boolean; email?: string; lastSync?: string; lastError?: string };
 type Character = { identity: string; style: string };
 type Profile = { nickname: string; occupation: string; about: string };
-type Memory = { id: string; text: string; createdAt: string };
+type Memory = { id: string; text: string; kind: string; subject?: string; createdAt: string; lastSeenAt: string; mentions: number };
+type SessionSummary = { day: string; summary: string; createdAt: string };
 type ChatResult = { content: string; ignored: boolean; irritation: number; ego: number };
 type Mood = { irritation: number; ego: number };
 type Vitals = { energy: number; happiness: number; curiosity: number; affection: number; sleepiness: number; stress: number; focus: number };
 type LifeTick = { vitals: Vitals; action: string | null; night: boolean };
 type Emotion = { emotion: string; confidence: number; energy: number; intent: string; focus: string };
+type Beat = { emotion: Emotion; gesture?: 'nod' | 'shake' | 'stare' };
 
 contextBridge.exposeInMainWorld('haru', {
   settings: { get: (key: string) => ipcRenderer.invoke('settings:get', key), set: (key: string, value: unknown) => ipcRenderer.invoke('settings:set', key, value) },
@@ -55,7 +57,9 @@ contextBridge.exposeInMainWorld('haru', {
   },
   memory: {
     list: () => ipcRenderer.invoke('memory:list') as Promise<Memory[]>,
-    add: (text: string) => ipcRenderer.invoke('memory:add', text) as Promise<Memory[]>,
+    add: (text: string, kind?: string) => ipcRenderer.invoke('memory:add', text, kind) as Promise<Memory[]>,
+    sessions: () => ipcRenderer.invoke('memory:sessions') as Promise<SessionSummary[]>,
+    forgetSessions: () => ipcRenderer.invoke('memory:forgetSessions') as Promise<SessionSummary[]>,
     remove: (id: string) => ipcRenderer.invoke('memory:remove', id) as Promise<Memory[]>,
     clear: () => ipcRenderer.invoke('memory:clear') as Promise<Memory[]>,
     onChange: (callback: (items: Memory[]) => void) => {
@@ -95,8 +99,8 @@ contextBridge.exposeInMainWorld('haru', {
       ipcRenderer.on('life:tick', listener);
       return () => ipcRenderer.removeListener('life:tick', listener);
     },
-    onEmotion: (callback: (emotion: Emotion) => void) => {
-      const listener = (_event: Electron.IpcRendererEvent, emotion: Emotion) => callback(emotion);
+    onEmotion: (callback: (beat: Beat) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, beat: Beat) => callback(beat);
       ipcRenderer.on('emotion:changed', listener);
       return () => ipcRenderer.removeListener('emotion:changed', listener);
     },
