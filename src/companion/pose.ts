@@ -60,6 +60,28 @@ export function blendPoses(entries: WeightedPose[]): Pose {
   return result;
 }
 
+/**
+ * The face she wears when nothing else is happening.
+ *
+ * Rigs are drawn at rest with a pleasant neutral — a slight smile, open brows —
+ * because that is what suits most characters. It does not suit this one: she
+ * spent a whole conversation demanding to know whether her nagging had been
+ * wasted while wearing a gentle smile, and the mismatch reads as the face not
+ * being connected to the voice at all.
+ *
+ * Applied continuously underneath everything else rather than as an expression,
+ * because expressions are beats that end. This is what she looks like between
+ * them. Emotional poses still layer on top and can pull the mouth back up, so a
+ * genuine laugh is not blocked by it — it just starts from further down.
+ */
+export const RESTING: Pose = {
+  smile: -0.45,
+  browsRaised: -0.3,
+  // A multiplier, so this narrows the eyes without preventing a blink from
+  // closing them completely.
+  eyesOpen: 0.88,
+};
+
 // Named so the vocabulary reads as behaviour rather than as parameter soup.
 export const POSES: Record<string, Pose> = {
   smile: { smile: 0.45, eyeSmile: 0.4, browsRaised: 0.1 },
@@ -78,7 +100,17 @@ export const POSES: Record<string, Pose> = {
   blink: { eyesOpen: 0 },
   sparkle: { eyeSmile: 0.55, browsRaised: 0.3, smile: 0.3 },
   narrow: { eyesOpen: 0.55, browsRaised: -0.35 },
+  // Swearing at you. Eyes down to a slit, brows hard down, mouth set, and leaning
+  // in rather than back — the difference between being cross and being cross
+  // with someone in particular.
+  seething: { eyesOpen: 0.32, browsRaised: -0.7, smile: -0.6, lean: 0.2, eyeSmile: -0.3 },
   upset: { smile: -0.4, browsRaised: -0.45, eyesOpen: 0.8 },
+  // Being prodded. Pulls back and away rather than making a face about it — the
+  // point is that the click lands on a body, not just on a mood.
+  flinch: { lean: -0.55, eyesOpen: 0.3, browsRaised: 0.45, mouthOpen: 0.3, headTilt: -6 },
+  // The same contact once she has stopped being surprised by it: braced and
+  // narrowed instead of startled.
+  recoil: { lean: -0.4, eyesOpen: 0.5, browsRaised: -0.5, smile: -0.5, headTilt: 5 },
 };
 
 // How each behaviour is shaped over time: how long it lasts, and how sharply it
@@ -98,7 +130,13 @@ export const POSE_TIMING: Record<string, { durationMs: number; attack: number }>
   blink: { durationMs: 420, attack: 0.35 },
   sparkle: { durationMs: 1800, attack: 0.2 },
   narrow: { durationMs: 2000, attack: 0.3 },
+  // Longer than the others and quick to arrive: it should still be on her face
+  // by the end of the sentence that earned it.
+  seething: { durationMs: 4200, attack: 0.12 },
   upset: { durationMs: 2600, attack: 0.25 },
+  // Sharp in, quick out. A flinch that eases in is not a flinch.
+  flinch: { durationMs: 700, attack: 0.08 },
+  recoil: { durationMs: 900, attack: 0.1 },
 };
 
 /**

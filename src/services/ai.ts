@@ -20,7 +20,9 @@ export function getProvider(config: ProviderConfig): AIProvider {
   }
 }
 
-export async function testConnection(endpoint: string): Promise<string[]> {
+export async function testConnection(endpoint: string, provider?: string): Promise<string[]> {
   if (!window.haru) throw new Error('Testing a connection requires the desktop app.');
-  return window.haru.ai.test(endpoint);
+  // The provider decides which dialect to ask in — Ollama's /api/tags or the
+  // OpenAI /models list — so it has to travel with the endpoint.
+  return window.haru.ai.test(endpoint, provider);
 }

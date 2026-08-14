@@ -1,7 +1,63 @@
 .model-row{display:flex;align-items:center;gap:7px;padding:10px 12px;border:1px dashed #4a4563;border-radius:10px;background:#171927;color:#a8cfb4}.model-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:12px Karla,sans-serif;color:#efebf2}.model-name.muted{color:#878cab}.import-model,.remove-model{flex:none;display:flex;align-items:center;gap:5px;background:#f0a8be;color:#14162b;border:0;border-radius:6px;padding:6px 8px;font:10px Karla,sans-serif;font-weight:600;cursor:pointer}.remove-model{background:transparent;color:#878cab;border:1px solid #4a4563}.import-model:disabled{opacity:.55}.live2d-canvas-host{position:absolute;inset:0}.live2d-canvas-host canvas{width:100%!important;height:100%!important}.live2d-canvas-host small{position:absolute;inset:0;display:grid;place-items:center;color:#a8cfb4;font:10px 'JetBrains Mono'}
 
 html[data-view="companion"],html[data-view="companion"] body{background:transparent;min-width:0}
-.companion-stage{position:fixed;inset:0;cursor:grab;-webkit-user-select:none;user-select:none}
-.companion-stage:active{cursor:grabbing}
+/* The stage fills the window so the canvas can, but it no longer takes pointer
+   events itself: the window is far wider than she is and mostly transparent, so
+   dragging and poking used to land on empty air well away from her. The margin
+   is now inert — the window still absorbs those clicks, it just ignores them. */
+.companion-stage{position:fixed;inset:0;-webkit-user-select:none;user-select:none;pointer-events:none}
+
+/* The part of the window that is actually her. Anchored to the bottom because
+   she is, and stopping short of the top so the caption above her head can be
+   clicked, and read, without dragging her across the desk. */
+.companion-hitbox{
+  position:absolute;bottom:0;left:50%;transform:translateX(-50%);
+  width:58%;height:88%;
+  pointer-events:auto;cursor:grab}
+.companion-hitbox:active{cursor:grabbing}
 .companion-stage canvas{-webkit-user-drag:none}
 .companion-error{position:absolute;inset:8px;display:grid;place-items:center;padding:12px;text-align:center;background:#171927e6;color:#f0a8be;font:10px 'JetBrains Mono';line-height:1.5;border-radius:10px}
+
+/* What she is saying, above her head. Anchored to the top and centred, with the
+   model scaled to 88% of the stage and pinned to the bottom, so it lands in the
+   headroom above her rather than across her face. max-height keeps a long reply
+   from swallowing the whole window; it scrolls inside instead. */
+.companion-caption{position:absolute;top:0;left:0;right:0;display:flex;justify-content:center;pointer-events:none;padding:6px 6px 0}
+.companion-caption span{
+  /* Narrow on purpose. Her window is far wider than she is, and a bubble allowed
+     to fill it stretches into a single long line that reads worse than a taller,
+     narrower block — and looks like a banner across the desktop rather than
+     something she is saying. Capped in ch so it holds a sensible line length
+     whatever the window is scaled to. */
+  pointer-events:auto;width:max-content;max-width:min(62%, 30ch);
+  /* Three lines, and no taller. There is only about 130px of clear space above
+     her head, and a box allowed to grow to fit a whole reply covered her face
+     entirely — which defeats the point of having her on screen at all. Long
+     lines scroll within this instead, so it reads like a game subtitle
+     advancing rather than a wall of text parked over the character. */
+  max-height:calc(3 * 1.45em + 16px);overflow-y:auto;scrollbar-width:none;
+  /* Backdrop rather than a solid fill: she is a transparent overlay sitting on
+     whatever is behind her, and an opaque box would read as a floating panel
+     rather than as part of her. */
+  background:#12141fd9;backdrop-filter:blur(6px);
+  border:1px solid #3a3f5aa6;border-radius:12px;
+  padding:8px 11px;color:#efebf2;font:13px/1.45 Karla,sans-serif;
+  text-align:center;text-wrap:pretty;
+  /* Readable against a bright desktop even where the backdrop is thin. */
+  text-shadow:0 1px 3px #000000b3;box-shadow:0 6px 18px #00000059;
+  animation:caption-in .18s ease-out}
+@keyframes caption-in{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+/* Both halves are inline and non-italic; <i> is only being used as a neutral
+   inline wrapper so the two runs reflow as one paragraph. The untyped half holds
+   the layout open at zero opacity, which is what stops the bubble resizing on
+   every character and jittering the whole overlay. */
+.companion-caption i{font-style:normal}
+.companion-caption .untyped{opacity:0}
+/* The scrollbar would sit over the text in a box this small. */
+.companion-caption span::-webkit-scrollbar{display:none}
+/* Takes no space and shows nothing; it exists only as something to scroll to. */
+.companion-caption .caret{display:inline-block;width:0;height:1em;vertical-align:text-bottom}
+
+/* The 3D stage. Fills the window the same way the Live2D canvas does, and is
+   equally transparent — the renderer clears to alpha 0, so every pixel she does
+   not cover shows the desktop through it. */

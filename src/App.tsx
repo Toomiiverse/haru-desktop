@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
-import { CharacterDrawer, Composer, Kept, MessageBubble, ProfileDrawer, SettingsDrawer, Suggestion, Topbar } from './components';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { JournalDrawer, CharacterDrawer, Composer, Kept, MessageBubble, ProfileDrawer, SettingsDrawer, Suggestion, Topbar, WardrobeDrawer } from './components';
 import { getProvider, testConnection } from './services/ai';
 import { randomGloat, randomRetort } from './retorts';
 import type { KeptItem, Message, ProviderConfig, Reaction } from './types';
@@ -8,7 +8,7 @@ const greeting: Message = { id: 'greeting', role: 'assistant', time: 'now', cont
 const defaultProviderConfig: ProviderConfig = { provider: 'ollama', model: 'qwen2.5:14b', endpoint: 'http://localhost:11434', temperature: 0.7 };
 
 export default function App() {
-  const [messages, setMessages] = useState<Message[]>([]); const [hydrated, setHydrated] = useState(false); const [kept, setKept] = useState<KeptItem[]>([]); const [sending, setSending] = useState(false); const [drawer, setDrawer] = useState<'character'|'profile'|'settings'|null>(null); const [live2dModel, setLive2dModel] = useState<{name: string; path: string; url: string} | null>(null); const [importing, setImporting] = useState(false); const [providerConfig, setProviderConfig] = useState<ProviderConfig>(defaultProviderConfig); const [replyingTo, setReplyingTo] = useState<{ id: string; excerpt: string } | null>(null);
+  const [messages, setMessages] = useState<Message[]>([]); const [hydrated, setHydrated] = useState(false); const [kept, setKept] = useState<KeptItem[]>([]); const [sending, setSending] = useState(false); const [page, setPage] = useState<'chat'|'character'|'profile'|'settings'|'journal'>('chat'); const [wardrobeOpen, setWardrobeOpen] = useState(false); const [live2dModel, setLive2dModel] = useState<{name: string; path: string; url: string} | null>(null); const [importing, setImporting] = useState(false); const [providerConfig, setProviderConfig] = useState<ProviderConfig>(defaultProviderConfig); const [replyingTo, setReplyingTo] = useState<{ id: string; excerpt: string } | null>(null);
   useEffect(() => { window.haru?.live2d.get().then(model => { if (model) setLive2dModel(model); }); }, []);
   useEffect(() => { window.haru?.settings.get('ai.config').then(saved => { if (saved) setProviderConfig(current => ({ ...current, ...(saved as Partial<ProviderConfig>) })); }); }, []);
   // Kept items are owned by the main process — the chat tool loop writes to them
@@ -19,6 +19,18 @@ export default function App() {
     return window.haru.kept.onChange(setKept);
   }, []);
   function saveProviderConfig(config: ProviderConfig) { setProviderConfig(config); window.haru?.settings.set('ai.config', config); }
+  // Asking her to change her outfit makes her call show_wardrobe, which lands
+  // here. The panel opens alongside whatever she says about being asked.
+  // Still an overlay, and deliberately the only one left. She opens this herself
+  // mid-conversation; navigating the user off the chat page because she decided
+  // to show them a hat would take the reply they were reading away with it.
+  useEffect(() => window.haru?.wardrobe.onOpen(() => setWardrobeOpen(true)), []);
+  // Things she says without being asked — reacting to being poked in the
+  // companion window. They belong in the transcript like anything else she says,
+  // and without this they exist only as audio and vanish with the volume off.
+  useEffect(() => window.haru?.chat.onInterject(line => {
+    setMessages(current => [...current, { id: crypto.randomUUID(), role: 'assistant' as const, content: line, time: 'now' }]);
+  }), []);
   // Replies land below the fold once the day's history is long enough to scroll,
   // so pin the view to the newest message whenever the list or pending state changes.
   const messagesRef = useRef<HTMLDivElement>(null);
@@ -30,11 +42,33 @@ export default function App() {
   // Bumped whenever the conversation is cleared, so a reply that was already in
   // flight can't be appended to the fresh chat it no longer belongs to.
   const conversation = useRef(0);
+  // She opens rather than waiting to be spoken to — on launch, and again whenever
+  // the conversation is cleared. Main decides whether a line is warranted at all
+  // and returns null when it is not, so the rule about how often she speaks up
+  // lives with the rest of her behaviour rather than in the view.
+  // Which conversation has already been opened. Without this StrictMode's double
+  // mount asks twice, and because main shares one in-flight request both callers
+  // resolve with the same line and both append it — she says it once out loud and
+  // twice on screen. Deduping the generation was not enough; the append needed it too.
+  const openedEpoch = useRef(-1);
+  const askForOpening = useCallback(() => {
+    if (!window.haru) return;
+    const epoch = conversation.current;
+    if (openedEpoch.current === epoch) return;
+    openedEpoch.current = epoch;
+    void window.haru.chat.opening().then(line => {
+      // A conversation cleared while the line was being written is no longer the
+      // one it was written for.
+      if (!line || conversation.current !== epoch) return;
+      setMessages(current => [...current, { id: crypto.randomUUID(), role: 'assistant' as const, content: line, time: 'now' }]);
+    });
+  }, []);
+
   useEffect(() => {
     if (!window.haru) { setHydrated(true); return; }
-    window.haru.chat.getMessages().then(saved => { setMessages(saved); setHydrated(true); });
-    return window.haru.chat.onReset(() => { conversation.current++; setMessages([]); });
-  }, []);
+    window.haru.chat.getMessages().then(saved => { setMessages(saved); setHydrated(true); askForOpening(); });
+    return window.haru.chat.onReset(() => { conversation.current++; setMessages([]); askForOpening(); });
+  }, [askForOpening]);
   async function newChat() {
     if (sending) return;
     if (!window.haru) { conversation.current++; setMessages([]); return; }
@@ -91,14 +125,48 @@ export default function App() {
         : { id: crypto.randomUUID(), role: 'assistant', content: reply.content, time: 'now' }]);
     } catch (error) {
       if (conversation.current !== epoch) return;
-      const detail = error instanceof Error ? error.message : String(error);
-      setMessages(current => [...current, { id: crypto.randomUUID(), role: 'assistant', content: `Couldn't reach ${providerConfig.provider} (${detail}). Check the setup in Setup → Ollama connection.`, time: 'now' }]);
+      // Electron prefixes anything thrown across IPC; it means nothing here and
+      // pushes the part that matters off the end of the line.
+      const detail = (error instanceof Error ? error.message : String(error))
+        .replace(/^Error invoking remote method '[^']+':\s*(Error:\s*)?/, '');
+      // The main process names whichever model actually answered, which is not
+      // always the configured one — a question can be escalated to the remote
+      // model mid-turn, and blaming the local one sent people to check a setting
+      // that was never involved. Only fall back to the configured provider when
+      // the failure happened before a model was ever chosen.
+      const attributed = / at \S+ —/.test(detail);
+      setMessages(current => [...current, {
+        id: crypto.randomUUID(), role: 'assistant', time: 'now',
+        content: attributed ? `Couldn't get an answer — ${detail}` : `Couldn't reach ${providerConfig.provider} (${detail}). Check Setup → Where she thinks.`,
+      }]);
     } finally {
       setSending(false);
     }
   }
   const empty = !messages.length;
+  // Her opening line is a real message, so the conversation stops being empty the
+  // moment she speaks. The starters are still worth offering at that point —
+  // they are what explains that saying something is enough to get it saved.
+  const onlyOpening = messages.length === 1 && messages[0].role === 'assistant';
+  const suggestions = <div className="suggestions"><Suggestion onClick={() => send('Set me a reminder for 8am to take my medication')}>Set a reminder for 8am</Suggestion><Suggestion onClick={() => send('Dentist Thursday at 10, lasts an hour')}>Dentist Thursday at 10</Suggestion><Suggestion onClick={() => send('What have I got coming up?')}>What have I got coming up?</Suggestion></div>;
   async function importLive2d() { if (!window.haru?.live2d) { alert('Live2D import is available in the desktop app.'); return; } setImporting(true); try { const model = await window.haru.live2d.import(); if (model) setLive2dModel(model); } finally { setImporting(false); } }
   async function removeLive2d() { await window.haru?.live2d.remove(); setLive2dModel(null); }
-  return <main className="haru-app"><Topbar characterOpen={drawer==='character'} profileOpen={drawer==='profile'} settingsOpen={drawer==='settings'} canStartNewChat={!!messages.length && !sending} onNewChat={newChat} onCharacter={() => setDrawer(drawer==='character'?null:'character')} onProfile={() => setDrawer(drawer==='profile'?null:'profile')} onSettings={() => setDrawer(drawer==='settings'?null:'settings')}/>{drawer === 'character' && <CharacterDrawer onClose={() => setDrawer(null)}/>} {drawer === 'profile' && <ProfileDrawer onClose={() => setDrawer(null)}/>} {drawer === 'settings' && <SettingsDrawer config={providerConfig} onSave={saveProviderConfig} onTest={testConnection} onClose={() => setDrawer(null)}/>}<div className="haru-body"><section className="chat-panel"><div className="messages" ref={messagesRef}>{empty ? <div className="empty-state"><MessageBubble message={greeting}/><p>Anything that sounds like a task or an appointment gets captured for real — not just talked about.</p><div className="suggestions"><Suggestion onClick={() => send('Set me a reminder for 8am to take my medication')}>Set a reminder for 8am</Suggestion><Suggestion onClick={() => send('Dentist Thursday at 10, lasts an hour')}>Dentist Thursday at 10</Suggestion><Suggestion onClick={() => send('What have I got coming up?')}>What have I got coming up?</Suggestion></div></div> : messages.map(message => <MessageBubble key={message.id} message={message} onReact={reaction => react(message.id, reaction)} onReply={() => setReplyingTo({ id: message.id, excerpt: message.content.replace(/\s+/g, ' ').trim().slice(0, 80) })}/>)}</div><Composer sending={sending} replyingTo={replyingTo} onCancelReply={() => setReplyingTo(null)} onSend={send}/></section><Kept items={kept} onToggle={id => { window.haru ? window.haru.kept.toggle(id) : setKept(items => items.map(item => item.id===id ? {...item, done: !item.done} : item)); }} model={live2dModel} importing={importing} onImport={importLive2d} onRemove={removeLive2d}/></div></main>;
+  const backToChat = () => setPage('chat');
+  // Told on every change; main decides whether it is worth saying anything, and
+  // nearly always decides it is not. Kept here rather than inside setPage's
+  // callers so a page reached any other way still counts as arriving there.
+  useEffect(() => { void window.haru?.ui.page(page); }, [page]);
+  return <main className="haru-app"><Topbar page={page} onNavigate={setPage} canStartNewChat={!!messages.length && !sending} onNewChat={newChat}/>
+    {wardrobeOpen && <WardrobeDrawer onClose={() => setWardrobeOpen(false)}/>}
+    {page === 'character' && <CharacterDrawer onClose={backToChat}/>}
+    {page === 'profile' && <ProfileDrawer onClose={backToChat}/>}
+    {page === 'settings' && <SettingsDrawer config={providerConfig} onSave={saveProviderConfig} onTest={testConnection} onClose={backToChat}/>}
+    {page === 'journal' && <JournalDrawer onClose={backToChat}/>}
+    {page === 'chat' && <div className="haru-body"><section className="chat-panel"><div className="messages" ref={messagesRef}>{empty ? <div className="empty-state"><MessageBubble message={greeting}/><p>Anything that sounds like a task or an appointment gets captured for real — not just talked about.</p>{suggestions}</div> : <>{messages.map(message => <MessageBubble key={message.id} message={message} onReact={reaction => react(message.id, reaction)} onReply={() => setReplyingTo({ id: message.id, excerpt: message.content.replace(/\s+/g, ' ').trim().slice(0, 80) })}/>)}{onlyOpening && <div className="empty-state">{suggestions}</div>}</>}</div><Composer sending={sending} replyingTo={replyingTo} onCancelReply={() => setReplyingTo(null)} onSend={send} onShowPicture={(reaction, saved) => setMessages(current => [...current,
+        // The picture itself goes in as theirs, so there is a record of having
+        // shown it even when she says nothing back — which is the normal case.
+        { id: crypto.randomUUID(), role: 'user' as const, content: `Showed her ${saved.replace(/^.*[\/]/, '')}`, time: 'now' },
+        ...(reaction ? [{ id: crypto.randomUUID(), role: 'assistant' as const, content: reaction, time: 'now' }] : []),
+      ])}/></section><Kept items={kept} onToggle={id => { window.haru ? window.haru.kept.toggle(id) : setKept(items => items.map(item => item.id===id ? {...item, done: !item.done} : item)); }} model={live2dModel} importing={importing} onImport={importLive2d} onRemove={removeLive2d}/></div>}
+  </main>;
 }

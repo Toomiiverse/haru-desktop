@@ -3,9 +3,20 @@ import { contextBridge, ipcRenderer } from 'electron';
 type Live2DModel = { path: string; name: string; url: string };
 type Message = { id: string; role: 'user' | 'assistant'; content: string; time: string };
 type ProviderConfig = { provider: string; model: string; endpoint: string; temperature: number };
-type KeptItem = { id: string; title: string; date: string; time?: string; kind: 'task' | 'event'; done: boolean; googleEventId?: string; googleTaskId?: string };
+type KeptItem = { id: string; title: string; date: string; time?: string; kind: 'task' | 'event'; done: boolean; heardAbout?: string; googleEventId?: string; googleTaskId?: string };
 type GoogleStatus = { hasCredentials: boolean; connected: boolean; email?: string; lastSync?: string; lastError?: string; tasksGranted?: boolean };
 type Character = { identity: string; style: string };
+type ListenConfig = { engine: string; endpoint: string; language: string; autoSend: boolean; wakeWord: boolean; replyWindow: boolean };
+type SearchConfig = { enabled: boolean; provider: string; limit: number; engineId: string; readPages: boolean; place: string };
+type DesktopConfig = { launch: boolean; power: boolean };
+type WatchingConfig = { enabled: boolean; everyMinutes: number; gamesOnly: boolean };
+type ScreenshotConfig = { enabled: boolean; folder: string; quietMinutes: number };
+type VisionConfig = { enabled: boolean; model: string; folder: string };
+type GamingConfig = { enabled: boolean; model: string; quiet: boolean };
+type AniListConfig = { enabled: boolean; username: string };
+type JournalConfig = { enabled: boolean; askHour: number; askUnprompted: boolean };
+type JournalEntry = { id: string; date: string; createdAt: string; updatedAt?: string; text: string; mood?: number; anxiety?: number; energy?: number; sleep?: number; prompted: boolean };
+type RoamConfig = { enabled: boolean; restlessness: number; avoidFullscreen: boolean };
 type Profile = { nickname: string; occupation: string; about: string };
 type Memory = { id: string; text: string; kind: string; subject?: string; createdAt: string; lastSeenAt: string; mentions: number };
 type SessionSummary = { day: string; summary: string; createdAt: string };
@@ -15,25 +26,179 @@ type Vitals = { energy: number; happiness: number; curiosity: number; affection:
 type LifeTick = { vitals: Vitals; action: string | null; night: boolean };
 type Emotion = { emotion: string; confidence: number; energy: number; intent: string; focus: string };
 type Beat = { emotion: Emotion; gesture?: 'nod' | 'shake' | 'stare' };
+type VoiceReference = { clip: string; text: string };
+type WardrobeControl = { id: string; name: string; kind: 'toggle' | 'option'; max: number };
+type VoiceConfig = { engine: string; voice: string; referenceText: string; endpoint: string; language: string; speed: number; volume: number; emotionVoices: Record<string, VoiceReference> };
+type SpeechClip = { turn: number; text: string; audio?: Uint8Array; mime?: string };
 
 contextBridge.exposeInMainWorld('haru', {
   settings: { get: (key: string) => ipcRenderer.invoke('settings:get', key), set: (key: string, value: unknown) => ipcRenderer.invoke('settings:set', key, value) },
+  listen: {
+    get: () => ipcRenderer.invoke('listen:get') as Promise<ListenConfig>,
+    set: (config: ListenConfig) => ipcRenderer.invoke('listen:set', config) as Promise<ListenConfig>,
+    transcribe: (audio: Uint8Array, mime: string) => ipcRenderer.invoke('listen:transcribe', audio, mime) as Promise<string>,
+    onChange: (callback: (config: ListenConfig) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, config: ListenConfig) => callback(config);
+      ipcRenderer.on('listen:changed', listener);
+      return () => ipcRenderer.removeListener('listen:changed', listener);
+    },
+  },
+  search: {
+    get: () => ipcRenderer.invoke('search:get') as Promise<SearchConfig & { hasKey: boolean }>,
+    set: (config: SearchConfig) => ipcRenderer.invoke('search:set', config) as Promise<SearchConfig & { hasKey: boolean }>,
+    setKey: (apiKey: string) => ipcRenderer.invoke('search:setKey', apiKey) as Promise<boolean>,
+    locate: () => ipcRenderer.invoke('search:locate') as Promise<{ place: string; accuracy: number }>,
+    test: () => ipcRenderer.invoke('search:test') as Promise<number>,
+  },
+  roam: {
+    get: () => ipcRenderer.invoke('roam:get') as Promise<RoamConfig>,
+    set: (config: RoamConfig) => ipcRenderer.invoke('roam:set', config) as Promise<RoamConfig>,
+    nudge: () => ipcRenderer.invoke('roam:nudge') as Promise<boolean>,
+  },
+  watching: {
+    get: () => ipcRenderer.invoke('watching:get') as Promise<WatchingConfig>,
+    set: (config: WatchingConfig) => ipcRenderer.invoke('watching:set', config) as Promise<WatchingConfig>,
+  },
+  desktop: {
+    get: () => ipcRenderer.invoke('desktop:get') as Promise<DesktopConfig & { apps: number }>,
+    set: (config: DesktopConfig) => ipcRenderer.invoke('desktop:set', config) as Promise<DesktopConfig & { apps: number }>,
+  },
+  screenshots: {
+    get: () => ipcRenderer.invoke('screenshots:get') as Promise<ScreenshotConfig>,
+    set: (config: ScreenshotConfig) => ipcRenderer.invoke('screenshots:set', config) as Promise<ScreenshotConfig>,
+  },
+  openai: {
+    status: () => ipcRenderer.invoke('openai:status') as Promise<{ hasKey: boolean; ffmpeg: boolean }>,
+    setKey: (apiKey: string) => ipcRenderer.invoke('openai:setKey', apiKey) as Promise<boolean>,
+  },
+  vision: {
+    get: () => ipcRenderer.invoke('vision:get') as Promise<VisionConfig>,
+    set: (config: VisionConfig) => ipcRenderer.invoke('vision:set', config) as Promise<VisionConfig>,
+    show: (note: string) => ipcRenderer.invoke('vision:show', note) as Promise<{ reaction: string | null; saved: string; held?: boolean } | null>,
+    openFolder: () => ipcRenderer.invoke('vision:openFolder') as Promise<void>,
+  },
+  gaming: {
+    get: () => ipcRenderer.invoke('gaming:get') as Promise<GamingConfig>,
+    set: (config: GamingConfig) => ipcRenderer.invoke('gaming:set', config) as Promise<GamingConfig>,
+  },
+  ui: { page: (page: string) => ipcRenderer.invoke('ui:page', page) as Promise<void> },
+  journal: {
+    list: () => ipcRenderer.invoke('journal:list') as Promise<JournalEntry[]>,
+    save: (entry: Partial<JournalEntry> & { text: string }) => ipcRenderer.invoke('journal:save', entry) as Promise<JournalEntry[]>,
+    remove: (id: string) => ipcRenderer.invoke('journal:remove', id) as Promise<JournalEntry[]>,
+    getConfig: () => ipcRenderer.invoke('journal:getConfig') as Promise<JournalConfig>,
+    setConfig: (config: JournalConfig) => ipcRenderer.invoke('journal:setConfig', config) as Promise<JournalConfig>,
+    stats: (range: string) => ipcRenderer.invoke('journal:stats', range),
+    note: () => ipcRenderer.invoke('journal:note'),
+    trend: () => ipcRenderer.invoke('journal:trend') as Promise<{ days: number; mood?: number; anxiety?: number; entries: number }>,
+    onChange: (callback: (entries: JournalEntry[]) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, entries: JournalEntry[]) => callback(entries);
+      ipcRenderer.on('journal:changed', listener);
+      return () => ipcRenderer.removeListener('journal:changed', listener);
+    },
+  },
+  anilist: {
+    get: () => ipcRenderer.invoke('anilist:get') as Promise<AniListConfig>,
+    set: (config: AniListConfig) => ipcRenderer.invoke('anilist:set', config) as Promise<AniListConfig>,
+    test: () => ipcRenderer.invoke('anilist:test') as Promise<number>,
+  },
+  startup: {
+    get: () => ipcRenderer.invoke('startup:get') as Promise<{ autoStart: boolean; shortcut: boolean; packaged: boolean }>,
+    setAutoStart: (enabled: boolean) => ipcRenderer.invoke('startup:setAutoStart', enabled) as Promise<boolean>,
+    createShortcut: () => ipcRenderer.invoke('startup:createShortcut') as Promise<string>,
+  },
   chat: {
     getMessages: () => ipcRenderer.invoke('chat:getMessages') as Promise<Message[]>,
     setMessages: (messages: Message[]) => ipcRenderer.invoke('chat:setMessages', messages),
     getArchive: () => ipcRenderer.invoke('chat:getArchive') as Promise<Record<string, Message[]>>,
     newConversation: () => ipcRenderer.invoke('chat:newConversation') as Promise<void>,
+    opening: () => ipcRenderer.invoke('chat:opening') as Promise<string | null>,
     onReset: (callback: () => void) => {
       const listener = () => callback();
       ipcRenderer.on('chat:reset', listener);
       return () => ipcRenderer.removeListener('chat:reset', listener);
     },
+    // She said something unprompted and has finished saying it, so an answer is
+    // expected. Separate from onInterject because the gap between the two is the
+    // whole point — the microphone must not open while she is still talking.
+    expectAnswer: () => ipcRenderer.invoke('chat:expectAnswer') as Promise<void>,
+    onExpectReply: (callback: () => void) => {
+      const listener = () => callback();
+      ipcRenderer.on('chat:expectReply', listener);
+      return () => ipcRenderer.removeListener('chat:expectReply', listener);
+    },
+    onInterject: (callback: (line: string) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, line: string) => callback(line);
+      ipcRenderer.on('chat:interject', listener);
+      return () => ipcRenderer.removeListener('chat:interject', listener);
+    },
   },
   ai: {
     send: (messages: { role: string; content: string }[], config: ProviderConfig) => ipcRenderer.invoke('ai:send', messages, config) as Promise<ChatResult>,
-    test: (endpoint: string) => ipcRenderer.invoke('ai:test', endpoint) as Promise<string[]>,
+    test: (endpoint: string, provider?: string) => ipcRenderer.invoke('ai:test', endpoint, provider) as Promise<string[]>,
+    defaultEndpoint: (provider: string) => ipcRenderer.invoke('ai:defaultEndpoint', provider) as Promise<string>,
+    verify: (endpoint: string, provider: string, model: string) => ipcRenderer.invoke('ai:verify', endpoint, provider, model) as Promise<{ models: string[]; note: string }>,
+    getEscalate: () => ipcRenderer.invoke('ai:getEscalate') as Promise<{ enabled: boolean; minWords: number; provider: ProviderConfig | null }>,
+    setEscalate: (setting: { enabled: boolean; minWords: number }, provider: ProviderConfig | null) => ipcRenderer.invoke('ai:setEscalate', setting, provider) as Promise<{ enabled: boolean; minWords: number; provider: ProviderConfig | null }>,
+    setKey: (apiKey: string) => ipcRenderer.invoke('ai:setKey', apiKey) as Promise<boolean>,
+    hasKey: () => ipcRenderer.invoke('ai:hasKey') as Promise<boolean>,
     retort: (disliked: string, config: ProviderConfig) => ipcRenderer.invoke('ai:retort', disliked, config) as Promise<string>,
     gloat: (praised: string, config: ProviderConfig) => ipcRenderer.invoke('ai:gloat', praised, config) as Promise<string>,
+  },
+  voice: {
+    get: () => ipcRenderer.invoke('voice:get') as Promise<VoiceConfig>,
+    set: (config: VoiceConfig) => ipcRenderer.invoke('voice:set', config) as Promise<VoiceConfig>,
+    test: (config: VoiceConfig) => ipcRenderer.invoke('voice:test', config) as Promise<string>,
+    stop: () => ipcRenderer.invoke('voice:stop') as Promise<void>,
+    setSpeaking: (speaking: boolean) => ipcRenderer.invoke('voice:speaking', speaking) as Promise<void>,
+    pickClip: () => ipcRenderer.invoke('voice:pickClip') as Promise<string | null>,
+    onClip: (callback: (clip: SpeechClip) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, clip: SpeechClip) => callback(clip);
+      ipcRenderer.on('speech:clip', listener);
+      return () => ipcRenderer.removeListener('speech:clip', listener);
+    },
+    onInsistence: (callback: (factor: number) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, factor: number) => callback(factor);
+      ipcRenderer.on('voice:insistence', listener);
+      return () => ipcRenderer.removeListener('voice:insistence', listener);
+    },
+    onDuck: (callback: (factor: number) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, factor: number) => callback(factor);
+      ipcRenderer.on('voice:duck', listener);
+      return () => ipcRenderer.removeListener('voice:duck', listener);
+    },
+    onStop: (callback: () => void) => {
+      const listener = () => callback();
+      ipcRenderer.on('speech:stop', listener);
+      return () => ipcRenderer.removeListener('speech:stop', listener);
+    },
+    onChange: (callback: (config: VoiceConfig) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, config: VoiceConfig) => callback(config);
+      ipcRenderer.on('voice:changed', listener);
+      return () => ipcRenderer.removeListener('voice:changed', listener);
+    },
+  },
+
+  wardrobe: {
+    get: () => ipcRenderer.invoke('wardrobe:get') as Promise<{ controls: WardrobeControl[]; values: Record<string, number> }>,
+    set: (id: string, value: number) => ipcRenderer.invoke('wardrobe:set', id, value) as Promise<Record<string, number>>,
+    reset: () => ipcRenderer.invoke('wardrobe:reset') as Promise<Record<string, number>>,
+    reportRanges: (ranges: Record<string, { min: number; max: number }>) => ipcRenderer.invoke('wardrobe:ranges', ranges) as Promise<void>,
+    onRefresh: (callback: () => void) => {
+      const listener = () => callback();
+      ipcRenderer.on('wardrobe:refresh', listener);
+      return () => ipcRenderer.removeListener('wardrobe:refresh', listener);
+    },
+    onChange: (callback: (values: Record<string, number>) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, values: Record<string, number>) => callback(values);
+      ipcRenderer.on('wardrobe:changed', listener);
+      return () => ipcRenderer.removeListener('wardrobe:changed', listener);
+    },
+    onOpen: (callback: () => void) => {
+      const listener = () => callback();
+      ipcRenderer.on('wardrobe:open', listener);
+      return () => ipcRenderer.removeListener('wardrobe:open', listener);
+    },
   },
   google: {
     status: () => ipcRenderer.invoke('google:status') as Promise<GoogleStatus>,
@@ -109,10 +274,32 @@ contextBridge.exposeInMainWorld('haru', {
     moveBy: (dx: number, dy: number) => ipcRenderer.invoke('companion:moveBy', dx, dy),
     resizeBy: (factor: number) => ipcRenderer.invoke('companion:resizeBy', factor),
     showMenu: () => ipcRenderer.invoke('companion:showMenu'),
+    poke: (kind: 'poke' | 'right-click') => ipcRenderer.invoke('companion:poke', kind),
+    onSay: (callback: (line: string | null) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, line: string | null) => callback(line);
+      ipcRenderer.on('companion:say', listener);
+      return () => ipcRenderer.removeListener('companion:say', listener);
+    },
+    // Main is carrying the window; this is how the legs find out.
+    onWalking: (callback: (state: { moving: boolean; facing: number }) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, state: { moving: boolean; facing: number }) => callback(state);
+      ipcRenderer.on('companion:walking', listener);
+      return () => ipcRenderer.removeListener('companion:walking', listener);
+    },
+    onWatching: (callback: (gaze: { x: number; y: number } | null) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, gaze: { x: number; y: number } | null) => callback(gaze);
+      ipcRenderer.on('companion:watching', listener);
+      return () => ipcRenderer.removeListener('companion:watching', listener);
+    },
     onCursor: (callback: (point: { x: number; y: number }) => void) => {
       const listener = (_event: Electron.IpcRendererEvent, point: { x: number; y: number }) => callback(point);
       ipcRenderer.on('companion:cursor', listener);
       return () => ipcRenderer.removeListener('companion:cursor', listener);
+    },
+    onPose: (callback: (name: string) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, name: string) => callback(name);
+      ipcRenderer.on('companion:pose', listener);
+      return () => ipcRenderer.removeListener('companion:pose', listener);
     },
     onSetExpression: (callback: (name: string) => void) => {
       const listener = (_event: Electron.IpcRendererEvent, name: string) => callback(name);

@@ -16,6 +16,8 @@ export type BehaviourState = {
   cursor: Gaze;
   /** Set by an idle action: somewhere she has chosen to look instead. */
   wander: Gaze | null;
+  /** Where the screen is, while something is playing fullscreen on it. */
+  watching?: Gaze | null;
   /** 0-1, how far through the current idle action we are. */
   actionProgress: number;
   vitals: Vitals;
@@ -72,6 +74,11 @@ export function resolveGaze(state: BehaviourState): Gaze {
     const target = focusGaze(state.emotion);
     if (target) layers.push({ target, weight: emotionWeight(state.emotion) * state.emotionStrength });
   }
+  // Watching something outweighs the pointer, because that is the whole request:
+  // she is looking at the screen, not tracking a cursor across it. Weighted as a
+  // layer rather than replacing the blend, so she can still be pulled away by a
+  // gesture and still drifts a little instead of locking rigid.
+  if (state.watching) layers.push({ target: state.watching, weight: 6 });
   // A stare outweighs everything else on purpose — it is the one behaviour whose
   // whole point is that she is looking straight at you and not at the pointer.
   if (state.gesture) {

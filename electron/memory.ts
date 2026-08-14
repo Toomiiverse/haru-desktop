@@ -65,6 +65,73 @@ export function isSameMemory(a: string, b: string) {
 }
 
 /**
+ * Whether this is worth keeping at all.
+ *
+ * There was no gate here, and it showed: of eleven things she had chosen to
+ * remember about someone she had talked to for a week, six carried no
+ * information. "They are your user and they exist." "Lives in a city." "They
+ * have finished what they are doing." "They sometimes express themselves with an
+ * 'Oh'." Each one then took a place in the prompt that a real fact could have
+ * had, and crowded out the four that were any use.
+ *
+ * The model cannot be relied on to judge this. Told to remember what matters it
+ * still writes down that the user exists, because a tool it has been given is a
+ * tool it wants to call. So the judgement happens here, on the text, where it
+ * can be measured.
+ *
+ * Written as three things to reject rather than a test of worth. Proving a fact
+ * valuable is not possible from the sentence alone; noticing that it says
+ * nothing usually is.
+ */
+
+/** True of nearly everyone, and therefore true of no one in particular. */
+const UNIVERSAL = /\b(exists?|(is|are) (a|your) (user|person|human)|has feelings|uses? (slang|informal|casual)|appreciat\w+ when thanked|likes? (being )?(thanked|helped)|(is|are) (friendly|polite|nice|kind)|sometimes (say|says|express\w*|use|uses)|express\w* (themsel\w+|him|her)|responds? (well|politely)|communicates)\b/i;
+
+/**
+ * A place with no name in it.
+ *
+ * "Lives in a city" is the shape: grammatically a fact about where someone
+ * lives, carrying nothing that distinguishes them from four billion people.
+ * Named places are exactly the opposite and are caught by namesSomething.
+ */
+const NOWHERE_IN_PARTICULAR = /\blives?\b[^.]{0,20}\b(somewhere|a (city|town|house|flat|place|country)|the (city|country))\b/i;
+
+/**
+ * Describes a moment rather than a person. A memory whose truth expires by
+ * tomorrow is a note, and it will still be in the prompt next month asserting
+ * that they have just finished something.
+ */
+const TRANSIENT = /\b(today|right now|currently|at the moment|just (now|finished|did)|this (morning|afternoon|evening)|tonight|seems?|appears? to be|is (feeling|doing|being)|have finished|has finished|are doing)\b/i;
+
+/**
+ * Something nameable in it — a proper noun, a number, a quoted title.
+ *
+ * This is what rescues "currently reading Oyasumi Punpun Ch. 1" from the
+ * transient rule: the wording is about now, but it names a thing, and knowing
+ * what someone reads outlives the chapter they are on. Without a name, a
+ * sentence about right now is only about right now.
+ */
+function namesSomething(text: string): boolean {
+  // A capital that is not simply the start of the sentence.
+  if (/\S\s+[A-Z][a-z]{2,}/.test(text)) return true;
+  return /\d/.test(text);
+}
+
+export function isWorthRemembering(text: string): boolean {
+  const clean = (text ?? '').trim();
+  if (!clean) return false;
+  // Length turned out to be a bad proxy for worth at every threshold tried.
+  // Three words lost "Allergic to shellfish"; two lost "Vegetarian". Both are
+  // among the most useful things anyone could tell her, and both are shorter
+  // than the junk. So this only requires that there is a word in there at all,
+  // and the vague entries are caught by what they say rather than by size.
+  if (keywords(clean).size < 1) return false;
+  if (UNIVERSAL.test(clean) || NOWHERE_IN_PARTICULAR.test(clean)) return false;
+  if (TRANSIENT.test(clean) && !namesSomething(clean)) return false;
+  return true;
+}
+
+/**
  * Adds a memory, or records another mention of one already held. Returns the
  * updated list and whether this was new, so the caller can tell the model
  * whether it has just learned something or merely repeated itself.

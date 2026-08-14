@@ -23,7 +23,7 @@ const TOKEN_EXPIRY_MARGIN_MS = 60_000;
 
 export type GoogleStatus = { hasCredentials: boolean; connected: boolean; email?: string; lastSync?: string; lastError?: string; tasksGranted?: boolean };
 export type CalendarEvent = { id: string; title: string; date: string; time?: string };
-export type GoogleTask = { id: string; title: string; date: string; done: boolean };
+export type GoogleTask = { id: string; title: string; date: string; done: boolean; completedAt?: string };
 type KeptForSync = { id: string; title: string; date: string; time?: string; kind: 'task' | 'event'; googleEventId?: string };
 
 type StoreLike = Pick<Store<Record<string, unknown>>, 'get' | 'set' | 'delete'>;
@@ -294,7 +294,12 @@ export function taskToItem(task: Record<string, unknown>): GoogleTask | null {
   // shift it by the local offset.
   const due = typeof task.due === 'string' ? task.due.slice(0, 10) : null;
   if (!due || !/^\d{4}-\d{2}-\d{2}$/.test(due)) return null;
-  return { id, title, date: due, done: task.status === 'completed' };
+  const done = task.status === 'completed';
+  // Unlike `due`, this one is a real instant and is kept whole. It is the only
+  // way to know when something ticked off on a phone actually happened, rather
+  // than dating it to whenever the sync got round to noticing.
+  const completedAt = done && typeof task.completed === 'string' ? task.completed : undefined;
+  return { id, title, date: due, done, completedAt };
 }
 
 export async function pullTasks(store: StoreLike, fromDate: string, days: number): Promise<GoogleTask[]> {
