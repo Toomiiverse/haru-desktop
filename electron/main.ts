@@ -1,7 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, type MenuItemConstructorOptions, nativeTheme, net, powerMonitor, protocol, safeStorage, screen, shell, desktopCapturer } from 'electron';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
-import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync, watch, writeFileSync, type FSWatcher } from 'node:fs';
+import { appendFileSync, copyFileSync, existsSync, readdirSync, mkdirSync, readFileSync, statSync, watch, writeFileSync, type FSWatcher } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import AdmZip from 'adm-zip';
@@ -1459,7 +1459,89 @@ function startWindowsHelper() {
   });
   helper.stderr?.on('data', (chunk: Buffer) => console.warn('[helper]', chunk.toString().trim().slice(0, 200)));
   helper.on('exit', code => { console.warn(`[helper] exited (${code})`); helper = null; });
+  // A stream's 'error' with nobody listening is thrown, not logged, and killing
+  // PowerShell a line after writing to it is the ordinary way to produce one.
+  // There is nothing to say about it — the helper is going anyway — but there
+  // has to be a listener, or the goodbye takes the process with it.
+  helper.on('error', error => console.warn('[helper] could not run:', error instanceof Error ? error.message : error));
+  helper.stdin?.on('error', () => {});
   console.log(`[helper] started from ${script}`);
+}
+
+/**
+ * Starting her voice again when it is not there.
+ *
+ * The speech server is a separate program that has always been started by hand
+ * or at login, so quitting it meant she was mute until the next time the machine
+ * was. Nothing in here ever launched it — the only child process this app has
+ * ever spawned is the PowerShell helper — so "restart it by opening Haru" was a
+ * reasonable thing to expect and simply did not exist.
+ *
+ * The .cmd is launched rather than python.exe, and that matters: the wrapper is
+ * what carries PYTHONUTF8, and without it the server answers 200 with a
+ * perfectly well-formed WAV of pure silence. See haru-voice-stack.
+ */
+const VOICE_LAUNCHER = 'start-haru-voice.cmd';
+
+function findVoiceLauncher(): string | null {
+  const saved = store.get('voiceLauncher') as string | undefined;
+  if (saved && existsSync(saved)) return saved;
+  // Top level, not under `voice`, for the dot-path reason that has bitten this
+  // store twice: saving the voice config would wipe anything nested inside it.
+  const roots = ['C:\\GPT-SoVITS', path.join(app.getPath('home'), 'GPT-SoVITS')];
+  for (const root of roots) {
+    if (!existsSync(root)) continue;
+    const here = path.join(root, VOICE_LAUNCHER);
+    if (existsSync(here)) { store.set('voiceLauncher', here); return here; }
+    let entries: string[] = [];
+    try { entries = readdirSync(root); } catch { continue; }
+    for (const entry of entries) {
+      const candidate = path.join(root, entry, VOICE_LAUNCHER);
+      if (existsSync(candidate)) { store.set('voiceLauncher', candidate); return candidate; }
+    }
+  }
+  return null;
+}
+
+/** Any HTTP answer at all means something is there; only a refused connection means nothing is. */
+async function isAnswering(endpoint: string, ms = 1500): Promise<boolean> {
+  try {
+    await net.fetch(`${trimEndpoint(endpoint)}/`, { signal: AbortSignal.timeout(ms) });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function reviveVoiceServer() {
+  const voice = readVoiceConfig(store.get('voice'));
+  if (voice.engine !== 'gpt-sovits') return;
+  // Somebody else's machine is somebody else's to start.
+  if (isRemote(voice.endpoint)) return;
+  if (await isAnswering(voice.endpoint)) { console.log('[voice] the speech server is already up'); return; }
+  const launcher = findVoiceLauncher();
+  if (!launcher) { console.warn(`[voice] nothing at ${voice.endpoint} and no ${VOICE_LAUNCHER} found — she will be silent`); return; }
+  console.log(`[voice] nothing at ${voice.endpoint} — starting ${launcher}`);
+  try {
+    // Detached and unref'd: it outlives this app deliberately, the same way it
+    // does when it starts at login. Killing it on quit would make closing Haru
+    // silently stop a server the user may have been using for something else.
+    spawn('cmd.exe', ['/c', 'start', '""', '/min', launcher], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
+  } catch (error) {
+    console.warn('[voice] could not start it:', error instanceof Error ? error.message : error);
+    return;
+  }
+  // Loading the models takes about eight seconds, so this is worth waiting out
+  // rather than reporting a failure she would recover from on her own.
+  const started = Date.now();
+  for (let waited = 0; waited < 45_000; waited += 2000) {
+    await new Promise(done => setTimeout(done, 2000));
+    if (await isAnswering(voice.endpoint)) {
+      console.log(`[voice] speech server answered after ${((Date.now() - started) / 1000).toFixed(0)}s`);
+      return;
+    }
+  }
+  console.warn('[voice] the speech server did not come up within 45s');
 }
 
 function handleHelperLine(line: string) {
@@ -4816,14 +4898,26 @@ function webDeps(): WebDeps {
   };
 }
 
+/** Why the door is shut, in words, for the panel that has to explain it. */
+let webTrouble = '';
+
 async function startWebDoor() {
   const access = getWebAccess();
   if (!access.enabled || !access.hash) return;
   if (webServer) return;
   try {
     webServer = await startWebServer(DEFAULT_WEB_PORT, webDeps());
+    webTrouble = '';
   } catch (error) {
-    console.warn('[web] could not open the door:', error instanceof Error ? error.message : error);
+    const why = error instanceof Error ? error.message : String(error);
+    // "Check the log" was useless advice twice over: there was no log, and the
+    // real answer was one word. A previous Haru had crashed on the way out and
+    // never exited, so it still held this port — which the panel then reported
+    // as a mysterious failure of the thing the user had just switched on.
+    webTrouble = /EADDRINUSE/i.test(why)
+      ? `Port ${DEFAULT_WEB_PORT} is already taken — most likely another copy of Haru is still running.`
+      : why;
+    console.warn('[web] could not open the door:', why);
   }
 }
 
@@ -5022,6 +5116,7 @@ app.whenReady().then(() => {
       username: access.username,
       hasPassword: Boolean(access.hash),
       running: Boolean(webServer),
+      trouble: webServer ? '' : webTrouble,
       port: webServer?.port ?? DEFAULT_WEB_PORT,
       devices: access.devices.map(device => ({ id: device.id, name: device.name, added: device.added, lastSeen: device.lastSeen })),
     };
@@ -5457,6 +5552,9 @@ app.whenReady().then(() => {
   // is: doing it inside the settings handler means it only ever starts for
   // somebody who opens settings, which is nobody on the second day.
   void startWebDoor();
+  // Her voice is a separate program, and opening Haru is the moment to notice it
+  // is not running.
+  void reviveVoiceServer();
   // Off the boot path: a directory walk per installed game is fast but it is
   // still disk, and nothing needs the answer until they are in a game.
   setTimeout(() => {
@@ -5480,5 +5578,63 @@ app.whenReady().then(() => {
 // Put the machine's volume back before going anywhere. Leaving a user's audio
 // at a third of where they set it, with the app that did it now gone, is the
 // worst failure this feature could have.
-app.on('before-quit', () => { releaseDuck(); helper?.stdin?.write('quit\n'); helper?.kill(); });
+/**
+ * Whether we are on the way out, which changes what a thrown error costs.
+ */
+let quitting = false;
+
+/**
+ * Somewhere to read afterwards.
+ *
+ * There was nowhere at all: no log file, no crash report, and a packaged app has
+ * no console to print to. A fault on shutdown was therefore a dialog with no
+ * text anyone could copy and no record left behind, which is the worst possible
+ * combination for finding out what happened.
+ */
+function noteCrash(kind: string, error: unknown) {
+  const detail = error instanceof Error ? (error.stack ?? error.message) : String(error);
+  const line = `${new Date().toISOString()} [${kind}] ${detail}\n`;
+  console.error(`[crash] ${kind}: ${detail}`);
+  try { appendFileSync(path.join(app.getPath('userData'), 'haru-main.log'), line); } catch { /* there is nothing further to try */ }
+}
+
+/**
+ * An error must never leave a window nobody can close.
+ *
+ * With no handler here, Electron puts up its own modal box and waits for a
+ * click. On the way out there is nobody to click it: the windows have gone and
+ * the box outlives them, so the process sits there for ever — still holding the
+ * single-instance lock, still holding port 8787, and still showing a dialog
+ * titled "Error" that says nothing useful. The next launch then reports that the
+ * web door would not open, which is true, and blames entirely the wrong thing.
+ *
+ * Two instances of that were found running at once.
+ */
+process.on('uncaughtException', error => {
+  noteCrash('uncaught exception', error);
+  if (quitting) app.exit(0);
+});
+process.on('unhandledRejection', reason => noteCrash('unhandled rejection', reason));
+
+app.on('before-quit', () => {
+  quitting = true;
+  // Every one of these is a process or a socket that may already be gone, and
+  // any of them throwing used to take the whole shutdown with it. The helper is
+  // the likeliest: writing to the stdin of a PowerShell that has already exited
+  // raises EPIPE, asynchronously, where nothing was listening for it.
+  try { releaseDuck(); } catch (error) { noteCrash('releasing the duck', error); }
+  try { helper?.stdin?.write('quit\n'); } catch (error) { noteCrash('telling the helper to quit', error); }
+  try { helper?.kill(); } catch (error) { noteCrash('killing the helper', error); }
+  void stopWebDoor().catch(error => noteCrash('closing the web door', error));
+});
+
+/**
+ * A shutdown that stalls is the same fault wearing different clothes: no dialog,
+ * but the same process left behind holding the same port. Nothing here should
+ * take three seconds, so anything still going at that point is stuck.
+ */
+app.on('will-quit', () => {
+  setTimeout(() => { console.warn('[quit] shutdown stalled — exiting anyway'); app.exit(0); }, 3000).unref();
+});
+
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });

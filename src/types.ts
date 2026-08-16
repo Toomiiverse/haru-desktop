@@ -81,5 +81,7 @@ export type WebStatus = {
   hasPassword: boolean;
   running: boolean;
   port: number;
+  /** Why it is shut, when it is meant to be open. */
+  trouble: string;
   devices: WebDevice[];
 };

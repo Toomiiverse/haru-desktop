@@ -1493,7 +1493,7 @@ function WebField() {
     </div>
     {status.enabled && <p className="status-note">{status.running
       ? `Listening on 127.0.0.1:${status.port}. Point your tunnel at that.`
-      : 'Switched on, but the door did not open — check the log.'}</p>}
+      : (status.trouble || 'Switched on, but the door did not open.')}</p>}
     {status.devices.length > 0 && <>
       <p className="status-note">Signed in and remembered:</p>
       {status.devices.map(device => <div key={device.id} className="row">
