@@ -70,3 +70,16 @@ export interface SpeechClip { turn: number; text: string; audio?: Uint8Array; mi
 // What she can change about how she looks. Discovered from the model's own
 // DisplayInfo rather than hardcoded — see electron/wardrobe.ts.
 export interface WardrobeControl { id: string; name: string; kind: 'toggle' | 'option'; values: number[]; }
+
+/** A phone or tablet that has been told to stay signed in. */
+export type WebDevice = { id: string; name: string; added: string; lastSeen: string };
+
+export type WebStatus = {
+  enabled: boolean;
+  username: string;
+  /** Whether one is set. The password itself never comes back across the bridge. */
+  hasPassword: boolean;
+  running: boolean;
+  port: number;
+  devices: WebDevice[];
+};

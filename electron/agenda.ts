@@ -193,7 +193,7 @@ export function missedInstruction(latestMessage: string): string {
   ].join(' ');
 }
 
-function relativeDay(dateKey: string, todayKey: string, weekday: Intl.DateTimeFormat) {
+export function relativeDay(dateKey: string, todayKey: string, weekday: Intl.DateTimeFormat) {
   if (dateKey === todayKey) return 'today';
   if (dateKey === shiftDays(todayKey, 1)) return 'tomorrow';
   if (dateKey === shiftDays(todayKey, -1)) return 'yesterday';

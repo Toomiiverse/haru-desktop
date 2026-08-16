@@ -1,0 +1,247 @@
+// The door itself: an HTTP server that lets one phone reach one Haru.
+//
+// It runs inside the desktop app rather than beside it. Her memory, her journal
+// and the conversation all live in one electron-store file, and a second process
+// writing that file is the bug that has already eaten work twice in this project
+// — the app rewrites what it holds in memory and the other writer's changes
+// vanish. One process, one writer, no sync, and no second copy of a journal on
+// some other machine.
+//
+// It listens on the loopback address and nowhere else. Reaching it from a phone
+// is somebody else's job — a tunnel, which also terminates TLS — and doing it
+// this way means there is no configuration mistake that quietly exposes her to
+// the local coffee shop wifi in plain text.
+
+import { createServer, type IncomingMessage, type ServerResponse, type Server } from 'node:http';
+import {
+  type WebAccess, passwordMatches, newToken, deviceFor, rememberDevice, touchDevice,
+  noteFailure, lockedFor, clearFailures, type Attempts, DEVICE_DAYS,
+} from './web';
+import { loginPage, appPage } from './webpage';
+
+export type WebDeps = {
+  readAccess(): WebAccess;
+  saveAccess(access: WebAccess): void;
+  /** Her real answer, through the same pipeline the desktop uses — minus hands. */
+  say(text: string): Promise<{ reply: string; ignored?: boolean }>;
+  history(): { role: string; content: string; at?: string }[];
+  agenda(): { id: string; title: string; date: string; kind: string; done?: boolean }[];
+  tickOff(id: string): Promise<void> | void;
+  memories(): string[];
+  journal(): { date: string; text: string; mood?: number; anxiety?: number }[];
+  writeJournal(entry: { text: string; mood?: number; anxiety?: number }): Promise<void> | void;
+};
+
+const SESSION_COOKIE = 'haru_session';
+const DEVICE_COOKIE = 'haru_device';
+/** Big enough for a long message, small enough that nobody posts a film. */
+const MAX_BODY = 256 * 1024;
+
+/** Logins that were not asked to be remembered. Gone when the app closes, deliberately. */
+const sessions = new Map<string, number>();
+const SESSION_MS = 12 * 60 * 60_000;
+
+/** Wrong guesses, kept per address. In memory: a restart is not a reward worth farming. */
+const attemptsBy = new Map<string, Attempts>();
+
+function parseCookies(header: string | undefined): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const part of (header ?? '').split(';')) {
+    const at = part.indexOf('=');
+    if (at < 0) continue;
+    const name = part.slice(0, at).trim();
+    if (name) out[name] = decodeURIComponent(part.slice(at + 1).trim());
+  }
+  return out;
+}
+
+/**
+ * Secure and HttpOnly always, SameSite=Strict always.
+ *
+ * Strict rather than Lax because nothing here is ever meant to be reached by
+ * following a link from somewhere else — every request comes from her own page —
+ * and it is the cheapest defence against another site posting on her behalf.
+ * Secure is safe on loopback too: browsers treat localhost as a secure origin.
+ */
+function setCookie(res: ServerResponse, name: string, value: string, maxAgeSeconds: number) {
+  const bits = [`${name}=${encodeURIComponent(value)}`, 'Path=/', 'HttpOnly', 'Secure', 'SameSite=Strict'];
+  bits.push(maxAgeSeconds > 0 ? `Max-Age=${maxAgeSeconds}` : 'Max-Age=0');
+  const existing = res.getHeader('Set-Cookie');
+  const all = Array.isArray(existing) ? existing : existing ? [String(existing)] : [];
+  res.setHeader('Set-Cookie', [...all, bits.join('; ')]);
+}
+
+function send(res: ServerResponse, status: number, body: string, type = 'application/json') {
+  // No third-party anything, ever: the page is entirely self-contained, so the
+  // policy that says so costs nothing and takes a whole class of injected script
+  // off the table.
+  res.writeHead(status, {
+    'Content-Type': type === 'application/json' ? 'application/json; charset=utf-8' : type,
+    'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:; connect-src 'self'; form-action 'none'; frame-ancestors 'none'; base-uri 'none'",
+    'X-Content-Type-Options': 'nosniff',
+    'Referrer-Policy': 'no-referrer',
+    'Cache-Control': 'no-store',
+  });
+  res.end(body);
+}
+
+const json = (res: ServerResponse, status: number, value: unknown) => send(res, status, JSON.stringify(value));
+
+async function readBody(req: IncomingMessage): Promise<unknown> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of req) {
+    size += (chunk as Buffer).length;
+    if (size > MAX_BODY) throw new Error('too much');
+    chunks.push(chunk as Buffer);
+  }
+  if (!chunks.length) return {};
+  try { return JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { throw new Error('not json'); }
+}
+
+/** Who is asking, if anyone. Returns the device when one is remembered, so it can be touched. */
+function whoIsThis(req: IncomingMessage, access: WebAccess, now: Date) {
+  const cookies = parseCookies(req.headers.cookie);
+  const session = cookies[SESSION_COOKIE];
+  if (session) {
+    const until = sessions.get(session);
+    if (until && until > now.getTime()) return { allowed: true as const, device: null };
+    if (until) sessions.delete(session);
+  }
+  const device = deviceFor(access, cookies[DEVICE_COOKIE] ?? '', now);
+  return device ? { allowed: true as const, device } : { allowed: false as const, device: null };
+}
+
+export function startWebServer(port: number, deps: WebDeps): Promise<{ port: number; stop(): Promise<void> }> {
+  const server: Server = createServer((req, res) => { void handle(req, res, deps).catch(error => {
+    console.error('[web] ' + (error instanceof Error ? error.message : String(error)));
+    if (!res.headersSent) json(res, 500, { error: 'Something went wrong.' });
+  }); });
+
+  return new Promise((resolve, reject) => {
+    server.once('error', reject);
+    // Loopback only. This is the line that keeps her off the network.
+    server.listen(port, '127.0.0.1', () => {
+      const actual = (server.address() as { port: number }).port;
+      console.log(`[web] listening on 127.0.0.1:${actual} — reachable only through a tunnel`);
+      resolve({
+        port: actual,
+        stop: () => new Promise<void>(done => server.close(() => { sessions.clear(); done(); })),
+      });
+    });
+  });
+}
+
+async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) {
+  const url = new URL(req.url ?? '/', 'http://127.0.0.1');
+  const path = url.pathname;
+  const now = new Date();
+  const access = deps.readAccess();
+
+  if (!access.enabled || !access.hash) {
+    return send(res, 503, '<!doctype html><meta charset=utf-8><p style="font:16px system-ui;padding:2rem">Haru is not set up for the web yet. Turn it on in her settings, on the desktop.</p>', 'text/html; charset=utf-8');
+  }
+
+  const me = whoIsThis(req, access, now);
+
+  if (req.method === 'POST' && path === '/api/login') return login(req, res, deps, access, now);
+
+  if (!me.allowed) {
+    if (path === '/' ) return send(res, 200, loginPage(), 'text/html; charset=utf-8');
+    return json(res, 401, { error: 'Sign in first.' });
+  }
+
+  // Seen today, so a phone in daily use never gets logged out.
+  if (me.device) deps.saveAccess(touchDevice(access, me.device.id, now));
+
+  if (req.method === 'GET' && path === '/') return send(res, 200, appPage(), 'text/html; charset=utf-8');
+
+  if (req.method === 'POST' && path === '/api/logout') {
+    const cookies = parseCookies(req.headers.cookie);
+    if (cookies[SESSION_COOKIE]) sessions.delete(cookies[SESSION_COOKIE]);
+    if (me.device) deps.saveAccess({ ...deps.readAccess(), devices: deps.readAccess().devices.filter(d => d.id !== me.device!.id) });
+    setCookie(res, SESSION_COOKIE, '', 0);
+    setCookie(res, DEVICE_COOKIE, '', 0);
+    return json(res, 200, { ok: true });
+  }
+
+  // Everything past here changes or reveals something, so it must be a real
+  // request from her own page rather than a form somebody else submitted.
+  if (req.method === 'POST' && !/^application\/json/.test(req.headers['content-type'] ?? '')) {
+    return json(res, 415, { error: 'Send JSON.' });
+  }
+
+  if (req.method === 'GET' && path === '/api/chat') {
+    return json(res, 200, { messages: deps.history().slice(-60) });
+  }
+
+  if (req.method === 'POST' && path === '/api/chat') {
+    const body = await readBody(req) as { text?: unknown };
+    const text = typeof body.text === 'string' ? body.text.trim() : '';
+    if (!text) return json(res, 400, { error: 'Say something.' });
+    const answer = await deps.say(text);
+    return json(res, 200, answer);
+  }
+
+  if (req.method === 'GET' && path === '/api/agenda') return json(res, 200, { items: deps.agenda() });
+
+  if (req.method === 'POST' && path === '/api/agenda/done') {
+    const body = await readBody(req) as { id?: unknown };
+    if (typeof body.id !== 'string' || !body.id) return json(res, 400, { error: 'Which one?' });
+    await deps.tickOff(body.id);
+    return json(res, 200, { items: deps.agenda() });
+  }
+
+  if (req.method === 'GET' && path === '/api/memory') return json(res, 200, { memories: deps.memories() });
+
+  if (req.method === 'GET' && path === '/api/journal') return json(res, 200, { entries: deps.journal().slice(-30) });
+
+  if (req.method === 'POST' && path === '/api/journal') {
+    const body = await readBody(req) as { text?: unknown; mood?: unknown; anxiety?: unknown };
+    const text = typeof body.text === 'string' ? body.text.trim() : '';
+    if (!text) return json(res, 400, { error: 'Write something.' });
+    const rating = (value: unknown) => (typeof value === 'number' && value >= 1 && value <= 10 ? Math.round(value) : undefined);
+    await deps.writeJournal({ text, mood: rating(body.mood), anxiety: rating(body.anxiety) });
+    return json(res, 200, { entries: deps.journal().slice(-30) });
+  }
+
+  return json(res, 404, { error: 'Nothing here.' });
+}
+
+async function login(req: IncomingMessage, res: ServerResponse, deps: WebDeps, access: WebAccess, now: Date) {
+  // Keyed by the address the tunnel reports, falling back to one shared bucket.
+  // A shared bucket is the safe direction to be wrong in: it slows everybody
+  // down under attack rather than letting each new source start fresh.
+  const from = String(req.headers['cf-connecting-ip'] ?? req.socket.remoteAddress ?? 'unknown');
+  const attempts = attemptsBy.get(from) ?? clearFailures();
+  const wait = lockedFor(attempts, now.getTime());
+  if (wait > 0) return json(res, 429, { error: `Too many tries. Wait ${Math.ceil(wait / 1000)}s.` });
+
+  let body: { username?: unknown; password?: unknown; remember?: unknown; device?: unknown };
+  try { body = await readBody(req) as typeof body; } catch { return json(res, 400, { error: 'Bad request.' }); }
+  const username = typeof body.username === 'string' ? body.username : '';
+  const password = typeof body.password === 'string' ? body.password : '';
+
+  // The username is compared too, but a wrong one is not said to be wrong —
+  // "no such user" tells a stranger which half to keep working on.
+  const right = username.toLowerCase() === access.username.toLowerCase() && passwordMatches(password, access);
+  if (!right) {
+    attemptsBy.set(from, noteFailure(attempts, now.getTime()));
+    console.warn(`[web] refused a sign-in from ${from}`);
+    return json(res, 401, { error: 'That is not right.' });
+  }
+
+  attemptsBy.set(from, clearFailures());
+  const token = newToken();
+  if (body.remember) {
+    const name = typeof body.device === 'string' ? body.device : '';
+    deps.saveAccess(rememberDevice(deps.readAccess(), token, name, now));
+    setCookie(res, DEVICE_COOKIE, token, DEVICE_DAYS * 86_400);
+    console.log(`[web] signed in and remembered "${name || 'a device'}"`);
+  } else {
+    sessions.set(token, now.getTime() + SESSION_MS);
+    setCookie(res, SESSION_COOKIE, token, Math.floor(SESSION_MS / 1000));
+    console.log('[web] signed in for this session only');
+  }
+  return json(res, 200, { ok: true });
+}

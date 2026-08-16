@@ -1,6 +1,6 @@
 import { Component, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Paperclip, MicOff, CalendarDays, Check, ChevronDown, CornerDownRight, Mic, Reply, SquareCheck, ChevronLeft, ChevronRight, CircleDot, Import, MessageSquarePlus, Plus, NotebookPen, MessageSquare, Square, ImagePlus, Sparkles, ThumbsDown, ThumbsUp, Trash2, X } from 'lucide-react';
-import type { AniListConfig, Character, DesktopConfig, GamingConfig, ScreenshotConfig, WatchingConfig, VisionConfig, HaruNote, JournalConfig, JournalEntry, JournalField, JournalRange, JournalStats, JournalFieldStats, RoamConfig, EmotionName, GoogleStatus, KeptItem, ListenConfig, Memory, MemoryKind, Message, Profile, ProviderConfig, Reaction, SearchConfig, SessionSummary, VoiceConfig, VoiceEngine, VoiceReference, WardrobeControl } from './types';
+import type { AniListConfig, Character, DesktopConfig, GamingConfig, ScreenshotConfig, WatchingConfig, VisionConfig, HaruNote, JournalConfig, JournalEntry, JournalField, JournalRange, JournalStats, JournalFieldStats, RoamConfig, EmotionName, GoogleStatus, KeptItem, ListenConfig, Memory, MemoryKind, Message, Profile, ProviderConfig, Reaction, SearchConfig, SessionSummary, VoiceConfig, VoiceEngine, VoiceReference, WardrobeControl, WebStatus } from './types';
 import { buildMonthGrid, datesInView, dayLabel, rangeLabel, shiftISODate, toISODate, weekOf, type CalendarView } from './date';
 import { startListening, startRecording, type Listener, type Recorder } from './companion/microphone';
 import { isUsableFollowUp, matchWake, readsAsFarewell } from './companion/wake';
@@ -561,7 +561,7 @@ export function SettingsDrawer({ config, onSave, onTest, onClose }: { config: Pr
       <input type="password" value={modelKey} placeholder={hasModelKey ? `A key is saved for ${KEY_SLOT_NAME[slot]} — type a new one to replace it` : `Bearer token for ${KEY_SLOT_NAME[slot]}`} onChange={event => setModelKey(event.target.value)}/>
       <button className="ghost" disabled={!modelKey.trim()} onClick={saveModelKey}>Save key</button>
     </div>
-  </>}{status.state !== 'idle' && <p className={status.state === 'error' ? 'status-error' : 'status-ok'}>{status.state === 'testing' ? 'Testing…' : status.message}</p>}</div><VoiceField registerSave={registerVoiceSave}/><ListenField/><SearchField/><AniListField/><SecondBrainField/><ThemeField/><VisionField/><AttachmentsField/><ScreenshotField/><WatchingField/><DesktopField/><GamingField/><RoamField/><GoogleCalendarField/><StartupField/><div className="drawer-foot"><button className="ghost" onClick={test} disabled={status.state === 'testing'}>{status.state === 'testing' ? 'Testing…' : 'Test connection'}</button><button className="ghost">Enable alerts</button>{saved && <span className="saved"><Check size={13}/> Saved</span>}<button className="solid" onClick={() => void save()}>Save setup</button></div></section>;
+  </>}{status.state !== 'idle' && <p className={status.state === 'error' ? 'status-error' : 'status-ok'}>{status.state === 'testing' ? 'Testing…' : status.message}</p>}</div><VoiceField registerSave={registerVoiceSave}/><ListenField/><SearchField/><AniListField/><SecondBrainField/><ThemeField/><VisionField/><AttachmentsField/><ScreenshotField/><WatchingField/><DesktopField/><GamingField/><RoamField/><GoogleCalendarField/><WebField/><StartupField/><div className="drawer-foot"><button className="ghost" onClick={test} disabled={status.state === 'testing'}>{status.state === 'testing' ? 'Testing…' : 'Test connection'}</button><button className="ghost">Enable alerts</button>{saved && <span className="saved"><Check size={13}/> Saved</span>}<button className="solid" onClick={() => void save()}>Save setup</button></div></section>;
 }
 
 // What each engine calls the thing it clones or selects a voice with. The label
@@ -1445,6 +1445,66 @@ function AniListField() {
  * on the same panel because the second is the answer to the first failing, and
  * somebody hunting for a manual launcher is already having the bad day.
  */
+/**
+ * Reaching her from a phone.
+ *
+ * The password is typed here and never read back — there is no getter for it in
+ * the bridge, only a setter and a "does one exist". The device list is the part
+ * that earns its place: a phone that is lost is the realistic way this goes
+ * wrong, and it is no use knowing that unless the phone can be turned off from
+ * the machine at home.
+ */
+function WebField() {
+  const [status, setStatus] = useState<WebStatus | null>(null);
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [message, setMessage] = useState<{ text: string; error?: boolean } | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { window.haru?.web.status().then(state => { setStatus(state); setUsername(state.username); }); }, []);
+
+  if (!window.haru || !status) return null;
+
+  async function run(action: () => Promise<unknown>, done: string) {
+    setBusy(true); setMessage(null);
+    try {
+      await action();
+      setStatus(await window.haru!.web.status());
+      setMessage({ text: done });
+    } catch (error) {
+      setMessage({ text: error instanceof Error ? error.message.replace(/^Error invoking remote method '[^']*':\s*(Error:\s*)?/, '') : String(error), error: true });
+    } finally { setBusy(false); }
+  }
+
+  return <div className="field"><h2>Reaching her from a phone</h2>
+    <p>A small web version of her — the conversation, the agenda, the journal and what she remembers. Not her screen, her voice, or anything that touches this machine.</p>
+    <p className="status-note">She listens only to this computer, so a phone cannot reach her until you put a tunnel in front of it. That is deliberate: it means there is no setting here that can accidentally publish her to the local wifi in plain text.</p>
+    <div className="form-grid">
+      <input value={username} disabled={busy} placeholder="A name to sign in with" onChange={event => setUsername(event.target.value)}/>
+      <input type="password" value={password} disabled={busy} placeholder={status.hasPassword ? 'A password is set — type a new one to replace it' : 'At least 12 characters'} onChange={event => setPassword(event.target.value)}/>
+    </div>
+    <div className="row">
+      <button className="ghost" disabled={busy || !username.trim() || !password.trim()}
+        onClick={() => void run(async () => { await window.haru!.web.setPassword(username.trim(), password); setPassword(''); }, 'Password set. Every remembered device has been signed out.')}>Set password</button>
+      <label className="check">
+        <input type="checkbox" checked={status.enabled} disabled={busy || !status.hasPassword}
+          onChange={event => void run(() => window.haru!.web.setEnabled(event.target.checked), event.target.checked ? 'Open.' : 'Closed.')}/>
+        Let her be reached
+      </label>
+    </div>
+    {status.enabled && <p className="status-note">{status.running
+      ? `Listening on 127.0.0.1:${status.port}. Point your tunnel at that.`
+      : 'Switched on, but the door did not open — check the log.'}</p>}
+    {status.devices.length > 0 && <>
+      <p className="status-note">Signed in and remembered:</p>
+      {status.devices.map(device => <div key={device.id} className="row">
+        <span className="grow">{device.name}<span className="status-note"> — last used {device.lastSeen ? new Date(device.lastSeen).toLocaleDateString() : 'never'}</span></span>
+        <button className="ghost" disabled={busy} onClick={() => void run(() => window.haru!.web.forgetDevice(device.id), 'That device will have to sign in again.')}>Sign it out</button>
+      </div>)}
+    </>}
+    {message && <p className={message.error ? 'status-error' : 'status-ok'}>{message.text}</p>}
+  </div>;
+}
+
 function StartupField() {
   const [state, setState] = useState<{ autoStart: boolean; shortcut: boolean; packaged: boolean } | null>(null);
   const [message, setMessage] = useState<{ text: string; error?: boolean } | null>(null);

@@ -13,7 +13,7 @@ import { nextPokeCount, pokeEmotion, pokeInstruction, pokeIrritation, pokeTier, 
 import { applyEvent, chooseIdleAction, DEFAULT_VITALS, driftVitals, nextTickDelayMs, type Environment, type Vitals } from './vitals';
 import { classificationPrompt, emotionToVitals, EMOTION_SCHEMA, NEUTRAL_EMOTION, parseEmotion, type Emotion } from './emotion';
 import { withDiscoveredExpressions } from './expressions';
-import { chaseableOverdue, findItem, formatAgenda, itemStatus, missedInstruction, readsAsDone, readsAsNotDone } from './agenda';
+import { chaseableOverdue, findItem, formatAgenda, itemStatus, missedInstruction, readsAsDone, readsAsNotDone, relativeDay } from './agenda';
 import { openingAngles, pickAngle, shouldPipeUp } from './opening';
 import { allDayDueMinutes, isEveningCheck, reminderInstruction, reminderTier, reminderVolume, shouldRemind, type ReminderState } from './reminders';
 import { isHeated, readTone, sharpen, toneGesture, tonePose } from './tone';
@@ -48,6 +48,8 @@ import { createDesktopShortcut, desktopShortcutPath, isAutoStartEnabled, setAuto
 import { claimsDesktopAction, dropRoleHeader, dropInventedContact, dropInventedScreenTalk, dropRepeatedAgendaMentions, dropRepeatedParagraphs, dropStageDirections } from './reply';
 import { hasShout, readVoiceConfig, referenceFor, shoutReference, spokenCase, speakableText, splitForSpeech, synthesise, type SpeechClip, type VoiceConfig } from './voice';
 import { formatMemoryPrompt, isWorthKeeping, isWorthRemembering, MEMORY_KINDS, migrateMemories, pruneMemories, rememberInto, selectMemories, summaryPrompt, type MemoryKind, type MemoryRecord, type SessionSummary } from './memory';
+import { forgetDevice, forgetEveryDevice, readWebAccess, setPassword, weakPassword, type WebAccess } from './web';
+import { startWebServer, type WebDeps } from './webserver';
 
 type Bounds = { x: number; y: number; width: number; height: number };
 type Live2DModel = { path: string; name: string; url: string };
@@ -2363,10 +2365,21 @@ async function considerReminding(environment: Environment): Promise<boolean> {
   try {
     const intoDay = now.getHours() * 60 + now.getMinutes();
     const evening = !target.item.time && isEveningCheck(intoDay);
-    const when = evening ? 'which they put on today with no particular time'
-      : target.due < -1 ? `which was due ${target.item.time ?? 'earlier'} and has been missed`
-      : target.due <= 1 ? 'which is due right now'
-      : `due in about ${Math.round(target.due)} minutes`;
+    // Which day it is actually on, said out loud in every branch.
+    //
+    // A task with no clock time used to be described as "due earlier and has
+    // been missed" — true, and containing no date at all. Asked to be sharp
+    // about a blank, the model fills it: a thing saved for today came back as
+    // "you were supposed to get that yesterday". The other branch had the
+    // opposite fault, hardcoding "today" onto something that might have been
+    // carried over from Friday.
+    const day = relativeDay(target.item.date, todayKey, new Intl.DateTimeFormat('en-US', { weekday: 'long' }));
+    // "today" and "last Friday" are already adverbial; a bare weekday needs "on".
+    const onDay = /^(today|yesterday|tomorrow|last )/.test(day) ? day : `on ${day}`;
+    const when = evening ? `which they put on for ${day} with no particular time`
+      : target.due < -1 ? `which was down for ${onDay}${target.item.time ? ` at ${target.item.time}` : ''} and has not been done`
+      : target.due <= 1 ? `which is due right now, ${onDay}`
+      : `due in about ${Math.round(target.due)} minutes, ${onDay}`;
     const character = getActiveCharacter();
     const system = [
       character.identity,
@@ -4382,7 +4395,7 @@ function brainFor(message: string, local: ProviderConfig): { config: ProviderCon
     : { config: local, escalated: false, because: verdict.because };
 }
 
-async function ollamaChat(messages: { role: string; content: string; at?: string }[], config: ProviderConfig) {
+async function ollamaChat(messages: { role: string; content: string; at?: string }[], config: ProviderConfig, { hands = true }: { hands?: boolean } = {}) {
   const latest = messages.at(-1)?.content ?? '';
   // They are talking to her, so the silence she was waiting out is over.
   noteUserSpoke();
@@ -4437,7 +4450,14 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // through ollamaQuip, which carries no tools at all — so this assignment is
   // the whole of the promise that a page, a screenshot or a game cannot reach
   // the machine.
-  handsAllowed = true;
+  //
+  // A turn that arrived over the web never gets them. The phone is for talking
+  // to her; the machine those tools act on is the one sitting at home, and
+  // "open this" or "shut down" arriving from outside the house is not a feature
+  // of a chat window — it is the reason a chat window should not have hands.
+  // Passed in rather than sniffed from the caller, so the one line that grants
+  // this is still the only line that grants it.
+  handsAllowed = hands;
   // One retry per reply, so a model that answers nothing twice is reported
   // rather than looped on.
   let emptyRetried = false;
@@ -4734,6 +4754,85 @@ app.on('second-instance', () => {
   mainWindow?.focus();
 });
 
+// ---- Reaching her from a phone -------------------------------------------
+
+/** Where the web door's settings live. Top-level, for the dot-path reason above. */
+function getWebAccess(): WebAccess {
+  return readWebAccess(store.get('webAccess'));
+}
+
+function saveWebAccess(access: WebAccess) {
+  store.set('webAccess', access);
+}
+
+const DEFAULT_WEB_PORT = 8787;
+let webServer: { port: number; stop(): Promise<void> } | null = null;
+
+/**
+ * What the phone is allowed to reach.
+ *
+ * Chat goes through the same ollamaChat the desktop uses, so what answers is
+ * genuinely her — the same system prompt, the same memory, the same mood — and
+ * not a second, thinner Haru that would drift from the first. The one thing
+ * withheld is her hands: see the comment on handsAllowed.
+ *
+ * Her reply is handed to the window rather than written to the store here. The
+ * renderer owns chat.messages and persists the whole list; writing underneath it
+ * would be a second writer to the same file, and the message from the phone
+ * would vanish the next time the desktop saved.
+ */
+function webDeps(): WebDeps {
+  return {
+    readAccess: getWebAccess,
+    saveAccess: saveWebAccess,
+    history: () => (store.get('chat.messages') as { role: string; content: string; at?: string }[] | undefined) ?? [],
+    async say(text) {
+      const config = store.get('ai.config') as ProviderConfig | undefined;
+      if (!config?.model) throw new Error('no model is set up');
+      const messages = [...(store.get('chat.messages') as { role: string; content: string; at?: string }[] ?? []), { role: 'user', content: text, at: new Date().toISOString() }];
+      const answer = await ollamaChat(messages, config, { hands: false });
+      const reply = answer.content ?? '';
+      sendToWindows('chat:fromPhone', { text, reply, ignored: Boolean(answer.ignored) });
+      console.log(`[web] answered ${text.length} chars with ${reply.length}`);
+      return { reply, ignored: answer.ignored };
+    },
+    agenda: () => getKept().map(item => ({ id: item.id, title: item.title, date: item.time ? `${item.date} ${item.time}` : item.date, kind: item.kind, done: item.done })),
+    tickOff(id) {
+      const updated = toggleKept(id);
+      if (updated?.done) void remarkOnTickOff(updated);
+    },
+    memories: () => getMemories().map(memory => memory.text),
+    journal: () => getJournal().map(entry => ({ date: entry.date, text: entry.text, mood: entry.mood, anxiety: entry.anxiety })),
+    writeJournal(entry) {
+      setJournal(upsertEntry(getJournal(), {
+        date: localDateKey(zonedNow(CHAT_TIMEZONE)),
+        text: entry.text,
+        mood: readRating(entry.mood),
+        anxiety: readRating(entry.anxiety),
+        // She did not ask for this one — it was written from a phone, unbidden.
+        prompted: false,
+      }));
+    },
+  };
+}
+
+async function startWebDoor() {
+  const access = getWebAccess();
+  if (!access.enabled || !access.hash) return;
+  if (webServer) return;
+  try {
+    webServer = await startWebServer(DEFAULT_WEB_PORT, webDeps());
+  } catch (error) {
+    console.warn('[web] could not open the door:', error instanceof Error ? error.message : error);
+  }
+}
+
+async function stopWebDoor() {
+  const running = webServer;
+  webServer = null;
+  if (running) { await running.stop(); console.log('[web] closed'); }
+}
+
 app.whenReady().then(() => {
   if (!isPrimaryInstance) return;
   protocol.handle('haru-model', async request => {
@@ -4913,6 +5012,43 @@ app.whenReady().then(() => {
     return true;
   });
   ipcMain.handle('ui:page', (_e, page: NoticedPage) => { void noticePage(page); });
+
+  // The web door. The password only ever travels inwards: it is hashed here and
+  // the renderer is told nothing but whether one exists.
+  ipcMain.handle('web:status', () => {
+    const access = getWebAccess();
+    return {
+      enabled: access.enabled,
+      username: access.username,
+      hasPassword: Boolean(access.hash),
+      running: Boolean(webServer),
+      port: webServer?.port ?? DEFAULT_WEB_PORT,
+      devices: access.devices.map(device => ({ id: device.id, name: device.name, added: device.added, lastSeen: device.lastSeen })),
+    };
+  });
+  ipcMain.handle('web:setPassword', (_e, username: string, password: string) => {
+    const name = String(username ?? '').trim();
+    if (!name) throw new Error('Pick a name to sign in with.');
+    const complaint = weakPassword(String(password ?? ''), name);
+    if (complaint) throw new Error(complaint);
+    // Every remembered device is dropped. Changing a password that somebody else
+    // may know is worth nothing if their phone stays signed in.
+    const access = forgetEveryDevice(getWebAccess());
+    saveWebAccess({ ...access, username: name, ...setPassword(password) });
+    console.log('[web] password set — every remembered device signed out');
+    return true;
+  });
+  ipcMain.handle('web:setEnabled', async (_e, enabled: boolean) => {
+    const access = getWebAccess();
+    if (enabled && !access.hash) throw new Error('Set a password first.');
+    saveWebAccess({ ...access, enabled: Boolean(enabled) });
+    if (enabled) await startWebDoor(); else await stopWebDoor();
+    return Boolean(webServer);
+  });
+  ipcMain.handle('web:forgetDevice', (_e, id: string) => {
+    saveWebAccess(forgetDevice(getWebAccess(), String(id)));
+    return getWebAccess().devices.map(device => ({ id: device.id, name: device.name, added: device.added, lastSeen: device.lastSeen }));
+  });
   ipcMain.handle('watching:get', () => readWatchingConfig(store.get('watching')));
   ipcMain.handle('watching:set', (_e, config: WatchingConfig) => {
     const saved = readWatchingConfig(config);
@@ -5317,6 +5453,10 @@ app.whenReady().then(() => {
   startWindowsHelper();
   watchScreenshots();
   startWatchingScreen();
+  // Opened at boot when it was left on, for the same reason the screen watcher
+  // is: doing it inside the settings handler means it only ever starts for
+  // somebody who opens settings, which is nobody on the second day.
+  void startWebDoor();
   // Off the boot path: a directory walk per installed game is fast but it is
   // still disk, and nothing needs the answer until they are in a game.
   setTimeout(() => {

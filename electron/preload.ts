@@ -6,6 +6,8 @@ type ProviderConfig = { provider: string; model: string; endpoint: string; tempe
 type KeptItem = { id: string; title: string; date: string; time?: string; kind: 'task' | 'event'; done: boolean; heardAbout?: string; googleEventId?: string; googleTaskId?: string };
 type GoogleStatus = { hasCredentials: boolean; connected: boolean; email?: string; lastSync?: string; lastError?: string; tasksGranted?: boolean };
 type Character = { identity: string; style: string };
+type WebDevice = { id: string; name: string; added: string; lastSeen: string };
+type WebStatus = { enabled: boolean; username: string; hasPassword: boolean; running: boolean; port: number; devices: WebDevice[] };
 type ListenConfig = { engine: string; endpoint: string; language: string; autoSend: boolean; wakeWord: boolean; replyWindow: boolean; chimeVolume: number };
 type SearchConfig = { enabled: boolean; provider: string; limit: number; engineId: string; readPages: boolean; place: string };
 type DesktopConfig = { launch: boolean; power: boolean };
@@ -85,6 +87,14 @@ contextBridge.exposeInMainWorld('haru', {
     set: (config: GamingConfig) => ipcRenderer.invoke('gaming:set', config) as Promise<GamingConfig>,
   },
   ui: { page: (page: string) => ipcRenderer.invoke('ui:page', page) as Promise<void> },
+  // The door a phone comes in by. The password goes one way only — there is no
+  // getter here, and there is not meant to be.
+  web: {
+    status: () => ipcRenderer.invoke('web:status') as Promise<WebStatus>,
+    setPassword: (username: string, password: string) => ipcRenderer.invoke('web:setPassword', username, password) as Promise<boolean>,
+    setEnabled: (enabled: boolean) => ipcRenderer.invoke('web:setEnabled', enabled) as Promise<boolean>,
+    forgetDevice: (id: string) => ipcRenderer.invoke('web:forgetDevice', id) as Promise<WebDevice[]>,
+  },
   journal: {
     list: () => ipcRenderer.invoke('journal:list') as Promise<JournalEntry[]>,
     save: (entry: Partial<JournalEntry> & { text: string }) => ipcRenderer.invoke('journal:save', entry) as Promise<JournalEntry[]>,
@@ -142,6 +152,13 @@ contextBridge.exposeInMainWorld('haru', {
       const listener = (_event: Electron.IpcRendererEvent, why: string) => callback(why);
       ipcRenderer.on('ai:fellBack', listener);
       return () => ipcRenderer.removeListener('ai:fellBack', listener);
+    },
+    // Said from a phone. The renderer owns the conversation and writes it to
+    // disk, so both halves are handed to it rather than saved behind its back.
+    onFromPhone: (callback: (turn: { text: string; reply: string; ignored: boolean }) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, turn: { text: string; reply: string; ignored: boolean }) => callback(turn);
+      ipcRenderer.on('chat:fromPhone', listener);
+      return () => ipcRenderer.removeListener('chat:fromPhone', listener);
     },
     onInterject: (callback: (line: string) => void) => {
       const listener = (_event: Electron.IpcRendererEvent, line: string) => callback(line);

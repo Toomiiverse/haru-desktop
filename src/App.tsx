@@ -39,6 +39,16 @@ export default function App() {
   useEffect(() => window.haru?.chat.onFellBack(why => {
     setMessages(current => [...current, { id: crypto.randomUUID(), role: 'system' as const, content: why, time: 'now', at: new Date().toISOString() }]);
   }), []);
+  // A conversation held on the phone is the same conversation, so it lands here
+  // too — otherwise coming back to the desk means finding her half of an
+  // exchange missing, and her remembering things that were never said on screen.
+  useEffect(() => window.haru?.chat.onFromPhone(turn => {
+    setMessages(current => [
+      ...current,
+      { id: crypto.randomUUID(), role: 'user' as const, content: turn.text, time: 'now', at: new Date().toISOString() },
+      ...(turn.ignored ? [] : [{ id: crypto.randomUUID(), role: 'assistant' as const, content: turn.reply, time: 'now', at: new Date().toISOString() }]),
+    ]);
+  }), []);
   useEffect(() => window.haru?.chat.onInterject(line => {
     setMessages(current => [...current, { id: crypto.randomUUID(), role: 'assistant' as const, content: line, time: 'now', at: new Date().toISOString() }]);
   }), []);
