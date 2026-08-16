@@ -27,6 +27,8 @@ export type BehaviourState = {
   emotion?: Emotion | null;
   /** 1 while the reading is fresh, easing to 0 as it fades. */
   emotionStrength: number;
+  /** 0 idling, 1 speaking. Settles the wandering while she is talking. */
+  speaking?: number;
   /** A gesture currently playing, if any. */
   gesture?: Gesture | null;
 };
@@ -53,7 +55,13 @@ export function attentionWeight(state: BehaviourState) {
 export function wanderWeight(state: BehaviourState) {
   if (!state.wander) return 0;
   const eased = Math.sin(Math.min(1, Math.max(0, state.actionProgress)) * Math.PI);
-  return eased * 1.4;
+  // Not while she is talking to you. Looking away mid-sentence is the gaze half
+  // of the same complaint the sway was the body half of: it reads as somebody
+  // idling who happens to be producing speech, rather than as somebody
+  // addressing you. Reduced rather than removed — people do glance away while
+  // speaking, they just do not drift off for two seconds at a time.
+  const talking = 1 - (state.speaking ?? 0) * 0.75;
+  return eased * 1.4 * talking;
 }
 
 // Where she settles when nothing else is pulling: straight ahead when alert,
@@ -175,6 +183,10 @@ const EMOTION_MOODS: Record<EmotionName, ActionShape['expressionMood']> = {
   neutral: 'neutral', happy: 'happy', curious: 'curious', smug: 'happy',
   annoyed: 'neutral', bored: 'neutral', sleepy: 'sleepy', surprised: 'curious',
   affectionate: 'happy', embarrassed: 'sleepy',
+  // Fired up reads as happy in the face even though the feeling is not really
+  // pleasure; worried has no face of its own and sits closest to curious, which
+  // is attentive rather than blank.
+  determined: 'happy', worried: 'curious',
 };
 
 export function expressionMoodFor(emotion: Emotion): ActionShape['expressionMood'] {
@@ -195,6 +207,11 @@ const EMOTION_HINTS: Record<EmotionName, RegExp[]> = {
   surprised: [/(surprise|shock|startle|scared|fright)/i, /(empty|wide)/i],
   affectionate: [/heart/i, /(love|blush|shy|fond)/i, /(smile|happy)/i],
   embarrassed: [/(blush|shy|flust|embarrass)/i, /(squeez|squint|cry)/i],
+  // Set and pushing: a narrowed, fixed face rather than a pleased one, falling
+  // back to a plain smile if the model carries nothing sharper.
+  determined: [/(determin|serious|focus|resolve|fired|intense)/i, /(squeez|squint|smug|smirk)/i, /(smile|happy)/i],
+  // Anxious on their behalf. Closer to upset than to surprised, but never angry.
+  worried: [/(worr|anxious|concern|nervous|uneasy|sad)/i, /(frown|upset|cry)/i, /(curious|question)/i],
 };
 
 // Neutral resolves to nothing on purpose: with no explicit neutral expression to

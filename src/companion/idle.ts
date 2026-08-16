@@ -71,8 +71,30 @@ export function liveliness({ energy, sleepiness, stress }: IdleVitals) {
   return Math.max(0.15, Math.min(1.25, 0.4 + energy * 0.7 - sleepiness * 0.45 + stress * 0.15));
 }
 
-export function idleMotion(elapsedMs: number, vitals: IdleVitals): IdleMotion {
+/**
+ * How much of the idle drift to take away while she is talking, 0 to 1.
+ *
+ * Someone speaking to you is not standing there swaying. The slow channels here
+ * — the weight shift from one leg to the other, the long lean, the sprite drift
+ * across the stage — are what standing about looks like, and running them under
+ * speech is what reads as floaty: she appears to be idling with a voice coming
+ * out of her rather than addressing anyone.
+ *
+ * Deliberately not a mute. Speech is not less movement, it is different
+ * movement: the slow sways go and the small quick ones come up, because a person
+ * making a point moves their head more, not less, just faster and over a shorter
+ * distance. Damping everything equally would swap floaty for embalmed.
+ */
+const SETTLE_SLOW = 0.85;
+const SETTLE_QUICK = 0.3;
+
+export function idleMotion(elapsedMs: number, vitals: IdleVitals, speaking = 0): IdleMotion {
   const t = elapsedMs / 1000;
+  const settle = Math.max(0, Math.min(1, speaking));
+  // The slow, wandering channels lose most of their travel.
+  const slow = 1 - settle * SETTLE_SLOW;
+  // The fast ones gain a little, so what is left reads as emphasis.
+  const quick = 1 + settle * SETTLE_QUICK;
   const scale = liveliness(vitals);
   // Breathing quickens with energy and stress but never stops.
   const breathHz = BREATH_HZ * (0.75 + vitals.energy * 0.4 + vitals.stress * 0.25);
@@ -104,24 +126,33 @@ export function idleMotion(elapsedMs: number, vitals: IdleVitals): IdleMotion {
     // they read as a torso swivelling rather than a person moving — and with
     // cursor tracking added on top they reach the rig's limit and stick there,
     // which looks like she is jammed against something.
-    bodyX: (shift * 2.2 + springy(t, 0.079, 1.3) * 1.3) * scale,
+    // shift is the weight change from leg to leg — the slowest thing here and
+    // the single biggest contributor to looking adrift. It is what goes first.
+    bodyX: (shift * 2.2 * slow + springy(t, 0.079, 1.3) * 1.3 * quick) * scale,
     // Pitch, not height: leaning fractionally forward and back. The bounce
     // deliberately does not come through here.
-    bodyY: (wave(t, 0.053, 2.6) * 1.1) * scale,
-    bodyZ: (shift * 1.2 + springy(t, 0.067, 0.2) * 0.7) * scale,
+    // The long forward-and-back lean, slower still than the weight shift.
+    bodyY: (wave(t, 0.053, 2.6) * 1.1 * slow) * scale,
+    bodyZ: (shift * 1.2 * slow + springy(t, 0.067, 0.2) * 0.7 * quick) * scale,
     // The head counters the body rather than following it — a person swaying
     // keeps their head roughly level, and matching the two exactly is what makes
     // a model look like it is being moved rather than moving.
-    headX: (springy(t, 0.091, 4.1) * 2.0 - shift * 1.1) * scale,
-    headY: (wave(t, 0.113, 0.9) * 1.5) * scale,
-    headZ: (springy(t, 0.061, 3.3) * 1.7 - shift * 0.8) * scale,
+    // Head keeps most of its own motion — this is where speech actually lives —
+    // but stops counter-rolling against a sway that is no longer happening.
+    headX: (springy(t, 0.091, 4.1) * 2.0 * quick - shift * 1.1 * slow) * scale,
+    headY: (wave(t, 0.113, 0.9) * 1.5 * quick) * scale,
+    headZ: (springy(t, 0.061, 3.3) * 1.7 * quick - shift * 0.8 * slow) * scale,
     // Her rig wires the tail wag straight into physics, so this costs one
     // parameter and buys constant motion down her whole back.
     tail: Math.max(0, Math.min(1, 0.35 + drive * 0.65)),
     // In fractions of the stage. The lateral drift is unchanged — a slow lean is
     // what standing still actually looks like — but the vertical is now a
     // fraction of what it was, closer to a chest rising than to a bob.
-    driftX: shift * 0.009 * scale,
+    // Sliding across the stage while making a point is the most obviously wrong
+    // of the lot, so it is damped hardest.
+    driftX: shift * 0.009 * scale * slow,
+    // Breathing stays: she does not stop breathing to talk, and the chest lift
+    // is the thing keeping her alive on screen once the swaying is gone.
     bounceY: lift * 0.003 * scale,
   };
 }

@@ -294,6 +294,8 @@ export function CompanionWindow() {
   // How far the sprite has already been nudged, so each frame applies only the
   // change. Absolute positioning here would clobber the fit-to-window logic.
   const drift = useRef({ x: 0, y: 0 });
+  /** 0 idling, 1 speaking. Eased in the frame loop — see idleMotion. */
+  const settle = useRef(0);
   const wasTalking = useRef(false);
   useEffect(() => {
     let frame = 0;
@@ -336,6 +338,9 @@ export function CompanionWindow() {
         idleSeconds: life.current.idleSeconds,
         emotion: feeling?.value ?? null,
         emotionStrength,
+        // Last frame's value, which is a sixteenth of a second stale and not
+        // worth reordering the loop for.
+        speaking: settle.current,
         gesture: gesture.current?.name ?? null,
         watching: watching.current,
       });
@@ -358,7 +363,15 @@ export function CompanionWindow() {
       // rig has no parameter for it, and as a delta against what was applied last
       // frame so it composes with the layout code that positions her on resize
       // rather than fighting it for ownership of position.
-      const idle = idleMotion(performance.now(), life.current.vitals);
+      // Eased rather than switched. Cutting the sway the instant a clip starts
+      // is a visible jolt — she snaps to attention — and restoring it the
+      // instant one ends is the same jolt backwards, several times a sentence
+      // as chunks play. A third of a second in, a little slower out, so she
+      // gathers herself and then loosens.
+      const talkingNow = voice.current?.speaking() ?? false;
+      const towards = talkingNow ? 1 : 0;
+      settle.current += (towards - settle.current) * (talkingNow ? 0.08 : 0.04);
+      const idle = idleMotion(performance.now(), life.current.vitals, settle.current);
       const wantX = idle.driftX * width;
       const wantY = -idle.bounceY * height;
       handle.position.x += wantX - drift.current.x;

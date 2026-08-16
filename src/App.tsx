@@ -28,8 +28,19 @@ export default function App() {
   // Things she says without being asked — reacting to being poked in the
   // companion window. They belong in the transcript like anything else she says,
   // and without this they exist only as audio and vanish with the volume off.
+  // A voice that failed is otherwise pure silence: the line is already on
+  // screen, so nothing distinguishes the server timing out from her simply
+  // choosing not to speak.
+  useEffect(() => window.haru?.chat.onVoiceFailed(why => {
+    setMessages(current => [...current, { id: crypto.randomUUID(), role: 'system' as const, content: why, time: 'now', at: new Date().toISOString() }]);
+  }), []);
+  // The far model going quiet is otherwise invisible: she carries on answering,
+  // several times slower, and nothing on screen says the pod is off.
+  useEffect(() => window.haru?.chat.onFellBack(why => {
+    setMessages(current => [...current, { id: crypto.randomUUID(), role: 'system' as const, content: why, time: 'now', at: new Date().toISOString() }]);
+  }), []);
   useEffect(() => window.haru?.chat.onInterject(line => {
-    setMessages(current => [...current, { id: crypto.randomUUID(), role: 'assistant' as const, content: line, time: 'now' }]);
+    setMessages(current => [...current, { id: crypto.randomUUID(), role: 'assistant' as const, content: line, time: 'now', at: new Date().toISOString() }]);
   }), []);
   // Replies land below the fold once the day's history is long enough to scroll,
   // so pin the view to the newest message whenever the list or pending state changes.
@@ -60,7 +71,7 @@ export default function App() {
       // A conversation cleared while the line was being written is no longer the
       // one it was written for.
       if (!line || conversation.current !== epoch) return;
-      setMessages(current => [...current, { id: crypto.randomUUID(), role: 'assistant' as const, content: line, time: 'now' }]);
+      setMessages(current => [...current, { id: crypto.randomUUID(), role: 'assistant' as const, content: line, time: 'now', at: new Date().toISOString() }]);
     });
   }, []);
 
@@ -98,13 +109,13 @@ export default function App() {
       // Falls through to a canned line below.
     }
     const fallback = reaction === 'down' ? randomRetort() : randomGloat();
-    setMessages(current => [...current, { id: crypto.randomUUID(), role: 'assistant' as const, content: content || fallback, time: 'now' }]);
+    setMessages(current => [...current, { id: crypto.randomUUID(), role: 'assistant' as const, content: content || fallback, time: 'now', at: new Date().toISOString() }]);
   }
 
-  async function send(content: string) {
+  async function send(content: string, heard?: string) {
     const epoch = conversation.current;
     const target = replyingTo;
-    const user: Message = { id: crypto.randomUUID(), role: 'user', content, time: 'now', ...(target ? { replyTo: target } : {}) };
+    const user: Message = { id: crypto.randomUUID(), role: 'user', content, time: 'now', at: new Date().toISOString(), ...(heard ? { heard } : {}), ...(target ? { replyTo: target } : {}) };
     setMessages(current => [...current, user]);
     setReplyingTo(null);
     setSending(true);
@@ -113,7 +124,7 @@ export default function App() {
       // what was typed, so the message stays the user's own words and the model
       // is told plainly that this is feedback about one particular line.
       const note: Message[] = target ? [{
-        id: `${user.id}-ref`, role: 'system', time: 'now',
+        id: `${user.id}-ref`, role: 'system', time: 'now', at: new Date().toISOString(),
         content: `The user's next message is a reply to one specific earlier line of yours: "${target.excerpt}". It is feedback about that line in particular, not a new topic. Take it as a correction and say what you will do differently.`,
       }] : [];
       const reply = await getProvider(providerConfig).send([...messages, ...note, user], providerConfig);
@@ -121,8 +132,8 @@ export default function App() {
       // She has stopped answering. Marked rather than left blank so it reads as
       // her ignoring you, not as the app having dropped the message.
       setMessages(current => [...current, reply.ignored
-        ? { id: crypto.randomUUID(), role: 'assistant', content: 'Haru is ignoring you.', time: 'now', ignored: true }
-        : { id: crypto.randomUUID(), role: 'assistant', content: reply.content, time: 'now' }]);
+        ? { id: crypto.randomUUID(), role: 'assistant', content: 'Haru is ignoring you.', time: 'now', at: new Date().toISOString(), ignored: true }
+        : { id: crypto.randomUUID(), role: 'assistant', content: reply.content, time: 'now', at: new Date().toISOString() }]);
     } catch (error) {
       if (conversation.current !== epoch) return;
       // Electron prefixes anything thrown across IPC; it means nothing here and
@@ -136,7 +147,7 @@ export default function App() {
       // the failure happened before a model was ever chosen.
       const attributed = / at \S+ —/.test(detail);
       setMessages(current => [...current, {
-        id: crypto.randomUUID(), role: 'assistant', time: 'now',
+        id: crypto.randomUUID(), role: 'assistant', time: 'now', at: new Date().toISOString(),
         content: attributed ? `Couldn't get an answer — ${detail}` : `Couldn't reach ${providerConfig.provider} (${detail}). Check Setup → Where she thinks.`,
       }]);
     } finally {
@@ -165,8 +176,8 @@ export default function App() {
     {page === 'chat' && <div className="haru-body"><section className="chat-panel"><div className="messages" ref={messagesRef}>{empty ? <div className="empty-state"><MessageBubble message={greeting}/><p>Anything that sounds like a task or an appointment gets captured for real — not just talked about.</p>{suggestions}</div> : <>{messages.map(message => <MessageBubble key={message.id} message={message} onReact={reaction => react(message.id, reaction)} onReply={() => setReplyingTo({ id: message.id, excerpt: message.content.replace(/\s+/g, ' ').trim().slice(0, 80) })}/>)}{onlyOpening && <div className="empty-state">{suggestions}</div>}</>}</div><Composer sending={sending} replyingTo={replyingTo} onCancelReply={() => setReplyingTo(null)} onSend={send} onShowPicture={(reaction, saved) => setMessages(current => [...current,
         // The picture itself goes in as theirs, so there is a record of having
         // shown it even when she says nothing back — which is the normal case.
-        { id: crypto.randomUUID(), role: 'user' as const, content: `Showed her ${saved.replace(/^.*[\/]/, '')}`, time: 'now' },
-        ...(reaction ? [{ id: crypto.randomUUID(), role: 'assistant' as const, content: reaction, time: 'now' }] : []),
+        { id: crypto.randomUUID(), role: 'user' as const, content: `Showed her ${saved.replace(/^.*[\/]/, '')}`, time: 'now', at: new Date().toISOString() },
+        ...(reaction ? [{ id: crypto.randomUUID(), role: 'assistant' as const, content: reaction, time: 'now', at: new Date().toISOString() }] : []),
       ])}/></section><Kept items={kept} onToggle={id => { window.haru ? window.haru.kept.toggle(id) : setKept(items => items.map(item => item.id===id ? {...item, done: !item.done} : item)); }} model={live2dModel} importing={importing} onImport={importLive2d} onRemove={removeLive2d}/></div>}
   </main>;
 }

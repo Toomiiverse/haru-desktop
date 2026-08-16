@@ -86,6 +86,40 @@ const REACTIONS: Record<ActivityKind, string> = {
   other: '',
 };
 
+/**
+ * Windows that are a tool being used, not a thing being done.
+ *
+ * A snip overlay covers the whole screen and reports itself as fullscreen, so
+ * she announced "A FULLSCREEN WINDOW OF... NOTHING!" at somebody taking a
+ * screenshot. The same goes for the task manager, an installer, a file dialog —
+ * these are means, and remarking on them is like commenting on someone reaching
+ * for a pen.
+ *
+ * Matched on process and title both, because a snip overlay often has no title
+ * at all, and an empty title is itself the giveaway that there is nothing there
+ * to react to.
+ */
+const A_TOOL = /^(snippingtool|screenclippinghost|screensketch|snagit\w*|greenshot|sharex|lightshot|taskmgr|mmc|regedit|dwm|explorer|shellexperiencehost|searchhost|startmenuexperiencehost|applicationframehost|textinputhost|lockapp|consent|msiexec|systemsettings|installer|setup)$/i;
+const TOOL_TITLE = /^(snipping tool|screen ?snip|screen ?sketch|snip & sketch|task manager|settings|open|save as|save|browse|select a file|choose|user account control|program compatibility|windows security)$/i;
+
+/**
+ * Whether this window is worth her noticing at all.
+ *
+ * Distinct from isNotable, which asks whether a *category* deserves a remark.
+ * This asks whether there is really a window there — an untitled overlay is not
+ * something they have opened, it is something passing across the screen.
+ */
+export function isJustATool(processName: string, windowTitle: string): boolean {
+  const process = (processName ?? '').replace(/\.exe$/i, '').trim();
+  const title = (windowTitle ?? '').trim();
+  if (A_TOOL.test(process)) return true;
+  if (TOOL_TITLE.test(title)) return true;
+  // Nothing to go on. A window with neither a name nor a recognisable process is
+  // an overlay or a stray frame, and she has nothing to say about it that is not
+  // invented.
+  return !title && !process;
+}
+
 export function activityInstruction(activity: Activity): string {
   return REACTIONS[activity.kind] ?? '';
 }

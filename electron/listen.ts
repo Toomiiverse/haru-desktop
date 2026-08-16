@@ -29,6 +29,8 @@ export type ListenConfig = {
    * rather than inherited.
    */
   wakeWord: boolean;
+  /** How loud the open/close chime is, 0 to 1. Its own control — see chime.ts. */
+  chimeVolume: number;
   /**
    * Listen for an answer whenever she speaks first — the opening line, a
    * reaction to a window changing, a reminder, being poked.
@@ -48,6 +50,7 @@ export const DEFAULT_LISTEN: ListenConfig = {
   language: 'en',
   autoSend: false,
   wakeWord: false,
+  chimeVolume: 0.06,
   replyWindow: false,
 };
 
@@ -62,6 +65,7 @@ export function readListenConfig(saved: unknown): ListenConfig {
     language: typeof record.language === 'string' && record.language.trim() ? record.language.trim() : DEFAULT_LISTEN.language,
     autoSend: record.autoSend === true,
     wakeWord: record.wakeWord === true,
+    chimeVolume: typeof record.chimeVolume === 'number' ? Math.max(0, Math.min(1, record.chimeVolume)) : DEFAULT_LISTEN.chimeVolume,
     replyWindow: record.replyWindow === true,
   };
 }

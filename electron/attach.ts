@@ -20,8 +20,10 @@ import path from 'node:path';
 import os from 'node:os';
 import { spawn } from 'node:child_process';
 
-export type FileKind = 'image' | 'audio' | 'video' | 'text' | 'unreadable';
+export type FileKind = 'image' | 'audio' | 'video' | 'text' | 'document' | 'unreadable';
 
+/** Its own kind: a PDF needs a parser, and may turn out to be a scan. */
+const DOCUMENT = /\.pdf$/i;
 const IMAGE = /\.(png|jpe?g|webp|gif|bmp|tiff?|avif|ico|heic)$/i;
 const AUDIO = /\.(mp3|wav|m4a|aac|ogg|opus|flac|wma|aiff?)$/i;
 const VIDEO = /\.(mp4|mkv|mov|avi|webm|wmv|flv|m4v|mpe?g|ts)$/i;
@@ -30,6 +32,7 @@ const TEXT = /\.(txt|md|markdown|csv|tsv|json|jsonc|ya?ml|toml|ini|cfg|conf|log|
 
 export function classify(file: string): FileKind {
   const name = file ?? '';
+  if (DOCUMENT.test(name)) return 'document';
   if (IMAGE.test(name)) return 'image';
   if (AUDIO.test(name)) return 'audio';
   if (VIDEO.test(name)) return 'video';
@@ -42,6 +45,7 @@ export const OPENABLE = {
   image: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'tif', 'tiff', 'avif', 'ico', 'heic'],
   audio: ['mp3', 'wav', 'm4a', 'aac', 'ogg', 'opus', 'flac', 'wma', 'aiff'],
   video: ['mp4', 'mkv', 'mov', 'avi', 'webm', 'wmv', 'flv', 'm4v', 'mpg', 'mpeg'],
+  document: ['pdf'],
   text: ['txt', 'md', 'csv', 'tsv', 'json', 'yaml', 'yml', 'log', 'xml', 'html', 'srt', 'vtt', 'js', 'ts', 'py', 'cs', 'sql'],
 };
 
@@ -186,6 +190,7 @@ export function attachmentPrompt(
     audio: `They have played you a sound file called "${name}".${length}`,
     video: `They have shown you a video called "${name}".${length} You have seen a few frames from across it and heard the sound.`,
     text: `They have given you a file called "${name}" to read.`,
+    document: `They have given you a document called "${name}" to read.`,
     unreadable: `They have given you a file called "${name}".`,
   };
   const body = [

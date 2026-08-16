@@ -22,6 +22,16 @@ export type OpeningContext = {
   overdue: number;
   dueToday: number;
   doneToday: number;
+  /**
+   * She is breaking into a session already underway, rather than opening one.
+   *
+   * The distinction decides whether a stray fact is charming or rude. Opening a
+   * conversation there is nothing else to talk about, so "did you know" is a
+   * perfectly good way in. Cutting into someone's afternoon with it is a
+   * non-sequitur, and it is the specific complaint: octopuses and jellyfish
+   * arriving unbidden while they were doing something else.
+   */
+  interrupting?: boolean;
   /** Whether earlier days have been summarised and can be referred back to. */
   hasHistory: boolean;
   /** Whether anything is known about the user beyond their schedule. */
@@ -99,8 +109,19 @@ export function openingAngles(context: OpeningContext): OpeningAngle[] {
 
   angles.push({
     name: 'fact',
-    weight: 2,
-    instruction: 'Open with something genuinely interesting you have been turning over — a real fact or an observation, nothing to do with their schedule. Say it straight out as though mid-thought. Do not introduce it as a fun fact, do not ask if they want to hear it, and do not explain why you are bringing it up.',
+    // Nothing at all when she is cutting into a session already going. Opening a
+    // conversation with a thought is one thing; arriving in the middle of
+    // somebody's afternoon with an octopus is the complaint itself.
+    weight: context.interrupting ? 0 : 2,
+    instruction: [
+      'Open with something genuinely interesting you have been turning over — a real fact or an observation, nothing to do with their schedule.',
+      'Say it straight out as though mid-thought. Do not introduce it as a fun fact, do not ask if they want to hear it, and do not explain why you are bringing it up.',
+      // Left to itself this angle produces animal trivia every single time —
+      // observed across sessions as jellyfish, then octopuses, then caterpillars.
+      // It is not that animals are wrong, it is that it is always animals, and
+      // the sameness is what makes it read as a party trick rather than a mind.
+      'Not an animal fact. You have used those up. Something from history, language, music, engineering, food, cities, space, money, or something you have noticed about how people behave — and not the famous version of it.',
+    ].join(' '),
   });
 
   angles.push({

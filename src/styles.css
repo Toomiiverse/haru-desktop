@@ -493,3 +493,110 @@
 .cal-monthcell.today { box-shadow: inset 0 0 0 1.5px var(--accent); }
 .cal-monthcell.selected { background: var(--accent); color: var(--accent-ink); }
 .cal-monthcell.selected .dot { background: var(--accent-ink); }
+
+/* Finished work, folded away.
+   Shut by default: it is worth being able to find and not worth looking at, and
+   left open it buries the two things still outstanding under a column of
+   crossed-out text. */
+.agenda-archive { margin-top: 10px; border-top: 1px solid var(--line); padding-top: 8px; }
+.archive-toggle {
+  display: flex; align-items: center; gap: 6px; width: 100%;
+  padding: 4px 0; border: 0; background: none; cursor: pointer;
+  color: var(--muted); font: 10px 'JetBrains Mono'; letter-spacing: .12em; text-transform: uppercase;
+}
+.archive-toggle:hover { color: var(--text-3); }
+/* The chevron turns rather than swapping icon, so the control reads as one
+   thing opening rather than two states. */
+.archive-toggle svg { transition: transform .15s ease; }
+.archive-toggle svg.open { transform: rotate(180deg); }
+.archive-count {
+  margin-left: auto; padding: 1px 6px; border-radius: 999px;
+  background: var(--surface-3); color: var(--muted); font: 9px 'JetBrains Mono';
+}
+/* Dimmer inside the archive than in the list: these are already accounted for,
+   and the strikethrough is doing the work. */
+.agenda-archive .agenda-item { opacity: .5; }
+.agenda-archive .agenda-item:hover { opacity: .8; }
+
+/* A sync that has stopped, said where the ticking happens.
+   Warn rather than error: nothing is lost, it is just not leaving the machine. */
+.kept-sync-error {
+  margin: 0 20px 10px; padding: 7px 10px;
+  border-left: 2px solid var(--warn); border-radius: 0 7px 7px 0;
+  background: var(--surface-2); color: var(--text-3);
+  font-size: 11.5px; line-height: 1.45; cursor: help;
+}
+
+/* The agenda row is two controls now: the shape ticks, the words go to that day.
+   The grid columns are unchanged, so the tick still lines up with the heading
+   icons above it — only what is clickable has changed. */
+.agenda-item { align-items: start; }
+.agenda-tick,
+.agenda-body {
+  border: 0; background: none; padding: 0; cursor: pointer;
+  color: inherit; font: inherit; text-align: left;
+}
+/* Full height so the tick is hittable next to a two-line row, not just at the
+   top of it. */
+.agenda-tick { display: flex; justify-content: center; align-self: stretch; padding-top: 4px; }
+.agenda-tick i { margin-top: 0; }
+.agenda-body { min-width: 0; }
+.agenda-body b { display: block; font-size: 13px; font-weight: 500; }
+.agenda-body small { display: block; color: var(--muted); font: 10px 'JetBrains Mono'; margin-top: 2px; }
+/* Only the half under the cursor lights up, so which of the two is about to
+   happen is never a guess. */
+.agenda-body:hover b { color: var(--accent); }
+.agenda-item.done .agenda-body b { text-decoration: line-through; }
+
+/* The composer is a textarea now, so shift+enter can put a line break in it —
+   an input cannot hold one at all. Styled to look exactly as it did at one line,
+   and it grows from there rather than scrolling a single row. */
+.compose textarea {
+  flex: 1; min-width: 0;
+  border: 1px solid var(--line); background: var(--field); color: var(--text);
+  border-radius: 11px; padding: 12px 15px; outline: none;
+  font: 14.5px Karla, sans-serif; line-height: 1.4;
+  /* Height is set from scrollHeight in JS; the drag handle would fight it. */
+  resize: none; overflow-y: auto;
+}
+.compose textarea:focus { border-color: var(--accent); }
+/* The buttons sit against the bottom of a grown box rather than floating
+   halfway up it. */
+.compose { align-items: flex-end; }
+/* Overrides .mic's own centring, which was right when every row was one line
+   tall and floats the buttons halfway up a grown box. Send gets the mic's
+   height explicitly, since flex-end stops it stretching to match the field. */
+.compose .mic, .compose .mic-stop { align-self: flex-end; }
+.compose button:not(.mic):not(.mic-stop) { height: 42px; align-self: flex-end; }
+
+/* "Heard that right?" under a spoken message. Quiet by default — it is an offer,
+   not a demand — and only appears where a mishearing could actually have
+   happened. */
+.heard-check { display: flex; align-items: center; gap: 4px; margin: 3px 2px 0; opacity: 0; transition: opacity .14s ease; }
+.bubble-row:hover .heard-check, .heard-check:focus-within { opacity: 1; }
+.heard-check span { color: var(--muted-2); font: 10px 'JetBrains Mono'; letter-spacing: .04em; }
+.heard-check .reaction { width: auto; height: 22px; padding: 0 8px; font: 10px 'JetBrains Mono'; text-transform: uppercase; letter-spacing: .08em; }
+.bubble-row.user .heard-check { justify-content: flex-end; }
+.heard-fix { display: flex; align-items: center; gap: 6px; margin: 4px 2px 0; }
+.heard-fix input {
+  flex: 1; min-width: 0; border: 1px solid var(--line); background: var(--field); color: var(--text);
+  border-radius: 8px; padding: 6px 10px; outline: none; font: 12.5px Karla, sans-serif;
+}
+.heard-fix input:focus { border-color: var(--accent); }
+.heard-note { margin: 4px 2px 0; color: var(--good); font: 10px 'JetBrains Mono'; letter-spacing: .04em; }
+.bubble-row.user .heard-note { align-self: flex-end; }
+
+/* The taught-corrections list. Monospace on the pair so the two halves line up
+   down the column and a wrong rule is spottable at a glance. */
+.corrections { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.corrections li {
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 8px; border-radius: 8px; background: var(--surface-2);
+}
+.corrections .heard, .corrections .meant { font: 12px 'JetBrains Mono'; }
+.corrections .heard { color: var(--muted); text-decoration: line-through; }
+.corrections .arrow { color: var(--muted-3); }
+.corrections .meant { color: var(--text); }
+/* Pushed right and quiet: it is a diagnostic, not part of the rule. */
+.corrections .used { margin-left: auto; color: var(--muted-2); font: 9px 'JetBrains Mono'; letter-spacing: .06em; text-transform: uppercase; }
+.corrections .reaction { width: 22px; height: 22px; }

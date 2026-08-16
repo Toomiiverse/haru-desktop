@@ -23,8 +23,20 @@ const SHUT = [660, 440];
 
 /** Short enough not to talk over, long enough to hear across a room. */
 const NOTE_MS = 90;
-/** Quiet. It plays over whatever else is happening and is not the point of it. */
-const LEVEL = 0.06;
+/**
+ * How loud, 0 to 1, set in Setup.
+ *
+ * Its own control rather than following her speaking volume, because the two
+ * are wanted at different levels: her voice can sit low in the background while
+ * the cue that the microphone is open still needs to carry across a room. On
+ * this machine her voice is at 0.05, which would have made the chime inaudible
+ * had it been scaled by it.
+ */
+let level = 0.06;
+
+export function setChimeVolume(value: number) {
+  level = Math.max(0, Math.min(1, value));
+}
 
 let context: AudioContext | null = null;
 
@@ -48,6 +60,8 @@ function audio(): AudioContext | null {
 }
 
 function play(notes: number[]) {
+  // Silent means silent: no context, no nodes, no cost.
+  if (level <= 0) return;
   const ctx = audio();
   if (!ctx) return;
   notes.forEach((frequency, index) => {
@@ -61,7 +75,7 @@ function play(notes: number[]) {
     // Ramped rather than switched: a square-edged gate on a tone clicks, and the
     // click is louder than the note.
     gain.gain.setValueAtTime(0, at);
-    gain.gain.linearRampToValueAtTime(LEVEL, at + 0.012);
+    gain.gain.linearRampToValueAtTime(level, at + 0.012);
     gain.gain.exponentialRampToValueAtTime(0.0001, at + NOTE_MS / 1000);
     oscillator.connect(gain);
     gain.connect(ctx.destination);

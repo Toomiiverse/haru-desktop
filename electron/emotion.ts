@@ -7,7 +7,12 @@
 // JSON alongside tools tends to cost one or the other. Keeping them apart means
 // the reply is never delayed or degraded by this.
 
-export const EMOTIONS = ['neutral', 'happy', 'curious', 'smug', 'annoyed', 'bored', 'sleepy', 'surprised', 'affectionate', 'embarrassed'] as const;
+// Two of these were added because the voice material called for them. Asked to
+// label recordings, the answer came back as "energetic, determined, motivated"
+// and "neutral, worried" — none of which had anywhere to go. Those are not
+// exotic states for her: driving somebody at a task and being anxious about
+// them are most of what she does, and neither was expressible.
+export const EMOTIONS = ['neutral', 'happy', 'curious', 'smug', 'annoyed', 'bored', 'sleepy', 'surprised', 'affectionate', 'embarrassed', 'determined', 'worried'] as const;
 export const INTENTS = ['listen', 'explain', 'tease', 'dismiss', 'celebrate', 'soothe'] as const;
 export const FOCUSES = ['user', 'self', 'task', 'away'] as const;
 
@@ -78,6 +83,12 @@ const VITAL_SHIFTS: Record<EmotionName, Partial<Record<'happiness' | 'curiosity'
   surprised: { curiosity: 0.2, energy: 0.15 },
   affectionate: { affection: 0.2, happiness: 0.15 },
   embarrassed: { stress: 0.12, affection: 0.08 },
+  // Fired up and pushing at something. Costs nothing in happiness — she is not
+  // enjoying herself exactly, she is on a mission.
+  determined: { energy: 0.2, curiosity: 0.1, stress: 0.05 },
+  // Anxious on their behalf, which is a kind of caring: stress up, and
+  // affection with it, or it reads as irritation.
+  worried: { stress: 0.2, affection: 0.1, energy: -0.05 },
 };
 
 export function emotionToVitals<T extends Record<string, number>>(emotion: Emotion, vitals: T): T {

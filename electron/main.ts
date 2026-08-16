@@ -18,7 +18,7 @@ import { openingAngles, pickAngle, shouldPipeUp } from './opening';
 import { allDayDueMinutes, isEveningCheck, reminderInstruction, reminderTier, reminderVolume, shouldRemind, type ReminderState } from './reminders';
 import { isHeated, readTone, sharpen, toneGesture, tonePose } from './tone';
 import { isSilenced, nextPushback, PUSHBACK_LIMIT, pushbackInstruction, readsAsDropIt, type Pushback } from './pushback';
-import { activityInstruction, isNotable, readActivity, type Activity, type ActivityKind } from './activity';
+import { activityInstruction, isJustATool, isNotable, readActivity, type Activity, type ActivityKind } from './activity';
 import { belongsToPlace, familiarity, markRemembered, noteExchange, noteVisit, readHaunts, rememberSaid, worthRemembering } from './familiar';
 import { discoverWardrobe, type ParameterRange, type WardrobeControl } from './wardrobe';
 import { looksLikeNothing, readListenConfig, transcribe, type ListenConfig } from './listen';
@@ -29,7 +29,10 @@ import { mayWander, pickDestination, readRoamConfig, refugeFrom, speedFor, step,
 import { angleFor, mayNotice, noteNoticed, readNotices, type Page as NoticedPage, type PageState } from './noticing';
 import { CAPTURE_HEIGHT, CAPTURE_WIDTH, glancePrompt, readWatchingConfig, shouldLook, splitGlance, worthMentioning, type WatchingConfig } from './watching';
 import { buildGameIndex, gameFor } from './steam';
+import { pdfPrompt, readPdf } from './pdf';
 import { attachmentPrompt, classify, discard, duration, extractAudio, extractFrames, findFfmpeg, OPENABLE, readText } from './attach';
+import { markTimeGaps, sinceLast } from './history';
+import { correct, noteUsed, readHearing, remember } from './hearing';
 import { assumeItIsTheirs, identifyWork, noteWork, readFollowing, recogniseNow, summariseFollowing } from './following';
 import { lookUpPlace, readWindowsLocation } from './location';
 import { convertImage, normaliseFormat, FORMATS } from './convert';
@@ -722,6 +725,7 @@ let answerFallback: ReturnType<typeof setTimeout> | undefined;
  * sentence is not a conversation, it is dictation with extra steps.
  */
 function expectAnswerWhenDone() {
+  console.log(`[reply-window] armed — waiting for her to stop speaking`);
   answerExpected = true;
   clearTimeout(answerFallback);
   // No voice means no end-of-speech to wait for.
@@ -733,6 +737,7 @@ function expectAnswerWhenDone() {
 
 function openAnswerWindow() {
   if (!answerExpected) return;
+  console.log('[reply-window] opening the microphone for their answer');
   answerExpected = false;
   clearTimeout(answerFallback);
   sendToWindows('chat:expectReply');
@@ -867,12 +872,25 @@ function whyNotInterject({ aboutTheGame = false } = {}): string | null {
   return null;
 }
 
-function interject(line: string, { aboutTheGame = false } = {}) {
+/**
+ * Returns whether the line actually went out, which callers must respect.
+ *
+ * Every site paired this with an unconditional `speak()`, so a line the rate
+ * limiter refused was still said aloud and still captioned over her model — it
+ * simply never reached the transcript. That is how the bubble and the chat came
+ * to be showing different conversations: not a sync bug, a dropped write with
+ * the speech left running.
+ *
+ * Refusing here has to mean refusing altogether. The limiter exists so she does
+ * not butt in; a version of it that silences only the written half prevents
+ * nothing and loses the record.
+ */
+function interject(line: string, { aboutTheGame = false } = {}): boolean {
   const now = Date.now();
   const refusal = whyNotInterject({ aboutTheGame });
   if (refusal) {
     console.log(`[interject] dropped — ${refusal}`);
-    return;
+    return false;
   }
   lastInterjectionAt = now;
   // Before it goes out, so that whatever she has just demanded an account of is
@@ -880,6 +898,7 @@ function interject(line: string, { aboutTheGame = false } = {}) {
   noteSheAsked(line);
   sendToWindows('chat:interject', line);
   expectAnswerWhenDone();
+  return true;
 }
 
 /**
@@ -953,6 +972,30 @@ let screenshotSpokeAt = 0;
 let pendingShot: { path: string; at: number } | null = null;
 let settleTimer: ReturnType<typeof setTimeout> | null = null;
 
+/** Where a local Ollama lives when the chat model has gone somewhere else. */
+const LOCAL_MODELS = 'http://localhost:11434';
+
+/**
+ * The address the eyes use.
+ *
+ * Every look() call used to take `provider.endpoint` — the chat model's address
+ * — and two of them are screenshots and screen-watching, which are meant to
+ * never leave this machine. That held only because the chat endpoint happened to
+ * be localhost. Pointing the chat model at a rented GPU would have moved the
+ * whole screen to a third party as a side effect of changing which model writes
+ * her sentences, and the line above the screenshot call would still have read
+ * "always the local vision model".
+ *
+ * So the guarantee is enforced here instead of assumed: eyes follow the chat
+ * model only while it is on this machine, and fall back to the local Ollama the
+ * moment it is not. For anyone whose chat model is local — everyone, until now —
+ * this changes nothing.
+ */
+function visionEndpoint(provider: ProviderConfig | undefined): string {
+  const chat = provider?.endpoint?.trim();
+  return chat && !isRemote(chat) ? chat : LOCAL_MODELS;
+}
+
 /**
  * Looks at a picture they chose to show her, remotely when that is set up.
  *
@@ -974,7 +1017,7 @@ async function lookAtPicture(imageBase64: string, vision: VisionConfig, provider
     }
   }
   const local = Date.now();
-  const sighting = await look(imageBase64, vision, provider.endpoint, modelHeaders(provider.endpoint), net.fetch);
+  const sighting = await look(imageBase64, vision, visionEndpoint(provider), modelHeaders(visionEndpoint(provider)), net.fetch);
   console.log(`[vision] ${vision.model} took ${((Date.now() - local) / 1000).toFixed(1)}s to look`);
   return sighting;
 }
@@ -1056,7 +1099,7 @@ async function glanceAtScreen() {
     const character = getActiveCharacter();
     // One call: it looks and reacts together, and keeps its place in memory so
     // the next glance is not another model load. See glancePrompt.
-    const sighting = await look(encoded, vision, provider.endpoint, modelHeaders(provider.endpoint), net.fetch, {
+    const sighting = await look(encoded, vision, visionEndpoint(provider), modelHeaders(visionEndpoint(provider)), net.fetch, {
       system: [
         character.identity,
         character.style,
@@ -1082,8 +1125,8 @@ async function glanceAtScreen() {
     const line = toLength(say, 220);
     if (!line.trim()) return;
     console.log(`[watch] remarked on what is on screen (${line.length} chars, ${Date.now() - startedAt}ms)`);
-    interject(line, { aboutTheGame: true });
-    void speak(line, classifyEmotion(line, provider));
+    // Spoken only if it was also written down — see interject.
+    if (interject(line, { aboutTheGame: true })) void speak(line, classifyEmotion(line, provider));
   } catch (error) {
     console.warn('[watch] could not look at the screen:', error instanceof Error ? error.message : error);
   }
@@ -1144,7 +1187,7 @@ async function remarkOnScreenshot() {
   try {
     const bytes = readFileSync(shot.path);
     // Always the local vision model, whatever the chat model is set to.
-    const sighting = await look(bytes.toString('base64'), vision, provider.endpoint, modelHeaders(provider.endpoint), net.fetch);
+    const sighting = await look(bytes.toString('base64'), vision, visionEndpoint(provider), modelHeaders(visionEndpoint(provider)), net.fetch);
     console.log(`[shot] ${path.basename(shot.path)} (${(bytes.length / 1024 | 0)}KB) -> ${sighting.description.length} chars`);
     const character = getActiveCharacter();
     // A screenshot arrives as a description, never a title — so without this she
@@ -1159,8 +1202,8 @@ async function remarkOnScreenshot() {
     if (!line.trim()) return;
     // Through interject, so every rule about when she may speak applies —
     // including staying quiet while they are gaming or mid-conversation.
-    interject(line);
-    void speak(line, classifyEmotion(line, provider));
+    // Spoken only if it was also written down — see interject.
+    if (interject(line)) void speak(line, classifyEmotion(line, provider));
   } catch (error) {
     console.warn('[shot] could not react:', error instanceof Error ? error.message : error);
   }
@@ -1226,13 +1269,40 @@ async function speak(reply: string, mood?: Promise<Emotion | null>) {
       // spelling it — the two do different halves of the same job.
       const shouting = hasShout(chunk);
       if (shouting) shoutedChunks++;
-      const clip = await synthesise(spokenCase(chunk), config, shouting ? shoutReference(config, reference) : reference, remoteAuth(config.endpoint));
+      const voice = shouting ? shoutReference(config, reference) : reference;
+      let clip;
+      try {
+        clip = await synthesise(spokenCase(chunk), config, voice, remoteAuth(config.endpoint));
+      } catch (first) {
+        // One retry, and only for a timeout.
+        //
+        // Measured on this machine: a cold synthesis took 6.7 seconds and every
+        // one after it took 1.1, because the model was then resident. Under load
+        // — a vision model and a chat model competing for the same card — the
+        // cold call is what runs past thirty seconds and aborts. The retry is
+        // nearly always the warm case, so it costs a second and turns a silent
+        // failure into speech.
+        //
+        // Not retried for anything else: a bad reference path or a rejected
+        // request will fail identically the second time and only doubles the wait.
+        if (!/timeout|aborted/i.test(first instanceof Error ? first.message : String(first))) throw first;
+        console.warn('[voice] synthesis timed out — trying once more, the model should be warm now');
+        clip = await synthesise(spokenCase(chunk), config, voice, remoteAuth(config.endpoint));
+      }
       // Checked after the await, not before: the wait is where a newer reply
       // lands, and a stale chunk arriving mid-sentence is the audible bug.
       if (turn !== speechTurn) return;
       sendToWindows('speech:clip', { turn, text: chunk, ...(clip ?? {}) } satisfies SpeechClip);
     } catch (error) {
-      console.warn('[voice] synthesis failed:', error instanceof Error ? error.message : error);
+      const detail = error instanceof Error ? error.message : String(error);
+      console.warn('[voice] synthesis failed:', detail);
+      // Said out loud, so to speak. A failure here is pure silence otherwise —
+      // the text is already in the chat, so there is nothing to tell the user
+      // that a voice was even attempted, and "she has gone quiet" is
+      // indistinguishable from her choosing not to speak.
+      sendToWindows('voice:failed', /timeout|aborted/i.test(detail)
+        ? 'The voice server took too long — she is on screen but not out loud.'
+        : `The voice server could not speak that: ${detail.slice(0, 120)}`);
       return;
     }
   }
@@ -1308,7 +1378,18 @@ async function handlePoke(kind: PokeKind) {
     const line = await ollamaQuip(system, cutOff ? `${prod} You were half-way through saying this out loud: "${cutOff}"` : prod, config);
     // Said out loud and put in the chat: the companion window has nowhere to
     // show text, and a line that only exists as audio is lost with the volume off.
-    interject(line);
+    //
+    // Sent directly rather than through interject, for the same reason the
+    // "hold on, I'm looking" line is. interject exists to stop her butting in on
+    // her own account, and one of the things it refuses on is the user having
+    // interacted in the last few minutes — which a poke always is. Routed
+    // through it, a poke reliably silenced its own reaction.
+    //
+    // It is not unrated: pokeSpeaking and POKE_LINE_COOLDOWN_MS above already
+    // bound this, and they bound the right thing — how often a poke earns a
+    // line, rather than how often she speaks unprompted.
+    sendToWindows('chat:interject', line);
+    noteSheAsked(line);
     void speak(line);
   } catch (error) {
     console.warn('[poke] could not write a reaction:', error instanceof Error ? error.message : error);
@@ -1419,6 +1500,10 @@ function handleHelperLine(line: string) {
     const process = parts[0] ?? '';
     const url = parts.length > 2 ? parts[parts.length - 1] : '';
     const title = parts.slice(1, parts.length > 2 ? -1 : undefined).join('|');
+    // A tool window is not an activity. Left in, the Snipping Tool became
+    // something she had opinions about, and it would have gone into the
+    // following tracker as a thing they keep coming back to.
+    if (isJustATool(process, title)) { console.log('[activity] ignoring a tool window'); return; }
     const activity = readActivity(process, title);
     // The label is what she says out loud, and for a game it was the process
     // name — "wdc", or the publisher if the window title got there first. Steam
@@ -1604,6 +1689,29 @@ function getOpenAIKey(): string {
 }
 
 /**
+ * The token for a machine that is ours but is not this one — a rented GPU, a box
+ * in the cupboard, whichever address the model, the voice and the ears are at
+ * today.
+ *
+ * This is the key the comment on remoteAuth used to describe: one door in front
+ * of our own services. It is a separate slot from xAI's and OpenAI's because
+ * those are other companies, and a token is not a thing to send somewhere on the
+ * chance it is ignored.
+ */
+function saveSelfHostedKey(apiKey: string) {
+  const key = apiKey.trim();
+  if (!key) { store.delete('selfHostedApiKey' as never); return; }
+  if (!safeStorage.isEncryptionAvailable()) throw new Error('This system has no secure storage available, so the API key cannot be saved safely.');
+  store.set('selfHostedApiKey', safeStorage.encryptString(key).toString('base64'));
+}
+
+function getSelfHostedKey(): string {
+  const saved = store.get('selfHostedApiKey') as string | undefined;
+  if (!saved) return '';
+  try { return safeStorage.decryptString(Buffer.from(saved, 'base64')); } catch { return ''; }
+}
+
+/**
  * Transcribing a file, through OpenAI when there is a key and locally otherwise.
  *
  * The same request either way: the local speech server speaks OpenAI's own
@@ -1639,9 +1747,11 @@ async function transcribeFile(wav: string): Promise<string> {
  */
 async function openAttachment(
   source: string,
-  kind: 'audio' | 'video' | 'text',
+  kind: 'audio' | 'video' | 'text' | 'document',
   asked: string,
-  tools: { ffmpeg: string; ffprobe: string },
+  // Null when ffmpeg is missing, which is fine: only sound and video need it,
+  // and those are refused before this is called.
+  tools: { ffmpeg: string; ffprobe: string } | null,
   vision: VisionConfig,
   provider: ProviderConfig,
 ): Promise<{ reaction: string | null; saved: string; held?: boolean }> {
@@ -1654,10 +1764,25 @@ async function openAttachment(
   }
   try {
     const parts: { description?: string; transcript?: string; text?: string; seconds?: number } = {};
+    if (kind === 'document') {
+      // Its own path rather than a branch of the text one: a PDF can be a scan,
+      // which is a document she genuinely cannot read, and that has to be said
+      // rather than reported as an empty file.
+      const read = await readPdf(source);
+      console.log(`[attach] ${name} — ${read.pages} page(s), ${read.scanned ? 'scanned, no readable text' : read.text.length + ' chars'}`);
+      if (!asked) {
+        heldPicture = { description: (read.scanned ? 'a scanned document, unreadable' : read.text).slice(0, 2000), name, at: Date.now() };
+        return { reaction: null, saved: source, held: true };
+      }
+      const character = getActiveCharacter();
+      const reaction = await ollamaQuip([character.identity, character.style, rightNow()].filter(Boolean).join(' '), pdfPrompt(name, read, asked), provider);
+      return { reaction, saved: source };
+    }
     if (kind === 'text') {
       parts.text = readText(source);
       console.log(`[attach] read ${name} (${parts.text.length} chars)`);
     } else {
+      if (!tools) throw new Error('that needs ffmpeg, which is not installed');
       parts.seconds = await duration(source, tools);
       if (kind === 'video') {
         const frames = await extractFrames(source, tools);
@@ -1673,7 +1798,7 @@ async function openAttachment(
         // about the video that no single frame contains.
         const sighting = await look(
           frames.map(frame => readFileSync(frame).toString('base64')),
-          vision, provider.endpoint, modelHeaders(provider.endpoint), net.fetch,
+          vision, visionEndpoint(provider), modelHeaders(visionEndpoint(provider)), net.fetch,
           { ask: `These are ${frames.length} frames taken at even intervals across one video, in order. Say plainly what the video shows and what happens across it, in two or three sentences. Describe it as one video, not as separate pictures.` },
         );
         parts.description = sighting.description;
@@ -1781,8 +1906,8 @@ async function reactToActivity(activity: Activity, url = '') {
     console.log(`[activity] ${activity.kind}${place ? ` (${place})` : ''} — reacted${knows ? ', already knew it' : ''}`);
     if (place) store.set('haunts', rememberSaid(getHaunts(), place, line));
     const emotion = classifyEmotion(line, config);
-    interject(line);
-    void speak(line, emotion);
+    // Spoken only if it was also written down — see interject.
+    if (interject(line)) void speak(line, emotion);
   } catch (error) {
     console.warn('[activity] could not react:', error instanceof Error ? error.message : error);
   } finally {
@@ -2056,7 +2181,15 @@ async function tieToPlace(said: string, replied: string, config: ProviderConfig)
  * from one she has been asking about since Tuesday, and she is told which.
  */
 let tickedOffAt = 0;
-/** Ticking a list of things off in one go should get one remark, not five. */
+/**
+ * Ticking a list of things off in one go should get one remark, not five.
+ *
+ * This is the limit that belongs here, and it is why the remark below goes out
+ * directly rather than through interject: ticking something off is an act aimed
+ * at her, and interject refuses precisely when the user has just acted. Routed
+ * through it, finishing a task she had chased for days got silence — which is
+ * the exact failure this function was written to fix.
+ */
 const TICK_OFF_COOLDOWN_MS = 90_000;
 
 async function remarkOnTickOff(item: KeptItem) {
@@ -2080,7 +2213,9 @@ async function remarkOnTickOff(item: KeptItem) {
         : 'It was due today and they have actually done it. Be surprised in a backhanded way rather than warm about it.',
       'One short line. Do not congratulate them properly, do not list anything else, and do not ask what is next.',
     ].join(' '), `The task they ticked off: "${item.title}".`, config);
-    interject(line);
+    // Directly, not through interject — see TICK_OFF_COOLDOWN_MS above.
+    sendToWindows('chat:interject', line);
+    noteSheAsked(line);
     void speak(line, classifyEmotion(line, config));
     console.log(`[kept] remarked on "${item.title}" being ticked off${late ? ' (late)' : ''}`);
   } catch (error) {
@@ -2101,6 +2236,14 @@ async function reactToFullscreen(title: string) {
   // has just gone fullscreen" came back as an indignant complaint about a
   // program literally called "Something".
   const named = title.trim();
+  // A snip overlay covers the whole screen and reports as fullscreen, so this
+  // fired at somebody taking a screenshot — "A FULLSCREEN WINDOW OF... NOTHING!"
+  // A tool is a means, not an activity, and there is nothing to say about one
+  // that is not invented.
+  if (isJustATool('', named)) {
+    console.log('[helper] fullscreen window is a tool, not something to react to');
+    return;
+  }
   if (named.length < 2) {
     console.log('[helper] fullscreen with no usable title — saying nothing');
     return;
@@ -2144,8 +2287,8 @@ async function reactToFullscreen(title: string) {
     console.log(`[helper] fullscreen: ${title.slice(0, 60)}`);
     broadcastBeat({ emotion: 'curious', confidence: 0.9, energy: 0.7, intent: 'tease', focus: 'away' }, 'stare');
     sendToWindows('companion:pose', 'lean-in');
-    interject(line);
-    void speak(line);
+    // Spoken only if it was also written down — see interject.
+    if (interject(line)) void speak(line);
   } catch (error) {
     console.warn('[helper] could not react to fullscreen:', error instanceof Error ? error.message : error);
   }
@@ -2237,8 +2380,8 @@ async function considerReminding(environment: Environment): Promise<boolean> {
     // syllable is already at the raised level.
     sendToWindows('voice:insistence', reminderVolume(tier));
     const emotion = classifyEmotion(line, config);
-    interject(line);
-    void speak(line, emotion);
+    // Spoken only if it was also written down — see interject.
+    if (interject(line)) void speak(line, emotion);
     return true;
   } catch (error) {
     console.warn('[remind] could not write a reminder:', error instanceof Error ? error.message : error);
@@ -2302,6 +2445,8 @@ async function considerPipingUp(environment: Environment) {
       hasHistory: getSessions().length > 0,
       knowsThings: getMemories().length > 0,
       kind: 'return',
+      // She is cutting in, not opening — no stray facts. See OpeningContext.
+      interrupting: true,
     }));
     const character = getActiveCharacter();
     const system = [
@@ -2313,6 +2458,8 @@ async function considerPipingUp(environment: Environment) {
       moodInstruction(mood.irritation),
       egoInstruction(mood.ego),
       'The user is at their machine but has not said anything to you for a while. You are breaking the silence yourself, unprompted.',
+      NO_NON_SEQUITURS,
+      NO_INVENTED_HISTORY,
       unpromptedContext(),
       'One or two short lines. Do not greet them, do not ask if they are still there, and do not point out how long it has been — you are starting a thought, not filing a complaint about being ignored.',
       angle ? `Open on this in particular: ${angle.instruction}` : '',
@@ -2321,8 +2468,8 @@ async function considerPipingUp(environment: Environment) {
     const line = await ollamaQuip(system, 'Say something.', config);
     console.log(`[idle] piped up (angle: ${angle?.name ?? 'none'}) after ${Math.round(minutes(mood.lastMessageAt ? Date.parse(mood.lastMessageAt) : null))} quiet minutes`);
     const emotion = classifyEmotion(line, config);
-    interject(line);
-    void speak(line, emotion);
+    // Spoken only if it was also written down — see interject.
+    if (interject(line)) void speak(line, emotion);
   } catch (error) {
     console.warn('[idle] could not pipe up:', error instanceof Error ? error.message : error);
   } finally {
@@ -3231,6 +3378,11 @@ async function composeOpening(): Promise<string | null> {
     kind === 'return'
       ? 'The user has just come back after being away a while. The conversation above is still there; pick it back up rather than introducing yourself.'
       : 'This is the start of a new conversation.',
+    // How long "a while" actually was. Told only that they had "come back", she
+    // resumed a conversation from the previous night as though it had paused for
+    // a moment — which is the same defect as the rest of this, seen from the end
+    // where she speaks first.
+    sinceLast(messages as { role: string; content: string; at?: string }[], new Date()),
     // The failure mode without this is a chirpy assistant greeting, which is the
     // one thing her character is defined against.
     NO_INVENTED_HISTORY,
@@ -3614,19 +3766,43 @@ function isRemote(endpoint: string) {
 }
 
 /**
- * The bearer for a service that is not on this machine. One key for all three,
- * because they will live behind one door: whether that is a rented GPU today or
- * a box in the cupboard later, it is one server with one token in front of it.
+ * Which token belongs at which address.
  *
- * None of these three has any authentication of its own — not Ollama, not
+ * This used to be one key for everything off this machine, on the reasoning that
+ * our services would live behind one door. That was true while the only remote
+ * things were ours. It stopped being true the moment xAI became the second
+ * model: "not localhost" then covered both our own box and somebody else's
+ * company, and the same bearer went to both.
+ *
+ * That failure is quiet, which is what makes it worth a function. Ollama ignores
+ * an Authorization header it has no use for and answers normally, so pointing
+ * the model at a rented GPU would have sent the xAI key to that host on every
+ * request, worked perfectly, and never once looked wrong.
+ *
+ * Ours still share a key — one door, as before. Other companies get theirs and
+ * only theirs.
+ */
+function keyFor(endpoint: string): string {
+  let host = '';
+  try { host = new URL(endpoint.trim()).hostname.toLowerCase(); } catch { return ''; }
+  if (/(^|\.)x\.ai$/.test(host)) return getRemoteKey();
+  if (/(^|\.)openai\.com$/.test(host)) return getOpenAIKey();
+  return getSelfHostedKey();
+}
+
+/**
+ * The bearer for a service that is not on this machine.
+ *
+ * None of our three has any authentication of its own — not Ollama, not
  * GPT-SoVITS, not the transcription server. Reachable from the internet and
  * unprotected, each is both free compute for whoever finds it and a copy of
  * whatever passes through: the whole prompt, her voice, and everything said near
  * the microphone.
  */
 function remoteAuth(endpoint: string): Record<string, string> {
-  const key = getRemoteKey();
-  return key && isRemote(endpoint) ? { Authorization: `Bearer ${key}` } : {};
+  if (!isRemote(endpoint)) return {};
+  const key = keyFor(endpoint);
+  return key ? { Authorization: `Bearer ${key}` } : {};
 }
 
 /**
@@ -3654,8 +3830,16 @@ function modelHeaders(endpoint: string): Record<string, string> {
  * thing that is not the problem. Four attempts were spent on exactly that.
  */
 function requireKeyFor(endpoint: string, provider: Provider) {
-  if (!isRemote(endpoint) || getRemoteKey()) return;
-  const name = provider === 'xai' ? 'xAI' : provider === 'openai' ? 'OpenAI' : 'That endpoint';
+  if (!isRemote(endpoint) || keyFor(endpoint)) return;
+  // Only a company that demands a key is worth stopping for. Our own server may
+  // have none — an unsecured box is a thing to warn about, not to refuse to
+  // call, and refusing here would have broken pointing the model at a rented GPU
+  // before it made a single request.
+  let host = '';
+  try { host = new URL(endpoint.trim()).hostname.toLowerCase(); } catch { /* handled below */ }
+  const name = /(^|\.)x\.ai$/.test(host) ? 'xAI' : /(^|\.)openai\.com$/.test(host) ? 'OpenAI' : '';
+  if (!name) return;
+  void provider;
   throw new Error(`No API key has been saved, so ${name} was sent none. Paste it in setup and press Save key.`);
 }
 
@@ -3718,12 +3902,81 @@ function attribute(config: ProviderConfig, error: unknown): Error {
   return new Error(`${config.model} at ${host} — ${detail} (${where})`);
 }
 
+/** How long to keep using the model at home before trying the far one again. */
+const AWAY_RETRY_MS = 60_000;
+
+/** Address -> the moment it is worth trying that address again. */
+const awayDown = new Map<string, number>();
+
+/**
+ * Marks a failure as "there was nothing at that address" rather than "that
+ * address said no", which is the only distinction the fallback below turns on.
+ */
+const ABSENT = '__absent__';
+function absent(message: string): Error {
+  return Object.assign(new Error(message), { [ABSENT]: true });
+}
+function isAbsent(error: unknown): boolean {
+  return Boolean(error && typeof error === 'object' && (error as Record<string, unknown>)[ABSENT]);
+}
+
+/**
+ * The same model, at home, when the far one is not answering.
+ *
+ * Only for our own kind of server: xAI and OpenAI have no twin on this machine,
+ * and quietly answering as a different company's model would be a worse failure
+ * than the outage. The model name is kept, because the rented box is a copy of
+ * this one — and if it is not, the local attempt fails too and the original
+ * problem is what gets reported.
+ */
+function homeTwin(config: ProviderConfig): ProviderConfig | null {
+  if (!isRemote(config.endpoint)) return null;
+  if (isOpenAIShaped(config.provider)) return null;
+  return { ...config, endpoint: LOCAL_MODELS };
+}
+
+/**
+ * A rented GPU that has been switched off should cost speed, not the evening.
+ *
+ * Without this, pointing her at a pod and then stopping it leaves her with no
+ * brain at all: every message fails, and nothing says why or suggests the model
+ * sitting idle on this machine. So an absent server falls back to home, and the
+ * address is remembered as down for a minute afterwards — otherwise every
+ * message pays the round trip to discover the same thing again.
+ *
+ * It says so in the transcript the first time, because the alternative is her
+ * silently becoming eight times slower with no explanation, which reads as
+ * something being wrong with her rather than with the pod.
+ */
 async function ollamaPost(conversation: OllamaMessage[], config: ProviderConfig, { tools = true, temperature = config.temperature, format, maxTokens }: { tools?: boolean; temperature?: number; format?: unknown; maxTokens?: number } = {}) {
   // One place, so chat, quips, openings and remarks all follow the same rule.
   config = modelForNow(config);
+  const options = { tools, temperature, format, maxTokens };
+  const home = homeTwin(config);
+  const address = trimEndpoint(config.endpoint);
+
+  const until = awayDown.get(address);
+  if (home && until && Date.now() < until) return sendToProvider(conversation, home, options);
+
   try {
-    return await sendToProvider(conversation, config, { tools, temperature, format, maxTokens });
+    const message = await sendToProvider(conversation, config, options);
+    if (awayDown.delete(address)) console.log(`[ai] ${address} is answering again`);
+    return message;
   } catch (error) {
+    if (home && isAbsent(error)) {
+      try {
+        const message = await sendToProvider(conversation, home, options);
+        if (!awayDown.has(address)) {
+          console.warn(`[ai] nothing at ${address} — using ${config.model} on this machine instead`);
+          sendToWindows('ai:fellBack', `${address} is not answering — she is thinking on this machine instead, which is slower. Start the pod, or point her back at localhost in setup.`);
+        }
+        awayDown.set(address, Date.now() + AWAY_RETRY_MS);
+        return message;
+      } catch {
+        // Home could not help either, so the far server's failure is still the
+        // honest thing to report.
+      }
+    }
     throw attribute(config, error);
   }
 }
@@ -3732,17 +3985,26 @@ async function sendToProvider(conversation: OllamaMessage[], config: ProviderCon
   // Routed here rather than at every call site: there are a dozen composers in
   // this file and none of them should know which provider is answering.
   if (isOpenAIShaped(config.provider)) return openAIPost(conversation, config, { tools, temperature, format, maxTokens });
-  const send = (withTools: boolean) => net.fetch(`${trimEndpoint(config.endpoint)}/api/chat`, {
-    method: 'POST',
-    headers: modelHeaders(config.endpoint),
-    body: JSON.stringify({
-      model: config.model, messages: conversation,
-      ...(withTools ? { tools: chatTools() } : {}),
-      ...(format ? { format } : {}),
-      stream: false,
-      options: { temperature, num_ctx: CHAT_NUM_CTX, ...(maxTokens ? { num_predict: maxTokens } : {}) },
-    }),
-  });
+  const send = async (withTools: boolean) => {
+    try {
+      return await net.fetch(`${trimEndpoint(config.endpoint)}/api/chat`, {
+        method: 'POST',
+        headers: modelHeaders(config.endpoint),
+        body: JSON.stringify({
+          model: config.model, messages: conversation,
+          ...(withTools ? { tools: chatTools() } : {}),
+          ...(format ? { format } : {}),
+          stream: false,
+          options: { temperature, num_ctx: CHAT_NUM_CTX, ...(maxTokens ? { num_predict: maxTokens } : {}) },
+        }),
+      });
+    } catch (error) {
+      // No response at all — a refused connection, a name that does not
+      // resolve, a network that is not there. Nobody said no; nobody said
+      // anything.
+      throw absent(error instanceof Error ? error.message : String(error));
+    }
+  };
 
   const wanted = tools && !toolless.has(config.model);
   let response = await send(wanted);
@@ -3758,7 +4020,21 @@ async function sendToProvider(conversation: OllamaMessage[], config: ProviderCon
       throw new Error(`Ollama returned 400: ${body || response.statusText}`);
     }
   }
-  if (!response.ok) throw new Error(`Ollama returned ${response.status}: ${(await response.text().catch(() => '')) || response.statusText}`);
+  if (!response.ok) {
+    const body = (await response.text().catch(() => '')) || '';
+    // A stopped RunPod pod answers 404 with an empty body — byte for byte what a
+    // hostname that never existed answers. A live Ollama missing the model also
+    // answers 404, but names the model in the body. The body is the only thing
+    // that tells them apart, and getting this wrong goes badly in both
+    // directions: treat every 404 as an outage and a mistyped model name falls
+    // back to this machine for ever without ever saying so; treat none of them
+    // as one and a stopped pod is never noticed, because it never fails any
+    // other way.
+    if (!body.trim() && (response.status === 404 || response.status >= 500)) {
+      throw absent(`nothing answered at ${trimEndpoint(config.endpoint)} (${response.status})`);
+    }
+    throw new Error(`Ollama returned ${response.status}: ${body || response.statusText}`);
+  }
   const data = await response.json() as { message?: OllamaMessage; error?: string };
   if (data.error) throw new Error(data.error);
   if (!data.message) throw new Error('Ollama response did not include a message.');
@@ -3890,7 +4166,21 @@ function tickOffSpoken(said: string) {
  * how your day was is how a journal turns into a chore, and the whole feature
  * depends on it staying something you want to answer.
  */
-let journalAskedOn: string | undefined;
+/**
+ * Long enough not to hammer, short enough to catch a gap in the conversation.
+ *
+ * She asks in the evening, which is exactly when someone is most likely to be
+ * mid-exchange with her — so the retry has to be quick enough to find a quiet
+ * moment the same night rather than giving up until tomorrow.
+ */
+const JOURNAL_RETRY_MS = 6 * 60_000;
+let journalTriedAt = 0;
+/**
+ * Survives a restart. Held only in memory it reset on every launch, so a day she
+ * had already asked about could be asked about again — and this app is restarted
+ * a great deal.
+ */
+let journalAskedOn = store.get('journal.askedOn') as string | undefined;
 
 /**
  * Her once-a-day ask. Written as a nudge she composes herself rather than a
@@ -3906,9 +4196,19 @@ async function askForJournal() {
   if (!shouldAsk(config, getJournal(), now, today, journalAskedOn)) return;
   const provider = store.get('ai.config') as ProviderConfig | undefined;
   if (!provider?.model) return;
-  // Marked before the request, not after: a slow or failed generation must not
-  // leave the door open for a second attempt a minute later.
-  journalAskedOn = today;
+  // Two different clocks, and conflating them cost several days of asking.
+  //
+  // The day is marked only once the question has actually reached them. It used
+  // to be marked here, before the request — which was right about slow
+  // generations and wrong about everything else: interject refuses a line when
+  // they have spoken in the last few minutes, which at the hour she asks is
+  // most evenings. She would compose the question, have it dropped, and record
+  // the day as done. Silent, and no retry until tomorrow.
+  //
+  // The attempt clock does the job the day-mark was doing badly: it stops a
+  // minute-by-minute retry loop without claiming the asking happened.
+  if (Date.now() - journalTriedAt < JOURNAL_RETRY_MS) return;
+  journalTriedAt = Date.now();
   const trend = recentTrend(getJournal(), today);
   const character = getActiveCharacter();
   const system = [
@@ -3924,9 +4224,16 @@ async function askForJournal() {
     const message = await ollamaPost([{ role: 'system', content: system }], provider, { tools: false, temperature: 0.9, maxTokens: 120 });
     const line = (message.content ?? '').trim().replace(/^["'“”]+|["'“”]+$/g, '');
     if (!line) return;
-    console.log(`[journal] asked for today's entry (${line.length} chars)`);
-    interject(line);
-    void speak(line, classifyEmotion(line, provider));
+    // Spoken only if it was also written down — see interject.
+    if (interject(line)) {
+      // Only now. This is the one place that means she actually asked.
+      journalAskedOn = today;
+      store.set('journal.askedOn', today);
+      console.log(`[journal] asked for today's entry (${line.length} chars)`);
+      void speak(line, classifyEmotion(line, provider));
+    } else {
+      console.log('[journal] the ask was dropped — will try again shortly');
+    }
   } catch (error) {
     console.warn('[journal] could not compose the ask:', error instanceof Error ? error.message : error);
   }
@@ -3972,8 +4279,8 @@ async function noticePage(page: NoticedPage) {
     const line = (message.content ?? '').trim().replace(/^["'“”]+|["'“”]+$/g, '');
     if (!line) return;
     console.log(`[notice] remarked on the ${page} page (${line.length} chars)`);
-    interject(line);
-    void speak(line, classifyEmotion(line, config));
+    // Spoken only if it was also written down — see interject.
+    if (interject(line)) void speak(line, classifyEmotion(line, config));
   } catch (error) {
     console.warn('[notice] could not compose a remark:', error instanceof Error ? error.message : error);
   }
@@ -4075,7 +4382,7 @@ function brainFor(message: string, local: ProviderConfig): { config: ProviderCon
     : { config: local, escalated: false, because: verdict.because };
 }
 
-async function ollamaChat(messages: { role: string; content: string }[], config: ProviderConfig) {
+async function ollamaChat(messages: { role: string; content: string; at?: string }[], config: ProviderConfig) {
   const latest = messages.at(-1)?.content ?? '';
   // They are talking to her, so the silence she was waiting out is over.
   noteUserSpoke();
@@ -4108,7 +4415,10 @@ async function ollamaChat(messages: { role: string; content: string }[], config:
   const hasItems = getKept().some(item => item.date >= startOfToday);
   const fresh = readFreshStart(messages);
   if (fresh) console.log(`[chat] first reply after a deliberate reset (previous conversation ${fresh.hadMessages ? 'had messages' : 'was empty'})`);
-  const conversation: OllamaMessage[] = [{ role: 'system', content: chatSystemPrompt({ ...mood, latestMessage: latest, fresh }) }, ...withoutStaleDenials(messages, hasItems)];
+  // Seams named before the history goes in. Every message used to say it was
+  // said "now", so a line from last night sat flush against one from a second
+  // ago and she read the lot as current — see ./history.
+  const conversation: OllamaMessage[] = [{ role: 'system', content: chatSystemPrompt({ ...mood, latestMessage: latest, fresh }) }, ...markTimeGaps(withoutStaleDenials(messages, hasItems))];
   // Chosen once for the whole turn, tool rounds included: swapping models
   // half-way through a tool loop would hand one model's call to another to
   // answer, and the two do not agree on how a call is even identified.
@@ -4493,6 +4803,23 @@ app.whenReady().then(() => {
   // messages deliberately do not do this: somebody at the keyboard has not asked
   // for the microphone.
   ipcMain.handle('chat:expectAnswer', () => { expectAnswerWhenDone(); });
+  ipcMain.handle('listen:correct', (_e, heardText: string, meantText: string) => {
+    const before = readHearing(store.get('hearing'));
+    const after = remember(before, heardText, meantText, new Date().toISOString());
+    store.set('hearing', after);
+    const learned = after.corrections[0];
+    // The pair, not the sentence: what it took from the correction is the only
+    // thing worth telling them, because it is what will fire next time.
+    if (learned && after.corrections.length !== before.corrections.length) console.log(`[listen] learned: "${learned.heard}" -> "${learned.meant}"`);
+    return after.corrections.length;
+  });
+  ipcMain.handle('listen:corrections', () => readHearing(store.get('hearing')).corrections);
+  ipcMain.handle('listen:forgetCorrection', (_e, heardText: string) => {
+    const now = readHearing(store.get('hearing'));
+    const kept = { corrections: now.corrections.filter(c => c.heard !== heardText) };
+    store.set('hearing', kept);
+    return kept.corrections;
+  });
   ipcMain.handle('listen:get', () => readListenConfig(store.get('listen')));
   ipcMain.handle('listen:set', (_e, config: ListenConfig) => {
     const saved = readListenConfig(config);
@@ -4510,8 +4837,17 @@ app.whenReady().then(() => {
       console.log(`[listen] ${audio.length} bytes -> nothing worth sending`);
       return '';
     }
-    console.log(`[listen] ${audio.length} bytes -> ${text.length} chars`);
-    return text;
+    // Rewritten with whatever she has been taught to mishear less. Applied here
+    // rather than as a prompt to the model — see hearing.ts for why priming is
+    // the wrong tool.
+    const heard = readHearing(store.get('hearing'));
+    const fixed = correct(heard, text);
+    if (fixed.applied.length) {
+      store.set('hearing', noteUsed(heard, fixed.applied));
+      console.log(`[listen] corrected: ${fixed.applied.join(', ')}`);
+    }
+    console.log(`[listen] ${audio.length} bytes -> ${fixed.text.length} chars`);
+    return fixed.text;
   });
   // hasKey rather than the key: whether one is saved is what the panel needs to
   // render, and the key itself has no business back in the renderer.
@@ -4605,21 +4941,22 @@ app.whenReady().then(() => {
    * Show her a picture. Returns her reaction so the renderer can put it in the
    * conversation; the copy and the memory happen here.
    */
-  ipcMain.handle('vision:show', async (_e, note: string) => {
+  ipcMain.handle('vision:show', async (_e, note: string, only: 'picture' | 'any' = 'any') => {
     const config = readVisionConfig(store.get('vision'));
     if (!config.enabled) throw new Error('Looking at pictures is switched off in setup.');
     const provider = store.get('ai.config') as ProviderConfig | undefined;
     if (!provider?.model) throw new Error('No model is configured.');
     const tools = findFfmpeg();
     const picked = await dialog.showOpenDialog({
-      title: 'Show Haru a file',
+      title: only === 'picture' ? 'Show Haru a picture' : 'Give Haru a file',
       properties: ['openFile'],
       // Sound and video only when ffmpeg is there to open them: offering a file
       // type that then fails is worse than not offering it.
-      filters: [
-        { name: 'Anything she can open', extensions: [...OPENABLE.image, ...OPENABLE.text, ...(tools ? [...OPENABLE.audio, ...OPENABLE.video] : [])] },
+      filters: only === 'picture' ? [{ name: 'Pictures', extensions: OPENABLE.image }] : [
+        { name: 'Anything she can open', extensions: [...OPENABLE.image, ...OPENABLE.document, ...OPENABLE.text, ...(tools ? [...OPENABLE.audio, ...OPENABLE.video] : [])] },
         { name: 'Pictures', extensions: OPENABLE.image },
         ...(tools ? [{ name: 'Sound', extensions: OPENABLE.audio }, { name: 'Video', extensions: OPENABLE.video }] : []),
+        { name: 'Documents', extensions: OPENABLE.document },
         { name: 'Text and data', extensions: OPENABLE.text },
         { name: 'All files', extensions: ['*'] },
       ],
@@ -4631,7 +4968,7 @@ app.whenReady().then(() => {
     if ((kind === 'audio' || kind === 'video') && !tools) throw new Error('Opening sound and video needs ffmpeg, which is not installed.');
     // Everything but a picture goes through the wider intake, which pulls the
     // file apart into things a model can actually read.
-    if (kind !== 'image') return openAttachment(source, kind, note?.trim() ?? '', tools!, config, provider);
+    if (kind !== 'image') return openAttachment(source, kind, note?.trim() ?? '', tools, config, provider);
 
     // Copied first, before anything can fail. If the model is down they still
     // wanted the picture kept, and the copy is the part they cannot redo.
@@ -4776,6 +5113,8 @@ app.whenReady().then(() => {
   ipcMain.handle('ai:defaultEndpoint', (_e, provider: string) => DEFAULT_ENDPOINTS[(provider as Provider)] ?? DEFAULT_ENDPOINTS.ollama);
   ipcMain.handle('ai:setKey', (_e, apiKey: string) => { saveRemoteKey(apiKey); return Boolean(getRemoteKey()); });
   ipcMain.handle('ai:hasKey', () => Boolean(getRemoteKey()));
+  ipcMain.handle('ai:setSelfHostedKey', (_e, apiKey: string) => { saveSelfHostedKey(apiKey); return Boolean(getSelfHostedKey()); });
+  ipcMain.handle('ai:hasSelfHostedKey', () => Boolean(getSelfHostedKey()));
   ipcMain.handle('openai:setKey', (_e, apiKey: string) => { saveOpenAIKey(apiKey); return Boolean(getOpenAIKey()); });
   ipcMain.handle('openai:status', () => ({ hasKey: Boolean(getOpenAIKey()), ffmpeg: Boolean(findFfmpeg()) }));
   ipcMain.handle('ai:verify', (_e, endpoint: string, provider: string, model: string) => verifyRemoteModel(endpoint, (provider as Provider) ?? 'openai', model));

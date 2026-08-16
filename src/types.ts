@@ -4,12 +4,22 @@ export type Role = 'user' | 'assistant' | 'system';
 export type Reaction = 'up' | 'down';
 // replyTo points at an earlier message of Haru's, so feedback can be aimed at
 // the reply it is actually about rather than at whatever she said last.
-export interface Message { id: string; role: Role; content: string; time: string; reaction?: Reaction; ignored?: boolean; replyTo?: { id: string; excerpt: string }; }
+/**
+ * 'time' is what the bubble prints and has always been the literal string
+ * 'now'. 'at' is when the message was actually said, which is what lets old
+ * context be told from new. Optional: everything written before this existed
+ * has none, and guessing one would be worse than the flatness it fixes.
+ */
+export interface Message { id: string; role: Role; content: string; time: string; at?: string;
+  /** Set when this message arrived by voice, holding what the speech server
+   *  actually returned. Kept so a correction can be taught against the exact
+   *  text that was misheard rather than against whatever was edited afterwards. */
+  heard?: string; reaction?: Reaction; ignored?: boolean; replyTo?: { id: string; excerpt: string }; }
 export interface ChatResult { content: string; ignored: boolean; irritation: number; ego: number; }
 export interface Mood { irritation: number; ego: number; }
 export interface Vitals { energy: number; happiness: number; curiosity: number; affection: number; sleepiness: number; stress: number; focus: number; }
 export interface LifeTick { vitals: Vitals; action: string | null; night: boolean; }
-export type EmotionName = 'neutral' | 'happy' | 'curious' | 'smug' | 'annoyed' | 'bored' | 'sleepy' | 'surprised' | 'affectionate' | 'embarrassed';
+export type EmotionName = 'neutral' | 'happy' | 'curious' | 'smug' | 'annoyed' | 'bored' | 'sleepy' | 'surprised' | 'affectionate' | 'embarrassed' | 'determined' | 'worried';
 export type Intent = 'listen' | 'explain' | 'tease' | 'dismiss' | 'celebrate' | 'soothe';
 export type FocusTarget = 'user' | 'self' | 'task' | 'away';
 export interface Emotion { emotion: EmotionName; confidence: number; energy: number; intent: Intent; focus: FocusTarget; }
@@ -22,7 +32,7 @@ export interface Character { identity: string; style: string; }
 // Speech to text. 'local' is any server speaking OpenAI's /v1/audio/transcriptions
 // — see electron/listen.ts.
 export type ListenEngine = 'off' | 'local';
-export interface ListenConfig { engine: ListenEngine; endpoint: string; language: string; autoSend: boolean; wakeWord: boolean; replyWindow: boolean; }
+export interface ListenConfig { engine: ListenEngine; endpoint: string; language: string; autoSend: boolean; wakeWord: boolean; replyWindow: boolean; chimeVolume: number; }
 export type SearchProvider = 'duckduckgo' | 'brave' | 'google';
 export interface SearchConfig { enabled: boolean; provider: SearchProvider; limit: number; engineId: string; readPages: boolean; place: string; }
 export interface DesktopConfig { launch: boolean; power: boolean; }

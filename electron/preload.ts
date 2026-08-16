@@ -6,7 +6,7 @@ type ProviderConfig = { provider: string; model: string; endpoint: string; tempe
 type KeptItem = { id: string; title: string; date: string; time?: string; kind: 'task' | 'event'; done: boolean; heardAbout?: string; googleEventId?: string; googleTaskId?: string };
 type GoogleStatus = { hasCredentials: boolean; connected: boolean; email?: string; lastSync?: string; lastError?: string; tasksGranted?: boolean };
 type Character = { identity: string; style: string };
-type ListenConfig = { engine: string; endpoint: string; language: string; autoSend: boolean; wakeWord: boolean; replyWindow: boolean };
+type ListenConfig = { engine: string; endpoint: string; language: string; autoSend: boolean; wakeWord: boolean; replyWindow: boolean; chimeVolume: number };
 type SearchConfig = { enabled: boolean; provider: string; limit: number; engineId: string; readPages: boolean; place: string };
 type DesktopConfig = { launch: boolean; power: boolean };
 type WatchingConfig = { enabled: boolean; everyMinutes: number; gamesOnly: boolean };
@@ -34,6 +34,9 @@ type SpeechClip = { turn: number; text: string; audio?: Uint8Array; mime?: strin
 contextBridge.exposeInMainWorld('haru', {
   settings: { get: (key: string) => ipcRenderer.invoke('settings:get', key), set: (key: string, value: unknown) => ipcRenderer.invoke('settings:set', key, value) },
   listen: {
+    correct: (heard: string, meant: string) => ipcRenderer.invoke('listen:correct', heard, meant) as Promise<number>,
+    corrections: () => ipcRenderer.invoke('listen:corrections') as Promise<{ heard: string; meant: string; used: number }[]>,
+    forgetCorrection: (heard: string) => ipcRenderer.invoke('listen:forgetCorrection', heard) as Promise<{ heard: string; meant: string; used: number }[]>,
     get: () => ipcRenderer.invoke('listen:get') as Promise<ListenConfig>,
     set: (config: ListenConfig) => ipcRenderer.invoke('listen:set', config) as Promise<ListenConfig>,
     transcribe: (audio: Uint8Array, mime: string) => ipcRenderer.invoke('listen:transcribe', audio, mime) as Promise<string>,
@@ -74,7 +77,7 @@ contextBridge.exposeInMainWorld('haru', {
   vision: {
     get: () => ipcRenderer.invoke('vision:get') as Promise<VisionConfig>,
     set: (config: VisionConfig) => ipcRenderer.invoke('vision:set', config) as Promise<VisionConfig>,
-    show: (note: string) => ipcRenderer.invoke('vision:show', note) as Promise<{ reaction: string | null; saved: string; held?: boolean } | null>,
+    show: (note: string, only: 'picture' | 'any' = 'any') => ipcRenderer.invoke('vision:show', note, only) as Promise<{ reaction: string | null; saved: string; held?: boolean } | null>,
     openFolder: () => ipcRenderer.invoke('vision:openFolder') as Promise<void>,
   },
   gaming: {
@@ -127,6 +130,19 @@ contextBridge.exposeInMainWorld('haru', {
       ipcRenderer.on('chat:expectReply', listener);
       return () => ipcRenderer.removeListener('chat:expectReply', listener);
     },
+    onVoiceFailed: (callback: (why: string) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, why: string) => callback(why);
+      ipcRenderer.on('voice:failed', listener);
+      return () => ipcRenderer.removeListener('voice:failed', listener);
+    },
+    // Said once when the far model stops answering and the one on this machine
+    // takes over. Same shape as a failed voice: a note in the transcript, not
+    // something she says.
+    onFellBack: (callback: (why: string) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, why: string) => callback(why);
+      ipcRenderer.on('ai:fellBack', listener);
+      return () => ipcRenderer.removeListener('ai:fellBack', listener);
+    },
     onInterject: (callback: (line: string) => void) => {
       const listener = (_event: Electron.IpcRendererEvent, line: string) => callback(line);
       ipcRenderer.on('chat:interject', listener);
@@ -142,6 +158,10 @@ contextBridge.exposeInMainWorld('haru', {
     setEscalate: (setting: { enabled: boolean; minWords: number }, provider: ProviderConfig | null) => ipcRenderer.invoke('ai:setEscalate', setting, provider) as Promise<{ enabled: boolean; minWords: number; provider: ProviderConfig | null }>,
     setKey: (apiKey: string) => ipcRenderer.invoke('ai:setKey', apiKey) as Promise<boolean>,
     hasKey: () => ipcRenderer.invoke('ai:hasKey') as Promise<boolean>,
+    // The token for our own server, wherever it is today. Kept apart from the
+    // one above, which belongs to xAI.
+    setSelfHostedKey: (apiKey: string) => ipcRenderer.invoke('ai:setSelfHostedKey', apiKey) as Promise<boolean>,
+    hasSelfHostedKey: () => ipcRenderer.invoke('ai:hasSelfHostedKey') as Promise<boolean>,
     retort: (disliked: string, config: ProviderConfig) => ipcRenderer.invoke('ai:retort', disliked, config) as Promise<string>,
     gloat: (praised: string, config: ProviderConfig) => ipcRenderer.invoke('ai:gloat', praised, config) as Promise<string>,
   },

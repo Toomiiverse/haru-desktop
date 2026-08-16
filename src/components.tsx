@@ -1,10 +1,10 @@
 import { Component, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { MicOff, CalendarDays, Check, ChevronDown, CornerDownRight, Mic, Reply, SquareCheck, ChevronLeft, ChevronRight, CircleDot, Import, MessageSquarePlus, Plus, NotebookPen, MessageSquare, Square, ImagePlus, Sparkles, ThumbsDown, ThumbsUp, Trash2, X } from 'lucide-react';
+import { Paperclip, MicOff, CalendarDays, Check, ChevronDown, CornerDownRight, Mic, Reply, SquareCheck, ChevronLeft, ChevronRight, CircleDot, Import, MessageSquarePlus, Plus, NotebookPen, MessageSquare, Square, ImagePlus, Sparkles, ThumbsDown, ThumbsUp, Trash2, X } from 'lucide-react';
 import type { AniListConfig, Character, DesktopConfig, GamingConfig, ScreenshotConfig, WatchingConfig, VisionConfig, HaruNote, JournalConfig, JournalEntry, JournalField, JournalRange, JournalStats, JournalFieldStats, RoamConfig, EmotionName, GoogleStatus, KeptItem, ListenConfig, Memory, MemoryKind, Message, Profile, ProviderConfig, Reaction, SearchConfig, SessionSummary, VoiceConfig, VoiceEngine, VoiceReference, WardrobeControl } from './types';
 import { buildMonthGrid, datesInView, dayLabel, rangeLabel, shiftISODate, toISODate, weekOf, type CalendarView } from './date';
 import { startListening, startRecording, type Listener, type Recorder } from './companion/microphone';
 import { isUsableFollowUp, matchWake, readsAsFarewell } from './companion/wake';
-import { chimeListening, chimeStoppedListening } from './companion/chime';
+import { chimeListening, chimeStoppedListening, setChimeVolume } from './companion/chime';
 export class StageFailureBoundary extends Component<{ children: ReactNode; onError(message: string): void }, { failed: boolean }> { state = { failed: false }; componentDidCatch(error: Error) { this.props.onError(error.message || 'Haru could not start the Live2D renderer.'); } render() { return this.state.failed ? null : this.props.children; } static getDerivedStateFromError() { return { failed: true }; } }
 
 export type Page = 'chat' | 'character' | 'profile' | 'settings' | 'journal';
@@ -461,6 +461,26 @@ export function CharacterDrawer({ onClose }: { onClose(): void }) {
     </div></section>;
 }
 
+/**
+ * Which saved key an address will actually be sent — the same rule as keyFor()
+ * in the main process, and it has to stay the same rule.
+ *
+ * This box used to be wired to one key regardless of what was typed above it, so
+ * with a rented GPU in the endpoint field it reported "a key is saved" about
+ * xAI's key, which is no longer sent there — and pasting the pod's token would
+ * have overwritten the key Grok escalation runs on, breaking a working feature
+ * to configure a different one.
+ */
+function keySlotFor(endpoint: string): 'xai' | 'openai' | 'self' {
+  let host = '';
+  try { host = new URL(endpoint.trim()).hostname.toLowerCase(); } catch { return 'self'; }
+  if (/(^|\.)x\.ai$/.test(host)) return 'xai';
+  if (/(^|\.)openai\.com$/.test(host)) return 'openai';
+  return 'self';
+}
+
+const KEY_SLOT_NAME = { xai: 'xAI', openai: 'OpenAI', self: 'your own server' } as const;
+
 export function SettingsDrawer({ config, onSave, onTest, onClose }: { config: ProviderConfig; onSave(config: ProviderConfig): void; onTest(endpoint: string, provider?: string): Promise<string[]>; onClose(): void }) {
   const [endpoint, setEndpoint] = useState(config.endpoint);
   const [model, setModel] = useState(config.model);
@@ -468,7 +488,25 @@ export function SettingsDrawer({ config, onSave, onTest, onClose }: { config: Pr
   const [saved, setSaved] = useState(false);
   const [modelKey, setModelKey] = useState('');
   const [hasModelKey, setHasModelKey] = useState(false);
-  useEffect(() => { window.haru?.ai.hasKey().then(setHasModelKey); }, []);
+  // Follows the address as it is typed, so the box always describes the key that
+  // endpoint would actually use.
+  const slot = keySlotFor(endpoint);
+  useEffect(() => {
+    const haru = window.haru;
+    if (!haru) return;
+    const saved = slot === 'xai' ? haru.ai.hasKey()
+      : slot === 'openai' ? haru.openai.status().then(status => status.hasKey)
+      : haru.ai.hasSelfHostedKey();
+    void saved.then(setHasModelKey);
+  }, [slot]);
+  function saveModelKey() {
+    const haru = window.haru;
+    if (!haru) return;
+    const written = slot === 'xai' ? haru.ai.setKey(modelKey)
+      : slot === 'openai' ? haru.openai.setKey(modelKey)
+      : haru.ai.setSelfHostedKey(modelKey);
+    void written.then(ok => { setHasModelKey(ok); setModelKey(''); });
+  }
   // Only asked for when the endpoint is not this machine. Localhost needs no
   // token and offering one there is just a box nobody should fill in.
   const remote = !/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:|\/|$)/i.test(endpoint.trim());
@@ -509,15 +547,19 @@ export function SettingsDrawer({ config, onSave, onTest, onClose }: { config: Pr
         <option value="xai">xAI — Grok</option>
         <option value="openai">OpenAI</option>
       </select>
+      {/* "Ollama" is a kind of server, not a place. Picking it and then typing
+          the address of a rented GPU left this saying "nothing sent anywhere"
+          immediately above an endpoint that sends everything — so the claim
+          follows the address, which is the thing that decides it. */}
       <span className="status-note">{config.provider === 'ollama'
-        ? 'Local. No key, no account, nothing sent anywhere.'
+        ? (remote ? 'Ollama, but not on this machine — see below.' : 'Local. No key, no account, nothing sent anywhere.')
         : 'Everything she is given goes to them with every message — the conversation, her memory of you, your list and your journal ratings.'}</span>
     </div>
     <div className="form-grid"><input value={endpoint} onChange={event => setEndpoint(event.target.value)} placeholder="http://localhost:11434"/><input value={model} onChange={event => setModel(event.target.value)} placeholder={config.provider === 'xai' ? 'grok-4' : config.provider === 'openai' ? 'gpt-4o' : 'qwen3:8b'}/></div>{remote && <>
     <p className="status-note">That is not this machine. Everything she is given goes there with every message — the conversation, what she remembers about you, your profile and your list — so it wants to be somewhere you trust, over https, and behind a token. Ollama has no password of its own: an endpoint on the open internet can be used, and read, by anyone who finds it.</p>
     <div className="form-grid">
-      <input type="password" value={modelKey} placeholder={hasModelKey ? 'A key is saved — type a new one to replace it' : 'Bearer token for the endpoint'} onChange={event => setModelKey(event.target.value)}/>
-      <button className="ghost" disabled={!modelKey.trim()} onClick={() => void window.haru?.ai.setKey(modelKey).then(saved => { setHasModelKey(saved); setModelKey(''); })}>Save key</button>
+      <input type="password" value={modelKey} placeholder={hasModelKey ? `A key is saved for ${KEY_SLOT_NAME[slot]} — type a new one to replace it` : `Bearer token for ${KEY_SLOT_NAME[slot]}`} onChange={event => setModelKey(event.target.value)}/>
+      <button className="ghost" disabled={!modelKey.trim()} onClick={saveModelKey}>Save key</button>
     </div>
   </>}{status.state !== 'idle' && <p className={status.state === 'error' ? 'status-error' : 'status-ok'}>{status.state === 'testing' ? 'Testing…' : status.message}</p>}</div><VoiceField registerSave={registerVoiceSave}/><ListenField/><SearchField/><AniListField/><SecondBrainField/><ThemeField/><VisionField/><AttachmentsField/><ScreenshotField/><WatchingField/><DesktopField/><GamingField/><RoamField/><GoogleCalendarField/><StartupField/><div className="drawer-foot"><button className="ghost" onClick={test} disabled={status.state === 'testing'}>{status.state === 'testing' ? 'Testing…' : 'Test connection'}</button><button className="ghost">Enable alerts</button>{saved && <span className="saved"><Check size={13}/> Saved</span>}<button className="solid" onClick={() => void save()}>Save setup</button></div></section>;
 }
@@ -750,8 +792,12 @@ function ListenField() {
   const [busy, setBusy] = useState(false);
   useEffect(() => {
     if (!window.haru) return;
-    window.haru.listen.get().then(setConfig);
-    return window.haru.listen.onChange(setConfig);
+    // The saved level reaches the chime module here. Both readers do it: the
+    // panel so "Hear it" plays what the slider says, and the mic button because
+    // that is the component that actually rings it.
+    const apply = (saved: ListenConfig) => { setConfig(saved); setChimeVolume(saved.chimeVolume); };
+    window.haru.listen.get().then(apply);
+    return window.haru.listen.onChange(apply);
   }, []);
 
   if (!window.haru || !config) return null;
@@ -792,6 +838,19 @@ function ListenField() {
         <span>Listen for {WAKE_WINDOW_MS / 1000} seconds whenever she speaks first</span>
       </label>
       {config.replyWindow && !config.wakeWord && <p className="status-note">Covers the times she starts it — the line when she comes up, a reaction to what you have open, a reminder, being poked. The microphone opens once she has finished talking, not while, and closes again on its own. No name needed; she already has your attention.</p>}
+      <div className="stack">
+        <span>Chime {config.chimeVolume > 0 ? `— ${Math.round(config.chimeVolume * 100)}%` : '— off'}</span>
+        <div className="row-actions">
+          <input type="range" min={0} max={40} step={1} value={Math.round(config.chimeVolume * 100)} disabled={busy}
+            onChange={event => save({ chimeVolume: Number(event.target.value) / 100 })}/>
+          {/* Plays the new level as you drag it, because a volume you cannot
+              hear while setting is a volume you set twice. */}
+          <button className="ghost" type="button" disabled={busy || config.chimeVolume <= 0} onClick={() => chimeListening()}>Hear it</button>
+        </div>
+        <span className="status-note">{config.chimeVolume > 0
+          ? 'Two short notes when the microphone opens, and two falling ones when it closes. The falling pair matters more than it sounds — without it you carry on talking into a window that shut a while ago. Separate from her speaking volume on purpose: her voice can sit low while the cue still needs to carry across a room.'
+          : 'Silent. The only sign she is listening will be the microphone button.'}</span>
+      </div>
       <label className="check-row">
         <input type="checkbox" checked={config.wakeWord} disabled={busy} onChange={event => save({ wakeWord: event.target.checked })}/>
         <span>Answer to “Hey Haru” without pressing anything</span>
@@ -799,6 +858,7 @@ function ListenField() {
       {config.wakeWord && <p className="status-note">This keeps the microphone open. Everything said nearby is transcribed on this machine to work out whether it was meant for her, then thrown away — nothing is written down and nothing leaves the computer, but it is a different bargain from pressing a button. Say “Haru, remind me to…” in one breath, or just “Haru?” and she will wait {WAKE_WINDOW_MS / 1000} seconds for the rest.</p>}
       <div className="row-actions"><button className="ghost" disabled={busy} onClick={check}>Check the server</button></div>
       <p className="status-note">Run <code>electron\start-haru-asr.cmd</code> to start it. It borrows the Python that GPT-SoVITS already bundles, so there is nothing else to install — the first run downloads the model and takes a minute.</p>
+      <Corrections/>
     </>}
     {message && <p className={message.error ? 'status-error' : 'status-ok'}>{message.text}</p>}
   </div>;
@@ -1115,10 +1175,11 @@ function AttachmentsField() {
   };
 
   return <div className="field"><h2>Files you show her</h2>
-    <p>The picture button takes anything now — pictures, sound, video, and text or data files. She opens it the way anything does: a video becomes a few frames and its sound, a recording becomes what was said.</p>
+    <p>The paperclip takes anything — pictures, sound, video, PDFs, and text or data files. She opens each the way it needs opening: a video becomes a few frames and its sound, a recording becomes what was said, a PDF becomes its text.</p>
     <p className="status-note">{status.ffmpeg
-      ? 'ffmpeg is installed, so sound and video work.'
-      : 'ffmpeg is not installed, so only pictures and text files can be opened. Video and sound need it to be pulled apart at all.'}</p>
+      ? 'ffmpeg is installed, so sound and video work. PDFs and text need nothing extra.'
+      : 'ffmpeg is not installed, so pictures, PDFs and text files work but sound and video do not — they need it to be pulled apart at all.'}</p>
+    <p className="status-note">A scanned PDF is pictures of pages with no text in it. She will say she cannot read that one rather than guessing at what it says.</p>
     <div className="stack">
       <span>OpenAI key {status.hasKey ? '— saved' : '— optional'}</span>
       <input type="password" value={key} disabled={busy} placeholder={status.hasKey ? 'A key is saved. Type a new one to replace it.' : 'sk-…'} onChange={event => setKey(event.target.value)}/>
@@ -1488,6 +1549,77 @@ export function CharacterModelRow({ model, importing, onImport, onRemove }: {
   </>;
 }
 
+/**
+ * Everything she has been taught to mishear less.
+ *
+ * Worth showing rather than leaving as an invisible store, for one reason: a
+ * substitution applied to every future transcript is exactly the kind of thing
+ * that becomes wrong later and is impossible to find. The use count is the
+ * useful column — a rule that has never fired is either unnecessary or written
+ * against a mishearing that does not recur, and either way it is clutter.
+ */
+function Corrections() {
+  const [rules, setRules] = useState<{ heard: string; meant: string; used: number }[] | null>(null);
+  useEffect(() => { window.haru?.listen.corrections().then(setRules); }, []);
+  if (!window.haru || !rules) return null;
+  return <div className="stack">
+    <span>What she has been taught {rules.length > 0 && `— ${rules.length}`}</span>
+    {rules.length === 0
+      ? <span className="status-note">Nothing yet. When she mishears you, hover the message and press <strong>No</strong> under it — say what you actually said and the substitution lands here, applied to everything she hears afterwards.</span>
+      : <>
+        <ul className="corrections">
+          {rules.map(rule => <li key={rule.heard}>
+            <span className="heard">{rule.heard}</span>
+            <span className="arrow">→</span>
+            <span className="meant">{rule.meant}</span>
+            {/* Plain count rather than "never used", which reads as a scolding
+                for a rule that simply has not come up yet. */}
+            <span className="used">{rule.used === 0 ? 'not yet used' : `${rule.used}×`}</span>
+            <button className="reaction" title="Forget this one"
+              onClick={() => void window.haru!.listen.forgetCorrection(rule.heard).then(setRules)}><X size={12}/></button>
+          </li>)}
+        </ul>
+        <span className="status-note">Applied after the speech server has finished, never fed to it as a hint — priming the model makes it return the hint itself when it hears near-silence, which then arrives as though you had said it. Whole words only, so a rule for one word cannot rewrite the middle of another.</span>
+      </>}
+  </div>;
+}
+
+/**
+ * "Was that right?", under anything she heard rather than read.
+ *
+ * Only on spoken messages, and only once — a prompt under every line would be
+ * noise, and the whole value is that it appears exactly where a mistake would
+ * have been made. Correcting it teaches a substitution that is applied to every
+ * future transcript; see hearing.ts.
+ */
+function HeardCheck({ heard }: { heard: string }) {
+  const [state, setState] = useState<'asking' | 'fixing' | 'done' | 'hidden'>('asking');
+  const [meant, setMeant] = useState('');
+  if (!window.haru || state === 'hidden') return null;
+  if (state === 'done') return <p className="heard-note">Noted — she will hear that right next time.</p>;
+  if (state === 'fixing') {
+    const teach = async () => {
+      const said = meant.trim();
+      if (!said || said === heard) { setState('hidden'); return; }
+      await window.haru!.listen.correct(heard, said);
+      setState('done');
+    };
+    return <div className="heard-fix">
+      <input autoFocus value={meant} placeholder="What did you actually say?"
+        onChange={event => setMeant(event.target.value)}
+        onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); void teach(); } if (event.key === 'Escape') setState('hidden'); }}/>
+      <button className="ghost" onClick={() => void teach()} disabled={!meant.trim()}>Teach her</button>
+      <button className="ghost" onClick={() => setState('hidden')}>Cancel</button>
+    </div>;
+  }
+  return <div className="heard-check">
+    <span>Heard that right?</span>
+    <button className="reaction" onClick={() => setState('hidden')} title="It was right">Yes</button>
+    {/* Seeded with what was heard so only the wrong word has to be changed. */}
+    <button className="reaction" onClick={() => { setMeant(heard); setState('fixing'); }} title="Tell her what you actually said">No</button>
+  </div>;
+}
+
 export function MessageBubble({ message, onReact, onReply }: { message: Message; onReact?(reaction: Reaction): void; onReply?(): void }) {
   // Only Haru's own replies can be rated or replied to, and the greeting is not
   // a real reply. Nothing to act on when she did not actually say anything.
@@ -1497,6 +1629,8 @@ export function MessageBubble({ message, onReact, onReply }: { message: Message;
         after the exchange rather than only while it is being written. */}
     {message.replyTo && <div className="reply-quote"><CornerDownRight size={11}/><span>{message.replyTo.excerpt}</span></div>}
     <div className={message.ignored ? 'bubble ignored' : 'bubble'}>{message.content}</div>
+    {/* Only under what she heard, and only for the person who said it. */}
+    {message.role === 'user' && message.heard && <HeardCheck heard={message.heard}/>}
     {actionable && onReact && <div className={message.reaction ? 'reactions rated' : 'reactions'}>
       <button className={message.reaction === 'up' ? 'reaction reacted' : 'reaction'} onClick={() => onReact('up')} aria-pressed={message.reaction === 'up'} title="Good response"><ThumbsUp size={13}/></button>
       <button className={message.reaction === 'down' ? 'reaction reacted' : 'reaction'} onClick={() => onReact('down')} aria-pressed={message.reaction === 'down'} title="Poor response"><ThumbsDown size={13}/></button>
@@ -1507,8 +1641,30 @@ export function MessageBubble({ message, onReact, onReply }: { message: Message;
 // The draft lives in state, not a plain local: `sending` toggling re-renders the
 // composer, which would reset a local and leave the (uncontrolled) input showing
 // text that submit could no longer see.
-export function Composer({ sending, replyingTo, onCancelReply, onSend, onShowPicture }: { sending: boolean; replyingTo?: { id: string; excerpt: string } | null; onCancelReply?(): void; onSend(text: string): void; onShowPicture?(reaction: string | null, saved: string): void }) {
+/**
+ * How tall the box may grow before it scrolls instead.
+ *
+ * About seven lines. Past that the message has stopped being a chat line, and a
+ * composer that keeps growing eats the conversation it is part of.
+ */
+const COMPOSER_MAX_HEIGHT = 168;
+
+export function Composer({ sending, replyingTo, onCancelReply, onSend, onShowPicture }: { sending: boolean; replyingTo?: { id: string; excerpt: string } | null; onCancelReply?(): void; onSend(text: string, heard?: string): void; onShowPicture?(reaction: string | null, saved: string): void }) {
   const [draft, setDraft] = useState('');
+  const box = useRef<HTMLTextAreaElement>(null);
+  // Grows with what is in it, up to a ceiling.
+  //
+  // Measured from scrollHeight rather than counted in lines, because a wrapped
+  // line takes the same room as a typed one and counting newlines misses it.
+  // The reset to 'auto' first is what makes it shrink again — without it the
+  // box only ever gets taller, since scrollHeight cannot report less than the
+  // height already set.
+  useEffect(() => {
+    const field = box.current;
+    if (!field) return;
+    field.style.height = 'auto';
+    field.style.height = `${Math.min(field.scrollHeight, COMPOSER_MAX_HEIGHT)}px`;
+  }, [draft]);
   function submit(event: React.FormEvent) {
     event.preventDefault();
     const text = draft.trim();
@@ -1530,7 +1686,10 @@ export function Composer({ sending, replyingTo, onCancelReply, onSend, onShowPic
       // that stops — but reopening the microphone after being thanked is exactly
       // the thing that makes her feel like she is hovering.
       if (!readsAsFarewell(text)) void window.haru?.chat.expectAnswer();
-      onSend(text);
+      // The transcript travels with the message so "was that right?" can teach a
+      // correction against exactly what was misheard, rather than against
+      // whatever the sentence was edited into afterwards.
+      onSend(text, text);
       return;
     }
     setDraft(current => (current.trim() ? `${current.replace(/\s+$/, '')} ${text}` : text));
@@ -1543,11 +1702,26 @@ export function Composer({ sending, replyingTo, onCancelReply, onSend, onShowPic
           asked. With nothing typed she looks and says nothing — showing someone
           a photograph is not the same as asking their opinion of it. */}
       <PictureButton note={draft} onShown={(reaction, saved) => { setDraft(''); onShowPicture?.(reaction, saved); }}/>
+      {/* Anything that is not a picture. Same destination, wider picker. */}
+      <AttachButton note={draft} onShown={(reaction, saved) => { setDraft(''); onShowPicture?.(reaction, saved); }}/>
       {/* Never disabled. Locking the box while she thinks means the sentence you
           had in your head has to survive her reply, and a reply can take five
           seconds — you lose the thought, not the time. Send is still gated, so
           nothing is sent twice; you can simply keep typing while she catches up. */}
-      <input value={draft} placeholder={replyingTo ? 'What did she get wrong?' : sending ? 'Keep typing — she is still thinking…' : 'Say something to Haru…'} onChange={event => setDraft(event.target.value)}/>
+      {/* A textarea rather than an input, because an input cannot hold a newline
+          at all — shift+enter in one does nothing, whatever you bind to it.
+          Enter still sends; shift+enter breaks the line. */}
+      <textarea ref={box} rows={1} value={draft}
+        placeholder={replyingTo ? 'What did she get wrong?' : sending ? 'Keep typing — she is still thinking…' : 'Say something to Haru…'}
+        onChange={event => setDraft(event.target.value)}
+        onKeyDown={event => {
+          // Not while an IME is composing: enter is how you accept a candidate
+          // in Japanese or Chinese input, and sending there would fire on every
+          // word rather than at the end of the sentence.
+          if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return;
+          event.preventDefault();
+          submit(event);
+        }}/>
       <button disabled={sending || !draft.trim()}>{sending ? 'Thinking…' : 'Send'}</button>
     </form>
   </div>;
@@ -1570,8 +1744,12 @@ function MicButton({ sending, onText }: { sending: boolean; onText(text: string,
 
   useEffect(() => {
     if (!window.haru) return;
-    window.haru.listen.get().then(setConfig);
-    return window.haru.listen.onChange(setConfig);
+    // The saved level reaches the chime module here. Both readers do it: the
+    // panel so "Hear it" plays what the slider says, and the mic button because
+    // that is the component that actually rings it.
+    const apply = (saved: ListenConfig) => { setConfig(saved); setChimeVolume(saved.chimeVolume); };
+    window.haru.listen.get().then(apply);
+    return window.haru.listen.onChange(apply);
   }, []);
 
   // Only while recording, and torn down the moment it stops.
@@ -1622,11 +1800,18 @@ function MicButton({ sending, onText }: { sending: boolean; onText(text: string,
      * the utterance to finish costs nothing when nobody is speaking, and saves
      * the one case that matters.
      */
+    // Bounded. Waiting for them to finish a sentence is right; waiting for ever
+    // is not, and a room with a television in it can hold the detector in
+    // "speech" indefinitely. Left unbounded the window never closes, `heard`
+    // never returns to false, and the *next* window opens with no transition —
+    // so no chime and no indicator, which looks like the feature being dead.
+    let deferrals = 0;
     const shutIfNotMidSentence = () => {
-      if (openMic.current?.speaking()) {
+      if (openMic.current?.speaking() && deferrals++ < MAX_CLOSE_DEFERRALS) {
         closeWindow = setTimeout(shutIfNotMidSentence, 1000);
         return;
       }
+      deferrals = 0;
       awake.current = false;
       setHeard(false);
     };
@@ -1700,11 +1885,15 @@ function MicButton({ sending, onText }: { sending: boolean; onText(text: string,
     };
 
     /** As in the wake path: do not shut the window on someone mid-sentence. */
+    // Bounded, for the reason given on the wake path: a window that never
+    // closes never reopens, and takes the chime and the indicator with it.
+    let deferrals = 0;
     const closeUnlessSpeaking = () => {
-      if (openMic.current?.speaking()) {
+      if (openMic.current?.speaking() && deferrals++ < MAX_CLOSE_DEFERRALS) {
         shut = setTimeout(closeUnlessSpeaking, 1000);
         return;
       }
+      deferrals = 0;
       close();
     };
 
@@ -1857,7 +2046,7 @@ function PictureButton({ note, onShown }: { note: string; onShown(reaction: stri
   async function show() {
     setBusy(true); setError(null);
     try {
-      const result = await window.haru!.vision.show(note);
+      const result = await window.haru!.vision.show(note, 'picture');
       // The path comes back whether or not she said anything, so the picture can
       // be recorded in the conversation even when she is holding her tongue.
       if (result) onShown(result.reaction, result.saved);
@@ -1872,6 +2061,61 @@ function PictureButton({ note, onShown }: { note: string; onShown(reaction: stri
     {error && <span className="mic-error" title={error}>!</span>}
   </>;
 }
+
+/**
+ * Anything else — sound, video, a document, a spreadsheet.
+ *
+ * A separate button from the picture one, and worth the extra control rather
+ * than widening that filter. The machinery already accepted every kind of file,
+ * but the only way in was a button captioned "Show her a picture", so there was
+ * nothing to suggest you could hand her a voice note. A feature nobody can find
+ * is not shipped.
+ *
+ * Both end at the same place. The split is only which files the dialog offers:
+ * pictures are the common case and deserve a picker that is not cluttered with
+ * every extension she can read.
+ */
+function AttachButton({ note, onShown }: { note: string; onShown(reaction: string | null, saved: string): void }) {
+  const [ready, setReady] = useState<{ vision: boolean; ffmpeg: boolean } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!window.haru) return;
+    void Promise.all([window.haru.vision.get(), window.haru.openai.status()])
+      .then(([vision, openai]) => setReady({ vision: vision.enabled, ffmpeg: openai.ffmpeg }));
+  }, []);
+  if (!window.haru || !ready?.vision) return null;
+  async function attach() {
+    setBusy(true); setError(null);
+    try {
+      const result = await window.haru!.vision.show(note, 'any');
+      if (result) onShown(result.reaction, result.saved);
+    } catch (problem) {
+      setError(problem instanceof Error ? problem.message.replace(/^Error invoking remote method .[^.]*.:s*(Error:s*)?/, '') : String(problem));
+    } finally { setBusy(false); }
+  }
+  // Said in the tooltip rather than discovered at the file dialog, since sound
+  // and video are exactly the things someone would reach for first.
+  const label = ready.ffmpeg
+    ? 'Give her a file — sound, video, a PDF, text or data'
+    : 'Give her a file — PDFs, text and data (sound and video need ffmpeg)';
+  return <>
+    <button type="button" className="mic" onClick={() => void attach()} disabled={busy} title={error ?? label} aria-label={label}>
+      {busy ? <span className="mic-thinking"/> : <Paperclip size={15}/>}
+    </button>
+    {error && <span className="mic-error" title={error}>!</span>}
+  </>;
+}
+
+/**
+ * How many seconds past the window she will wait for someone to finish talking.
+ *
+ * Finite on purpose: the wait exists so a sentence begun inside the window is
+ * not cut off, and a room that is never quiet would otherwise hold it open for
+ * ever — which is worse than closing early, because a window that never closes
+ * never reopens either.
+ */
+const MAX_CLOSE_DEFERRALS = 8;
 
 /** How long a bare "Haru?" leaves her listening for what comes next. */
 const WAKE_WINDOW_MS = 8000;
@@ -1991,46 +2235,119 @@ export function Calendar({ items, selected, view, onSelect, onView }: {
 // Events and tasks are shown apart because they behave differently: an event
 // happens whether or not you turn up, while a task is yours to tick off. Only
 // the latter is clickable, so the affordance matches what is actually possible.
-function AgendaSection({ label, items, checkable, onToggle }: { label: string; items: KeptItem[]; checkable: boolean; onToggle(id: string): void }) {
+/**
+ * When the day is not already obvious from the heading.
+ *
+ * A month view listed "Ammie's Birthday Party, 8:00 PM" with nothing saying
+ * which of thirty-one evenings that was. In a day view the heading has already
+ * said it and repeating it on every row is noise.
+ */
+function whenLabel(item: KeptItem, view: CalendarView): string {
+  const parts: string[] = [];
+  if (view !== 'day') {
+    const [year, month, day] = item.date.split('-').map(Number);
+    parts.push(new Intl.DateTimeFormat('en-AU', {
+      weekday: 'short',
+      day: 'numeric',
+      // The month only matters once the range can span more than one.
+      ...(view === 'month' || view === 'year' ? { month: 'short' } : {}),
+    }).format(new Date(year, month - 1, day)));
+  }
+  if (item.time) parts.push(item.time);
+  return parts.join(' · ');
+}
+
+function AgendaSection({ label, items, checkable, view, onToggle, onJump }: { label: string; items: KeptItem[]; checkable: boolean; view: CalendarView; onToggle(id: string): void; onJump(date: string): void }) {
   if (!items.length) return null;
-  return <div className="agenda-section"><h4>{checkable ? <SquareCheck size={10}/> : <CalendarDays size={10}/>} {label}</h4>
+  // No heading inside the archive: the toggle above it already says what these
+  // are, and a second label would be the same word twice.
+  return <div className="agenda-section">{label && <h4>{checkable ? <SquareCheck size={10}/> : <CalendarDays size={10}/>} {label}</h4>}
     {items.map(item => {
-      // Both shapes are clickable now. The square still means a task and the dot
-      // still means an event — that distinction is real and worth keeping — but
-      // an event you cannot close is one she asks about for ever, and plenty of
-      // what lands on a calendar is an errand with a time attached.
-      const body = <><i className={checkable ? 'tick' : 'dot'}>{item.done ? <Check size={11}/> : checkable ? null : <CircleDot size={11}/>}</i><div className="agenda-text"><b>{item.title}</b>{item.time && <small>{item.time}</small>}</div></>;
+      // Two controls, not one. Ticking and "show me that day" are both wanted on
+      // the same row, and a single button cannot do both — so the shape ticks
+      // and the words navigate. Separate <button>s rather than one with a click
+      // target inside it, because a button inside a button is invalid and the
+      // inner one stops being reachable by keyboard.
       const classes = `agenda-item ${checkable ? 'task' : 'event'}${item.done ? ' done' : ''}`;
-      return <button key={item.id} className={classes} onClick={() => onToggle(item.id)} aria-pressed={item.done}
-        title={item.done ? 'Done — click to undo' : checkable ? 'Mark as done' : 'Mark as dealt with, so she stops asking'}>{body}</button>;
+      const when = whenLabel(item, view);
+      // In a day view there is nowhere to jump to, so the words tick as well
+      // rather than being a control that does nothing.
+      const navigates = view !== 'day';
+      return <div key={item.id} className={classes}>
+        <button className="agenda-tick" onClick={() => onToggle(item.id)} aria-pressed={item.done}
+          title={item.done ? 'Done — click to undo' : checkable ? 'Mark as done' : 'Mark as dealt with, so she stops asking'}>
+          <i className={checkable ? 'tick' : 'dot'}>{item.done ? <Check size={11}/> : checkable ? null : <CircleDot size={11}/>}</i>
+        </button>
+        <button className="agenda-body" onClick={() => navigates ? onJump(item.date) : onToggle(item.id)}
+          title={navigates ? 'Show that day' : item.done ? 'Done — click to undo' : 'Mark as done'}>
+          <b>{item.title}</b>{when && <small>{when}</small>}
+        </button>
+      </div>;
     })}
   </div>;
 }
 
-export function Agenda({ items, selected, view, onToggle }: { items: KeptItem[]; selected: string; view: CalendarView; onToggle(id: string): void }) {
-  const { tasks, events } = useMemo(() => {
+export function Agenda({ items, selected, view, onToggle, onJump }: { items: KeptItem[]; selected: string; view: CalendarView; onToggle(id: string): void; onJump(date: string): void }) {
+  // Shut by default. Finished work is worth being able to find and not worth
+  // looking at — 15 of 16 items were done and every one of them was still in the
+  // list, which leaves the two things actually outstanding buried in a column of
+  // crossed-out text.
+  const [showDone, setShowDone] = useState(false);
+  const { tasks, events, done } = useMemo(() => {
     // Date first once the range is wider than a day, or a week's items arrive
     // shuffled by time of day with no sense of which day each belongs to.
     const byTime = (a: KeptItem, b: KeptItem) => a.date.localeCompare(b.date) || (a.time ?? '').localeCompare(b.time ?? '');
     const inView = datesInView(view, selected);
     const day = items.filter(item => inView(item.date));
     return {
-      // Outstanding tasks first: those are the ones still wanting something.
-      tasks: day.filter(item => item.kind === 'task').sort((a, b) => Number(a.done) - Number(b.done) || byTime(a, b)),
-      events: day.filter(item => item.kind === 'event').sort(byTime),
+      tasks: day.filter(item => item.kind === 'task' && !item.done).sort(byTime),
+      // Events are not filtered by done: an event happens whether or not it was
+      // ticked, and one still on today is worth seeing even after the fact.
+      events: day.filter(item => item.kind === 'event' && !item.done).sort(byTime),
+      // Newest first — what was just finished is the part anyone looks for, and
+      // the reason to open this at all is usually to undo a mistaken tick.
+      done: day.filter(item => item.done).sort((a, b) => (b.completedAt ?? '').localeCompare(a.completedAt ?? '') || byTime(b, a)),
     };
   }, [items, selected, view]);
+  const nothingLeft = !tasks.length && !events.length;
   return <div className="agenda"><h3>{rangeLabel(view, selected)}</h3>
-    {!tasks.length && !events.length
+    {nothingLeft && !done.length
       ? <p className="nothing">{view === 'day' ? 'Nothing kept for this day.' : `Nothing kept for this ${view}.`}</p>
-      : <><AgendaSection label="Tasks" items={tasks} checkable onToggle={onToggle}/><AgendaSection label="Events" items={events} checkable={false} onToggle={onToggle}/></>}
+      : <>
+        <AgendaSection label="Tasks" items={tasks} checkable view={view} onToggle={onToggle} onJump={onJump}/>
+        <AgendaSection label="Events" items={events} checkable={false} view={view} onToggle={onToggle} onJump={onJump}/>
+        {/* Said explicitly, because an empty list and a finished one look the
+            same otherwise and one of them is worth feeling good about. */}
+        {nothingLeft && done.length > 0 && <p className="nothing">All done{view === 'day' ? ' for today' : ''}.</p>}
+        {done.length > 0 && <div className="agenda-archive">
+          <button className="archive-toggle" onClick={() => setShowDone(current => !current)} aria-expanded={showDone}>
+            <ChevronDown size={11} className={showDone ? 'open' : ''}/> Done <span className="archive-count">{done.length}</span>
+          </button>
+          {showDone && <AgendaSection label="" items={done} checkable view={view} onToggle={onToggle} onJump={onJump}/>}
+        </div>}
+      </>}
   </div>;
 }
 
 export function Kept({ items, model, importing, onImport, onRemove, onToggle }: { items: KeptItem[]; model: { name: string; url: string } | null; importing: boolean; onImport(): void; onRemove(): void; onToggle(id: string): void }) {
   const [selected, setSelected] = useState(() => toISODate(new Date()));
   const [view, setView] = useState<CalendarView>('month');
+  // Whether anything ticked here is actually reaching Google.
+  //
+  // The failure was silent from where it mattered: a revoked token was recorded
+  // and shown in Setup, while ticking a task in this panel looked exactly like
+  // success. Days of completions stayed on this machine and the phone never
+  // heard about any of them. A sync that has stopped has to say so where the
+  // ticking happens.
+  const [syncError, setSyncError] = useState('');
+  useEffect(() => {
+    if (!window.haru) return;
+    void window.haru.google.status().then(status => setSyncError(status.connected ? status.lastError ?? '' : ''));
+    return window.haru.google.onChange(status => setSyncError(status.connected ? status.lastError ?? '' : ''));
+  }, []);
   const pending = items.filter(item => !item.done).length;
-  return <aside className="kept"><h2>Kept{pending > 0 && <span className="kept-count">{pending}</span>}</h2><Calendar items={items} selected={selected} view={view} onSelect={setSelected} onView={setView}/><Agenda items={items} selected={selected} view={view} onToggle={onToggle}/><div className="stage-slot"><CharacterModelRow model={model} importing={importing} onImport={onImport} onRemove={onRemove}/></div></aside>;
+  return <aside className="kept"><h2>Kept{pending > 0 && <span className="kept-count">{pending}</span>}</h2>
+    {syncError && <p className="kept-sync-error" title={syncError}>Not reaching Google — ticking things here will not update your phone. Reconnect in Setup.</p>}
+    <Calendar items={items} selected={selected} view={view} onSelect={setSelected} onView={setView}/><Agenda items={items} selected={selected} view={view} onToggle={onToggle} onJump={date => { setSelected(date); setView('day'); }}/><div className="stage-slot"><CharacterModelRow model={model} importing={importing} onImport={onImport} onRemove={onRemove}/></div></aside>;
 }
 export function Suggestion({ children, onClick }: { children: React.ReactNode; onClick(): void }) { return <button className="suggestion" onClick={onClick}>{children}</button>; }

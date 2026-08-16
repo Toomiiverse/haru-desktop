@@ -117,6 +117,29 @@ function namesSomething(text: string): boolean {
   return /\d/.test(text);
 }
 
+/**
+ * A memory whose whole content is an instruction not to mention something.
+ *
+ * These look like the most useful memory in the store and are the worst thing in
+ * it. "Don't mention the jellyfish PC" was written down after the user said
+ * exactly that, kept deliberately as a guard, and put the word "jellyfish" into
+ * every prompt from then on — the only concrete noun in the line. A day later
+ * she opened with a fact about jellyfish. Telling a model not to mention
+ * something is how you make sure it is thinking about it.
+ *
+ * The subject being dropped is what has to go, not be written down. Refusing the
+ * memory is right: what the user actually wants is enforced by not carrying the
+ * topic forward, and pushback.ts already handles being told to drop something.
+ */
+// Verb stems rather than exact words: the instruction arrives as "stop
+// mentioning", "don't bring up" and "no more talking about" in roughly equal
+// measure, and \bmention\b does not match "mentioning".
+const A_BAN = /^\s*(do ?n'?t|do not|never|stop|no more|quit|avoid)\b.{0,14}?\b(mention\w*|talk\w*\s+about|bring\w*\s+up|say\w*|discuss\w*|rais\w+|refer\w*\s+to|go(ing)?\s+on\s+about)\b/i;
+
+export function bansATopic(text: string): boolean {
+  return A_BAN.test((text ?? '').trim());
+}
+
 export function isWorthRemembering(text: string): boolean {
   const clean = (text ?? '').trim();
   if (!clean) return false;
@@ -126,6 +149,7 @@ export function isWorthRemembering(text: string): boolean {
   // than the junk. So this only requires that there is a word in there at all,
   // and the vague entries are caught by what they say rather than by size.
   if (keywords(clean).size < 1) return false;
+  if (bansATopic(clean)) return false;
   if (UNIVERSAL.test(clean) || NOWHERE_IN_PARTICULAR.test(clean)) return false;
   if (TRANSIENT.test(clean) && !namesSomething(clean)) return false;
   return true;
