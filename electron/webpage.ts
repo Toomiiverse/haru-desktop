@@ -124,6 +124,7 @@ export function appPage(): string {
   .stage img { height:100%; object-fit:contain; filter:drop-shadow(0 16px 40px oklch(25% 0.12 var(--hue) / 0.6)); }
   /* Faded into the page rather than cut off, so there is no hard edge where she ends. */
   .stage::after { content:''; position:absolute; inset:auto 0 0 0; height:64px; background:linear-gradient(transparent, var(--bg)); pointer-events:none; }
+  .stage.faceless { height:auto; min-height:3.2rem; }
   .who { position:absolute; top:.9rem; left:1.1rem; display:flex; align-items:center; gap:.5rem; font-weight:650; letter-spacing:-.01em; }
   .dot { width:8px; height:8px; border-radius:50%; background:var(--accent); box-shadow:0 0 12px var(--accent); }
   .out { position:absolute; top:.75rem; right:.9rem; background:var(--glass); color:var(--ink-dim); border:1px solid var(--edge); padding:.4rem .9rem; font-size:.82rem; font-weight:500; backdrop-filter:blur(12px); }
@@ -144,6 +145,25 @@ export function appPage(): string {
   form.compose textarea { resize:none; max-height:7rem; border-radius:var(--r-lg); }
   form.compose button { padding:.8rem 1.15rem; }
 
+  /* A wide window is not a big phone.
+     Stretched across a desktop browser the bubbles ran the full 1700px and the
+     text became unreadable at about six words a line, so the column is capped
+     at a comfortable measure and she moves alongside it rather than sitting on
+     top — which is closer to the reference on a wide screen anyway: the
+     character is the room, and the conversation happens in it. */
+  @media (min-width: 900px) {
+    body { display:grid; grid-template-columns: minmax(280px, 34vw) minmax(0, 1fr); grid-template-rows: auto 1fr auto; column-gap:1rem; padding:0 1.5rem; }
+    .stage { grid-row: 1 / -1; height:auto; align-items:center; padding-bottom:2rem; }
+    .stage img { height:auto; max-height:74dvh; max-width:100%; }
+    .stage::after { display:none; }
+    .who { top:1.4rem; left:.4rem; }
+    .out { position:fixed; top:1rem; right:1.5rem; z-index:2; }
+    nav { grid-column:2; margin:1rem 0 0; align-self:start; max-width:44rem; }
+    section { grid-column:2; padding:1rem 0; max-width:44rem; }
+    form.compose { grid-column:2; padding:.6rem 0 1.2rem; max-width:44rem; }
+    .msg { max-width:min(82%, 46rem); }
+  }
+
   .card { background:var(--glass); border:1px solid var(--edge); border-radius:var(--r-lg); padding:.85rem 1rem; margin:0 0 .6rem; backdrop-filter:blur(12px); }
   .card h3 { margin:0 0 .15rem; font-size:1rem; font-weight:600; }
   .card time { color:var(--ink-dim); font-size:.85rem; }
@@ -155,7 +175,7 @@ export function appPage(): string {
 <div class=stage>
   <div class=who><span class=dot></span> Haru</div>
   <button class=out id=out>Sign out</button>
-  <img src="/portrait" alt="">
+  <img src="/portrait" alt="" onerror="this.closest('.stage').classList.add('faceless')">
 </div>
 <nav>
   <button data-t=chat class=on>Chat</button>
