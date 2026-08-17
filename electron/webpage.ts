@@ -289,11 +289,18 @@ load();
     // Order matters: the plugin reads a global PIXI when it loads, and the
     // Cubism runtime has to exist before any model is built.
     await script('/lib/pixi.js');
-    // Live2D's own runtime, from Live2D. It is the one thing here that is not
-    // served by us, and the most likely thing to be missing: a blocker, a shield
-    // or a phone with no signal all stop it, and none of them say so out loud.
-    try { await script('https://cubism.live2d.com/sdk-web/cubismcore/live2dcubismcore.min.js'); }
-    catch { throw new Error('the Live2D runtime could not be reached — an ad blocker or shield will do that'); }
+    // pixi builds its shaders with new Function(), which a policy without
+    // 'unsafe-eval' refuses — in every browser, which is why this failed in
+    // three of them and looked like a blocker in none. This module replaces that
+    // one mechanism, so the policy stays shut rather than being widened to allow
+    // eval on a page that renders somebody's chat history.
+    await script('/lib/noeval.js');
+    PIXI.install && PIXI.install({});
+    // Live2D's runtime, served from us rather than from their CDN. Fetched from
+    // outside, this was the one thing on the page a shield could quietly stop —
+    // and Brave with Shields up did exactly that.
+    try { await script('/lib/cubismcore.js'); }
+    catch { throw new Error('the Live2D runtime is missing from this build'); }
     if(!window.Live2DCubismCore) throw new Error('the Live2D runtime loaded but did not start');
     await script('/lib/live2d.js');
     if(!window.PIXI||!PIXI.live2d) throw new Error('the Live2D plugin did not attach to pixi');

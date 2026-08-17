@@ -13,6 +13,7 @@
     "package": "npm run build && electron-builder --win"
   },
   "dependencies": {
+    "@pixi/unsafe-eval": "^6.5.10",
     "@vitejs/plugin-react": "6.0.5",
     "adm-zip": "0.5.16",
     "electron-store": "11.0.2",

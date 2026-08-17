@@ -79,6 +79,22 @@ function fileWithin(root: string, requested: string): string | null {
   return resolved;
 }
 
+/**
+ * The three files the stage is made of, all served from us.
+ *
+ * The Cubism runtime is here rather than fetched from Live2D because it is the
+ * one thing on the page that used to come from somewhere else, and a shield, a
+ * blocker or a phone with no signal all stopped it without saying so. Its own
+ * header names it "Redistributable Code" under Live2D's licence, which is the
+ * licence anticipating exactly this.
+ */
+const LIB_FILES: Record<string, string> = {
+  '/lib/pixi.js': 'pixi.min.js',
+  '/lib/noeval.js': 'pixi-unsafe-eval.min.js',
+  '/lib/live2d.js': 'live2d.cubism4.min.js',
+  '/lib/cubismcore.js': 'live2dcubismcore.min.js',
+};
+
 const SESSION_COOKIE = 'haru_session';
 const DEVICE_COOKIE = 'haru_device';
 /** Big enough for a long message, small enough that nobody posts a film. */
@@ -124,22 +140,17 @@ function send(res: ServerResponse, status: number, body: string, type = 'applica
   // off the table.
   res.writeHead(status, {
     'Content-Type': type === 'application/json' ? 'application/json; charset=utf-8' : type,
-    // Opened by exactly two things, both of them the Live2D stage.
+    // Nothing outside this server, again.
     //
-    // 'self' for scripts and images, because pixi, the Live2D plugin and her
-    // model are all served from here. And cubism.live2d.com, which is not: the
-    // Cubism runtime is Live2D's own file, loaded from their CDN, exactly as the
-    // desktop app has always loaded it. Redistributing it ourselves is a
-    // licensing decision that is not ours to make quietly, so the one outside
-    // origin stays — named, and no wider than the one file it is for.
-    //
-    // Everything else is still denied by default: no outside style, font, frame
-    // or connection, so a hostile string that reaches this page still has
-    // nowhere to send what it finds.
+    // The Live2D stage briefly needed one named origin for Cubism's runtime.
+    // That file is now served from here like everything else, so the policy is
+    // back to naming no host at all — which is the version worth having: there
+    // is no third party to block it, no signal needed beyond the tunnel, and a
+    // hostile string that reaches this page has nowhere to send what it finds.
     'Content-Security-Policy': [
       "default-src 'none'",
       "style-src 'unsafe-inline'",
-      "script-src 'self' 'unsafe-inline' https://cubism.live2d.com",
+      "script-src 'self' 'unsafe-inline'",
       "img-src 'self' data: blob:",
       "connect-src 'self'",
       "worker-src blob:",
@@ -271,9 +282,9 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
     return json(res, 200, { entry: model ? filePath.basename(model.entry) : null });
   }
 
-  if (req.method === 'GET' && (path === '/lib/pixi.js' || path === '/lib/live2d.js')) {
+  if (req.method === 'GET' && LIB_FILES[path]) {
     const folder = deps.libFolder();
-    const file = folder && fileAt(folder, path === '/lib/pixi.js' ? 'pixi.min.js' : 'live2d.cubism4.min.js');
+    const file = folder && fileAt(folder, LIB_FILES[path]);
     if (!file) return json(res, 404, { error: 'The Live2D runtime is not in this build.' });
     return sendFile(res, file, 'text/javascript; charset=utf-8');
   }
