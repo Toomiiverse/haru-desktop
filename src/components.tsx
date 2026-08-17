@@ -2353,37 +2353,49 @@ export function Agenda({ items, selected, view, onToggle, onJump }: { items: Kep
   // list, which leaves the two things actually outstanding buried in a column of
   // crossed-out text.
   const [showDone, setShowDone] = useState(false);
-  const { tasks, events, done } = useMemo(() => {
+  const { tasks, events, done, passedEvents } = useMemo(() => {
     // Date first once the range is wider than a day, or a week's items arrive
     // shuffled by time of day with no sense of which day each belongs to.
     const byTime = (a: KeptItem, b: KeptItem) => a.date.localeCompare(b.date) || (a.time ?? '').localeCompare(b.time ?? '');
     const inView = datesInView(view, selected);
     const day = items.filter(item => inView(item.date));
+    const today = toISODate(new Date());
+    // An event on a day that has been and gone. Split on the day rather than the
+    // tick, because an event is never ticked — nobody marks a party finished —
+    // so nothing ever moved it out of the way and a birthday from nine days ago
+    // sat above the things actually coming up. Today is still today, though:
+    // an event this evening stays in the list all evening, and after it too.
+    const passed = (item: KeptItem) => item.kind === 'event' && item.date < today;
     return {
       tasks: day.filter(item => item.kind === 'task' && !item.done).sort(byTime),
-      // Events are not filtered by done: an event happens whether or not it was
-      // ticked, and one still on today is worth seeing even after the fact.
-      events: day.filter(item => item.kind === 'event' && !item.done).sort(byTime),
+      events: day.filter(item => item.kind === 'event' && !item.done && !passed(item)).sort(byTime),
+      passedEvents: day.filter(item => !item.done && passed(item)).sort((a, b) => byTime(b, a)),
       // Newest first — what was just finished is the part anyone looks for, and
       // the reason to open this at all is usually to undo a mistaken tick.
       done: day.filter(item => item.done).sort((a, b) => (b.completedAt ?? '').localeCompare(a.completedAt ?? '') || byTime(b, a)),
     };
   }, [items, selected, view]);
+  // Both belong behind the same fold: finished, or over. Newest first either way.
+  const earlier = useMemo(
+    () => [...done, ...passedEvents].sort((a, b) => b.date.localeCompare(a.date) || (b.time ?? '').localeCompare(a.time ?? '')),
+    [done, passedEvents],
+  );
   const nothingLeft = !tasks.length && !events.length;
   return <div className="agenda"><h3>{rangeLabel(view, selected)}</h3>
-    {nothingLeft && !done.length
+    {nothingLeft && !earlier.length
       ? <p className="nothing">{view === 'day' ? 'Nothing kept for this day.' : `Nothing kept for this ${view}.`}</p>
       : <>
         <AgendaSection label="Tasks" items={tasks} checkable view={view} onToggle={onToggle} onJump={onJump}/>
         <AgendaSection label="Events" items={events} checkable={false} view={view} onToggle={onToggle} onJump={onJump}/>
         {/* Said explicitly, because an empty list and a finished one look the
             same otherwise and one of them is worth feeling good about. */}
-        {nothingLeft && done.length > 0 && <p className="nothing">All done{view === 'day' ? ' for today' : ''}.</p>}
-        {done.length > 0 && <div className="agenda-archive">
+        {nothingLeft && earlier.length > 0 && <p className="nothing">All done{view === 'day' ? ' for today' : ''}.</p>}
+        {earlier.length > 0 && <div className="agenda-archive">
           <button className="archive-toggle" onClick={() => setShowDone(current => !current)} aria-expanded={showDone}>
-            <ChevronDown size={11} className={showDone ? 'open' : ''}/> Done <span className="archive-count">{done.length}</span>
+            {/* "Done" would be a lie about a party nobody ticked off. */}
+            <ChevronDown size={11} className={showDone ? 'open' : ''}/> {passedEvents.length ? 'Earlier' : 'Done'} <span className="archive-count">{earlier.length}</span>
           </button>
-          {showDone && <AgendaSection label="" items={done} checkable view={view} onToggle={onToggle} onJump={onJump}/>}
+          {showDone && <AgendaSection label="" items={earlier} checkable view={view} onToggle={onToggle} onJump={onJump}/>}
         </div>}
       </>}
   </div>;
