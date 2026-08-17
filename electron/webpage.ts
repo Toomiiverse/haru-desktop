@@ -131,6 +131,7 @@ export function appPage(): string {
   /* Faded into the page rather than cut off, so there is no hard edge where she ends. */
   .stage::after { content:''; position:absolute; inset:auto 0 0 0; height:64px; background:linear-gradient(transparent, var(--bg)); pointer-events:none; }
   .stage.faceless { height:auto; min-height:3.2rem; }
+  .stagenote { position:absolute; left:0; right:0; bottom:.4rem; margin:0; text-align:center; font-size:.76rem; color:var(--ink-dim); opacity:.75; padding:0 1rem; }
   .who { position:absolute; top:.9rem; left:1.1rem; display:flex; align-items:center; gap:.5rem; font-weight:650; letter-spacing:-.01em; }
   .dot { width:8px; height:8px; border-radius:50%; background:var(--accent); box-shadow:0 0 12px var(--accent); }
   .out { position:absolute; top:.75rem; right:.9rem; background:var(--glass); color:var(--ink-dim); border:1px solid var(--edge); padding:.4rem .9rem; font-size:.82rem; font-weight:500; backdrop-filter:blur(12px); }
@@ -163,7 +164,7 @@ export function appPage(): string {
     .stage img { height:auto; max-height:74dvh; max-width:100%; }
     .stage::after { display:none; }
     .who { top:1.4rem; left:.4rem; }
-    .out { position:fixed; top:1rem; right:1.5rem; z-index:2; }
+    .out { position:fixed; top:1rem; right:1.5rem; z-index:3; }
     nav { grid-column:2; margin:1rem 0 0; align-self:start; max-width:44rem; }
     section { grid-column:2; padding:1rem 0; max-width:44rem; }
     form.compose { grid-column:2; padding:.6rem 0 1.2rem; max-width:44rem; }
@@ -288,8 +289,17 @@ load();
     // Order matters: the plugin reads a global PIXI when it loads, and the
     // Cubism runtime has to exist before any model is built.
     await script('/lib/pixi.js');
-    await script('https://cubism.live2d.com/sdk-web/cubismcore/live2dcubismcore.min.js');
+    // Live2D's own runtime, from Live2D. It is the one thing here that is not
+    // served by us, and the most likely thing to be missing: a blocker, a shield
+    // or a phone with no signal all stop it, and none of them say so out loud.
+    try { await script('https://cubism.live2d.com/sdk-web/cubismcore/live2dcubismcore.min.js'); }
+    catch { throw new Error('the Live2D runtime could not be reached — an ad blocker or shield will do that'); }
+    if(!window.Live2DCubismCore) throw new Error('the Live2D runtime loaded but did not start');
     await script('/lib/live2d.js');
+    if(!window.PIXI||!PIXI.live2d) throw new Error('the Live2D plugin did not attach to pixi');
+    // The bundled build does not always find the ticker on its own, and without
+    // one she loads and then never moves.
+    try { PIXI.live2d.Live2DModel.registerTicker(PIXI.Ticker); } catch {}
     const canvas=document.createElement('canvas');
     host.appendChild(canvas);
     const app=new PIXI.Application({view:canvas,backgroundAlpha:0,antialias:true,resolution:Math.min(devicePixelRatio||1,2),autoDensity:true,resizeTo:host});
@@ -313,7 +323,16 @@ load();
     host.classList.add('alive');
     console.log('[stage] '+entry+' is up');
   }catch(error){
-    console.warn('[stage] staying with the portrait: '+(error&&error.message||error));
+    // Said on the page, not only in a console nobody has open. The portrait
+    // staying put looks identical to the portrait being the design, so without
+    // this a broken stage is invisible — which is how the first attempt at it
+    // looked like it had simply been ignored.
+    const why=(error&&error.message||String(error));
+    console.warn('[stage] staying with the portrait: '+why);
+    const note=document.createElement('p');
+    note.className='stagenote';
+    note.textContent='She is not moving — '+why+'.';
+    host.appendChild(note);
   }
 })();
 </script>`;
