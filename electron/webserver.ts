@@ -38,6 +38,10 @@ export type WebDeps = {
   model(): { root: string; entry: string } | null;
   /** Where the vendored pixi and Live2D plugin are kept. */
   libFolder(): string | null;
+  /** Her voice for a line, or nothing if she has none set up. */
+  speak(text: string): Promise<{ audio: Uint8Array; mime: string } | null>;
+  /** What they just said, through the same ears and the same corrections as the desktop. */
+  hear(audio: Uint8Array, mime: string): Promise<string>;
 };
 
 /**
@@ -99,6 +103,8 @@ const SESSION_COOKIE = 'haru_session';
 const DEVICE_COOKIE = 'haru_device';
 /** Big enough for a long message, small enough that nobody posts a film. */
 const MAX_BODY = 256 * 1024;
+/** A recording is not a message. Roughly a minute of opus, and a hard stop. */
+const MAX_AUDIO = 8 * 1024 * 1024;
 
 /** Logins that were not asked to be remembered. Gone when the app closes, deliberately. */
 const sessions = new Map<string, number>();
@@ -152,6 +158,7 @@ function send(res: ServerResponse, status: number, body: string, type = 'applica
       "style-src 'unsafe-inline'",
       "script-src 'self' 'unsafe-inline'",
       "img-src 'self' data: blob:",
+      "media-src 'self' blob:",
       "connect-src 'self'",
       "worker-src blob:",
       "form-action 'none'",
@@ -201,6 +208,17 @@ async function readBody(req: IncomingMessage): Promise<unknown> {
   }
   if (!chunks.length) return {};
   try { return JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { throw new Error('not json'); }
+}
+
+async function readAudio(req: IncomingMessage): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of req) {
+    size += (chunk as Buffer).length;
+    if (size > MAX_AUDIO) throw new Error('too much');
+    chunks.push(chunk as Buffer);
+  }
+  return Buffer.concat(chunks);
 }
 
 /** Who is asking, if anyone. Returns the device when one is remembered, so it can be touched. */
@@ -308,7 +326,9 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
 
   // Everything past here changes or reveals something, so it must be a real
   // request from her own page rather than a form somebody else submitted.
-  if (req.method === 'POST' && !/^application\/json/.test(req.headers['content-type'] ?? '')) {
+  // A recording is the one thing posted here that is not JSON, and it checks its
+  // own content type below rather than being waved through.
+  if (req.method === 'POST' && path !== '/api/listen' && !/^application\/json/.test(req.headers['content-type'] ?? '')) {
     return json(res, 415, { error: 'Send JSON.' });
   }
 
@@ -322,6 +342,53 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
     if (!text) return json(res, 400, { error: 'Say something.' });
     const answer = await deps.say(text);
     return json(res, 200, answer);
+  }
+
+  // Her voice. Asked for separately rather than returned with the reply,
+  // because the words should be on screen while the audio is still being made —
+  // a sentence that waits for its own recording arrives late and reads as lag.
+  if (req.method === 'POST' && path === '/api/speak') {
+    const body = await readBody(req) as { text?: unknown };
+    const text = typeof body.text === 'string' ? body.text.trim() : '';
+    if (!text) return json(res, 400, { error: 'Nothing to say.' });
+    const clip = await deps.speak(text.slice(0, 2000));
+    if (!clip) return json(res, 503, { error: 'Her voice is not set up.' });
+    res.writeHead(200, {
+      'Content-Type': clip.mime || 'audio/wav',
+      'Content-Length': clip.audio.length,
+      'Content-Security-Policy': "default-src 'none'",
+      'X-Content-Type-Options': 'nosniff',
+      'Cache-Control': 'no-store',
+    });
+    return res.end(Buffer.from(clip.audio));
+  }
+
+  // Her ears. The body is a recording rather than JSON, so it is read raw and
+  // capped far higher — the JSON limit is sized for a message, not for a minute
+  // of audio.
+  if (req.method === 'POST' && path === '/api/listen') {
+    const mime = String(req.headers['content-type'] ?? 'audio/webm').split(';')[0];
+    if (!/^audio\//.test(mime)) return json(res, 415, { error: 'Send audio.' });
+    // Answered from the declared length before a byte is read, because refusing
+    // part-way through a body that is still being sent breaks the connection
+    // underneath the answer: the caller gets a reset instead of the 413 that was
+    // genuinely sent. A browser posting a Blob always declares its length, so
+    // this is the path that matters. The streaming cap below still stands for
+    // anything chunked, which is a caller we did not write.
+    const declared = Number(req.headers['content-length'] ?? 0);
+    if (declared > MAX_AUDIO) {
+      res.setHeader('Connection', 'close');
+      return json(res, 413, { error: 'That recording is too long.' });
+    }
+    let audio: Buffer;
+    try { audio = await readAudio(req); } catch {
+      res.setHeader('Connection', 'close');
+      return json(res, 413, { error: 'That recording is too long.' });
+    }
+    if (!audio.length) return json(res, 400, { error: 'The recording was empty.' });
+    const text = await deps.hear(audio, mime);
+    console.log(`[web] heard ${(audio.length / 1024).toFixed(0)}KB -> ${text ? `"${text.slice(0, 60)}"` : 'nothing worth sending'}`);
+    return json(res, 200, { text });
   }
 
   if (req.method === 'GET' && path === '/api/agenda') return json(res, 200, { items: deps.agenda() });

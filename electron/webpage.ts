@@ -151,6 +151,11 @@ export function appPage(): string {
   form.compose { display:flex; gap:.5rem; padding:.6rem .9rem calc(.6rem + env(safe-area-inset-bottom)); align-items:flex-end; }
   form.compose textarea { resize:none; max-height:7rem; border-radius:var(--r-lg); }
   form.compose button { padding:.8rem 1.15rem; }
+  form.compose .icon { background:var(--glass); border:1px solid var(--edge); padding:.7rem .85rem; font-size:1.05rem; line-height:1; backdrop-filter:blur(12px); }
+  /* Held down, it should look held down. Recording with no sign of recording is
+     how you end up sending thirty seconds of a room. */
+  form.compose .icon.hot { background:var(--accent); border-color:var(--accent); animation:pulse 1.1s ease-in-out infinite; }
+  @keyframes pulse { 50% { box-shadow:0 0 0 .55rem oklch(78% 0.13 var(--hue) / 0.18); } }
 
   /* A wide window is not a big phone.
      Stretched across a desktop browser the bubbles ran the full 1700px and the
@@ -191,7 +196,7 @@ export function appPage(): string {
   <button data-t=memory>Memory</button>
 </nav>
 <section id=chat class=on></section>
-<form class=compose id=cf><textarea id=ci rows=1 placeholder="Say something…"></textarea><button id=cb>Send</button></form>
+<form class=compose id=cf><button type=button id=mic class=icon title="Hold to talk">🎙</button><textarea id=ci rows=1 placeholder="Say something…"></textarea><button id=cb>Send</button></form>
 <section id=agenda></section>
 <section id=journal></section>
 <section id=memory></section>
@@ -252,6 +257,65 @@ async function load(){
 }
 
 const ci=$('ci');
+
+// ---- Her voice ------------------------------------------------------------
+//
+// Asked for after the words are already on screen, never before: a reply that
+// waits for its own recording arrives late and reads as her being slow, when she
+// was not. If she has no voice set up the request 503s and nothing happens,
+// which is the correct amount of fuss.
+let playing=null;
+async function speak(text){
+  try{
+    if(playing){ playing.pause(); playing=null; }
+    const r=await fetch('/api/speak',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({text})});
+    if(!r.ok) return;
+    const url=URL.createObjectURL(await r.blob());
+    playing=new Audio(url);
+    playing.onended=playing.onerror=()=>URL.revokeObjectURL(url);
+    await playing.play();
+  }catch(e){ console.warn('[voice] '+(e&&e.message||e)); }
+}
+
+// ---- Her ears -------------------------------------------------------------
+//
+// Held rather than toggled. A toggle leaves a microphone open in a pocket, and
+// on a phone that is the difference between a feature and a liability.
+const mic=$('mic');
+let recorder=null,chunks=[];
+async function startHearing(){
+  if(recorder) return;
+  try{
+    const stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true}});
+    recorder=new MediaRecorder(stream);
+    chunks=[];
+    recorder.ondataavailable=e=>{ if(e.data.size) chunks.push(e.data); };
+    recorder.onstop=async()=>{
+      stream.getTracks().forEach(t=>t.stop());
+      const blob=new Blob(chunks,{type:recorder.mimeType||'audio/webm'});
+      recorder=null; mic.classList.remove('hot');
+      if(blob.size<1200) return;
+      mic.disabled=true;
+      try{
+        const r=await fetch('/api/listen',{method:'POST',headers:{'content-type':blob.type.split(';')[0]},body:blob});
+        const {text}=await r.json();
+        // Put into the box rather than sent: a transcript is a guess, and one
+        // you cannot see before it is sent is one you cannot correct.
+        if(text){ ci.value=(ci.value?ci.value+' ':'')+text; ci.focus(); ci.dispatchEvent(new Event('input')); }
+      }catch(e){ console.warn('[ears] '+(e&&e.message||e)); }
+      mic.disabled=false;
+    };
+    recorder.start();
+    mic.classList.add('hot');
+  }catch(e){
+    console.warn('[ears] '+(e&&e.message||e));
+    mic.title='No microphone: '+(e&&e.message||e);
+  }
+}
+function stopHearing(){ if(recorder&&recorder.state!=='inactive') recorder.stop(); }
+mic.addEventListener('pointerdown',e=>{e.preventDefault();startHearing();});
+for(const done of ['pointerup','pointerleave','pointercancel']) mic.addEventListener(done,stopHearing);
+
 ci.addEventListener('input',()=>{ci.style.height='auto';ci.style.height=Math.min(ci.scrollHeight,112)+'px';});
 $('cf').addEventListener('submit',async ev=>{
   ev.preventDefault();
@@ -263,7 +327,7 @@ $('cf').addEventListener('submit',async ev=>{
     const a=await post('/api/chat',{text});
     document.getElementById('wait').remove();
     if(a.ignored) $('chat').insertAdjacentHTML('beforeend','<div class="msg sys">She is not answering that.</div>');
-    else $('chat').insertAdjacentHTML('beforeend','<div class="msg them">'+esc(a.reply)+'</div>');
+    else { $('chat').insertAdjacentHTML('beforeend','<div class="msg them">'+esc(a.reply)+'</div>'); void speak(a.reply); }
   }catch(r){
     document.getElementById('wait').remove();
     if(r&&r.status===401){location.reload();return;}

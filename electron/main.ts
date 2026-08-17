@@ -5097,6 +5097,24 @@ function webDeps(): WebDeps {
       const folder = [path.join(app.getAppPath(), 'build', 'lib'), path.join(process.resourcesPath ?? '', 'build', 'lib')].find(existsSync);
       return folder ?? null;
     },
+    async speak(text) {
+      // The same voice, the same reference clip, the same server the desktop
+      // speaks through. Nothing about her sounds different for being far away.
+      const voice = readVoiceConfig(store.get('voice'));
+      if (voice.engine === 'off' || voice.engine === 'windows') return null;
+      return synthesise(spokenCase(speakableText(text)), voice, referenceFor(voice), remoteAuth(voice.endpoint));
+    },
+    async hear(audio, mime) {
+      const listen = readListenConfig(store.get('listen'));
+      const said = await transcribe(audio, mime, listen, net.fetch as never, remoteAuth(listen.endpoint));
+      if (looksLikeNothing(said)) return '';
+      // Through the same corrections she has been taught at the desk. A name she
+      // keeps mishearing is misheard the same way down a phone.
+      const heard = readHearing(store.get('hearing'));
+      const fixed = correct(heard, said);
+      if (fixed.applied.length) store.set('hearing', noteUsed(heard, fixed.applied));
+      return fixed.text;
+    },
     memories: () => getMemories().map(memory => memory.text),
     journal: () => getJournal().map(entry => ({ date: entry.date, text: entry.text, mood: entry.mood, anxiety: entry.anxiety })),
     writeJournal(entry) {
