@@ -337,7 +337,14 @@ $('cf').addEventListener('submit',async ev=>{
     const a=await post('/api/chat',{text});
     document.getElementById('wait').remove();
     if(a.ignored) $('chat').insertAdjacentHTML('beforeend','<div class="msg sys">She is not answering that.</div>');
-    else { $('chat').insertAdjacentHTML('beforeend','<div class="msg them">'+esc(a.reply)+'</div>'); void speak(a.reply); }
+    else {
+      $('chat').insertAdjacentHTML('beforeend','<div class="msg them">'+esc(a.reply)+'</div>');
+      // Her face before her voice: the expression should already have changed by
+      // the time the first syllable arrives, the way it does when someone is
+      // about to say something.
+      if(window.haruFace) window.haruFace(a.expression||null);
+      void speak(a.reply);
+    }
   }catch(r){
     document.getElementById('wait').remove();
     if(r&&r.status===401){location.reload();return;}
@@ -401,8 +408,18 @@ load();
     // hit areas. On a phone the pointer is wherever it was last touched, which
     // is close enough to being looked at.
     host.addEventListener('pointermove',e=>{const r=host.getBoundingClientRect();model.focus(e.clientX-r.left,e.clientY-r.top);});
+    // Held here so a reply can reach her face. The server decides which
+    // expression, because only it knows what this model carries.
+    window.haruFace=name=>{
+      try{
+        if(name) model.expression(name);
+        else if(model.internalModel&&model.internalModel.motionManager&&model.internalModel.motionManager.expressionManager)
+          model.internalModel.motionManager.expressionManager.resetExpression();
+      }catch(e){ console.warn('[stage] '+(e&&e.message||e)); }
+    };
+    const faces=(model.internalModel&&model.internalModel.settings&&model.internalModel.settings.expressions||[]).length;
     host.classList.add('alive');
-    console.log('[stage] '+entry+' is up');
+    console.log('[stage] '+entry+' is up with '+faces+' expression(s)');
   }catch(error){
     // Said on the page, not only in a console nobody has open. The portrait
     // staying put looks identical to the portrait being the design, so without

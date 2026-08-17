@@ -11,7 +11,7 @@ import { connectGoogle, disconnectGoogle, googleStatus, pullEvents, pullTasks, p
 import { afterCooldown, afterEgoCooldown, afterPoke, egoInstruction, goodnightInstruction, IGNORE_THRESHOLD, isGoodnight, isIgnoring, isLowEffort, leverageInstruction, moodInstruction, nextEgo, nextIrritation, shoutInstruction, shoutState, type ShoutState } from './mood';
 import { nextPokeCount, pokeEmotion, pokeInstruction, pokeIrritation, pokeTier, type PokeKind } from './poke';
 import { applyEvent, chooseIdleAction, DEFAULT_VITALS, driftVitals, nextTickDelayMs, type Environment, type Vitals } from './vitals';
-import { classificationPrompt, emotionToVitals, EMOTION_SCHEMA, NEUTRAL_EMOTION, parseEmotion, type Emotion } from './emotion';
+import { classificationPrompt, emotionToVitals, EMOTION_SCHEMA, NEUTRAL_EMOTION, parseEmotion, type Emotion , faceForEmotion } from './emotion';
 import { withDiscoveredExpressions } from './expressions';
 import { chaseableOverdue, findItem, formatAgenda, itemStatus, missedInstruction, putOffInstruction, putOffUntil, readsAsBareReport, tickOffInstruction, readsAsDone, readsAsNotDone, relativeDay } from './agenda';
 import { openingAngles, pickAngle, shouldPipeUp } from './opening';
@@ -5047,6 +5047,29 @@ const DEFAULT_WEB_PORT = 8787;
 let webServer: { port: number; stop(): Promise<void> } | null = null;
 
 /**
+ * The names of the expressions her model can pull.
+ *
+ * Taken from the folder rather than the manifest, for the same reason the server
+ * fills the manifest in as it serves it: this model ships twenty-two expression
+ * files and declares none of them, so trusting the manifest would report that
+ * she has no face.
+ */
+function modelExpressions(): string[] {
+  const saved = store.get('live2d.model') as { path?: string } | undefined;
+  if (!saved?.path || !existsSync(saved.path)) return [];
+  try {
+    const manifest = JSON.parse(readFileSync(saved.path, 'utf8')) as { FileReferences?: { Expressions?: { Name?: string }[] } };
+    const declared = manifest.FileReferences?.Expressions;
+    if (Array.isArray(declared) && declared.length) return declared.map(e => String(e.Name ?? '')).filter(Boolean);
+    return readdirSync(path.dirname(saved.path))
+      .filter(name => /\.exp3\.json$/i.test(name))
+      .map(name => name.replace(/\.exp3\.json$/i, ''));
+  } catch {
+    return [];
+  }
+}
+
+/**
  * What the phone is allowed to reach.
  *
  * Chat goes through the same ollamaChat the desktop uses, so what answers is
@@ -5071,8 +5094,26 @@ function webDeps(): WebDeps {
       const answer = await ollamaChat(messages, config, { hands: false });
       const reply = answer.content ?? '';
       sendToWindows('chat:fromPhone', { text, reply, ignored: Boolean(answer.ignored) });
-      console.log(`[web] answered ${text.length} chars with ${reply.length}`);
-      return { reply, ignored: answer.ignored };
+      // Read here rather than on the phone, because only this side knows which
+      // expressions the model carries — and for this model the honest answer is
+      // often "none for that", which is a nothing the page can act on.
+      let emotion: string | null = null;
+      let expression: string | null = null;
+      if (reply && !answer.ignored) {
+        try {
+          const felt = await classifyEmotion(reply, config);
+          if (felt) {
+            emotion = felt.emotion;
+            expression = faceForEmotion(felt.emotion, modelExpressions());
+          }
+        } catch (error) {
+          // A face is worth less than an answer: if the classifier fails she
+          // still speaks, she just keeps the face she had.
+          console.warn('[web] could not read her expression:', error instanceof Error ? error.message : error);
+        }
+      }
+      console.log(`[web] answered ${text.length} chars with ${reply.length}${emotion ? ` — ${emotion}${expression ? ` (${expression})` : ' (no face for it)'}` : ''}`);
+      return { reply, ignored: answer.ignored, emotion, expression };
     },
     agenda: () => getKept().map(item => ({ id: item.id, title: item.title, date: item.time ? `${item.date} ${item.time}` : item.date, kind: item.kind, done: item.done })),
     tickOff(id) {

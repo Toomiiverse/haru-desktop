@@ -17,6 +17,44 @@ export const INTENTS = ['listen', 'explain', 'tease', 'dismiss', 'celebrate', 's
 export const FOCUSES = ['user', 'self', 'task', 'away'] as const;
 
 export type EmotionName = typeof EMOTIONS[number];
+
+/**
+ * The face she pulls, chosen from what a model actually ships.
+ *
+ * Written out per emotion rather than matched on name hints, which is how the
+ * desktop does it. Hints are the right tool when a model carries a full set of
+ * emotional expressions and the names vary; they are the wrong one for a model
+ * that carries five faces and seventeen wardrobe toggles. Against the real
+ * model here they picked "Blush 2" for happy, affectionate and embarrassed
+ * alike, found nothing for surprised even though a "scare" face exists, and
+ * matched "hat off on" for nothing at all — better by luck than by design.
+ *
+ * Several emotions have no entry. That is the honest answer for a model with no
+ * face for them: leaving the last one up would be a lie, and forcing a nearby
+ * one makes her smirk when she is bored.
+ */
+const FACES: Partial<Record<EmotionName, RegExp[]>> = {
+  annoyed: [/^angry$/i, /angry|mad|upset/i],
+  worried: [/^cry$/i, /cry|sad|tear/i],
+  surprised: [/^scare$/i, /scare|shock|surprise/i],
+  affectionate: [/^blush$/i, /^blush(?! ?2)/i],
+  embarrassed: [/^full blush$/i, /full ?blush/i, /blush ?2/i],
+  happy: [/blush ?2/i, /smile|happy|joy|grin/i],
+};
+
+/**
+ * Which of a model's expressions to use, or nothing.
+ *
+ * `available` is whatever the model declares, so this works the same for a model
+ * with five expressions and one with fifty.
+ */
+export function faceForEmotion(emotion: EmotionName, available: string[]): string | null {
+  for (const test of FACES[emotion] ?? []) {
+    const found = available.find(name => test.test(name));
+    if (found) return found;
+  }
+  return null;
+}
 export type Intent = typeof INTENTS[number];
 export type FocusTarget = typeof FOCUSES[number];
 

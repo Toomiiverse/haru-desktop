@@ -13,7 +13,7 @@
 // the local coffee shop wifi in plain text.
 
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from 'node:http';
-import { createReadStream, existsSync, statSync } from 'node:fs';
+import { createReadStream, existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import filePath from 'node:path';
 import {
   type WebAccess, passwordMatches, newToken, deviceFor, rememberDevice, touchDevice,
@@ -25,7 +25,7 @@ export type WebDeps = {
   readAccess(): WebAccess;
   saveAccess(access: WebAccess): void;
   /** Her real answer, through the same pipeline the desktop uses — minus hands. */
-  say(text: string): Promise<{ reply: string; ignored?: boolean }>;
+  say(text: string): Promise<{ reply: string; ignored?: boolean; expression?: string | null; emotion?: string | null }>;
   history(): { role: string; content: string; at?: string }[];
   agenda(): { id: string; title: string; date: string; kind: string; done?: boolean }[];
   tickOff(id: string): Promise<void> | void;
@@ -98,6 +98,24 @@ const LIB_FILES: Record<string, string> = {
   '/lib/live2d.js': 'live2d.cubism4.min.js',
   '/lib/cubismcore.js': 'live2dcubismcore.min.js',
 };
+
+/**
+ * The manifest, with the expression files the folder actually contains.
+ *
+ * Only when it declares none itself — a model that lists its own expressions
+ * knows better than we do. Read fresh each time rather than cached: the file is
+ * a kilobyte, and a reimported model should not need a restart to be noticed.
+ */
+function withExpressions(entry: string, root: string): unknown {
+  const manifest = JSON.parse(readFileSync(entry, 'utf8')) as { FileReferences?: { Expressions?: unknown[] } };
+  const refs = manifest.FileReferences ?? (manifest.FileReferences = {});
+  if (Array.isArray(refs.Expressions) && refs.Expressions.length) return manifest;
+  let names: string[] = [];
+  try { names = readdirSync(root).filter(name => /\.exp3\.json$/i.test(name)); } catch { return manifest; }
+  if (!names.length) return manifest;
+  refs.Expressions = names.map(file => ({ Name: file.replace(/\.exp3\.json$/i, ''), File: file }));
+  return manifest;
+}
 
 const SESSION_COOKIE = 'haru_session';
 const DEVICE_COOKIE = 'haru_device';
@@ -334,6 +352,15 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
     if (!model) return json(res, 404, { error: 'No model.' });
     const file = fileWithin(model.root, path.slice('/model/'.length));
     if (!file) return json(res, 404, { error: 'Not part of the model.' });
+    // The manifest is handed over with its expressions filled in, when it has
+    // none of its own. Anya ships twenty-two .exp3.json files and declares not
+    // one of them, so every runtime that reads the manifest — this one included
+    // — believes she has no face at all. Done here rather than by editing the
+    // file, because the model is somebody's paid asset and rewriting it to make
+    // our feature work is not ours to do.
+    if (file === filePath.resolve(model.entry)) {
+      return send(res, 200, JSON.stringify(withExpressions(file, model.root)), 'application/json; charset=utf-8');
+    }
     return sendFile(res, file, MODEL_TYPES[filePath.extname(file).toLowerCase()] ?? 'application/octet-stream');
   }
 
