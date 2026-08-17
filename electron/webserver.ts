@@ -30,6 +30,8 @@ export type WebDeps = {
   memories(): string[];
   journal(): { date: string; text: string; mood?: number; anxiety?: number }[];
   writeJournal(entry: { text: string; mood?: number; anxiety?: number }): Promise<void> | void;
+  /** Her picture, or nothing if this build has none. */
+  portrait(): Buffer | null;
 };
 
 const SESSION_COOKIE = 'haru_session';
@@ -77,7 +79,11 @@ function send(res: ServerResponse, status: number, body: string, type = 'applica
   // off the table.
   res.writeHead(status, {
     'Content-Type': type === 'application/json' ? 'application/json; charset=utf-8' : type,
-    'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:; connect-src 'self'; form-action 'none'; frame-ancestors 'none'; base-uri 'none'",
+    // 'self' for images only, and only because her portrait is served from here.
+    // Everything else stays shut: no outside script, style, font or frame, which
+    // is what makes a hostile string that reaches the page harmless — it has
+    // nowhere to send what it finds.
+    'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; form-action 'none'; frame-ancestors 'none'; base-uri 'none'",
     'X-Content-Type-Options': 'nosniff',
     'Referrer-Policy': 'no-referrer',
     'Cache-Control': 'no-store',
@@ -143,6 +149,20 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
   }
 
   const me = whoIsThis(req, access, now);
+
+  // Her face, on the sign-in page as well as the stage, so it is served before
+  // anyone has signed in. It is the app's own icon and gives nothing away.
+  if (req.method === 'GET' && path === '/portrait') {
+    const picture = deps.portrait();
+    if (!picture) return json(res, 404, { error: 'No portrait.' });
+    res.writeHead(200, {
+      'Content-Type': 'image/png',
+      'Content-Security-Policy': "default-src 'none'",
+      'X-Content-Type-Options': 'nosniff',
+      'Cache-Control': 'private, max-age=86400',
+    });
+    return res.end(picture);
+  }
 
   if (req.method === 'POST' && path === '/api/login') return login(req, res, deps, access, now);
 

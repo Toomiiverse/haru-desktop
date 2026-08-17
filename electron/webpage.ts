@@ -3,44 +3,93 @@
 // Written as plain HTML with no build step and no imports. The desktop app is
 // React through Vite, and a second Vite target for one chat screen would mean a
 // second build to keep working, a second set of assets to ship, and a packaging
-// path to get wrong — for a page that is a list, a text box and four tabs.
+// path to get wrong — for a page that is a stage, a list and a text box.
 //
 // Nothing is fetched from anywhere: no fonts, no icons, no framework. That is
 // what lets the server send a content policy forbidding every outside origin,
 // which in turn means a hostile string that reaches this page has nowhere to
-// send anything it finds.
+// send anything it finds. Her portrait is served by us, from us.
+//
+// The look follows AIRI (airi.moeru.ai): the character is the page rather than
+// an ornament on it, colour comes from one rotatable hue in OKLCH rather than a
+// list of hex codes, and everything sits on soft, generously rounded glass. Two
+// things are deliberately not copied — her palette stays pink rather than AIRI's
+// green, because she is not that character, and the hue does not animate, which
+// on a companion you glance at all day would be a fidget rather than a feature.
+
+/** One number to move the whole palette. 350 is Haru's pink; 150 would be AIRI's green. */
+const HUE = 350;
 
 const SHELL = `
-  :root { color-scheme: dark; --bg:#16132a; --panel:#1e1a38; --line:#2f2a52; --text:#e9e6f5; --dim:#a49dc4; --accent:#f2a3c0; --mine:#3a3163; }
+  :root {
+    color-scheme: dark;
+    --hue: ${HUE};
+    /* OKLCH so lightness stays perceptually even as the hue turns — the reason
+       the reference uses it, and the reason a hand-picked hex per shade is not
+       needed. */
+    --bg:      oklch(16% 0.035 var(--hue));
+    --bg-lift: oklch(21% 0.045 var(--hue));
+    --ink:     oklch(96% 0.012 var(--hue));
+    --ink-dim: oklch(72% 0.030 var(--hue));
+    --accent:  oklch(78% 0.130 var(--hue));
+    --accent-ink: oklch(22% 0.070 var(--hue));
+    --glass:   oklch(30% 0.045 var(--hue) / 0.55);
+    --edge:    oklch(70% 0.060 var(--hue) / 0.16);
+    --mine:    oklch(38% 0.075 var(--hue) / 0.85);
+    --r-lg: 22px;
+    --r-md: 16px;
+  }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-  body { margin:0; background:var(--bg); color:var(--text); font:16px/1.5 system-ui,-apple-system,Segoe UI,sans-serif; }
+  body {
+    margin: 0; min-height: 100dvh; background: var(--bg); color: var(--ink);
+    font: 16px/1.55 ui-rounded, "SF Pro Rounded", "Segoe UI Variable", system-ui, -apple-system, sans-serif;
+    /* The glow she sits in. Fixed, so it does not slide around under scrolling. */
+    background-image:
+      radial-gradient(120% 70% at 50% -10%, oklch(42% 0.12 var(--hue) / 0.55), transparent 60%),
+      radial-gradient(90% 50% at 100% 100%, oklch(38% 0.10 calc(var(--hue) + 60) / 0.35), transparent 70%);
+    background-attachment: fixed;
+  }
   input, textarea, button { font: inherit; color: inherit; }
-  input, textarea { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:.7rem .9rem; width:100%; }
-  input:focus, textarea:focus { outline:none; border-color:var(--accent); }
-  button { background:var(--accent); color:#241a2c; border:0; border-radius:12px; padding:.7rem 1.1rem; font-weight:600; }
-  button:disabled { opacity:.5; }
-  .err { color:#ff9a9a; min-height:1.4em; font-size:.9rem; }
+  input, textarea {
+    background: var(--glass); border: 1px solid var(--edge); border-radius: var(--r-md);
+    padding: .8rem 1rem; width: 100%; backdrop-filter: blur(12px);
+  }
+  input:focus, textarea:focus { outline: none; border-color: var(--accent); }
+  button {
+    background: var(--accent); color: var(--accent-ink); border: 0;
+    border-radius: 999px; padding: .75rem 1.3rem; font-weight: 650; letter-spacing: .01em;
+  }
+  button:disabled { opacity: .45; }
+  .err { color: oklch(72% 0.16 25); min-height: 1.4em; font-size: .9rem; }
 `;
 
 export function loginPage(): string {
   return `<!doctype html><html lang=en><meta charset=utf-8>
 <meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name=theme-color content="#171029">
 <title>Haru</title><style>${SHELL}
-  main { max-width:26rem; margin:0 auto; padding:18vh 1.25rem 2rem; }
-  h1 { font-size:1.6rem; margin:0 0 .25rem; }
-  p.sub { color:var(--dim); margin:0 0 1.75rem; font-size:.95rem; }
-  label { display:block; margin:0 0 .9rem; }
-  label span { display:block; font-size:.85rem; color:var(--dim); margin-bottom:.35rem; }
-  .row { display:flex; align-items:center; gap:.6rem; margin:1rem 0 1.25rem; color:var(--dim); font-size:.9rem; }
-  .row input { width:auto; accent-color:var(--accent); }
+  main { max-width: 25rem; margin: 0 auto; padding: 12vh 1.4rem 2rem; }
+  .face {
+    width: 116px; height: 116px; margin: 0 auto 1.5rem; border-radius: 50%;
+    background: var(--glass) center/cover no-repeat; border: 1px solid var(--edge);
+    box-shadow: 0 18px 50px oklch(30% 0.12 var(--hue) / 0.5);
+  }
+  h1 { font-size: 1.75rem; margin: 0 0 .25rem; text-align: center; letter-spacing: -.02em; }
+  p.sub { color: var(--ink-dim); margin: 0 0 2rem; font-size: .95rem; text-align: center; }
+  label { display: block; margin: 0 0 .85rem; }
+  label span { display: block; font-size: .82rem; color: var(--ink-dim); margin: 0 0 .35rem .2rem; }
+  .row { display: flex; align-items: center; gap: .6rem; margin: 1.1rem 0 1.4rem .2rem; color: var(--ink-dim); font-size: .9rem; }
+  .row input { width: auto; accent-color: var(--accent); }
+  #go { width: 100%; padding: .85rem; }
 </style>
 <main>
+  <div class=face style="background-image:url('/portrait')"></div>
   <h1>Haru</h1>
   <p class=sub>She is at home. Sign in to reach her.</p>
   <form id=f>
     <label><span>Name</span><input name=username autocomplete=username autocapitalize=none required></label>
     <label><span>Password</span><input name=password type=password autocomplete=current-password required></label>
-    <div class=row><input type=checkbox id=r name=remember checked><label for=r style=margin:0>Remember this device</label></div>
+    <div class=row><input type=checkbox id=r name=remember checked><label for=r style="margin:0">Remember this device</label></div>
     <button id=go>Sign in</button>
     <p class=err id=e></p>
   </form>
@@ -64,35 +113,56 @@ f.addEventListener('submit',async ev=>{
 export function appPage(): string {
   return `<!doctype html><html lang=en><meta charset=utf-8>
 <meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name=theme-color content="#171029">
 <title>Haru</title><style>${SHELL}
-  body { display:flex; flex-direction:column; height:100dvh; }
-  header { display:flex; gap:.4rem; padding:.6rem .75rem; border-bottom:1px solid var(--line); overflow-x:auto; }
-  header button { background:none; color:var(--dim); padding:.4rem .8rem; border-radius:999px; font-weight:500; }
-  header button.on { background:var(--panel); color:var(--text); }
-  header .out { margin-left:auto; color:var(--dim); font-size:.85rem; }
-  section { flex:1; overflow-y:auto; padding:1rem .9rem; display:none; }
+  body { display:flex; flex-direction:column; height:100dvh; overflow:hidden; }
+
+  /* The stage. She is the top of the page and everything else sits under her,
+     which is the whole point of the reference: a companion, not a chat log with
+     an avatar in the corner. */
+  .stage { position:relative; flex:0 0 auto; height:min(34dvh,260px); display:flex; align-items:flex-end; justify-content:center; }
+  .stage img { height:100%; object-fit:contain; filter:drop-shadow(0 16px 40px oklch(25% 0.12 var(--hue) / 0.6)); }
+  /* Faded into the page rather than cut off, so there is no hard edge where she ends. */
+  .stage::after { content:''; position:absolute; inset:auto 0 0 0; height:64px; background:linear-gradient(transparent, var(--bg)); pointer-events:none; }
+  .who { position:absolute; top:.9rem; left:1.1rem; display:flex; align-items:center; gap:.5rem; font-weight:650; letter-spacing:-.01em; }
+  .dot { width:8px; height:8px; border-radius:50%; background:var(--accent); box-shadow:0 0 12px var(--accent); }
+  .out { position:absolute; top:.75rem; right:.9rem; background:var(--glass); color:var(--ink-dim); border:1px solid var(--edge); padding:.4rem .9rem; font-size:.82rem; font-weight:500; backdrop-filter:blur(12px); }
+
+  nav { display:flex; gap:.3rem; padding:.35rem; margin:0 .9rem; background:var(--glass); border:1px solid var(--edge); border-radius:999px; backdrop-filter:blur(14px); }
+  nav button { flex:1; background:none; color:var(--ink-dim); padding:.5rem .4rem; font-size:.9rem; font-weight:550; }
+  nav button.on { background:var(--accent); color:var(--accent-ink); }
+
+  section { flex:1; overflow-y:auto; padding:1rem .9rem 1.2rem; display:none; -webkit-overflow-scrolling:touch; }
   section.on { display:block; }
-  .msg { max-width:85%; padding:.6rem .85rem; border-radius:16px; margin:0 0 .6rem; white-space:pre-wrap; overflow-wrap:anywhere; }
-  .them { background:var(--panel); border-bottom-left-radius:5px; }
-  .me { background:var(--mine); margin-left:auto; border-bottom-right-radius:5px; }
-  .sys { color:var(--dim); font-size:.85rem; text-align:center; max-width:100%; }
-  form.compose { display:flex; gap:.5rem; padding:.65rem; border-top:1px solid var(--line); }
-  form.compose textarea { resize:none; max-height:7rem; }
-  .card { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:.75rem .9rem; margin:0 0 .6rem; }
-  .card h3 { margin:0 0 .2rem; font-size:1rem; font-weight:600; }
-  .card time { color:var(--dim); font-size:.85rem; }
-  .card button { background:none; border:1px solid var(--line); color:var(--dim); padding:.35rem .7rem; font-size:.85rem; margin-top:.5rem; }
-  .done { opacity:.45; }
-  .quiet { color:var(--dim); }
+
+  .msg { max-width:82%; padding:.7rem 1rem; border-radius:var(--r-lg); margin:0 0 .55rem; white-space:pre-wrap; overflow-wrap:anywhere; }
+  .them { background:var(--glass); border:1px solid var(--edge); border-bottom-left-radius:7px; backdrop-filter:blur(12px); }
+  .me { background:var(--mine); border:1px solid var(--edge); margin-left:auto; border-bottom-right-radius:7px; }
+  .sys { color:var(--ink-dim); font-size:.84rem; text-align:center; max-width:100%; background:none; border:0; }
+
+  form.compose { display:flex; gap:.5rem; padding:.6rem .9rem calc(.6rem + env(safe-area-inset-bottom)); align-items:flex-end; }
+  form.compose textarea { resize:none; max-height:7rem; border-radius:var(--r-lg); }
+  form.compose button { padding:.8rem 1.15rem; }
+
+  .card { background:var(--glass); border:1px solid var(--edge); border-radius:var(--r-lg); padding:.85rem 1rem; margin:0 0 .6rem; backdrop-filter:blur(12px); }
+  .card h3 { margin:0 0 .15rem; font-size:1rem; font-weight:600; }
+  .card time { color:var(--ink-dim); font-size:.85rem; }
+  .card button { background:none; border:1px solid var(--edge); color:var(--ink-dim); padding:.4rem .85rem; font-size:.85rem; margin-top:.6rem; font-weight:500; }
+  .done { opacity:.4; }
+  .quiet { color:var(--ink-dim); text-align:center; padding:2rem 0; }
   .jrow { display:flex; gap:.6rem; margin:.6rem 0; }
 </style>
-<header>
+<div class=stage>
+  <div class=who><span class=dot></span> Haru</div>
+  <button class=out id=out>Sign out</button>
+  <img src="/portrait" alt="">
+</div>
+<nav>
   <button data-t=chat class=on>Chat</button>
   <button data-t=agenda>Agenda</button>
   <button data-t=journal>Journal</button>
   <button data-t=memory>Memory</button>
-  <button class=out id=out>Sign out</button>
-</header>
+</nav>
 <section id=chat class=on></section>
 <form class=compose id=cf><textarea id=ci rows=1 placeholder="Say something…"></textarea><button id=cb>Send</button></form>
 <section id=agenda></section>
@@ -105,9 +175,9 @@ const get=u=>fetch(u).then(r=>r.ok?r.json():Promise.reject(r));
 const post=(u,b)=>fetch(u,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(b||{})}).then(r=>r.ok?r.json():Promise.reject(r));
 let tab='chat';
 
-document.querySelectorAll('header button[data-t]').forEach(b=>b.onclick=()=>{
+document.querySelectorAll('nav button[data-t]').forEach(b=>b.onclick=()=>{
   tab=b.dataset.t;
-  document.querySelectorAll('header button[data-t]').forEach(x=>x.classList.toggle('on',x===b));
+  document.querySelectorAll('nav button[data-t]').forEach(x=>x.classList.toggle('on',x===b));
   document.querySelectorAll('section').forEach(s=>s.classList.toggle('on',s.id===tab));
   $('cf').style.display = tab==='chat' ? 'flex' : 'none';
   load();
@@ -139,7 +209,7 @@ async function load(){
         '<div class=card><textarea id=jt rows=3 placeholder="How was today?"></textarea>'+
         '<div class=jrow><input id=jm type=number min=1 max=10 placeholder="Mood 1-10"><input id=ja type=number min=1 max=10 placeholder="Anxiety 1-10"></div>'+
         '<button id=jsave>Save</button></div>'+
-        entries.slice().reverse().map(e=>'<div class=card><time>'+esc(e.date)+'</time><p style=margin:.3rem_0_0>'+esc(e.text)+'</p></div>').join('');
+        entries.slice().reverse().map(e=>'<div class=card><time>'+esc(e.date)+'</time><p style="margin:.3rem 0 0">'+esc(e.text)+'</p></div>').join('');
       $('jsave').onclick=async()=>{
         const text=$('jt').value.trim(); if(!text)return;
         $('jsave').disabled=true;

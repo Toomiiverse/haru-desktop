@@ -5079,6 +5079,12 @@ function webDeps(): WebDeps {
       const updated = toggleKept(id);
       if (updated?.done) void remarkOnTickOff(updated);
     },
+    portrait: () => {
+      // The app icon doubles as her face on the phone. Read each time rather than
+      // held: it is 1.5MB, wanted about once a day, and the browser caches it.
+      const picture = path.join(app.getAppPath(), 'build', 'icon.png');
+      try { return existsSync(picture) ? readFileSync(picture) : null; } catch { return null; }
+    },
     memories: () => getMemories().map(memory => memory.text),
     journal: () => getJournal().map(entry => ({ date: entry.date, text: entry.text, mood: entry.mood, anxiety: entry.anxiety })),
     writeJournal(entry) {
