@@ -122,6 +122,12 @@ export function appPage(): string {
      an avatar in the corner. */
   .stage { position:relative; flex:0 0 auto; height:min(34dvh,260px); display:flex; align-items:flex-end; justify-content:center; }
   .stage img { height:100%; object-fit:contain; filter:drop-shadow(0 16px 40px oklch(25% 0.12 var(--hue) / 0.6)); }
+  /* The model sits exactly where the portrait did, and the portrait stays until
+     it is drawing — 28MB over a tunnel is a few seconds, and a blank stage for
+     those seconds reads as broken rather than as loading. */
+  .stage canvas { position:absolute; inset:0; width:100%; height:100%; opacity:0; transition:opacity .6s ease; }
+  .stage.alive canvas { opacity:1; }
+  .stage.alive img { opacity:0; transition:opacity .6s ease; }
   /* Faded into the page rather than cut off, so there is no hard edge where she ends. */
   .stage::after { content:''; position:absolute; inset:auto 0 0 0; height:64px; background:linear-gradient(transparent, var(--bg)); pointer-events:none; }
   .stage.faceless { height:auto; min-height:3.2rem; }
@@ -265,5 +271,50 @@ $('cf').addEventListener('submit',async ev=>{
   $('cb').disabled=false; $('chat').scrollTop=$('chat').scrollHeight;
 });
 load();
+
+// ---- The stage ------------------------------------------------------------
+//
+// Loaded after everything else and allowed to fail without taking the page with
+// it. She is 28MB of model behind a tunnel: on a slow connection the chat should
+// already be working while this is still arriving, and on a phone that cannot
+// manage WebGL at all the portrait simply stays.
+(async function stage(){
+  const host=document.querySelector('.stage');
+  if(!host) return;
+  const script=src=>new Promise((ok,no)=>{const s=document.createElement('script');s.src=src;s.onload=ok;s.onerror=()=>no(new Error(src));document.head.appendChild(s);});
+  try{
+    const {entry}=await get('/api/model');
+    if(!entry){ console.log('[stage] no model imported on the desktop'); return; }
+    // Order matters: the plugin reads a global PIXI when it loads, and the
+    // Cubism runtime has to exist before any model is built.
+    await script('/lib/pixi.js');
+    await script('https://cubism.live2d.com/sdk-web/cubismcore/live2dcubismcore.min.js');
+    await script('/lib/live2d.js');
+    const canvas=document.createElement('canvas');
+    host.appendChild(canvas);
+    const app=new PIXI.Application({view:canvas,backgroundAlpha:0,antialias:true,resolution:Math.min(devicePixelRatio||1,2),autoDensity:true,resizeTo:host});
+    const model=await PIXI.live2d.Live2DModel.from('/model/'+encodeURIComponent(entry),{autoInteract:false});
+    app.stage.addChild(model);
+    // Anchored at the bottom middle and scaled to fit, the same way the desktop
+    // does it: a Live2D model's own origin is nowhere useful.
+    const fit=()=>{
+      const w=app.renderer.screen.width,h=app.renderer.screen.height;
+      if(!model.width||!model.height)return;
+      model.scale.set(Math.min(w/(model.width/model.scale.x),h/(model.height/model.scale.y))*0.92);
+      model.anchor.set(0.5,1);
+      model.position.set(w/2,h);
+    };
+    fit();
+    new ResizeObserver(fit).observe(host);
+    // Her eyes follow a finger or a cursor, and nothing else — no dragging, no
+    // hit areas. On a phone the pointer is wherever it was last touched, which
+    // is close enough to being looked at.
+    host.addEventListener('pointermove',e=>{const r=host.getBoundingClientRect();model.focus(e.clientX-r.left,e.clientY-r.top);});
+    host.classList.add('alive');
+    console.log('[stage] '+entry+' is up');
+  }catch(error){
+    console.warn('[stage] staying with the portrait: '+(error&&error.message||error));
+  }
+})();
 </script>`;
 }

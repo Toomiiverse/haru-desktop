@@ -13,6 +13,8 @@
 // the local coffee shop wifi in plain text.
 
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from 'node:http';
+import { createReadStream, existsSync, statSync } from 'node:fs';
+import filePath from 'node:path';
 import {
   type WebAccess, passwordMatches, newToken, deviceFor, rememberDevice, touchDevice,
   noteFailure, lockedFor, clearFailures, type Attempts, DEVICE_DAYS,
@@ -32,7 +34,50 @@ export type WebDeps = {
   writeJournal(entry: { text: string; mood?: number; anxiety?: number }): Promise<void> | void;
   /** Her picture, or nothing if this build has none. */
   portrait(): Buffer | null;
+  /** The Live2D model to stand on the stage: the folder it lives in and its entry file. */
+  model(): { root: string; entry: string } | null;
+  /** Where the vendored pixi and Live2D plugin are kept. */
+  libFolder(): string | null;
 };
+
+/**
+ * The only extensions a model is allowed to be made of.
+ *
+ * A route that serves files out of a folder is a route that will be asked for
+ * other files, and the answer has to be no by default rather than no by
+ * accident. Together with the containment check below, this is what keeps
+ * "serve her model" from meaning "serve anything on this disk".
+ */
+const MODEL_TYPES: Record<string, string> = {
+  '.json': 'application/json',
+  '.moc3': 'application/octet-stream',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
+  '.mtn': 'application/octet-stream',
+  '.motion3': 'application/json',
+  '.wav': 'audio/wav',
+};
+
+/**
+ * A file inside the folder, or nothing.
+ *
+ * Resolved and then checked to still be under the root, which is the check that
+ * matters: "../" survives being decoded, being encoded twice, and being written
+ * with backslashes, and none of those look suspicious until the file comes back.
+ */
+function fileWithin(root: string, requested: string): string | null {
+  let relative: string;
+  try { relative = decodeURIComponent(requested); } catch { return null; }
+  if (relative.includes('\0')) return null;
+  const resolved = filePath.resolve(root, '.' + filePath.posix.normalize('/' + relative.replace(/\\/g, '/')));
+  const base = filePath.resolve(root);
+  if (resolved !== base && !resolved.startsWith(base + filePath.sep)) return null;
+  if (!MODEL_TYPES[filePath.extname(resolved).toLowerCase()]) return null;
+  if (!existsSync(resolved) || !statSync(resolved).isFile()) return null;
+  return resolved;
+}
 
 const SESSION_COOKIE = 'haru_session';
 const DEVICE_COOKIE = 'haru_device';
@@ -79,11 +124,29 @@ function send(res: ServerResponse, status: number, body: string, type = 'applica
   // off the table.
   res.writeHead(status, {
     'Content-Type': type === 'application/json' ? 'application/json; charset=utf-8' : type,
-    // 'self' for images only, and only because her portrait is served from here.
-    // Everything else stays shut: no outside script, style, font or frame, which
-    // is what makes a hostile string that reaches the page harmless — it has
+    // Opened by exactly two things, both of them the Live2D stage.
+    //
+    // 'self' for scripts and images, because pixi, the Live2D plugin and her
+    // model are all served from here. And cubism.live2d.com, which is not: the
+    // Cubism runtime is Live2D's own file, loaded from their CDN, exactly as the
+    // desktop app has always loaded it. Redistributing it ourselves is a
+    // licensing decision that is not ours to make quietly, so the one outside
+    // origin stays — named, and no wider than the one file it is for.
+    //
+    // Everything else is still denied by default: no outside style, font, frame
+    // or connection, so a hostile string that reaches this page still has
     // nowhere to send what it finds.
-    'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; form-action 'none'; frame-ancestors 'none'; base-uri 'none'",
+    'Content-Security-Policy': [
+      "default-src 'none'",
+      "style-src 'unsafe-inline'",
+      "script-src 'self' 'unsafe-inline' https://cubism.live2d.com",
+      "img-src 'self' data: blob:",
+      "connect-src 'self'",
+      "worker-src blob:",
+      "form-action 'none'",
+      "frame-ancestors 'none'",
+      "base-uri 'none'",
+    ].join('; '),
     'X-Content-Type-Options': 'nosniff',
     'Referrer-Policy': 'no-referrer',
     'Cache-Control': 'no-store',
@@ -92,6 +155,30 @@ function send(res: ServerResponse, status: number, body: string, type = 'applica
 }
 
 const json = (res: ServerResponse, status: number, value: unknown) => send(res, status, JSON.stringify(value));
+
+/** A named file directly inside a folder, never below it. */
+function fileAt(folder: string, name: string): string | null {
+  const full = filePath.join(folder, name);
+  return existsSync(full) && statSync(full).isFile() ? full : null;
+}
+
+/**
+ * Streamed rather than read: the model is 28MB across nearly forty files, and
+ * holding each one in memory to hand it over would be the same bytes twice for
+ * no reason. Cached hard — a .moc3 does not change without being reimported.
+ */
+function sendFile(res: ServerResponse, file: string, type: string) {
+  res.writeHead(200, {
+    'Content-Type': type,
+    'Content-Length': statSync(file).size,
+    'Content-Security-Policy': "default-src 'none'",
+    'X-Content-Type-Options': 'nosniff',
+    'Cache-Control': 'private, max-age=604800, immutable',
+  });
+  const stream = createReadStream(file);
+  stream.on('error', () => res.destroy());
+  stream.pipe(res);
+}
 
 async function readBody(req: IncomingMessage): Promise<unknown> {
   const chunks: Buffer[] = [];
@@ -167,6 +254,8 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
   if (req.method === 'POST' && path === '/api/login') return login(req, res, deps, access, now);
 
   if (!me.allowed) {
+    // Her model is not served to strangers. It is 28MB of somebody's paid asset
+    // and there is no reason for the sign-in page to need it.
     if (path === '/' ) return send(res, 200, loginPage(), 'text/html; charset=utf-8');
     return json(res, 401, { error: 'Sign in first.' });
   }
@@ -175,6 +264,27 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
   if (me.device) deps.saveAccess(touchDevice(access, me.device.id, now));
 
   if (req.method === 'GET' && path === '/') return send(res, 200, appPage(), 'text/html; charset=utf-8');
+
+  // The stage's moving parts, all behind the login.
+  if (req.method === 'GET' && path === '/api/model') {
+    const model = deps.model();
+    return json(res, 200, { entry: model ? filePath.basename(model.entry) : null });
+  }
+
+  if (req.method === 'GET' && (path === '/lib/pixi.js' || path === '/lib/live2d.js')) {
+    const folder = deps.libFolder();
+    const file = folder && fileAt(folder, path === '/lib/pixi.js' ? 'pixi.min.js' : 'live2d.cubism4.min.js');
+    if (!file) return json(res, 404, { error: 'The Live2D runtime is not in this build.' });
+    return sendFile(res, file, 'text/javascript; charset=utf-8');
+  }
+
+  if (req.method === 'GET' && path.startsWith('/model/')) {
+    const model = deps.model();
+    if (!model) return json(res, 404, { error: 'No model.' });
+    const file = fileWithin(model.root, path.slice('/model/'.length));
+    if (!file) return json(res, 404, { error: 'Not part of the model.' });
+    return sendFile(res, file, MODEL_TYPES[filePath.extname(file).toLowerCase()] ?? 'application/octet-stream');
+  }
 
   if (req.method === 'POST' && path === '/api/logout') {
     const cookies = parseCookies(req.headers.cookie);

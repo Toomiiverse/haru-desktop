@@ -48,7 +48,9 @@
       "dist-electron/**",
       "electron/windows-helper.ps1",
       "package.json",
-      "build/icon.ico"
+      "build/icon.ico",
+      "build/lib/**",
+      "build/icon.png"
     ],
     "win": {
       "icon": "build/icon.ico"

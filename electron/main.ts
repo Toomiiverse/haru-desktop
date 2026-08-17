@@ -5085,6 +5085,18 @@ function webDeps(): WebDeps {
       const picture = path.join(app.getAppPath(), 'build', 'icon.png');
       try { return existsSync(picture) ? readFileSync(picture) : null; } catch { return null; }
     },
+    model: () => {
+      const saved = (store.get('live2d.model') as { path?: string } | undefined);
+      if (!saved?.path || !existsSync(saved.path)) return null;
+      // The folder the entry file sits in is the model's world: every texture and
+      // motion it references is relative to that, so it is the only folder the
+      // web route is ever allowed to reach into.
+      return { root: path.dirname(saved.path), entry: saved.path };
+    },
+    libFolder: () => {
+      const folder = [path.join(app.getAppPath(), 'build', 'lib'), path.join(process.resourcesPath ?? '', 'build', 'lib')].find(existsSync);
+      return folder ?? null;
+    },
     memories: () => getMemories().map(memory => memory.text),
     journal: () => getJournal().map(entry => ({ date: entry.date, text: entry.text, mood: entry.mood, anxiety: entry.anxiety })),
     writeJournal(entry) {
