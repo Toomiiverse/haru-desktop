@@ -110,11 +110,67 @@ export function relevantItems(items: AgendaItem[], todayKey: string) {
  * half a title's words to land before it will act, which is what keeps three
  * letters from being reckless.
  */
-function sharesRoot(word: string, asked: Set<string>) {
-  if (asked.has(word)) return true;
+/**
+ * One slip apart: a swap, a missing letter, an extra one, or a wrong one.
+ *
+ * People type "motehrboard" and mean the motherboard, and a list that only
+ * answers to correct spelling makes them retype it or, worse, quietly does
+ * nothing. The first three letters already forgive a typo that happens later in
+ * the word — which is why the swap above still matched — but they forgive
+ * nothing at the start, and they let "mot" agree with "motion".
+ *
+ * Only for words of six letters or more. At four, one letter apart is not a
+ * typo, it is a different word: pick and pack, cake and lake, work and word.
+ */
+const LONG_ENOUGH_TO_MISTYPE = 6;
+
+function oneSlipApart(a: string, b: string): boolean {
+  const [short, long] = a.length <= b.length ? [a, b] : [b, a];
+  if (long.length - short.length > 1) return false;
+  if (long.length === short.length) {
+    const differ: number[] = [];
+    for (let i = 0; i < long.length; i++) if (long[i] !== short[i] && differ.push(i) > 2) return false;
+    if (differ.length === 1) return true;
+    // Two neighbours, each holding the other's letter: the transposition that
+    // "motehrboard" actually is.
+    return differ.length === 2
+      && differ[1] === differ[0] + 1
+      && long[differ[0]] === short[differ[1]]
+      && long[differ[1]] === short[differ[0]];
+  }
+  // One letter too many on one side.
+  let i = 0, j = 0, slips = 0;
+  while (i < long.length && j < short.length) {
+    if (long[i] === short[j]) { i++; j++; continue; }
+    if (++slips > 1) return false;
+    i++;
+  }
+  return true;
+}
+
+/**
+ * How well a title's word was actually said, not merely whether it was.
+ *
+ * Three letters agreeing is weak evidence — "rent" and "rental", "mot" and
+ * "motion" — while the whole word, or the whole word with one slip in it, is
+ * strong. Keeping them apart is what lets a single word be enough sometimes and
+ * never enough other times.
+ */
+type WordMatch = 'exact' | 'slip' | 'prefix' | null;
+
+function howItMatches(word: string, asked: Set<string>): WordMatch {
+  if (asked.has(word)) return 'exact';
   const root = word.slice(0, 3);
-  for (const spoken of asked) if (spoken.slice(0, 3) === root) return true;
-  return false;
+  let prefix = false;
+  for (const spoken of asked) {
+    if (word.length >= LONG_ENOUGH_TO_MISTYPE && spoken.length >= LONG_ENOUGH_TO_MISTYPE && oneSlipApart(word, spoken)) return 'slip';
+    if (spoken.slice(0, 3) === root) prefix = true;
+  }
+  return prefix ? 'prefix' : null;
+}
+
+function sharesRoot(word: string, asked: Set<string>) {
+  return howItMatches(word, asked) !== null;
 }
 
 /**
@@ -160,6 +216,12 @@ export function findItem<T extends AgendaItem>(items: T[], phrase: string): T | 
   for (const item of items) {
     const words = significant(item.title);
     if (!words.size) continue;
+    // Half a word is worth half a word. Three letters agreeing is a hint, not a
+    // sighting, and counting it the same as the whole word is what let "I paid
+    // the rent" close a rental inspection and "I picked up Sam" close the
+    // motherboard — both on a single three-letter stub, in a two-word title
+    // where one word is already half the score.
+    const weigh = (word: string) => { const how = howItMatches(word, asked); return how === null ? 0 : how === 'prefix' ? 0.5 : 1; };
     const sharedWords = [...words].filter(word => sharesRoot(word, asked));
     const shared = sharedWords.length;
     if (!shared) continue;
@@ -167,10 +229,21 @@ export function findItem<T extends AgendaItem>(items: T[], phrase: string): T | 
     if (shared < 2 && !sharedWords.some(tellsThemApart)) continue;
     // Scored both ways round, best wins: against everything the title says, and
     // against just the part that names the thing.
+    const weight = [...words].reduce((sum, word) => sum + weigh(word), 0);
     const head = headOf(item.title);
     const headWords = head ? significant(head) : null;
-    const headOverlap = headWords ? [...headWords].filter(word => sharesRoot(word, asked)).length / headWords.size : 0;
-    const overlap = Math.max(shared / words.size, headOverlap);
+    const headOverlap = headWords ? [...headWords].reduce((sum, word) => sum + weigh(word), 0) / headWords.size : 0;
+    // A long, uncommon word said in full carries the whole thing on its own.
+    // "Get TV power connector" is three words worth matching, so "I bought the
+    // connector" scores 0.33 and fails — while naming the one word that belongs
+    // to no other task on the list. The word has to be said properly for this:
+    // three letters agreeing would let "I paid the rent" close out a rental
+    // inspection.
+    const namesItOutright = sharedWords.some(word =>
+      word.length >= LONG_ENOUGH_TO_MISTYPE
+      && tellsThemApart(word)
+      && howItMatches(word, asked) !== 'prefix');
+    const overlap = namesItOutright ? 1 : Math.max(weight / words.size, headOverlap);
     // The unfinished bonus only breaks ties between candidates; it must not lift
     // a weak match over the bar, which let "did you eat?" close out "Eat lunch
     // with Dad" on a single shared word.
@@ -197,7 +270,11 @@ export function findItem<T extends AgendaItem>(items: T[], phrase: string): T | 
 // The contraction has no space in it — "I've taken" is one token where "I have
 // taken" is two, and a pattern expecting "i " misses every contracted form,
 // which is most of how anyone actually types.
-const READS_AS_DONE = /\b(i(?:'ve| have| already)?\s+(?:just\s+|already\s+)?(?:did|done|took|taken|finished|sorted|handled|posted|sent|paid|booked|called|rang|emailed|texted|got)\b|(?:did|done|sorted|handled|finished) (?:it|that|them|those)\b|(?:it|that|they|those)(?:'s| is| are| was| were) (?:done|sorted|handled|finished)\b|all (?:done|sorted)\b|already (?:did|done|took|taken)\b)/i;
+// The verbs people actually finish things with. "picked up" was missing, which
+// is how "I picked up the motherboard yes" read as no report at all: she
+// congratulated them on it in the same breath as leaving it open, because the
+// sentence reached the model but never reached the list.
+const READS_AS_DONE = /\b(i(?:'ve| have| already)?\s+(?:just\s+|already\s+)?(?:did|done|took|taken|finished|sorted|handled|posted|sent|paid|booked|called|rang|emailed|texted|got|picked|collected|grabbed|bought|fetched|returned|completed|dropped|met|went)\b|(?:picked|dropped) (?:it|that|them|those) (?:up|off)\b|\b(?:picked|collected|grabbed|bought|fetched|dropped)\s+(?:it\s+)?(?:up|off)?\s*(?:the|a|my|that|those|them)\b|(?:did|done|sorted|handled|finished) (?:it|that|them|those)\b|(?:it|that|they|those)(?:'s| is| are| was| were) (?:done|sorted|handled|finished)\b|all (?:done|sorted)\b|already (?:did|done|took|taken|picked)\b)/i;
 
 export function readsAsDone(text: string) {
   // A denial contains most of the same words, so it is asked first.

@@ -5060,7 +5060,18 @@ app.whenReady().then(() => {
   // Only ever in flight once: the window asks on mount and again after a reset,
   // and in dev both can land together. Sharing the promise stops two greetings.
   ipcMain.handle('chat:opening', () => {
-    if (!openingInFlight) openingInFlight = composeOpening().finally(() => { openingInFlight = null; });
+    if (!openingInFlight) openingInFlight = composeOpening().then(line => {
+      // Counted as one of her unprompted lines, because that is what it is.
+      //
+      // The spacing above already stops two reminders landing seconds apart —
+      // and then the opening line, which picks its angle from the same overdue
+      // list, spoke three seconds before one anyway. Both were about the TV
+      // power connector, both within five seconds of the window appearing, and
+      // neither knew the other had spoken. It is the same fault the comment on
+      // lastRemindedAt describes, with the opening left out of the sum.
+      if (line) lastRemindedAt = Date.now();
+      return line;
+    }).finally(() => { openingInFlight = null; });
     return openingInFlight;
   });
   ipcMain.handle('profile:get', () => getProfile());
