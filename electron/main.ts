@@ -4207,6 +4207,66 @@ function stillTalkingAbout(): string {
   return speakingNow && speakingLine ? ` You have not even finished saying it — you are still speaking these words aloud right now: "${speakingLine.slice(0, 300)}"` : '';
 }
 
+/**
+ * The last few turns, so a reaction lands inside the conversation instead of
+ * beside it.
+ *
+ * Both reactions used to be handed one thing: the line being judged. With no
+ * idea what was being talked about, the best they could do was a verdict on a
+ * sentence — so a thumbs-up given while she was sending them out of the door
+ * came back as a remark about her own performance, which read as ignoring them.
+ * The approval happens in a moment, and the moment is the point.
+ */
+function recentExchange(limit = 6): string {
+  const messages = (store.get('chat.messages') as { role: string; content: string }[] | undefined) ?? [];
+  return messages
+    .slice(-limit)
+    .map(message => `${message.role === 'user' ? 'They' : 'You'}: ${String(message.content ?? '').replace(/\s+/g, ' ').slice(0, 300)}`)
+    .join('\n');
+}
+
+const IN_THE_MOMENT = 'Answer inside that conversation, not beside it. If they were on their way out, or busy, or you had just told them to do something, your line belongs to that moment — carry it on rather than commenting on yourself from nowhere.';
+
+const normaliseLine = (text: string) => text.toLowerCase().replace(/[^\p{L}\p{N} ]/gu, ' ').replace(/\s+/g, ' ').trim();
+
+/**
+ * Whether she has read one of the examples straight back.
+ *
+ * The examples exist to set a tone, and are introduced as something to write a
+ * new line against — but "Noted. I'll take that as permission to stop trying so
+ * hard." arrived in a real conversation, and it is example four, word for word.
+ * The temperature was already raised to stop repeated reactions converging;
+ * that stops her repeating herself, and does nothing about her repeating us.
+ */
+function reusesExample(line: string, examples: string[]): boolean {
+  const said = normaliseLine(line);
+  if (!said) return false;
+  // Compared on the first four letters, so "take" and "taken" are one word.
+  // Without that, a line rebuilt out of the same pieces reads as new.
+  const stem = (word: string) => word.slice(0, 4);
+  const stems = new Set(said.split(' ').map(stem));
+  return examples.some(example => {
+    const shown = normaliseLine(example);
+    if (said === shown || (shown.length > 12 && said.includes(shown))) return true;
+    // Near misses count as copying too: "I'll" typed out as "I will" is not a
+    // new line, it is the same one with the contraction undone, and an exact
+    // match would wave it through. Short words are ignored so the overlap is
+    // measured on what the line is about rather than on "the" and "you".
+    const meaningful = shown.split(' ').filter(word => word.length > 2);
+    if (meaningful.length < 4) return false;
+    return meaningful.filter(word => stems.has(stem(word))).length / meaningful.length >= 0.8;
+  });
+}
+
+async function quipOfHerOwn(system: string, user: string, config: ProviderConfig, examples: string[]) {
+  const line = await ollamaQuip(system, user, config);
+  if (!reusesExample(line, examples)) return line;
+  console.warn('[react] she read an example back word for word — asking again');
+  const again = await ollamaQuip(`${system} You just used one of those examples exactly as written. They are a tone to aim at, not lines to copy. Write one of your own about what is actually happening here.`, user, config);
+  if (reusesExample(again, examples)) console.warn('[react] and again on the second try — sending it anyway');
+  return again;
+}
+
 export function ollamaRetort(disliked: string, config: ProviderConfig) {
   const interrupted = stillTalkingAbout();
   const system = [
@@ -4215,9 +4275,15 @@ export function ollamaRetort(disliked: string, config: ProviderConfig) {
     'Be unrepentant and sarcastic about it. Do not apologise, do not offer to fix it, do not ask a question, do not use quotation marks.',
     'Refer to what they actually disliked so the jab lands on that specific reply.',
     interrupted ? 'They marked it down while you were still saying it. Take that personally and say so — being judged before you had finished is the insult, on top of the verdict itself.' : '',
-    `Match the bite of these, but write a new one: ${RETORT_EXAMPLES.map(line => `"${line}"`).join(' ')}`,
+    IN_THE_MOMENT,
+    `Match the bite of these, but write a new one — never one of these exact lines: ${RETORT_EXAMPLES.map(line => `"${line}"`).join(' ')}`,
   ].filter(Boolean).join(' ');
-  return ollamaQuip(system, `This is the reply I marked as poor: "${disliked.slice(0, 500)}"${interrupted}`, config);
+  const recent = recentExchange();
+  const user = [
+    recent ? `How the conversation was going, oldest first:\n${recent}\n` : '',
+    `This is the reply I marked as poor: "${disliked.slice(0, 500)}"${interrupted}`,
+  ].filter(Boolean).join('\n');
+  return quipOfHerOwn(system, user, config, RETORT_EXAMPLES);
 }
 
 // Praise is not thanked for, it is cashed in. The line should read as her taking
@@ -4228,12 +4294,22 @@ export function ollamaGloat(praised: string, config: ProviderConfig, ego: number
     getActiveCharacter().identity,
     'The user just marked one of your replies as good. Respond with ONE short line, under 25 words.',
     'Do not thank them and do not be warm about it. Be smug — you already knew it was good, and their approval only confirms you can do as you like.',
-    ego >= 4 ? 'Make it obvious you now intend to coast: hint that since they are pleased, you need not try as hard from here.' : 'Take the credit and be a little condescending about them needing you.',
+    // Coasting is a joke about her own ego, and it only reads as one when it is
+    // aimed at something. Said into a void — which is all she had — it lands as
+    // her losing interest in the person, at the exact moment they were pleased
+    // with her.
+    ego >= 4 ? 'Make it obvious you now intend to coast: hint that since they are pleased, you need not try as hard from here — but hang it on whatever is actually going on, not on nothing.' : 'Take the credit and be a little condescending about them needing you.',
     'Do not ask a question and do not use quotation marks. Refer to what they actually praised.',
     interrupted ? 'They approved it while you were still saying it, which is its own kind of cheek — you had not finished. Say so, and be smug that they could already tell.' : '',
-    `Match the tone of these, but write a new one: ${GLOAT_EXAMPLES.map(line => `"${line}"`).join(' ')}`,
+    IN_THE_MOMENT,
+    `Match the tone of these, but write a new one — never one of these exact lines: ${GLOAT_EXAMPLES.map(line => `"${line}"`).join(' ')}`,
   ].filter(Boolean).join(' ');
-  return ollamaQuip(system, `This is the reply I marked as good: "${praised.slice(0, 500)}"${interrupted}`, config);
+  const recent = recentExchange();
+  const user = [
+    recent ? `How the conversation was going, oldest first:\n${recent}\n` : '',
+    `This is the reply I marked as good: "${praised.slice(0, 500)}"${interrupted}`,
+  ].filter(Boolean).join('\n');
+  return quipOfHerOwn(system, user, config, GLOAT_EXAMPLES);
 }
 
 /**
