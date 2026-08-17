@@ -13,7 +13,7 @@ import { nextPokeCount, pokeEmotion, pokeInstruction, pokeIrritation, pokeTier, 
 import { applyEvent, chooseIdleAction, DEFAULT_VITALS, driftVitals, nextTickDelayMs, type Environment, type Vitals } from './vitals';
 import { classificationPrompt, emotionToVitals, EMOTION_SCHEMA, NEUTRAL_EMOTION, parseEmotion, type Emotion } from './emotion';
 import { withDiscoveredExpressions } from './expressions';
-import { chaseableOverdue, findItem, formatAgenda, itemStatus, missedInstruction, putOffInstruction, readsAsBareReport, tickOffInstruction, readsAsDone, readsAsNotDone, relativeDay } from './agenda';
+import { chaseableOverdue, findItem, formatAgenda, itemStatus, missedInstruction, putOffInstruction, putOffUntil, readsAsBareReport, tickOffInstruction, readsAsDone, readsAsNotDone, relativeDay } from './agenda';
 import { openingAngles, pickAngle, shouldPipeUp } from './opening';
 import { allDayDueMinutes, isEveningCheck, reminderInstruction, reminderTier, reminderVolume, shouldRemind, type ReminderState } from './reminders';
 import { isHeated, readTone, sharpen, toneGesture, tonePose } from './tone';
@@ -3349,7 +3349,9 @@ function chatSystemPrompt({ irritation, ego, goodnight, shout, latestMessage, fr
     missedInstruction(latestMessage),
     // Beside it rather than inside it: not doing something and saying when you
     // will are different admissions, and only one of them changes the list.
-    putOffInstruction(latestMessage),
+    movedJustNow
+      ? `You have already moved "${movedJustNow.title}" to ${movedJustNow.to}. Tell them it is moved, and have an opinion about it being pushed — you are not a calendar politely accepting a change. Do not call any tool to move it again.`
+      : putOffInstruction(latestMessage),
     // The backstop for everything tickOffSpoken cannot be sure enough of.
     tickOffInstruction(latestMessage, getKept().some(item => item.kind === 'task' && !item.done)),
     // Last but one, so it outranks the agenda and the nagging above it. Being
@@ -4383,6 +4385,40 @@ function whatSheWasChasing(open: KeptItem[]): KeptItem | null {
   return null;
 }
 
+/** What was moved this turn, so the prompt can say so rather than ask for it. */
+let movedJustNow: { title: string; from: string; to: string } | null = null;
+
+/**
+ * Moving a task they have just given a new day for.
+ *
+ * Left to her at first, on the grounds that a tick is one bit while a date means
+ * guessing which of several tasks they meant. That reasoning was sound and the
+ * conclusion was wrong: the guessing problem was solved for ticking off — the
+ * same resolver finds the task from what was said or from what she last raised —
+ * and the tool it was left to did not get called. She said "Fine. Move it to
+ * tomorrow then" and moved nothing, which is worse than either doing it or
+ * refusing, because it says the thing was handled.
+ *
+ * Still refuses to guess: no task named and none being discussed means no move.
+ */
+function putOffSpoken(said: string) {
+  movedJustNow = null;
+  const when = putOffUntil(said);
+  if (!when) return null;
+  const open = getKept().filter(item => item.kind === 'task' && !item.done);
+  if (!open.length) return null;
+  const target = findItem(open, said) ?? whatSheWasChasing(open);
+  if (!target) return null;
+  // "until friday" and "till saturday" carry their preposition; resolveDate wants
+  // the day on its own.
+  const resolved = resolveDate(when.replace(/^(?:on|until|till|by)\s+/, ''), zonedNow(CHAT_TIMEZONE));
+  if (!resolved || resolved === target.date) return null;
+  const updated = updateKept(target.id, { date: resolved });
+  console.log(`[agenda] moved from what they said: "${target.title}" ${target.date} -> ${resolved}`);
+  movedJustNow = { title: target.title, from: target.date, to: resolved };
+  return updated;
+}
+
 function tickOffSpoken(said: string) {
   if (!readsAsDone(said)) return null;
   const open = getKept().filter(item => item.kind === 'task' && !item.done);
@@ -4619,6 +4655,8 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // They are talking to her, so the silence she was waiting out is over.
   noteUserSpoke();
   tickOffSpoken(latest);
+  // A new day for something is as much a report as finishing it is.
+  putOffSpoken(latest);
   // Separate from ticking off, and it has to be: an event is never ticked off,
   // and the answer to "how did it go" rarely looks like a completion.
   noteTheyAccounted(latest);

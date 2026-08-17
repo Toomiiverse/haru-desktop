@@ -384,7 +384,11 @@ export function missedInstruction(latestMessage: string): string {
 // makes it a date: "sat" and "sun" are ordinary English otherwise, and "I sat
 // down" is not a reschedule.
 const WHEN_INSTEAD = /\b(tomorrow|tonight|later|next week|this weekend|another day|after work|in the morning|(?:on|until|till|by)\s+(?:mon|tues?|wed(?:nes)?|thurs?|fri|sat(?:ur)?|sun)(?:day)?|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i;
-const PUTTING_IT_OFF = /\b(?:have to|has to|need to|i'?ll|i will|going to|gonna|can'?t|cannot|couldn'?t|won'?t|not (?:until|till)|push(?:ing)? it|move it|resched)/i;
+// "move it" and "push it" were too literal by half: "Move the task to tomorrow"
+// is about as plain as an instruction gets and matched none of it, because the
+// object was a noun rather than a pronoun. The verbs are enough on their own —
+// a day has to be named as well before any of this counts.
+const PUTTING_IT_OFF = /\b(?:have to|has to|need to|i'?ll|i will|going to|gonna|can'?t|cannot|couldn'?t|won'?t|not (?:until|till)|push\w*|mov\w*|shift\w*|bump\w*|resched\w*|postpon\w*|put (?:it|that|them) off)\b/i;
 
 export function putOffUntil(latestMessage: string): string | null {
   // "I did it tomorrow" is not a sentence anyone says; a completion wins.
