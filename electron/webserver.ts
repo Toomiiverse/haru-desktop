@@ -280,6 +280,28 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
     return res.end(picture);
   }
 
+  // What makes her installable rather than a browser tab: her own window, her
+  // own icon in the taskbar and on a home screen, no address bar. Served before
+  // the login because a browser reads it to decide whether it can be installed
+  // at all, and it says nothing a stranger could not guess from the front page.
+  if (req.method === 'GET' && path === '/manifest.webmanifest') {
+    return send(res, 200, JSON.stringify({
+      name: 'Haru',
+      short_name: 'Haru',
+      description: 'Haru, wherever you are.',
+      start_url: '/',
+      scope: '/',
+      display: 'standalone',
+      orientation: 'any',
+      background_color: '#171029',
+      theme_color: '#171029',
+      icons: [
+        { src: '/portrait', sizes: '1254x1254', type: 'image/png', purpose: 'any' },
+        { src: '/portrait', sizes: '1254x1254', type: 'image/png', purpose: 'maskable' },
+      ],
+    }), 'application/manifest+json; charset=utf-8');
+  }
+
   if (req.method === 'POST' && path === '/api/login') return login(req, res, deps, access, now);
 
   if (!me.allowed) {

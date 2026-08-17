@@ -67,6 +67,11 @@ export function loginPage(): string {
   return `<!doctype html><html lang=en><meta charset=utf-8>
 <meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name=theme-color content="#171029">
+<link rel=manifest href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/portrait">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Haru">
 <title>Haru</title><style>${SHELL}
   main { max-width: 25rem; margin: 0 auto; padding: 12vh 1.4rem 2rem; }
   .face {
@@ -114,6 +119,11 @@ export function appPage(): string {
   return `<!doctype html><html lang=en><meta charset=utf-8>
 <meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name=theme-color content="#171029">
+<link rel=manifest href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/portrait">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Haru">
 <title>Haru</title><style>${SHELL}
   body { display:flex; flex-direction:column; height:100dvh; overflow:hidden; }
 

@@ -64,6 +64,53 @@ GPT-SoVITS lives somewhere else. The route is OpenAI's
 `/v1/audio/transcriptions`, so whisper.cpp's server or anything else speaking it
 can be dropped in by changing the endpoint alone.
 
+## Running her on a server
+
+She can live on an always-on machine and be reached from a desktop and a phone,
+with the thinking done somewhere else again — a rented GPU, say. Three things
+make that work, and a few stop working.
+
+**She still needs a logged-in desktop session.** This is an Electron app: it
+opens windows, watches the screen and talks to an audio device. A headless
+Windows Server with nobody signed in will not run her; an always-on PC with an
+autologin account will.
+
+**The clients are the web version.** Turn it on in Setup → *Reaching her from a
+phone*, put a tunnel in front of `127.0.0.1:8787`, then open that URL and install
+it — Chrome and Edge offer it from the address bar, iOS from Share → Add to Home
+Screen. It gets its own window, its own icon and no address bar, on both.
+
+**What does not come with the repo.** These are hers, not the code's:
+
+- `%APPDATA%\haru-desktop\config.json` — the conversation, her memories, the
+  journal, the agenda, her speech corrections. Copy it to carry her across.
+- `%APPDATA%\haru-desktop\live2d-models\` — several hundred megabytes.
+- GPT-SoVITS and its weights, if you want her voice. A separate install.
+
+**The API keys will not survive the copy.** They are encrypted with Windows
+DPAPI, which is tied to the account and the machine that wrote them. They travel
+as unreadable noise and have to be typed again in Setup. Nothing warns you — she
+simply cannot reach the model until you do.
+
+**Run one of her, not two.** Two installs means two `config.json` files, and they
+diverge the moment either is used: the same memory in two versions, with no merge.
+
+### What stops existing
+
+Everything that acts on the machine she runs on now acts on the server, which is
+usually not what was wanted:
+
+| Feature | On a server |
+| --- | --- |
+| Screen watching | watches an idle server desktop |
+| Screenshot reactions | the server's screen |
+| Open, close, shut down | the server, not yours |
+| Game awareness | a server plays nothing |
+| The roaming companion window | a screen nobody is looking at |
+
+Setup is desktop-only too. Changing a model, a voice or a key means opening her
+window on the server — over remote desktop, or at the machine itself.
+
 ## Architecture
 
 - `electron/`: native window lifecycle and secure IPC bridge.
