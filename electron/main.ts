@@ -13,7 +13,7 @@ import { nextPokeCount, pokeEmotion, pokeInstruction, pokeIrritation, pokeTier, 
 import { applyEvent, chooseIdleAction, DEFAULT_VITALS, driftVitals, nextTickDelayMs, type Environment, type Vitals } from './vitals';
 import { classificationPrompt, emotionToVitals, EMOTION_SCHEMA, NEUTRAL_EMOTION, parseEmotion, type Emotion } from './emotion';
 import { withDiscoveredExpressions } from './expressions';
-import { chaseableOverdue, findItem, formatAgenda, itemStatus, missedInstruction, readsAsDone, readsAsNotDone, relativeDay } from './agenda';
+import { chaseableOverdue, findItem, formatAgenda, itemStatus, missedInstruction, putOffInstruction, readsAsDone, readsAsNotDone, relativeDay } from './agenda';
 import { openingAngles, pickAngle, shouldPipeUp } from './opening';
 import { allDayDueMinutes, isEveningCheck, reminderInstruction, reminderTier, reminderVolume, shouldRemind, type ReminderState } from './reminders';
 import { isHeated, readTone, sharpen, toneGesture, tonePose } from './tone';
@@ -3347,6 +3347,9 @@ function chatSystemPrompt({ irritation, ego, goodnight, shout, latestMessage, fr
     // After the mood lines: an admission earns the same treatment whether she was
     // already annoyed or perfectly cheerful when it landed.
     missedInstruction(latestMessage),
+    // Beside it rather than inside it: not doing something and saying when you
+    // will are different admissions, and only one of them changes the list.
+    putOffInstruction(latestMessage),
     // Last but one, so it outranks the agenda and the nagging above it. Being
     // told to drop something has to beat every reason she had to raise it.
     pushbackInstruction(store.get('pushback') as Pushback | undefined, Date.now()),

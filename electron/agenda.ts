@@ -117,16 +117,60 @@ function sharesRoot(word: string, asked: Set<string>) {
   return false;
 }
 
+/**
+ * The part of a title that names the thing, before it says where.
+ *
+ * "Pick up motherboard from Umart Belmont" is five words worth matching on, and
+ * three of them are the shop. Nobody reports a task back that way: they say they
+ * picked up the motherboard. Scored against the whole title that is 0.40 and
+ * falls under the bar, so telling her it was done did nothing — which is worse
+ * than useless, because she then carried on chasing something already finished.
+ *
+ * The head is only used when it leaves enough to be sure of. "Go to work" must
+ * not become "go".
+ */
+const WHERE_IT_HAPPENS = /\s+\b(?:from|at|in)\b\s+/i;
+
+function significant(text: string) {
+  return new Set(text.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(word => word.length > 2));
+}
+
+function headOf(title: string): string | null {
+  const cut = title.search(WHERE_IT_HAPPENS);
+  if (cut <= 0) return null;
+  const head = title.slice(0, cut);
+  return significant(head).size >= 2 ? head : null;
+}
+
 export function findItem<T extends AgendaItem>(items: T[], phrase: string): T | null {
-  const asked = new Set(phrase.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(word => word.length > 2));
+  const asked = significant(phrase);
   if (!asked.size) return null;
+
+  // How ordinary each word is across the list they actually have. "pick" is on
+  // two of their tasks and means almost nothing on its own; "motherboard" is on
+  // one and settles it. Counting rather than guessing means the judgement
+  // follows their own list instead of a table of words someone chose here — and
+  // it is what separates "got the motherboard", which should tick that off on
+  // one word, from "I picked up Sam", which should not tick off anything.
+  const spread = new Map<string, number>();
+  for (const item of items) for (const word of significant(item.title)) spread.set(word, (spread.get(word) ?? 0) + 1);
+  const tellsThemApart = (word: string) => (spread.get(word) ?? 0) <= 1;
+
   let best: { item: T; overlap: number; rank: number } | null = null;
   for (const item of items) {
-    const words = new Set(item.title.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(word => word.length > 2));
+    const words = significant(item.title);
     if (!words.size) continue;
-    const shared = [...words].filter(word => sharesRoot(word, asked)).length;
+    const sharedWords = [...words].filter(word => sharesRoot(word, asked));
+    const shared = sharedWords.length;
     if (!shared) continue;
-    const overlap = shared / words.size;
+    // One word is enough only when that word belongs to this task and no other.
+    if (shared < 2 && !sharedWords.some(tellsThemApart)) continue;
+    // Scored both ways round, best wins: against everything the title says, and
+    // against just the part that names the thing.
+    const head = headOf(item.title);
+    const headWords = head ? significant(head) : null;
+    const headOverlap = headWords ? [...headWords].filter(word => sharesRoot(word, asked)).length / headWords.size : 0;
+    const overlap = Math.max(shared / words.size, headOverlap);
     // The unfinished bonus only breaks ties between candidates; it must not lift
     // a weak match over the bar, which let "did you eat?" close out "Eat lunch
     // with Dad" on a single shared word.
@@ -190,6 +234,44 @@ export function missedInstruction(latestMessage: string): string {
     'Lecture them. Be scathing about it, call them names for it — an idiot, a muppet, hopeless — and make it clear this is exactly what you expected.',
     'Aim all of it at what they did, never at who they are: their laziness over this one thing, not their worth. No cruelty about their character, their intelligence in general, or anything they cannot change.',
     'Then, in your last line, turn it round. Tell them to get it done and that you expect better next time — grudgingly, without going soft, but genuinely meant. End on that, never on the insult.',
+  ].join(' ');
+}
+
+/**
+ * When they will get to it, if they have just said.
+ *
+ * "I'm home now so I have to check tomorrow" is not a completion and not a
+ * refusal — it is a new date, offered in passing. Nothing read it that way, so
+ * the task sat on today being chased into the evening while both of them already
+ * knew it was a tomorrow job.
+ *
+ * Deliberately not written to the list here. Ticking something off is one bit
+ * and reversible in a click; moving a date means guessing which of several tasks
+ * they meant from a sentence that often names none of them, and being wrong
+ * quietly rewrites something they still have to do. She has update_kept_item and
+ * she can see the conversation — this only makes sure she notices.
+ */
+// Written out in full when it stands alone, abbreviated only after a word that
+// makes it a date: "sat" and "sun" are ordinary English otherwise, and "I sat
+// down" is not a reschedule.
+const WHEN_INSTEAD = /\b(tomorrow|tonight|later|next week|this weekend|another day|after work|in the morning|(?:on|until|till|by)\s+(?:mon|tues?|wed(?:nes)?|thurs?|fri|sat(?:ur)?|sun)(?:day)?|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i;
+const PUTTING_IT_OFF = /\b(?:have to|has to|need to|i'?ll|i will|going to|gonna|can'?t|cannot|couldn'?t|won'?t|not (?:until|till)|push(?:ing)? it|move it|resched)/i;
+
+export function putOffUntil(latestMessage: string): string | null {
+  // "I did it tomorrow" is not a sentence anyone says; a completion wins.
+  if (readsAsDone(latestMessage)) return null;
+  if (!PUTTING_IT_OFF.test(latestMessage)) return null;
+  return latestMessage.match(WHEN_INSTEAD)?.[0].toLowerCase() ?? null;
+}
+
+export function putOffInstruction(latestMessage: string): string {
+  const when = putOffUntil(latestMessage);
+  if (!when) return '';
+  return [
+    `They have just said they will not get to something until ${when}.`,
+    'If it is one of the tasks already on their list, move it to that day with update_kept_item rather than adding a second one, and tell them you have moved it.',
+    'Have an opinion about it being pushed — you are not a calendar politely accepting a change — but move it anyway.',
+    'If you cannot tell which task they mean, ask which one instead of guessing.',
   ].join(' ');
 }
 
