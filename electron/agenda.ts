@@ -276,9 +276,61 @@ export function findItem<T extends AgendaItem>(items: T[], phrase: string): T | 
 // sentence reached the model but never reached the list.
 const READS_AS_DONE = /\b(i(?:'ve| have| already)?\s+(?:just\s+|already\s+)?(?:did|done|took|taken|finished|sorted|handled|posted|sent|paid|booked|called|rang|emailed|texted|got|picked|collected|grabbed|bought|fetched|returned|completed|dropped|met|went)\b|(?:picked|dropped) (?:it|that|them|those) (?:up|off)\b|\b(?:picked|collected|grabbed|bought|fetched|dropped)\s+(?:it\s+)?(?:up|off)?\s*(?:the|a|my|that|those|them)\b|(?:did|done|sorted|handled|finished) (?:it|that|them|those)\b|(?:it|that|they|those)(?:'s| is| are| was| were) (?:done|sorted|handled|finished)\b|all (?:done|sorted)\b|already (?:did|done|took|taken|picked)\b)/i;
 
+// An answer with no sentence around it: "yes, picked up!", "yep, done". Anchored
+// to the start on purpose, so it cannot fire inside "I need to get it picked up"
+// — the loose reading of a completion belongs in the prompt below, where a model
+// with the whole conversation decides, not in code acting on its own.
+const READS_AS_DONE_BARE = /^\s*(?:(?:yes|yep|yeah|yup|ok|okay|aye)\b[,!.\s]*)?(?:picked|got|done|sorted|finished|collected|grabbed|bought|fetched)\b/i;
+
 export function readsAsDone(text: string) {
   // A denial contains most of the same words, so it is asked first.
-  return !readsAsNotDone(text) && READS_AS_DONE.test(text);
+  return !readsAsNotDone(text) && (READS_AS_DONE.test(text) || READS_AS_DONE_BARE.test(text));
+}
+
+/**
+ * An answer that names nothing because it does not need to.
+ *
+ * "yes, picked up!" has no pronoun to follow and no noun to match, which left it
+ * falling through every path at once: nothing to find, nothing to resolve. But
+ * naming nothing is itself the signal — it is an answer to a question, and the
+ * question was hers. Anchored to the start, so it stays an answer rather than a
+ * clause somewhere inside a longer sentence about something else.
+ */
+export function readsAsBareReport(text: string) {
+  return !readsAsNotDone(text) && READS_AS_DONE_BARE.test(text);
+}
+
+/**
+ * Telling her that ticking things off is her job too.
+ *
+ * The pattern above has now been widened four times for four ways of saying the
+ * same thing — "I did however pick up", "I picked up the motherboard", "ive
+ * picked it up", "yes, picked up!" — and a fifth is always available, because
+ * this is language and not a form. Each widening also makes a false tick more
+ * likely, and a false tick writes to their list.
+ *
+ * She has had complete_kept_item the whole time and did not reach for it, which
+ * is not surprising: nothing ever asked her to, and the code quietly doing it
+ * first meant the tool had no visible reason to exist. So the code keeps the
+ * cases it is sure of, and she is told to handle the rest — she has the
+ * conversation in front of her, which is the thing a regular expression will
+ * never have, and can tell "yes, picked up!" from "I need to get it picked up".
+ *
+ * Deliberately generous about when to say this. Being reminded she can tick
+ * something off costs a sentence in a prompt; not being reminded costs a task
+ * that stays on the list while she keeps shouting about it.
+ */
+const MIGHT_BE_A_REPORT = /\b(done|did|got|picked|collected|grabbed|bought|fetched|sorted|finished|handled|completed|dropped|took|taken|paid|called|sent|posted|been|yes|yep|yeah|yup)\b/i;
+
+export function tickOffInstruction(latestMessage: string, anythingOpen: boolean): string {
+  if (!anythingOpen || readsAsNotDone(latestMessage)) return '';
+  if (!MIGHT_BE_A_REPORT.test(latestMessage)) return '';
+  return [
+    'If they have just told you something on their list is done, tick it off with complete_kept_item before you answer.',
+    'They will not usually name it or say it in full — "yes, picked up", "yeah did that", "got it" all count.',
+    'If it is not obvious which one they mean, it is the one you last asked them about.',
+    'Do not tick anything off if they are saying they have not done it, or are about to.',
+  ].join(' ');
 }
 
 /**

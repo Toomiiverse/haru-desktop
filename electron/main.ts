@@ -13,7 +13,7 @@ import { nextPokeCount, pokeEmotion, pokeInstruction, pokeIrritation, pokeTier, 
 import { applyEvent, chooseIdleAction, DEFAULT_VITALS, driftVitals, nextTickDelayMs, type Environment, type Vitals } from './vitals';
 import { classificationPrompt, emotionToVitals, EMOTION_SCHEMA, NEUTRAL_EMOTION, parseEmotion, type Emotion } from './emotion';
 import { withDiscoveredExpressions } from './expressions';
-import { chaseableOverdue, findItem, formatAgenda, itemStatus, missedInstruction, putOffInstruction, readsAsDone, readsAsNotDone, relativeDay } from './agenda';
+import { chaseableOverdue, findItem, formatAgenda, itemStatus, missedInstruction, putOffInstruction, readsAsBareReport, tickOffInstruction, readsAsDone, readsAsNotDone, relativeDay } from './agenda';
 import { openingAngles, pickAngle, shouldPipeUp } from './opening';
 import { allDayDueMinutes, isEveningCheck, reminderInstruction, reminderTier, reminderVolume, shouldRemind, type ReminderState } from './reminders';
 import { isHeated, readTone, sharpen, toneGesture, tonePose } from './tone';
@@ -3350,6 +3350,8 @@ function chatSystemPrompt({ irritation, ego, goodnight, shout, latestMessage, fr
     // Beside it rather than inside it: not doing something and saying when you
     // will are different admissions, and only one of them changes the list.
     putOffInstruction(latestMessage),
+    // The backstop for everything tickOffSpoken cannot be sure enough of.
+    tickOffInstruction(latestMessage, getKept().some(item => item.kind === 'task' && !item.done)),
     // Last but one, so it outranks the agenda and the nagging above it. Being
     // told to drop something has to beat every reason she had to raise it.
     pushbackInstruction(store.get('pushback') as Pushback | undefined, Date.now()),
@@ -4361,7 +4363,7 @@ function whatSheWasChasing(open: KeptItem[]): KeptItem | null {
 function tickOffSpoken(said: string) {
   if (!readsAsDone(said)) return null;
   const open = getKept().filter(item => item.kind === 'task' && !item.done);
-  const match = findItem(open, said) ?? (REFERS_BACK.test(said) ? whatSheWasChasing(open) : null);
+  const match = findItem(open, said) ?? (REFERS_BACK.test(said) || readsAsBareReport(said) ? whatSheWasChasing(open) : null);
   if (!match) return null;
   toggleKept(match.id, true);
   console.log(`[agenda] ticked off from what they said: "${match.title}"`);
