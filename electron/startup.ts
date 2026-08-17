@@ -11,7 +11,17 @@
 // "she did not come up" should not be hunting through Program Files.
 
 import { app, shell } from 'electron';
+import { existsSync } from 'node:fs';
 import path from 'node:path';
+
+/** Her icon on disk, wherever this build keeps it. */
+function iconFile(): string | undefined {
+  const candidates = [
+    path.join(app.getAppPath(), 'build', 'icon.ico'),
+    path.join(process.resourcesPath ?? '', 'build', 'icon.ico'),
+  ];
+  return candidates.find(candidate => existsSync(candidate));
+}
 
 /**
  * Starting at login should not throw a full chat window at somebody who has
@@ -81,11 +91,16 @@ export function createDesktopShortcut() {
     // wherever Explorer happened to be.
     cwd: app.isPackaged ? path.dirname(exe) : app.getAppPath(),
     description: 'Haru desktop companion',
-    // The packaged exe carries its own icon; electron.exe would otherwise put
-    // the Electron logo on the desktop.
-    icon: exe,
+    // The packaged exe carries its own icon. Unpackaged, exe is electron.exe and
+    // carries Electron's — which this used to hand to Windows regardless, so a
+    // shortcut made from source arrived wearing somebody else's logo and looked
+    // for all the world like it was starting a different application.
+    icon: iconFile() ?? exe,
     iconIndex: 0,
-    appUserModelId: app.isPackaged ? 'com.haru.desktop' : undefined,
+    // Always, not only when packaged: it is what lets Windows tie a pinned
+    // shortcut to the window that opens from it, and that is worth more from
+    // source than it is in a build nobody has made yet.
+    appUserModelId: 'com.haru.desktop',
   });
   if (!ok) throw new Error('Windows refused to write the shortcut.');
   return target;

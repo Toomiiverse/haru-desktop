@@ -4897,8 +4897,28 @@ function getCompanionBounds(): Bounds {
   return { x: work.x + work.width - width - 24, y: work.y + work.height - height - 24, width, height };
 }
 
+/**
+ * Her own face on her own window.
+ *
+ * Unpackaged, Electron runs from electron.exe and Windows shows electron.exe's
+ * icon — so the app in the taskbar was the Electron logo no matter what the
+ * shortcut said, which reads as the shortcut having launched the wrong thing.
+ * It had not; only the picture was wrong.
+ *
+ * Packaged builds get this from the exe, but setting it here as well costs
+ * nothing and keeps the two the same.
+ */
+function appIcon(): string | undefined {
+  const candidates = [
+    path.join(app.getAppPath(), 'build', 'icon.ico'),
+    path.join(process.resourcesPath ?? '', 'build', 'icon.ico'),
+    path.join(__dirname, '..', 'build', 'icon.ico'),
+  ];
+  return candidates.find(candidate => existsSync(candidate));
+}
+
 function createWindow() {
-  mainWindow = new BrowserWindow({ width: 1240, height: 800, minWidth: 980, minHeight: 640, titleBarStyle: 'hiddenInset', backgroundColor: '#0d0d12', webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true } });
+  mainWindow = new BrowserWindow({ icon: appIcon(), width: 1240, height: 800, minWidth: 980, minHeight: 640, titleBarStyle: 'hiddenInset', backgroundColor: '#0d0d12', webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true } });
   const devUrl = process.env.VITE_DEV_SERVER_URL;
   if (devUrl) mainWindow.loadURL(devUrl); else mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
   mainWindow.on('focus', syncOnFocus);
@@ -4907,6 +4927,7 @@ function createWindow() {
 function createCompanionWindow() {
   const pinned = store.get('companion.pinned', true) as boolean;
   companionWindow = new BrowserWindow({
+    icon: appIcon(),
     ...getCompanionBounds(),
     show: false,
     frame: false,
@@ -5063,6 +5084,12 @@ async function stopWebDoor() {
   webServer = null;
   if (running) { await running.stop(); console.log('[web] closed'); }
 }
+
+// Told to Windows before any window exists, and in every build rather than only
+// packaged ones. Without it the taskbar files her under electron.exe: the same
+// group as any other Electron app running, the wrong name on hover, and a pinned
+// shortcut that does not recognise the window it opened as its own.
+if (process.platform === 'win32') app.setAppUserModelId('com.haru.desktop');
 
 app.whenReady().then(() => {
   if (!isPrimaryInstance) return;
