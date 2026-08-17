@@ -4326,9 +4326,42 @@ export function ollamaGloat(praised: string, config: ProviderConfig, ego: number
  * title's words. Three separate hurdles, because this writes to their list
  * without being asked.
  */
+/** Words that point at something already being talked about instead of naming it. */
+const REFERS_BACK = /\b(it|that|them|those|this|the lot)\b/i;
+
+/** How long after being chased about something "it" still means that thing. */
+const STILL_MEANS_IT_MS = 30 * 60_000;
+
+/**
+ * What "it" is.
+ *
+ * "ive picked it up" names nothing at all, and every amount of matching on
+ * words will keep failing on it, because the word that identifies the task is
+ * one the user quite reasonably did not say — she had just demanded the TV power
+ * connector twice in five minutes, so saying its name back would be strange.
+ *
+ * The referent is whatever she last went looking for them about. That is already
+ * written down, one line per task, because the escalation needs it; nothing had
+ * ever read it in this direction. Only for half an hour, and only while the task
+ * is still open, so a stale "it" cannot close something days later.
+ *
+ * Read before acknowledgeReminders wipes the slate, which is why the order of
+ * those two calls in ollamaChat matters.
+ */
+function whatSheWasChasing(open: KeptItem[]): KeptItem | null {
+  let latest: { id: string; at: number } | null = null;
+  for (const [id, state] of Object.entries(reminderStates())) {
+    const at = state?.lastAt ?? 0;
+    if (at && (!latest || at > latest.at)) latest = { id, at };
+  }
+  if (!latest || Date.now() - latest.at > STILL_MEANS_IT_MS) return null;
+  return open.find(item => item.id === latest.id) ?? null;
+}
+
 function tickOffSpoken(said: string) {
   if (!readsAsDone(said)) return null;
-  const match = findItem(getKept().filter(item => item.kind === 'task' && !item.done), said);
+  const open = getKept().filter(item => item.kind === 'task' && !item.done);
+  const match = findItem(open, said) ?? (REFERS_BACK.test(said) ? whatSheWasChasing(open) : null);
   if (!match) return null;
   toggleKept(match.id, true);
   console.log(`[agenda] ticked off from what they said: "${match.title}"`);
