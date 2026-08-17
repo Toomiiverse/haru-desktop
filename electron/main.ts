@@ -4350,14 +4350,37 @@ const STILL_MEANS_IT_MS = 30 * 60_000;
  * Read before acknowledgeReminders wipes the slate, which is why the order of
  * those two calls in ollamaChat matters.
  */
+/** How far back "it" is allowed to reach for what it means. */
+const CONTEXT_TURNS = 8;
+
 function whatSheWasChasing(open: KeptItem[]): KeptItem | null {
   let latest: { id: string; at: number } | null = null;
   for (const [id, state] of Object.entries(reminderStates())) {
     const at = state?.lastAt ?? 0;
     if (at && (!latest || at > latest.at)) latest = { id, at };
   }
-  if (!latest || Date.now() - latest.at > STILL_MEANS_IT_MS) return null;
-  return open.find(item => item.id === latest.id) ?? null;
+  if (latest && Date.now() - latest.at <= STILL_MEANS_IT_MS) {
+    const chased = open.find(item => item.id === latest.id);
+    if (chased) return chased;
+  }
+
+  // Failing that, the last task she actually named out loud.
+  //
+  // The reminder slate above is wiped the moment they say anything at all —
+  // being answered is the point of chasing, so it is cleared on every message —
+  // which meant the referent for "it" was reliably gone by the time "it" was
+  // said. A record that erases itself precisely when it is needed is not a
+  // record. What she said is still there, and "Did you get the TV power
+  // connector today?" names the task as plainly as the slate ever did.
+  const messages = (store.get('chat.messages') as { role: string; content: string; at?: string }[] | undefined) ?? [];
+  for (const message of messages.slice(-CONTEXT_TURNS).reverse()) {
+    if (message.role !== 'assistant') continue;
+    const when = message.at ? Date.parse(message.at) : Date.now();
+    if (Number.isFinite(when) && Date.now() - when > STILL_MEANS_IT_MS) break;
+    const named = findItem(open, String(message.content ?? ''));
+    if (named) return named;
+  }
+  return null;
 }
 
 function tickOffSpoken(said: string) {
