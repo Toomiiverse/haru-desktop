@@ -410,7 +410,7 @@ setInterval(askIfSheHasSomethingToSay,4*60_000);
   if(!host) return;
   const script=src=>new Promise((ok,no)=>{const s=document.createElement('script');s.src=src;s.onload=ok;s.onerror=()=>no(new Error(src));document.head.appendChild(s);});
   try{
-    const {entry}=await get('/api/model');
+    const {entry,pose}=await get('/api/model');
     if(!entry){ console.log('[stage] no model imported on the desktop'); return; }
     // Order matters: the plugin reads a global PIXI when it loads, and the
     // Cubism runtime has to exist before any model is built.
@@ -462,6 +462,23 @@ setInterval(askIfSheHasSomethingToSay,4*60_000);
           model.internalModel.motionManager.expressionManager.resetExpression();
       }catch(e){ console.warn('[stage] '+(e&&e.message||e)); }
     };
+    // Re-applied every frame rather than set once. The model rewrites its own
+    // parameters on each update from whatever motion is running, so a pose set
+    // at load is gone by the next tick — which looks exactly like it never
+    // worked. Added after the model, so it runs after that update and before
+    // the frame is drawn.
+    const posed=Object.entries(pose||{});
+    if(posed.length){
+      const core=model.internalModel&&model.internalModel.coreModel;
+      if(core&&core.setParameterValueById){
+        app.ticker.add(()=>{
+          for(const [id,value] of posed){
+            try{ core.setParameterValueById(id,value); }catch(e){ /* not on this model */ }
+          }
+        });
+        console.log('[stage] holding '+posed.length+' saved parameters');
+      }
+    }
     const faces=(model.internalModel&&model.internalModel.settings&&model.internalModel.settings.expressions||[]).length;
     host.classList.add('alive');
     console.log('[stage] '+entry+' is up with '+faces+' expression(s)');

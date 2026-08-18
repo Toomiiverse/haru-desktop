@@ -43,6 +43,8 @@ export type WebDeps = {
   portrait(): Buffer | null;
   /** The Live2D model to stand on the stage: the folder it lives in and its entry file. */
   model(): { root: string; entry: string } | null;
+  /** How she has been set up on the desktop — her pose, and what she is wearing. */
+  pose?(): Record<string, number>;
   /** Where the vendored pixi and Live2D plugin are kept. */
   libFolder(): string | null;
   /** Her voice for a line, or nothing if she has none set up. */
@@ -344,7 +346,12 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
   // The stage's moving parts, all behind the login.
   if (req.method === 'GET' && path === '/api/model') {
     const model = deps.model();
-    return json(res, 200, { entry: model ? filePath.basename(model.entry) : null });
+    // Her pose is decoration; the model is the point. Looked up separately so a
+    // wardrobe that cannot be read leaves her standing in the default position
+    // rather than leaving the stage empty.
+    let pose: Record<string, number> = {};
+    try { pose = deps.pose?.() ?? {}; } catch { /* she stands as she comes */ }
+    return json(res, 200, { entry: model ? filePath.basename(model.entry) : null, pose });
   }
 
   if (req.method === 'GET' && LIB_FILES[path]) {

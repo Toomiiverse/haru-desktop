@@ -13,7 +13,7 @@ import { nextPokeCount, pokeEmotion, pokeInstruction, pokeIrritation, pokeTier, 
 import { applyEvent, chooseIdleAction, DEFAULT_VITALS, driftVitals, nextTickDelayMs, type Environment, type Vitals } from './vitals';
 import { classificationPrompt, emotionToVitals, EMOTION_SCHEMA, NEUTRAL_EMOTION, parseEmotion, type Emotion , faceForEmotion } from './emotion';
 import { withDiscoveredExpressions } from './expressions';
-import { chaseableOverdue, findItem, formatAgenda, itemStatus, missedInstruction, putOffInstruction, putOffUntil, readsAsBareReport, tickOffInstruction, readsAsDone, readsAsNotDone, relativeDay } from './agenda';
+import { chaseableOverdue, findItem, formatAgenda, itemStatus, missedInstruction, putOffInstruction, putOffUntil, readsAsBareReport, tickOffInstruction, readsAsDone, doneClause, readsAsNotDone, relativeDay } from './agenda';
 import { openingAngles, pickAngle, shouldPipeUp } from './opening';
 import { allDayDueMinutes, isEveningCheck, reminderInstruction, reminderTier, reminderVolume, shouldRemind, type ReminderState } from './reminders';
 import { isHeated, readTone, sharpen, toneGesture, tonePose } from './tone';
@@ -3399,7 +3399,10 @@ function chatSystemPrompt({ irritation, ego, goodnight, shout, latestMessage, fr
       ? `You have already moved "${movedJustNow.title}" to ${movedJustNow.to}. Tell them it is moved, and have an opinion about it being pushed — you are not a calendar politely accepting a change. Do not call any tool to move it again.`
       : putOffInstruction(latestMessage),
     // The backstop for everything tickOffSpoken cannot be sure enough of.
-    tickOffInstruction(latestMessage, getKept().some(item => item.kind === 'task' && !item.done)),
+    ((): string => {
+      const open = getKept().filter(item => item.kind === 'task' && !item.done);
+      return tickOffInstruction(latestMessage, open.length > 0, findItem(open, latestMessage)?.title ?? null);
+    })(),
     // Last but one, so it outranks the agenda and the nagging above it. Being
     // told to drop something has to beat every reason she had to raise it.
     pushbackInstruction(store.get('pushback') as Pushback | undefined, Date.now()),
@@ -4475,9 +4478,12 @@ function putOffSpoken(said: string) {
 }
 
 function tickOffSpoken(said: string) {
-  if (!readsAsDone(said)) return null;
+  // Matched against the clause that reports it done, not the whole message.
+  // Everything else they said is about something else by definition.
+  const reported = doneClause(said);
+  if (!reported) return null;
   const open = getKept().filter(item => item.kind === 'task' && !item.done);
-  const match = findItem(open, said) ?? (REFERS_BACK.test(said) || readsAsBareReport(said) ? whatSheWasChasing(open) : null);
+  const match = findItem(open, reported) ?? (REFERS_BACK.test(reported) || readsAsBareReport(reported) ? whatSheWasChasing(open) : null);
   if (!match) return null;
   toggleKept(match.id, true);
   console.log(`[agenda] ticked off from what they said: "${match.title}"`);
@@ -5452,6 +5458,10 @@ function webDeps(): WebDeps {
       // web route is ever allowed to reach into.
       return { root: path.dirname(saved.path), entry: saved.path };
     },
+    // The same record the desktop reads. Her arms were placed once, in the
+    // wardrobe, and there is no reason a phone should be a second place to do
+    // it — or a second answer about where they are.
+    pose: () => getWardrobeValues(),
     libFolder: () => {
       const folder = [path.join(app.getAppPath(), 'build', 'lib'), path.join(process.resourcesPath ?? '', 'build', 'lib')].find(existsSync);
       return folder ?? null;

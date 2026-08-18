@@ -267,6 +267,19 @@ export function findItem<T extends AgendaItem>(items: T[], phrase: string): T | 
  * nothing on a model that would have called the tool anyway: the item is already
  * ticked by the time she is asked to reply, so she has nothing left to get wrong.
  */
+/**
+ * The words people finish things with — and, said after a "haven't", the exact
+ * same words people use to say they have not.
+ *
+ * Kept in one place because the two halves have drifted apart every single time.
+ * "found" was added to the done list and not to the denial list, so "I've found
+ * it" and "I haven't found it yet" both read as a report. Whichever half gets
+ * patched next, the other half now moves with it.
+ */
+const FINISHED = 'did|done|took|taken|got|had|been|made|managed|picked|collected|grabbed|bought|fetched|found|sourced|nabbed|snagged|sorted|handled|finished|completed|returned|dropped|met|paid|called|rang|sent|posted|booked|emailed|texted|went';
+/** The same verbs unconjugated, which is the form a denial puts them in. */
+const TO_FINISH = 'get|do|make|manage|have time|pick|collect|grab|buy|fetch|find|source|sort|handle|finish|complete|return|drop|meet|pay|call|send|post|book|go';
+
 // The contraction has no space in it — "I've taken" is one token where "I have
 // taken" is two, and a pattern expecting "i " misses every contracted form,
 // which is most of how anyone actually types.
@@ -274,17 +287,50 @@ export function findItem<T extends AgendaItem>(items: T[], phrase: string): T | 
 // is how "I picked up the motherboard yes" read as no report at all: she
 // congratulated them on it in the same breath as leaving it open, because the
 // sentence reached the model but never reached the list.
-const READS_AS_DONE = /\b(i(?:'ve| have| already)?\s+(?:just\s+|already\s+)?(?:did|done|took|taken|finished|sorted|handled|posted|sent|paid|booked|called|rang|emailed|texted|got|picked|collected|grabbed|bought|fetched|returned|completed|dropped|met|went)\b|(?:picked|dropped) (?:it|that|them|those) (?:up|off)\b|\b(?:picked|collected|grabbed|bought|fetched|dropped)\s+(?:it\s+)?(?:up|off)?\s*(?:the|a|my|that|those|them)\b|(?:did|done|sorted|handled|finished) (?:it|that|them|those)\b|(?:it|that|they|those)(?:'s| is| are| was| were) (?:done|sorted|handled|finished)\b|all (?:done|sorted)\b|already (?:did|done|took|taken|picked)\b)/i;
+const READS_AS_DONE = /\b(i(?:'ve| have| already)?\s+(?:just\s+|already\s+)?(?:did|done|took|taken|finished|sorted|handled|posted|sent|paid|booked|called|rang|emailed|texted|got|picked|collected|grabbed|bought|fetched|returned|completed|dropped|met|went|found|sourced|nabbed|snagged)\b|(?:picked|dropped) (?:it|that|them|those) (?:up|off)\b|\b(?:picked|collected|grabbed|bought|fetched|dropped)\s+(?:it\s+)?(?:up|off)?\s*(?:the|a|my|that|those|them)\b|(?:did|done|sorted|handled|finished) (?:it|that|them|those)\b|(?:it|that|they|those)(?:'s| is| are| was| were) (?:done|sorted|handled|finished)\b|all (?:done|sorted)\b|already (?:did|done|took|taken|picked)\b)/i;
 
 // An answer with no sentence around it: "yes, picked up!", "yep, done". Anchored
 // to the start on purpose, so it cannot fire inside "I need to get it picked up"
 // — the loose reading of a completion belongs in the prompt below, where a model
 // with the whole conversation decides, not in code acting on its own.
-const READS_AS_DONE_BARE = /^\s*(?:(?:yes|yep|yeah|yup|ok|okay|aye)\b[,!.\s]*)?(?:picked|got|done|sorted|finished|collected|grabbed|bought|fetched)\b/i;
+const READS_AS_DONE_BARE = /^\s*(?:(?:yes|yep|yeah|yup|ok|okay|aye)\b[,!.\s]*)?(?:picked|got|done|sorted|finished|collected|grabbed|bought|fetched|found)\b/i;
+
+/**
+ * A message is rarely all one thing. "I couldn't find it in store! I did
+ * however pick up the motherboard" denies one task and reports another in the
+ * same breath, and asking whether the whole message is a denial gets the wrong
+ * answer for both halves at once — the failure at the front hid the report
+ * behind it, and the task stayed open.
+ *
+ * Split on sentence ends and on "but", because the pivot is where the subject
+ * changes. Then each half is read for what it actually says.
+ */
+function clausesOf(text: string): string[] {
+  return text.split(/[.!?;]+|,?\s+\bbut\b/i).map(part => part.trim()).filter(Boolean);
+}
+
+/**
+ * The part of a message that reports something finished, if any part does.
+ *
+ * Worth having on its own because whatever was finished is named in the clause
+ * that says it was finished, and nowhere else. "I haven't got it but I did try"
+ * keeps its only pronoun in the half that failed; read as one message, that "it"
+ * stood in for the half that succeeded and ticked off the wrong task entirely.
+ * Handing back just the reporting clause stops the two halves borrowing each
+ * other's meaning.
+ */
+export function doneClause(text: string): string | null {
+  const clauses = clausesOf(text);
+  for (let i = 0; i < clauses.length; i++) {
+    // A denial carries most of the same words, so it is asked first.
+    if (readsAsNotDone(clauses[i])) continue;
+    if (READS_AS_DONE.test(clauses[i]) || (i === 0 && READS_AS_DONE_BARE.test(clauses[i]))) return clauses[i];
+  }
+  return null;
+}
 
 export function readsAsDone(text: string) {
-  // A denial contains most of the same words, so it is asked first.
-  return !readsAsNotDone(text) && (READS_AS_DONE.test(text) || READS_AS_DONE_BARE.test(text));
+  return doneClause(text) !== null;
 }
 
 /**
@@ -322,11 +368,37 @@ export function readsAsBareReport(text: string) {
  */
 const MIGHT_BE_A_REPORT = /\b(done|did|got|picked|collected|grabbed|bought|fetched|sorted|finished|handled|completed|dropped|took|taken|paid|called|sent|posted|been|yes|yep|yeah|yup)\b/i;
 
-export function tickOffInstruction(latestMessage: string, anythingOpen: boolean): string {
+/**
+ * Asking her to do something about a task is not telling her it is done.
+ *
+ * Naming an open task is now enough on its own to raise the question, which is
+ * the point — but "remind me about the power connector tomorrow" names one
+ * while plainly meaning the opposite, so that one shape is ruled out here. Only
+ * when the message is nothing but a request: "I got the milk, and remind me
+ * about the dentist" is still a report.
+ */
+const ASKS_HER_TO = /^\s*(?:hey\s+haru[,!.\s]*)?(?:please\s+|can you\s+|could you\s+)?(?:remind|add|put|schedule|book|set|move|push|change)\b|\b(?:remind me|don'?t forget)\b/i;
+
+export function tickOffInstruction(latestMessage: string, anythingOpen: boolean, namedTask?: string | null): string {
   if (!anythingOpen || readsAsNotDone(latestMessage)) return '';
-  if (!MIGHT_BE_A_REPORT.test(latestMessage)) return '';
+  // Relevance first, vocabulary second.
+  //
+  // The word list has now been short six times — "I did however pick up", "ive
+  // picked it up", "yes, picked up!", "yes omg! I did get it", and finally "I've
+  // already found the power connector", where the missing word was "found". A
+  // seventh is always available, because this is language.
+  //
+  // But naming one of their open tasks is not language, it is a fact, and it is
+  // the fact that matters: if they have brought up something on their list at
+  // all, she is the one who should work out whether it is done. The word list
+  // stays as a second way in, for the times they report something without
+  // naming it.
+  if (!namedTask && !MIGHT_BE_A_REPORT.test(latestMessage)) return '';
+  if (ASKS_HER_TO.test(latestMessage) && !readsAsDone(latestMessage)) return '';
   return [
-    'If they have just told you something on their list is done, tick it off with complete_kept_item before you answer.',
+    namedTask
+      ? `They have just mentioned "${namedTask}", which is on their list and not ticked off. If what they said means it is done, tick it off with complete_kept_item before you answer.`
+      : 'If they have just told you something on their list is done, tick it off with complete_kept_item before you answer.',
     'They will not usually name it or say it in full — "yes, picked up", "yeah did that", "got it" all count.',
     'If it is not obvious which one they mean, it is the one you last asked them about.',
     'Do not tick anything off if they are saying they have not done it, or are about to.',
@@ -341,7 +413,12 @@ export function tickOffInstruction(latestMessage: string, anythingOpen: boolean)
  * has to do, so it is refused in code rather than discouraged in prose.
  */
 export function readsAsNotDone(text: string) {
-  return /(never (did|got|managed)|didn'?t (get|do|make|manage|have time)|did not (get|do|manage)|haven'?t (got|done|had)|have not (got|done)|not done|still (need|have) to|forgot to|no time to|missed (it|the)|forgot about)/i.test(text);
+  return new RegExp(
+    '(?:'
+      // "never got round to it", "haven't found it", "didn't manage to pick it up"
+      + String.raw`(?:never|haven'?t|have not|hadn'?t|had not|didn'?t|did not|couldn'?t|could not|not)\s+(?:yet\s+|even\s+|really\s+|been able to\s+|managed to\s+|had (?:the )?(?:time|chance) to\s+)?(?:${FINISHED}|${TO_FINISH})\b`
+      + '|not done|still (?:need|have|meant|got) to|forgot to|no time to|missed (?:it|the)|forgot about'
+    + ')', 'i').test(text);
 }
 
 /**
