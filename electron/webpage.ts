@@ -224,7 +224,7 @@ const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&
 // The same handful of marks she writes on the desktop, applied to text that has
 // already been escaped — so the only tags that can ever reach the page are the
 // three put there here.
-const md=s=>s.replace(/\*\*\s*([^*]+?)\s*\*\*/g,'<b>$1</b>').replace(/[\u0060]([^\u0060\n]+?)[\u0060]/g,'<code>$1</code>').replace(/\*([^*\s][^*\n]*?)\*/g,'<i>$1</i>');
+const md=s=>s.replace(/\\*\\*\\s*([^*]+?)\\s*\\*\\*/g,'<b>$1</b>').replace(/\`([^\`\\n]+?)\`/g,'<code>$1</code>').replace(/\\*([^*\\s][^*\\n]*?)\\*/g,'<i>$1</i>');
 const get=u=>fetch(u).then(r=>r.ok?r.json():Promise.reject(r));
 const post=(u,b)=>fetch(u,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(b||{})}).then(r=>r.ok?r.json():Promise.reject(r));
 let tab='chat';
