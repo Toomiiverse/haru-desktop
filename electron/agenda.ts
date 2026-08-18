@@ -471,13 +471,36 @@ export function putOffInstruction(latestMessage: string): string {
   ].join(' ');
 }
 
+/**
+ * How many days between two date keys, counted on the calendar rather than the
+ * clock, so daylight saving cannot make a day 23 hours long and lose one.
+ */
+function daysBetween(fromKey: string, toKey: string) {
+  const at = (key: string) => { const [y, m, d] = key.split('-').map(Number); return Date.UTC(y, m - 1, d); };
+  return Math.round((at(toKey) - at(fromKey)) / 86_400_000);
+}
+
+/**
+ * A weekday name on its own is only useful to someone who knows what day it is
+ * today, and she was not always told. Handed "Rental Inspection (Thursday)" at
+ * 11pm on a Tuesday she announced it was tomorrow, then said Saturday, and had
+ * to be corrected twice — the day was right in front of her and the arithmetic
+ * was not.
+ *
+ * So the distance is spelled out for anything within the fortnight. Today,
+ * tomorrow and yesterday already say it in a word and are left alone.
+ */
 export function relativeDay(dateKey: string, todayKey: string, weekday: Intl.DateTimeFormat) {
   if (dateKey === todayKey) return 'today';
   if (dateKey === shiftDays(todayKey, 1)) return 'tomorrow';
   if (dateKey === shiftDays(todayKey, -1)) return 'yesterday';
   const [year, month, day] = dateKey.split('-').map(Number);
   const when = new Date(year, month - 1, day);
-  return dateKey < todayKey ? `last ${weekday.format(when)}` : weekday.format(when);
+  const name = weekday.format(when);
+  const away = daysBetween(todayKey, dateKey);
+  if (away > 1 && away <= 14) return `${name}, ${away} days from now`;
+  if (away < -1 && away >= -14) return `last ${name}, ${-away} days ago`;
+  return dateKey < todayKey ? `last ${name}` : name;
 }
 
 

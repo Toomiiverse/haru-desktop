@@ -2568,7 +2568,10 @@ async function considerPipingUp(environment: Environment) {
     const character = getActiveCharacter();
     const system = [
       character.identity,
-      `It is ${formatTimeOfDay(now.getHours(), now.getMinutes())} on ${todayKey}.`,
+      // The weekday, same as every other prompt. Without it she is holding a
+      // date on her list and no idea where today sits against it, which is how
+      // Thursday became "tomorrow" in a line she started herself.
+      `It is ${formatTimeOfDay(now.getHours(), now.getMinutes())} on ${new Intl.DateTimeFormat('en-US', { weekday: 'long' }).format(now)} ${todayKey}.`,
       profileSummary(''),
       keptSummary(now),
       character.style,
