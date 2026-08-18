@@ -51,7 +51,7 @@ import { formatMemoryPrompt, isWorthKeeping, isWorthRemembering, MEMORY_KINDS, m
 import { forgetDevice, forgetEveryDevice, readWebAccess, setPassword, weakPassword, type WebAccess } from './web';
 import { conversationMayLeave } from './sensitivity';
 import { addCheckIn, checkInInstruction, checkInsOn, readCheckIns, type CheckIn } from './checkins';
-import { DiscordLink, looksLikeUserId, readDiscordConfig, type DiscordConfig } from './discord';
+import { DiscordLink, looksLikeUserId, readDiscordConfig, useOfChannel, type DiscordConfig } from './discord';
 import { startWebServer, type WebDeps } from './webserver';
 
 type Bounds = { x: number; y: number; width: number; height: number };
@@ -5237,9 +5237,61 @@ function getDiscordToken(): string {
  * would drift from the one at the desk within a week, and the drift would be
  * invisible until it was large.
  */
-async function answerOnDiscord(text: string) {
+/**
+ * A number in a check-in, only when it is unmistakably a rating.
+ *
+ * Three shapes: said out of ten, sitting at the end of the line, or opening it
+ * before a comma. Anything else is left alone, because "took 2 paracetamol" and
+ * "about a 6" are the same shape to a regular expression and only one of them is
+ * a number about how they feel.
+ *
+ * Erring toward reading none is the right way round. A missed rating leaves a
+ * note with no number, which is still the note; an invented one puts a wrong
+ * figure into the record they are keeping precisely to see a pattern in.
+ */
+function ratingIn(text: string): number | undefined {
+  const outOfTen = text.match(/\b([1-9]|10)\s*(?:\/\s*10|out of 10)\b/i);
+  if (outOfTen) return Number(outOfTen[1]);
+  const trailing = text.match(/[,\s-]\s*([1-9]|10)\s*[.!]?\s*$/);
+  if (trailing) return Number(trailing[1]);
+  const leading = text.match(/^\s*([1-9]|10)\s*[,.]/);
+  if (leading) return Number(leading[1]);
+  return undefined;
+}
+
+async function answerOnDiscord(text: string, channelId = '') {
   const config = store.get('ai.config') as ProviderConfig | undefined;
   if (!config?.model) return { reply: '', ignored: true };
+
+  // In a channel set aside for check-ins, the message is one. Written down in
+  // code rather than left to her to notice: the whole point of giving a channel
+  // a purpose is that nothing has to be inferred, and a check-in that depends on
+  // a model spotting it is a check-in that is sometimes lost.
+  if (channelId && useOfChannel(getDiscordConfig(), channelId) === 'checkin') {
+    const now = zonedNow(CHAT_TIMEZONE);
+    // A number said anywhere in the line, so "rough morning, 7" and "7, rough
+    // morning" both count. Only 1-10, and only on its own — the 7 in "7am" is
+    // not an anxiety rating.
+    const anxiety = ratingIn(text);
+    setCheckIns(addCheckIn(getCheckIns(), text, anxiety, new Date(), localDateKey(now)));
+    const today = checkInsOn(getCheckIns(), localDateKey(now));
+    console.log(`[discord] check-in noted${anxiety ? ` (anxiety ${anxiety}/10)` : ''} — ${today.length} today`);
+    const character = getActiveCharacter();
+    const system = [
+      character.identity,
+      character.style,
+      'They have just jotted a check-in at you — a note about how they are, taken while the day is still going. It is already written down; you do not need to record it and must not say you will.',
+      today.length > 1 ? `That is ${today.length} today.` : '',
+      'Answer in one short line. Take it seriously without making a fuss of it, and do not ask them to elaborate unless it sounds bad.',
+    ].filter(Boolean).join(' ');
+    try {
+      const line = await ollamaQuip(system, `They wrote: "${text.slice(0, 500)}"`, config);
+      return { reply: line, ignored: false };
+    } catch {
+      // The note is what matters and it is already saved. Silence beats an error.
+      return { reply: '', ignored: true };
+    }
+  }
   const messages = [...(store.get('chat.messages') as { role: string; content: string; at?: string }[] ?? []), { role: 'user', content: text, at: new Date().toISOString() }];
   const answer = await ollamaChat(messages, config, { hands: false });
   const reply = answer.content ?? '';
@@ -5283,7 +5335,7 @@ async function startDiscord() {
   if (discord) return;
   discordTrouble = '';
   discord = new DiscordLink(token, config.ownerId, {
-    answer: answerOnDiscord,
+    answer: (text, channelId) => answerOnDiscord(text, channelId),
     onReady: name => { discordUser = name; discordTrouble = ''; },
     onTrouble: why => { discordTrouble = why; },
     onIgnored: why => { discordTrouble = why; },
@@ -5667,10 +5719,10 @@ app.whenReady().then(() => {
   // the renderer is told nothing but whether one exists.
   ipcMain.handle('discord:status', () => {
     const config = getDiscordConfig();
-    return { enabled: config.enabled, ownerId: config.ownerId, pesterHours: config.pesterHours, hasToken: Boolean(getDiscordToken()), connected: Boolean(discord), botName: discordUser, trouble: discordTrouble };
+    return { enabled: config.enabled, ownerId: config.ownerId, pesterHours: config.pesterHours, hasToken: Boolean(getDiscordToken()), connected: Boolean(discord), botName: discordUser, trouble: discordTrouble, checkInChannel: Object.keys(config.channels).find(id => config.channels[id] === 'checkin') ?? '' };
   });
   ipcMain.handle('discord:setToken', (_e, token: string) => { saveDiscordToken(String(token ?? '')); return Boolean(getDiscordToken()); });
-  ipcMain.handle('discord:set', async (_e, next: { ownerId: string; pesterHours: number; enabled: boolean }) => {
+  ipcMain.handle('discord:set', async (_e, next: { ownerId: string; pesterHours: number; enabled: boolean; checkInChannel?: string }) => {
     const current = getDiscordConfig();
     const ownerId = String(next?.ownerId ?? '').trim();
     if (next?.enabled && !ownerId) throw new Error('She needs your Discord user ID, or she would answer anyone.');
@@ -5679,7 +5731,12 @@ app.whenReady().then(() => {
     // The DM channel belongs to a person; changing who she answers must not
     // leave her still messaging the last one.
     const dmChannelId = ownerId === current.ownerId ? current.dmChannelId : '';
-    saveDiscordConfig(readDiscordConfig({ ...current, ...next, ownerId, dmChannelId }));
+    const channel = String(next?.checkInChannel ?? '').trim();
+    if (channel && !looksLikeUserId(channel)) throw new Error('A channel id is about eighteen digits. Right-click the channel and Copy Channel ID.');
+    // One channel at a time, replaced rather than accumulated: pointing her at a
+    // new one should stop the old one silently swallowing messages as check-ins.
+    const channels = channel ? { [channel]: 'checkin' as const } : {};
+    saveDiscordConfig(readDiscordConfig({ ...current, ...next, ownerId, dmChannelId, channels }));
     stopDiscord();
     if (getDiscordConfig().enabled) await startDiscord();
     return { enabled: getDiscordConfig().enabled, connected: Boolean(discord) };

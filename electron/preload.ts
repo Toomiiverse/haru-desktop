@@ -88,9 +88,9 @@ contextBridge.exposeInMainWorld('haru', {
   },
   ui: { page: (page: string) => ipcRenderer.invoke('ui:page', page) as Promise<void> },
   discord: {
-    status: () => ipcRenderer.invoke('discord:status') as Promise<{ enabled: boolean; ownerId: string; pesterHours: number; hasToken: boolean; connected: boolean; botName: string; trouble: string }>,
+    status: () => ipcRenderer.invoke('discord:status') as Promise<{ enabled: boolean; ownerId: string; pesterHours: number; hasToken: boolean; connected: boolean; botName: string; trouble: string; checkInChannel: string }>,
     setToken: (token: string) => ipcRenderer.invoke('discord:setToken', token) as Promise<boolean>,
-    set: (next: { ownerId: string; pesterHours: number; enabled: boolean }) => ipcRenderer.invoke('discord:set', next) as Promise<{ enabled: boolean; connected: boolean }>,
+    set: (next: { ownerId: string; pesterHours: number; enabled: boolean; checkInChannel?: string }) => ipcRenderer.invoke('discord:set', next) as Promise<{ enabled: boolean; connected: boolean }>,
   },
   // The door a phone comes in by. The password goes one way only — there is no
   // getter here, and there is not meant to be.

@@ -32,7 +32,23 @@ export type DiscordConfig = {
   dmChannelId: string;
   /** Hours between unprompted messages. Longer than the phone's, by request. */
   pesterHours: number;
+  /**
+   * What a channel is for, by id.
+   *
+   * A channel is a statement of intent in a way a sentence is not: posting in
+   * #check-ins means "this is a check-in" without her having to work it out, and
+   * the scrollback becomes the record. Anywhere unlisted, including DMs, is
+   * ordinary conversation and she infers as before.
+   */
+  channels: Record<string, ChannelUse>;
 };
+
+/** What a given channel is for. */
+export type ChannelUse = 'chat' | 'checkin';
+
+export function useOfChannel(config: { channels?: Record<string, ChannelUse> }, channelId: string): ChannelUse {
+  return config.channels?.[channelId] === 'checkin' ? 'checkin' : 'chat';
+}
 
 /**
  * Whether that is a Discord id rather than a username.
@@ -47,6 +63,15 @@ export function looksLikeUserId(value: string): boolean {
   return /^\d{17,20}$/.test(value.trim());
 }
 
+function readChannels(saved: unknown): Record<string, ChannelUse> {
+  if (!saved || typeof saved !== 'object') return {};
+  const out: Record<string, ChannelUse> = {};
+  for (const [id, use] of Object.entries(saved as Record<string, unknown>)) {
+    if (looksLikeUserId(id) && (use === 'chat' || use === 'checkin')) out[id] = use;
+  }
+  return out;
+}
+
 export function readDiscordConfig(saved: unknown): DiscordConfig {
   const record = (saved && typeof saved === 'object' ? saved : {}) as Partial<DiscordConfig>;
   const hours = typeof record.pesterHours === 'number' ? record.pesterHours : 3;
@@ -58,6 +83,7 @@ export function readDiscordConfig(saved: unknown): DiscordConfig {
     // a companion that buzzes every ten minutes gets muted — which is a worse
     // outcome than one that says nothing.
     pesterHours: Math.min(12, Math.max(1, hours)),
+    channels: readChannels(record.channels),
   };
 }
 
@@ -130,7 +156,7 @@ export function backoffMs(attempt: number): number {
 }
 
 type Sink = {
-  answer(text: string): Promise<{ reply: string; ignored?: boolean }>;
+  answer(text: string, channelId: string): Promise<{ reply: string; ignored?: boolean }>;
   onReady?(username: string): void;
   /** Said out loud in Setup, because a console is not somewhere anyone looks. */
   onTrouble?(why: string): void;
@@ -271,7 +297,7 @@ export class DiscordLink {
         method: 'POST',
         headers: { Authorization: 'Bot ' + this.token },
       });
-      const answer = await this.sink.answer(message.content);
+      const answer = await this.sink.answer(message.content, message.channel_id);
       if (answer.ignored || !answer.reply.trim()) return;
       await this.send(message.channel_id, answer.reply);
     } catch (error) {

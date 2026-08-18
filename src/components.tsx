@@ -1462,14 +1462,15 @@ function AniListField() {
  * answer everyone's — and everything she knows is in those answers.
  */
 function DiscordField() {
-  const [status, setStatus] = useState<{ enabled: boolean; ownerId: string; pesterHours: number; hasToken: boolean; connected: boolean; botName: string; trouble: string } | null>(null);
+  const [status, setStatus] = useState<{ enabled: boolean; ownerId: string; pesterHours: number; hasToken: boolean; connected: boolean; botName: string; trouble: string; checkInChannel: string } | null>(null);
   const [token, setToken] = useState('');
   const [ownerId, setOwnerId] = useState('');
   const [hours, setHours] = useState(3);
+  const [checkInChannel, setCheckInChannel] = useState('');
   const [message, setMessage] = useState<{ text: string; error?: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
   useEffect(() => {
-    const read = () => window.haru?.discord.status().then(s => { setStatus(s); setOwnerId(s.ownerId); setHours(s.pesterHours); });
+    const read = () => window.haru?.discord.status().then(s => { setStatus(s); setOwnerId(s.ownerId); setHours(s.pesterHours); setCheckInChannel(s.checkInChannel); });
     read();
     // Polled while the panel is open: the interesting failures happen when a
     // message arrives, which is after anyone has stopped looking at a status.
@@ -1505,11 +1506,15 @@ function DiscordField() {
         hours
       </label>
     </div>
+    <div className="form-grid">
+      <input value={checkInChannel} disabled={busy} placeholder="Check-in channel id — optional" onChange={event => setCheckInChannel(event.target.value)}/>
+      <span className="status-note">Anything you post there is written down as a check-in, without her having to work out that it was one. Leave it empty and she decides from what you say.</span>
+    </div>
     <div className="row">
-      <button className="ghost" disabled={busy} onClick={() => void run(() => window.haru!.discord.set({ ownerId: ownerId.trim(), pesterHours: hours, enabled: status.enabled }), 'Saved.')}>Save</button>
+      <button className="ghost" disabled={busy} onClick={() => void run(() => window.haru!.discord.set({ ownerId: ownerId.trim(), pesterHours: hours, enabled: status.enabled, checkInChannel }), 'Saved.')}>Save</button>
       <label className="check">
         <input type="checkbox" checked={status.enabled} disabled={busy || !status.hasToken}
-          onChange={event => void run(() => window.haru!.discord.set({ ownerId: ownerId.trim(), pesterHours: hours, enabled: event.target.checked }), event.target.checked ? 'Connecting…' : 'Disconnected.')}/>
+          onChange={event => void run(() => window.haru!.discord.set({ ownerId: ownerId.trim(), pesterHours: hours, enabled: event.target.checked, checkInChannel }), event.target.checked ? 'Connecting…' : 'Disconnected.')}/>
         Let her use Discord
       </label>
     </div>
