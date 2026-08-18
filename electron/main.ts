@@ -13,7 +13,7 @@ import { nextPokeCount, pokeEmotion, pokeInstruction, pokeIrritation, pokeTier, 
 import { applyEvent, chooseIdleAction, DEFAULT_VITALS, driftVitals, nextTickDelayMs, type Environment, type Vitals } from './vitals';
 import { classificationPrompt, emotionToVitals, EMOTION_SCHEMA, NEUTRAL_EMOTION, parseEmotion, type Emotion , faceForEmotion } from './emotion';
 import { withDiscoveredExpressions } from './expressions';
-import { chaseableOverdue, findItem, formatAgenda, itemStatus, missedInstruction, putOffInstruction, putOffUntil, readsAsBareReport, tickOffInstruction, readsAsDone, doneClause, readsAsNotDone, relativeDay } from './agenda';
+import { chaseableOverdue, findItem, formatAgenda, itemStatus, missedInstruction, putOffInstruction, putOffUntil, relevantItems, readsAsBareReport, tickOffInstruction, readsAsDone, doneClause, readsAsNotDone, relativeDay } from './agenda';
 import { openingAngles, pickAngle, shouldPipeUp } from './opening';
 import { allDayDueMinutes, isEveningCheck, reminderInstruction, reminderTier, reminderVolume, shouldRemind, type ReminderState } from './reminders';
 import { isHeated, readTone, sharpen, toneGesture, tonePose } from './tone';
@@ -63,7 +63,7 @@ type Live2DModel = { path: string; name: string; url: string };
 // completedAt is when a task was ticked off, not when it was due — the two come
 // apart whenever something is confirmed late, and it is the former she needs to
 // know how freshly she was told. Absent on anything ticked before it was kept.
-type KeptItem = { id: string; title: string; date: string; time?: string; kind: 'task' | 'event'; done: boolean; completedAt?: string; heardAbout?: string; googleEventId?: string; googleTaskId?: string };
+type KeptItem = { id: string; title: string; date: string; time?: string; kind: 'task' | 'event'; done: boolean; completedAt?: string; heardAbout?: string; remarkedAt?: string; googleEventId?: string; googleTaskId?: string };
 type Profile = { nickname: string; occupation: string; about: string };
 type Memory = { id: string; text: string; createdAt: string };
 
@@ -4696,6 +4696,31 @@ function noteSheAsked(line: string) {
  * ask again later. Anything else — how it went, what they did, that it was fine
  * — settles it, which for an event is the only ending it will ever get.
  */
+/**
+ * She gets one remark about a finished task, and then it leaves her sight.
+ *
+ * "Finally got the TV power connector? Took you long enough" arrived hours after
+ * it had been ticked off, and she was not wrong to know about it — a completed
+ * task is held in front of her for a couple of days on purpose. Nothing recorded
+ * that she had already said her piece, so every turn was the first time.
+ *
+ * Her own words are what count here, not theirs: they told her once, and this is
+ * about her not going back to it.
+ */
+function noteRemarkedOn(hers: string) {
+  // Only what she was actually shown. Searched against the whole list, "get to
+  // work on the rental inspection" matched a "Go to work" finished twelve days
+  // ago and stamped that instead — a task long off her agenda cannot be the one
+  // she was talking about.
+  const todayKey = localDateKey(zonedNow(CHAT_TIMEZONE));
+  const settled = relevantItems(getKept(), todayKey).filter(item => item.kind === 'task' && item.done && !item.remarkedAt);
+  if (!settled.length) return;
+  const target = findItem(settled, hers);
+  if (!target) return;
+  setKept(getKept().map(item => item.id === target.id ? { ...item, remarkedAt: new Date().toISOString() } : item));
+  console.log(`[agenda] she has had her say about "${target.title}" — it drops off her list`);
+}
+
 function noteTheyAccounted(said: string) {
   if (!awaitingAccount) return;
   const spoken = said.trim().split(/\s+/).filter(Boolean);
@@ -4890,7 +4915,7 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
     // Agenda repeats first: it works on whole paragraphs and knows what the
         // subject is, so it should get its say before the blunter filters start
         // counting words.
-        const onList = getKept().filter(item => !item.done).map(item => item.title);
+        const onList = getKept().map(item => item.title);
         const deduped = dropRepeatedAgendaMentions(message.content, recent, onList, latest);
         const content = dropRoleHeader(dropInventedContact(dropStageDirections(dropInventedScreenTalk(dropRepeatedParagraphs(deduped, recent), grounded))));
     if (content !== message.content) console.log(`[ai] dropped ${message.content.length - content.length} chars she had already said`);
@@ -4903,6 +4928,8 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
     const mood = classifyEmotion(content, config);
     void speak(content, mood);
     void tieToPlace(latest, content, config);
+    // Whatever finished task she just brought up, she has now brought up.
+    noteRemarkedOn(content);
     return { content, ignored: false, irritation, ego };
   }
   throw new Error('Haru kept calling tools without settling on a reply.');

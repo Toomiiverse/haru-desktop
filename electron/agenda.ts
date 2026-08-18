@@ -10,7 +10,12 @@ import { localDateKey, parseTimeOfDay } from './dates';
 // it". An event especially is never ticked off — the party happened whether or
 // not anyone marks it — so being told about it is the only thing that can ever
 // settle it, and without somewhere to record that she asks again forever.
-export type AgendaItem = { title: string; date: string; time?: string; done: boolean; completedAt?: string; heardAbout?: string };
+// remarkedAt is when she actually said something about a finished task. It is a
+// third state again: completedAt is when it was done, heardAbout is when she was
+// told how it went, and this is when she has had her say about it. Without it a
+// ticked-off task sits in front of her for two days and she can open with it
+// every time, which reads as her forgetting it was ever done.
+export type AgendaItem = { title: string; date: string; time?: string; done: boolean; completedAt?: string; heardAbout?: string; remarkedAt?: string };
 export type ItemStatus = 'done' | 'overdue' | 'now' | 'upcoming';
 
 /** Anything unfinished from within this window is still worth chasing. */
@@ -83,10 +88,14 @@ function stillFresh(item: AgendaItem, todayKey: string) {
   return (when ? localDateKey(when) : item.date) >= earliest;
 }
 
-export function relevantItems(items: AgendaItem[], todayKey: string) {
+export function relevantItems<T extends AgendaItem>(items: T[], todayKey: string): T[] {
   const earliest = shiftDays(todayKey, -OVERDUE_WINDOW_DAYS);
   return items
     .filter(item => {
+      // One remark, then it goes. The window below was only ever meant to buy
+      // her a single "you did that yesterday" — it could not tell whether she
+      // had already used it, so she spent the whole day using it.
+      if (item.done && item.remarkedAt) return false;
       if (item.date >= todayKey) return true;
       return item.done ? stillFresh(item, todayKey) : item.date >= earliest;
     })
