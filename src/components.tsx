@@ -561,7 +561,7 @@ export function SettingsDrawer({ config, onSave, onTest, onClose }: { config: Pr
       <input type="password" value={modelKey} placeholder={hasModelKey ? `A key is saved for ${KEY_SLOT_NAME[slot]} — type a new one to replace it` : `Bearer token for ${KEY_SLOT_NAME[slot]}`} onChange={event => setModelKey(event.target.value)}/>
       <button className="ghost" disabled={!modelKey.trim()} onClick={saveModelKey}>Save key</button>
     </div>
-  </>}{status.state !== 'idle' && <p className={status.state === 'error' ? 'status-error' : 'status-ok'}>{status.state === 'testing' ? 'Testing…' : status.message}</p>}</div><VoiceField registerSave={registerVoiceSave}/><ListenField/><SearchField/><AniListField/><SecondBrainField/><ThemeField/><VisionField/><AttachmentsField/><ScreenshotField/><WatchingField/><DesktopField/><GamingField/><RoamField/><GoogleCalendarField/><WebField/><StartupField/><div className="drawer-foot"><button className="ghost" onClick={test} disabled={status.state === 'testing'}>{status.state === 'testing' ? 'Testing…' : 'Test connection'}</button><button className="ghost">Enable alerts</button>{saved && <span className="saved"><Check size={13}/> Saved</span>}<button className="solid" onClick={() => void save()}>Save setup</button></div></section>;
+  </>}{status.state !== 'idle' && <p className={status.state === 'error' ? 'status-error' : 'status-ok'}>{status.state === 'testing' ? 'Testing…' : status.message}</p>}</div><VoiceField registerSave={registerVoiceSave}/><ListenField/><SearchField/><AniListField/><SecondBrainField/><ThemeField/><VisionField/><AttachmentsField/><ScreenshotField/><WatchingField/><DesktopField/><GamingField/><RoamField/><GoogleCalendarField/><DiscordField/><WebField/><StartupField/><div className="drawer-foot"><button className="ghost" onClick={test} disabled={status.state === 'testing'}>{status.state === 'testing' ? 'Testing…' : 'Test connection'}</button><button className="ghost">Enable alerts</button>{saved && <span className="saved"><Check size={13}/> Saved</span>}<button className="solid" onClick={() => void save()}>Save setup</button></div></section>;
 }
 
 // What each engine calls the thing it clones or selects a voice with. The label
@@ -1454,6 +1454,63 @@ function AniListField() {
  * wrong, and it is no use knowing that unless the phone can be turned off from
  * the machine at home.
  */
+/**
+ * Reaching her from Discord.
+ *
+ * The one field that is not optional is the user ID. A bot is reachable by
+ * anyone who finds it, so without knowing whose messages to answer she would
+ * answer everyone's — and everything she knows is in those answers.
+ */
+function DiscordField() {
+  const [status, setStatus] = useState<{ enabled: boolean; ownerId: string; pesterHours: number; hasToken: boolean; connected: boolean } | null>(null);
+  const [token, setToken] = useState('');
+  const [ownerId, setOwnerId] = useState('');
+  const [hours, setHours] = useState(3);
+  const [message, setMessage] = useState<{ text: string; error?: boolean } | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { window.haru?.discord.status().then(s => { setStatus(s); setOwnerId(s.ownerId); setHours(s.pesterHours); }); }, []);
+
+  if (!window.haru || !status) return null;
+
+  async function run(action: () => Promise<unknown>, done: string) {
+    setBusy(true); setMessage(null);
+    try {
+      await action();
+      setStatus(await window.haru!.discord.status());
+      setMessage({ text: done });
+    } catch (error) {
+      setMessage({ text: error instanceof Error ? error.message.replace(/^Error invoking remote method '[^']*':s*(Error:s*)?/, '') : String(error), error: true });
+    } finally { setBusy(false); }
+  }
+
+  return <div className="field"><h2>Reaching her from Discord</h2>
+    <p>She answers you in a direct message, and brings things up herself — which the web version cannot do, because a browser tab cannot make your phone buzz.</p>
+    <p className="status-note">Make a bot at discord.com/developers, turn on the Message Content intent, and invite it to any server you are both in — Discord will not let it message you otherwise. Then paste its token here. Turn on Developer Mode in Discord to copy your own user ID.</p>
+    <div className="form-grid">
+      <input type="password" value={token} disabled={busy} placeholder={status.hasToken ? 'A token is saved — type a new one to replace it' : 'Bot token'} onChange={event => setToken(event.target.value)}/>
+      <button className="ghost" disabled={busy || !token.trim()} onClick={() => void run(async () => { await window.haru!.discord.setToken(token); setToken(''); }, 'Token saved, encrypted by the system.')}>Save token</button>
+    </div>
+    <div className="form-grid">
+      <input value={ownerId} disabled={busy} placeholder="Your Discord user ID — she answers nobody else" onChange={event => setOwnerId(event.target.value)}/>
+      <label className="check">
+        Pester every
+        <input type="number" min={1} max={12} value={hours} disabled={busy} style={{ width: '4rem' }} onChange={event => setHours(Number(event.target.value))}/>
+        hours
+      </label>
+    </div>
+    <div className="row">
+      <button className="ghost" disabled={busy} onClick={() => void run(() => window.haru!.discord.set({ ownerId: ownerId.trim(), pesterHours: hours, enabled: status.enabled }), 'Saved.')}>Save</button>
+      <label className="check">
+        <input type="checkbox" checked={status.enabled} disabled={busy || !status.hasToken}
+          onChange={event => void run(() => window.haru!.discord.set({ ownerId: ownerId.trim(), pesterHours: hours, enabled: event.target.checked }), event.target.checked ? 'Connecting…' : 'Disconnected.')}/>
+        Let her use Discord
+      </label>
+    </div>
+    {status.enabled && <p className="status-note">{status.connected ? 'Connected. Send her a direct message.' : 'Switched on but not connected — check the log.'}</p>}
+    {message && <p className={message.error ? 'status-error' : 'status-ok'}>{message.text}</p>}
+  </div>;
+}
+
 function WebField() {
   const [status, setStatus] = useState<WebStatus | null>(null);
   const [username, setUsername] = useState('');

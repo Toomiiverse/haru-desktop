@@ -50,6 +50,7 @@ import { hasShout, readVoiceConfig, referenceFor, shoutReference, spokenCase, sp
 import { formatMemoryPrompt, isWorthKeeping, isWorthRemembering, MEMORY_KINDS, migrateMemories, pruneMemories, rememberInto, selectMemories, summaryPrompt, type MemoryKind, type MemoryRecord, type SessionSummary } from './memory';
 import { forgetDevice, forgetEveryDevice, readWebAccess, setPassword, weakPassword, type WebAccess } from './web';
 import { addCheckIn, checkInInstruction, checkInsOn, readCheckIns, type CheckIn } from './checkins';
+import { DiscordLink, readDiscordConfig, type DiscordConfig } from './discord';
 import { startWebServer, type WebDeps } from './webserver';
 
 type Bounds = { x: number; y: number; width: number; height: number };
@@ -5146,6 +5147,101 @@ async function nudgeForPhone(): Promise<{ line: string; about: string } | null> 
   }
 }
 
+// ---- Reaching her from Discord --------------------------------------------
+
+let discord: DiscordLink | null = null;
+let pesterTimer: ReturnType<typeof setInterval> | null = null;
+
+function getDiscordConfig(): DiscordConfig {
+  return readDiscordConfig(store.get('discord'));
+}
+
+function saveDiscordConfig(config: DiscordConfig) {
+  store.set('discord', config);
+}
+
+/**
+ * The bot token, kept the way every other credential here is: encrypted by the
+ * OS, never handed back to the renderer, never written to a log.
+ */
+function saveDiscordToken(token: string) {
+  const value = token.trim();
+  if (!value) { store.delete('discordToken' as never); return; }
+  if (!safeStorage.isEncryptionAvailable()) throw new Error('This system has no secure storage available, so the token cannot be saved safely.');
+  store.set('discordToken', safeStorage.encryptString(value).toString('base64'));
+}
+
+function getDiscordToken(): string {
+  const saved = store.get('discordToken') as string | undefined;
+  if (!saved) return '';
+  try { return safeStorage.decryptString(Buffer.from(saved, 'base64')); } catch { return ''; }
+}
+
+/**
+ * Her side of a Discord conversation.
+ *
+ * The same ollamaChat as everywhere else, with the same hands withheld. Nothing
+ * about her is different here — a second, thinner Haru answering on Discord
+ * would drift from the one at the desk within a week, and the drift would be
+ * invisible until it was large.
+ */
+async function answerOnDiscord(text: string) {
+  const config = store.get('ai.config') as ProviderConfig | undefined;
+  if (!config?.model) return { reply: '', ignored: true };
+  const messages = [...(store.get('chat.messages') as { role: string; content: string; at?: string }[] ?? []), { role: 'user', content: text, at: new Date().toISOString() }];
+  const answer = await ollamaChat(messages, config, { hands: false });
+  const reply = answer.content ?? '';
+  // Lands in the desktop transcript too, so coming back to the desk does not
+  // mean finding half a conversation missing.
+  sendToWindows('chat:fromPhone', { text, reply, ignored: Boolean(answer.ignored) });
+  console.log('[discord] answered ' + text.length + ' chars with ' + reply.length);
+  return { reply, ignored: answer.ignored };
+}
+
+/**
+ * The pestering, on the long interval this channel deserves.
+ *
+ * Discord makes a noise on a phone, which is the whole point and also the whole
+ * risk: the same nudge that is welcome three times a day is an app that gets
+ * muted at twenty. It shares the chase ladder with the desk and the web, so
+ * being chased in one place still counts as being chased.
+ */
+async function pesterOnDiscord() {
+  const config = getDiscordConfig();
+  if (!config.enabled || !discord || !config.ownerId) return;
+  const said = await nudgeForPhone();
+  if (!said) return;
+  try {
+    let channel = config.dmChannelId;
+    if (!channel) {
+      channel = await discord.dmChannel();
+      saveDiscordConfig({ ...config, dmChannelId: channel });
+    }
+    await discord.send(channel, said.line);
+    console.log('[discord] pestered about "' + said.about + '"');
+  } catch (error) {
+    console.warn('[discord] could not pester:', error instanceof Error ? error.message : error);
+  }
+}
+
+async function startDiscord() {
+  const config = getDiscordConfig();
+  const token = getDiscordToken();
+  if (!config.enabled || !token || !config.ownerId) return;
+  if (discord) return;
+  discord = new DiscordLink(token, config.ownerId, { answer: answerOnDiscord });
+  discord.start();
+  if (pesterTimer) clearInterval(pesterTimer);
+  pesterTimer = setInterval(() => { void pesterOnDiscord(); }, config.pesterHours * 60 * 60_000);
+}
+
+function stopDiscord() {
+  if (pesterTimer) clearInterval(pesterTimer);
+  pesterTimer = null;
+  discord?.stop();
+  discord = null;
+}
+
 const DEFAULT_WEB_PORT = 8787;
 let webServer: { port: number; stop(): Promise<void> } | null = null;
 
@@ -5510,6 +5606,24 @@ app.whenReady().then(() => {
 
   // The web door. The password only ever travels inwards: it is hashed here and
   // the renderer is told nothing but whether one exists.
+  ipcMain.handle('discord:status', () => {
+    const config = getDiscordConfig();
+    return { enabled: config.enabled, ownerId: config.ownerId, pesterHours: config.pesterHours, hasToken: Boolean(getDiscordToken()), connected: Boolean(discord) };
+  });
+  ipcMain.handle('discord:setToken', (_e, token: string) => { saveDiscordToken(String(token ?? '')); return Boolean(getDiscordToken()); });
+  ipcMain.handle('discord:set', async (_e, next: { ownerId: string; pesterHours: number; enabled: boolean }) => {
+    const current = getDiscordConfig();
+    const ownerId = String(next?.ownerId ?? '').trim();
+    if (next?.enabled && !ownerId) throw new Error('She needs your Discord user ID, or she would answer anyone.');
+    if (next?.enabled && !getDiscordToken()) throw new Error('Set the bot token first.');
+    // The DM channel belongs to a person; changing who she answers must not
+    // leave her still messaging the last one.
+    const dmChannelId = ownerId === current.ownerId ? current.dmChannelId : '';
+    saveDiscordConfig(readDiscordConfig({ ...current, ...next, ownerId, dmChannelId }));
+    stopDiscord();
+    if (getDiscordConfig().enabled) await startDiscord();
+    return { enabled: getDiscordConfig().enabled, connected: Boolean(discord) };
+  });
   ipcMain.handle('web:status', () => {
     const access = getWebAccess();
     return {
@@ -5953,6 +6067,7 @@ app.whenReady().then(() => {
   // is: doing it inside the settings handler means it only ever starts for
   // somebody who opens settings, which is nobody on the second day.
   void startWebDoor();
+  void startDiscord();
   // Her voice is a separate program, and opening Haru is the moment to notice it
   // is not running.
   void reviveVoiceServer();
@@ -6026,6 +6141,7 @@ app.on('before-quit', () => {
   try { releaseDuck(); } catch (error) { noteCrash('releasing the duck', error); }
   try { helper?.stdin?.write('quit\n'); } catch (error) { noteCrash('telling the helper to quit', error); }
   try { helper?.kill(); } catch (error) { noteCrash('killing the helper', error); }
+  try { stopDiscord(); } catch (error) { noteCrash('closing Discord', error); }
   void stopWebDoor().catch(error => noteCrash('closing the web door', error));
 });
 

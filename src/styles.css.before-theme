@@ -1,0 +1,259 @@
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Karla:wght@400;500;600&family=Zen+Maru+Gothic:wght@400;500;700&display=swap');
+:root{font-family:Karla,system-ui,sans-serif;color:#efebf2;background:#14162b}*{box-sizing:border-box}body{margin:0;min-width:780px}.haru-app{height:100vh;overflow:hidden;background:radial-gradient(120% 80% at 15% -10%,#2a2145 0%,transparent 55%),radial-gradient(100% 70% at 95% 105%,#1b2c3a 0%,transparent 60%),#14162b}.topbar{height:64px;padding:0 23px;border-bottom:1px solid #333952;display:flex;align-items:center;gap:13px}.wordmark{font:700 23px 'Zen Maru Gothic',sans-serif;letter-spacing:-.5px}.wordmark span{color:#f0a8be}.connection{display:flex;align-items:center;gap:6px;color:#878cab;font:10px 'JetBrains Mono',monospace;letter-spacing:.12em;text-transform:uppercase}.connection i{width:7px;height:7px;border-radius:50%;background:#a8cfb4;box-shadow:0 0 8px #a8cfb4}.top-actions{margin-left:auto;display:flex;gap:6px}.pill,.ghost,.solid{font-family:Karla,sans-serif;cursor:pointer}.pill{border:1px solid #333952;border-radius:999px;background:transparent;color:#878cab;font:10px 'JetBrains Mono',monospace;letter-spacing:.1em;text-transform:uppercase;padding:6px 12px}.pill{display:inline-flex;align-items:center;gap:5px}
+.pill:hover:not(:disabled),.pill.selected{border-color:#f0a8be;color:#f0a8be}
+.pill:disabled{opacity:.4;cursor:default}.drawer{position:relative;max-height:44vh;overflow:auto;background:#10121ed9;border-bottom:1px solid #333952;padding:18px 23px}.drawer-close{position:absolute;right:20px;top:15px;background:none;border:0;color:#878cab;cursor:pointer}.field{max-width:800px;margin-bottom:15px}.field h2{font:500 15px 'Zen Maru Gothic',sans-serif;margin:0 0 4px}.field p{color:#878cab;font-size:12px;line-height:1.5;margin:0 0 8px}.field textarea,.field input{width:100%;background:#1d2138;border:1px solid #333952;border-radius:10px;padding:10px 12px;color:#efebf2;font:13px Karla,sans-serif;line-height:1.55;outline:none}.field textarea{height:95px;resize:vertical}.field textarea.short{height:72px}.field textarea:focus,.field input:focus{border-color:#f0a8be}.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.drawer-foot{display:flex;align-items:center;gap:9px;max-width:800px}.ghost{padding:8px 11px;background:none;border:1px solid #333952;color:#878cab;border-radius:8px;font-size:12px}.solid{margin-left:auto;border:0;background:#f0a8be;color:#14162b;border-radius:8px;padding:9px 15px;font-weight:600}.saved{display:flex;gap:4px;align-items:center;color:#a8cfb4;font:10px 'JetBrains Mono';text-transform:uppercase}
+.bubble-stack{display:flex;flex-direction:column;align-items:flex-start;min-width:0}
+/* The quoted line stays with the message, so which reply was meant is still
+   readable long after the exchange. */
+.reply-quote{display:flex;align-items:center;gap:5px;max-width:100%;margin:0 0 4px 2px;padding:3px 8px;border-left:2px solid #3a4060;color:#6f7594;font-size:11.5px;font-style:italic}
+.reply-quote span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bubble-row.user .reply-quote{align-self:flex-end}
+.compose-wrap{border-top:1px solid #333952}
+.compose-wrap .compose{border-top:0}
+.replying-to{display:flex;align-items:center;gap:7px;margin:10px 22px 0;padding:6px 10px;border-left:2px solid #f0a8be;background:#1b2033;border-radius:0 7px 7px 0;color:#a9afd0;font-size:12px}
+.replying-to span{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.replying-to button{border:0;background:none;color:#6f7594;cursor:pointer;display:grid;place-items:center;padding:2px}
+.replying-to button:hover{color:#f0a8be}
+/* Deliberately unlike a real reply: this is the absence of one. */
+.bubble.ignored{background:transparent;border:1px dashed #2a2f47;color:#5f6484;font-style:italic}
+/* Hidden until hover so a wall of buttons does not compete with the reply, but
+   kept visible once rated so the feedback is not invisible after the fact. */
+.reactions{display:flex;gap:2px;margin:4px 0 0 2px;opacity:0;transition:opacity .14s ease}
+.bubble-row:hover .reactions,.reactions:focus-within,.reactions.rated{opacity:1}
+.reaction{display:grid;place-items:center;width:26px;height:26px;border:0;border-radius:7px;background:transparent;color:#5f6484;cursor:pointer;transition:color .14s ease,background .14s ease}
+.reaction:hover{background:#1b2033;color:#a9afd0}
+.reaction.reacted{color:#f0a8be;background:#241b28;animation:reaction-pop .34s cubic-bezier(.34,1.56,.64,1)}
+@keyframes reaction-pop{0%{transform:scale(1)}45%{transform:scale(1.32)}100%{transform:scale(1)}}
+@media (prefers-reduced-motion:reduce){.reaction.reacted{animation:none}}
+/* Tasks and events are told apart at a glance: a square you can tick versus a
+   dot you cannot. The shape carries the meaning, not just the colour. */
+.agenda-section{margin-bottom:10px}
+.agenda-section h4{margin:6px 0 2px;display:flex;align-items:center;gap:5px;color:#6f7594;font:9px 'JetBrains Mono',monospace;letter-spacing:.14em;text-transform:uppercase}
+.agenda-item.event{cursor:pointer}
+.agenda-item.event:hover i.dot{background:#232840}
+.agenda-item.event.done i.dot{background:#a8cfb4;color:#14162b}
+.agenda-item i.tick{border-radius:3px;border-color:#a8b4f0;color:#a8b4f0}
+.agenda-item.task:hover i.tick{background:#232840}
+.agenda-item.done i.tick{background:#a8b4f0;color:#14162b}
+.agenda-item i.dot{border-color:#a8cfb4;color:#a8cfb4}
+.dot.task{background:#a8b4f0}
+.row-actions{display:flex;gap:8px;margin-top:8px}
+.row-actions input{flex:1}
+.memory-list{list-style:none;margin:8px 0 0;padding:0;display:flex;flex-direction:column;gap:4px;max-height:220px;overflow-y:auto}
+.memory-list li{display:flex;align-items:center;gap:8px;padding:7px 10px;border:1px solid #232840;border-radius:8px;background:#141828;font-size:12.5px;line-height:1.45}
+.memory-list li span{flex:1}
+.memory-list li span em{color:#6f7594;font-style:normal}
+.memory-group{margin-top:10px}
+.memory-group h3{margin:0;font:10px 'JetBrains Mono',monospace;letter-spacing:.1em;text-transform:uppercase;color:#6f7594}
+/* Marks something raised again and again, which is what she treats as a theme. */
+.recurring{font:10px 'JetBrains Mono',monospace;color:#f0a8be;background:#241b28;border-radius:5px;padding:2px 5px}
+.row-actions select{background:#141828;color:#c9cee8;border:1px solid #232840;border-radius:8px;padding:0 8px;font-size:12px}
+/* Fixed label column so the option chips line up rather than stepping raggedly
+   with the length of each garment's name. */
+.wardrobe-row{display:flex;align-items:center;gap:10px;margin-top:7px}
+.wardrobe-row label{width:140px;flex:none;color:#c9cee8;font-size:12.5px}
+.wardrobe-options{display:flex;gap:5px}
+.chip{min-width:32px;padding:5px 10px;background:#141828;border:1px solid #333952;color:#878cab;border-radius:7px;font-size:12px;cursor:pointer}
+.chip:hover{border-color:#4a5170;color:#c9cee8}
+.chip.selected{background:#f0a8be;border-color:#f0a8be;color:#14162b;font-weight:600}
+/* Ten rows is a lot of drawer, so it stays folded until asked for. */
+.emotion-voices{margin-top:9px}
+.disclosure{display:flex;align-items:center;gap:5px;background:none;border:0;color:#878cab;font:11px 'JetBrains Mono',monospace;text-transform:uppercase;letter-spacing:.06em;cursor:pointer;padding:0}
+.disclosure em{font-style:normal;color:#f0a8be}
+.emotion-row{display:flex;align-items:center;gap:8px;margin-top:6px}
+/* Fixed width so the clip buttons line up into a column rather than stepping
+   raggedly with the length of each emotion name. */
+.emotion-row label{width:88px;flex:none;color:#878cab;font:11px 'JetBrains Mono',monospace}
+.emotion-row button:not(.icon){flex:none;max-width:190px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.emotion-row input{flex:1}
+.emotion-row input:disabled{opacity:.4}
+.ghost.icon{padding:6px 7px;line-height:0}
+.ghost:disabled{opacity:.35;cursor:default}
+/* Label and slider read as one control, so the pair does not get split by the flex gap. */
+.slider{display:flex;align-items:center;gap:7px;color:#878cab;font:10px 'JetBrains Mono',monospace;text-transform:uppercase;white-space:nowrap}
+.slider input[type=range]{flex:1;min-width:70px;accent-color:#f0a8be}
+/* The dictation button, sized to match the send button so the row stays even.
+   The level bar grows out of the bottom of the icon while recording — enough to
+   show it is hearing something without turning into a VU meter. */
+.mic{display:grid;place-items:center;position:relative;width:42px;border:1px solid #333952;border-radius:11px;background:#1d2138;color:#878cab;cursor:pointer;flex:none}
+.mic:hover:not(:disabled){border-color:#f0a8be;color:#f0a8be}
+.mic:disabled{opacity:.55;cursor:default}
+.mic-recording{border-color:#f0a8be;color:#f0a8be;background:#f0a8be1a}
+.mic-level{position:absolute;left:50%;bottom:5px;width:22px;height:3px;margin-left:-11px;border-radius:2px;background:#f0a8be;transform-origin:bottom;transition:transform .06s linear}
+.mic-thinking{width:13px;height:13px;border:2px solid #333952;border-top-color:#f0a8be;border-radius:50%;animation:mic-spin .7s linear infinite}
+@keyframes mic-spin{to{transform:rotate(360deg)}}
+.mic-error{align-self:center;color:#f0a8be;font:600 13px 'JetBrains Mono';cursor:help}
+/* Armed for the wake word: a standing tint, so an open microphone is never
+   something you have to remember rather than see. */
+.mic-armed{border-color:#4a5170;color:#9aa0c0}
+.mic-armed.mic-recording{border-color:#f0a8be;color:#f0a8be}
+
+
+/* Box and label are one control, so the whole row is a hit target rather than a 14px square. */
+.check-row{display:flex;align-items:center;gap:8px;margin-top:10px;color:#efebf2;font-size:13px;cursor:pointer}
+.check-row input{width:14px;height:14px;accent-color:#f0a8be;cursor:pointer}
+.check-row input:disabled,.check-row:has(input:disabled){cursor:default;opacity:.55}
+/* An aside about the situation rather than the result of an action, so it stays quieter than either status line. */
+.status-note{color:#878cab;font:11px 'JetBrains Mono';line-height:1.5;margin:8px 0 0}
+.status-ok{color:#a8cfb4;font:11px 'JetBrains Mono';margin:6px 0 0}
+.status-error{color:#f0a8be;font:11px 'JetBrains Mono';margin:6px 0 0}.haru-body{height:calc(100vh - 64px);display:grid;grid-template-columns:minmax(0,1fr) 296px}.chat-panel{display:flex;flex-direction:column;min-height:0}.messages{flex:1;overflow:auto;padding:27px 23px 8px;display:flex;flex-direction:column;gap:16px}.bubble-row{display:flex;max-width:82%;align-items:flex-start}.bubble-row.user{align-self:flex-end}.assistant-dot{flex:none;width:7px;height:7px;border-radius:50%;background:#f0a8be;margin:16px 11px 0 0;box-shadow:0 0 11px #f0a8be}.bubble-row.user .assistant-dot{display:none}.bubble{white-space:pre-wrap;padding:11px 15px;border-radius:15px;font-size:14.5px;line-height:1.58}.assistant .bubble{padding-left:0}.user .bubble{background:#272c48;border-bottom-right-radius:5px}.empty-state{margin:auto;max-width:440px;padding-bottom:38px}.empty-state .bubble-row{max-width:100%;margin-bottom:18px}.empty-state>p{margin:0;color:#878cab;text-align:center;font-size:13.5px;line-height:1.6}.suggestions{display:flex;flex-wrap:wrap;justify-content:center;gap:7px;margin-top:18px}.suggestion{border:1px solid #333952;background:#272c48;color:#efebf2;border-radius:999px;padding:7px 11px;font:12px Karla,sans-serif;cursor:pointer}.suggestion:hover{border-color:#f0a8be}.compose{display:flex;gap:9px;padding:14px 22px 20px;border-top:1px solid #333952}.compose input{flex:1;border:1px solid #333952;background:#1d2138;color:#efebf2;border-radius:11px;padding:12px 15px;outline:none;font:14.5px Karla,sans-serif}.compose input:focus{border-color:#f0a8be}.compose button{border:0;border-radius:11px;background:#f0a8be;color:#14162b;padding:0 18px;font-weight:600;cursor:pointer}.compose button:disabled{opacity:.45}.kept{position:relative;border-left:1px solid #333952;background:#0e10201f;display:flex;flex-direction:column;min-height:0;overflow:auto}.kept h2{margin:0;padding:20px 20px 13px;display:flex;align-items:center;gap:7px;color:#878cab;font:10px 'JetBrains Mono';letter-spacing:.16em;text-transform:uppercase}.kept-count{background:#f0a8be;color:#14162b;border-radius:999px;padding:1px 6px;font:9px 'JetBrains Mono'}.nothing{padding:0 20px;color:#878cab;font-size:13px;line-height:1.6}.calendar{padding:0 20px 10px;flex:none}.calendar-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}.cal-nav{width:22px;height:22px;display:grid;place-items:center;background:none;border:1px solid #333952;border-radius:6px;color:#878cab;cursor:pointer}.cal-nav:hover{border-color:#f0a8be;color:#f0a8be}.cal-month{background:none;border:0;padding:2px 6px;border-radius:6px;color:#efebf2;font:600 12px 'Zen Maru Gothic',sans-serif;cursor:pointer}.cal-month:hover{color:#f0a8be}.calendar-weekdays{display:grid;grid-template-columns:repeat(7,1fr);text-align:center;color:#878cab;font:9px 'JetBrains Mono';margin-bottom:2px}.calendar-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:2px}.cal-day{aspect-ratio:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;border:0;border-radius:7px;background:none;color:#efebf2;font:11px Karla,sans-serif;cursor:pointer}.cal-day:hover{background:#1d2138}.cal-day.outside{color:#4a4563}.cal-day.today span{color:#f0a8be;font-weight:700}.cal-day.selected{background:#f0a8be}.cal-day.selected span{color:#14162b}.cal-dots{display:flex;gap:2px}.dot{width:4px;height:4px;border-radius:50%;background:#f0a8be}.dot.event{background:#a8cfb4}.cal-day.selected .dot{background:#14162b}.agenda{padding:12px 20px 4px;border-top:1px solid #333952;flex:1;min-height:70px;overflow:auto}.agenda h3{margin:0 0 6px;color:#878cab;font:10px 'JetBrains Mono';letter-spacing:.1em;text-transform:uppercase}.agenda-item{display:grid;grid-template-columns:17px 1fr;width:100%;border:0;background:none;color:#efebf2;text-align:left;padding:7px 0;cursor:pointer}.agenda-item i{width:8px;height:8px;border-radius:50%;display:grid;place-items:center;background:#14162b;border:1px solid #f0a8be;color:#f0a8be;margin-top:4px}.agenda-item i svg{width:7px}.agenda-text b{display:block;font-size:13px;font-weight:500}.agenda-text small{display:block;color:#878cab;font:10px 'JetBrains Mono';margin-top:2px}.agenda-item.done{opacity:.4}.agenda-item.done b{text-decoration:line-through}.stage-slot{margin-top:auto;padding:20px;flex:none}@media(max-width:850px){.haru-body{grid-template-columns:1fr 250px}.stage-slot{padding:14px}}
+
+/* The journal. Wider than the other drawers because it holds writing rather
+   than settings, and a diary in a 320px column is a diary nobody writes in. */
+.drawer.journal { max-width: 560px; }
+.journal-text {
+  width: 100%; resize: vertical; min-height: 7rem;
+  font: inherit; line-height: 1.5;
+  color: var(--text); background: var(--surface-2, rgba(255,255,255,.04));
+  border: 1px solid var(--line, rgba(255,255,255,.12)); border-radius: 10px; padding: .7rem .8rem;
+}
+.journal-text:focus { outline: none; border-color: var(--accent, #8b7cf6); }
+
+.ratings { display: grid; gap: .35rem; margin: .8rem 0 .4rem; }
+.rating-row { display: grid; grid-template-columns: 4.5rem 1fr 1.6rem 1.2rem auto; align-items: center; gap: .5rem; }
+.rating-label { font-size: .82rem; opacity: .8; }
+.rating-value { font-variant-numeric: tabular-nums; font-size: .82rem; text-align: right; }
+.rating-ends { font-size: .68rem; opacity: .45; white-space: nowrap; }
+.rating-clear {
+  background: none; border: none; cursor: pointer; opacity: .5;
+  color: var(--text); font-size: .95rem; line-height: 1; padding: 0 .2rem;
+}
+.rating-clear:disabled { opacity: .15; cursor: default; }
+.rating-row input[type="range"] { accent-color: var(--accent, #8b7cf6); }
+/* Anxiety runs the other way: a full bar is a bad day, so it must not read as
+   a green progress bar filling up nicely. */
+.rating-row input[type="range"].inverted { accent-color: #d98b6a; }
+
+.trend-row { display: grid; grid-template-columns: 4.5rem 1fr; align-items: end; gap: .5rem; margin-bottom: .5rem; }
+.sparkline { display: flex; align-items: flex-end; gap: 3px; height: 36px; }
+.sparkline .bar { flex: 1; min-width: 4px; border-radius: 2px 2px 0 0; background: var(--accent, #8b7cf6); }
+.sparkline .bar.inverted { background: #d98b6a; }
+
+.journal-entry {
+  border-top: 1px solid var(--line, rgba(255,255,255,.1));
+  padding: .7rem 0;
+}
+.journal-entry header { display: flex; align-items: center; gap: .5rem; margin-bottom: .3rem; }
+.journal-entry header strong { font-size: .85rem; font-weight: 600; }
+.journal-entry header .remove-model { margin-left: auto; }
+.journal-entry p { margin: 0; font-size: .88rem; line-height: 1.55; white-space: pre-wrap; opacity: .9; }
+.journal-marks { display: flex; gap: .3rem; }
+.journal-marks em {
+  font-style: normal; font-size: .68rem; padding: .1rem .35rem; border-radius: 999px;
+  background: color-mix(in srgb, var(--accent, #8b7cf6) 22%, transparent);
+}
+.journal-marks em.inverted { background: color-mix(in srgb, #d98b6a 25%, transparent); }
+
+/* Pages, not panels.
+   The drawer was a 44vh sheet that slid over the top and pushed the chat down;
+   these replace the body outright, so moving between Chat, Journal, You,
+   Character and Setup is navigation rather than something covering up your
+   conversation. The wardrobe is the one exception and stays a drawer — she opens
+   that herself mid-reply, and taking the page away for it would take the reply
+   the user was reading with it. */
+.page {
+  height: calc(100vh - 64px);
+  overflow-y: auto;
+  padding: 26px 26px 48px;
+}
+/* Content column rather than full bleed: settings read badly at 1600px wide. */
+.page .field { max-width: 760px; }
+.page.journal .field { max-width: 620px; }
+.page .drawer-foot { max-width: 760px; margin-top: 18px; }
+
+/* Tabs sit centred between the wordmark and the actions, and the selected one is
+   underlined rather than merely tinted — with five of them, colour alone is not
+   enough to find where you are at a glance. */
+.tabs { display: flex; align-items: center; gap: 2px; margin-left: 22px; }
+.tab {
+  position: relative;
+  border: 0; background: none; cursor: pointer;
+  color: #878cab; font: 10px 'JetBrains Mono', monospace;
+  letter-spacing: .1em; text-transform: uppercase;
+  padding: 21px 13px; display: inline-flex; align-items: center; gap: 5px;
+}
+.tab:hover { color: #efebf2; }
+.tab.selected { color: #f0a8be; }
+.tab.selected::after {
+  content: ''; position: absolute; left: 10px; right: 10px; bottom: -1px;
+  height: 2px; border-radius: 2px 2px 0 0; background: #f0a8be;
+}
+
+/* The journal page: writing on the left, how it is going on the right — the same
+   two-column shape as the chat page, so they read as one app. */
+.page.journal { display: grid; grid-template-columns: minmax(0,1fr) 296px; gap: 26px; align-items: start; }
+.journal-main { min-width: 0; }
+.journal-side { position: sticky; top: 0; display: grid; gap: 14px; }
+
+/* Her reaction to your streak. Toned by mood rather than decorated. */
+.haru-note { display: grid; grid-template-columns: auto 1fr; gap: 10px; align-items: center;
+  padding: 12px 14px; border-radius: 12px; border: 1px solid #333952; background: #1b2033; }
+.haru-note p { margin: 0; font-size: 12.5px; line-height: 1.5; color: #c9cde6; }
+.haru-note-face { font: 15px 'JetBrains Mono', monospace; white-space: nowrap; }
+.haru-note.proud { border-color: #a8cfb4; } .haru-note.proud .haru-note-face { color: #a8cfb4; }
+.haru-note.pleased { border-color: #f0a8be; } .haru-note.pleased .haru-note-face { color: #f0a8be; }
+.haru-note.grumpy { border-color: #d98b6a; } .haru-note.grumpy .haru-note-face { color: #d98b6a; }
+.haru-note.watching .haru-note-face { color: #878cab; }
+
+.side-block { padding: 12px 14px; border: 1px solid #333952; border-radius: 12px; background: #16192b; }
+.side-block h3 { margin: 0 0 8px; font: 500 12px 'Zen Maru Gothic', sans-serif; color: #878cab;
+  text-transform: uppercase; letter-spacing: .1em; }
+.today-faces { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px; }
+.today-face { display: grid; gap: 2px; font: 14px 'JetBrains Mono', monospace; color: #efebf2; }
+.today-face em { font: 10px 'JetBrains Mono', monospace; font-style: normal; color: #878cab;
+  text-transform: uppercase; letter-spacing: .06em; }
+.today-text { margin: 0; font-size: 12.5px; line-height: 1.55; color: #a9afd0; white-space: pre-wrap;
+  max-height: 220px; overflow: auto; }
+.streak-count { margin: 0 0 4px; font: 700 30px 'Zen Maru Gothic', sans-serif; color: #f0a8be; line-height: 1; }
+.streak-count em { font: 11px 'JetBrains Mono', monospace; font-style: normal; color: #878cab;
+  margin-left: 6px; text-transform: uppercase; }
+
+/* A face that changes as you drag, and pops when it does. */
+.rating-row { grid-template-columns: 4.2rem 4.6rem 1fr 3rem 1.2rem auto; }
+.rating-face { font: 13px 'JetBrains Mono', monospace; color: #f0a8be; white-space: nowrap;
+  animation: face-pop 260ms cubic-bezier(.2,1.6,.4,1); }
+.rating-face.inverted { color: #d98b6a; }
+@keyframes face-pop { from { transform: scale(.72) translateY(2px); opacity: .4; } to { transform: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .rating-face { animation: none; } }
+.rating-value em { font-style: normal; font-size: .72em; opacity: .5; }
+.rating-value.muted { opacity: .4; }
+.autosave { display: flex; align-items: center; gap: 5px; margin: 6px 0 0;
+  font: 10px 'JetBrains Mono', monospace; text-transform: uppercase; letter-spacing: .08em; color: #6f7594; }
+.autosave.saved { color: #a8cfb4; }
+
+.chart-head { display: flex; align-items: baseline; gap: 12px; }
+.range-tabs { margin-left: auto; display: flex; gap: 3px; }
+.range { border: 1px solid transparent; background: none; color: #6f7594; cursor: pointer;
+  border-radius: 7px; padding: 4px 9px; font: 10px 'JetBrains Mono', monospace;
+  text-transform: uppercase; letter-spacing: .08em; }
+.range:hover { color: #efebf2; }
+.range.selected { color: #f0a8be; border-color: #333952; background: #1b2033; }
+
+.stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 10px 0 14px; }
+.stat { display: grid; gap: 1px; padding: 9px 10px; border: 1px solid #333952; border-radius: 10px; background: #16192b; }
+.stat.empty { opacity: .45; }
+.stat-label { font: 10px 'JetBrains Mono', monospace; text-transform: uppercase; letter-spacing: .08em; color: #878cab; }
+.stat-avg { font: 600 19px 'Zen Maru Gothic', sans-serif; color: #efebf2; }
+.stat-avg em, .stat-none { font: 10px 'JetBrains Mono', monospace; font-style: normal; color: #6f7594; }
+.stat-range { font-size: 10.5px; color: #6f7594; }
+.stat-change { font: 10px 'JetBrains Mono', monospace; }
+.stat-change.good { color: #a8cfb4; } .stat-change.bad { color: #d98b6a; }
+
+.chart-row { display: grid; grid-template-columns: 4.2rem 1fr; align-items: center; gap: 10px; margin-bottom: 8px; }
+.journal-chart { width: 100%; height: 44px; overflow: visible; }
+.journal-chart .grid { stroke: #333952; stroke-width: .3; }
+.journal-chart .bar { fill: #f0a8be; }
+.journal-chart .bar.inverted { fill: #d98b6a; }
+/* A day with nothing recorded is a stub on the baseline, not a zero — zero is a
+   real answer on these scales and must not look the same as silence. */
+.journal-chart .bar.missing { fill: #333952; }
+
+/* Shutting her ears without going into Setup. Sits beside the mic and only
+   exists while something is actually listening. */
+.mic-stop {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; margin-left: -4px;
+  border: 1px solid #333952; border-radius: 8px;
+  background: #1b2033; color: #d98b6a; cursor: pointer;
+}
+.mic-stop:hover { border-color: #d98b6a; }
