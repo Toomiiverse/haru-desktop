@@ -480,3 +480,30 @@ export function formatResults(query: string, results: SearchResult[], canReadPag
   const lines = results.map((result, index) => `${index + 1}. ${result.title} — ${result.snippet || 'no summary'} (${new URL(result.url).hostname})`);
   return [`You looked up "${query}" and found this:`, lines.join(' '), ...rules].join(' ');
 }
+
+/**
+ * Questions she cannot answer from in here, recognised at the point they are
+ * asked rather than left to a paragraph further up the prompt.
+ *
+ * Asked "square how to charge/setup subscription" she answered out of her own
+ * head, with a joke, and never reached for the tool — the standing instruction
+ * lists news, prices, results and opening times, which are all facts about the
+ * world, and a how-to does not read as any of them.
+ *
+ * Procedure is the worst possible thing to answer from memory: the menus in
+ * somebody else's product move, and a model that has not seen them since
+ * training will lay out a path through a dashboard that no longer exists,
+ * confidently. This is the shape most worth catching.
+ */
+const ASKS_HOW = /\b(?:how (?:do|can|would|should) i|how to|how does .{2,40} work|wha(?:ts|t's|t is) the best way to|where (?:do|can) i (?:find|get|see|change|set|add|enable)|steps? (?:to|for)|walk me through|guide (?:to|for))\b/i;
+
+/**
+ * Things she genuinely does hold, which must not be sent to a search engine.
+ * Their list, their notes, her own workings — all of it is in this room.
+ */
+const ABOUT_IN_HERE = /\b(?:my (?:list|tasks?|agenda|calendar|check ?ins?|notes?|journal|memor(?:y|ies))|how do i (?:look|sound|seem)|you feel|your (?:day|voice|memory|name|settings?)|we (?:talked|said)|earlier|yesterday i told you)\b/i;
+
+export function lookItUpInstruction(latestMessage: string, searchOn: boolean): string {
+  if (!searchOn || !ASKS_HOW.test(latestMessage) || ABOUT_IN_HERE.test(latestMessage)) return '';
+  return 'They have just asked how to do something. If it is about anything outside this room — some app, site, service, product or bit of hardware — look it up with search_web before you answer, even if you think you know: menus and steps move, and yours are as old as your training. Only answer straight from your own head if it is about them, about you, or about something they have already told you. Still no announcing the search — answer as though you simply knew.';
+}
