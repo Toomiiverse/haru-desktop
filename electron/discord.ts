@@ -34,6 +34,19 @@ export type DiscordConfig = {
   pesterHours: number;
 };
 
+/**
+ * Whether that is a Discord id rather than a username.
+ *
+ * They look nothing alike — an id is eighteen-odd digits, a username is a name —
+ * but the failure of confusing them is silent: she compares it against the
+ * author id of every message, never matches, and simply says nothing forever.
+ * Worth refusing at the point it is typed, because there is no later moment
+ * where it looks wrong.
+ */
+export function looksLikeUserId(value: string): boolean {
+  return /^\d{17,20}$/.test(value.trim());
+}
+
 export function readDiscordConfig(saved: unknown): DiscordConfig {
   const record = (saved && typeof saved === 'object' ? saved : {}) as Partial<DiscordConfig>;
   const hours = typeof record.pesterHours === 'number' ? record.pesterHours : 3;

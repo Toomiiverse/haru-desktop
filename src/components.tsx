@@ -1491,7 +1491,7 @@ function DiscordField() {
       <button className="ghost" disabled={busy || !token.trim()} onClick={() => void run(async () => { await window.haru!.discord.setToken(token); setToken(''); }, 'Token saved, encrypted by the system.')}>Save token</button>
     </div>
     <div className="form-grid">
-      <input value={ownerId} disabled={busy} placeholder="Your Discord user ID — she answers nobody else" onChange={event => setOwnerId(event.target.value)}/>
+      <input value={ownerId} disabled={busy} placeholder="Your Discord user ID — 18 digits, not your username" onChange={event => setOwnerId(event.target.value)}/>
       <label className="check">
         Pester every
         <input type="number" min={1} max={12} value={hours} disabled={busy} style={{ width: '4rem' }} onChange={event => setHours(Number(event.target.value))}/>

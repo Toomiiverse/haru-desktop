@@ -50,7 +50,7 @@ import { hasShout, readVoiceConfig, referenceFor, shoutReference, spokenCase, sp
 import { formatMemoryPrompt, isWorthKeeping, isWorthRemembering, MEMORY_KINDS, migrateMemories, pruneMemories, rememberInto, selectMemories, summaryPrompt, type MemoryKind, type MemoryRecord, type SessionSummary } from './memory';
 import { forgetDevice, forgetEveryDevice, readWebAccess, setPassword, weakPassword, type WebAccess } from './web';
 import { addCheckIn, checkInInstruction, checkInsOn, readCheckIns, type CheckIn } from './checkins';
-import { DiscordLink, readDiscordConfig, type DiscordConfig } from './discord';
+import { DiscordLink, looksLikeUserId, readDiscordConfig, type DiscordConfig } from './discord';
 import { startWebServer, type WebDeps } from './webserver';
 
 type Bounds = { x: number; y: number; width: number; height: number };
@@ -5615,6 +5615,7 @@ app.whenReady().then(() => {
     const current = getDiscordConfig();
     const ownerId = String(next?.ownerId ?? '').trim();
     if (next?.enabled && !ownerId) throw new Error('She needs your Discord user ID, or she would answer anyone.');
+    if (ownerId && !looksLikeUserId(ownerId)) throw new Error(`"${ownerId}" is a username, not a user ID. Turn on Developer Mode in Discord, right-click yourself and Copy User ID — it is about eighteen digits.`);
     if (next?.enabled && !getDiscordToken()) throw new Error('Set the bot token first.');
     // The DM channel belongs to a person; changing who she answers must not
     // leave her still messaging the last one.
