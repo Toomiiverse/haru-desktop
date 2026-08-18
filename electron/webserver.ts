@@ -20,6 +20,7 @@ import {
   noteFailure, lockedFor, clearFailures, type Attempts, DEVICE_DAYS,
 } from './web';
 import { loginPage, appPage } from './webpage';
+import type { CheckIn } from './checkins';
 
 export type WebDeps = {
   readAccess(): WebAccess;
@@ -32,6 +33,12 @@ export type WebDeps = {
   memories(): string[];
   journal(): { date: string; text: string; mood?: number; anxiety?: number }[];
   writeJournal(entry: { text: string; mood?: number; anxiety?: number }): Promise<void> | void;
+  /** Today's little notes, oldest first. */
+  checkIns(): CheckIn[];
+  /** Jot one down. Returns today's, including the new one. */
+  addCheckIn(note: string, anxiety: number | undefined): CheckIn[];
+  /** Anything she would say first, unprompted, or nothing. */
+  nudge(): Promise<{ line: string; about: string } | null>;
   /** Her picture, or nothing if this build has none. */
   portrait(): Buffer | null;
   /** The Live2D model to stand on the stage: the folder it lives in and its entry file. */
@@ -440,6 +447,14 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
     return json(res, 200, { text });
   }
 
+  // Asked for when the page opens and while it stays open. A phone cannot be
+  // pushed to from here — no notifications, deliberately — so this is how she
+  // gets to speak first, at the one moment she has their attention anyway.
+  if (req.method === 'GET' && path === '/api/nudge') {
+    const said = await deps.nudge();
+    return json(res, 200, said ?? { line: null });
+  }
+
   if (req.method === 'GET' && path === '/api/agenda') return json(res, 200, { items: deps.agenda() });
 
   if (req.method === 'POST' && path === '/api/agenda/done') {
@@ -450,6 +465,18 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
   }
 
   if (req.method === 'GET' && path === '/api/memory') return json(res, 200, { memories: deps.memories() });
+
+  // Little notes taken while the day happens. Separate from the journal on
+  // purpose: one is written about a day, the other during it.
+  if (req.method === 'GET' && path === '/api/checkins') return json(res, 200, { entries: deps.checkIns() });
+
+  if (req.method === 'POST' && path === '/api/checkins') {
+    const body = await readBody(req) as { note?: unknown; anxiety?: unknown };
+    const note = typeof body.note === 'string' ? body.note.trim() : '';
+    if (!note) return json(res, 400, { error: 'Write something.' });
+    const anxiety = typeof body.anxiety === 'number' && body.anxiety >= 1 && body.anxiety <= 10 ? Math.round(body.anxiety) : undefined;
+    return json(res, 200, { entries: deps.addCheckIn(note.slice(0, 1000), anxiety) });
+  }
 
   if (req.method === 'GET' && path === '/api/journal') return json(res, 200, { entries: deps.journal().slice(-30) });
 

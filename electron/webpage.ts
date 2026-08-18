@@ -193,6 +193,11 @@ export function appPage(): string {
   .done { opacity:.4; }
   .quiet { color:var(--ink-dim); text-align:center; padding:2rem 0; }
   .jrow { display:flex; gap:.6rem; margin:.6rem 0; }
+  /* Ten taps rather than a number field: on a phone, picking 7 should be one
+     thumb movement, not a keyboard. */
+  .scale { display:flex; gap:.25rem; }
+  .scale button { flex:1; padding:.5rem 0; background:var(--glass); border:1px solid var(--edge); color:var(--ink-dim); border-radius:10px; font-size:.85rem; font-weight:600; }
+  .scale button.on { background:var(--accent); color:var(--accent-ink); border-color:var(--accent); }
 </style>
 <div class=stage>
   <div class=who><span class=dot></span> Haru</div>
@@ -202,7 +207,7 @@ export function appPage(): string {
 <nav>
   <button data-t=chat class=on>Chat</button>
   <button data-t=agenda>Agenda</button>
-  <button data-t=journal>Journal</button>
+  <button data-t=journal>Check-ins</button>
   <button data-t=memory>Memory</button>
 </nav>
 <section id=chat class=on></section>
@@ -212,6 +217,7 @@ export function appPage(): string {
 <section id=memory></section>
 <script>
 const $=id=>document.getElementById(id);
+const clockOf=at=>{const d=new Date(at);return isNaN(d)?'':d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});};
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const get=u=>fetch(u).then(r=>r.ok?r.json():Promise.reject(r));
 const post=(u,b)=>fetch(u,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(b||{})}).then(r=>r.ok?r.json():Promise.reject(r));
@@ -246,16 +252,27 @@ async function load(){
       $('agenda').querySelectorAll('[data-done]').forEach(b=>b.onclick=async()=>{b.disabled=true;await post('/api/agenda/done',{id:b.dataset.done});load();});
     }
     if(tab==='journal'){
-      const {entries}=await get('/api/journal');
+      const {entries}=await get('/api/checkins');
       $('journal').innerHTML =
-        '<div class=card><textarea id=jt rows=3 placeholder="How was today?"></textarea>'+
-        '<div class=jrow><input id=jm type=number min=1 max=10 placeholder="Mood 1-10"><input id=ja type=number min=1 max=10 placeholder="Anxiety 1-10"></div>'+
-        '<button id=jsave>Save</button></div>'+
-        entries.slice().reverse().map(e=>'<div class=card><time>'+esc(e.date)+'</time><p style="margin:.3rem 0 0">'+esc(e.text)+'</p></div>').join('');
+        '<div class=card><textarea id=jt rows=2 placeholder="What just happened?"></textarea>'+
+        '<p class=quiet style="text-align:left;padding:.5rem 0 .3rem;font-size:.82rem">How anxious, right now?</p>'+
+        '<div class=scale id=jscale>'+[1,2,3,4,5,6,7,8,9,10].map(n=>'<button type=button data-n="'+n+'">'+n+'</button>').join('')+'</div>'+
+        '<button id=jsave style="margin-top:.7rem">Note it</button></div>'+
+        (entries.length?entries.slice().reverse().map(e=>
+          '<div class=card><time>'+esc(clockOf(e.at))+(e.anxiety?' · anxiety '+e.anxiety+'/10':'')+'</time>'+
+          '<p style="margin:.3rem 0 0">'+esc(e.note)+'</p></div>').join('')
+          :'<p class=quiet>Nothing noted today. Jot things as they happen — she reads them when you are back at your desk.</p>');
+      // Tapping a number twice clears it: not every note is an anxious one, and
+      // being unable to unpick a mis-tap is how a form starts feeling like one.
+      let picked=null;
+      $('jscale').querySelectorAll('button').forEach(b=>b.onclick=()=>{
+        picked = picked===Number(b.dataset.n) ? null : Number(b.dataset.n);
+        $('jscale').querySelectorAll('button').forEach(x=>x.classList.toggle('on',Number(x.dataset.n)===picked));
+      });
       $('jsave').onclick=async()=>{
-        const text=$('jt').value.trim(); if(!text)return;
+        const note=$('jt').value.trim(); if(!note)return;
         $('jsave').disabled=true;
-        await post('/api/journal',{text,mood:Number($('jm').value)||undefined,anxiety:Number($('ja').value)||undefined});
+        await post('/api/checkins',{note,anxiety:picked||undefined});
         load();
       };
     }
@@ -353,6 +370,34 @@ $('cf').addEventListener('submit',async ev=>{
   $('cb').disabled=false; $('chat').scrollTop=$('chat').scrollHeight;
 });
 load();
+
+// ---- Her, speaking first ---------------------------------------------------
+//
+// The point of carrying her about is that she mentions the thing you have not
+// done, rather than waiting to be asked. There are no notifications here, so the
+// moment to do it is while the page is open — which is also the only moment she
+// has anyone's attention.
+//
+// Asked on opening, again when the page comes back to the front, and slowly
+// while it sits there. The deciding is all on her side: most of these return
+// nothing, because most of the time there is nothing worth saying.
+async function askIfSheHasSomethingToSay(){
+  if(document.hidden) return;
+  try{
+    const {line}=await get('/api/nudge');
+    if(!line) return;
+    if(tab!=='chat'){ document.querySelector('nav button[data-t=chat]').click(); }
+    $('chat').insertAdjacentHTML('beforeend','<div class="msg them">'+esc(line)+'</div>');
+    $('chat').scrollTop=$('chat').scrollHeight;
+    if(window.haruFace) window.haruFace(null);
+    void speak(line);
+  }catch(r){ if(r&&r.status===401) location.reload(); }
+}
+setTimeout(askIfSheHasSomethingToSay,1500);
+document.addEventListener('visibilitychange',()=>{ if(!document.hidden) askIfSheHasSomethingToSay(); });
+// Four minutes: she is being carried around, not watched. Anything faster reads
+// as pestering, and the spacing on her side would refuse it anyway.
+setInterval(askIfSheHasSomethingToSay,4*60_000);
 
 // ---- The stage ------------------------------------------------------------
 //

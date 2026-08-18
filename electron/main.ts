@@ -49,6 +49,7 @@ import { claimsDesktopAction, dropRoleHeader, dropInventedContact, dropInventedS
 import { hasShout, readVoiceConfig, referenceFor, shoutReference, spokenCase, speakableText, splitForSpeech, synthesise, type SpeechClip, type VoiceConfig } from './voice';
 import { formatMemoryPrompt, isWorthKeeping, isWorthRemembering, MEMORY_KINDS, migrateMemories, pruneMemories, rememberInto, selectMemories, summaryPrompt, type MemoryKind, type MemoryRecord, type SessionSummary } from './memory';
 import { forgetDevice, forgetEveryDevice, readWebAccess, setPassword, weakPassword, type WebAccess } from './web';
+import { addCheckIn, checkInInstruction, checkInsOn, readCheckIns, type CheckIn } from './checkins';
 import { startWebServer, type WebDeps } from './webserver';
 
 type Bounds = { x: number; y: number; width: number; height: number };
@@ -2406,6 +2407,41 @@ function minutesUntil(item: KeptItem, now: Date, todayKey: string): number {
  * Chases the user about a task that is due. Keeps going, louder and less politely
  * each time, until they say something or tick it off.
  */
+/**
+ * Which task, if any, is worth chasing right now.
+ *
+ * Shared by the desktop and the phone so the two cannot drift. They differ in
+ * exactly one input: at the desk, "are they here" is how long the machine has
+ * been idle; on a phone it is whether the page is open in their hand. Everything
+ * else — the escalation ladder, quiet hours, the staleness cap — is one set of
+ * rules with one implementation, which is the only way the attempt counts stay
+ * honest when she is answered on one device and ignored on the other.
+ */
+function chaseTarget(
+  now: Date,
+  todayKey: string,
+  states: Record<string, ReminderState>,
+  minutesSinceUserSpoke: number,
+  idleSeconds: number,
+) {
+  // Only tasks: an event happens whether or not they are reminded of it, and
+  // there is nothing for them to have done about it.
+  return getKept()
+    .filter(item => item.kind === 'task')
+    .map(item => ({ item, due: minutesUntil(item, now, todayKey) }))
+    // Soonest first, and anything already overdue ahead of anything upcoming.
+    .sort((a, b) => a.due - b.due)
+    .find(({ item, due }) => shouldRemind({
+      minutesUntilDue: due,
+      done: item.done,
+      state: states[item.id],
+      minutesSinceUserSpoke,
+      machineIdleSeconds: idleSeconds,
+      hour: now.getHours(),
+      now: Date.now(),
+    })) ?? null;
+}
+
 async function considerReminding(environment: Environment): Promise<boolean> {
   if (chasing || Date.now() - lastRemindedAt < REMINDER_SPACING_MS) return false;
   // Silencing only the chat prompt would leave this loop chasing them anyway,
@@ -2419,23 +2455,7 @@ async function considerReminding(environment: Environment): Promise<boolean> {
   const mood = getMood();
   const minutesSinceUserSpoke = mood.lastMessageAt ? (Date.now() - Date.parse(mood.lastMessageAt)) / 60_000 : Number.POSITIVE_INFINITY;
 
-  // Only tasks: an event happens whether or not they are reminded of it, and
-  // there is nothing for them to have done about it.
-  const candidates = getKept()
-    .filter(item => item.kind === 'task')
-    .map(item => ({ item, due: minutesUntil(item, now, todayKey) }))
-    // Soonest first, and anything already overdue ahead of anything upcoming.
-    .sort((a, b) => a.due - b.due);
-
-  const target = candidates.find(({ item, due }) => shouldRemind({
-    minutesUntilDue: due,
-    done: item.done,
-    state: states[item.id],
-    minutesSinceUserSpoke,
-    machineIdleSeconds: environment.idleSeconds,
-    hour: now.getHours(),
-    now: Date.now(),
-  }));
+  const target = chaseTarget(now, todayKey, states, minutesSinceUserSpoke, environment.idleSeconds);
   if (!target) return false;
 
   const previous = states[target.item.id];
@@ -3289,6 +3309,11 @@ function chatSystemPrompt({ irritation, ego, goodnight, shout, latestMessage, fr
     aniListSummary(),
     heldPicturePrompt(heldPicture, Date.now()),
     journalPrompt(readJournalConfig(store.get('journal.config')), getJournal(), localDateKey(now)),
+    // What they jotted down on their phone while the day was happening. This is
+    // the whole reason for taking them: back at the desk she can ask about the
+    // eleven o'clock spike rather than "how was your day", which is the
+    // difference between a check-in and a form.
+    checkInInstruction(checkInsOn(getCheckIns(), localDateKey(now))),
     // Placed with the other things she simply knows, rather than as an
     // instruction: what is on their screen is context for answering, not a topic
     // she has been told to raise.
@@ -4554,6 +4579,20 @@ async function noticePage(page: NoticedPage) {
   }
 }
 
+function getCheckIns() {
+  return readCheckIns(store.get('checkins'));
+}
+
+/**
+ * Written under its own key rather than inside journal, because the two are
+ * different things and the dot-path trap in this store is unforgiving: saving
+ * the journal config would take the day's notes with it.
+ */
+function setCheckIns(next: ReturnType<typeof readCheckIns>) {
+  store.set('checkins', next);
+  sendToWindows('checkins:changed', next.entries);
+}
+
 function getJournal(): JournalEntry[] {
   return readEntries(store.get('journal.entries'));
 }
@@ -5043,6 +5082,70 @@ function saveWebAccess(access: WebAccess) {
   store.set('webAccess', access);
 }
 
+/**
+ * What she would say first, unprompted, to someone holding their phone.
+ *
+ * The whole point of her being on a phone is that she is a companion rather than
+ * a search box: she should be the one to mention the thing you have not done.
+ * The web page cannot be pushed to — no notifications here, deliberately — so
+ * this is asked for when the page opens and while it stays open, which is the
+ * moment she has someone's attention anyway.
+ *
+ * It shares everything with the desktop: the same selector, the same escalation
+ * ladder, the same attempt counts, the same spacing. Chased on one device, she
+ * does not immediately chase on the other, because both write the same record.
+ */
+async function nudgeForPhone(): Promise<{ line: string; about: string } | null> {
+  if (chasing || Date.now() - lastRemindedAt < REMINDER_SPACING_MS) return null;
+  // Told to drop something, she drops it here too. Silencing the chat and then
+  // being nagged by the phone is the same complaint wearing a different hat.
+  if (isSilenced(store.get('pushback') as Pushback | undefined, Date.now())) return null;
+  const config = store.get('ai.config') as ProviderConfig | undefined;
+  if (!config?.model) return null;
+
+  const now = zonedNow(CHAT_TIMEZONE);
+  const todayKey = localDateKey(now);
+  const states = reminderStates();
+  const mood = getMood();
+  const minutesSinceUserSpoke = mood.lastMessageAt ? (Date.now() - Date.parse(mood.lastMessageAt)) / 60_000 : Number.POSITIVE_INFINITY;
+
+  // Zero idle seconds: the page being open is the phone's version of somebody
+  // sitting at the machine. If they are looking at her, they are there.
+  const target = chaseTarget(now, todayKey, states, minutesSinceUserSpoke, 0);
+  if (!target) return null;
+
+  const attempts = states[target.item.id]?.attempts ?? 0;
+  const tier = reminderTier(attempts);
+  chasing = true;
+  lastRemindedAt = Date.now();
+  store.set('reminders', { ...states, [target.item.id]: { attempts: attempts + 1, lastAt: Date.now() } });
+  try {
+    const intoDay = now.getHours() * 60 + now.getMinutes();
+    const evening = !target.item.time && isEveningCheck(intoDay);
+    const day = relativeDay(target.item.date, todayKey, new Intl.DateTimeFormat('en-US', { weekday: 'long' }));
+    const onDay = /^(today|yesterday|tomorrow|last )/.test(day) ? day : `on ${day}`;
+    const when = evening ? `which they put on for ${day} with no particular time`
+      : target.due < -1 ? `which was down for ${onDay}${target.item.time ? ` at ${target.item.time}` : ''} and has not been done`
+      : target.due <= 1 ? `which is due right now, ${onDay}`
+      : `due in about ${Math.round(target.due)} minutes, ${onDay}`;
+    const character = getActiveCharacter();
+    const system = [
+      character.identity,
+      character.style,
+      reminderInstruction(tier, target.item.title, when, evening),
+      'They are on their phone, away from their desk. One or two short lines. No quotation marks, no stage directions.',
+    ].join(' ');
+    const line = await ollamaQuip(system, 'Remind them.', config);
+    console.log(`[web] nudged about "${target.item.title}" (attempt ${attempts + 1}, ${tier})`);
+    return { line, about: target.item.title };
+  } catch (error) {
+    console.warn('[web] could not compose a nudge:', error instanceof Error ? error.message : error);
+    return null;
+  } finally {
+    chasing = false;
+  }
+}
+
 const DEFAULT_WEB_PORT = 8787;
 let webServer: { port: number; stop(): Promise<void> } | null = null;
 
@@ -5120,6 +5223,14 @@ function webDeps(): WebDeps {
       const updated = toggleKept(id);
       if (updated?.done) void remarkOnTickOff(updated);
     },
+    checkIns: () => checkInsOn(getCheckIns(), localDateKey(zonedNow(CHAT_TIMEZONE))),
+    addCheckIn(note, anxiety) {
+      const now = zonedNow(CHAT_TIMEZONE);
+      setCheckIns(addCheckIn(getCheckIns(), note, anxiety, new Date(), localDateKey(now)));
+      console.log(`[web] check-in noted${typeof anxiety === 'number' ? ` (anxiety ${anxiety}/10)` : ''}`);
+      return checkInsOn(getCheckIns(), localDateKey(now));
+    },
+    nudge: () => nudgeForPhone(),
     portrait: () => {
       // The app icon doubles as her face on the phone. Read each time rather than
       // held: it is 1.5MB, wanted about once a day, and the browser caches it.
