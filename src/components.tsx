@@ -601,6 +601,7 @@ export function WardrobeDrawer({ onClose }: { onClose(): void }) {
   if (!window.haru) return null;
   const options = (controls ?? []).filter(control => control.kind === 'option');
   const toggles = (controls ?? []).filter(control => control.kind === 'toggle');
+  const poses = (controls ?? []).filter(control => control.kind === 'pose');
   const set = (id: string, value: number) => { void window.haru!.wardrobe.set(id, value).then(setValues); };
   // Compared against the offered values rather than assumed, since they can run
   // negative. Nothing chosen shows the model's own default as selected.
@@ -634,6 +635,24 @@ export function WardrobeDrawer({ onClose }: { onClose(): void }) {
                 <button className={chosenIndex(control) === control.values.length - 1 ? 'chip selected' : 'chip'} onClick={() => set(control.id, control.values[control.values.length - 1] ?? 1)}>On</button>
               </div>
             </div>)}
+            {/* Sliders, not buttons: an elbow is a position rather than a
+                choice, and nobody can be told in advance which number looks
+                right. This model rigs ten arm parameters and no expression
+                touches any of them, so wherever the author left them is where
+                they stay — which is what reads as "weird". */}
+            {poses.length > 0 && <>
+              <p className="status-note">Where her arms rest. Drag until she looks right — it is remembered for this model.</p>
+              {poses.map(control => {
+                const low = control.values[0];
+                const high = control.values[control.values.length - 1];
+                const current = values[control.id] ?? control.values[Math.floor(control.values.length / 2)];
+                return <div className="wardrobe-row" key={control.id}>
+                  <label>{control.name}</label>
+                  <input type="range" min={low} max={high} step={(high - low) / 100} value={current}
+                    onChange={event => set(control.id, Number(event.target.value))}/>
+                </div>;
+              })}
+            </>}
             <div className="row-actions"><button className="ghost" onClick={() => { void window.haru!.wardrobe.reset().then(setValues); }}>Back to how she came</button></div>
           </>}
     </div>

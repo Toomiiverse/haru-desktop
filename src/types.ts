@@ -69,7 +69,7 @@ export interface VoiceConfig { engine: VoiceEngine; voice: string; referenceText
 export interface SpeechClip { turn: number; text: string; audio?: Uint8Array; mime?: string; }
 // What she can change about how she looks. Discovered from the model's own
 // DisplayInfo rather than hardcoded — see electron/wardrobe.ts.
-export interface WardrobeControl { id: string; name: string; kind: 'toggle' | 'option'; values: number[]; }
+export interface WardrobeControl { id: string; name: string; kind: 'toggle' | 'option' | 'pose'; values: number[]; }
 
 /** A phone or tablet that has been told to stay signed in. */
 export type WebDevice = { id: string; name: string; added: string; lastSeen: string };

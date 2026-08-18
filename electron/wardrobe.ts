@@ -14,7 +14,17 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 
-export type WardrobeKind = 'toggle' | 'option';
+export type WardrobeKind = 'toggle' | 'option' | 'pose';
+
+/**
+ * Parameters that place a limb rather than pick an outfit.
+ *
+ * They are excluded from the pickers above on purpose — arms are continuous, and
+ * a row of twelve buttons is no way to choose an elbow angle — but they are the
+ * ones that make a model look wrong when its author left them mid-gesture. This
+ * model rigs ten of them and no bundled expression touches any.
+ */
+const POSE_NAME = /\b(arm|forearm|elbow|wrist|hand|shoulder)\b/i;
 export type WardrobeControl = {
   id: string;
   name: string;
@@ -120,6 +130,8 @@ export function readWardrobe(displayInfo: unknown, ceilings: Map<string, number>
       : OPTION_GROUP.test(group) ? 'option'
       : TOGGLE_NAME.test(label) ? 'toggle'
       : OPTION_NAME.test(label) ? 'option'
+      // Last, so a sleeve colour named "left arm colour" is still an option.
+      : POSE_NAME.test(label) ? 'pose'
       : null;
     if (!kind) continue;
 
@@ -128,7 +140,11 @@ export function readWardrobe(displayInfo: unknown, ceilings: Map<string, number>
     // is the only reliable source. The expression-file guess below is a stopgap
     // for the first frames after launch and is wrong whenever a control does not
     // happen to run upward from 1.
-    const values = kind === 'toggle'
+    const values = kind === 'pose'
+      // Both ends and the middle. The slider interpolates; these exist so the
+      // renderer knows the bounds and where the arm rests by default.
+      ? (range ? [range.min, (range.min + range.max) / 2, range.max] : [-1, 0, 1])
+      : kind === 'toggle'
       ? (range ? [range.min, range.max] : [0, 1])
       : range ? optionValues(range)
       : Array.from({ length: Math.max(2, Math.ceil(ceilings.get(id) ?? 0) || 3) }, (_, index) => index + 1);
@@ -137,7 +153,8 @@ export function readWardrobe(displayInfo: unknown, ceilings: Map<string, number>
 
   // Options before toggles: changing colour is the thing people came for, and
   // the on/off switches read as accessories to it.
-  return controls.sort((a, b) => (a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind === 'option' ? -1 : 1));
+  const order = { option: 0, toggle: 1, pose: 2 };
+  return controls.sort((a, b) => (a.kind === b.kind ? a.name.localeCompare(b.name) : order[a.kind] - order[b.kind]));
 }
 
 /** Reads the DisplayInfo the manifest points at, if the model ships one. */

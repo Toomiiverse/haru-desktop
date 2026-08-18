@@ -29,7 +29,7 @@ type LifeTick = { vitals: Vitals; action: string | null; night: boolean };
 type Emotion = { emotion: string; confidence: number; energy: number; intent: string; focus: string };
 type Beat = { emotion: Emotion; gesture?: 'nod' | 'shake' | 'stare' };
 type VoiceReference = { clip: string; text: string };
-type WardrobeControl = { id: string; name: string; kind: 'toggle' | 'option'; max: number };
+type WardrobeControl = { id: string; name: string; kind: 'toggle' | 'option' | 'pose'; max: number };
 type VoiceConfig = { engine: string; voice: string; referenceText: string; endpoint: string; language: string; speed: number; volume: number; emotionVoices: Record<string, VoiceReference> };
 type SpeechClip = { turn: number; text: string; audio?: Uint8Array; mime?: string };
 
