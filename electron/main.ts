@@ -2952,6 +2952,22 @@ const JOURNAL_TOOL: ChatTool = {
   },
 };
 
+const CHECKIN_TOOL: ChatTool = {
+  type: 'function',
+  function: {
+    name: 'note_check_in',
+    description: "Write down a short check-in when they mention how they are feeling in passing — a rough hour, a spike of anxiety, something that just happened. This is not the journal: it is a note taken while the day is still going, and it is what you read back at the end of the day to ask about it properly. Use it whenever they say something about their state, however briefly, even mid-conversation. Do not use it for a full account of a whole day — that is save_journal_entry.",
+    parameters: {
+      type: 'object',
+      properties: {
+        note: { type: 'string', description: 'What they said happened or how they feel, in their own words, short. First person, as they said it.' },
+        anxiety: { type: 'number', description: 'How anxious, 1-10, only if they gave a number or said something plain enough to place on one. Leave it out rather than guessing — a note without a number is still worth keeping.' },
+      },
+      required: ['note'],
+    },
+  },
+};
+
 const ANILIST_TOOL: ChatTool = {
   type: 'function',
   function: {
@@ -3063,6 +3079,9 @@ function chatTools() {
   const desktop = readDesktopConfig(store.get('desktop'));
   const tools: ChatTool[] = [...CHAT_TOOLS];
   if (readJournalConfig(store.get('journal.config')).enabled) tools.push(JOURNAL_TOOL);
+  // Always offered, journal or not: a check-in is a note about a moment, and
+  // the moments worth noting happen whether or not anyone keeps a diary.
+  tools.push(CHECKIN_TOOL);
   if (anilist.enabled) tools.push(ANILIST_TOOL);
   if (search.enabled) {
     tools.push(SEARCH_TOOL);
@@ -3630,6 +3649,15 @@ function coerceMemoryKind(value: unknown): MemoryKind {
 async function runChatTool(call: ToolCall, latestUserMessage: string): Promise<string> {
   const name = call.function?.name;
   const args = toolArguments(call);
+  if (name === 'note_check_in') {
+    const note = typeof args.note === 'string' ? args.note.trim() : '';
+    if (!note) return JSON.stringify({ error: 'There is nothing to note down yet.' });
+    const rating = typeof args.anxiety === 'number' && args.anxiety >= 1 && args.anxiety <= 10 ? Math.round(args.anxiety) : undefined;
+    const now = zonedNow(CHAT_TIMEZONE);
+    setCheckIns(addCheckIn(getCheckIns(), note.slice(0, 1000), rating, new Date(), localDateKey(now)));
+    console.log(`[checkin] noted from conversation${rating ? ` (anxiety ${rating}/10)` : ''}`);
+    return JSON.stringify({ saved: true, note: note.slice(0, 120), anxiety: rating ?? null, today: checkInsOn(getCheckIns(), localDateKey(now)).length });
+  }
   if (name === 'save_journal_entry') {
     const text = typeof args.text === 'string' ? args.text.trim() : '';
     if (!text) return JSON.stringify({ error: 'There is nothing to write down yet. Ask them how the day went first.' });
