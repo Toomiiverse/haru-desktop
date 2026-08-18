@@ -10,24 +10,11 @@ import { localDateKey, parseTimeOfDay } from './dates';
 // it". An event especially is never ticked off — the party happened whether or
 // not anyone marks it — so being told about it is the only thing that can ever
 // settle it, and without somewhere to record that she asks again forever.
-// remarkedAt is when she actually said something about a finished task. It is a
-// third state again: completedAt is when it was done, heardAbout is when she was
-// told how it went, and this is when she has had her say about it. Without it a
-// ticked-off task sits in front of her for two days and she can open with it
-// every time, which reads as her forgetting it was ever done.
-export type AgendaItem = { title: string; date: string; time?: string; done: boolean; completedAt?: string; heardAbout?: string; remarkedAt?: string };
+export type AgendaItem = { title: string; date: string; time?: string; done: boolean; completedAt?: string; heardAbout?: string };
 export type ItemStatus = 'done' | 'overdue' | 'now' | 'upcoming';
 
 /** Anything unfinished from within this window is still worth chasing. */
 export const OVERDUE_WINDOW_DAYS = 7;
-/**
- * How long something finished stays in front of her. Shorter than the overdue
- * window on purpose: an unfinished task is still owed and she should keep
- * asking, whereas a finished one is only worth remembering long enough to say
- * "you did that yesterday". Kept longer she reads out a week of things that
- * are nobody's problem any more.
- */
-export const DONE_WINDOW_DAYS = 2;
 /** Treated as happening right now rather than missed, either side of the hour. */
 const NOW_WINDOW_MINUTES = 30;
 
@@ -68,37 +55,27 @@ function timeRank(item: AgendaItem) {
   return parsed ? parsed.hour * 60 + parsed.minute : -1;
 }
 
+
 /**
- * A finished task is held on when it was ticked off, not on when it was due.
- * Those come apart exactly when it matters: confirming something a week late
- * used to file it under last week and drop it from her prompt the instant it
- * was done, so the act of telling her was what made her forget.
+ * What she should have in front of her — and nothing that is finished.
+ *
+ * A completed task used to be held here for a couple of days so she could say
+ * "you did that yesterday". Measured against her own model, eight runs an arm,
+ * that turned out to cost far more than it bought: with a finished task on the
+ * list she opened on it 8 times out of 8, and with none she opened on what was
+ * actually outstanding 8 times out of 8. Reordering the list did not move it.
+ * Telling her outright not to lead with one did not move it. The only thing
+ * that moved it was the item not being there.
+ *
+ * She is not silent about finishing things: she still says her piece the moment
+ * something is ticked off, and if they tell her in conversation the message is
+ * right there in front of her. What she has lost is the ability to bring it up
+ * again afterwards, which is the whole point.
  */
-function completionTime(item: AgendaItem) {
-  if (!item.completedAt) return null;
-  const when = new Date(item.completedAt);
-  return Number.isNaN(when.getTime()) ? null : when;
-}
-
-function stillFresh(item: AgendaItem, todayKey: string) {
-  const earliest = shiftDays(todayKey, -DONE_WINDOW_DAYS);
-  const when = completionTime(item);
-  // Items ticked off before completions were recorded have only their due date
-  // to go on, which at worst retires them a little early.
-  return (when ? localDateKey(when) : item.date) >= earliest;
-}
-
 export function relevantItems<T extends AgendaItem>(items: T[], todayKey: string): T[] {
   const earliest = shiftDays(todayKey, -OVERDUE_WINDOW_DAYS);
   return items
-    .filter(item => {
-      // One remark, then it goes. The window below was only ever meant to buy
-      // her a single "you did that yesterday" — it could not tell whether she
-      // had already used it, so she spent the whole day using it.
-      if (item.done && item.remarkedAt) return false;
-      if (item.date >= todayKey) return true;
-      return item.done ? stillFresh(item, todayKey) : item.date >= earliest;
-    })
+    .filter(item => !item.done && (item.date >= todayKey || item.date >= earliest))
     .sort((a, b) => a.date.localeCompare(b.date) || timeRank(a) - timeRank(b));
 }
 
@@ -503,25 +480,6 @@ export function relativeDay(dateKey: string, todayKey: string, weekday: Intl.Dat
   return dateKey < todayKey ? `last ${weekday.format(when)}` : weekday.format(when);
 }
 
-/**
- * When it was ticked off, in the terms she would use it in. A bare [done] makes
- * every finished task equally old news, so she either congratulates someone on
- * something they had long forgotten or treats what they just told her as
- * ancient history. The gap between "you told me a minute ago" and "you did that
- * on Tuesday" is the whole difference between remembering and holding a list.
- */
-function describeCompletion(item: AgendaItem, now: Date, todayKey: string, weekday: Intl.DateTimeFormat) {
-  const when = completionTime(item);
-  if (!when) return '';
-  const minutes = Math.floor((now.getTime() - when.getTime()) / 60_000);
-  // A clock that has gone backwards is not worth trying to explain to her.
-  if (minutes < 0) return '';
-  if (minutes < 5) return 'they told you just now';
-  if (minutes < 90) return `they told you ${Math.round(minutes / 5) * 5} minutes ago`;
-  const day = localDateKey(when);
-  if (day === todayKey) return 'they told you earlier today';
-  return `they told you ${relativeDay(day, todayKey, weekday)}`;
-}
 
 /**
  * The calendar block for the prompt. Each line carries its own relative day and
@@ -572,9 +530,7 @@ export function formatAgenda(items: AgendaItem[], now: Date, todayKey: string, l
   const lines = relevant.map(item => {
     const status = itemStatus(item, now, todayKey);
     const when = `${item.date} (${relativeDay(item.date, todayKey, weekday)}) ${item.time ?? 'all day'}`;
-    const ticked = status === 'done' ? describeCompletion(item, now, todayKey, weekday) : '';
-    const mark = status === 'done' ? ` [done${ticked ? ` - ${ticked}` : ''}]`
-      : status === 'overdue' ? (worthChasing(item, todayKey)
+    const mark = status === 'overdue' ? (worthChasing(item, todayKey)
         ? ' [TIME HAS PASSED - you never heard whether it happened]'
         // Told about it is a different state from given up on, and the wording
         // has to separate them: she asked how the party went, was told all about
@@ -595,14 +551,6 @@ export function formatAgenda(items: AgendaItem[], now: Date, todayKey: string, l
   }
   if (relevant.some(item => itemStatus(item, now, todayKey) === 'overdue' && !worthChasing(item, todayKey))) {
     parts.push('Anything marked as long past you have already chased more than once. Do not open with it, do not ask again whether it happened, and do not work it into a reply about something else. If they raise it, deal with it then.');
-  }
-  // The list said "Laundry [done - they told you 20 minutes ago]" and she still
-  // wrote "if laundry is all that's left for you" — accurate data, and a sentence
-  // that reads to the person who did the laundry as though she had not noticed.
-  // Marking something done is only half the job; she has to speak about it in
-  // the tense it is actually in.
-  if (relevant.some(item => itemStatus(item, now, todayKey) === 'done')) {
-    parts.push('Anything marked done is finished. Speak about it in the past tense — something they did, not something facing them — and never phrase it as still to do, still outstanding, or all they have left.');
   }
   return parts.join(' ');
 }
