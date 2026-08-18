@@ -1769,6 +1769,30 @@ function HeardCheck({ heard }: { heard: string }) {
   </div>;
 }
 
+/**
+ * The little bit of Markdown she actually writes.
+ *
+ * She reaches for **bold** in a list without being asked to, and it arrived on
+ * screen as literal asterisks — which reads as her glitching rather than as
+ * emphasis. Rendered as elements rather than injected as HTML, because her
+ * replies carry text she pulled off the web and none of it should ever be able
+ * to become markup.
+ *
+ * Underscores are deliberately left alone: example_word is a word, not italics,
+ * and she writes about code often enough for that to matter more than the
+ * occasional _emphasis_ going unstyled.
+ */
+const INLINE = /(\*\*\s*[^*]+?\s*\*\*|\*[^*\s][^*\n]*?\*|`[^`\n]+?`)/;
+
+export function withEmphasis(text: string): ReactNode[] {
+  return text.split(INLINE).filter(part => part !== '').map((part, i) => {
+    if (part.startsWith('**') && part.endsWith('**')) return <strong key={i}>{part.slice(2, -2).trim()}</strong>;
+    if (part.startsWith('`') && part.endsWith('`')) return <code key={i}>{part.slice(1, -1)}</code>;
+    if (part.startsWith('*') && part.endsWith('*')) return <em key={i}>{part.slice(1, -1)}</em>;
+    return part;
+  });
+}
+
 export function MessageBubble({ message, onReact, onReply }: { message: Message; onReact?(reaction: Reaction): void; onReply?(): void }) {
   // Only Haru's own replies can be rated or replied to, and the greeting is not
   // a real reply. Nothing to act on when she did not actually say anything.
@@ -1777,7 +1801,7 @@ export function MessageBubble({ message, onReact, onReply }: { message: Message;
     {/* Kept on the message itself, so which reply was meant stays readable long
         after the exchange rather than only while it is being written. */}
     {message.replyTo && <div className="reply-quote"><CornerDownRight size={11}/><span>{message.replyTo.excerpt}</span></div>}
-    <div className={message.ignored ? 'bubble ignored' : 'bubble'}>{message.content}</div>
+    <div className={message.ignored ? 'bubble ignored' : 'bubble'}>{withEmphasis(message.content)}</div>
     {/* Only under what she heard, and only for the person who said it. */}
     {message.role === 'user' && message.heard && <HeardCheck heard={message.heard}/>}
     {actionable && onReact && <div className={message.reaction ? 'reactions rated' : 'reactions'}>

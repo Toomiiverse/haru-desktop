@@ -154,6 +154,8 @@ export function appPage(): string {
   section.on { display:block; }
 
   .msg { max-width:82%; padding:.7rem 1rem; border-radius:var(--r-lg); margin:0 0 .55rem; white-space:pre-wrap; overflow-wrap:anywhere; }
+  .msg b { font-weight:700; }
+  .msg code { font-family:ui-monospace,monospace; font-size:.88em; background:var(--surface-3,rgba(255,255,255,.08)); border-radius:.3rem; padding:.05rem .3rem; }
   .them { background:var(--glass); border:1px solid var(--edge); border-bottom-left-radius:7px; backdrop-filter:blur(12px); }
   .me { background:var(--mine); border:1px solid var(--edge); margin-left:auto; border-bottom-right-radius:7px; }
   .sys { color:var(--ink-dim); font-size:.84rem; text-align:center; max-width:100%; background:none; border:0; }
@@ -219,6 +221,10 @@ export function appPage(): string {
 const $=id=>document.getElementById(id);
 const clockOf=at=>{const d=new Date(at);return isNaN(d)?'':d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});};
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+// The same handful of marks she writes on the desktop, applied to text that has
+// already been escaped — so the only tags that can ever reach the page are the
+// three put there here.
+const md=s=>s.replace(/\*\*\s*([^*]+?)\s*\*\*/g,'<b>$1</b>').replace(/[\u0060]([^\u0060\n]+?)[\u0060]/g,'<code>$1</code>').replace(/\*([^*\s][^*\n]*?)\*/g,'<i>$1</i>');
 const get=u=>fetch(u).then(r=>r.ok?r.json():Promise.reject(r));
 const post=(u,b)=>fetch(u,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(b||{})}).then(r=>r.ok?r.json():Promise.reject(r));
 let tab='chat';
@@ -235,7 +241,7 @@ $('out').onclick=()=>post('/api/logout').then(()=>location.reload());
 function bubbles(list){
   $('chat').innerHTML = list.map(m=>{
     const cls = m.role==='user'?'me':m.role==='assistant'?'them':'sys';
-    return '<div class="msg '+cls+'">'+esc(m.content)+'</div>';
+    return '<div class="msg '+cls+'">'+md(esc(m.content))+'</div>';
   }).join('') || '<p class=quiet>Nothing yet today.</p>';
   $('chat').scrollTop = $('chat').scrollHeight;
 }
