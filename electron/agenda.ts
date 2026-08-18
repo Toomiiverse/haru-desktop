@@ -569,7 +569,15 @@ export function formatAgenda(items: AgendaItem[], now: Date, todayKey: string, l
   if (!relevant.length) return 'The user has nothing saved from today onward.';
 
   const weekday = new Intl.DateTimeFormat('en-US', { weekday: 'long' });
-  const lines = relevant.map(item => {
+  // Outstanding first, finished last. The list is chronological, which puts the
+  // things she has nothing left to ask about at the top — and she opened with
+  // them, leading on a task that was ticked off hours earlier while what was
+  // actually facing them sat underneath. Order inside each half is untouched.
+  const ordered = [
+    ...relevant.filter(item => itemStatus(item, now, todayKey) !== 'done'),
+    ...relevant.filter(item => itemStatus(item, now, todayKey) === 'done'),
+  ];
+  const lines = ordered.map(item => {
     const status = itemStatus(item, now, todayKey);
     const when = `${item.date} (${relativeDay(item.date, todayKey, weekday)}) ${item.time ?? 'all day'}`;
     const ticked = status === 'done' ? describeCompletion(item, now, todayKey, weekday) : '';
@@ -602,7 +610,14 @@ export function formatAgenda(items: AgendaItem[], now: Date, todayKey: string, l
   // Marking something done is only half the job; she has to speak about it in
   // the tense it is actually in.
   if (relevant.some(item => itemStatus(item, now, todayKey) === 'done')) {
-    parts.push('Anything marked done is finished. Speak about it in the past tense — something they did, not something facing them — and never phrase it as still to do, still outstanding, or all they have left.');
+    // Ordering alone is a hint. A model handed a finished task will still find
+    // something to say about it, so the finished half is named for what it is:
+    // background, not material.
+    const anythingLeft = relevant.some(item => itemStatus(item, now, todayKey) !== 'done');
+    parts.push('Anything marked done is finished. Speak about it in the past tense — something they did, not something facing them — and never phrase it as still to do, still outstanding, or all they have left.'
+      + (anythingLeft
+        ? ' Do not lead with one. They are listed so you know what has already been dealt with, not as something to bring up — open on what is still outstanding, and mention a finished one only if they raise it or it genuinely bears on what you are saying.'
+        : ''));
   }
   return parts.join(' ');
 }
