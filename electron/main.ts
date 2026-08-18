@@ -781,15 +781,45 @@ const UNPROMPTED_CONTEXT_TURNS = 10;
  * one day. Clearing the screen at lunchtime should not make her forget the
  * morning; that is the whole point of the day being the unit.
  */
+/**
+ * What has been said, and when it was said.
+ *
+ * At five in the morning this returned an empty string: the day had rolled over,
+ * today's archive was empty, and last night's seventy-eight messages sat one key
+ * away untouched. So she spoke up with no idea what had already passed between
+ * them, and rather than saying nothing she invented the continuity she was
+ * missing — "you never told me how the rental inspection went yesterday",
+ * about an inspection that is still two days off and has never happened.
+ *
+ * The first hours of a day are exactly when she has least to go on and is most
+ * likely to fill the gap herself, so an empty today falls back to the last day
+ * that had anything in it. Labelled as what it is, never as today: knowing what
+ * was said is only half of it, and a companion who thinks last night was this
+ * morning is its own kind of wrong.
+ */
+function spokenOn(day: string, today: string): { role?: string; content?: string }[] {
+  const archived = (((store.get('chat.archive') as Record<string, unknown[]> | undefined) ?? {})[day] ?? []) as { role?: string; content?: string }[];
+  // The live list is whatever has not been archived yet, which is always today.
+  const live = day === today ? ((store.get('chat.messages') as { role?: string; content?: string }[] | undefined) ?? []) : [];
+  return [...archived, ...live].filter(message => message.role === 'user' || message.role === 'assistant');
+}
+
 function todaySoFar(limit = UNPROMPTED_CONTEXT_TURNS): string {
-  const today = localDateKey(zonedNow(CHAT_TIMEZONE));
-  const live = (store.get('chat.messages') as { role?: string; content?: string }[] | undefined) ?? [];
-  const archived = (((store.get('chat.archive') as Record<string, unknown[]> | undefined) ?? {})[today] ?? []) as { role?: string; content?: string }[];
-  const spoken = [...archived, ...live].filter(message => message.role === 'user' || message.role === 'assistant');
-  if (!spoken.length) return '';
-  const lines = spoken.slice(-limit).map(message =>
-    `${message.role === 'user' ? 'Them' : 'You'}: ${String(message.content ?? '').replace(/\s+/g, ' ').slice(0, 200)}`);
-  return `What has already been said today, oldest first:\n${lines.join('\n')}`;
+  const now = zonedNow(CHAT_TIMEZONE);
+  const today = localDateKey(now);
+  const render = (spoken: { role?: string; content?: string }[]) => spoken.slice(-limit).map(message =>
+    `${message.role === 'user' ? 'Them' : 'You'}: ${String(message.content ?? '').replace(/\s+/g, ' ').slice(0, 200)}`).join('\n');
+
+  const todays = spokenOn(today, today);
+  if (todays.length) return `What has already been said today, oldest first:\n${render(todays)}`;
+
+  const archive = (store.get('chat.archive') as Record<string, unknown[]> | undefined) ?? {};
+  const earlier = Object.keys(archive).filter(day => day < today).sort().pop();
+  if (!earlier) return '';
+  const last = spokenOn(earlier, today);
+  if (!last.length) return '';
+  const when = relativeDay(earlier, today, new Intl.DateTimeFormat('en-US', { weekday: 'long' }));
+  return `Nothing has been said between you yet today. The last time you spoke was ${when}, and it ended like this, oldest first:\n${render(last)}\nThat was ${when}, not today. Do not talk about any of it as though it has just happened, and do not assume anything has happened since.`;
 }
 
 /**
@@ -839,7 +869,13 @@ function unpromptedContext(): string {
   // opposite of the intent. Returning to what happened today is the good case;
   // only saying the same line twice is the bad one, and the two have to be
   // separated or avoiding the second costs you the first.
-  return `${parts.join('\n')}\nCarry on from that. Pick up something from today — what they told you, what they were doing, how a thing they mentioned turned out — rather than opening on nothing. Do not greet them, do not say a line you have already said, and do not act as though this is the first thing you have said all day.`;
+  // "Do not act as though this is the first thing you have said all day" is
+  // false at six in the morning, and telling her to pick something up from
+  // today when today is empty is how she came to invent one.
+  const fresh = !spokenOn(localDateKey(zonedNow(CHAT_TIMEZONE)), localDateKey(zonedNow(CHAT_TIMEZONE))).length;
+  return `${parts.join('\n')}\n${fresh
+    ? 'This is the first thing you have said today. Open on what is actually in front of them — what is on their list, or something they left unfinished last time — and do not ask how anything went unless it has already happened.'
+    : 'Carry on from that. Pick up something from today — what they told you, what they were doing, how a thing they mentioned turned out — rather than opening on nothing. Do not greet them, do not say a line you have already said, and do not act as though this is the first thing you have said all day.'}`;
 }
 
 /**
