@@ -1462,13 +1462,20 @@ function AniListField() {
  * answer everyone's — and everything she knows is in those answers.
  */
 function DiscordField() {
-  const [status, setStatus] = useState<{ enabled: boolean; ownerId: string; pesterHours: number; hasToken: boolean; connected: boolean } | null>(null);
+  const [status, setStatus] = useState<{ enabled: boolean; ownerId: string; pesterHours: number; hasToken: boolean; connected: boolean; botName: string; trouble: string } | null>(null);
   const [token, setToken] = useState('');
   const [ownerId, setOwnerId] = useState('');
   const [hours, setHours] = useState(3);
   const [message, setMessage] = useState<{ text: string; error?: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
-  useEffect(() => { window.haru?.discord.status().then(s => { setStatus(s); setOwnerId(s.ownerId); setHours(s.pesterHours); }); }, []);
+  useEffect(() => {
+    const read = () => window.haru?.discord.status().then(s => { setStatus(s); setOwnerId(s.ownerId); setHours(s.pesterHours); });
+    read();
+    // Polled while the panel is open: the interesting failures happen when a
+    // message arrives, which is after anyone has stopped looking at a status.
+    const timer = setInterval(read, 3000);
+    return () => clearInterval(timer);
+  }, []);
 
   if (!window.haru || !status) return null;
 
@@ -1506,7 +1513,8 @@ function DiscordField() {
         Let her use Discord
       </label>
     </div>
-    {status.enabled && <p className="status-note">{status.connected ? 'Connected. Send her a direct message.' : 'Switched on but not connected — check the log.'}</p>}
+    {status.enabled && <p className="status-note">{status.botName ? `Connected as ${status.botName}. Message her.` : status.connected ? 'Connecting…' : 'Switched on but not connected.'}</p>}
+    {status.trouble && <p className="status-error">{status.trouble}</p>}
     {message && <p className={message.error ? 'status-error' : 'status-ok'}>{message.text}</p>}
   </div>;
 }

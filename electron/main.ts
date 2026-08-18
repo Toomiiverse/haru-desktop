@@ -5150,6 +5150,8 @@ async function nudgeForPhone(): Promise<{ line: string; about: string } | null> 
 // ---- Reaching her from Discord --------------------------------------------
 
 let discord: DiscordLink | null = null;
+let discordUser = '';
+let discordTrouble = '';
 let pesterTimer: ReturnType<typeof setInterval> | null = null;
 
 function getDiscordConfig(): DiscordConfig {
@@ -5229,13 +5231,20 @@ async function startDiscord() {
   const token = getDiscordToken();
   if (!config.enabled || !token || !config.ownerId) return;
   if (discord) return;
-  discord = new DiscordLink(token, config.ownerId, { answer: answerOnDiscord });
+  discordTrouble = '';
+  discord = new DiscordLink(token, config.ownerId, {
+    answer: answerOnDiscord,
+    onReady: name => { discordUser = name; discordTrouble = ''; },
+    onTrouble: why => { discordTrouble = why; },
+    onIgnored: why => { discordTrouble = why; },
+  });
   discord.start();
   if (pesterTimer) clearInterval(pesterTimer);
   pesterTimer = setInterval(() => { void pesterOnDiscord(); }, config.pesterHours * 60 * 60_000);
 }
 
 function stopDiscord() {
+  discordUser = '';
   if (pesterTimer) clearInterval(pesterTimer);
   pesterTimer = null;
   discord?.stop();
@@ -5608,7 +5617,7 @@ app.whenReady().then(() => {
   // the renderer is told nothing but whether one exists.
   ipcMain.handle('discord:status', () => {
     const config = getDiscordConfig();
-    return { enabled: config.enabled, ownerId: config.ownerId, pesterHours: config.pesterHours, hasToken: Boolean(getDiscordToken()), connected: Boolean(discord) };
+    return { enabled: config.enabled, ownerId: config.ownerId, pesterHours: config.pesterHours, hasToken: Boolean(getDiscordToken()), connected: Boolean(discord), botName: discordUser, trouble: discordTrouble };
   });
   ipcMain.handle('discord:setToken', (_e, token: string) => { saveDiscordToken(String(token ?? '')); return Boolean(getDiscordToken()); });
   ipcMain.handle('discord:set', async (_e, next: { ownerId: string; pesterHours: number; enabled: boolean }) => {

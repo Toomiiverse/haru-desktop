@@ -132,6 +132,10 @@ export function backoffMs(attempt: number): number {
 type Sink = {
   answer(text: string): Promise<{ reply: string; ignored?: boolean }>;
   onReady?(username: string): void;
+  /** Said out loud in Setup, because a console is not somewhere anyone looks. */
+  onTrouble?(why: string): void;
+  /** Every message she declined to answer, and why. The commonest bug is here. */
+  onIgnored?(why: string): void;
 };
 
 /**
@@ -199,7 +203,10 @@ export class DiscordLink {
       if (this.closed) return;
       // 4004 is a rejected token. Retrying that forever helps nobody and only
       // makes the real problem harder to see in the log.
-      if (event.code === 4004) { console.error('[discord] the token was rejected — set it again in Setup'); return; }
+      if (event.code === 4004) { this.sink.onTrouble?.('Discord rejected the token. Set it again in Setup.'); console.error('[discord] the token was rejected'); return; }
+      // 4014 is the one people actually hit: the bot is asking for Message
+      // Content, and the developer portal has not been told to allow it.
+      if (event.code === 4014) { this.sink.onTrouble?.('Discord refused the Message Content intent. Turn it on at discord.com/developers under Bot, Privileged Gateway Intents.'); console.error('[discord] intent refused'); return; }
       this.attempt += 1;
       const wait = backoffMs(this.attempt);
       console.warn('[discord] disconnected (' + event.code + ') — trying again in ' + Math.round(wait / 1000) + 's');
@@ -242,7 +249,20 @@ export class DiscordLink {
 
     if (packet.t !== 'MESSAGE_CREATE') return;
     const message = packet.d as { channel_id: string; content: string; author?: { id?: string; bot?: boolean } };
-    if (!shouldAnswer(message, this.ownerId, this.selfId)) return;
+    if (!shouldAnswer(message, this.ownerId, this.selfId)) {
+      // Named rather than dropped in silence. "She is connected and says
+      // nothing" has three quite different causes and they are indistinguishable
+      // from the outside: the wrong person, an empty message, or her own echo.
+      const from = message.author?.id ?? 'nobody';
+      if (from !== this.selfId && !message.author?.bot) {
+        const why = from !== this.ownerId
+          ? `Ignored a message from ${from} — she only answers ${this.ownerId}.`
+          : 'A message arrived with no text. That is the Message Content intent being off.';
+        this.sink.onIgnored?.(why);
+        console.warn('[discord] ' + why);
+      }
+      return;
+    }
 
     try {
       // Typing, because she takes several seconds and silence reads as a bot
