@@ -49,6 +49,7 @@ import { claimsDesktopAction, dropRoleHeader, dropInventedContact, dropInventedS
 import { hasShout, readVoiceConfig, referenceFor, shoutReference, spokenCase, speakableText, splitForSpeech, synthesise, type SpeechClip, type VoiceConfig } from './voice';
 import { formatMemoryPrompt, isWorthKeeping, isWorthRemembering, MEMORY_KINDS, migrateMemories, pruneMemories, rememberInto, selectMemories, summaryPrompt, type MemoryKind, type MemoryRecord, type SessionSummary } from './memory';
 import { forgetDevice, forgetEveryDevice, readWebAccess, setPassword, weakPassword, type WebAccess } from './web';
+import { conversationMayLeave } from './sensitivity';
 import { addCheckIn, checkInInstruction, checkInsOn, readCheckIns, type CheckIn } from './checkins';
 import { DiscordLink, looksLikeUserId, readDiscordConfig, type DiscordConfig } from './discord';
 import { startWebServer, type WebDeps } from './webserver';
@@ -4708,14 +4709,35 @@ function noteTheyAccounted(said: string) {
  * quips and tab remarks — none of which are questions and none of which should
  * ever cost money. Only a real message from the user can send anything out.
  */
-function brainFor(message: string, local: ProviderConfig): { config: ProviderConfig; escalated: boolean; because: string } {
+/**
+ * Which model answers, and — first — whether it is allowed to.
+ *
+ * Two questions, asked in this order, and the order is the whole point. "Is it
+ * hard" decides whether a better model is worth reaching for. "May it leave"
+ * decides whether reaching is permitted at all, and it has the final say: a
+ * question about a password is often exactly the kind of long, technical thing
+ * that reads as worth escalating, and that is the one that must not go.
+ *
+ * Checked against the conversation rather than the newest line, because
+ * escalating sends the history with it. A key pasted three turns ago is still in
+ * what would be posted.
+ */
+function brainFor(message: string, local: ProviderConfig, conversation: { role: string; content: string }[] = []): { config: ProviderConfig; escalated: boolean; because: string } {
   const setting = readEscalateConfig(store.get('escalate'));
   const away = store.get('escalate.provider') as ProviderConfig | undefined;
   if (!setting.enabled || !away?.model || !isOpenAIShaped(away.provider)) return { config: local, escalated: false, because: 'no second model set up' };
+
   const verdict = decide(message, setting);
-  return verdict.escalate
-    ? { config: { ...away, temperature: local.temperature }, escalated: true, because: verdict.because }
-    : { config: local, escalated: false, because: verdict.because };
+  if (!verdict.escalate) return { config: local, escalated: false, because: verdict.because };
+
+  // pageWasRead is already true whenever a stranger's page is in the turn, and a
+  // page she fetched is not ours to forward either.
+  const allowed = conversationMayLeave([...conversation, { role: 'user', content: message }], pageWasRead);
+  if (!allowed.safe) {
+    console.log(`[router] keeping this one local — ${allowed.because}`);
+    return { config: local, escalated: false, because: `stays here: ${allowed.because}` };
+  }
+  return { config: { ...away, temperature: local.temperature }, escalated: true, because: verdict.because };
 }
 
 async function ollamaChat(messages: { role: string; content: string; at?: string }[], config: ProviderConfig, { hands = true }: { hands?: boolean } = {}) {
@@ -4760,7 +4782,7 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // Chosen once for the whole turn, tool rounds included: swapping models
   // half-way through a tool loop would hand one model's call to another to
   // answer, and the two do not agree on how a call is even identified.
-  const brain = brainFor(latest, config);
+  const brain = brainFor(latest, config, messages);
   if (brain.escalated) console.log(`[ai] sent out to ${brain.config.model} — ${brain.because}`);
   config = brain.config;
   // Once a stranger's page is in the conversation, she finishes this turn with
