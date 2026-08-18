@@ -331,3 +331,37 @@ export function dropRepeatedParagraphs(reply: string, previousReplies: string[])
   // paragraphs are the ones she actually meant.
   return dropTrailingRepeatQuestions(kept.slice(0, MAX_PARAGRAPHS)).join('\n\n').trim();
 }
+/**
+ * The paragraph after the answer.
+ *
+ * Corrected about the date of a rental inspection she came back with three: the
+ * answer, an unrelated question about a video edit, and a remark about how late
+ * it was with another question after it. Only the first was a reply to anything.
+ * Her prompt has forbidden exactly this from the start — "do not sweep in a
+ * topic they did not raise" — and she does it anyway, which after six other
+ * wordings today is not something another sentence is going to fix.
+ *
+ * The ceiling above is three, and the reasoning for it still holds: a real
+ * answer sometimes needs two beats and a caveat. What it cannot tell is whether
+ * the third paragraph is the caveat or the padding. That distinction is not in
+ * the prose, but it is in the shape and in what she did to produce the reply —
+ * an answer with parts is written in parts, and an answer she went and looked up
+ * is long because the world is, not because she was filling.
+ *
+ * So three still stands for a list or for something she searched for; anything
+ * else stops at two. Asked to look up how to set up Square subscriptions she
+ * replied with a lead-in and two numbered steps, and that reply was exactly what
+ * was wanted — it must survive this untouched, and it does, on both counts.
+ */
+const ENUMERATED = /^\s*(?:[-*•]|\d+[.)])\s/;
+const TACKED_ON_CEILING = 2;
+
+export function dropTackedOnParagraphs(reply: string, lookedSomethingUp: boolean): string {
+  // She went and found this out. Its length is the answer's, not hers.
+  if (lookedSomethingUp) return reply;
+  const paragraphs = reply.split(/\n{2,}/);
+  if (paragraphs.length <= TACKED_ON_CEILING) return reply;
+  // A list is a shape, not padding: the parts are the answer.
+  if (paragraphs.some(paragraph => ENUMERATED.test(paragraph))) return reply;
+  return paragraphs.slice(0, TACKED_ON_CEILING).join('\n\n').trim();
+}
