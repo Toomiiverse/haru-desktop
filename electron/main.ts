@@ -1759,17 +1759,42 @@ let reactingToActivity = false;
  * whole object, which would take the key with it. That is exactly how the
  * private-mode character got wiped every time the mode was toggled.
  */
+/**
+ * Encrypted through the OS keyring when one is running. A headless box that
+ * never unlocked a login session has none — safeStorage refuses outright
+ * rather than half-working there — so this falls back to keeping the key as
+ * readable as everything else Haru remembers already is, next to it in the
+ * same file, rather than refusing to save it at all.
+ *
+ * On Windows and macOS the fallback never fires: safeStorage is always
+ * available, so nothing here changes what is on this disk. It exists for the
+ * server, and on that machine config.json must be chmod 600 — the file then
+ * holds a key in the clear and is only as private as its permissions.
+ *
+ * The prefix is what makes it honest. A value marked plain: says outright that
+ * it is not protected, and an unmarked one is from before this existed and is
+ * still encrypted, so nothing saved earlier has to be re-entered.
+ */
+function encryptSecret(value: string): string {
+  if (safeStorage.isEncryptionAvailable()) return 'enc:' + safeStorage.encryptString(value).toString('base64');
+  return 'plain:' + value;
+}
+
+function decryptSecret(saved: string | undefined): string {
+  if (!saved) return '';
+  if (saved.startsWith('plain:')) return saved.slice('plain:'.length);
+  const encoded = saved.startsWith('enc:') ? saved.slice('enc:'.length) : saved; // old format, saved before the fallback existed
+  try { return safeStorage.decryptString(Buffer.from(encoded, 'base64')); } catch { return ''; }
+}
+
 function saveSearchKey(apiKey: string) {
   const key = apiKey.trim();
   if (!key) { store.delete('searchApiKey' as never); return; }
-  if (!safeStorage.isEncryptionAvailable()) throw new Error('This system has no secure storage available, so the API key cannot be saved safely.');
-  store.set('searchApiKey', safeStorage.encryptString(key).toString('base64'));
+  store.set('searchApiKey', encryptSecret(key));
 }
 
 function getSearchKey(): string {
-  const saved = store.get('searchApiKey') as string | undefined;
-  if (!saved) return '';
-  try { return safeStorage.decryptString(Buffer.from(saved, 'base64')); } catch { return ''; }
+  return decryptSecret(store.get('searchApiKey') as string | undefined);
 }
 
 /**
@@ -1780,14 +1805,11 @@ function getSearchKey(): string {
 function saveRemoteKey(apiKey: string) {
   const key = apiKey.trim();
   if (!key) { store.delete('remoteApiKey' as never); return; }
-  if (!safeStorage.isEncryptionAvailable()) throw new Error('This system has no secure storage available, so the API key cannot be saved safely.');
-  store.set('remoteApiKey', safeStorage.encryptString(key).toString('base64'));
+  store.set('remoteApiKey', encryptSecret(key));
 }
 
 function getRemoteKey(): string {
-  const saved = store.get('remoteApiKey') as string | undefined;
-  if (!saved) return '';
-  try { return safeStorage.decryptString(Buffer.from(saved, 'base64')); } catch { return ''; }
+  return decryptSecret(store.get('remoteApiKey') as string | undefined);
 }
 
 /**
@@ -1801,14 +1823,11 @@ function getRemoteKey(): string {
 function saveOpenAIKey(apiKey: string) {
   const key = apiKey.trim();
   if (!key) { store.delete('openaiApiKey' as never); return; }
-  if (!safeStorage.isEncryptionAvailable()) throw new Error('This system has no secure storage available, so the API key cannot be saved safely.');
-  store.set('openaiApiKey', safeStorage.encryptString(key).toString('base64'));
+  store.set('openaiApiKey', encryptSecret(key));
 }
 
 function getOpenAIKey(): string {
-  const saved = store.get('openaiApiKey') as string | undefined;
-  if (!saved) return '';
-  try { return safeStorage.decryptString(Buffer.from(saved, 'base64')); } catch { return ''; }
+  return decryptSecret(store.get('openaiApiKey') as string | undefined);
 }
 
 /**
@@ -1824,14 +1843,11 @@ function getOpenAIKey(): string {
 function saveSelfHostedKey(apiKey: string) {
   const key = apiKey.trim();
   if (!key) { store.delete('selfHostedApiKey' as never); return; }
-  if (!safeStorage.isEncryptionAvailable()) throw new Error('This system has no secure storage available, so the API key cannot be saved safely.');
-  store.set('selfHostedApiKey', safeStorage.encryptString(key).toString('base64'));
+  store.set('selfHostedApiKey', encryptSecret(key));
 }
 
 function getSelfHostedKey(): string {
-  const saved = store.get('selfHostedApiKey') as string | undefined;
-  if (!saved) return '';
-  try { return safeStorage.decryptString(Buffer.from(saved, 'base64')); } catch { return ''; }
+  return decryptSecret(store.get('selfHostedApiKey') as string | undefined);
 }
 
 /**
@@ -5273,14 +5289,11 @@ function saveDiscordConfig(config: DiscordConfig) {
 function saveDiscordToken(token: string) {
   const value = token.trim();
   if (!value) { store.delete('discordToken' as never); return; }
-  if (!safeStorage.isEncryptionAvailable()) throw new Error('This system has no secure storage available, so the token cannot be saved safely.');
-  store.set('discordToken', safeStorage.encryptString(value).toString('base64'));
+  store.set('discordToken', encryptSecret(value));
 }
 
 function getDiscordToken(): string {
-  const saved = store.get('discordToken') as string | undefined;
-  if (!saved) return '';
-  try { return safeStorage.decryptString(Buffer.from(saved, 'base64')); } catch { return ''; }
+  return decryptSecret(store.get('discordToken') as string | undefined);
 }
 
 /**

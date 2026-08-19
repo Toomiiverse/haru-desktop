@@ -297,16 +297,27 @@ const ci=$('ci');
 // waits for its own recording arrives late and reads as her being slow, when she
 // was not. If she has no voice set up the request 503s and nothing happens,
 // which is the correct amount of fuss.
-let playing=null;
+//
+// One Audio element, reused for every line, rather than a fresh one per reply.
+// iOS Safari only allows programmatic play() on an element that has already
+// played inside a user gesture — and the gesture here is the send tap, which is
+// long gone by the time an 8-17s reply comes back. A fresh Audio element made at
+// that point is unprivileged and play() is silently rejected: nothing plays,
+// nothing throws, and it looks exactly like a broken voice. Priming this element
+// inside the tap (see the submit handler below) carries that privilege forward
+// to the later play() on the same element, which Safari does allow.
+const player=new Audio();
+function primeVoice(){ player.play().catch(()=>{}); player.pause(); }
 async function speak(text){
   try{
-    if(playing){ playing.pause(); playing=null; }
+    player.pause();
     const r=await fetch('/api/speak',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({text})});
     if(!r.ok) return;
     const url=URL.createObjectURL(await r.blob());
-    playing=new Audio(url);
-    playing.onended=playing.onerror=()=>URL.revokeObjectURL(url);
-    await playing.play();
+    const previous=player.src;
+    player.src=url;
+    player.onended=player.onerror=()=>{ URL.revokeObjectURL(url); if(previous) URL.revokeObjectURL(previous); };
+    await player.play();
   }catch(e){ console.warn('[voice] '+(e&&e.message||e)); }
 }
 
@@ -353,6 +364,7 @@ ci.addEventListener('input',()=>{ci.style.height='auto';ci.style.height=Math.min
 $('cf').addEventListener('submit',async ev=>{
   ev.preventDefault();
   const text=ci.value.trim(); if(!text)return;
+  primeVoice();
   ci.value=''; ci.style.height='auto'; $('cb').disabled=true;
   $('chat').insertAdjacentHTML('beforeend','<div class="msg me">'+esc(text)+'</div><div class="msg them" id=wait>…</div>');
   $('chat').scrollTop=$('chat').scrollHeight;
