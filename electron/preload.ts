@@ -49,6 +49,11 @@ contextBridge.exposeInMainWorld('haru', {
     },
   },
   search: {
+  checkInSource: {
+    status: () => ipcRenderer.invoke('checkinsource:get'),
+    set: (url: string, username: string, password: string) => ipcRenderer.invoke('checkinsource:set', url, username, password),
+    pull: () => ipcRenderer.invoke('checkinsource:pull'),
+  },
     get: () => ipcRenderer.invoke('search:get') as Promise<SearchConfig & { hasKey: boolean }>,
     set: (config: SearchConfig) => ipcRenderer.invoke('search:set', config) as Promise<SearchConfig & { hasKey: boolean }>,
     setKey: (apiKey: string) => ipcRenderer.invoke('search:setKey', apiKey) as Promise<boolean>,
