@@ -40,17 +40,32 @@ const BASE = `https://api.runpod.ai/v2/${id}/openai/v1`;
  * mismatch comes back as a 400 that reads like an auth problem, so it is worth
  * asking rather than assuming. This route answers without waking a worker.
  */
+// Failures here are reported rather than swallowed. A bare "could not ask" sends
+// you round three possibilities with no way to tell them apart; the status code
+// separates them immediately — 401 is the key, 404 is the route, a timeout is a
+// worker still waking. Given a long leash for the same reason: this may have to
+// start a worker before anything can answer.
 async function servedModel() {
   try {
     const response = await fetch(`${BASE}/models`, {
-      signal: AbortSignal.timeout(60_000),
+      signal: AbortSignal.timeout(300_000),
       headers: { authorization: `Bearer ${key}` },
     });
-    if (!response.ok) return null;
+    if (!response.ok) {
+      const text = (await response.text()).slice(0, 200).replace(/\s+/g, ' ');
+      console.log(`  /models:  HTTP ${response.status} — ${text || '(no body)'}`);
+      if (response.status === 401 || response.status === 403) console.log('            That is the key. Check it was pasted whole and is not the revoked one.');
+      if (response.status === 404) console.log('            That is the route. This endpoint may not have been deployed with the vLLM worker.');
+      return null;
+    }
     const body = await response.json();
     const names = (body.data ?? []).map(entry => entry.id).filter(Boolean);
+    if (!names.length) console.log(`  /models:  answered, but listed nothing — ${JSON.stringify(body).slice(0, 200)}`);
     return names[0] ?? null;
-  } catch { return null; }
+  } catch (error) {
+    console.log(`  /models:  ${error.name === 'TimeoutError' ? 'timed out waiting for a worker' : error.message}`);
+    return null;
+  }
 }
 
 async function ask(label, prompt, timeoutMs) {
