@@ -19,6 +19,18 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
+// Windows only, and worth saying outright rather than leaving it to be inferred
+// from a missing signtool. The problem this solves — Smart App Control refusing
+// to run an unsigned binary — does not exist on Linux, so the server has nothing
+// to sign and never needs this. Asked to run it there anyway, the honest answer
+// is that there is nothing to do, not that a tool is missing.
+if (process.platform !== 'win32') {
+  console.log(`  nothing to do on ${process.platform}.`);
+  console.log('  This signs the Windows Electron binary so Smart App Control will run it.');
+  console.log('  No such policy exists here — run her the usual way: npm install && npm run build.');
+  process.exit(0);
+}
+
 const NEEDED = ['HARU_SIGN_ENDPOINT', 'HARU_SIGN_ACCOUNT', 'HARU_SIGN_PROFILE'];
 const missing = NEEDED.filter(name => !(process.env[name] ?? '').trim());
 if (missing.length) {
