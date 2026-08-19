@@ -214,6 +214,12 @@ contextBridge.exposeInMainWorld('haru', {
       ipcRenderer.on('voice:changed', listener);
       return () => ipcRenderer.removeListener('voice:changed', listener);
     },
+    /** Whether she is currently mid-line, reported from wherever main last heard it. */
+    onSpeakingChanged: (callback: (speaking: boolean) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, speaking: boolean) => callback(speaking);
+      ipcRenderer.on('voice:speakingChanged', listener);
+      return () => ipcRenderer.removeListener('voice:speakingChanged', listener);
+    },
   },
 
   wardrobe: {

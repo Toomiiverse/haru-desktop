@@ -123,6 +123,22 @@ export function claimsDesktopAction(reply: string): DesktopClaim {
  */
 const ROLE_HEADER = /^\s*(assistant|user|system|model)\s*:?\s*\n+/i;
 
+/**
+ * Markdown emphasis a character who talks, not writes, has no business using.
+ *
+ * Told directly and repeatedly not to use asterisks, a 14B still reaches for
+ * `**bold**` under stress or emphasis — the same training habit every chat
+ * model has, and wording alone did not settle it. So the pairs are unwrapped to
+ * their plain text and anything left over is dropped rather than spoken as a
+ * literal asterisk.
+ */
+export function dropMarkdownEmphasis(reply: string): string {
+  return reply
+    .replace(/\*\*(.+?)\*\*/g, '$1')
+    .replace(/(?<!\w)\*(.+?)\*(?!\w)/g, '$1')
+    .replace(/\*/g, '');
+}
+
 export function dropRoleHeader(reply: string): string {
   const withoutHeader = reply.replace(ROLE_HEADER, '');
   // An opening quote with no closing one is the other half of the same leak.

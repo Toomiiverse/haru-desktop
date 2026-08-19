@@ -32,7 +32,7 @@ export interface Character { identity: string; style: string; }
 // Speech to text. 'local' is any server speaking OpenAI's /v1/audio/transcriptions
 // — see electron/listen.ts.
 export type ListenEngine = 'off' | 'local';
-export interface ListenConfig { engine: ListenEngine; endpoint: string; language: string; autoSend: boolean; wakeWord: boolean; replyWindow: boolean; chimeVolume: number; }
+export interface ListenConfig { engine: ListenEngine; endpoint: string; language: string; autoSend: boolean; wakeWord: boolean; replyWindow: boolean; chimeVolume: number; bargeIn: boolean; }
 export type SearchProvider = 'duckduckgo' | 'brave' | 'google';
 export interface SearchConfig { enabled: boolean; provider: SearchProvider; limit: number; engineId: string; readPages: boolean; place: string; }
 export interface DesktopConfig { launch: boolean; power: boolean; }

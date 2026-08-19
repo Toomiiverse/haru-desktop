@@ -109,7 +109,14 @@ export type Listener = {
  * over a fan ignores someone talking quietly. Tracking the floor means the
  * trigger sits a constant distance above whatever the room is doing.
  */
-export async function startListening(onUtterance: (clip: Recording) => void): Promise<Listener> {
+export async function startListening(
+  onUtterance: (clip: Recording) => void,
+  /** Overrides TRIGGER_OVER_FLOOR — the barge-in listener wants a much higher
+   *  bar than a room going quiet needs, since its own room noise is her voice
+   *  leaking back in through the speakers. */
+  opts: { triggerOverFloor?: number } = {},
+): Promise<Listener> {
+  const triggerOverFloor = opts.triggerOverFloor ?? TRIGGER_OVER_FLOOR;
   const stream = await navigator.mediaDevices.getUserMedia({
     audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
   });
@@ -151,7 +158,7 @@ export async function startListening(onUtterance: (clip: Recording) => void): Pr
     const rms = Math.sqrt(sum / input.length);
     live = live * 0.7 + rms * 0.3;
 
-    const trigger = Math.max(floor * TRIGGER_OVER_FLOOR, MIN_TRIGGER);
+    const trigger = Math.max(floor * triggerOverFloor, MIN_TRIGGER);
     if (!inSpeech) {
       // Only tracked between utterances, so someone talking does not slowly
       // raise the floor until they are talking beneath it.
