@@ -20,16 +20,38 @@ const key = (process.env.RUNPOD_API_KEY ?? '').trim();
 const id = (process.env.RUNPOD_ENDPOINT_ID ?? '').trim();
 const model = (process.env.RUNPOD_MODEL ?? '').trim();
 
-const missing = [['RUNPOD_API_KEY', key], ['RUNPOD_ENDPOINT_ID', id], ['RUNPOD_MODEL', model]]
+const missing = [['RUNPOD_API_KEY', key], ['RUNPOD_ENDPOINT_ID', id]]
   .filter(([, value]) => !value).map(([name]) => name);
 if (missing.length) {
   console.error(`  not set: ${missing.join(', ')}`);
-  console.error('  Set all three and run again. The key is only ever sent to RunPod.');
+  console.error('  Set them and run again. The key is only ever sent to RunPod.');
+  console.error('  RUNPOD_MODEL is optional — without it, the endpoint is asked what it serves.');
   process.exit(1);
 }
 
 // The same URL she would use: her endpoint plus /chat/completions.
 const BASE = `https://api.runpod.ai/v2/${id}/openai/v1`;
+
+/**
+ * What is this endpoint actually serving?
+ *
+ * The model string has to match exactly, and it is not always what was typed
+ * into the deploy form — a name can be normalised, or a revision appended. A
+ * mismatch comes back as a 400 that reads like an auth problem, so it is worth
+ * asking rather than assuming. This route answers without waking a worker.
+ */
+async function servedModel() {
+  try {
+    const response = await fetch(`${BASE}/models`, {
+      signal: AbortSignal.timeout(60_000),
+      headers: { authorization: `Bearer ${key}` },
+    });
+    if (!response.ok) return null;
+    const body = await response.json();
+    const names = (body.data ?? []).map(entry => entry.id).filter(Boolean);
+    return names[0] ?? null;
+  } catch { return null; }
+}
 
 async function ask(label, prompt, timeoutMs) {
   const started = Date.now();
@@ -38,7 +60,7 @@ async function ask(label, prompt, timeoutMs) {
       method: 'POST',
       signal: AbortSignal.timeout(timeoutMs),
       headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
-      body: JSON.stringify({ model, messages: [{ role: 'user', content: prompt }], max_tokens: 60, temperature: 0.7 }),
+      body: JSON.stringify({ model: serving, messages: [{ role: 'user', content: prompt }], max_tokens: 60, temperature: 0.7 }),
     });
     const seconds = ((Date.now() - started) / 1000).toFixed(1);
     if (!response.ok) {
@@ -58,9 +80,27 @@ async function ask(label, prompt, timeoutMs) {
   }
 }
 
+let serving = model;
+
 (async () => {
   console.log(`  endpoint: ${BASE}`);
-  console.log(`  model:    ${model}\n`);
+  const found = await servedModel();
+  if (found) {
+    console.log(`  serving:  ${found}`);
+    if (model && model !== found) {
+      console.log(`  NOTE:     you set RUNPOD_MODEL to ${model}, which is not what it serves.`);
+      console.log('            Using the served name — put that one in her config too.');
+    }
+    serving = found;
+  } else if (model) {
+    console.log(`  serving:  could not ask; using RUNPOD_MODEL (${model})`);
+  } else {
+    console.error('  serving:  could not ask what it serves, and RUNPOD_MODEL is not set.');
+    console.error('            Either the endpoint id is wrong, the key is wrong, or this');
+    console.error('            endpoint has no OpenAI-compatible route. Set RUNPOD_MODEL to try anyway.');
+    process.exit(1);
+  }
+  console.log();
 
   // First call after idle carries the load. Given a long leash on purpose.
   const cold = await ask('cold (first call)', 'Say the single word: ready', 300_000);
