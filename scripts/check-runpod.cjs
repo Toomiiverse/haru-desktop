@@ -95,10 +95,45 @@ async function ask(label, prompt, timeoutMs) {
   }
 }
 
+/**
+ * What the endpoint itself says about its workers.
+ *
+ * A timeout on /models is not a diagnosis — it could be a worker downloading
+ * twenty gigabytes of weights for the first time, or one crash-looping on an
+ * image that never built, and those need opposite responses. This route answers
+ * immediately without waking anything, and tells the two apart.
+ */
+async function health() {
+  try {
+    const response = await fetch(`https://api.runpod.ai/v2/${id}/health`, {
+      signal: AbortSignal.timeout(30_000),
+      headers: { authorization: `Bearer ${key}` },
+    });
+    if (!response.ok) { console.log(`  health:   HTTP ${response.status}`); return null; }
+    return await response.json();
+  } catch (error) {
+    console.log(`  health:   ${error.message}`);
+    return null;
+  }
+}
+
 let serving = model;
 
 (async () => {
   console.log(`  endpoint: ${BASE}`);
+
+  const state = await health();
+  if (state) {
+    const w = state.workers ?? {};
+    const j = state.jobs ?? {};
+    console.log(`  workers:  ready ${w.ready ?? 0}, running ${w.running ?? 0}, initialising ${w.initializing ?? 0}, idle ${w.idle ?? 0}, throttled ${w.throttled ?? 0}, unhealthy ${w.unhealthy ?? 0}`);
+    console.log(`  jobs:     in queue ${j.inQueue ?? 0}, in progress ${j.inProgress ?? 0}, failed ${j.failed ?? 0}, completed ${j.completed ?? 0}`);
+    if ((w.unhealthy ?? 0) > 0) console.log('            Workers are unhealthy — the image or the model is failing to start. Read the Logs tab; nothing here will fix it.');
+    else if ((w.throttled ?? 0) > 0) console.log('            Workers are throttled — no GPU free in that tier. Pick a different GPU or wait.');
+    else if ((j.failed ?? 0) > 0) console.log('            Jobs have failed. The Logs tab will say why.');
+    else if ((w.initializing ?? 0) > 0) console.log('            A worker is starting. On a first run this includes downloading the weights, which for a 32B is tens of gigabytes.');
+  }
+  console.log();
   const found = await servedModel();
   if (found) {
     console.log(`  serving:  ${found}`);
