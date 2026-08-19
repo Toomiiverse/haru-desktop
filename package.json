@@ -14,7 +14,6 @@
   },
   "dependencies": {
     "@pixi/unsafe-eval": "^6.5.10",
-    "@vitejs/plugin-react": "6.0.5",
     "adm-zip": "0.5.16",
     "electron-store": "11.0.2",
     "lucide-react": "1.28.0",
@@ -22,8 +21,7 @@
     "pixi-live2d-display": "0.4.0",
     "pixi.js": "6.5.10",
     "react": "19.2.8",
-    "react-dom": "19.2.8",
-    "vite": "8.2.0"
+    "react-dom": "19.2.8"
   },
   "devDependencies": {
     "@types/adm-zip": "0.5.7",
@@ -31,11 +29,13 @@
     "@types/react": "19.2.18",
     "@types/react-dom": "19.2.4",
     "@types/three": "^0.180.0",
+    "@vitejs/plugin-react": "6.0.5",
     "concurrently": "10.0.4",
     "cross-env": "10.1.0",
     "electron": "43.2.0",
     "electron-builder": "26.15.3",
     "typescript": "7.0.2",
+    "vite": "8.2.0",
     "wait-on": "9.1.0"
   },
   "build": {
