@@ -62,7 +62,6 @@ contextBridge.exposeInMainWorld('haru', {
       return () => ipcRenderer.removeListener('listen:changed', listener);
     },
   },
-  search: {
   jellyfin: {
     status: () => ipcRenderer.invoke('jellyfin:get'),
     set: (url: string, userId: string, apiKey: string) => ipcRenderer.invoke('jellyfin:set', url, userId, apiKey),
@@ -73,6 +72,7 @@ contextBridge.exposeInMainWorld('haru', {
     set: (url: string, username: string, password: string) => ipcRenderer.invoke('checkinsource:set', url, username, password),
     pull: () => ipcRenderer.invoke('checkinsource:pull'),
   },
+  search: {
     get: () => ipcRenderer.invoke('search:get') as Promise<SearchConfig & { hasKey: boolean }>,
     set: (config: SearchConfig) => ipcRenderer.invoke('search:set', config) as Promise<SearchConfig & { hasKey: boolean }>,
     setKey: (apiKey: string) => ipcRenderer.invoke('search:setKey', apiKey) as Promise<boolean>,
