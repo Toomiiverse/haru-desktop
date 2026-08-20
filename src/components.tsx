@@ -561,7 +561,7 @@ export function SettingsDrawer({ config, onSave, onTest, onClose }: { config: Pr
       <input type="password" value={modelKey} placeholder={hasModelKey ? `A key is saved for ${KEY_SLOT_NAME[slot]} — type a new one to replace it` : `Bearer token for ${KEY_SLOT_NAME[slot]}`} onChange={event => setModelKey(event.target.value)}/>
       <button className="ghost" disabled={!modelKey.trim()} onClick={saveModelKey}>Save key</button>
     </div>
-  </>}{status.state !== 'idle' && <p className={status.state === 'error' ? 'status-error' : 'status-ok'}>{status.state === 'testing' ? 'Testing…' : status.message}</p>}</div><VoiceField registerSave={registerVoiceSave}/><ListenField/><SearchField/><AniListField/><SecondBrainField/><ThemeField/><VisionField/><AttachmentsField/><ScreenshotField/><WatchingField/><DesktopField/><GamingField/><RoamField/><GoogleCalendarField/><DiscordField/><WebField/><CheckInSourceField/><StartupField/><div className="drawer-foot"><button className="ghost" onClick={test} disabled={status.state === 'testing'}>{status.state === 'testing' ? 'Testing…' : 'Test connection'}</button><button className="ghost">Enable alerts</button>{saved && <span className="saved"><Check size={13}/> Saved</span>}<button className="solid" onClick={() => void save()}>Save setup</button></div></section>;
+  </>}{status.state !== 'idle' && <p className={status.state === 'error' ? 'status-error' : 'status-ok'}>{status.state === 'testing' ? 'Testing…' : status.message}</p>}</div><VoiceField registerSave={registerVoiceSave}/><ListenField/><SearchField/><AniListField/><SecondBrainField/><ThemeField/><VisionField/><AttachmentsField/><ScreenshotField/><WatchingField/><DesktopField/><GamingField/><RoamField/><GoogleCalendarField/><DiscordField/><WebField/><CheckInSourceField/><JellyfinField/><StartupField/><div className="drawer-foot"><button className="ghost" onClick={test} disabled={status.state === 'testing'}>{status.state === 'testing' ? 'Testing…' : 'Test connection'}</button><button className="ghost">Enable alerts</button>{saved && <span className="saved"><Check size={13}/> Saved</span>}<button className="solid" onClick={() => void save()}>Save setup</button></div></section>;
 }
 
 // What each engine calls the thing it clones or selects a voice with. The label
@@ -1550,6 +1550,66 @@ function DiscordField() {
  * this machine would never see it — the day arriving in two halves that never
  * meet. This is how the desk is told where to go and ask.
  */
+/**
+ * The media server, and the key that opens it.
+ *
+ * One place to paste it. The Python client reads the same value rather than
+ * keeping a second copy in a file beside itself, because two copies of a
+ * credential is two things to rotate and one of them always gets forgotten.
+ *
+ * Optional all the way down, for the reason the check-in field is: a renderer
+ * built against a newer preload than the one running would otherwise throw in
+ * here and take the whole settings page with it.
+ */
+function JellyfinField() {
+  const [status, setStatus] = useState<{ url: string; userId: string; hasKey: boolean } | null>(null);
+  const [url, setUrl] = useState('');
+  const [userId, setUserId] = useState('');
+  const [apiKey, setApiKey] = useState('');
+  const [message, setMessage] = useState<{ text: string; error?: boolean } | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    window.haru?.jellyfin?.status?.()
+      .then(state => { setStatus(state); setUrl(state.url); setUserId(state.userId); })
+      .catch(() => { /* older preload: the field simply does not appear */ });
+  }, []);
+
+  if (!window.haru?.jellyfin || !status) return null;
+
+  async function run(action: () => Promise<unknown>, done: string) {
+    setBusy(true); setMessage(null);
+    try {
+      await action();
+      setStatus(await window.haru!.jellyfin!.status());
+      if (done) setMessage({ text: done });
+    } catch (error) {
+      setMessage({ text: error instanceof Error ? error.message.replace(/^Error invoking remote method '[^']*':\s*(Error:\s*)?/, '') : String(error), error: true });
+    } finally { setBusy(false); }
+  }
+
+  return <div className="field"><h2>Her media server</h2>
+    <p>Jellyfin, so she knows what you have and what you are partway through. Browsing and searching only — she does not play anything at you.</p>
+    <p className="status-note">The key is kept the way her other keys are, and it never appears in a log. An address on your own network or tailnet can be plain http; anything on the open internet has to be https, or the key would cross it in the clear.</p>
+    <div className="form-grid">
+      <input value={url} disabled={busy} placeholder="http://100.123.135.10:8096" onChange={event => setUrl(event.target.value)}/>
+      <input type="password" value={apiKey} disabled={busy} placeholder={status.hasKey ? 'A key is saved — paste a new one to replace it' : 'Dashboard, Advanced, API Keys'} onChange={event => setApiKey(event.target.value)}/>
+      <input value={userId} disabled={busy} placeholder="User id — leave blank and she will find one" onChange={event => setUserId(event.target.value)}/>
+    </div>
+    <div className="row">
+      <button className="ghost" disabled={busy || !url.trim() || (!apiKey && !status.hasKey)}
+        onClick={() => void run(async () => { await window.haru!.jellyfin!.set(url.trim(), userId.trim(), apiKey); setApiKey(''); }, 'Saved.')}>Save</button>
+      <button className="ghost" disabled={busy || !status.url || !status.hasKey}
+        onClick={() => void run(async () => {
+          const reached = await window.haru!.jellyfin!.test();
+          setMessage({ text: `${reached.name} ${reached.version} — ${reached.libraries} librar${reached.libraries === 1 ? 'y' : 'ies'}.` });
+        }, '')}>Test it</button>
+      <button className="ghost" disabled={busy || !status.url}
+        onClick={() => void run(async () => { await window.haru!.jellyfin!.set('', '', ''); setUrl(''); setUserId(''); setApiKey(''); }, 'Forgotten.')}>Forget it</button>
+    </div>
+    {message && <p className={message.error ? 'status-error' : 'status-ok'}>{message.text}</p>}
+  </div>;
+}
+
 function CheckInSourceField() {
   const [status, setStatus] = useState<{ url: string; username: string; hasPassword: boolean } | null>(null);
   const [url, setUrl] = useState('');

@@ -12,13 +12,22 @@ python -m jellyfin init          # writes config.json, chmod 600
 
 Then put an API key in it — Jellyfin Dashboard → Advanced → API Keys.
 
-Or keep it out of the filesystem entirely, which is better:
+Better still, paste it into **Haru's own setup page** instead — there is a
+"Her media server" section. This client reads the same value, so there is one
+key to rotate rather than two. (Readable only where she stores it unencrypted,
+which means the headless server; on Windows safeStorage encrypts it and this
+falls back to the environment or the file, which is the right way round.)
+
+Or keep it out of the filesystem entirely:
 
 ```bash
 export JELLYFIN_API_KEY="..."    # the environment beats the file
 ```
 
-`user_id` can be left blank on a single-user server; the client looks one up
+`user_id`Sources are tried in order: environment, then , then
+Haru's settings. The most explicit wins.
+
+ can be left blank on a single-user server; the client looks one up
 and says which it chose. On a server with several users, set it.
 
 ## Using it

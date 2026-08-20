@@ -79,8 +79,62 @@ def _from_file(path: Path) -> dict:
     return loaded
 
 
+def _haru_config_path() -> Path:
+    """Where Haru herself keeps her settings, per platform."""
+    if os.name == "nt":
+        return Path(os.environ.get("APPDATA", "")) / "haru-desktop" / "config.json"
+    return Path.home() / ".config" / "haru-desktop" / "config.json"
+
+
+def _from_haru() -> dict:
+    """Borrow the server address and key already entered in Haru's settings.
+
+    One key, entered once. Two copies of a credential means two things to
+    rotate, and one of them always gets forgotten.
+
+    Only readable where she stored it unencrypted, which is any machine without
+    an OS keyring — the headless server, in practice. On Windows safeStorage
+    encrypts it against a key in her own Local State, so this finds nothing and
+    quietly falls back to the environment or the file, which is correct: this
+    should not be the thing that teaches a plaintext key to exist.
+    """
+    path = _haru_config_path()
+    if not path.exists():
+        return {}
+    try:
+        with path.open(encoding="utf-8") as handle:
+            saved = json.load(handle)
+    except (json.JSONDecodeError, OSError) as error:
+        log.debug("could not read Haru's config at %s: %s", path, error)
+        return {}
+
+    jellyfin = saved.get("jellyfin") or {}
+    key = saved.get("jellyfinApiKey") or ""
+    if isinstance(key, str) and key.startswith("plain:"):
+        key = key[len("plain:"):]
+    elif key:
+        log.debug("Haru's Jellyfin key is encrypted on this machine; not readable from here")
+        key = ""
+
+    found = {
+        "url": (jellyfin.get("url") or "").strip().rstrip("/"),
+        "api_key": key.strip(),
+        "user_id": (jellyfin.get("userId") or "").strip(),
+    }
+    if found["url"] or found["api_key"]:
+        log.debug("took %s from Haru's settings",
+                  ", ".join(name for name, value in found.items() if value and name != "api_key") or "the key")
+    return found
+
+
 def load(path: Path | None = None) -> Config:
-    """Assemble configuration from the environment and the config file.
+    """Assemble configuration from the environment, the config file, and Haru.
+
+    Sources are tried in that order, so the most explicit wins:
+
+    1. ``JELLYFIN_URL`` / ``JELLYFIN_API_KEY`` / ``JELLYFIN_USER_ID``
+    2. ``jellyfin/config.json`` beside this module
+    3. Whatever was entered in Haru's own settings, where it is readable
 
     Args:
         path: Where to look for config.json. Defaults to next to this module.
@@ -94,11 +148,15 @@ def load(path: Path | None = None) -> Config:
     """
     path = path or CONFIG_PATH
     saved = _from_file(path)
+    hers = _from_haru()
+
+    def pick(env_name: str, key: str) -> str:
+        return (os.environ.get(env_name) or saved.get(key, "") or hers.get(key, "")).strip()
 
     config = Config(
-        url=(os.environ.get(ENV_URL) or saved.get("url", "")).strip().rstrip("/"),
-        api_key=(os.environ.get(ENV_KEY) or saved.get("api_key", "")).strip(),
-        user_id=(os.environ.get(ENV_USER) or saved.get("user_id", "")).strip(),
+        url=pick(ENV_URL, "url").rstrip("/"),
+        api_key=pick(ENV_KEY, "api_key"),
+        user_id=pick(ENV_USER, "user_id"),
     )
     log.debug("configured for %s", config.redacted())
     return config

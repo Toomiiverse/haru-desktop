@@ -50,6 +50,11 @@ interface Window {
       set(config: import('./types').AniListConfig): Promise<import('./types').AniListConfig>;
       test(): Promise<number>;
     };
+    jellyfin: {
+      status(): Promise<{ url: string; userId: string; hasKey: boolean }>;
+      set(url: string, userId: string, apiKey: string): Promise<{ url: string; userId: string; hasKey: boolean }>;
+      test(): Promise<{ name: string; version: string; libraries: number; userId: string }>;
+    };
     checkInSource: {
       status(): Promise<{ url: string; username: string; hasPassword: boolean }>;
       set(url: string, username: string, password: string): Promise<{ url: string; username: string; hasPassword: boolean }>;

@@ -1,5 +1,19 @@
 import { contextBridge, ipcRenderer } from 'electron';
 
+contextBridge.exposeInMainWorld('electron', {
+  // Your existing stuff
+  onSetExpression: (callback: (name: string) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, name: string) => callback(name);
+    ipcRenderer.on('companion:setExpression', listener);
+    return () => ipcRenderer.removeListener('companion:setExpression', listener);
+  },
+  
+  // Add this new ipcRenderer section
+  ipcRenderer: {
+    invoke: (channel: string, ...args: any[]) => ipcRenderer.invoke(channel, ...args),
+  },
+});
+
 type Live2DModel = { path: string; name: string; url: string };
 type Message = { id: string; role: 'user' | 'assistant'; content: string; time: string };
 type ProviderConfig = { provider: string; model: string; endpoint: string; temperature: number };
@@ -49,6 +63,11 @@ contextBridge.exposeInMainWorld('haru', {
     },
   },
   search: {
+  jellyfin: {
+    status: () => ipcRenderer.invoke('jellyfin:get'),
+    set: (url: string, userId: string, apiKey: string) => ipcRenderer.invoke('jellyfin:set', url, userId, apiKey),
+    test: () => ipcRenderer.invoke('jellyfin:test'),
+  },
   checkInSource: {
     status: () => ipcRenderer.invoke('checkinsource:get'),
     set: (url: string, username: string, password: string) => ipcRenderer.invoke('checkinsource:set', url, username, password),
@@ -295,6 +314,7 @@ contextBridge.exposeInMainWorld('haru', {
       return () => ipcRenderer.removeListener('kept:changed', listener);
     },
   },
+
   live2d: {
     import: () => ipcRenderer.invoke('live2d:import'),
     get: () => ipcRenderer.invoke('live2d:get'),

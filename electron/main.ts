@@ -4734,6 +4734,73 @@ async function pullCheckIns(): Promise<void> {
   }
 }
 
+/**
+ * Where the media server is, and the key that opens it.
+ *
+ * Kept beside her other secrets rather than in a file next to the Python
+ * client, so there is one place to paste it and one place it can leak from.
+ * On this machine safeStorage encrypts it; on the headless server it is written
+ * plain: and the file's permissions are what protect it — the same trade as
+ * every other key she holds.
+ */
+type JellyfinConfig = { url: string; userId: string };
+
+function readJellyfinConfig(saved: unknown): JellyfinConfig {
+  const raw = (saved ?? {}) as Record<string, unknown>;
+  return {
+    url: typeof raw.url === 'string' ? raw.url.trim().replace(/\/+$/, '') : '',
+    userId: typeof raw.userId === 'string' ? raw.userId.trim() : '',
+  };
+}
+
+/**
+ * Refused before the key is sent anywhere it should not go.
+ *
+ * A media server lives on your own network, so plain http to a private address
+ * is fine and normal. Plain http to a public host is not: the key would cross
+ * the internet in the clear, and a typo in a hostname is all it takes. Anything
+ * public has to be https.
+ */
+function jellyfinAddressAllowed(url: string): boolean {
+  let parsed: URL;
+  try { parsed = new URL(url); } catch { return false; }
+  if (parsed.protocol === 'https:') return true;
+  if (parsed.protocol !== 'http:') return false;
+  const host = parsed.hostname.toLowerCase();
+  if (host === 'localhost' || host.endsWith('.local') || host.endsWith('.ts.net')) return true;
+  const octets = host.split('.');
+  if (octets.length !== 4 || octets.some(part => !/^\d{1,3}$/.test(part))) return false;
+  const [a, b] = octets.map(Number);
+  if (a === 127 || a === 10) return true;
+  if (a === 192 && b === 168) return true;
+  if (a === 172 && b >= 16 && b <= 31) return true;
+  return a === 100 && b >= 64 && b <= 127; // the tailnet
+}
+
+async function jellyfinReach(config: JellyfinConfig, key: string) {
+  const headers = {
+    Authorization: `MediaBrowser Client="Haru", Device="Haru", DeviceId="haru-desktop", Version="1.0.0", Token="${key}"`,
+    Accept: 'application/json',
+  };
+  const info = await net.fetch(`${config.url}/System/Info`, { headers });
+  if (info.status === 401 || info.status === 403) throw new Error('Jellyfin rejected that key.');
+  if (!info.ok) throw new Error(`Jellyfin answered ${info.status}.`);
+  const server = await info.json() as { ServerName?: string; Version?: string };
+  let libraries = 0;
+  let userId = config.userId;
+  try {
+    if (!userId) {
+      const users = await (await net.fetch(`${config.url}/Users`, { headers })).json() as { Id: string }[];
+      userId = users?.[0]?.Id ?? '';
+    }
+    if (userId) {
+      const views = await (await net.fetch(`${config.url}/UserViews?userId=${encodeURIComponent(userId)}`, { headers })).json() as { Items?: unknown[] };
+      libraries = views?.Items?.length ?? 0;
+    }
+  } catch { /* the key works; the library count is a nicety */ }
+  return { name: server.ServerName ?? '(unnamed)', version: server.Version ?? '?', libraries, userId };
+}
+
 function getCheckIns() {
   return readCheckIns(store.get('checkins'));
 }
@@ -5793,6 +5860,36 @@ app.whenReady().then(() => {
   });
   // hasKey rather than the key: whether one is saved is what the panel needs to
   // render, and the key itself has no business back in the renderer.
+  ipcMain.handle('jellyfin:get', () => {
+    const config = readJellyfinConfig(store.get('jellyfin'));
+    return { ...config, hasKey: Boolean(decryptSecret(store.get('jellyfinApiKey') as string | undefined)) };
+  });
+  ipcMain.handle('jellyfin:set', (_e, url: string, userId: string, apiKey: string) => {
+    const config = readJellyfinConfig({ url, userId });
+    if (!config.url) {
+      store.delete('jellyfin' as never);
+      store.delete('jellyfinApiKey' as never);
+      console.log('[jellyfin] forgotten');
+      return { url: '', userId: '', hasKey: false };
+    }
+    if (!jellyfinAddressAllowed(config.url)) throw new Error('That address would send the key over the open internet in the clear. Use https, or an address on your own network or tailnet.');
+    store.set('jellyfin', config);
+    if (apiKey) store.set('jellyfinApiKey', encryptSecret(apiKey));
+    console.log(`[jellyfin] pointed at ${config.url}`);
+    return { ...config, hasKey: Boolean(apiKey) || Boolean(decryptSecret(store.get('jellyfinApiKey') as string | undefined)) };
+  });
+  ipcMain.handle('jellyfin:test', async () => {
+    const config = readJellyfinConfig(store.get('jellyfin'));
+    const key = decryptSecret(store.get('jellyfinApiKey') as string | undefined);
+    if (!config.url) throw new Error('No address set.');
+    if (!key) throw new Error('No API key saved.');
+    const reached = await jellyfinReach(config, key);
+    // The user id is worth keeping once we have looked it up, so the next call
+    // does not have to ask again.
+    if (!config.userId && reached.userId) store.set('jellyfin', { ...config, userId: reached.userId });
+    console.log(`[jellyfin] ${reached.name} ${reached.version}, ${reached.libraries} librar${reached.libraries === 1 ? 'y' : 'ies'}`);
+    return reached;
+  });
   ipcMain.handle('checkinsource:get', () => {
     const source = readCheckInSource(store.get('checkinSource'));
     return { url: source?.url ?? '', username: source?.username ?? '', hasPassword: Boolean(decryptSecret(store.get('checkinSourcePassword') as string | undefined)) };
