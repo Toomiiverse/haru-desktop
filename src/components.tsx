@@ -1557,15 +1557,23 @@ function CheckInSourceField() {
   const [password, setPassword] = useState('');
   const [message, setMessage] = useState<{ text: string; error?: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
-  useEffect(() => { window.haru?.checkInSource.status().then(state => { setStatus(state); setUrl(state.url); setUsername(state.username); }); }, []);
+  // Optional all the way down, and the failure is caught. A renderer built
+  // against a newer preload than the one running finds checkInSource missing,
+  // and an exception thrown in here takes the whole settings page with it —
+  // one unreachable field is a far better outcome than no setup screen.
+  useEffect(() => {
+    window.haru?.checkInSource?.status?.()
+      .then(state => { setStatus(state); setUrl(state.url); setUsername(state.username); })
+      .catch(() => { /* older preload: the field simply does not appear */ });
+  }, []);
 
-  if (!window.haru || !status) return null;
+  if (!window.haru?.checkInSource || !status) return null;
 
   async function run(action: () => Promise<unknown>, done: string) {
     setBusy(true); setMessage(null);
     try {
       await action();
-      setStatus(await window.haru!.checkInSource.status());
+      setStatus(await window.haru!.checkInSource!.status());
       setMessage({ text: done });
     } catch (error) {
       setMessage({ text: error instanceof Error ? error.message.replace(/^Error invoking remote method '[^']*':\s*(Error:\s*)?/, '') : String(error), error: true });
@@ -1582,11 +1590,11 @@ function CheckInSourceField() {
     </div>
     <div className="row">
       <button className="ghost" disabled={busy || !url.trim() || !username.trim() || (!password && !status.hasPassword)}
-        onClick={() => void run(async () => { await window.haru!.checkInSource.set(url.trim(), username.trim(), password); setPassword(''); }, 'Saved. Reading from it now.')}>Save</button>
+        onClick={() => void run(async () => { await window.haru!.checkInSource!.set(url.trim(), username.trim(), password); setPassword(''); }, 'Saved. Reading from it now.')}>Save</button>
       <button className="ghost" disabled={busy || !status.url}
-        onClick={() => void run(async () => { const total = await window.haru!.checkInSource.pull(); setMessage({ text: `Read them — ${total} check-in${total === 1 ? '' : 's'} here now.` }); }, '')}>Read now</button>
+        onClick={() => void run(async () => { const total = await window.haru!.checkInSource!.pull(); setMessage({ text: `Read them — ${total} check-in${total === 1 ? '' : 's'} here now.` }); }, '')}>Read now</button>
       <button className="ghost" disabled={busy || !status.url}
-        onClick={() => void run(async () => { await window.haru!.checkInSource.set('', '', ''); setUrl(''); setUsername(''); setPassword(''); }, 'Stopped reading from it.')}>Forget it</button>
+        onClick={() => void run(async () => { await window.haru!.checkInSource!.set('', '', ''); setUrl(''); setUsername(''); setPassword(''); }, 'Stopped reading from it.')}>Forget it</button>
     </div>
     {message && <p className={message.error ? 'status-error' : 'status-ok'}>{message.text}</p>}
   </div>;

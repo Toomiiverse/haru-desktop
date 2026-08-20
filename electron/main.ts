@@ -54,6 +54,7 @@ import { addCheckIn, checkInInstruction, checkInsOn, readCheckIns, type CheckIn 
 import { describePull, isTailnetAddress, mergeCheckIns, readCheckInSource } from './checkinsource';
 import { DiscordLink, looksLikeUserId, readDiscordConfig, useOfChannel, type DiscordConfig } from './discord';
 import { startWebServer, type WebDeps } from './webserver';
+import { setupSonarrHandlers } from './sonarr-api';
 
 type Bounds = { x: number; y: number; width: number; height: number };
 type Live2DModel = { path: string; name: string; url: string };
@@ -5691,6 +5692,10 @@ app.whenReady().then(() => {
       return new Response('Model file not found on disk', { status: 404 });
     }
   });
+  // Registered once, at startup. It was inside the protocol handler above, so it
+  // never ran until a model file was requested and then threw on the second
+  // request — ipcMain.handle refuses a duplicate channel.
+  setupSonarrHandlers();
   nativeTheme.themeSource = 'dark';
   ipcMain.handle('settings:get', (_e, key) => store.get(key));
   ipcMain.handle('settings:set', (_e, key, value) => store.set(key, value));
