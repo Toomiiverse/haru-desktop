@@ -58,3 +58,39 @@ export function resolveDate(input: string, now: Date): string | null {
   }
   return null;
 }
+
+// Reminder times arrive as the user's own wording, passed straight through by the
+// chat tool ("8:00 AM", "8pm", "20:30"), so they are parsed here rather than
+// constrained at the tool boundary — the model is worse at reformatting a time
+// than at repeating one.
+export function parseTimeOfDay(input: string): { hour: number; minute: number } | null {
+  const text = input.trim().toLowerCase().replace(/\s+/g, ' ').replace(/^at /, '');
+  if (text === 'noon' || text === 'midday') return { hour: 12, minute: 0 };
+  if (text === 'midnight') return { hour: 0, minute: 0 };
+  const match = text.match(/^(\d{1,2})(?:[:.](\d{2}))?\s*(a\.?m\.?|p\.?m\.?)?$/);
+  if (!match) return null;
+  let hour = Number(match[1]);
+  const minute = match[2] ? Number(match[2]) : 0;
+  const meridiem = match[3]?.replace(/\./g, '');
+  if (minute > 59) return null;
+  if (meridiem) {
+    if (hour < 1 || hour > 12) return null;
+    if (meridiem === 'am' && hour === 12) hour = 0;
+    if (meridiem === 'pm' && hour !== 12) hour += 12;
+  } else if (hour > 23) {
+    return null;
+  }
+  return { hour, minute };
+}
+
+// Turns a kept item's stored date and free-form time into the concrete moment it
+// comes due. All-day items resolve to `allDayHour` rather than midnight, which
+// would fire while the user is asleep; an unparseable time falls back there too,
+// since the user still asked to be reminded that day.
+export function dueDateTime(date: string, time: string | undefined, allDayHour: number): Date | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+  const [year, month, day] = date.split('-').map(Number);
+  const clock = (time && parseTimeOfDay(time)) || { hour: allDayHour, minute: 0 };
+  const due = new Date(year, month - 1, day, clock.hour, clock.minute, 0, 0);
+  return Number.isNaN(due.getTime()) ? null : due;
+}

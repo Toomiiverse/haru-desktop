@@ -1,15 +1,15 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, type MenuItemConstructorOptions, nativeTheme, net, protocol, screen } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, type MenuItemConstructorOptions, nativeTheme, net, Notification, protocol, screen } from 'electron';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import AdmZip from 'adm-zip';
 import Store from 'electron-store';
-import { localDateKey, resolveDate, zonedNow } from './dates';
+import { dueDateTime, localDateKey, resolveDate, zonedNow } from './dates';
 
 type Bounds = { x: number; y: number; width: number; height: number };
 type Live2DModel = { path: string; name: string; url: string };
-type KeptItem = { id: string; title: string; date: string; time?: string; kind: 'reminder' | 'event'; done: boolean };
+type KeptItem = { id: string; title: string; date: string; time?: string; kind: 'reminder' | 'event'; done: boolean; notified?: boolean };
 
 const COMPANION_DEFAULT_WIDTH = 300;
 const COMPANION_ASPECT = 360 / 300;
@@ -20,6 +20,14 @@ const CURSOR_POLL_MS = 33;
 const CHAT_TIMEZONE = 'Australia/Perth'; // UTC+8 year-round, no DST
 const CHAT_RESET_HOUR = 5;
 const CHAT_RESET_POLL_MS = 60_000;
+const ALERT_POLL_MS = 20_000;
+// All-day items have no time of their own, so they surface at a waking hour
+// rather than at midnight, which is when their date technically begins.
+const ALERT_ALL_DAY_HOUR = 9;
+// A reminder that came due while Haru was closed is still worth showing; a
+// fortnight of them arriving at once is not. Anything overdue by more than this
+// is marked off silently instead, so launching never fires a backlog.
+const ALERT_GRACE_MS = 15 * 60_000;
 
 const store = new Store<Record<string, unknown>>();
 const live2dRoots = new Map<string, string>();
@@ -177,6 +185,50 @@ function addKeptItem(item: Omit<KeptItem, 'id' | 'done'>): KeptItem {
   const created: KeptItem = { ...item, id: randomUUID(), done: false };
   setKept([...getKept(), created]);
   return created;
+}
+
+function alertsEnabled() {
+  return store.get('alerts.enabled', true) as boolean;
+}
+
+function showKeptNotification(item: KeptItem) {
+  const notification = new Notification({
+    title: item.kind === 'event' ? 'Haru · appointment' : 'Haru · reminder',
+    body: item.time ? `${item.title} — ${item.time}` : item.title,
+  });
+  notification.on('click', () => {
+    if (!mainWindow || mainWindow.isDestroyed()) createWindow();
+    mainWindow?.show();
+    mainWindow?.focus();
+  });
+  notification.show();
+}
+
+// Polls the store rather than holding a timer per item: the chat tool can create
+// an item at any moment and the store is the single source of truth, so
+// re-reading it on a tick avoids keeping a parallel set of timers in sync with
+// it. `notified` is persisted on the item itself so a restart does not re-fire
+// everything that has already been shown.
+function checkDueReminders() {
+  const items = getKept();
+  if (!items.length) return;
+  const now = zonedNow(CHAT_TIMEZONE).getTime();
+  const canNotify = alertsEnabled() && Notification.isSupported();
+  let changed = false;
+  const next = items.map(item => {
+    if (item.notified || item.done) return item;
+    const due = dueDateTime(item.date, item.time, ALERT_ALL_DAY_HOUR);
+    if (!due || due.getTime() > now) return item;
+    // Marked off even when alerts are muted or missed: re-enabling alerts should
+    // start from now, not replay everything that came due while they were off.
+    if (canNotify && now - due.getTime() <= ALERT_GRACE_MS) {
+      console.log(`[alerts] notifying ${item.kind}: "${item.title}" due ${item.date}${item.time ? ` at ${item.time}` : ''}`);
+      showKeptNotification(item);
+    }
+    changed = true;
+    return { ...item, notified: true };
+  });
+  if (changed) setKept(next);
 }
 
 type ProviderConfig = { provider: string; model: string; endpoint: string; temperature: number };
@@ -416,6 +468,10 @@ function createCompanionWindow() {
 }
 
 app.whenReady().then(() => {
+  // Windows routes toasts by AppUserModelID; without one matching the shortcut
+  // electron-builder installs, notifications are attributed to the bare Electron
+  // host — or dropped outright.
+  app.setAppUserModelId('com.haru.desktop');
   protocol.handle('haru-model', async request => {
     const url = new URL(request.url);
     const segments = url.pathname.split('/').filter(Boolean);
@@ -451,6 +507,14 @@ app.whenReady().then(() => {
   ipcMain.handle('kept:get', () => getKept());
   ipcMain.handle('kept:toggle', (_e, id: string) => { setKept(getKept().map(item => item.id === id ? { ...item, done: !item.done } : item)); });
   ipcMain.handle('kept:remove', (_e, id: string) => { setKept(getKept().filter(item => item.id !== id)); });
+  ipcMain.handle('alerts:get', () => alertsEnabled());
+  ipcMain.handle('alerts:set', (_e, enabled: boolean) => {
+    store.set('alerts.enabled', !!enabled);
+    // Catches up immediately so turning alerts off silences anything already due
+    // this tick, rather than letting it fire up to ALERT_POLL_MS later.
+    checkDueReminders();
+    return alertsEnabled();
+  });
   ipcMain.handle('ai:send', (_e, messages: { role: string; content: string }[], config: ProviderConfig) => ollamaChat(messages, config));
   ipcMain.handle('ai:test', (_e, endpoint: string) => ollamaTags(endpoint));
   ipcMain.handle('live2d:import', async () => {
@@ -514,6 +578,8 @@ app.whenReady().then(() => {
   createCompanionWindow();
   performChatResetIfDue();
   setInterval(performChatResetIfDue, CHAT_RESET_POLL_MS);
+  checkDueReminders();
+  setInterval(checkDueReminders, ALERT_POLL_MS);
   app.on('activate', () => { if (!mainWindow || mainWindow.isDestroyed()) createWindow(); });
 });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });

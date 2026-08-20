@@ -3,7 +3,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 type Live2DModel = { path: string; name: string; url: string };
 type Message = { id: string; role: 'user' | 'assistant'; content: string; time: string };
 type ProviderConfig = { provider: string; model: string; endpoint: string; temperature: number };
-type KeptItem = { id: string; title: string; date: string; time?: string; kind: 'reminder' | 'event'; done: boolean };
+type KeptItem = { id: string; title: string; date: string; time?: string; kind: 'reminder' | 'event'; done: boolean; notified?: boolean };
 
 contextBridge.exposeInMainWorld('haru', {
   settings: { get: (key: string) => ipcRenderer.invoke('settings:get', key), set: (key: string, value: unknown) => ipcRenderer.invoke('settings:set', key, value) },
@@ -31,6 +31,10 @@ contextBridge.exposeInMainWorld('haru', {
       ipcRenderer.on('kept:changed', listener);
       return () => ipcRenderer.removeListener('kept:changed', listener);
     },
+  },
+  alerts: {
+    get: () => ipcRenderer.invoke('alerts:get') as Promise<boolean>,
+    set: (enabled: boolean) => ipcRenderer.invoke('alerts:set', enabled) as Promise<boolean>,
   },
   live2d: {
     import: () => ipcRenderer.invoke('live2d:import'),
