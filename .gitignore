@@ -9,3 +9,6 @@ Thumbs.db
 .env
 .env.local
 .claude/settings.local.json
+
+# The Jellyfin API key lives here. The example beside it is safe to commit.
+jellyfin/config.json
