@@ -5492,7 +5492,29 @@ function webDeps(): WebDeps {
       console.log(`[web] answered ${text.length} chars with ${reply.length}${emotion ? ` — ${emotion}${expression ? ` (${expression})` : ' (no face for it)'}` : ''}`);
       return { reply, ignored: answer.ignored, emotion, expression };
     },
-    agenda: () => getKept().map(item => ({ id: item.id, title: item.title, date: item.time ? `${item.date} ${item.time}` : item.date, kind: item.kind, done: item.done })),
+    // Sent as a bare date plus a day-offset rather than one formatted string —
+    // the phone buckets into daily/weekly/monthly by daysAway, and doing that
+    // date math against the phone's own clock would disagree with her whenever
+    // it is in a different timezone. Computed once here, against the timezone
+    // she actually keeps.
+    agenda: () => {
+      const todayKey = localDateKey(zonedNow(CHAT_TIMEZONE));
+      const timeRank = (time?: string) => {
+        const parsed = time ? parseTimeOfDay(time) : null;
+        return parsed ? parsed.hour * 60 + parsed.minute : -1;
+      };
+      return getKept()
+        .map(item => ({
+          id: item.id,
+          title: item.title,
+          date: item.date,
+          time: item.time ?? null,
+          kind: item.kind,
+          done: item.done,
+          daysAway: Math.round((Date.parse(`${item.date}T00:00:00Z`) - Date.parse(`${todayKey}T00:00:00Z`)) / 86400000),
+        }))
+        .sort((a, b) => a.date.localeCompare(b.date) || timeRank(a.time ?? undefined) - timeRank(b.time ?? undefined));
+    },
     tickOff(id) {
       const updated = toggleKept(id);
       if (updated?.done) void remarkOnTickOff(updated);
