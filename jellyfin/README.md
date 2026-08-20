@@ -24,10 +24,10 @@ Or keep it out of the filesystem entirely:
 export JELLYFIN_API_KEY="..."    # the environment beats the file
 ```
 
-`user_id`Sources are tried in order: environment, then , then
+Sources are tried in order: the environment, then `jellyfin/config.json`, then
 Haru's settings. The most explicit wins.
 
- can be left blank on a single-user server; the client looks one up
+`user_id` can be left blank on a single-user server; the client looks one up
 and says which it chose. On a server with several users, set it.
 
 ## Using it
