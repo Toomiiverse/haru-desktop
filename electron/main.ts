@@ -6,8 +6,8 @@ import { pathToFileURL } from 'node:url';
 import AdmZip from 'adm-zip';
 import Store from 'electron-store';
 import {
-  clampCompanionPosition, clampCompanionWidth, clampCompanionWidthOnDisplay,
-  combinedDisplayBounds, companionNeedsReclamp, cursorPollIntervalMs, defaultCompanionWidth,
+  clampCompanionPosition, combinedDisplayBounds, companionNeedsReclamp,
+  cursorPollIntervalMs, defaultCompanionWidth, effectiveCompanionBounds,
   type Bounds,
 } from './companion';
 import { dueDateTime, localDateKey, resolveDate, zonedNow } from './dates';
@@ -24,8 +24,10 @@ const COMPANION_MARGIN = 60;
 // always the flat default above, so a small laptop panel gets a corner companion
 // instead of one that dominates the screen. See defaultCompanionWidth.
 const COMPANION_DEFAULT_WIDTH_FRACTION = 0.22;
-// Same idea for the scroll-wheel resize ceiling: 900px reads fine on a desktop
-// monitor but can exceed a small laptop panel outright.
+// Ceiling applied whenever a preferred width — however it was set: scroll-wheel
+// resize, restored at launch, or re-fit after a live display change — is placed
+// onto a specific display: 900px reads fine on a desktop monitor but can exceed
+// a small laptop panel outright. See effectiveCompanionBounds.
 const COMPANION_MAX_WIDTH_FRACTION = 0.6;
 const CURSOR_POLL_MS_AC = 33;
 // Eye-follow at half rate on battery still reads as tracking the cursor, for
@@ -401,38 +403,57 @@ function allDisplayBounds() {
 }
 
 function getCompanionBounds(): Bounds {
+  const displays = allDisplayBounds();
   const saved = store.get('companion.bounds') as Bounds | undefined;
-  if (saved) {
-    const width = clampCompanionWidth(saved.width || COMPANION_DEFAULT_WIDTH, COMPANION_MIN_WIDTH, COMPANION_MAX_WIDTH);
-    const height = Math.round(width * COMPANION_ASPECT);
-    const { minX, minY, maxX, maxY } = combinedDisplayBounds(allDisplayBounds());
-    const onScreen = saved.x + width > minX && saved.x < maxX && saved.y + height > minY && saved.y < maxY;
-    if (onScreen) return { x: saved.x, y: saved.y, width, height };
+  let preferredWidth = store.get('companion.preferredWidth') as number | undefined;
+  if (saved && preferredWidth === undefined) {
+    // Migrating from before preferredWidth existed: adopt whatever was last
+    // saved as the preference, captured once so a later display-driven shrink
+    // can never overwrite it before it's had a chance to be recorded.
+    preferredWidth = saved.width;
+    store.set('companion.preferredWidth', preferredWidth);
   }
-  // No saved bounds, or the saved ones are no longer on any display: size fresh,
-  // relative to whichever display is primary right now.
+  if (saved && preferredWidth !== undefined) {
+    const { minX, minY, maxX, maxY } = combinedDisplayBounds(displays);
+    const onScreen = saved.x + saved.width > minX && saved.x < maxX && saved.y + saved.height > minY && saved.y < maxY;
+    if (onScreen) {
+      const display = screen.getDisplayMatching(saved);
+      return effectiveCompanionBounds(saved, preferredWidth, display.workArea.width, displays, COMPANION_MARGIN, COMPANION_MIN_WIDTH, COMPANION_MAX_WIDTH, COMPANION_MAX_WIDTH_FRACTION, COMPANION_ASPECT);
+    }
+  }
+  // Never resized, or the saved position is no longer on any display: place
+  // fresh in the corner of whichever display is primary right now.
   const primary = screen.getPrimaryDisplay();
   const width = defaultCompanionWidth(primary.workArea.width, COMPANION_DEFAULT_WIDTH, COMPANION_DEFAULT_WIDTH_FRACTION, COMPANION_MIN_WIDTH, COMPANION_MAX_WIDTH);
   const height = Math.round(width * COMPANION_ASPECT);
+  // Recorded as the preference too: without this, a truly fresh install that
+  // undocks before ever being resized has no preference to fall back to, so the
+  // shrink-to-fit on that first undock would itself become the baseline every
+  // later launch migrates from — the exact ratchet preferredWidth exists to stop.
+  store.set('companion.preferredWidth', width);
   const work = primary.workArea;
   return { x: work.x + work.width - width - 24, y: work.y + work.height - height - 24, width, height };
 }
 
-// Re-clamps the companion after the display arrangement changes at runtime —
-// e.g. a laptop undocked from an external monitor without quitting Haru.
-// companionNeedsReclamp guards this: display-metrics-changed also fires for
+// Re-fits the companion after the display arrangement changes at runtime — e.g.
+// a laptop undocked from an external monitor without quitting Haru shrinks her
+// to fit, and reconnecting the monitor grows her back to the preferred size.
+// Shares effectiveCompanionBounds with getCompanionBounds and resizeBy so the
+// three can never disagree; companionNeedsReclamp guards it to a no-op when
+// nothing actually needs to change — display-metrics-changed also fires for
 // DPI/scale/rotation changes anywhere, including on a display the companion
-// isn't on, so this must be a no-op unless clamping would actually move or
-// shrink the window.
+// isn't on.
 function reclampCompanionWindow() {
   if (!companionWindow) return;
   const bounds = companionWindow.getBounds();
+  // getCompanionBounds always records a preference before this can run, so the
+  // fallback below is defensive only.
+  const preferredWidth = (store.get('companion.preferredWidth') as number | undefined) ?? bounds.width;
   const displays = allDisplayBounds();
-  if (!companionNeedsReclamp(bounds, displays, COMPANION_MARGIN, COMPANION_MIN_WIDTH, COMPANION_MAX_WIDTH, COMPANION_ASPECT)) return;
-  const width = clampCompanionWidth(bounds.width, COMPANION_MIN_WIDTH, COMPANION_MAX_WIDTH);
-  const height = Math.round(width * COMPANION_ASPECT);
-  const { x, y } = clampCompanionPosition(bounds.x, bounds.y, width, height, displays, COMPANION_MARGIN);
-  companionWindow.setBounds({ x, y, width, height });
+  const display = screen.getDisplayMatching(bounds);
+  const next = effectiveCompanionBounds(bounds, preferredWidth, display.workArea.width, displays, COMPANION_MARGIN, COMPANION_MIN_WIDTH, COMPANION_MAX_WIDTH, COMPANION_MAX_WIDTH_FRACTION, COMPANION_ASPECT);
+  if (!companionNeedsReclamp(bounds, next)) return;
+  companionWindow.setBounds(next);
   store.set('companion.bounds', companionWindow.getBounds());
 }
 
@@ -584,14 +605,12 @@ app.whenReady().then(() => {
     // flat ceiling: growing via scroll-wheel shouldn't be able to exceed a small
     // laptop panel just because 900px is fine on a desktop monitor.
     const display = screen.getDisplayMatching(bounds);
-    const width = clampCompanionWidthOnDisplay(bounds.width * factor, COMPANION_MIN_WIDTH, COMPANION_MAX_WIDTH, display.workArea.width, COMPANION_MAX_WIDTH_FRACTION);
-    const height = Math.round(width * COMPANION_ASPECT);
-    // Anchor the resize at bottom-center, matching the model's own anchor point,
-    // so growing/shrinking feels like the character scaling in place.
-    const centerX = bounds.x + bounds.width / 2;
-    const bottom = bounds.y + bounds.height;
-    const { x, y } = clampCompanionPosition(Math.round(centerX - width / 2), Math.round(bottom - height), width, height, allDisplayBounds(), COMPANION_MARGIN);
-    companionWindow.setBounds({ x, y, width, height });
+    const next = effectiveCompanionBounds(bounds, bounds.width * factor, display.workArea.width, allDisplayBounds(), COMPANION_MARGIN, COMPANION_MIN_WIDTH, COMPANION_MAX_WIDTH, COMPANION_MAX_WIDTH_FRACTION, COMPANION_ASPECT);
+    companionWindow.setBounds(next);
+    // The width the user actually asked for — remembered so a later automatic
+    // shrink-to-fit (undocking) has a real size to grow back to on redock,
+    // instead of the shrunk size becoming the new baseline forever.
+    store.set('companion.preferredWidth', next.width);
   });
   ipcMain.handle('companion:showMenu', () => {
     const pinned = store.get('companion.pinned', true) as boolean;

@@ -43,22 +43,49 @@ export function clampCompanionPosition(x: number, y: number, width: number, heig
   };
 }
 
-// True when a window at `bounds` is no longer positioned/sized validly against
-// `displays` — i.e. clamping it would actually move or resize it. Used to make
-// the live display-change handler idempotent: `display-metrics-changed` fires for
-// DPI/scale/rotation changes anywhere, including on a display the companion isn't
-// on, so it must only touch the window when clamping would change something.
-// `aspect` must be the same constant the caller's own setBounds derives height
-// from (COMPANION_ASPECT) — deriving height from `bounds.height / bounds.width`
-// instead reads back whatever the OS actually gave the window (frame/DPI
-// rounding can drift this a pixel or two off the nominal ratio), which both
-// checks a different position-clamp boundary than the executor will use and
-// can never notice the drift itself, since nothing then compares against it.
-export function companionNeedsReclamp(bounds: Bounds, displays: DisplayBounds[], margin: number, widthMin: number, widthMax: number, aspect: number): boolean {
-  const width = clampCompanionWidth(bounds.width, widthMin, widthMax);
+// The single source of truth for "what should the companion's bounds be right
+// now", used identically to decide whether a reclamp is needed and to perform
+// one — so the two can never disagree about what "correct" means, which is
+// exactly the bug an earlier version of this function had (see git history:
+// the guard derived height from the window's own possibly-drifted bounds ratio
+// while the executor derived it from the fixed aspect constant).
+//
+// `preferredWidth` is the size the user actually asked for — via an explicit
+// scroll-wheel resize, or whatever was last on record — never a value an
+// earlier automatic reclamp produced. Feeding a shrunk-to-fit width back in as
+// next call's "preferred" would ratchet the size down a little more on every
+// undock, with no way back to the original on redock.
+//
+// Anchored at bottom-center, matching the model's own anchor point, so
+// growing/shrinking feels like the character scaling in place rather than
+// jumping — including at launch, where `current` is the last saved bounds.
+export function effectiveCompanionBounds(
+  current: Bounds,
+  preferredWidth: number,
+  matchingDisplayWorkAreaWidth: number,
+  allDisplays: DisplayBounds[],
+  margin: number,
+  widthMin: number,
+  widthMax: number,
+  maxFraction: number,
+  aspect: number,
+): Bounds {
+  const width = clampCompanionWidthOnDisplay(preferredWidth, widthMin, widthMax, matchingDisplayWorkAreaWidth, maxFraction);
   const height = Math.round(width * aspect);
-  const { x, y } = clampCompanionPosition(bounds.x, bounds.y, width, height, displays, margin);
-  return x !== bounds.x || y !== bounds.y || width !== bounds.width || height !== bounds.height;
+  const centerX = current.x + current.width / 2;
+  const bottom = current.y + current.height;
+  const { x, y } = clampCompanionPosition(Math.round(centerX - width / 2), Math.round(bottom - height), width, height, allDisplays, margin);
+  return { x, y, width, height };
+}
+
+// True when `next` (an effectiveCompanionBounds result) actually differs from
+// `current` — i.e. applying it would move or resize the window. Used to make
+// the live display-change handler idempotent: `display-metrics-changed` fires
+// for DPI/scale/rotation changes anywhere, including on a display the
+// companion isn't on, so it must only touch the window when something would
+// actually change.
+export function companionNeedsReclamp(current: Bounds, next: Bounds): boolean {
+  return current.x !== next.x || current.y !== next.y || current.width !== next.width || current.height !== next.height;
 }
 
 // Battery halves the poll rate rather than pausing it outright: eye-follow is
