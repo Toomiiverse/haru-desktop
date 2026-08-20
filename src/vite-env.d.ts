@@ -50,6 +50,11 @@ interface Window {
       set(config: import('./types').AniListConfig): Promise<import('./types').AniListConfig>;
       test(): Promise<number>;
     };
+    checkInSource: {
+      status(): Promise<{ url: string; username: string; hasPassword: boolean }>;
+      set(url: string, username: string, password: string): Promise<{ url: string; username: string; hasPassword: boolean }>;
+      pull(): Promise<number>;
+    };
     search: {
       get(): Promise<import('./types').SearchConfig & { hasKey: boolean }>;
       set(config: import('./types').SearchConfig): Promise<import('./types').SearchConfig & { hasKey: boolean }>;

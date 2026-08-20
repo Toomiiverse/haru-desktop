@@ -51,6 +51,7 @@ import { formatMemoryPrompt, isWorthKeeping, isWorthRemembering, MEMORY_KINDS, m
 import { forgetDevice, forgetEveryDevice, readWebAccess, setPassword, weakPassword, type WebAccess } from './web';
 import { conversationMayLeave } from './sensitivity';
 import { addCheckIn, checkInInstruction, checkInsOn, readCheckIns, type CheckIn } from './checkins';
+import { describePull, isTailnetAddress, mergeCheckIns, readCheckInSource } from './checkinsource';
 import { DiscordLink, looksLikeUserId, readDiscordConfig, useOfChannel, type DiscordConfig } from './discord';
 import { startWebServer, type WebDeps } from './webserver';
 
@@ -4674,6 +4675,64 @@ async function noticePage(page: NoticedPage) {
   }
 }
 
+/**
+ * Goes and gets what she was told while away from this desk.
+ *
+ * Discord lives on the server now, so a note sent from the phone is written
+ * there and the evening review here would never see it — the day arriving in
+ * two halves that never meet. This is the desk going to ask.
+ *
+ * Failures are quiet on purpose. The server is a machine in a shed that gets
+ * moved, unplugged and rebooted, and a companion who cannot be spoken to
+ * because a second computer is off is worse than one missing a note. Whatever
+ * is local still stands; the pull either adds to it or does not.
+ */
+let pullingCheckIns = false;
+
+async function pullCheckIns(): Promise<void> {
+  if (pullingCheckIns) return;
+  const source = readCheckInSource(store.get('checkinSource'));
+  if (!source) return;
+  // readCheckInSource already refuses anything off-tailnet, and this asks again
+  // rather than trusting that it did: the password goes out over this URL, and
+  // the notes come back over it.
+  if (!isTailnetAddress(source.url)) {
+    console.warn('[checkins] refusing to pull — ' + source.url + ' is not a tailnet address');
+    return;
+  }
+  const password = decryptSecret(store.get('checkinSourcePassword') as string | undefined);
+  if (!password) return;
+
+  pullingCheckIns = true;
+  try {
+    const signIn = await net.fetch(source.url + '/api/login', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ username: source.username, password, remember: false }),
+    });
+    if (!signIn.ok) { console.warn('[checkins] the server would not sign us in (' + signIn.status + ')'); return; }
+    // Her own session cookie, held for this one exchange and not stored.
+    const cookie = (signIn.headers.get('set-cookie') ?? '').split(',').map(part => part.split(';')[0].trim()).filter(Boolean).join('; ');
+
+    const got = await net.fetch(source.url + '/api/checkins', { headers: cookie ? { cookie } : {} });
+    if (!got.ok) { console.warn('[checkins] could not read them (' + got.status + ')'); return; }
+    const body = await got.json() as { entries?: unknown };
+    const theirs = Array.isArray(body.entries) ? body.entries : [];
+    if (!theirs.length) return;
+
+    const before = getCheckIns();
+    const merged = mergeCheckIns(before, theirs as never);
+    const what = describePull(before, merged);
+    if (!what) return;
+    setCheckIns(merged);
+    console.log('[checkins] ' + what);
+  } catch (error) {
+    console.warn('[checkins] could not reach the server:', error instanceof Error ? error.message : error);
+  } finally {
+    pullingCheckIns = false;
+  }
+}
+
 function getCheckIns() {
   return readCheckIns(store.get('checkins'));
 }
@@ -5618,6 +5677,12 @@ async function stopWebDoor() {
 if (process.platform === 'win32') app.setAppUserModelId('com.haru.desktop');
 
 app.whenReady().then(() => {
+  // Whatever was said to her elsewhere today. Once at startup, then quietly on
+  // the hour — often enough that the evening review has it, rare enough that a
+  // sleeping server is not being knocked on constantly.
+  void pullCheckIns();
+  setInterval(() => void pullCheckIns(), 15 * 60_000);
+
   if (!isPrimaryInstance) return;
   protocol.handle('haru-model', async request => {
     const url = new URL(request.url);
@@ -5745,6 +5810,29 @@ app.whenReady().then(() => {
   });
   // hasKey rather than the key: whether one is saved is what the panel needs to
   // render, and the key itself has no business back in the renderer.
+  ipcMain.handle('checkinsource:get', () => {
+    const source = readCheckInSource(store.get('checkinSource'));
+    return { url: source?.url ?? '', username: source?.username ?? '', hasPassword: Boolean(decryptSecret(store.get('checkinSourcePassword') as string | undefined)) };
+  });
+  ipcMain.handle('checkinsource:set', (_e, url: string, username: string, password: string) => {
+    const trimmed = String(url ?? '').trim().replace(/\/+$/, '');
+    if (!trimmed) {
+      store.delete('checkinSource' as never);
+      store.delete('checkinSourcePassword' as never);
+      console.log('[checkins] no longer reading from another machine');
+      return { url: '', username: '', hasPassword: false };
+    }
+    // Refused here as well as in the reader. A password is about to be stored
+    // for this address and then sent to it, and these notes are the last thing
+    // that should go anywhere but the tailnet.
+    if (!isTailnetAddress(trimmed)) throw new Error('That is not a tailnet address. It has to be a name ending .ts.net, or a 100.x address, so her check-ins never leave the tailnet.');
+    store.set('checkinSource', { url: trimmed, username: String(username ?? '').trim() });
+    if (password) store.set('checkinSourcePassword', encryptSecret(password));
+    console.log('[checkins] reading from ' + trimmed);
+    void pullCheckIns();
+    return { url: trimmed, username: String(username ?? '').trim(), hasPassword: Boolean(password) || Boolean(decryptSecret(store.get('checkinSourcePassword') as string | undefined)) };
+  });
+  ipcMain.handle('checkinsource:pull', async () => { await pullCheckIns(); return getCheckIns().entries.length; });
   ipcMain.handle('search:get', () => ({ ...readSearchConfig(store.get('search')), hasKey: Boolean(getSearchKey()) }));
   ipcMain.handle('search:set', (_e, config: SearchConfig) => {
     const saved = readSearchConfig(config);

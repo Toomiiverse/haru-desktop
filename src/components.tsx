@@ -561,7 +561,7 @@ export function SettingsDrawer({ config, onSave, onTest, onClose }: { config: Pr
       <input type="password" value={modelKey} placeholder={hasModelKey ? `A key is saved for ${KEY_SLOT_NAME[slot]} — type a new one to replace it` : `Bearer token for ${KEY_SLOT_NAME[slot]}`} onChange={event => setModelKey(event.target.value)}/>
       <button className="ghost" disabled={!modelKey.trim()} onClick={saveModelKey}>Save key</button>
     </div>
-  </>}{status.state !== 'idle' && <p className={status.state === 'error' ? 'status-error' : 'status-ok'}>{status.state === 'testing' ? 'Testing…' : status.message}</p>}</div><VoiceField registerSave={registerVoiceSave}/><ListenField/><SearchField/><AniListField/><SecondBrainField/><ThemeField/><VisionField/><AttachmentsField/><ScreenshotField/><WatchingField/><DesktopField/><GamingField/><RoamField/><GoogleCalendarField/><DiscordField/><WebField/><StartupField/><div className="drawer-foot"><button className="ghost" onClick={test} disabled={status.state === 'testing'}>{status.state === 'testing' ? 'Testing…' : 'Test connection'}</button><button className="ghost">Enable alerts</button>{saved && <span className="saved"><Check size={13}/> Saved</span>}<button className="solid" onClick={() => void save()}>Save setup</button></div></section>;
+  </>}{status.state !== 'idle' && <p className={status.state === 'error' ? 'status-error' : 'status-ok'}>{status.state === 'testing' ? 'Testing…' : status.message}</p>}</div><VoiceField registerSave={registerVoiceSave}/><ListenField/><SearchField/><AniListField/><SecondBrainField/><ThemeField/><VisionField/><AttachmentsField/><ScreenshotField/><WatchingField/><DesktopField/><GamingField/><RoamField/><GoogleCalendarField/><DiscordField/><WebField/><CheckInSourceField/><StartupField/><div className="drawer-foot"><button className="ghost" onClick={test} disabled={status.state === 'testing'}>{status.state === 'testing' ? 'Testing…' : 'Test connection'}</button><button className="ghost">Enable alerts</button>{saved && <span className="saved"><Check size={13}/> Saved</span>}<button className="solid" onClick={() => void save()}>Save setup</button></div></section>;
 }
 
 // What each engine calls the thing it clones or selects a voice with. The label
@@ -1539,6 +1539,55 @@ function DiscordField() {
     </div>
     {status.enabled && <p className="status-note">{status.botName ? `Connected as ${status.botName}. Message her.` : status.connected ? 'Connecting…' : 'Switched on but not connected.'}</p>}
     {status.trouble && <p className="status-error">{status.trouble}</p>}
+    {message && <p className={message.error ? 'status-error' : 'status-ok'}>{message.text}</p>}
+  </div>;
+}
+
+/**
+ * Where her other self is, and how to sign in to it.
+ *
+ * Discord moved to the server, so a note sent from a phone is written there and
+ * this machine would never see it — the day arriving in two halves that never
+ * meet. This is how the desk is told where to go and ask.
+ */
+function CheckInSourceField() {
+  const [status, setStatus] = useState<{ url: string; username: string; hasPassword: boolean } | null>(null);
+  const [url, setUrl] = useState('');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [message, setMessage] = useState<{ text: string; error?: boolean } | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { window.haru?.checkInSource.status().then(state => { setStatus(state); setUrl(state.url); setUsername(state.username); }); }, []);
+
+  if (!window.haru || !status) return null;
+
+  async function run(action: () => Promise<unknown>, done: string) {
+    setBusy(true); setMessage(null);
+    try {
+      await action();
+      setStatus(await window.haru!.checkInSource.status());
+      setMessage({ text: done });
+    } catch (error) {
+      setMessage({ text: error instanceof Error ? error.message.replace(/^Error invoking remote method '[^']*':\s*(Error:\s*)?/, '') : String(error), error: true });
+    } finally { setBusy(false); }
+  }
+
+  return <div className="field"><h2>Check-ins made elsewhere</h2>
+    <p>If she also runs on another machine — a server answering Discord, say — the notes you send it are written there. This lets her read them back here, so the end-of-day check-in knows about the whole day and not just the part spent at this desk.</p>
+    <p className="status-note">The address has to be on your tailnet: a name ending .ts.net, or a 100.x address. Anything else is refused rather than sent. These are the most private things she keeps, and they should never leave it.</p>
+    <div className="form-grid">
+      <input value={url} disabled={busy} placeholder="https://haruserver.tail1234.ts.net" onChange={event => setUrl(event.target.value)}/>
+      <input value={username} disabled={busy} placeholder="The name you sign in to it with" onChange={event => setUsername(event.target.value)}/>
+      <input type="password" value={password} disabled={busy} placeholder={status.hasPassword ? 'A password is saved — type a new one to replace it' : 'Its password'} onChange={event => setPassword(event.target.value)}/>
+    </div>
+    <div className="row">
+      <button className="ghost" disabled={busy || !url.trim() || !username.trim() || (!password && !status.hasPassword)}
+        onClick={() => void run(async () => { await window.haru!.checkInSource.set(url.trim(), username.trim(), password); setPassword(''); }, 'Saved. Reading from it now.')}>Save</button>
+      <button className="ghost" disabled={busy || !status.url}
+        onClick={() => void run(async () => { const total = await window.haru!.checkInSource.pull(); setMessage({ text: `Read them — ${total} check-in${total === 1 ? '' : 's'} here now.` }); }, '')}>Read now</button>
+      <button className="ghost" disabled={busy || !status.url}
+        onClick={() => void run(async () => { await window.haru!.checkInSource.set('', '', ''); setUrl(''); setUsername(''); setPassword(''); }, 'Stopped reading from it.')}>Forget it</button>
+    </div>
     {message && <p className={message.error ? 'status-error' : 'status-ok'}>{message.text}</p>}
   </div>;
 }
