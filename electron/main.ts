@@ -1,13 +1,17 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, type MenuItemConstructorOptions, nativeTheme, net, Notification, protocol, screen } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, type MenuItemConstructorOptions, nativeTheme, net, Notification, powerMonitor, protocol, screen } from 'electron';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import AdmZip from 'adm-zip';
 import Store from 'electron-store';
+import {
+  clampCompanionPosition, clampCompanionWidth, clampCompanionWidthOnDisplay,
+  combinedDisplayBounds, companionNeedsReclamp, cursorPollIntervalMs, defaultCompanionWidth,
+  type Bounds,
+} from './companion';
 import { dueDateTime, localDateKey, resolveDate, zonedNow } from './dates';
 
-type Bounds = { x: number; y: number; width: number; height: number };
 type Live2DModel = { path: string; name: string; url: string };
 type KeptItem = { id: string; title: string; date: string; time?: string; kind: 'reminder' | 'event'; done: boolean; notified?: boolean };
 
@@ -16,7 +20,17 @@ const COMPANION_ASPECT = 360 / 300;
 const COMPANION_MIN_WIDTH = 140;
 const COMPANION_MAX_WIDTH = 900;
 const COMPANION_MARGIN = 60;
-const CURSOR_POLL_MS = 33;
+// A fresh companion is sized off the primary display's work area rather than
+// always the flat default above, so a small laptop panel gets a corner companion
+// instead of one that dominates the screen. See defaultCompanionWidth.
+const COMPANION_DEFAULT_WIDTH_FRACTION = 0.22;
+// Same idea for the scroll-wheel resize ceiling: 900px reads fine on a desktop
+// monitor but can exceed a small laptop panel outright.
+const COMPANION_MAX_WIDTH_FRACTION = 0.6;
+const CURSOR_POLL_MS_AC = 33;
+// Eye-follow at half rate on battery still reads as tracking the cursor, for
+// roughly half the wakeups — see cursorPollIntervalMs.
+const CURSOR_POLL_MS_BATTERY = 66;
 const CHAT_TIMEZONE = 'Australia/Perth'; // UTC+8 year-round, no DST
 const CHAT_RESET_HOUR = 5;
 const CHAT_RESET_POLL_MS = 60_000;
@@ -33,6 +47,8 @@ const store = new Store<Record<string, unknown>>();
 const live2dRoots = new Map<string, string>();
 let mainWindow: BrowserWindow | null = null;
 let companionWindow: BrowserWindow | null = null;
+let cursorPollTimer: ReturnType<typeof setInterval> | undefined;
+let lastCursorSend: { x: number; y: number } | undefined;
 
 protocol.registerSchemesAsPrivileged([{ scheme: 'haru-model', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } }]);
 
@@ -377,41 +393,47 @@ function readExpressionNames(): string[] {
   }
 }
 
-function combinedDisplayBounds() {
-  const displays = screen.getAllDisplays();
-  return {
-    minX: Math.min(...displays.map(d => d.bounds.x)),
-    minY: Math.min(...displays.map(d => d.bounds.y)),
-    maxX: Math.max(...displays.map(d => d.bounds.x + d.bounds.width)),
-    maxY: Math.max(...displays.map(d => d.bounds.y + d.bounds.height)),
-  };
-}
-
-function clampCompanionWidth(width: number) {
-  return Math.min(Math.max(Math.round(width), COMPANION_MIN_WIDTH), COMPANION_MAX_WIDTH);
-}
-
-function clampCompanionPosition(x: number, y: number, width: number, height: number) {
-  const { minX, minY, maxX, maxY } = combinedDisplayBounds();
-  return {
-    x: Math.min(Math.max(x, minX - width + COMPANION_MARGIN), maxX - COMPANION_MARGIN),
-    y: Math.min(Math.max(y, minY - height + COMPANION_MARGIN), maxY - COMPANION_MARGIN),
-  };
+// The clamping/sizing math itself lives in ./companion, free of electron imports
+// so it can be exercised in plain Node the same way dates.ts is. These wrappers
+// just supply the live display list electron/screen holds.
+function allDisplayBounds() {
+  return screen.getAllDisplays().map(d => d.bounds);
 }
 
 function getCompanionBounds(): Bounds {
   const saved = store.get('companion.bounds') as Bounds | undefined;
   if (saved) {
-    const width = clampCompanionWidth(saved.width || COMPANION_DEFAULT_WIDTH);
+    const width = clampCompanionWidth(saved.width || COMPANION_DEFAULT_WIDTH, COMPANION_MIN_WIDTH, COMPANION_MAX_WIDTH);
     const height = Math.round(width * COMPANION_ASPECT);
-    const { minX, minY, maxX, maxY } = combinedDisplayBounds();
+    const { minX, minY, maxX, maxY } = combinedDisplayBounds(allDisplayBounds());
     const onScreen = saved.x + width > minX && saved.x < maxX && saved.y + height > minY && saved.y < maxY;
     if (onScreen) return { x: saved.x, y: saved.y, width, height };
   }
-  const width = COMPANION_DEFAULT_WIDTH;
+  // No saved bounds, or the saved ones are no longer on any display: size fresh,
+  // relative to whichever display is primary right now.
+  const primary = screen.getPrimaryDisplay();
+  const width = defaultCompanionWidth(primary.workArea.width, COMPANION_DEFAULT_WIDTH, COMPANION_DEFAULT_WIDTH_FRACTION, COMPANION_MIN_WIDTH, COMPANION_MAX_WIDTH);
   const height = Math.round(width * COMPANION_ASPECT);
-  const work = screen.getPrimaryDisplay().workArea;
+  const work = primary.workArea;
   return { x: work.x + work.width - width - 24, y: work.y + work.height - height - 24, width, height };
+}
+
+// Re-clamps the companion after the display arrangement changes at runtime —
+// e.g. a laptop undocked from an external monitor without quitting Haru.
+// companionNeedsReclamp guards this: display-metrics-changed also fires for
+// DPI/scale/rotation changes anywhere, including on a display the companion
+// isn't on, so this must be a no-op unless clamping would actually move or
+// shrink the window.
+function reclampCompanionWindow() {
+  if (!companionWindow) return;
+  const bounds = companionWindow.getBounds();
+  const displays = allDisplayBounds();
+  if (!companionNeedsReclamp(bounds, displays, COMPANION_MARGIN, COMPANION_MIN_WIDTH, COMPANION_MAX_WIDTH, COMPANION_ASPECT)) return;
+  const width = clampCompanionWidth(bounds.width, COMPANION_MIN_WIDTH, COMPANION_MAX_WIDTH);
+  const height = Math.round(width * COMPANION_ASPECT);
+  const { x, y } = clampCompanionPosition(bounds.x, bounds.y, width, height, displays, COMPANION_MARGIN);
+  companionWindow.setBounds({ x, y, width, height });
+  store.set('companion.bounds', companionWindow.getBounds());
 }
 
 function createWindow() {
@@ -458,13 +480,27 @@ function createCompanionWindow() {
   companionWindow.on('moved', persistBounds);
   companionWindow.on('resize', persistBounds);
   companionWindow.on('resized', persistBounds);
+}
 
-  setInterval(() => {
-    if (!companionWindow || !companionWindow.isVisible()) return;
-    const point = screen.getCursorScreenPoint();
-    const bounds = companionWindow.getBounds();
-    companionWindow.webContents.send('companion:cursor', { x: point.x - bounds.x, y: point.y - bounds.y });
-  }, CURSOR_POLL_MS);
+// Sends only on an actual change in cursor position relative to the window,
+// which is most ticks once the cursor stops moving.
+function pollCursor() {
+  if (!companionWindow || !companionWindow.isVisible()) return;
+  const point = screen.getCursorScreenPoint();
+  const bounds = companionWindow.getBounds();
+  const next = { x: point.x - bounds.x, y: point.y - bounds.y };
+  if (lastCursorSend && lastCursorSend.x === next.x && lastCursorSend.y === next.y) return;
+  lastCursorSend = next;
+  companionWindow.webContents.send('companion:cursor', next);
+}
+
+// Restarted rather than adjusted in place — setInterval has no reschedule API —
+// whenever the power source changes, so eye-follow runs at a battery-friendly
+// rate on battery and back at the original rate on AC.
+function startCursorPoll() {
+  clearInterval(cursorPollTimer);
+  const ms = cursorPollIntervalMs(powerMonitor.isOnBatteryPower(), CURSOR_POLL_MS_AC, CURSOR_POLL_MS_BATTERY);
+  cursorPollTimer = setInterval(pollCursor, ms);
 }
 
 app.whenReady().then(() => {
@@ -538,19 +574,23 @@ app.whenReady().then(() => {
   ipcMain.handle('companion:moveBy', (_e, dx: number, dy: number) => {
     if (!companionWindow) return;
     const bounds = companionWindow.getBounds();
-    const { x, y } = clampCompanionPosition(bounds.x + dx, bounds.y + dy, bounds.width, bounds.height);
+    const { x, y } = clampCompanionPosition(bounds.x + dx, bounds.y + dy, bounds.width, bounds.height, allDisplayBounds(), COMPANION_MARGIN);
     companionWindow.setBounds({ ...bounds, x: Math.round(x), y: Math.round(y) });
   });
   ipcMain.handle('companion:resizeBy', (_e, factor: number) => {
     if (!companionWindow) return;
     const bounds = companionWindow.getBounds();
-    const width = clampCompanionWidth(bounds.width * factor);
+    // Capped to the screen she's actually on (getDisplayMatching), not just the
+    // flat ceiling: growing via scroll-wheel shouldn't be able to exceed a small
+    // laptop panel just because 900px is fine on a desktop monitor.
+    const display = screen.getDisplayMatching(bounds);
+    const width = clampCompanionWidthOnDisplay(bounds.width * factor, COMPANION_MIN_WIDTH, COMPANION_MAX_WIDTH, display.workArea.width, COMPANION_MAX_WIDTH_FRACTION);
     const height = Math.round(width * COMPANION_ASPECT);
     // Anchor the resize at bottom-center, matching the model's own anchor point,
     // so growing/shrinking feels like the character scaling in place.
     const centerX = bounds.x + bounds.width / 2;
     const bottom = bounds.y + bounds.height;
-    const { x, y } = clampCompanionPosition(Math.round(centerX - width / 2), Math.round(bottom - height), width, height);
+    const { x, y } = clampCompanionPosition(Math.round(centerX - width / 2), Math.round(bottom - height), width, height, allDisplayBounds(), COMPANION_MARGIN);
     companionWindow.setBounds({ x, y, width, height });
   });
   ipcMain.handle('companion:showMenu', () => {
@@ -576,6 +616,12 @@ app.whenReady().then(() => {
   });
   createWindow();
   createCompanionWindow();
+  startCursorPoll();
+  // Eye-follow rate follows whichever power source is current; see startCursorPoll.
+  powerMonitor.on('on-battery', startCursorPoll);
+  powerMonitor.on('on-ac', startCursorPoll);
+  screen.on('display-removed', reclampCompanionWindow);
+  screen.on('display-metrics-changed', reclampCompanionWindow);
   performChatResetIfDue();
   setInterval(performChatResetIfDue, CHAT_RESET_POLL_MS);
   checkDueReminders();
