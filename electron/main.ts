@@ -51,9 +51,11 @@ import { formatMemoryPrompt, isWorthKeeping, isWorthRemembering, MEMORY_KINDS, m
 import { forgetDevice, forgetEveryDevice, readWebAccess, setPassword, weakPassword, type WebAccess } from './web';
 import { conversationMayLeave } from './sensitivity';
 import { addCheckIn, checkInInstruction, checkInsOn, readCheckIns, type CheckIn } from './checkins';
+import { addAside, alreadySaidRecently, asideContext, asidesOn, pruneAsides, readAsides, type Aside, type AsideSource } from './asides';
 import { describePull, isTailnetAddress, mergeCheckIns, readCheckInSource } from './checkinsource';
 import { DiscordLink, looksLikeUserId, readDiscordConfig, useOfChannel, type DiscordConfig } from './discord';
 import { startWebServer, type WebDeps } from './webserver';
+import { BREVITY, summonedLine } from './summoned';
 import { setupSonarrHandlers } from './sonarr-api';
 
 type Bounds = { x: number; y: number; width: number; height: number };
@@ -188,6 +190,10 @@ function unpackModel(archivePath: string) {
 // measurable amount of IPC for movement nobody can see the difference in.
 const ROAM_TICK_MS = 30;
 let roamTimer: NodeJS.Timeout | null = null;
+// Open means the box at her feet is up and waiting to be typed into. She holds
+// still while it is: wandering off mid-sentence takes the box with her.
+let summonOpen = false;
+let lastSummonLine = '';
 let walkingTo: Point | null = null;
 let lastWalkAt = 0;
 let lastUserMovedAt = Date.now();
@@ -238,6 +244,10 @@ function roamTick() {
     if (walk.arrived) { walkingTo = null; console.log(`[roam] arrived at ${Math.round(x)}`); }
     return;
   }
+
+  // Being talked to holds her in place. Everything below is about whether she
+  // feels like moving; this is about the box moving with her if she does.
+  if (summonOpen) { nextWanderAt = 0; return; }
 
   if (!mayWander({
     enabled: config.enabled,
@@ -436,6 +446,11 @@ function performChatResetIfDue() {
   heldPicture = null;
   store.set('chat.dayKey', key);
   store.delete('chat.messages' as never);
+  // Her log is trimmed rather than cleared. The conversation starts fresh every
+  // day because a conversation is a thing you are in the middle of; the log is a
+  // record, and a record you can only ever see today's page of is not one. A few
+  // days of it is what makes "what was she going on about on Tuesday" answerable.
+  store.set('chat.asides', pruneAsides(getAsides()));
   // Overwrites any manual marker still pending: whatever the user did last night,
   // the reason this history is empty now is the clock. Same misreading to head
   // off, different explanation — she cannot ask them why they cleared this one.
@@ -765,7 +780,33 @@ function openAnswerWindow() {
 const INTERJECT_GAP_MS = 4 * 60_000;
 let lastInterjectionAt = 0;
 
-/** Everything she says without having been spoken to goes through here. */
+/**
+ * Her log, which is not the transcript.
+ *
+ * Everything she says off her own back is written here instead of into the
+ * conversation. Two separate complaints, one cause: the chat filled with
+ * commentary nobody had asked for, and — worse — every line of it went back into
+ * the model on the next message, so a day of her narrating the screen became the
+ * bulk of what she thought had been said between them.
+ *
+ * Owned by this process rather than by the renderer, unlike chat.messages.
+ * Every one of these is written here, so there is nothing for the window to own;
+ * it is handed each line as it happens and shows the log it is given.
+ */
+function getAsides(): Aside[] {
+  return readAsides(store.get('chat.asides'));
+}
+
+/** Everything she says without having been spoken to is written here. */
+function noteAside(text: string, source: AsideSource): Aside | null {
+  const line = text.trim();
+  if (!line) return null;
+  const { asides, aside } = addAside(getAsides(), line, source, new Date(), localDateKey(zonedNow(CHAT_TIMEZONE)));
+  store.set('chat.asides', asides);
+  sendToWindows('chat:aside', aside);
+  return aside;
+}
+
 // Enough of the day to carry a thread without crowding out the instruction that
 // follows it. Ten turns is roughly the last exchange plus what led into it.
 const UNPROMPTED_CONTEXT_TURNS = 10;
@@ -863,7 +904,17 @@ function unpromptedContext(): string {
   // one that was missed is exactly where the complaint came from — she remarked
   // on a manga she had watched them read for days as though she had never seen
   // it, because that particular composer had never been given the list.
-  const parts = [summariseFollowing(getFollowing(), Date.now()), todaySoFar(), stillWaiting()].filter(Boolean);
+  const today = localDateKey(zonedNow(CHAT_TIMEZONE));
+  const asides = getAsides();
+  const spokenToday = asidesOn(asides, today);
+  // Her own remarks, beside the conversation rather than mixed into it. They are
+  // not part of what was said between them and printing them as though they were
+  // is how she came to answer her own asides — but she does have to know she has
+  // already made the point, or she makes it again an hour later.
+  //
+  // On the clock rather than on the day, unlike the check below: what she must
+  // not repeat at one in the morning is what she said at half eleven.
+  const parts = [summariseFollowing(getFollowing(), Date.now()), todaySoFar(), alreadySaidRecently(asides, CHAT_TIMEZONE, Date.now()), stillWaiting()].filter(Boolean);
   if (!parts.length) return '';
   // "Do not repeat a point you have already made" was read as "change the
   // subject": once a thread was answered and settled she abandoned the day
@@ -874,7 +925,10 @@ function unpromptedContext(): string {
   // "Do not act as though this is the first thing you have said all day" is
   // false at six in the morning, and telling her to pick something up from
   // today when today is empty is how she came to invent one.
-  const fresh = !spokenOn(localDateKey(zonedNow(CHAT_TIMEZONE)), localDateKey(zonedNow(CHAT_TIMEZONE))).length;
+  // Her own remarks count. Twelve of them and no reply is not "the first thing
+  // you have said today", and told that it was she opened the afternoon with a
+  // greeting on top of a morning of her own commentary.
+  const fresh = !spokenOn(today, today).length && !spokenToday.length;
   return `${parts.join('\n')}\n${fresh
     ? 'This is the first thing you have said today. Open on what is actually in front of them — what is on their list, or something they left unfinished last time — and do not ask how anything went unless it has already happened.'
     : 'Carry on from that. Pick up something from today — what they told you, what they were doing, how a thing they mentioned turned out — rather than opening on nothing. Do not greet them, do not say a line you have already said, and do not act as though this is the first thing you have said all day.'}`;
@@ -928,7 +982,7 @@ function whyNotInterject({ aboutTheGame = false } = {}): string | null {
  * not butt in; a version of it that silences only the written half prevents
  * nothing and loses the record.
  */
-function interject(line: string, { aboutTheGame = false } = {}): boolean {
+function interject(line: string, { aboutTheGame = false, source = 'other' as AsideSource } = {}): boolean {
   const now = Date.now();
   const refusal = whyNotInterject({ aboutTheGame });
   if (refusal) {
@@ -939,7 +993,13 @@ function interject(line: string, { aboutTheGame = false } = {}): boolean {
   // Before it goes out, so that whatever she has just demanded an account of is
   // on record by the time they reply.
   noteSheAsked(line);
-  sendToWindows('chat:interject', line);
+  // Into her own log, not the transcript. This function is the definition of an
+  // unprompted line — it exists to rate-limit exactly the things nobody asked
+  // for — so it is also the right and only place to decide where they are
+  // written. Anything that reaches the conversation instead does so by not
+  // coming through here, which is a short and deliberate list: see the two
+  // "hold on, I'm looking" sites, which answer a button the user just pressed.
+  noteAside(line, source);
   expectAnswerWhenDone();
   return true;
 }
@@ -1169,7 +1229,7 @@ async function glanceAtScreen() {
     if (!line.trim()) return;
     console.log(`[watch] remarked on what is on screen (${line.length} chars, ${Date.now() - startedAt}ms)`);
     // Spoken only if it was also written down — see interject.
-    if (interject(line, { aboutTheGame: true })) void speak(line, classifyEmotion(line, provider));
+    if (interject(line, { aboutTheGame: true, source: 'screen' })) void speak(line, classifyEmotion(line, provider));
   } catch (error) {
     console.warn('[watch] could not look at the screen:', error instanceof Error ? error.message : error);
   }
@@ -1246,7 +1306,7 @@ async function remarkOnScreenshot() {
     // Through interject, so every rule about when she may speak applies —
     // including staying quiet while they are gaming or mid-conversation.
     // Spoken only if it was also written down — see interject.
-    if (interject(line)) void speak(line, classifyEmotion(line, provider));
+    if (interject(line, { source: 'screenshot' })) void speak(line, classifyEmotion(line, provider));
   } catch (error) {
     console.warn('[shot] could not react:', error instanceof Error ? error.message : error);
   }
@@ -1419,19 +1479,22 @@ async function handlePoke(kind: PokeKind) {
     ].filter(Boolean).join(' ');
     const prod = kind === 'right-click' ? 'They just right-clicked on you.' : 'They just poked you.';
     const line = await ollamaQuip(system, cutOff ? `${prod} You were half-way through saying this out loud: "${cutOff}"` : prod, config);
-    // Said out loud and put in the chat: the companion window has nowhere to
-    // show text, and a line that only exists as audio is lost with the volume off.
+    // Said out loud and written down: the companion window has nowhere to show
+    // text, and a line that only exists as audio is lost with the volume off.
     //
-    // Sent directly rather than through interject, for the same reason the
-    // "hold on, I'm looking" line is. interject exists to stop her butting in on
-    // her own account, and one of the things it refuses on is the user having
-    // interacted in the last few minutes — which a poke always is. Routed
-    // through it, a poke reliably silenced its own reaction.
+    // Into her log rather than the conversation. Being prodded in the corner of
+    // the screen is not a message they typed, and the reply to it is not part of
+    // any exchange — it is her reacting, which is exactly what the log is for.
+    //
+    // It does not go through interject, for the same reason the "hold on, I'm
+    // looking" line does not: interject refuses when the user has interacted in
+    // the last few minutes, which a poke always is. Routed through it, a poke
+    // reliably silenced its own reaction.
     //
     // It is not unrated: pokeSpeaking and POKE_LINE_COOLDOWN_MS above already
     // bound this, and they bound the right thing — how often a poke earns a
     // line, rather than how often she speaks unprompted.
-    sendToWindows('chat:interject', line);
+    noteAside(line, 'poke');
     noteSheAsked(line);
     void speak(line);
   } catch (error) {
@@ -1899,6 +1962,10 @@ async function openAttachment(
   const name = path.basename(source);
   const temporary: string[] = [];
   if (asked) {
+    // Into the conversation, not her log: they asked a question through the
+    // composer and the answer lands in the conversation, so the "hold on" that
+    // precedes it has to be in the same place. Splitting the two halves of one
+    // exchange across two tabs is worse than either version of the noise.
     const holdOn = whileLooking();
     sendToWindows('chat:interject', holdOn);
     void speak(holdOn);
@@ -2048,7 +2115,7 @@ async function reactToActivity(activity: Activity, url = '') {
     if (place) store.set('haunts', rememberSaid(getHaunts(), place, line));
     const emotion = classifyEmotion(line, config);
     // Spoken only if it was also written down — see interject.
-    if (interject(line)) void speak(line, emotion);
+    if (interject(line, { source: 'activity' })) void speak(line, emotion);
   } catch (error) {
     console.warn('[activity] could not react:', error instanceof Error ? error.message : error);
   } finally {
@@ -2354,8 +2421,10 @@ async function remarkOnTickOff(item: KeptItem) {
         : 'It was due today and they have actually done it. Be surprised in a backhanded way rather than warm about it.',
       'One short line. Do not congratulate them properly, do not list anything else, and do not ask what is next.',
     ].join(' '), `The task they ticked off: "${item.title}".`, config);
-    // Directly, not through interject — see TICK_OFF_COOLDOWN_MS above.
-    sendToWindows('chat:interject', line);
+    // Directly, not through interject — see TICK_OFF_COOLDOWN_MS above. Still
+    // into her log rather than the conversation: they ticked a box, they did not
+    // say anything, and a remark about it is hers alone.
+    noteAside(line, 'kept');
     noteSheAsked(line);
     void speak(line, classifyEmotion(line, config));
     console.log(`[kept] remarked on "${item.title}" being ticked off${late ? ' (late)' : ''}`);
@@ -2429,7 +2498,7 @@ async function reactToFullscreen(title: string) {
     broadcastBeat({ emotion: 'curious', confidence: 0.9, energy: 0.7, intent: 'tease', focus: 'away' }, 'stare');
     sendToWindows('companion:pose', 'lean-in');
     // Spoken only if it was also written down — see interject.
-    if (interject(line)) void speak(line);
+    if (interject(line, { source: 'fullscreen' })) void speak(line);
   } catch (error) {
     console.warn('[helper] could not react to fullscreen:', error instanceof Error ? error.message : error);
   }
@@ -2552,7 +2621,7 @@ async function considerReminding(environment: Environment): Promise<boolean> {
     sendToWindows('voice:insistence', reminderVolume(tier));
     const emotion = classifyEmotion(line, config);
     // Spoken only if it was also written down — see interject.
-    if (interject(line)) void speak(line, emotion);
+    if (interject(line, { source: 'reminder' })) void speak(line, emotion);
     return true;
   } catch (error) {
     console.warn('[remind] could not write a reminder:', error instanceof Error ? error.message : error);
@@ -2643,7 +2712,7 @@ async function considerPipingUp(environment: Environment) {
     console.log(`[idle] piped up (angle: ${angle?.name ?? 'none'}) after ${Math.round(minutes(mood.lastMessageAt ? Date.parse(mood.lastMessageAt) : null))} quiet minutes`);
     const emotion = classifyEmotion(line, config);
     // Spoken only if it was also written down — see interject.
-    if (interject(line)) void speak(line, emotion);
+    if (interject(line, { source: 'idle' })) void speak(line, emotion);
   } catch (error) {
     console.warn('[idle] could not pipe up:', error instanceof Error ? error.message : error);
   } finally {
@@ -3396,6 +3465,17 @@ function chatSystemPrompt({ irritation, ego, goodnight, shout, latestMessage, fr
     // instruction: what is on their screen is context for answering, not a topic
     // she has been told to raise.
     whatTheyAreDoing(),
+    // The same, for whatever she has just said out loud off her own back. Those
+    // lines are kept in her own log rather than the transcript below, which is
+    // the point — but a reply to one of them arrives here looking like a
+    // non sequitur. "Taking a break" answers a question she asked about the
+    // episode on screen; without the question it is a stranger announcing
+    // something, and filling that kind of gap is exactly what she invents to do.
+    //
+    // It expires, and that is the whole difference from putting them back in the
+    // transcript: a note lasts a quarter of an hour, a message lasts until the
+    // day is archived and then turns up in the summary.
+    asideContext(getAsides(), Date.now()),
     feedbackSummary(),
     keptSummary(now),
     'Answer questions about what is coming up from that list, and never say nothing is saved without checking it first.',
@@ -4493,12 +4573,29 @@ function whatSheWasChasing(open: KeptItem[]): KeptItem | null {
   // said. A record that erases itself precisely when it is needed is not a
   // record. What she said is still there, and "Did you get the TV power
   // connector today?" names the task as plainly as the slate ever did.
-  const messages = (store.get('chat.messages') as { role: string; content: string; at?: string }[] | undefined) ?? [];
-  for (const message of messages.slice(-CONTEXT_TURNS).reverse()) {
-    if (message.role !== 'assistant') continue;
-    const when = message.at ? Date.parse(message.at) : Date.now();
-    if (Number.isFinite(when) && Date.now() - when > STILL_MEANS_IT_MS) break;
-    const named = findItem(open, String(message.content ?? ''));
+  //
+  // Both places she says things, and it has to be both: chasing a task is an
+  // unprompted line, so every reminder she has ever given is in her own log and
+  // not in the transcript. Reading only the transcript here would leave "it"
+  // meaning nothing in precisely the case this exists for — she nags about the
+  // TV power connector, they say "got it", and the log holding the only mention
+  // of the connector is the one that was not consulted.
+  const spoken = [
+    ...((store.get('chat.messages') as { role: string; content: string; at?: string }[] | undefined) ?? [])
+      .filter(message => message.role === 'assistant')
+      .map(message => ({ text: String(message.content ?? ''), at: message.at })),
+    ...getAsides().map(aside => ({ text: aside.text, at: aside.at })),
+  ];
+  // Oldest first, then walked backwards, so the most recent thing she named
+  // wins. Anything undated counts as just now, which is what the transcript
+  // scan already assumed. One clock for the whole sort: read per comparison, it
+  // moves mid-sort and the ordering stops being an ordering.
+  const now = Date.now();
+  spoken.sort((a, b) => (a.at ? Date.parse(a.at) : now) - (b.at ? Date.parse(b.at) : now));
+  for (const line of spoken.slice(-CONTEXT_TURNS).reverse()) {
+    const when = line.at ? Date.parse(line.at) : now;
+    if (Number.isFinite(when) && now - when > STILL_MEANS_IT_MS) break;
+    const named = findItem(open, line.text);
     if (named) return named;
   }
   return null;
@@ -4615,7 +4712,7 @@ async function askForJournal() {
     const line = (message.content ?? '').trim().replace(/^["'“”]+|["'“”]+$/g, '');
     if (!line) return;
     // Spoken only if it was also written down — see interject.
-    if (interject(line)) {
+    if (interject(line, { source: 'journal' })) {
       // Only now. This is the one place that means she actually asked.
       journalAskedOn = today;
       store.set('journal.askedOn', today);
@@ -4670,7 +4767,7 @@ async function noticePage(page: NoticedPage) {
     if (!line) return;
     console.log(`[notice] remarked on the ${page} page (${line.length} chars)`);
     // Spoken only if it was also written down — see interject.
-    if (interject(line)) void speak(line, classifyEmotion(line, config));
+    if (interject(line, { source: 'page' })) void speak(line, classifyEmotion(line, config));
   } catch (error) {
     console.warn('[notice] could not compose a remark:', error instanceof Error ? error.message : error);
   }
@@ -4932,7 +5029,7 @@ function brainFor(message: string, local: ProviderConfig, conversation: { role: 
   return { config: { ...away, temperature: local.temperature }, escalated: true, because: verdict.because };
 }
 
-async function ollamaChat(messages: { role: string; content: string; at?: string }[], config: ProviderConfig, { hands = true }: { hands?: boolean } = {}) {
+async function ollamaChat(messages: { role: string; content: string; at?: string }[], config: ProviderConfig, { hands = true, brief = false }: { hands?: boolean; brief?: boolean } = {}) {
   const latest = messages.at(-1)?.content ?? '';
   // They are talking to her, so the silence she was waiting out is over.
   noteUserSpoke();
@@ -4970,7 +5067,10 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // Seams named before the history goes in. Every message used to say it was
   // said "now", so a line from last night sat flush against one from a second
   // ago and she read the lot as current — see ./history.
-  const conversation: OllamaMessage[] = [{ role: 'system', content: chatSystemPrompt({ ...mood, latestMessage: latest, fresh }) }, ...markTimeGaps(withoutStaleDenials(messages, hasItems))];
+  // Same prompt, same tools, same memory — with one sentence added when the
+  // answer has to fit in a caption rather than a chat window.
+  const system = chatSystemPrompt({ ...mood, latestMessage: latest, fresh });
+  const conversation: OllamaMessage[] = [{ role: 'system', content: brief ? `${system} ${BREVITY}` : system }, ...markTimeGaps(withoutStaleDenials(messages, hasItems))];
   // Chosen once for the whole turn, tool rounds included: swapping models
   // half-way through a tool loop would hand one model's call to another to
   // answer, and the two do not agree on how a call is even identified.
@@ -5782,6 +5882,12 @@ app.whenReady().then(() => {
   });
   ipcMain.handle('chat:setMessages', (_e, messages) => { store.set('chat.messages', messages); });
   ipcMain.handle('chat:getArchive', () => store.get('chat.archive') ?? {});
+  ipcMain.handle('chat:getAsides', () => getAsides());
+  ipcMain.handle('chat:clearAsides', () => {
+    store.set('chat.asides', []);
+    sendToWindows('chat:asidesCleared');
+    return [];
+  });
   ipcMain.handle('chat:newConversation', () => startNewConversation());
   // Only ever in flight once: the window asks on mount and again after a reset,
   // and in dev both can land together. Sharing the promise stops two greetings.
@@ -6108,7 +6214,8 @@ app.whenReady().then(() => {
     if (asked) {
       // sendToWindows rather than interject(): interject is rate-limited for
       // things she says off her own back, and this answers a button they just
-      // pressed — the one case where staying quiet is wrong.
+      // pressed — the one case where staying quiet is wrong. It stays in the
+      // conversation for the same reason, since the reaction it promises does.
       const holdOn = whileLooking();
       sendToWindows('chat:interject', holdOn);
       void speak(holdOn);
@@ -6401,6 +6508,58 @@ app.whenReady().then(() => {
     companionWindow.setBounds({ x, y, width, height });
   });
   ipcMain.handle('companion:poke', (_e, kind: PokeKind) => { void handlePoke(kind === 'right-click' ? 'right-click' : 'poke'); });
+  /**
+   * She looks up. Answers instantly and on purpose: the line is canned so the
+   * box never waits on a model, and only the reply itself is generated.
+   */
+  ipcMain.handle('companion:open', () => {
+    summonOpen = true;
+    // Being spoken to is not being prodded. handlePoke counts a click as
+    // criticism and bumps irritation for it; opening the box is the opposite,
+    // and charging her for it would make her hostile for no reason at all.
+    nudgeVitals('spoken-to');
+    noteUserSpoke();
+    const line = summonedLine(getMood().irritation, lastSummonLine);
+    lastSummonLine = line;
+    if (store.get('companion.subtitles', true)) sendToWindows('companion:say', line);
+    console.log('[summon] opened');
+    return line;
+  });
+
+  ipcMain.handle('companion:close', () => {
+    summonOpen = false;
+    console.log('[summon] closed');
+  });
+
+  /**
+   * A message typed at her window, answered as if it had been typed at her chat.
+   *
+   * Through ollamaChat rather than a lighter path, so everything still works
+   * from here: ticking a task off, remembering something, looking something up.
+   * A second conversation that could not do any of that would be a worse
+   * version of her wearing the same face.
+   */
+  ipcMain.handle('companion:ask', async (_e, text: string) => {
+    const said = String(text ?? '').trim();
+    if (!said) return { reply: '', ignored: false };
+    const config = store.get('ai.config') as ProviderConfig | undefined;
+    if (!config?.model) throw new Error('No model is set up.');
+
+    const messages = [...(store.get('chat.messages') as { role: string; content: string; at?: string }[] ?? []),
+      { role: 'user', content: said, at: new Date().toISOString() }];
+    // hands stay on: she is at her own machine, and this is the same person at
+    // the same desk. brief, because it has to fit in a caption.
+    const answer = await ollamaChat(messages, config, { brief: true });
+    const reply = answer.content ?? '';
+    // The same channel the phone and Discord use, so the desk transcript picks
+    // it up and coming back to the window does not mean finding half a
+    // conversation missing. ollamaChat has already spoken it and pushed the
+    // caption on its way through.
+    sendToWindows('chat:fromPhone', { text: said, reply, ignored: Boolean(answer.ignored) });
+    console.log(`[summon] answered ${said.length} chars with ${reply.length}`);
+    return { reply, ignored: Boolean(answer.ignored) };
+  });
+
   ipcMain.handle('companion:showMenu', () => {
     const pinned = store.get('companion.pinned', true) as boolean;
     const expressions = readExpressionNames();

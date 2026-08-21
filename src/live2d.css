@@ -35,7 +35,11 @@ html[data-view="companion"],html[data-view="companion"] body{background:transpar
      entirely — which defeats the point of having her on screen at all. Long
      lines scroll within this instead, so it reads like a game subtitle
      advancing rather than a wall of text parked over the character. */
-  max-height:calc(3 * 1.45em + 16px);overflow-y:auto;scrollbar-width:none;
+  /* Eight lines rather than three: she is answered at her window now, and a
+     reply cut off at three lines with no way to see the rest is worse than a
+     taller bubble. Still capped — the brevity instruction keeps her to a
+     sentence or two, and this is the backstop for when it does not. */
+  max-height:calc(8 * 1.45em + 16px);overflow-y:auto;scrollbar-width:none;
   /* Backdrop rather than a solid fill: she is a transparent overlay sitting on
      whatever is behind her, and an opaque box would read as a floating panel
      rather than as part of her. */
@@ -61,3 +65,21 @@ html[data-view="companion"],html[data-view="companion"] body{background:transpar
 /* The 3D stage. Fills the window the same way the Live2D canvas does, and is
    equally transparent — the renderer clears to alpha 0, so every pixel she does
    not cover shows the desktop through it. */
+
+/* The box at her feet. Sits under her, matched to the caption width above so
+   the two read as one thing rather than two panels that happen to overlap. */
+.companion-ask{position:absolute;left:0;right:0;bottom:6px;display:flex;justify-content:center;padding:0 6px;pointer-events:none}
+.companion-ask input{
+  pointer-events:auto;width:min(80%, 30ch);
+  font:13px Karla,sans-serif;color:#fff;
+  background:oklch(18% 0.02 300 / 0.88);
+  border:1px solid oklch(70% 0.14 350 / 0.55);border-radius:11px;
+  padding:7px 11px;outline:none;
+  box-shadow:0 6px 20px oklch(10% 0.02 300 / 0.5);
+  backdrop-filter:blur(6px);
+}
+.companion-ask input:focus{border-color:oklch(74% 0.17 350 / 0.9)}
+.companion-ask input::placeholder{color:oklch(70% 0.02 300 / 0.65)}
+/* Nothing to type into while she is thinking, but it still holds its place —
+   a box that vanishes and comes back shifts everything under her. */
+.companion-ask input:disabled{opacity:0.75}

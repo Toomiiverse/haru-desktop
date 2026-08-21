@@ -67,7 +67,7 @@ interface Window {
       locate(): Promise<{ place: string; accuracy: number }>;
       test(): Promise<number>;
     };
-    chat: { getMessages(): Promise<import('./types').Message[]>; setMessages(messages: import('./types').Message[]): Promise<void>; getArchive(): Promise<Record<string, import('./types').Message[]>>; newConversation(): Promise<void>; opening(): Promise<string | null>; onReset(callback: () => void): () => void; onInterject(callback: (line: string) => void): () => void; onVoiceFailed(callback: (why: string) => void): () => void; onFellBack(callback: (why: string) => void): () => void; onFromPhone(callback: (turn: { text: string; reply: string; ignored: boolean }) => void): () => void; onExpectReply(callback: () => void): () => void; expectAnswer(): Promise<void> };
+    chat: { getMessages(): Promise<import('./types').Message[]>; setMessages(messages: import('./types').Message[]): Promise<void>; getArchive(): Promise<Record<string, import('./types').Message[]>>; newConversation(): Promise<void>; opening(): Promise<string | null>; onReset(callback: () => void): () => void; onInterject(callback: (line: string) => void): () => void; onVoiceFailed(callback: (why: string) => void): () => void; onFellBack(callback: (why: string) => void): () => void; onFromPhone(callback: (turn: { text: string; reply: string; ignored: boolean }) => void): () => void; onExpectReply(callback: () => void): () => void; expectAnswer(): Promise<void>; getAsides(): Promise<import('./types').Aside[]>; clearAsides(): Promise<import('./types').Aside[]>; onAside(callback: (aside: import('./types').Aside) => void): () => void; onAsidesCleared(callback: () => void): () => void };
     ai: { send(messages: { role: string; content: string }[], config: import('./types').ProviderConfig): Promise<import('./types').ChatResult>; test(endpoint: string, provider?: string): Promise<string[]>; defaultEndpoint(provider: string): Promise<string>; verify(endpoint: string, provider: string, model: string): Promise<{ models: string[]; note: string }>; getEscalate(): Promise<{ enabled: boolean; minWords: number; provider: import('./types').ProviderConfig | null }>; setEscalate(setting: { enabled: boolean; minWords: number }, provider: import('./types').ProviderConfig | null): Promise<{ enabled: boolean; minWords: number; provider: import('./types').ProviderConfig | null }>; setKey(apiKey: string): Promise<boolean>; hasKey(): Promise<boolean>; setSelfHostedKey(apiKey: string): Promise<boolean>; hasSelfHostedKey(): Promise<boolean>; retort(disliked: string, config: import('./types').ProviderConfig): Promise<string>; gloat(praised: string, config: import('./types').ProviderConfig): Promise<string> };
     mood: { get(): Promise<import('./types').Mood>; react(reaction: import('./types').Reaction): Promise<import('./types').Mood> };
     profile: { get(): Promise<import('./types').Profile>; set(profile: import('./types').Profile): Promise<import('./types').Profile> };
@@ -120,6 +120,9 @@ interface Window {
       resizeBy(factor: number): Promise<void>;
       showMenu(): Promise<void>;
       poke(kind: 'poke' | 'right-click'): Promise<void>;
+      open(): Promise<string>;
+      close(): Promise<void>;
+      ask(text: string): Promise<{ reply: string; ignored: boolean }>;
       onWalking(callback: (state: { moving: boolean; facing: number }) => void): () => void;
       onSay(callback: (line: string | null) => void): () => void;
       onWatching(callback: (gaze: { x: number; y: number } | null) => void): () => void;

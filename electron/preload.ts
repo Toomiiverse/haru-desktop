@@ -16,6 +16,10 @@ contextBridge.exposeInMainWorld('electron', {
 
 type Live2DModel = { path: string; name: string; url: string };
 type Message = { id: string; role: 'user' | 'assistant'; content: string; time: string };
+// Something she said off her own back. Deliberately not a Message: it never
+// belonged to the conversation, and giving it that shape is what let it be
+// appended to one. See electron/asides.ts.
+type Aside = { id: string; at: string; day: string; source: string; text: string };
 type ProviderConfig = { provider: string; model: string; endpoint: string; temperature: number };
 type KeptItem = { id: string; title: string; date: string; time?: string; kind: 'task' | 'event'; done: boolean; heardAbout?: string; googleEventId?: string; googleTaskId?: string };
 type GoogleStatus = { hasCredentials: boolean; connected: boolean; email?: string; lastSync?: string; lastError?: string; tasksGranted?: boolean };
@@ -194,6 +198,22 @@ contextBridge.exposeInMainWorld('haru', {
       ipcRenderer.on('chat:interject', listener);
       return () => ipcRenderer.removeListener('chat:interject', listener);
     },
+    // Everything she says without being spoken to. Its own channel and its own
+    // store, kept out of the transcript on purpose — see electron/asides.ts.
+    // Main owns the list, so the window asks for it and is told about additions
+    // rather than holding a copy it has to save.
+    getAsides: () => ipcRenderer.invoke('chat:getAsides') as Promise<Aside[]>,
+    clearAsides: () => ipcRenderer.invoke('chat:clearAsides') as Promise<Aside[]>,
+    onAside: (callback: (aside: Aside) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, aside: Aside) => callback(aside);
+      ipcRenderer.on('chat:aside', listener);
+      return () => ipcRenderer.removeListener('chat:aside', listener);
+    },
+    onAsidesCleared: (callback: () => void) => {
+      const listener = () => callback();
+      ipcRenderer.on('chat:asidesCleared', listener);
+      return () => ipcRenderer.removeListener('chat:asidesCleared', listener);
+    },
   },
   ai: {
     send: (messages: { role: string; content: string }[], config: ProviderConfig) => ipcRenderer.invoke('ai:send', messages, config) as Promise<ChatResult>,
@@ -342,6 +362,9 @@ contextBridge.exposeInMainWorld('haru', {
     resizeBy: (factor: number) => ipcRenderer.invoke('companion:resizeBy', factor),
     showMenu: () => ipcRenderer.invoke('companion:showMenu'),
     poke: (kind: 'poke' | 'right-click') => ipcRenderer.invoke('companion:poke', kind),
+    open: () => ipcRenderer.invoke('companion:open') as Promise<string>,
+    close: () => ipcRenderer.invoke('companion:close'),
+    ask: (text: string) => ipcRenderer.invoke('companion:ask', text) as Promise<{ reply: string; ignored: boolean }>,
     onSay: (callback: (line: string | null) => void) => {
       const listener = (_event: Electron.IpcRendererEvent, line: string | null) => callback(line);
       ipcRenderer.on('companion:say', listener);

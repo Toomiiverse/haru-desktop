@@ -387,6 +387,51 @@ export function CompanionWindow() {
   // only a press that goes nowhere counts as having prodded her.
   const press = useRef<{ x: number; y: number; at: number } | null>(null);
 
+  // The box at her feet. Open means she is waiting to be typed into; asking
+  // means the question has gone and the answer has not come back yet, which on
+  // a local model is two to six seconds and needs to look like something.
+  const [asking, setAsking] = useState(false);
+  const [draft, setDraft] = useState('');
+  const [waiting, setWaiting] = useState(false);
+  const box = useRef<HTMLInputElement | null>(null);
+  const openRef = useRef(false);
+  openRef.current = asking;
+
+  const closeBox = useCallback(() => {
+    setAsking(false);
+    setDraft('');
+    setWaiting(false);
+    void window.haru?.companion.close();
+  }, []);
+
+  // Clicking away puts it away. Without this the box sits open behind whatever
+  // they turned to instead, and she keeps standing still waiting for it.
+  useEffect(() => {
+    const onBlur = () => { if (openRef.current) closeBox(); };
+    window.addEventListener('blur', onBlur);
+    return () => window.removeEventListener('blur', onBlur);
+  }, [closeBox]);
+
+  async function send() {
+    const said = draft.trim();
+    if (!said || waiting) return;
+    setDraft('');
+    setWaiting(true);
+    try {
+      // The reply arrives through the caption on its own — ollamaChat speaks it
+      // and pushes it there — so there is nothing to do with the result here
+      // beyond stopping the waiting state.
+      await window.haru?.companion.ask(said);
+    } catch {
+      // Reported through her caption rather than in the box: an error message
+      // in a text field she is standing next to reads as the app breaking,
+      // where a line from her reads as her saying she cannot.
+    } finally {
+      setWaiting(false);
+      box.current?.focus();
+    }
+  }
+
   function onPointerDown(event: React.PointerEvent) {
     if (event.button !== 0) return;
     dragging.current = true;
@@ -407,7 +452,13 @@ export function CompanionWindow() {
     // wobbles a few pixels, and treating that as a poke would have her complain
     // every time she was moved.
     const moved = Math.hypot(event.screenX - started.x, event.screenY - started.y);
-    if (moved < 5 && performance.now() - started.at < 500) void window.haru?.companion.poke('poke');
+    if (moved < 5 && performance.now() - started.at < 500) {
+      // A click on her is a summons now, not a prod. Prodding is what clicking
+      // her while the box is already open means — which keeps the flinching and
+      // the escalation without asking anyone to learn a second gesture.
+      if (asking) void window.haru?.companion.poke('poke');
+      else void window.haru?.companion.open().then(() => { setAsking(true); setTimeout(() => box.current?.focus(), 0); });
+    }
   }
   function onContextMenu(event: React.MouseEvent) {
     event.preventDefault();
@@ -438,6 +489,23 @@ export function CompanionWindow() {
           already its final size on the first character — without it the box
           grows line by line as she types and shoves itself around the screen. */}
       {caption && <div className="companion-caption"><span><i className="typed">{caption.slice(0, typed)}</i><i ref={caret} className="caret"/><i className="untyped">{caption.slice(typed)}</i></span></div>}
+      {/* Outside the hitbox above, deliberately: inside it, every keystroke would
+          be a drag on her and typing would walk her across the desktop. */}
+      {asking && <div className="companion-ask">
+        <input
+          ref={box}
+          value={draft}
+          disabled={waiting}
+          placeholder={waiting ? 'thinking…' : 'say something'}
+          onChange={event => setDraft(event.target.value)}
+          onKeyDown={event => {
+            if (event.key === 'Enter') { event.preventDefault(); void send(); }
+            // Escape closes without sending, which is the way out for a box
+            // opened by a stray click on her.
+            if (event.key === 'Escape') { event.preventDefault(); closeBox(); }
+          }}
+        />
+      </div>}
       {error && <div className="companion-error">{error}</div>}
     </div>
   );
