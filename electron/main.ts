@@ -45,7 +45,7 @@ import { haruNote, rangeStats, type HaruNote, type RangeName, type RangeStats } 
 import { describeRating, entryFor, journalPrompt, readEntries, readJournalConfig, readRating, recentTrend, shouldAsk, upsertEntry, SCALE_MAX, type JournalConfig, type JournalEntry } from './journal';
 import { formatList, formatMedia, formatMissing, lookUp, readAniListConfig, userList, type AniListConfig, type ListEntry, type MediaKind } from './anilist';
 import { createDesktopShortcut, desktopShortcutPath, isAutoStartEnabled, setAutoStart, startedHidden } from './startup';
-import { claimsDesktopAction, dropRoleHeader, dropTackedOnParagraphs, dropInventedContact, dropInventedScreenTalk, dropRepeatedAgendaMentions, dropRepeatedParagraphs, dropStageDirections } from './reply';
+import { claimsDesktopAction, dropRoleHeader, dropTackedOnParagraphs, dropInventedContact, dropInventedScreenTalk, dropMarkdownEmphasis, dropRepeatedAgendaMentions, dropRepeatedParagraphs, dropStageDirections } from './reply';
 import { hasShout, readVoiceConfig, referenceFor, shoutReference, spokenCase, speakableText, splitForSpeech, synthesise, type SpeechClip, type VoiceConfig } from './voice';
 import { formatMemoryPrompt, isWorthKeeping, isWorthRemembering, MEMORY_KINDS, migrateMemories, pruneMemories, rememberInto, selectMemories, summaryPrompt, type MemoryKind, type MemoryRecord, type SessionSummary } from './memory';
 import { forgetDevice, forgetEveryDevice, readWebAccess, setPassword, weakPassword, type WebAccess } from './web';
@@ -5011,7 +5011,7 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
         // "ran" is what she actually reached for this turn, which is a fact about
         // the reply rather than a guess from its text.
         const trimmed = dropRoleHeader(dropInventedContact(dropStageDirections(dropInventedScreenTalk(dropRepeatedParagraphs(deduped, recent), grounded))));
-        const content = dropTackedOnParagraphs(trimmed, ran.has('search_web') || ran.has('read_web_page'));
+        const content = dropMarkdownEmphasis(dropTackedOnParagraphs(trimmed, ran.has('search_web') || ran.has('read_web_page')));
     if (content !== message.content) console.log(`[ai] dropped ${message.content.length - content.length} chars she had already said`);
     console.log(`[ai] chat reply in ${Date.now() - started}ms, ${content.length} chars`);
     // Cleared only once a reply actually exists, so a failed or unreachable turn
