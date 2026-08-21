@@ -4156,6 +4156,24 @@ function homeTwin(config: ProviderConfig): ProviderConfig | null {
 }
 
 /**
+ * The rented GPU we already pay for "A second model for the hard ones", used
+ * here for a second reason: this box has one card shared with her voice, and a
+ * reply that fails outright — the local model out of VRAM, wedged, not
+ * answering at all — is worse than one answered a little slower by someone
+ * else's hardware. Not a twin of the local model, so no name is preserved; the
+ * user already agreed to have this one answer under Setup.
+ *
+ * Guarded to a config that is not already OpenAI-shaped so a failure once
+ * escalated there does not loop back into itself.
+ */
+function capacitySpill(config: ProviderConfig): ProviderConfig | null {
+  if (isOpenAIShaped(config.provider)) return null;
+  const spill = store.get('escalate.provider') as ProviderConfig | undefined;
+  if (!spill?.model || !isOpenAIShaped(spill.provider)) return null;
+  return { ...spill, temperature: config.temperature };
+}
+
+/**
  * A rented GPU that has been switched off should cost speed, not the evening.
  *
  * Without this, pointing her at a pod and then stopping it leaves her with no
@@ -4941,7 +4959,16 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
     // already withdraws every tool, and this makes the narrower promise explicit
     // so that loosening one does not silently loosen the other.
     if (pageWasRead) handsAllowed = false;
-    const message = await ollamaPost(conversation, config, { tools: !pageWasRead && !emptyRetried });
+    const toolsWanted = { tools: !pageWasRead && !emptyRetried };
+    let message: OllamaMessage;
+    try {
+      message = await ollamaPost(conversation, config, toolsWanted);
+    } catch (error) {
+      const spill = capacitySpill(config);
+      if (!spill) throw error;
+      console.warn(`[ai] ${config.model} did not answer (${error instanceof Error ? error.message : String(error)}) — spilling this reply to ${spill.model}`);
+      message = await sendToProvider(conversation, spill, toolsWanted);
+    }
     if (message.tool_calls?.length) {
       // Logged by name: when a tool does not fire, the useful question is whether
       // the model reached for the wrong one or for none at all.
