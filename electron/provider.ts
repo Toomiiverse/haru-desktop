@@ -10,6 +10,16 @@
 // bites is tool results: Ollama matches them to a call by name, OpenAI by an id
 // it issued, and losing that id turns a tool call into a 400 nobody can read.
 
+/**
+ * One tool as a provider is told about it. Shared rather than declared where it
+ * is used, so a module that only defines a tool does not have to restate the
+ * shape of one.
+ */
+export type ChatTool = {
+  type: string;
+  function: { name: string; description: string; parameters: { type: string; properties: Record<string, unknown>; required: string[] } };
+};
+
 export type Provider = 'ollama' | 'openai' | 'xai' | 'venice';
 
 /** Everything that is not Ollama speaks OpenAI's dialect, including xAI and Venice. */

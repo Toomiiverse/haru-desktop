@@ -123,7 +123,7 @@ interface Window {
       poke(kind: 'poke' | 'right-click'): Promise<void>;
       open(): Promise<string>;
       close(): Promise<void>;
-      ask(text: string): Promise<{ reply: string; ignored: boolean }>;
+      ask(text: string): Promise<{ reply: string; ignored: boolean; choices: string[] }>;
       onWalking(callback: (state: { moving: boolean; facing: number }) => void): () => void;
       onSay(callback: (line: string | null) => void): () => void;
       onWatching(callback: (gaze: { x: number; y: number } | null) => void): () => void;

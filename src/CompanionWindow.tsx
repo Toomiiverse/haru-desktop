@@ -393,6 +393,9 @@ export function CompanionWindow() {
   const [asking, setAsking] = useState(false);
   const [draft, setDraft] = useState('');
   const [waiting, setWaiting] = useState(false);
+  // What she offered to say back. Empty means the text box; anything in it means
+  // the buttons, because a box and a set of choices at once is two questions.
+  const [choices, setChoices] = useState<string[]>([]);
   const box = useRef<HTMLInputElement | null>(null);
   const openRef = useRef(false);
   openRef.current = asking;
@@ -401,6 +404,7 @@ export function CompanionWindow() {
     setAsking(false);
     setDraft('');
     setWaiting(false);
+    setChoices([]);
     void window.haru?.companion.close();
   }, []);
 
@@ -412,16 +416,20 @@ export function CompanionWindow() {
     return () => window.removeEventListener('blur', onBlur);
   }, [closeBox]);
 
-  async function send() {
-    const said = draft.trim();
+  async function send(text?: string) {
+    const said = (text ?? draft).trim();
     if (!said || waiting) return;
     setDraft('');
+    // Cleared before the question goes, not after the answer comes back: leaving
+    // the old buttons up while she thinks invites picking one twice.
+    setChoices([]);
     setWaiting(true);
     try {
-      // The reply arrives through the caption on its own — ollamaChat speaks it
-      // and pushes it there — so there is nothing to do with the result here
-      // beyond stopping the waiting state.
-      await window.haru?.companion.ask(said);
+      // The reply itself arrives through the caption on its own — ollamaChat
+      // speaks it and pushes it there. Only what she offered has to come back
+      // here, because nothing else knows how to draw it.
+      const answer = await window.haru?.companion.ask(said);
+      setChoices(answer?.choices ?? []);
     } catch {
       // Reported through her caption rather than in the box: an error message
       // in a text field she is standing next to reads as the app breaking,
@@ -488,23 +496,44 @@ export function CompanionWindow() {
       {/* The full line is rendered underneath at zero opacity so the bubble is
           already its final size on the first character — without it the box
           grows line by line as she types and shoves itself around the screen. */}
-      {caption && <div className="companion-caption"><span><i className="typed">{caption.slice(0, typed)}</i><i ref={caret} className="caret"/><i className="untyped">{caption.slice(typed)}</i></span></div>}
-      {/* Outside the hitbox above, deliberately: inside it, every keystroke would
-          be a drag on her and typing would walk her across the desktop. */}
-      {asking && <div className="companion-ask">
-        <input
-          ref={box}
-          value={draft}
-          disabled={waiting}
-          placeholder={waiting ? 'thinking…' : 'say something'}
-          onChange={event => setDraft(event.target.value)}
-          onKeyDown={event => {
-            if (event.key === 'Enter') { event.preventDefault(); void send(); }
-            // Escape closes without sending, which is the way out for a box
-            // opened by a stray click on her.
-            if (event.key === 'Escape') { event.preventDefault(); closeBox(); }
-          }}
-        />
+      {/* One panel above her head: who is speaking, what she said, and either the
+          replies she offered or somewhere to type. The three used to be a caption
+          and a box at opposite ends of the window, which read as two things
+          happening rather than one conversation. */}
+      {(caption || asking) && <div className="companion-dialogue">
+        <div className="dialogue-box">
+          <div className="dialogue-name">Haru</div>
+          {caption && <div className="dialogue-line"><span>
+            <i className="typed">{caption.slice(0, typed)}</i>
+            <i ref={caret} className="caret"/>
+            <i className="untyped">{caption.slice(typed)}</i>
+          </span>
+          {/* The little marker that means there is nothing more coming. Only
+              once she has finished typing, or it blinks through her sentence. */}
+          {typed >= caption.length && !waiting && <b className="dialogue-more">▼</b>}
+          </div>}
+          {asking && (choices.length > 0
+            ? <div className="dialogue-choices">
+                {choices.map((choice, index) => (
+                  <button key={choice} className="dialogue-choice" disabled={waiting} onClick={() => void send(choice)}>
+                    <b>{index + 1}</b><span>{choice}</span>
+                  </button>
+                ))}
+              </div>
+            : <div className="dialogue-ask">
+                <input
+                  ref={box}
+                  value={draft}
+                  disabled={waiting}
+                  placeholder={waiting ? 'thinking…' : 'say something'}
+                  onChange={event => setDraft(event.target.value)}
+                  onKeyDown={event => {
+                    if (event.key === 'Enter') { event.preventDefault(); void send(); }
+                    if (event.key === 'Escape') { event.preventDefault(); closeBox(); }
+                  }}
+                />
+              </div>)}
+        </div>
       </div>}
       {error && <div className="companion-error">{error}</div>}
     </div>

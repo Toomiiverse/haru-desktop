@@ -368,7 +368,7 @@ contextBridge.exposeInMainWorld('haru', {
     poke: (kind: 'poke' | 'right-click') => ipcRenderer.invoke('companion:poke', kind),
     open: () => ipcRenderer.invoke('companion:open') as Promise<string>,
     close: () => ipcRenderer.invoke('companion:close'),
-    ask: (text: string) => ipcRenderer.invoke('companion:ask', text) as Promise<{ reply: string; ignored: boolean }>,
+    ask: (text: string) => ipcRenderer.invoke('companion:ask', text) as Promise<{ reply: string; ignored: boolean; choices: string[] }>,
     onSay: (callback: (line: string | null) => void) => {
       const listener = (_event: Electron.IpcRendererEvent, line: string | null) => callback(line);
       ipcRenderer.on('companion:say', listener);

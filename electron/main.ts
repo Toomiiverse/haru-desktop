@@ -23,7 +23,7 @@ import { belongsToPlace, familiarity, markRemembered, noteExchange, noteVisit, r
 import { discoverWardrobe, type ParameterRange, type WardrobeControl } from './wardrobe';
 import { looksLikeNothing, readListenConfig, transcribe, type ListenConfig } from './listen';
 import { decide, readEscalateConfig, type EscalateConfig } from './escalate';
-import { describeFailure, fromOpenAIReply, isOpenAIShaped, toOpenAIBody, DEFAULT_ENDPOINTS, type Provider } from './provider';
+import { describeFailure, fromOpenAIReply, isOpenAIShaped, toOpenAIBody, DEFAULT_ENDPOINTS, type ChatTool, type Provider } from './provider';
 import { formatPage, formatResults, readSearchConfig, lookItUpInstruction, readWebPage, SearchBlocked, searchWeb, type SearchConfig, type SearchResult } from './search';
 import { mayWander, pickDestination, readRoamConfig, refugeFrom, speedFor, step, nextWanderDelay, type Point, type RoamConfig } from './roam';
 import { angleFor, mayNotice, noteNoticed, readNotices, type Page as NoticedPage, type PageState } from './noticing';
@@ -56,6 +56,7 @@ import { describePull, isTailnetAddress, mergeCheckIns, readCheckInSource } from
 import { DiscordLink, looksLikeUserId, readDiscordConfig, useOfChannel, type DiscordConfig } from './discord';
 import { startWebServer, type WebDeps } from './webserver';
 import { BREVITY, summonedLine } from './summoned';
+import { CHOICES_TOOL, readChoices } from './choices';
 import { setupSonarrHandlers } from './sonarr-api';
 
 type Bounds = { x: number; y: number; width: number; height: number };
@@ -193,6 +194,12 @@ let roamTimer: NodeJS.Timeout | null = null;
 // Open means the box at her feet is up and waiting to be typed into. She holds
 // still while it is: wandering off mid-sentence takes the box with her.
 let summonOpen = false;
+// Whether the choices tool is on the table this turn, and what she picked if she
+// used it. Module-level for the same reason handsAllowed is: chatTools() is
+// called deep inside the reply loop and threading a flag through every composer
+// to reach it would be worse than this.
+let offeringChoices = false;
+let pendingChoices: string[] = [];
 let lastSummonLine = '';
 let walkingTo: Point | null = null;
 let lastWalkAt = 0;
@@ -2910,11 +2917,6 @@ const CHAT_NUM_CTX = 8192;
  * them or the array rejects it — which is backwards, since each tool differs
  * from the others precisely in its parameters.
  */
-type ChatTool = {
-  type: string;
-  function: { name: string; description: string; parameters: { type: string; properties: Record<string, unknown>; required: string[] } };
-};
-
 const CHAT_TOOLS: ChatTool[] = [{
   type: 'function',
   function: {
@@ -3220,6 +3222,10 @@ function chatTools() {
   const anilist = readAniListConfig(store.get('anilist'));
   const desktop = readDesktopConfig(store.get('desktop'));
   const tools: ChatTool[] = [...CHAT_TOOLS];
+  // Only where there is a box to draw them in. Offered at the desk she would
+  // call it and nothing would appear, which is a worse failure than not having
+  // it: she would think she had asked and be met with silence.
+  if (offeringChoices) tools.push(CHOICES_TOOL);
   if (readJournalConfig(store.get('journal.config')).enabled) tools.push(JOURNAL_TOOL);
   // Always offered, journal or not: a check-in is a note about a moment, and
   // the moments worth noting happen whether or not anyone keeps a diary.
@@ -3938,6 +3944,13 @@ async function runChatTool(call: ToolCall, latestUserMessage: string): Promise<s
       return `That page could not be read (${reason}). ${others > 0 ? `You may try one other result instead if a different one looks like it would answer them. ` : ''}Otherwise answer from the search summaries you already have, or say you could not find it. Do not answer from memory as though you had read it.`;
     }
   }
+  if (name === 'offer_choices') {
+    pendingChoices = readChoices((args as { choices?: unknown }).choices);
+    if (!pendingChoices.length) return JSON.stringify({ shown: false, reason: 'Give two to four short replies, each in their voice.' });
+    console.log(`[summon] offered ${pendingChoices.length} choices`);
+    return JSON.stringify({ shown: true, choices: pendingChoices });
+  }
+
   if (name === 'search_web') {
     const query = typeof args.query === 'string' ? args.query.trim() : '';
     if (!query) return JSON.stringify({ error: 'query is required.' });
@@ -5063,7 +5076,7 @@ function brainFor(message: string, local: ProviderConfig, conversation: { role: 
   return { config: { ...away, temperature: local.temperature }, escalated: true, because: verdict.because };
 }
 
-async function ollamaChat(messages: { role: string; content: string; at?: string }[], config: ProviderConfig, { hands = true, brief = false }: { hands?: boolean; brief?: boolean } = {}) {
+async function ollamaChat(messages: { role: string; content: string; at?: string }[], config: ProviderConfig, { hands = true, brief = false, choices = false }: { hands?: boolean; brief?: boolean; choices?: boolean } = {}) {
   const latest = messages.at(-1)?.content ?? '';
   // They are talking to her, so the silence she was waiting out is over.
   noteUserSpoke();
@@ -5131,6 +5144,8 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // Passed in rather than sniffed from the caller, so the one line that grants
   // this is still the only line that grants it.
   handsAllowed = hands;
+  offeringChoices = choices;
+  pendingChoices = [];
   // One retry per reply, so a model that answers nothing twice is reported
   // rather than looped on.
   let emptyRetried = false;
@@ -6616,15 +6631,16 @@ app.whenReady().then(() => {
       { role: 'user', content: said, at: new Date().toISOString() }];
     // hands stay on: she is at her own machine, and this is the same person at
     // the same desk. brief, because it has to fit in a caption.
-    const answer = await ollamaChat(messages, config, { brief: true });
+    const answer = await ollamaChat(messages, config, { brief: true, choices: true });
     const reply = answer.content ?? '';
+    const choices = [...pendingChoices];
     // The same channel the phone and Discord use, so the desk transcript picks
     // it up and coming back to the window does not mean finding half a
     // conversation missing. ollamaChat has already spoken it and pushed the
     // caption on its way through.
     sendToWindows('chat:fromPhone', { text: said, reply, ignored: Boolean(answer.ignored) });
-    console.log(`[summon] answered ${said.length} chars with ${reply.length}`);
-    return { reply, ignored: Boolean(answer.ignored) };
+    console.log(`[summon] answered ${said.length} chars with ${reply.length}${choices.length ? ` and ${choices.length} choices` : ''}`);
+    return { reply, ignored: Boolean(answer.ignored), choices };
   });
 
   ipcMain.handle('companion:showMenu', () => {
