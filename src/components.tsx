@@ -5,6 +5,7 @@ import { buildMonthGrid, datesInView, dayLabel, rangeLabel, shiftISODate, toISOD
 import { startListening, startRecording, type Listener, type Recorder } from './companion/microphone';
 import { isUsableFollowUp, matchWake, readsAsFarewell } from './companion/wake';
 import { chimeListening, chimeStoppedListening, setChimeVolume } from './companion/chime';
+import { randomWait } from './retorts';
 export class StageFailureBoundary extends Component<{ children: ReactNode; onError(message: string): void }, { failed: boolean }> { state = { failed: false }; componentDidCatch(error: Error) { this.props.onError(error.message || 'Haru could not start the Live2D renderer.'); } render() { return this.state.failed ? null : this.props.children; } static getDerivedStateFromError() { return { failed: true }; } }
 
 export type Page = 'chat' | 'asides' | 'character' | 'profile' | 'settings' | 'journal';
@@ -2119,6 +2120,10 @@ export function Composer({ sending, replyingTo, onCancelReply, onSend, staged, o
 }) {
   const [draft, setDraft] = useState('');
   const box = useRef<HTMLTextAreaElement>(null);
+  // Which line she is waiting behind this time. Picked when the send goes out
+  // rather than per render, so it does not shuffle while you are reading it.
+  const [waitingLine, setWaitingLine] = useState('');
+  useEffect(() => { if (sending) setWaitingLine(randomWait()); }, [sending]);
   // Grows with what is in it, up to a ceiling.
   //
   // Measured from scrollHeight rather than counted in lines, because a wrapped
@@ -2203,8 +2208,14 @@ export function Composer({ sending, replyingTo, onCancelReply, onSend, staged, o
       {/* A textarea rather than an input, because an input cannot hold a newline
           at all — shift+enter in one does nothing, whatever you bind to it.
           Enter still sends; shift+enter breaks the line. */}
+      {/* The box and the line she is waiting behind, stacked. Unlike her own
+          window this field is never taken away — you can carry on typing while
+          she thinks — so the line cannot replace it and has to sit over it, the
+          way a placeholder does, and get out of the way the moment you type. */}
+      <div className="compose-field">
+      {sending && !draft && !replyingTo && <div className="compose-waiting" aria-hidden="true"><span>{waitingLine || 'Haru is thinking…'}</span></div>}
       <textarea ref={box} rows={1} value={draft}
-        placeholder={replyingTo ? 'What did she get wrong?' : sending ? 'Keep typing — she is still thinking…' : staged.length ? 'What do you want her to do with it?' : 'Say something to Haru…'}
+        placeholder={replyingTo ? 'What did she get wrong?' : sending ? '' : staged.length ? 'What do you want her to do with it?' : 'Say something to Haru…'}
         onChange={event => setDraft(event.target.value)}
         onPaste={event => void paste(event)}
         onKeyDown={event => {
@@ -2215,6 +2226,7 @@ export function Composer({ sending, replyingTo, onCancelReply, onSend, staged, o
           event.preventDefault();
           submit(event);
         }}/>
+      </div>
       <button disabled={sending || (!draft.trim() && !staged.length)}>{sending ? 'Thinking…' : 'Send'}</button>
     </form>
   </div>;

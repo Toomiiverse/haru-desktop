@@ -18,9 +18,16 @@ function loadCubismCore() {
 
 export type Live2DModelHandle = Live2DModelClass;
 
-export function Live2DCanvas({ source, onError, onReady }: { source: string; onError(message: string): void; onReady?(model: Live2DModelHandle | null): void }) {
+export function Live2DCanvas({ source, onError, onReady, onFit }: { source: string; onError(message: string): void; onReady?(model: Live2DModelHandle | null): void; onFit?(drawnWidth: number): void }) {
   const host = useRef<HTMLDivElement>(null);
   const [loading, setLoading] = useState(true);
+  // Through a ref rather than the effect's dependencies: adding it there would
+  // tear down and rebuild the whole PIXI application every time the parent
+  // re-rendered with a fresh closure, and reading the prop directly inside
+  // fitModel would pin it to whatever it was on the first render.
+  const report = useRef(onFit);
+  report.current = onFit;
+
   useEffect(() => {
     let app: PIXI.Application | undefined;
     let model: Live2DModelHandle | undefined;
@@ -36,8 +43,23 @@ export function Live2DCanvas({ source, onError, onReady }: { source: string; onE
     function fitModel() {
       if (!app || !model || !baseWidth || !baseHeight) return;
       const screen = app.renderer.screen;
-      model.scale.set(Math.min(screen.width / baseWidth, screen.height / baseHeight) * .88);
+      const scale = Math.min(screen.width / baseWidth, screen.height / baseHeight) * .88;
+      model.scale.set(scale);
       model.position.set(screen.width / 2, screen.height);
+      // How wide she actually comes out, which is not the width of her window.
+      //
+      // The fit takes whichever of the two ratios is smaller, and for a model
+      // taller than its frame that is always the height — so a tall character in
+      // a 300x360 window is drawn about 140 wide and leaves the rest empty. Sizing
+      // anything against the window therefore sizes it against a box she occupies
+      // less than half of, which is how the dialogue panel came to dwarf her: it
+      // was measuring the window and calling it her.
+      //
+      // Published rather than returned because two very different things need it —
+      // the stylesheet, to scale the panel, and the window, to decide when she is
+      // too small to have one. Set on the root so a plain CSS var reaches both.
+      report.current?.(baseWidth * scale);
+      document.documentElement.style.setProperty('--haru-width', `${Math.round(baseWidth * scale)}px`);
     }
 
     async function render() {

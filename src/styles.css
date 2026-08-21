@@ -560,6 +560,40 @@
   resize: none; overflow-y: auto;
 }
 .compose textarea:focus { border-color: var(--accent); }
+
+/* The field and the waiting line share a cell, so the line can sit exactly where
+   the placeholder would. flex:1 moves here from the textarea, which is now the
+   thing being stretched rather than the thing stretching. */
+.compose-field { position: relative; flex: 1; min-width: 0; display: flex; }
+.compose-field textarea { flex: 1; }
+/* Placed on the field's own padding so it lands on the first line of text
+   wherever the box has grown to, and inert so every click, drag and selection
+   goes to the textarea underneath it as though it were not there. */
+.compose-waiting {
+  position: absolute; left: 16px; right: 16px; top: 12px;
+  pointer-events: none;
+  font: 14.5px Karla, sans-serif; line-height: 1.4;
+}
+/* Its own keyframes rather than the companion window's. The two stylesheets
+   happen to be loaded together today, which would make sharing work and make it
+   a dependency nobody wrote down. */
+.compose-waiting span {
+  background: linear-gradient(100deg, var(--muted-2) 38%, var(--text) 50%, var(--muted-2) 62%);
+  background-size: 260% 100%;
+  -webkit-background-clip: text; background-clip: text;
+  color: transparent;
+  animation: compose-waiting-sweep 2.1s linear infinite;
+}
+@keyframes compose-waiting-sweep { from { background-position: 150% 0 } to { background-position: -50% 0 } }
+/* Frozen mid-sweep the gradient would leave half the sentence dimmed, so this
+   drops the effect rather than stopping it. */
+@media (prefers-reduced-motion: reduce) {
+  .compose-waiting span {
+    animation: none; background: none;
+    -webkit-background-clip: border-box; background-clip: border-box;
+    color: var(--muted);
+  }
+}
 /* The buttons sit against the bottom of a grown box rather than floating
    halfway up it. */
 .compose { align-items: flex-end; }

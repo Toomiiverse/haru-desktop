@@ -6,6 +6,7 @@ import { POSES, POSE_TIMING, poseStrength } from './companion/pose';
 import { attachParameterLayer } from './companion/parameters';
 import { createVoicePlayer, type MouthReading, type VoicePlayer } from './companion/mouth';
 import { idleMotion } from './companion/idle';
+import { randomWait } from './retorts';
 import type { Emotion, Vitals, VoiceConfig } from './types';
 
 // Only used until the first life tick arrives, a few seconds after launch.
@@ -86,6 +87,22 @@ async function reportParameterRanges(handle: Live2DModelHandle) {
 
 const Live2DCanvas = lazy(() => import('./components/Live2DCanvas').then(module => ({ default: module.Live2DCanvas })));
 
+/**
+ * How small she can get before the dialogue stops being drawn at all.
+ *
+ * Measured across her, not across her window. The two come apart badly: the model
+ * is fitted by whichever of width or height runs out first, so a tall character
+ * in a 300x360 window is drawn about 140 wide and the rest of the window is
+ * empty air. A threshold on the window would fire when she was already half the
+ * size it sounded like.
+ *
+ * 120 of her own pixels is where she stops being someone you are talking to and
+ * becomes an ornament, and a panel wider than she is tall is not a companion —
+ * it is a text box with a picture behind it. Nothing is lost by it: anything open
+ * is closed properly rather than hidden, and scrolling back up starts a fresh one.
+ */
+const DIALOGUE_MIN_HARU_WIDTH = 120;
+
 export function CompanionWindow() {
   const [model, setModel] = useState<Live2DModel | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -161,17 +178,22 @@ export function CompanionWindow() {
   // What she is saying, shown above her. Driven from main rather than from the
   // speech clips so it still appears with the voice switched off.
   const [caption, setCaption] = useState<string | null>(null);
+  // How wide she is actually drawn, reported by the canvas every time it refits
+  // her. Not window.innerWidth, which is a much larger number she occupies less
+  // than half of — see DIALOGUE_MIN_HARU_WIDTH.
+  const [drawnWidth, setDrawnWidth] = useState(0);
+  const onFit = useCallback((width: number) => setDrawnWidth(width), []);
+
+  // Nothing is drawn before the first fit, and a panel that flashed up at full
+  // size and then vanished would be worse than one that waited a frame.
+  const narrow = drawnWidth > 0 && drawnWidth < DIALOGUE_MIN_HARU_WIDTH;
   const [typed, setTyped] = useState(0);
-  // The bubble only shows three lines, so it has to follow the words being typed
-  // rather than sitting at the top showing the opening of a reply that has long
-  // since moved on. Scrolling to scrollHeight would not do it: the untyped
-  // remainder is still in the box holding its width open, so the bottom of the
-  // content is the end of text that has not been said yet. This tracks a marker
-  // sitting exactly at the typing position instead.
+  // Still marks where she is up to, but nothing follows it any more. It used to
+  // be scrolled into view every character, because the box had a scroller of its
+  // own and the untyped remainder sat below the typing position holding the
+  // layout open. Neither is true now: the box ends at the last character typed,
+  // so the caret is always the lowest thing in it and always on screen.
   const caret = useRef<HTMLBRElement>(null);
-  useEffect(() => {
-    caret.current?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-  }, [typed]);
   useEffect(() => window.haru?.companion.onSay(line => { setCaption(line); setTyped(0); }), []);
 
   // Typed out rather than dropped in whole. Paced at roughly her speaking rate so
@@ -204,7 +226,13 @@ export function CompanionWindow() {
       const talking = voice.current?.speaking() ?? false;
       // Never clears mid-sentence: a line that is still being typed has not been
       // read yet no matter how long it has been on screen.
-      if (!talking && typed >= caption.length && performance.now() - shownAt > readMs) setCaption(null);
+      //
+      // Nor while the reply box is open. Answering her takes longer than reading
+      // her, and having the line you are part-way through answering disappear is
+      // the same complaint as losing the box: whatever is on screen goes when you
+      // say it goes. openRef rather than `asking` so the timer is not torn down
+      // and restarted every time the box opens.
+      if (!talking && !openRef.current && typed >= caption.length && performance.now() - shownAt > readMs) setCaption(null);
     }, 250);
     return () => clearInterval(timer);
   }, [caption, typed]);
@@ -393,6 +421,9 @@ export function CompanionWindow() {
   const [asking, setAsking] = useState(false);
   const [draft, setDraft] = useState('');
   const [waiting, setWaiting] = useState(false);
+  // Picked once when the question goes out rather than per render, so it does not
+  // shuffle under you while you are reading it.
+  const [waitingLine, setWaitingLine] = useState('');
   // What she offered to say back. Empty means the text box; anything in it means
   // the buttons, because a box and a set of choices at once is two questions.
   const [choices, setChoices] = useState<string[]>([]);
@@ -411,6 +442,11 @@ export function CompanionWindow() {
       .catch(() => { /* never set: YOU is the default and needs no rescue */ });
   }, []);
   const box = useRef<HTMLInputElement | null>(null);
+  // The field is replaced while she composes rather than disabled in place, so it
+  // is a different element when it comes back and has lost the caret. Handing it
+  // straight back is the difference between a conversation and a form you have to
+  // click into after every answer.
+  useEffect(() => { if (asking && !waiting) box.current?.focus(); }, [asking, waiting]);
   const openRef = useRef(false);
   openRef.current = asking;
 
@@ -423,13 +459,25 @@ export function CompanionWindow() {
     void window.haru?.companion.close();
   }, []);
 
-  // Clicking away puts it away. Without this the box sits open behind whatever
-  // they turned to instead, and she keeps standing still waiting for it.
-  useEffect(() => {
-    const onBlur = () => { if (openRef.current) closeBox(); };
-    window.addEventListener('blur', onBlur);
-    return () => window.removeEventListener('blur', onBlur);
-  }, [closeBox]);
+  /**
+   * The whole panel away — her line as well as your box.
+   *
+   * closeBox on its own only takes your half, which is how the panel ended up
+   * sitting there with her paragraph in it and nothing to answer it with. That
+   * is a dead end: no way to reply and no way to be rid of it.
+   */
+  const dismiss = useCallback(() => { setCaption(null); closeBox(); }, [closeBox]);
+
+  // Shrinking her past the threshold takes the panel with it, so anything open
+  // has to be closed rather than merely hidden. A box that is still logically
+  // open while invisible is the worst of both: it holds the keyboard, and main
+  // has her stood there waiting for an answer that can no longer be typed.
+  useEffect(() => { if (narrow && openRef.current) dismiss(); }, [narrow, dismiss]);
+
+  // Clicking away used to put it away, and that is what took the reply box out
+  // from under people: turn to another window for a moment and you came back to
+  // her paragraph with nowhere to type. It closes when you say so now — the ✕,
+  // or Escape — which is the point of having a button for it.
 
   async function send(text?: string) {
     const said = (text ?? draft).trim();
@@ -442,6 +490,7 @@ export function CompanionWindow() {
     // Cleared before the question goes, not after the answer comes back: leaving
     // the old buttons up while she thinks invites picking one twice.
     setChoices([]);
+    setWaitingLine(randomWait());
     setWaiting(true);
     try {
       // The reply itself arrives through the caption on its own — ollamaChat
@@ -503,7 +552,7 @@ export function CompanionWindow() {
     <div className="companion-stage">
       <StageFailureBoundary onError={setError}>
         <Suspense fallback={null}>
-          <Live2DCanvas source={model.url} onError={setError} onReady={handleReady} />
+          <Live2DCanvas source={model.url} onError={setError} onReady={handleReady} onFit={onFit} />
         </Suspense>
       </StageFailureBoundary>
       {/* Everything that reacts to a pointer lives on this, not on the stage, so
@@ -519,17 +568,23 @@ export function CompanionWindow() {
           replies she offered or somewhere to type. The three used to be a caption
           and a box at opposite ends of the window, which read as two things
           happening rather than one conversation. */}
-      {(caption || asking) && <div className="companion-dialogue">
+      {!narrow && (caption || asking) && <div className="companion-dialogue">
+        {/* Outside the roll on purpose: everything in there rides up and off the
+            top as the exchange grows, and the one control that must never do that
+            is the one that closes it. Hers is the only thing that goes on its own,
+            and only when nobody is part-way through answering it. */}
+        <button className="dialogue-close" onClick={dismiss} title="Close (Esc)" aria-label="Close">✕</button>
+        <div className="dialogue-roll">
         {/* Yours first, because it came first: read top to bottom, the exchange
             is in the order it happened. Right-aligned against her left, which is
             what makes two boxes read as two people rather than as a list. */}
-        {mine && <div className="dialogue-box mine">
+        {mine && <div className="dialogue-box mine recap">
           <div className="dialogue-name">{speaker}</div>
           <div className="dialogue-line said">{mine}</div>
         </div>}
-        <div className="dialogue-box hers">
+        {caption && <div className="dialogue-box hers">
           <div className="dialogue-name">Haru</div>
-          {caption && <div className="dialogue-line"><span>
+          <div className="dialogue-line"><span>
             <i className="typed">{caption.slice(0, typed)}</i>
             <i ref={caret} className="caret"/>
             <i className="untyped">{caption.slice(typed)}</i>
@@ -537,8 +592,16 @@ export function CompanionWindow() {
           {/* The little marker that means there is nothing more coming. Only
               once she has finished typing, or it blinks through her sentence. */}
           {typed >= caption.length && !waiting && <b className="dialogue-more">▼</b>}
-          </div>}
-          {asking && (choices.length > 0
+          </div>
+        </div>}
+        {/* Your half, on your side, under her line rather than inside it.
+            It was nested in her box — so you typed your own words underneath a
+            plate reading HARU, and the choices she offered, which are written in
+            your voice, appeared as though she were saying them. Below her and
+            plated with your name is the same order the exchange happened in. */}
+        {asking && <div className="dialogue-box mine reply">
+          <div className="dialogue-name">{speaker}</div>
+          {choices.length > 0
             ? <div className="dialogue-choices">
                 {choices.map((choice, index) => (
                   <button key={choice} className="dialogue-choice" disabled={waiting} onClick={() => void send(choice)}>
@@ -546,19 +609,21 @@ export function CompanionWindow() {
                   </button>
                 ))}
               </div>
+            : waiting
+            ? <div className="dialogue-ask"><div className="dialogue-waiting"><span>{waitingLine || 'Haru is thinking…'}</span></div></div>
             : <div className="dialogue-ask">
                 <input
                   ref={box}
                   value={draft}
-                  disabled={waiting}
-                  placeholder={waiting ? 'thinking…' : 'say something'}
+                  placeholder="say something"
                   onChange={event => setDraft(event.target.value)}
                   onKeyDown={event => {
                     if (event.key === 'Enter') { event.preventDefault(); void send(); }
-                    if (event.key === 'Escape') { event.preventDefault(); closeBox(); }
+                    if (event.key === 'Escape') { event.preventDefault(); dismiss(); }
                   }}
                 />
-              </div>)}
+              </div>}
+        </div>}
         </div>
       </div>}
       {error && <div className="companion-error">{error}</div>}

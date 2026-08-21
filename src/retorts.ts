@@ -27,6 +27,45 @@ export const LIKE_GLOATS = [
   'Naturally. You’re welcome, not that you said it.',
 ];
 
+/**
+ * What your own box says while she is composing a reply.
+ *
+ * "thinking…" is what a progress bar says. It is accurate and it is nobody — the
+ * two to six seconds a local model takes are the two to six seconds you are most
+ * aware you are waiting on software, so it is the worst possible moment for her
+ * to stop being a person and become a spinner.
+ *
+ * All of them name her and all of them are in the present tense, because the
+ * sentence is doing the job a spinner does: something is happening and it has not
+ * finished. Past that they are only allowed to be funny. Edit freely — the list
+ * is the whole feature, and one is picked per reply with no immediate repeats.
+ *
+ * Keep them under about thirty-two characters. The box holds one line at her
+ * smallest size and grows to two past that, and since it is anchored to the
+ * bottom of the strip, growing means shoving her own words up the screen and
+ * back down again every time she answers.
+ */
+export const WHILE_WAITING = [
+  'Haru is thinking…',
+  'Haru is replying…',
+  'Haru is hating on you…',
+  'Haru is dazing about…',
+  'Haru is judging you…',
+  'Haru is picking her words…',
+  'Haru is weighing up an answer…',
+  'Haru is rolling her eyes…',
+  'Haru is pretending to think…',
+  'Haru is drafting something mean…',
+  'Haru is finding a nicer way…',
+  'Haru is sighing about this…',
+  'Haru is taking her sweet time…',
+  'Haru is choosing violence…',
+  'Haru is deciding where to start…',
+  'Haru is muttering to herself…',
+  'Haru is unimpressed but typing…',
+  'Haru is composing herself…',
+];
+
 // Tracks the last line used per list so the same one cannot land twice running,
 // which would read as canned rather than as a genuine reaction.
 const previous = new Map<string[], number>();
@@ -42,3 +81,4 @@ function pick(lines: string[]) {
 
 export function randomRetort() { return pick(DISLIKE_RETORTS); }
 export function randomGloat() { return pick(LIKE_GLOATS); }
+export function randomWait() { return pick(WHILE_WAITING); }

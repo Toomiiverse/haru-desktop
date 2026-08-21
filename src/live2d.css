@@ -26,28 +26,36 @@ html[data-view="companion"],html[data-view="companion"] body{background:transpar
 
    Everything here is sized from --dlg rather than in pixels, because she is
    scroll-resizable from 140px wide to 900px and a box built for one of those is
-   absurd at the other. At 140 a 13px font and 12px of padding is most of the
-   window; at 900 it is a stamp on a poster. The window is her viewport, so vw is
-   simply her width, and the clamp keeps it legible when she is tiny and stops it
-   ballooning when she is huge. The slope is set so her usual size lands where
-   this was drawn by hand. */
+   absurd at the other.
+
+   It follows how wide she is actually drawn, not how wide her window is. Those
+   are not the same number and assuming they were is what made this feel broken:
+   the fit takes the smaller of the two ratios, so a model taller than its frame
+   is limited by height and comes out under half the width of the window it sits
+   in. Sized against the window, the panel stayed put while she visibly shrank
+   underneath it — and above about 500px the clamp was pinned at its ceiling, so
+   scrolling did nothing at all. --haru-width is published by fitModel in
+   Live2DCanvas on every resize; the fallback only matters before the first frame.
+   The clamp keeps it legible when she is tiny and stops it ballooning when she
+   is huge. */
 .companion-dialogue{
-  --dlg:clamp(10px, calc(2.2vw + 4px), 15px);
+  --dlg:clamp(8px, calc(var(--haru-width, 40vw) * .025 + 4px), 14px);
   position:absolute;top:0;left:0;right:0;
-  display:flex;flex-direction:column;gap:calc(var(--dlg) * .4);
   pointer-events:none;padding:calc(var(--dlg) * .5) calc(var(--dlg) * .5) 0;
-  /* Never more than three fifths of her window, whatever is in it. Measured
-     rather than assumed: at her smallest size a long reply with four choices
-     came out at 173% of the window, because the arithmetic had counted the
-     text and forgotten the plates, the gaps, the options and your box. */
-  max-height:60vh;
 }
 .dialogue-box{
   /* Narrow on purpose. Her window is far wider than she is, and a box allowed to
      fill it reads as a banner across the desktop rather than as something she is
      saying. Both bounds are in ch, which follows the font, so the box holds a
      sensible line length at any of her sizes — and the percentages take over when
-     she is small enough that ch would overflow the window. */
+     she is small enough that ch would overflow the window.
+
+     ch is only worth anything if the box has a font of its own. Without this it
+     resolved against the inherited 16px root, so both bounds were fixed pixel
+     values wearing font units: the text inside scaled with her and the box
+     around it stayed exactly the same width, which is most of why scrolling her
+     down appeared to do nothing. */
+  font-size:var(--dlg);
   pointer-events:auto;width:max-content;
   min-width:min(72%, 26ch);max-width:min(88%, 38ch);
   position:relative;
@@ -62,15 +70,85 @@ html[data-view="companion"],html[data-view="companion"] body{background:transpar
 }
 @keyframes dialogue-in{from{opacity:0;transform:translateY(-6px) scale(.985)}to{opacity:1;transform:none}}
 
+/* The strip the exchange lives in, and the reason she is never scaled down to
+   make room for it.
+ *
+   She is anchored to the bottom of her window and fitted to 88% of its height,
+   so there is almost no clear air above her head — a panel that grows downward
+   is a panel that grows onto her face. The alternative was shrinking her every
+   time she said something long, which made her size a function of her own
+   verbosity.
+ *
+   So the strip is fixed and the exchange rides up out of it, oldest first, the
+   way credits leave the top of a screen. Bottom-anchored, because the end of what
+   she is saying and the box you answer in are the two things that must never be
+   the part that left. What goes past the top is gone rather than scrollable: this
+   is a companion over your desktop, not a transcript — the transcript is in her
+   window, and it has all of it. */
+.dialogue-roll{
+  display:flex;flex-direction:column;justify-content:flex-end;
+  gap:calc(var(--dlg) * .4);
+  /* The knob. Her bounding box starts 12% down, but this model carries empty
+     space above her hair, so her head really begins around 24% — measured off a
+     screenshot, not calculated. So 24 is not a taste call — it is where she
+     starts. Raise it if you would rather read more and see less of her; the
+     fade means going over simply means more of the exchange has left the top.
+
+     A fixed height, not a maximum. With a maximum the strip shrank to whatever
+     was in it, so the gradient — which is a share of the strip — landed on the
+     top of the only box there was and faded her name plate out the instant she
+     said anything. Fixed, the strip is always taller than a short exchange, the
+     content sits at the bottom of it, and the fade has nothing but empty air to
+     work on until there is genuinely too much to show. */
+  height:24vh;
+  overflow:hidden;
+  /* The fade itself, over the top two fifths rather than the top fifth. A short
+     ramp reads as a clipped edge with a soft lip on it; a long one reads as
+     distance — the line is not cut off, it is going. Which is the whole effect,
+     so it is worth the two lines it costs to be readable in.
+     -webkit- as well: Chromium still wants the prefix for mask-image. */
+  -webkit-mask-image:linear-gradient(to bottom, transparent 0, #000 40%);
+  mask-image:linear-gradient(to bottom, transparent 0, #000 40%);
+}
+
 /* Two sides. Stacked rather than side by side — her window is narrower than she
    is tall, and two boxes abreast would each be too thin to hold a sentence.
    Yours pinned right and hers left is what carries the sense of an exchange. */
-.dialogue-box.hers{align-self:flex-start}
+/* Hers alone is a fixed width rather than one that hugs its text. Now that the
+   untyped remainder no longer holds the box open, a width that follows the
+   content would step wider on the first few words of every reply — the height
+   growing is the effect, the width twitching is just noise. It is also what the
+   genre does: the character's box is the same shape every time, and only what is
+   in it changes. */
+.dialogue-box.hers{align-self:flex-start;width:min(88%, 38ch)}
 .dialogue-box.mine{align-self:flex-end}
-/* Under about this wide there is not room above her head for two speakers, and
-   a box that overflows reads as broken. Yours is the one that goes: you already
-   know what you said. */
-@media (max-width: 219px){ .dialogue-box.mine{display:none} }
+/* Under about this wide there is not room above her head for two speakers, so
+   what goes is the recap of your last line — you already know what you said, and
+   the reply box must stay or she is asking a question with nowhere to answer it.
+   Narrower still and the panel is not drawn at all: see DIALOGUE_MIN_WIDTH in
+   CompanionWindow.tsx, which is the threshold that actually bites first. */
+@media (max-width: 219px){ .dialogue-box.mine.recap{display:none} }
+
+/* Away when you say so, not when a timer says so. The panel itself takes no
+   pointer events, so this has to claim them back. Small, dim until reached for,
+   and pinned to the panel rather than to a box so it reads as closing the whole
+   exchange rather than dismissing one line of it. */
+.dialogue-close{
+  position:absolute;top:calc(var(--dlg) * .5);right:calc(var(--dlg) * .5);z-index:2;
+  pointer-events:auto;cursor:pointer;
+  width:calc(var(--dlg) * 1.5);height:calc(var(--dlg) * 1.5);
+  display:grid;place-items:center;
+  border:1px solid oklch(70% 0.06 265 / 0.28);
+  border-radius:50%;
+  background:oklch(14% 0.015 265 / 0.8);
+  color:oklch(78% 0.02 300 / 0.75);
+  font:calc(var(--dlg) * .8)/1 Karla,sans-serif;
+  padding:0;
+}
+.dialogue-close:hover{
+  border-color:oklch(74% 0.17 350 / 0.7);
+  color:oklch(90% 0.05 350);
+}
 
 /* The name plate, sitting on the top edge the way they always do. */
 .dialogue-name{
@@ -89,19 +167,28 @@ html[data-view="companion"],html[data-view="companion"] body{background:transpar
   color:oklch(96% 0.01 300);
   font:var(--dlg)/1.5 Karla,sans-serif;
   text-shadow:0 1px 3px oklch(0% 0 0 / 0.7);
-  /* Eight lines, or a third of her window, whichever is less. The em cap keeps
-     the box a sensible shape; the vh cap is what stops a long reply covering her
-     face when she is small, where eight lines would be most of her height. */
-  max-height:min(calc(8 * 1.5em), 32vh);
-  overflow-y:auto;scrollbar-width:none;
+  /* No cap and no scroller of its own. Both used to be here to stop a long reply
+     covering her face, which is now the roll's job — and an inner scrollbar would
+     hold the text in place rather than letting it ride up and out, which is the
+     whole effect. */
   text-wrap:pretty;
 }
 .dialogue-line::-webkit-scrollbar{display:none}
 /* Both runs are inline and upright; <i> is a neutral wrapper so the typed and
-   untyped halves reflow as one paragraph. The untyped half holds the layout open
-   at zero opacity, which is what stops the box resizing on every character. */
+   untyped halves reflow as one paragraph.
+ *
+   The untyped half used to sit here at zero opacity, holding the box open at the
+   full size of the finished reply from the first character. That was right when
+   the box grew downward — it stopped the thing resizing on every letter — and
+   wrong the moment the strip started bottom-anchoring. Sized for the whole reply
+   up front, the box was already taller than the strip before she had said a
+   word, so her opening line began life above the top edge and you read the end
+   of a sentence fading out over an empty box.
+ *
+   Taken out of the flow it grows a line at a time as she speaks, upward, and
+   passes into the fade when it runs out of room. Which is the effect. */
 .dialogue-line i{font-style:normal}
-.dialogue-line .untyped{opacity:0}
+.dialogue-line .untyped{display:none}
 .dialogue-line .caret{display:inline-block;width:2px;height:1em;vertical-align:-2px;background:oklch(74% 0.17 350);animation:dialogue-caret .8s steps(1) infinite}
 @keyframes dialogue-caret{0%,50%{opacity:1}50.01%,100%{opacity:0}}
 
@@ -135,12 +222,13 @@ html[data-view="companion"],html[data-view="companion"] body{background:transpar
   display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;
 }
 
-/* Where you answer. Sits under her line, separated by a rule rather than a gap,
-   so the panel stays one object. */
-.dialogue-ask,.dialogue-choices{
-  margin-top:calc(var(--dlg) * .65);padding-top:calc(var(--dlg) * .65);
-  border-top:1px solid oklch(72% 0.15 350 / 0.2);
-}
+/* Where you answer. Its own box on your side now, so there is nothing above it
+   inside the box to be separated from — the rule and the space it needed when it
+   was nested under her line would read as a stray line across an empty box. */
+.dialogue-ask,.dialogue-choices{margin-top:0;padding-top:0;border-top:0}
+/* The reply box holds an input, not a sentence, so it does not want the tight
+   line-clamped shape the recap of your last message has. */
+.dialogue-box.mine.reply{padding-bottom:calc(var(--dlg) * .85)}
 
 .dialogue-ask input{
   width:100%;box-sizing:border-box;
@@ -153,9 +241,48 @@ html[data-view="companion"],html[data-view="companion"] body{background:transpar
 }
 .dialogue-ask input:focus{border-color:oklch(74% 0.17 350 / 0.8);background:oklch(10% 0.02 300 / 0.75)}
 .dialogue-ask input::placeholder{color:oklch(70% 0.02 300 / 0.55)}
-/* Still there while she thinks, just inert — a field that vanishes and returns
-   shifts the whole panel under her. */
-.dialogue-ask input:disabled{opacity:.7}
+/* What stands in for the field while she is composing.
+ *
+   Real text rather than the input's placeholder, because a placeholder is a
+   single line that cannot wrap: "Haru is unimpressed but typing…" simply ran off
+   the end of the box and stopped mid-word. This wraps, so the line can be as
+   long as it is funny.
+
+   Same padding and radius as the field it replaces, so the box does not change
+   shape when she starts or stops. */
+.dialogue-waiting{
+  box-sizing:border-box;
+  background:oklch(10% 0.02 300 / 0.55);
+  border:1px solid oklch(72% 0.15 350 / 0.3);
+  border-radius:calc(var(--dlg) * .6);
+  padding:calc(var(--dlg) * .45) calc(var(--dlg) * .68);
+  font:calc(var(--dlg) * .96)/1.35 Karla,sans-serif;
+  text-wrap:pretty;
+}
+/* The wait, made visible. A light travels along the words the way it does across
+   a skeleton while something loads — the sentence is already telling you she is
+   busy, and this is what stops it reading as a sentence that has finished.
+   Clipped to the glyphs, so it lights the text rather than the box. */
+.dialogue-waiting span{
+  background:linear-gradient(100deg,
+    oklch(70% 0.02 300 / 0.5) 38%,
+    oklch(94% 0.03 350 / 0.95) 50%,
+    oklch(70% 0.02 300 / 0.5) 62%);
+  background-size:260% 100%;
+  -webkit-background-clip:text;background-clip:text;
+  color:transparent;
+  animation:dialogue-waiting-sweep 2.1s linear infinite;
+}
+@keyframes dialogue-waiting-sweep{from{background-position:150% 0}to{background-position:-50% 0}}
+/* Without the sweep the gradient would leave half the sentence dimmed, so the
+   reduced-motion case drops the whole effect rather than freezing it. */
+@media (prefers-reduced-motion:reduce){
+  .dialogue-waiting span{
+    animation:none;background:none;
+    -webkit-background-clip:border-box;background-clip:border-box;
+    color:oklch(78% 0.02 300 / 0.8);
+  }
+}
 
 .dialogue-choices{display:flex;flex-direction:column;gap:calc(var(--dlg) * .3);
   /* Four options at 10px still stack taller than she is when she is small.
