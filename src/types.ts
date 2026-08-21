@@ -56,7 +56,7 @@ export interface Profile { nickname: string; occupation: string; about: string; 
 export type MemoryKind = 'preference' | 'relationship' | 'event' | 'fact';
 export interface Memory { id: string; text: string; kind: MemoryKind; subject?: string; createdAt: string; lastSeenAt: string; mentions: number; }
 export interface SessionSummary { day: string; summary: string; createdAt: string; }
-export interface ProviderConfig { provider: 'ollama' | 'openai' | 'xai'; model: string; endpoint: string; temperature: number; }
+export interface ProviderConfig { provider: 'ollama' | 'openai' | 'xai' | 'venice'; model: string; endpoint: string; temperature: number; }
 // 'windows' is spoken by the renderer through the built-in SAPI voices; the rest
 // are synthesised in main and arrive as audio. See electron/voice.ts.
 export type VoiceEngine = 'off' | 'windows' | 'openai' | 'gpt-sovits';

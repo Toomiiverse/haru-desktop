@@ -1832,6 +1832,21 @@ function getOpenAIKey(): string {
 }
 
 /**
+ * Venice's own key, kept apart for the same reason as OpenAI's: a different
+ * company, a different account, and a chat provider chosen in Setup should
+ * never silently decide which of them sees the conversation.
+ */
+function saveVeniceKey(apiKey: string) {
+  const key = apiKey.trim();
+  if (!key) { store.delete('veniceApiKey' as never); return; }
+  store.set('veniceApiKey', encryptSecret(key));
+}
+
+function getVeniceKey(): string {
+  return decryptSecret(store.get('veniceApiKey') as string | undefined);
+}
+
+/**
  * The token for a machine that is ours but is not this one — a rented GPU, a box
  * in the cupboard, whichever address the model, the voice and the ears are at
  * today.
@@ -4007,6 +4022,7 @@ function keyFor(endpoint: string): string {
   try { host = new URL(endpoint.trim()).hostname.toLowerCase(); } catch { return ''; }
   if (/(^|\.)x\.ai$/.test(host)) return getRemoteKey();
   if (/(^|\.)openai\.com$/.test(host)) return getOpenAIKey();
+  if (/(^|\.)venice\.ai$/.test(host)) return getVeniceKey();
   return getSelfHostedKey();
 }
 
@@ -4057,7 +4073,7 @@ function requireKeyFor(endpoint: string, provider: Provider) {
   // before it made a single request.
   let host = '';
   try { host = new URL(endpoint.trim()).hostname.toLowerCase(); } catch { /* handled below */ }
-  const name = /(^|\.)x\.ai$/.test(host) ? 'xAI' : /(^|\.)openai\.com$/.test(host) ? 'OpenAI' : '';
+  const name = /(^|\.)x\.ai$/.test(host) ? 'xAI' : /(^|\.)openai\.com$/.test(host) ? 'OpenAI' : /(^|\.)venice\.ai$/.test(host) ? 'Venice' : '';
   if (!name) return;
   void provider;
   throw new Error(`No API key has been saved, so ${name} was sent none. Paste it in setup and press Save key.`);
@@ -6188,6 +6204,8 @@ app.whenReady().then(() => {
   ipcMain.handle('ai:hasSelfHostedKey', () => Boolean(getSelfHostedKey()));
   ipcMain.handle('openai:setKey', (_e, apiKey: string) => { saveOpenAIKey(apiKey); return Boolean(getOpenAIKey()); });
   ipcMain.handle('openai:status', () => ({ hasKey: Boolean(getOpenAIKey()), ffmpeg: Boolean(findFfmpeg()) }));
+  ipcMain.handle('venice:setKey', (_e, apiKey: string) => { saveVeniceKey(apiKey); return Boolean(getVeniceKey()); });
+  ipcMain.handle('venice:hasKey', () => Boolean(getVeniceKey()));
   ipcMain.handle('ai:verify', (_e, endpoint: string, provider: string, model: string) => verifyRemoteModel(endpoint, (provider as Provider) ?? 'openai', model));
   ipcMain.handle('ai:getEscalate', () => ({ ...readEscalateConfig(store.get('escalate')), provider: store.get('escalate.provider') ?? null }));
   ipcMain.handle('ai:setEscalate', (_e, setting: EscalateConfig, provider: ProviderConfig | null) => {
