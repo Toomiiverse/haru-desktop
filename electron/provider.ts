@@ -10,11 +10,11 @@
 // bites is tool results: Ollama matches them to a call by name, OpenAI by an id
 // it issued, and losing that id turns a tool call into a 400 nobody can read.
 
-export type Provider = 'ollama' | 'openai' | 'xai';
+export type Provider = 'ollama' | 'openai' | 'xai' | 'venice';
 
-/** Everything that is not Ollama speaks OpenAI's dialect, including xAI. */
+/** Everything that is not Ollama speaks OpenAI's dialect, including xAI and Venice. */
 export function isOpenAIShaped(provider: string | undefined): boolean {
-  return provider === 'openai' || provider === 'xai';
+  return provider === 'openai' || provider === 'xai' || provider === 'venice';
 }
 
 /** Where a provider lives, when the user has not typed something themselves. */
@@ -22,6 +22,7 @@ export const DEFAULT_ENDPOINTS: Record<Provider, string> = {
   ollama: 'http://localhost:11434',
   openai: 'https://api.openai.com/v1',
   xai: 'https://api.x.ai/v1',
+  venice: 'https://api.venice.ai/api/v1',
 };
 
 export type ToolCall = { id?: string; function?: { name?: string; arguments?: unknown } };
@@ -146,7 +147,7 @@ export function fromOpenAIReply(payload: OpenAIReply): ChatMessage {
 export function describeFailure(status: number, body: string, provider: Provider): string {
   let message = '';
   try { const parsed = JSON.parse(body) as OpenAIReply; message = (typeof parsed.error === 'string' ? parsed.error : parsed.error?.message) ?? ''; } catch { /* not JSON */ }
-  const name = provider === 'xai' ? 'xAI' : 'The provider';
+  const name = provider === 'xai' ? 'xAI' : provider === 'venice' ? 'Venice' : 'The provider';
   if (status === 401 || status === 403) return `${name} rejected the API key.`;
   if (status === 404) return `${name} has no model by that name, or the endpoint is wrong.`;
   if (status === 429) return `${name} is rate-limiting, or the account is out of credit.`;

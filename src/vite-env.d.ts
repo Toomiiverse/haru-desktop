@@ -24,6 +24,7 @@ interface Window {
     desktop: { get(): Promise<import('./types').DesktopConfig & { apps: number }>; set(config: import('./types').DesktopConfig): Promise<import('./types').DesktopConfig & { apps: number }> };
     screenshots: { get(): Promise<import('./types').ScreenshotConfig>; set(config: import('./types').ScreenshotConfig): Promise<import('./types').ScreenshotConfig> };
     openai: { status(): Promise<{ hasKey: boolean; ffmpeg: boolean }>; setKey(apiKey: string): Promise<boolean> };
+    venice: { hasKey(): Promise<boolean>; setKey(apiKey: string): Promise<boolean> };
     vision: {
       get(): Promise<import('./types').VisionConfig>;
       set(config: import('./types').VisionConfig): Promise<import('./types').VisionConfig>;

@@ -1896,6 +1896,21 @@ function getOpenAIKey(): string {
 }
 
 /**
+ * Venice's own key, kept apart for the same reason as OpenAI's: a different
+ * company, a different account, and a chat provider chosen in Setup should
+ * never silently decide which of them sees the conversation.
+ */
+function saveVeniceKey(apiKey: string) {
+  const key = apiKey.trim();
+  if (!key) { store.delete('veniceApiKey' as never); return; }
+  store.set('veniceApiKey', encryptSecret(key));
+}
+
+function getVeniceKey(): string {
+  return decryptSecret(store.get('veniceApiKey') as string | undefined);
+}
+
+/**
  * The token for a machine that is ours but is not this one — a rented GPU, a box
  * in the cupboard, whichever address the model, the voice and the ears are at
  * today.
@@ -4088,6 +4103,7 @@ function keyFor(endpoint: string): string {
   try { host = new URL(endpoint.trim()).hostname.toLowerCase(); } catch { return ''; }
   if (/(^|\.)x\.ai$/.test(host)) return getRemoteKey();
   if (/(^|\.)openai\.com$/.test(host)) return getOpenAIKey();
+  if (/(^|\.)venice\.ai$/.test(host)) return getVeniceKey();
   return getSelfHostedKey();
 }
 
@@ -4138,7 +4154,7 @@ function requireKeyFor(endpoint: string, provider: Provider) {
   // before it made a single request.
   let host = '';
   try { host = new URL(endpoint.trim()).hostname.toLowerCase(); } catch { /* handled below */ }
-  const name = /(^|\.)x\.ai$/.test(host) ? 'xAI' : /(^|\.)openai\.com$/.test(host) ? 'OpenAI' : '';
+  const name = /(^|\.)x\.ai$/.test(host) ? 'xAI' : /(^|\.)openai\.com$/.test(host) ? 'OpenAI' : /(^|\.)venice\.ai$/.test(host) ? 'Venice' : '';
   if (!name) return;
   void provider;
   throw new Error(`No API key has been saved, so ${name} was sent none. Paste it in setup and press Save key.`);
@@ -4234,6 +4250,24 @@ function homeTwin(config: ProviderConfig): ProviderConfig | null {
   if (!isRemote(config.endpoint)) return null;
   if (isOpenAIShaped(config.provider)) return null;
   return { ...config, endpoint: LOCAL_MODELS };
+}
+
+/**
+ * The rented GPU we already pay for "A second model for the hard ones", used
+ * here for a second reason: this box has one card shared with her voice, and a
+ * reply that fails outright — the local model out of VRAM, wedged, not
+ * answering at all — is worse than one answered a little slower by someone
+ * else's hardware. Not a twin of the local model, so no name is preserved; the
+ * user already agreed to have this one answer under Setup.
+ *
+ * Guarded to a config that is not already OpenAI-shaped so a failure once
+ * escalated there does not loop back into itself.
+ */
+function capacitySpill(config: ProviderConfig): ProviderConfig | null {
+  if (isOpenAIShaped(config.provider)) return null;
+  const spill = store.get('escalate.provider') as ProviderConfig | undefined;
+  if (!spill?.model || !isOpenAIShaped(spill.provider)) return null;
+  return { ...spill, temperature: config.temperature };
 }
 
 /**
@@ -5109,7 +5143,16 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
     // already withdraws every tool, and this makes the narrower promise explicit
     // so that loosening one does not silently loosen the other.
     if (pageWasRead) handsAllowed = false;
-    const message = await ollamaPost(conversation, config, { tools: !pageWasRead && !emptyRetried });
+    const toolsWanted = { tools: !pageWasRead && !emptyRetried };
+    let message: OllamaMessage;
+    try {
+      message = await ollamaPost(conversation, config, toolsWanted);
+    } catch (error) {
+      const spill = capacitySpill(config);
+      if (!spill) throw error;
+      console.warn(`[ai] ${config.model} did not answer (${error instanceof Error ? error.message : String(error)}) — spilling this reply to ${spill.model}`);
+      message = await sendToProvider(conversation, spill, toolsWanted);
+    }
     if (message.tool_calls?.length) {
       // Logged by name: when a tool does not fire, the useful question is whether
       // the model reached for the wrong one or for none at all.
@@ -5719,7 +5762,29 @@ function webDeps(): WebDeps {
       console.log(`[web] answered ${text.length} chars with ${reply.length}${emotion ? ` — ${emotion}${expression ? ` (${expression})` : ' (no face for it)'}` : ''}`);
       return { reply, ignored: answer.ignored, emotion, expression };
     },
-    agenda: () => getKept().map(item => ({ id: item.id, title: item.title, date: item.time ? `${item.date} ${item.time}` : item.date, kind: item.kind, done: item.done })),
+    // Sent as a bare date plus a day-offset rather than one formatted string —
+    // the phone buckets into daily/weekly/monthly by daysAway, and doing that
+    // date math against the phone's own clock would disagree with her whenever
+    // it is in a different timezone. Computed once here, against the timezone
+    // she actually keeps.
+    agenda: () => {
+      const todayKey = localDateKey(zonedNow(CHAT_TIMEZONE));
+      const timeRank = (time?: string) => {
+        const parsed = time ? parseTimeOfDay(time) : null;
+        return parsed ? parsed.hour * 60 + parsed.minute : -1;
+      };
+      return getKept()
+        .map(item => ({
+          id: item.id,
+          title: item.title,
+          date: item.date,
+          time: item.time ?? null,
+          kind: item.kind,
+          done: item.done,
+          daysAway: Math.round((Date.parse(`${item.date}T00:00:00Z`) - Date.parse(`${todayKey}T00:00:00Z`)) / 86400000),
+        }))
+        .sort((a, b) => a.date.localeCompare(b.date) || timeRank(a.time ?? undefined) - timeRank(b.time ?? undefined));
+    },
     tickOff(id) {
       const updated = toggleKept(id);
       if (updated?.done) void remarkOnTickOff(updated);
@@ -6348,6 +6413,8 @@ app.whenReady().then(() => {
   ipcMain.handle('ai:hasSelfHostedKey', () => Boolean(getSelfHostedKey()));
   ipcMain.handle('openai:setKey', (_e, apiKey: string) => { saveOpenAIKey(apiKey); return Boolean(getOpenAIKey()); });
   ipcMain.handle('openai:status', () => ({ hasKey: Boolean(getOpenAIKey()), ffmpeg: Boolean(findFfmpeg()) }));
+  ipcMain.handle('venice:setKey', (_e, apiKey: string) => { saveVeniceKey(apiKey); return Boolean(getVeniceKey()); });
+  ipcMain.handle('venice:hasKey', () => Boolean(getVeniceKey()));
   ipcMain.handle('ai:verify', (_e, endpoint: string, provider: string, model: string) => verifyRemoteModel(endpoint, (provider as Provider) ?? 'openai', model));
   ipcMain.handle('ai:getEscalate', () => ({ ...readEscalateConfig(store.get('escalate')), provider: store.get('escalate.provider') ?? null }));
   ipcMain.handle('ai:setEscalate', (_e, setting: EscalateConfig, provider: ProviderConfig | null) => {

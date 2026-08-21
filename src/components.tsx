@@ -475,15 +475,30 @@ export function CharacterDrawer({ onClose }: { onClose(): void }) {
  * have overwritten the key Grok escalation runs on, breaking a working feature
  * to configure a different one.
  */
-function keySlotFor(endpoint: string): 'xai' | 'openai' | 'self' {
+function keySlotFor(endpoint: string): 'xai' | 'openai' | 'venice' | 'self' {
   let host = '';
   try { host = new URL(endpoint.trim()).hostname.toLowerCase(); } catch { return 'self'; }
   if (/(^|\.)x\.ai$/.test(host)) return 'xai';
   if (/(^|\.)openai\.com$/.test(host)) return 'openai';
+  if (/(^|\.)venice\.ai$/.test(host)) return 'venice';
   return 'self';
 }
 
-const KEY_SLOT_NAME = { xai: 'xAI', openai: 'OpenAI', self: 'your own server' } as const;
+const KEY_SLOT_NAME = { xai: 'xAI', openai: 'OpenAI', venice: 'Venice AI', self: 'your own server' } as const;
+
+/** The saved-key check and save action for whichever company an endpoint resolves to — shared by every panel that asks for a key, so xAI, OpenAI and Venice are never a slot short of each other. */
+function hasKeyFor(haru: NonNullable<typeof window.haru>, slot: ReturnType<typeof keySlotFor>) {
+  return slot === 'xai' ? haru.ai.hasKey()
+    : slot === 'openai' ? haru.openai.status().then(status => status.hasKey)
+    : slot === 'venice' ? haru.venice.hasKey()
+    : haru.ai.hasSelfHostedKey();
+}
+function setKeyFor(haru: NonNullable<typeof window.haru>, slot: ReturnType<typeof keySlotFor>, key: string) {
+  return slot === 'xai' ? haru.ai.setKey(key)
+    : slot === 'openai' ? haru.openai.setKey(key)
+    : slot === 'venice' ? haru.venice.setKey(key)
+    : haru.ai.setSelfHostedKey(key);
+}
 
 export function SettingsDrawer({ config, onSave, onTest, onClose }: { config: ProviderConfig; onSave(config: ProviderConfig): void; onTest(endpoint: string, provider?: string): Promise<string[]>; onClose(): void }) {
   const [endpoint, setEndpoint] = useState(config.endpoint);
@@ -498,18 +513,12 @@ export function SettingsDrawer({ config, onSave, onTest, onClose }: { config: Pr
   useEffect(() => {
     const haru = window.haru;
     if (!haru) return;
-    const saved = slot === 'xai' ? haru.ai.hasKey()
-      : slot === 'openai' ? haru.openai.status().then(status => status.hasKey)
-      : haru.ai.hasSelfHostedKey();
-    void saved.then(setHasModelKey);
+    void hasKeyFor(haru, slot).then(setHasModelKey);
   }, [slot]);
   function saveModelKey() {
     const haru = window.haru;
     if (!haru) return;
-    const written = slot === 'xai' ? haru.ai.setKey(modelKey)
-      : slot === 'openai' ? haru.openai.setKey(modelKey)
-      : haru.ai.setSelfHostedKey(modelKey);
-    void written.then(ok => { setHasModelKey(ok); setModelKey(''); });
+    void setKeyFor(haru, slot, modelKey).then(ok => { setHasModelKey(ok); setModelKey(''); });
   }
   // Only asked for when the endpoint is not this machine. Localhost needs no
   // token and offering one there is just a box nobody should fill in.
@@ -539,7 +548,7 @@ export function SettingsDrawer({ config, onSave, onTest, onClose }: { config: Pr
    *  never right for the new one — but a hand-typed endpoint is left alone. */
   async function chooseProvider(next: ProviderConfig['provider']) {
     const suggested = await window.haru?.ai.defaultEndpoint(next);
-    const known = ['http://localhost:11434', 'https://api.openai.com/v1', 'https://api.x.ai/v1'];
+    const known = ['http://localhost:11434', 'https://api.openai.com/v1', 'https://api.x.ai/v1', 'https://api.venice.ai/api/v1'];
     if (suggested && known.includes(endpoint.trim())) setEndpoint(suggested);
     onSave({ ...config, provider: next, endpoint: suggested && known.includes(endpoint.trim()) ? suggested : endpoint, model });
   }
@@ -550,6 +559,7 @@ export function SettingsDrawer({ config, onSave, onTest, onClose }: { config: Pr
         <option value="ollama">Ollama — on this machine</option>
         <option value="xai">xAI — Grok</option>
         <option value="openai">OpenAI</option>
+        <option value="venice">Venice AI</option>
       </select>
       {/* "Ollama" is a kind of server, not a place. Picking it and then typing
           the address of a rented GPU left this saying "nothing sent anywhere"
@@ -559,7 +569,7 @@ export function SettingsDrawer({ config, onSave, onTest, onClose }: { config: Pr
         ? (remote ? 'Ollama, but not on this machine — see below.' : 'Local. No key, no account, nothing sent anywhere.')
         : 'Everything she is given goes to them with every message — the conversation, her memory of you, your list and your journal ratings.'}</span>
     </div>
-    <div className="form-grid"><input value={endpoint} onChange={event => setEndpoint(event.target.value)} placeholder="http://localhost:11434"/><input value={model} onChange={event => setModel(event.target.value)} placeholder={config.provider === 'xai' ? 'grok-4' : config.provider === 'openai' ? 'gpt-4o' : 'qwen3:8b'}/></div>{remote && <>
+    <div className="form-grid"><input value={endpoint} onChange={event => setEndpoint(event.target.value)} placeholder="http://localhost:11434"/><input value={model} onChange={event => setModel(event.target.value)} placeholder={config.provider === 'xai' ? 'grok-4' : config.provider === 'openai' ? 'gpt-4o' : config.provider === 'venice' ? 'llama-3.3-70b' : 'qwen3:8b'}/></div>{remote && <>
     <p className="status-note">That is not this machine. Everything she is given goes there with every message — the conversation, what she remembers about you, your profile and your list — so it wants to be somewhere you trust, over https, and behind a token. Ollama has no password of its own: an endpoint on the open internet can be used, and read, by anyone who finds it.</p>
     <div className="form-grid">
       <input type="password" value={modelKey} placeholder={hasModelKey ? `A key is saved for ${KEY_SLOT_NAME[slot]} — type a new one to replace it` : `Bearer token for ${KEY_SLOT_NAME[slot]}`} onChange={event => setModelKey(event.target.value)}/>
@@ -1075,10 +1085,19 @@ function SecondBrainField() {
   const [message, setMessage] = useState<{ text: string; error?: boolean } | null>(null);
   const [key, setKey] = useState('');
   const [hasKey, setHasKey] = useState(false);
+  const awayEndpoint = setting?.provider?.endpoint ?? 'https://api.x.ai/v1';
+  const keySlot = keySlotFor(awayEndpoint);
   useEffect(() => {
     window.haru?.ai.getEscalate().then(setSetting);
-    window.haru?.ai.hasKey().then(setHasKey);
   }, []);
+  useEffect(() => {
+    const haru = window.haru;
+    if (!haru) return;
+    // Follows the endpoint as the provider is switched, same as the main
+    // connection panel — this used to always check xAI's key regardless of what
+    // was actually picked here.
+    void hasKeyFor(haru, keySlot).then(setHasKey);
+  }, [keySlot]);
   if (!window.haru || !setting) return null;
 
   const away = setting.provider ?? { provider: 'xai' as const, model: '', endpoint: 'https://api.x.ai/v1', temperature: 0.7 };
@@ -1106,9 +1125,10 @@ function SecondBrainField() {
     </label>
     {setting.enabled && <>
       <div className="form-grid">
-        <select value={away.provider} onChange={event => void save({}, { ...away, provider: event.target.value as ProviderConfig['provider'], endpoint: event.target.value === 'openai' ? 'https://api.openai.com/v1' : 'https://api.x.ai/v1' })}>
+        <select value={away.provider} onChange={event => void save({}, { ...away, provider: event.target.value as ProviderConfig['provider'], endpoint: event.target.value === 'openai' ? 'https://api.openai.com/v1' : event.target.value === 'venice' ? 'https://api.venice.ai/api/v1' : 'https://api.x.ai/v1' })}>
           <option value="xai">xAI — Grok</option>
           <option value="openai">OpenAI</option>
+          <option value="venice">Venice AI</option>
         </select>
         <input value={away.model} placeholder="grok-4" onChange={event => void save({}, { ...away, model: event.target.value })}/>
       </div>
@@ -1123,25 +1143,29 @@ function SecondBrainField() {
           point of this panel is keeping the main one local. It is the same
           stored key either way; setting it in one place sets it in both. */}
       <div className="form-grid">
-        <input type="password" value={key} placeholder={hasKey ? 'A key is saved — type a new one to replace it' : 'Paste your API key here'}
+        <input type="password" value={key} placeholder={hasKey ? `A key is saved for ${KEY_SLOT_NAME[keySlot]} — type a new one to replace it` : `Bearer token for ${KEY_SLOT_NAME[keySlot]}`}
           onChange={event => setKey(event.target.value)}/>
         {/* The failure path is the point. Without a catch, a save that throws in
             main — no secure storage, a locked keychain — rejects a promise
             nobody is listening to: the box does not clear, no message appears,
             and it looks exactly like a click that missed. */}
         <button className="ghost" disabled={!key.trim()}
-          onClick={() => void window.haru?.ai.setKey(key)
-            .then(saved => {
-              setHasKey(saved);
-              setKey('');
-              setMessage(saved
-                ? { text: 'Key saved, encrypted by Windows.' }
-                : { text: 'Nothing was saved — the box was empty.', error: true });
-            })
-            .catch(problem => setMessage({
-              text: problem instanceof Error ? problem.message.replace(/^Error invoking remote method '[^']+':\s*(Error:\s*)?/, '') : 'Could not save the key.',
-              error: true,
-            }))}>Save key</button>
+          onClick={() => {
+            const haru = window.haru;
+            if (!haru) return;
+            void setKeyFor(haru, keySlot, key)
+              .then(saved => {
+                setHasKey(saved);
+                setKey('');
+                setMessage(saved
+                  ? { text: 'Key saved, encrypted by Windows.' }
+                  : { text: 'Nothing was saved — the box was empty.', error: true });
+              })
+              .catch(problem => setMessage({
+                text: problem instanceof Error ? problem.message.replace(/^Error invoking remote method '[^']+':\s*(Error:\s*)?/, '') : 'Could not save the key.',
+                error: true,
+              }));
+          }}>Save key</button>
       </div>
       <div className="row-actions">
         <button className="ghost" disabled={checking} onClick={() => void list()}>{checking ? 'Checking…' : 'Check the key and list models'}</button>

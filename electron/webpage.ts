@@ -194,6 +194,11 @@ export function appPage(): string {
   .card button { background:none; border:1px solid var(--edge); color:var(--ink-dim); padding:.4rem .85rem; font-size:.85rem; margin-top:.6rem; font-weight:500; }
   .done { opacity:.4; }
   .quiet { color:var(--ink-dim); text-align:center; padding:2rem 0; }
+  /* Same pill-group look as the top nav, scaled down for a filter inside a tab
+     rather than a switch between tabs. */
+  .subnav { display:flex; gap:.3rem; margin:0 0 .8rem; }
+  .subnav button { flex:1; background:var(--glass); border:1px solid var(--edge); color:var(--ink-dim); padding:.45rem 0; font-size:.82rem; font-weight:600; border-radius:10px; }
+  .subnav button.on { background:var(--accent); color:var(--accent-ink); border-color:var(--accent); }
   .jrow { display:flex; gap:.6rem; margin:.6rem 0; }
   /* Ten taps rather than a number field: on a phone, picking 7 should be one
      thumb movement, not a keyboard. */
@@ -228,6 +233,12 @@ const md=s=>s.replace(/\\*\\*\\s*([^*]+?)\\s*\\*\\*/g,'<b>$1</b>').replace(/\`([
 const get=u=>fetch(u).then(r=>r.ok?r.json():Promise.reject(r));
 const post=(u,b)=>fetch(u,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(b||{})}).then(r=>r.ok?r.json():Promise.reject(r));
 let tab='chat';
+// Which of Daily/Weekly/Monthly is showing. A rolling window from today, not a
+// calendar boundary — "Monthly" a day before month-end would otherwise show
+// almost nothing, which is a worse surprise than the window not lining up with
+// a wall calendar.
+let agendaView='daily';
+let agendaItems=[];
 
 document.querySelectorAll('nav button[data-t]').forEach(b=>b.onclick=()=>{
   tab=b.dataset.t;
@@ -246,16 +257,39 @@ function bubbles(list){
   $('chat').scrollTop = $('chat').scrollHeight;
 }
 
+function agendaCard(i){
+  const when = i.time ? esc(i.date)+' · '+esc(i.time) : esc(i.date);
+  return '<div class="card'+(i.done?' done':'')+'"><h3>'+esc(i.title)+'</h3><time>'+when+'</time>'+
+    (i.kind==='task'&&!i.done?'<br><button data-done="'+esc(i.id)+'">Tick off</button>':'')+'</div>';
+}
+async function agendaTickOff(id){
+  await post('/api/agenda/done',{id});
+  agendaItems=(await get('/api/agenda')).items;
+  renderAgenda();
+}
+// Reminders pin anything due today, tomorrow, or missed within the last week —
+// bounded to match how far back she considers a task "recently missed" rather
+// than dead (OVERDUE_WINDOW_DAYS in agenda.ts), so a task overdue by a month
+// does not sit pinned at the top forever.
+function renderAgenda(){
+  const windowDays = {daily:0, weekly:6, monthly:30}[agendaView];
+  const reminders = agendaItems.filter(i=>!i.done && i.daysAway<=1 && i.daysAway>=-7);
+  const inView = agendaItems.filter(i=>i.daysAway>=0 && i.daysAway<=windowDays);
+  $('agenda').innerHTML =
+    '<div class="subnav" id=agendaViews>'+['daily','weekly','monthly'].map(v=>
+      '<button data-view="'+v+'" class="'+(v===agendaView?'on':'')+'">'+v[0].toUpperCase()+v.slice(1)+'</button>').join('')+'</div>'+
+    (reminders.length ? '<p class=quiet style="text-align:left;padding:0 0 .4rem;font-size:.82rem">Coming up</p>'+reminders.map(agendaCard).join('') : '')+
+    (inView.length ? inView.map(agendaCard).join('') : '<p class=quiet>Nothing on.</p>');
+  $('agendaViews').querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>{agendaView=b.dataset.view;renderAgenda();});
+  $('agenda').querySelectorAll('[data-done]').forEach(b=>b.onclick=()=>{b.disabled=true;agendaTickOff(b.dataset.done);});
+}
+
 async function load(){
   try{
     if(tab==='chat') bubbles((await get('/api/chat')).messages);
     if(tab==='agenda'){
-      const {items}=await get('/api/agenda');
-      $('agenda').innerHTML = items.length ? items.map(i=>
-        '<div class="card'+(i.done?' done':'')+'"><h3>'+esc(i.title)+'</h3><time>'+esc(i.date)+'</time>'+
-        (i.kind==='task'&&!i.done?'<br><button data-done="'+esc(i.id)+'">Tick off</button>':'')+'</div>').join('')
-        : '<p class=quiet>Nothing on.</p>';
-      $('agenda').querySelectorAll('[data-done]').forEach(b=>b.onclick=async()=>{b.disabled=true;await post('/api/agenda/done',{id:b.dataset.done});load();});
+      agendaItems=(await get('/api/agenda')).items;
+      renderAgenda();
     }
     if(tab==='journal'){
       const {entries}=await get('/api/checkins');

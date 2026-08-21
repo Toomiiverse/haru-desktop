@@ -28,7 +28,8 @@ export type WebDeps = {
   /** Her real answer, through the same pipeline the desktop uses — minus hands. */
   say(text: string): Promise<{ reply: string; ignored?: boolean; expression?: string | null; emotion?: string | null }>;
   history(): { role: string; content: string; at?: string }[];
-  agenda(): { id: string; title: string; date: string; kind: string; done?: boolean }[];
+  /** date is a bare YYYY-MM-DD; daysAway is its offset from today so the page can bucket into daily/weekly/monthly without redoing timezone-aware date math client-side. */
+  agenda(): { id: string; title: string; date: string; time: string | null; kind: string; done?: boolean; daysAway: number }[];
   tickOff(id: string): Promise<void> | void;
   memories(): string[];
   journal(): { date: string; text: string; mood?: number; anxiety?: number }[];

@@ -104,6 +104,10 @@ contextBridge.exposeInMainWorld('haru', {
     status: () => ipcRenderer.invoke('openai:status') as Promise<{ hasKey: boolean; ffmpeg: boolean }>,
     setKey: (apiKey: string) => ipcRenderer.invoke('openai:setKey', apiKey) as Promise<boolean>,
   },
+  venice: {
+    hasKey: () => ipcRenderer.invoke('venice:hasKey') as Promise<boolean>,
+    setKey: (apiKey: string) => ipcRenderer.invoke('venice:setKey', apiKey) as Promise<boolean>,
+  },
   vision: {
     get: () => ipcRenderer.invoke('vision:get') as Promise<VisionConfig>,
     set: (config: VisionConfig) => ipcRenderer.invoke('vision:set', config) as Promise<VisionConfig>,
