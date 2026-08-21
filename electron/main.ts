@@ -49,7 +49,7 @@ import { claimsDesktopAction, dropRoleHeader, dropTackedOnParagraphs, dropInvent
 import { hasShout, readVoiceConfig, referenceFor, shoutReference, spokenCase, speakableText, splitForSpeech, synthesise, type SpeechClip, type VoiceConfig } from './voice';
 import { formatMemoryPrompt, isWorthKeeping, isWorthRemembering, MEMORY_KINDS, migrateMemories, pruneMemories, rememberInto, selectMemories, summaryPrompt, type MemoryKind, type MemoryRecord, type SessionSummary } from './memory';
 import { forgetDevice, forgetEveryDevice, readWebAccess, setPassword, weakPassword, type WebAccess } from './web';
-import { conversationMayLeave } from './sensitivity';
+import { conversationMayLeave, mayLeaveTheMachine } from './sensitivity';
 import { addCheckIn, checkInInstruction, checkInsOn, readCheckIns, type CheckIn } from './checkins';
 import { addAside, alreadySaidRecently, asideContext, asidesOn, pruneAsides, readAsides, type Aside, type AsideSource } from './asides';
 import { attachmentsInPlay, describeAttached, READ_IT_ALL_PROMPT, readAttachments, type Attachment, type Opened } from './attachments';
@@ -4282,6 +4282,25 @@ function modelHeaders(endpoint: string): Record<string, string> {
  * "rejected the API key". Told that, you go and check the key — which is the one
  * thing that is not the problem. Four attempts were spent on exactly that.
  */
+/**
+ * Whether requireKeyFor would let this through, asked without being thrown at.
+ *
+ * The router has to know before it commits. requireKeyFor raises a plain Error,
+ * and the fall-back-to-home path in ollamaPost only catches the marked one that
+ * means "nothing answered" — so a hosted model with no key does not degrade to
+ * the local one, it fails the whole reply. That was survivable while only long
+ * questions went out, because a short one never took that road. It stops being
+ * survivable the moment a whole surface is routed out by default.
+ */
+function hasKeyFor(endpoint: string): boolean {
+  if (!isRemote(endpoint) || keyFor(endpoint)) return true;
+  let host = '';
+  try { host = new URL(endpoint.trim()).hostname.toLowerCase(); } catch { return true; }
+  // The same three that requireKeyFor refuses for. Anything else — our own box,
+  // a rented GPU — may legitimately have none.
+  return !/(^|\.)(x\.ai|openai\.com|venice\.ai)$/.test(host);
+}
+
 function requireKeyFor(endpoint: string, provider: Provider) {
   if (!isRemote(endpoint) || keyFor(endpoint)) return;
   // Only a company that demands a key is worth stopping for. Our own server may
@@ -5199,18 +5218,26 @@ function brainFor(
   message: string,
   local: ProviderConfig,
   conversation: { role: string; content: string }[] = [],
-  { pictures = false } = {},
+  { pictures = false, away = '' } = {},
 ): Brain {
   const setting = readEscalateConfig(store.get('escalate'));
-  const away = store.get('escalate.provider') as ProviderConfig | undefined;
-  const hosted = Boolean(away?.model && isOpenAIShaped(away.provider));
-  // Escalation being switched off is a preference about cost on ordinary
-  // questions. A picture is not an ordinary question: there is no local answer
-  // to fall back to, only a worse one. So only the absence of a second model
-  // stops this, not the setting.
-  if (!hosted || (!setting.enabled && !pictures)) return { config: local, escalated: false, because: 'no second model set up', sees: false };
+  const hosted = store.get('escalate.provider') as ProviderConfig | undefined;
+  // The key is part of being usable, not a detail discovered on the way out.
+  const usable = Boolean(hosted?.model && isOpenAIShaped(hosted.provider) && hasKeyFor(hosted.endpoint));
+  // Two things override the word count, and they override the setting with it.
+  //
+  // Escalation being switched off is a preference about cost on an ordinary
+  // question asked at the desk. Neither of these is that. A picture has no local
+  // answer to fall back to, only a worse one; and a message from somewhere she
+  // is not — Discord, the phone — is one where the wait is the whole experience,
+  // because nobody watching a chat app knows the difference between thinking and
+  // broken. `away` carries its own reason so the log says which it was.
+  const forced = pictures || Boolean(away);
+  if (!usable || (!setting.enabled && !forced)) return { config: local, escalated: false, because: 'no second model set up', sees: false };
 
-  const verdict = pictures ? { escalate: true, because: 'there is a picture in it' } : decide(message, setting);
+  const verdict = pictures ? { escalate: true, because: 'there is a picture in it' }
+    : away ? { escalate: true, because: away }
+    : decide(message, setting);
   if (!verdict.escalate) return { config: local, escalated: false, because: verdict.because, sees: false };
 
   // pageWasRead is already true whenever a stranger's page is in the turn, and a
@@ -5226,7 +5253,32 @@ function brainFor(
     console.log(`[router] keeping this one local — ${allowed.because}`);
     return { config: local, escalated: false, because: `stays here: ${allowed.because}`, sees: false };
   }
-  return { config: { ...away!, temperature: local.temperature }, escalated: true, because: verdict.because, sees: true };
+  return { config: { ...hosted!, temperature: local.temperature }, escalated: true, because: verdict.because, sees: true };
+}
+
+/**
+ * The hosted model for the one-shot composers, where waiting is the whole problem.
+ *
+ * ollamaQuip carries no conversation and no tools, so there is no brainFor to
+ * route it — it takes a config and uses it. On a machine whose local model is a
+ * serverless pod that is the difference between a reply and a cold start, and a
+ * cold start on a chat app reads as her being broken rather than as her thinking.
+ *
+ * Falls back rather than fails: no second model, or no key for it, and this
+ * returns exactly what it was given, which is what happened before it existed.
+ */
+function fastBrain(local: ProviderConfig, text: string): ProviderConfig {
+  const hosted = store.get('escalate.provider') as ProviderConfig | undefined;
+  if (!hosted?.model || !isOpenAIShaped(hosted.provider) || !hasKeyFor(hosted.endpoint)) return local;
+  // The same scan the routed path gets. This one carries a single line rather
+  // than a transcript, but a check-in is exactly the kind of thing somebody
+  // types a password into by accident.
+  const allowed = mayLeaveTheMachine(text);
+  if (!allowed.safe) {
+    console.log(`[router] keeping this one local — ${allowed.because}`);
+    return local;
+  }
+  return { ...hosted, temperature: local.temperature };
 }
 
 /**
@@ -5275,7 +5327,7 @@ async function withAttachments<T extends { role: string; content: string; at?: s
   return out;
 }
 
-async function ollamaChat(messages: { role: string; content: string; at?: string; attachments?: Attachment[] }[], config: ProviderConfig, { hands = true, brief = false, choices = false }: { hands?: boolean; brief?: boolean; choices?: boolean } = {}) {
+async function ollamaChat(messages: { role: string; content: string; at?: string; attachments?: Attachment[] }[], config: ProviderConfig, { hands = true, brief = false, choices = false, away = '' }: { hands?: boolean; brief?: boolean; choices?: boolean; away?: string } = {}) {
   const latest = messages.at(-1)?.content ?? '';
   // They are talking to her, so the silence she was waiting out is over.
   noteUserSpoke();
@@ -5326,7 +5378,7 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // Chosen once for the whole turn, tool rounds included: swapping models
   // half-way through a tool loop would hand one model's call to another to
   // answer, and the two do not agree on how a call is even identified.
-  const brain = brainFor(latest, config, messages, { pictures });
+  const brain = brainFor(latest, config, messages, { pictures, away });
   if (brain.escalated) console.log(`[ai] sent out to ${brain.config.model} — ${brain.because}`);
   config = brain.config;
   const vision = readVisionConfig(store.get('vision'));
@@ -5858,7 +5910,7 @@ async function answerOnDiscord(text: string, channelId = '') {
       'Answer in one short line. Take it seriously without making a fuss of it, and do not ask them to elaborate unless it sounds bad.',
     ].filter(Boolean).join(' ');
     try {
-      const line = await ollamaQuip(system, `They wrote: "${text.slice(0, 500)}"`, config);
+      const line = await ollamaQuip(system, `They wrote: "${text.slice(0, 500)}"`, fastBrain(config, text));
       return { reply: line, ignored: false };
     } catch {
       // The note is what matters and it is already saved. Silence beats an error.
@@ -5866,7 +5918,18 @@ async function answerOnDiscord(text: string, channelId = '') {
     }
   }
   const messages = [...(store.get('chat.messages') as { role: string; content: string; at?: string }[] ?? []), { role: 'user', content: text, at: new Date().toISOString() }];
-  const answer = await ollamaChat(messages, config, { hands: false });
+  // Out to the hosted model rather than to whatever answers at the desk.
+  //
+  // Her own machine is the right place for a conversation you are sitting in
+  // front of, where a few seconds of thinking looks like thinking. Discord is
+  // not that: it is a chat app on a phone, the reply arrives as a notification
+  // or it does not, and there is nothing on screen to say she is working. Since
+  // the local model became a serverless pod that gap became a cold start, and a
+  // cold start there is indistinguishable from her being down.
+  //
+  // Still routed rather than forced: no second model configured, or a credential
+  // sitting in the recent transcript, and this comes straight back home.
+  const answer = await ollamaChat(messages, config, { hands: false, away: 'it came in over Discord' });
   const reply = answer.content ?? '';
   // Lands in the desktop transcript too, so coming back to the desk does not
   // mean finding half a conversation missing.
