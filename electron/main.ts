@@ -56,6 +56,7 @@ import { attachmentsInPlay, describeAttached, READ_IT_ALL_PROMPT, readAttachment
 import { describePull, isTailnetAddress, mergeCheckIns, readCheckInSource } from './checkinsource';
 import { DiscordLink, looksLikeUserId, readDiscordConfig, useOfChannel, type DiscordConfig } from './discord';
 import { startWebServer, type WebDeps } from './webserver';
+import { CHECK_EVERY_MS, describeUpdate, progressStep, whyNotCheck, type UpdateState } from './updates';
 import { BREVITY, summonedLine } from './summoned';
 import { CHOICES_TOOL, readChoices } from './choices';
 
@@ -6122,6 +6123,78 @@ async function stopWebDoor() {
 // shortcut that does not recognise the window it opened as its own.
 if (process.platform === 'win32') app.setAppUserModelId('com.haru.desktop');
 
+/**
+ * The packaged app, keeping itself current.
+ *
+ * Loaded here rather than at the top of the file because electron-updater reads
+ * app-update.yml as it initialises, and that file only exists inside a packaged
+ * build — importing it unconditionally makes `npm run dev` noisy about a file
+ * that is correctly absent.
+ *
+ * Everything is reported and nothing is imposed: it downloads on its own and
+ * installs on the next quit, which is a moment the user picked. quitAndInstall
+ * is never called from here.
+ */
+let updateState: UpdateState = { stage: 'idle' };
+let downloadedPercent = -1;
+
+function currentUpdateState(): UpdateState {
+  return updateState;
+}
+
+function watchForUpdates() {
+  const refusal = whyNotCheck(app.isPackaged, process.platform);
+  if (refusal) {
+    console.log(`[update] not checking — ${refusal}`);
+    return;
+  }
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { autoUpdater } = require('electron-updater') as typeof import('electron-updater');
+  // The sentence is written here rather than in the window, the same way the
+  // fallback notices are: main is what knows why, and a renderer reassembling a
+  // reason out of an enum is a second place for the wording to drift.
+  const say = (next: UpdateState) => {
+    updateState = next;
+    sendToWindows('update:state', { state: next, version: app.getVersion(), says: describeUpdate(next, app.getVersion()) });
+  };
+
+  autoUpdater.autoDownload = true;
+  // The whole promise of the thing: she is closed and reopened constantly, so
+  // the swap costs nobody anything if it waits for that.
+  autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.logger = null;
+
+  autoUpdater.on('checking-for-update', () => say({ stage: 'checking' }));
+  autoUpdater.on('update-not-available', () => { console.log('[update] already current'); say({ stage: 'current' }); });
+  autoUpdater.on('update-available', info => {
+    console.log(`[update] ${info.version} is available — downloading`);
+    downloadedPercent = -1;
+    say({ stage: 'downloading', version: info.version, percent: 0 });
+  });
+  autoUpdater.on('download-progress', progress => {
+    const step = progressStep(downloadedPercent, progress.percent);
+    if (step === null) return;
+    downloadedPercent = step;
+    const version = updateState.stage === 'downloading' ? updateState.version : '';
+    say({ stage: 'downloading', version, percent: step });
+  });
+  autoUpdater.on('update-downloaded', info => {
+    console.log(`[update] ${info.version} is ready — it will install when she is next closed`);
+    say({ stage: 'ready', version: info.version });
+  });
+  autoUpdater.on('error', error => {
+    // Never fatal. A feed that cannot be reached is a machine that stays on the
+    // version it already had, which is a working companion.
+    const because = (error instanceof Error ? error.message : String(error)).split('\n')[0].slice(0, 160);
+    console.warn(`[update] could not check: ${because}`);
+    say({ stage: 'failed', because });
+  });
+
+  const check = () => { void autoUpdater.checkForUpdates().catch(() => { /* reported through the error event */ }); };
+  check();
+  setInterval(check, CHECK_EVERY_MS);
+}
+
 app.whenReady().then(() => {
   // Whatever was said to her elsewhere today. Once at startup, then quietly on
   // the hour — often enough that the evening review has it, rare enough that a
@@ -6130,6 +6203,9 @@ app.whenReady().then(() => {
   setInterval(() => void pullCheckIns(), 15 * 60_000);
 
   if (!isPrimaryInstance) return;
+  // After the single-instance gate: two copies racing to download the same
+  // installer over each other is the one way this could do harm.
+  watchForUpdates();
   protocol.handle('haru-model', async request => {
     const url = new URL(request.url);
     const segments = url.pathname.split('/').filter(Boolean);
@@ -6207,6 +6283,14 @@ app.whenReady().then(() => {
   }));
   ipcMain.handle('startup:setAutoStart', (_e, enabled: boolean) => setAutoStart(enabled === true));
   ipcMain.handle('startup:createShortcut', () => createDesktopShortcut());
+  ipcMain.handle('update:get', () => ({
+    state: currentUpdateState(),
+    version: app.getVersion(),
+    says: describeUpdate(currentUpdateState(), app.getVersion()),
+    // So the panel can say why it will never report anything on this build,
+    // rather than sitting at "Version 0.1.0." looking broken.
+    standingDown: whyNotCheck(app.isPackaged, process.platform),
+  }));
   ipcMain.handle('chat:getMessages', () => {
     performChatResetIfDue();
     return store.get('chat.messages') ?? [];

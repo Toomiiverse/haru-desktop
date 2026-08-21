@@ -1,6 +1,6 @@
 import { Component, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Paperclip, MicOff, CalendarDays, Check, ChevronDown, CornerDownRight, FileAudio, FileText, FileVideo, Mic, Quote, Reply, SquareCheck, ChevronLeft, ChevronRight, CircleDot, Import, MessageSquarePlus, Plus, NotebookPen, MessageSquare, Square, ImagePlus, Sparkles, ThumbsDown, ThumbsUp, Trash2, X } from 'lucide-react';
-import type { Aside, AsideSource, Attachment, AniListConfig, Character, DesktopConfig, GamingConfig, ScreenshotConfig, WatchingConfig, VisionConfig, HaruNote, JournalConfig, JournalEntry, JournalField, JournalRange, JournalStats, JournalFieldStats, RoamConfig, EmotionName, GoogleStatus, KeptItem, ListenConfig, Memory, MemoryKind, Message, Profile, ProviderConfig, Reaction, SearchConfig, SessionSummary, VoiceConfig, VoiceEngine, VoiceReference, WardrobeControl, WebStatus } from './types';
+import type { Aside, AsideSource, Attachment, UpdateReport, AniListConfig, Character, DesktopConfig, GamingConfig, ScreenshotConfig, WatchingConfig, VisionConfig, HaruNote, JournalConfig, JournalEntry, JournalField, JournalRange, JournalStats, JournalFieldStats, RoamConfig, EmotionName, GoogleStatus, KeptItem, ListenConfig, Memory, MemoryKind, Message, Profile, ProviderConfig, Reaction, SearchConfig, SessionSummary, VoiceConfig, VoiceEngine, VoiceReference, WardrobeControl, WebStatus } from './types';
 import { buildMonthGrid, datesInView, dayLabel, rangeLabel, shiftISODate, toISODate, weekOf, type CalendarView } from './date';
 import { startListening, startRecording, type Listener, type Recorder } from './companion/microphone';
 import { isUsableFollowUp, matchWake, readsAsFarewell } from './companion/wake';
@@ -1750,7 +1750,16 @@ function StartupField() {
   const [state, setState] = useState<{ autoStart: boolean; shortcut: boolean; packaged: boolean } | null>(null);
   const [message, setMessage] = useState<{ text: string; error?: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
+  // Read once for where it stands, then told about every change — a download
+  // reports progress, and a panel holding a snapshot would sit at 0% until it
+  // was closed and reopened.
+  const [update, setUpdate] = useState<UpdateReport | null>(null);
   useEffect(() => { window.haru?.startup.get().then(setState); }, []);
+  useEffect(() => {
+    if (!window.haru) return;
+    void window.haru.updates.get().then(setUpdate);
+    return window.haru.updates.onState(setUpdate);
+  }, []);
 
   if (!window.haru || !state) return null;
 
@@ -1777,6 +1786,18 @@ function StartupField() {
       <div className="row-actions"><button className="ghost" disabled={busy} onClick={() => run(() => window.haru!.startup.createShortcut(), 'Haru is on your desktop.')}>{state.shortcut ? 'Write the shortcut again' : 'Put Haru on my desktop'}</button></div>
     </div>
     {!state.packaged && <p className="status-note">Running from source, so both of these point at this project folder and its dev Electron. Move or rebuild the app and they need writing again.</p>}
+    {/* Which version this is, and whether a newer one is on its way. Quiet on
+        purpose: the usual answer is that she is current, which is an answer to a
+        question nobody asked. The one line worth noticing is that an update is
+        sitting there waiting for her to be closed. */}
+    {update && <div className="memory-group"><h3>Version</h3>
+      <p>{update.says}</p>
+      {update.standingDown
+        ? <p className="status-note">Not checking for updates — {update.standingDown}. An installed copy checks on its own, once a day.</p>
+        : update.state.stage === 'ready'
+          ? <p className="status-ok">Close her when you are ready and she will come back updated.</p>
+          : null}
+    </div>}
     {message && <p className={message.error ? 'status-error' : 'status-ok'}>{message.text}</p>}
   </div>;
 }

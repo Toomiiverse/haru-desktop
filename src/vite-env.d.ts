@@ -6,6 +6,7 @@ interface Window {
   haru?: {
     settings: { get(key: string): Promise<unknown>; set(key: string, value: unknown): Promise<void> };
     startup: { get(): Promise<{ autoStart: boolean; shortcut: boolean; packaged: boolean }>; setAutoStart(enabled: boolean): Promise<boolean>; createShortcut(): Promise<string> };
+    updates: { get(): Promise<import('./types').UpdateReport>; onState(callback: (report: import('./types').UpdateReport) => void): () => void };
     listen: {
       correct(heard: string, meant: string): Promise<number>;
       corrections(): Promise<{ heard: string; meant: string; used: number }[]>;

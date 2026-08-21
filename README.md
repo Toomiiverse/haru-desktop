@@ -95,6 +95,42 @@ simply cannot reach the model until you do.
 **Run one of her, not two.** Two installs means two `config.json` files, and they
 diverge the moment either is used: the same memory in two versions, with no merge.
 
+### Getting a new version onto another machine
+
+The server updates itself: `./update.sh` pulls, installs, builds and restarts her
+under Xvfb. That needs a checkout and a toolchain, which a laptop running the
+packaged app does not have — so the packaged app checks a feed on launch and once
+a day after that, downloads a newer version on its own, and installs it the next
+time she is closed. She is never restarted out from under you. **Setup → Starting
+up** shows which version is running and whether one is waiting.
+
+The server can host that feed, but it cannot build it: a signed Windows installer
+needs Windows and the Trusted Signing account. Cut releases on the desktop.
+
+1. **Raise `version` in `package.json`.** `electron-updater` compares versions and
+   nothing else. Publish 0.1.0 twice and every machine correctly decides there is
+   nothing new — this is the first thing to check when an update does not arrive.
+2. Set all four `HARU_SIGN_*` variables. An unsigned build is blocked outright by
+   Smart App Control, and the publisher name is also what an update is verified
+   against on the way in — a mismatch there is accepted at signing time and only
+   surfaces later, as an update that will not install.
+3. `npm run package -- --publish always`.
+
+By default that publishes to this repository's GitHub releases, which is the
+least to keep working: HTTPS, hosting and integrity all already exist, and
+nothing has to stay reachable at home. Set `GH_TOKEN` to a token that can write
+releases.
+
+To serve it yourself instead, set `HARU_UPDATE_URL` to the directory that will
+hold the files — the same variable decides where the build is published and where
+it later looks, so the two cannot drift apart. Then copy `latest.yml`, the `.exe`
+and its `.blockmap` out of `release/` to whatever serves that URL. Any static
+file server does; it does not want to be behind her web login, which is why she
+does not serve it herself.
+
+The build prints which feed it was cut for. A build published to the wrong place
+is otherwise indistinguishable from a good one until nothing updates.
+
 ### What stops existing
 
 Everything that acts on the machine she runs on now acts on the server, which is

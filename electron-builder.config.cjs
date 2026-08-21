@@ -36,10 +36,31 @@ console.log(signing
   ? `  signing through Trusted Signing as "${process.env.HARU_SIGN_PUBLISHER}"`
   : '  building unsigned — Smart App Control will block this on a machine that enforces it');
 
+// Where the built app will look for its next version, and where --publish sends
+// this one. The two have to be the same place or the laptop checks an address
+// nothing was ever uploaded to, which fails silently — hence one setting for
+// both, and a line printed saying which was used. A build cut for the wrong feed
+// is otherwise indistinguishable from a good one until it will not update.
+//
+// GitHub by default because the repository is public, which makes it the least
+// machinery: HTTPS, integrity and hosting already exist and nothing has to stay
+// reachable at home. Set HARU_UPDATE_URL to serve the feed yourself instead —
+// it wants the directory holding latest.yml, the installer and its blockmap.
+const feed = (process.env.HARU_UPDATE_URL ?? '').trim();
+console.log(feed
+  ? `  updates from ${feed}`
+  : '  updates from GitHub releases (set HARU_UPDATE_URL to host them yourself)');
+
 module.exports = {
   appId: 'com.haru.desktop',
   productName: 'Haru',
   directories: { output: 'release' },
+  // Also what puts app-update.yml inside the packaged app. Without a publish
+  // block there is no such file, and an installed build cannot check for
+  // anything however well the rest of it is wired.
+  publish: feed
+    ? [{ provider: 'generic', url: feed }]
+    : [{ provider: 'github', owner: 'Toomiiverse', repo: 'haru-desktop' }],
   files: [
     'dist/**',
     'dist-electron/**',

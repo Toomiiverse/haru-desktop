@@ -22,6 +22,8 @@ type Message = { id: string; role: 'user' | 'assistant'; content: string; time: 
 type Aside = { id: string; at: string; day: string; source: string; text: string };
 // A file that came with a message. A path rather than bytes — see electron/attachments.ts.
 type Attachment = { id: string; kind: string; name: string; saved: string; url: string; bytes: number };
+// What the app knows about its own next version. See electron/updates.ts.
+type UpdateReport = { state: { stage: string; version?: string; percent?: number; because?: string }; version: string; says: string; standingDown?: string | null };
 type ProviderConfig = { provider: string; model: string; endpoint: string; temperature: number };
 type KeptItem = { id: string; title: string; date: string; time?: string; kind: 'task' | 'event'; done: boolean; heardAbout?: string; googleEventId?: string; googleTaskId?: string };
 type GoogleStatus = { hasCredentials: boolean; connected: boolean; email?: string; lastSync?: string; lastError?: string; tasksGranted?: boolean };
@@ -170,6 +172,17 @@ contextBridge.exposeInMainWorld('haru', {
     get: () => ipcRenderer.invoke('startup:get') as Promise<{ autoStart: boolean; shortcut: boolean; packaged: boolean }>,
     setAutoStart: (enabled: boolean) => ipcRenderer.invoke('startup:setAutoStart', enabled) as Promise<boolean>,
     createShortcut: () => ipcRenderer.invoke('startup:createShortcut') as Promise<string>,
+  },
+  // Whether a newer her is on the way. Read once for the current state, then
+  // told about every change — the download reports progress, and a panel that
+  // only ever saw a snapshot would sit at 0% until it was reopened.
+  updates: {
+    get: () => ipcRenderer.invoke('update:get') as Promise<UpdateReport>,
+    onState: (callback: (report: UpdateReport) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, report: UpdateReport) => callback(report);
+      ipcRenderer.on('update:state', listener);
+      return () => ipcRenderer.removeListener('update:state', listener);
+    },
   },
   chat: {
     getMessages: () => ipcRenderer.invoke('chat:getMessages') as Promise<Message[]>,

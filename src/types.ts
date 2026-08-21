@@ -40,6 +40,22 @@ export interface Message { id: string; role: Role; content: string; time: string
  */
 export type AsideSource = 'screen' | 'screenshot' | 'activity' | 'fullscreen' | 'reminder' | 'idle' | 'journal' | 'page' | 'poke' | 'kept' | 'other';
 export interface Aside { id: string; at: string; day: string; source: AsideSource; text: string; }
+/**
+ * What the app knows about its own next version.
+ *
+ * `says` is written in the main process rather than assembled here, the same way
+ * the model-fallback notices are — it is the side that knows why, and two places
+ * writing the same sentence is two places for it to drift. See electron/updates.ts.
+ */
+export type UpdateStage = 'idle' | 'checking' | 'current' | 'downloading' | 'ready' | 'failed';
+export interface UpdateReport {
+  state: { stage: UpdateStage; version?: string; percent?: number; because?: string };
+  version: string;
+  says: string;
+  /** Why it will never report anything on this build — from source, or a platform with no installer. */
+  standingDown?: string | null;
+}
+
 export interface ChatResult { content: string; ignored: boolean; irritation: number; ego: number; }
 export interface Mood { irritation: number; ego: number; }
 export interface Vitals { energy: number; happiness: number; curiosity: number; affection: number; sleepiness: number; stress: number; focus: number; }
