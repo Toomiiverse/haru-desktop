@@ -5815,7 +5815,11 @@ async function nudgeForPhone(): Promise<{ line: string; about: string } | null> 
       reminderInstruction(tier, target.item.title, when, evening),
       'They are on their phone, away from their desk. One or two short lines. No quotation marks, no stage directions.',
     ].join(' ');
-    const line = await ollamaQuip(system, 'Remind them.', config);
+    // Out with the rest of what she says away from the desk. Both callers of
+    // this are remote — the phone asking, and the Discord pestering — so there
+    // is nobody sitting in front of her to read a delay as thinking. Scanned on
+    // the title, because that is the part of this that leaves the machine.
+    const line = await ollamaQuip(system, 'Remind them.', fastBrain(config, target.item.title));
     console.log(`[web] nudged about "${target.item.title}" (attempt ${attempts + 1}, ${tier})`);
     return { line, about: target.item.title };
   } catch (error) {
@@ -6103,7 +6107,12 @@ function webDeps(): WebDeps {
       const config = store.get('ai.config') as ProviderConfig | undefined;
       if (!config?.model) throw new Error('no model is set up');
       const messages = [...(store.get('chat.messages') as { role: string; content: string; at?: string }[] ?? []), { role: 'user', content: text, at: new Date().toISOString() }];
-      const answer = await ollamaChat(messages, config, { hands: false });
+      // Out to the hosted model, for the same reason Discord is: this is a
+      // phone. There is no window to show that she is thinking, the tab is
+      // often not even in front of them, and since the local model became a
+      // serverless pod the first message of a session pays a cold start. The
+      // desk keeps the local one — that is what the GPU is for.
+      const answer = await ollamaChat(messages, config, { hands: false, away: 'it came in from the phone' });
       const reply = answer.content ?? '';
       sendToWindows('chat:fromPhone', { text, reply, ignored: Boolean(answer.ignored) });
       // Read here rather than on the phone, because only this side knows which
@@ -6113,7 +6122,11 @@ function webDeps(): WebDeps {
       let expression: string | null = null;
       if (reply && !answer.ignored) {
         try {
-          const felt = await classifyEmotion(reply, config);
+          // The same road as the reply, and it has to be. This is a second
+          // request the phone waits on before it sees anything, so leaving it
+          // pointed at a pod would answer fast and then stall for the cold
+          // start anyway — paying the full wait to pick a face.
+          const felt = await classifyEmotion(reply, fastBrain(config, reply));
           if (felt) {
             emotion = felt.emotion;
             expression = faceForEmotion(felt.emotion, modelExpressions());
