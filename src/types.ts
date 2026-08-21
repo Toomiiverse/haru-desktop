@@ -15,6 +15,18 @@ export interface Message { id: string; role: Role; content: string; time: string
    *  actually returned. Kept so a correction can be taught against the exact
    *  text that was misheard rather than against whatever was edited afterwards. */
   heard?: string; reaction?: Reaction; ignored?: boolean; replyTo?: { id: string; excerpt: string }; }
+/**
+ * Something she said without being spoken to — a remark about the screen, a
+ * nudge about the list, a jab about a tab.
+ *
+ * Kept apart from Message on purpose, and not merely by a flag. These were never
+ * part of the conversation: nobody said them to her, nobody necessarily answered,
+ * and mixing them into the transcript both buried what was actually said and fed
+ * a day of her own commentary back to the model as though it were history. The
+ * separate type is what stops the two being appended to the same list again.
+ */
+export type AsideSource = 'screen' | 'screenshot' | 'activity' | 'fullscreen' | 'reminder' | 'idle' | 'journal' | 'page' | 'poke' | 'kept' | 'other';
+export interface Aside { id: string; at: string; day: string; source: AsideSource; text: string; }
 export interface ChatResult { content: string; ignored: boolean; irritation: number; ego: number; }
 export interface Mood { irritation: number; ego: number; }
 export interface Vitals { energy: number; happiness: number; curiosity: number; affection: number; sleepiness: number; stress: number; focus: number; }

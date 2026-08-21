@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { JournalDrawer, CharacterDrawer, Composer, Kept, MessageBubble, ProfileDrawer, SettingsDrawer, Suggestion, Topbar, WardrobeDrawer } from './components';
+import { AsidesPage, JournalDrawer, CharacterDrawer, Composer, Kept, MessageBubble, ProfileDrawer, SettingsDrawer, Suggestion, Topbar, WardrobeDrawer } from './components';
 import { getProvider, testConnection } from './services/ai';
 import { randomGloat, randomRetort } from './retorts';
 import type { KeptItem, Message, ProviderConfig, Reaction } from './types';
@@ -8,7 +8,7 @@ const greeting: Message = { id: 'greeting', role: 'assistant', time: 'now', cont
 const defaultProviderConfig: ProviderConfig = { provider: 'ollama', model: 'qwen2.5:14b', endpoint: 'http://localhost:11434', temperature: 0.7 };
 
 export default function App() {
-  const [messages, setMessages] = useState<Message[]>([]); const [hydrated, setHydrated] = useState(false); const [kept, setKept] = useState<KeptItem[]>([]); const [sending, setSending] = useState(false); const [page, setPage] = useState<'chat'|'character'|'profile'|'settings'|'journal'>('chat'); const [wardrobeOpen, setWardrobeOpen] = useState(false); const [live2dModel, setLive2dModel] = useState<{name: string; path: string; url: string} | null>(null); const [importing, setImporting] = useState(false); const [providerConfig, setProviderConfig] = useState<ProviderConfig>(defaultProviderConfig); const [replyingTo, setReplyingTo] = useState<{ id: string; excerpt: string } | null>(null);
+  const [messages, setMessages] = useState<Message[]>([]); const [hydrated, setHydrated] = useState(false); const [kept, setKept] = useState<KeptItem[]>([]); const [sending, setSending] = useState(false); const [page, setPage] = useState<'chat'|'asides'|'character'|'profile'|'settings'|'journal'>('chat'); const [wardrobeOpen, setWardrobeOpen] = useState(false); const [live2dModel, setLive2dModel] = useState<{name: string; path: string; url: string} | null>(null); const [importing, setImporting] = useState(false); const [providerConfig, setProviderConfig] = useState<ProviderConfig>(defaultProviderConfig); const [replyingTo, setReplyingTo] = useState<{ id: string; excerpt: string } | null>(null);
   useEffect(() => { window.haru?.live2d.get().then(model => { if (model) setLive2dModel(model); }); }, []);
   useEffect(() => { window.haru?.settings.get('ai.config').then(saved => { if (saved) setProviderConfig(current => ({ ...current, ...(saved as Partial<ProviderConfig>) })); }); }, []);
   // Kept items are owned by the main process — the chat tool loop writes to them
@@ -25,9 +25,6 @@ export default function App() {
   // mid-conversation; navigating the user off the chat page because she decided
   // to show them a hat would take the reply they were reading away with it.
   useEffect(() => window.haru?.wardrobe.onOpen(() => setWardrobeOpen(true)), []);
-  // Things she says without being asked — reacting to being poked in the
-  // companion window. They belong in the transcript like anything else she says,
-  // and without this they exist only as audio and vanish with the volume off.
   // A voice that failed is otherwise pure silence: the line is already on
   // screen, so nothing distinguishes the server timing out from her simply
   // choosing not to speak.
@@ -49,6 +46,11 @@ export default function App() {
       ...(turn.ignored ? [] : [{ id: crypto.randomUUID(), role: 'assistant' as const, content: turn.reply, time: 'now', at: new Date().toISOString() }]),
     ]);
   }), []);
+  // What is left on this channel is only the handful of lines that belong to an
+  // exchange the user started — "hold on, I'm looking at it" while she opens an
+  // attachment they asked about. Everything she says off her own back goes to
+  // the Asides tab instead: see electron/asides.ts for why, and note that the
+  // split is made in main, so nothing unprompted can arrive here to be appended.
   useEffect(() => window.haru?.chat.onInterject(line => {
     setMessages(current => [...current, { id: crypto.randomUUID(), role: 'assistant' as const, content: line, time: 'now', at: new Date().toISOString() }]);
   }), []);
@@ -183,6 +185,7 @@ export default function App() {
     {page === 'profile' && <ProfileDrawer onClose={backToChat}/>}
     {page === 'settings' && <SettingsDrawer config={providerConfig} onSave={saveProviderConfig} onTest={testConnection} onClose={backToChat}/>}
     {page === 'journal' && <JournalDrawer onClose={backToChat}/>}
+    {page === 'asides' && <AsidesPage/>}
     {page === 'chat' && <div className="haru-body"><section className="chat-panel"><div className="messages" ref={messagesRef}>{empty ? <div className="empty-state"><MessageBubble message={greeting}/><p>Anything that sounds like a task or an appointment gets captured for real — not just talked about.</p>{suggestions}</div> : <>{messages.map(message => <MessageBubble key={message.id} message={message} onReact={reaction => react(message.id, reaction)} onReply={() => setReplyingTo({ id: message.id, excerpt: message.content.replace(/\s+/g, ' ').trim().slice(0, 80) })}/>)}{onlyOpening && <div className="empty-state">{suggestions}</div>}</>}</div><Composer sending={sending} replyingTo={replyingTo} onCancelReply={() => setReplyingTo(null)} onSend={send} onShowPicture={(reaction, saved) => setMessages(current => [...current,
         // The picture itself goes in as theirs, so there is a record of having
         // shown it even when she says nothing back — which is the normal case.

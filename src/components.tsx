@@ -1,19 +1,23 @@
 import { Component, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Paperclip, MicOff, CalendarDays, Check, ChevronDown, CornerDownRight, Mic, Reply, SquareCheck, ChevronLeft, ChevronRight, CircleDot, Import, MessageSquarePlus, Plus, NotebookPen, MessageSquare, Square, ImagePlus, Sparkles, ThumbsDown, ThumbsUp, Trash2, X } from 'lucide-react';
-import type { AniListConfig, Character, DesktopConfig, GamingConfig, ScreenshotConfig, WatchingConfig, VisionConfig, HaruNote, JournalConfig, JournalEntry, JournalField, JournalRange, JournalStats, JournalFieldStats, RoamConfig, EmotionName, GoogleStatus, KeptItem, ListenConfig, Memory, MemoryKind, Message, Profile, ProviderConfig, Reaction, SearchConfig, SessionSummary, VoiceConfig, VoiceEngine, VoiceReference, WardrobeControl, WebStatus } from './types';
+import { Paperclip, MicOff, CalendarDays, Check, ChevronDown, CornerDownRight, Mic, Quote, Reply, SquareCheck, ChevronLeft, ChevronRight, CircleDot, Import, MessageSquarePlus, Plus, NotebookPen, MessageSquare, Square, ImagePlus, Sparkles, ThumbsDown, ThumbsUp, Trash2, X } from 'lucide-react';
+import type { Aside, AsideSource, AniListConfig, Character, DesktopConfig, GamingConfig, ScreenshotConfig, WatchingConfig, VisionConfig, HaruNote, JournalConfig, JournalEntry, JournalField, JournalRange, JournalStats, JournalFieldStats, RoamConfig, EmotionName, GoogleStatus, KeptItem, ListenConfig, Memory, MemoryKind, Message, Profile, ProviderConfig, Reaction, SearchConfig, SessionSummary, VoiceConfig, VoiceEngine, VoiceReference, WardrobeControl, WebStatus } from './types';
 import { buildMonthGrid, datesInView, dayLabel, rangeLabel, shiftISODate, toISODate, weekOf, type CalendarView } from './date';
 import { startListening, startRecording, type Listener, type Recorder } from './companion/microphone';
 import { isUsableFollowUp, matchWake, readsAsFarewell } from './companion/wake';
 import { chimeListening, chimeStoppedListening, setChimeVolume } from './companion/chime';
 export class StageFailureBoundary extends Component<{ children: ReactNode; onError(message: string): void }, { failed: boolean }> { state = { failed: false }; componentDidCatch(error: Error) { this.props.onError(error.message || 'Haru could not start the Live2D renderer.'); } render() { return this.state.failed ? null : this.props.children; } static getDerivedStateFromError() { return { failed: true }; } }
 
-export type Page = 'chat' | 'character' | 'profile' | 'settings' | 'journal';
+export type Page = 'chat' | 'asides' | 'character' | 'profile' | 'settings' | 'journal';
 
 // Chat is a tab like the rest rather than the thing the others cover up. That is
 // the whole difference between a panel that slides over your conversation and a
 // set of pages you move between: somewhere to go back to that is named.
 const TABS: { page: Page; label: string; icon?: typeof NotebookPen }[] = [
   { page: 'chat', label: 'Chat', icon: MessageSquare },
+  // Next to the chat rather than off with the settings: it is the other half of
+  // what she has said today, and somebody looking for a line they half heard her
+  // say will look beside the conversation, not behind a gear.
+  { page: 'asides', label: 'Asides', icon: Quote },
   { page: 'journal', label: 'Journal', icon: NotebookPen },
   { page: 'profile', label: 'You' },
   { page: 'character', label: 'Character' },
@@ -1908,6 +1912,90 @@ export function withEmphasis(text: string): ReactNode[] {
     if (part.startsWith('*') && part.endsWith('*')) return <em key={i}>{part.slice(1, -1)}</em>;
     return part;
   });
+}
+
+/**
+ * Why she spoke, in words rather than in the source name the log stores.
+ *
+ * The reason is most of what makes this page readable. Twenty lines with no
+ * cause attached is a wall of things she said; twenty lines each labelled with
+ * what set it off is a record of what she has been paying attention to, which is
+ * the only reason to keep it.
+ */
+const ASIDE_REASONS: Record<AsideSource, string> = {
+  screen: 'watching your screen',
+  screenshot: 'a screenshot appeared',
+  activity: 'you opened something',
+  fullscreen: 'something went fullscreen',
+  reminder: 'chasing your list',
+  idle: 'breaking the silence',
+  journal: 'asking about your day',
+  page: 'you moved around her app',
+  poke: 'you poked her',
+  kept: 'you ticked something off',
+  other: 'her own account',
+};
+
+function asideDayLabel(day: string, today: string) {
+  if (day === today) return 'Today';
+  if (day === shiftISODate(today, -1)) return 'Yesterday';
+  return dayLabel(day);
+}
+
+function asideClock(at: string) {
+  const when = new Date(at);
+  return Number.isNaN(when.getTime()) ? '' : when.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+}
+
+/**
+ * Everything she said without being spoken to.
+ *
+ * It used to go in the chat, for the honest reason that the chat was the only
+ * place with room to print a sentence. That cost twice over: an afternoon of her
+ * narrating the screen buried what had actually been said between them, and
+ * every one of those lines went back to the model with the next message, so her
+ * own commentary became the bulk of what she thought the conversation was.
+ *
+ * Newest first, and by day. This is a log — it is opened to find out what she
+ * has been coming out with, not read from the beginning — and the answer to that
+ * should be the first line on the page rather than the last.
+ */
+export function AsidesPage() {
+  const [asides, setAsides] = useState<Aside[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  useEffect(() => {
+    if (!window.haru) { setLoaded(true); return; }
+    void window.haru.chat.getAsides().then(list => { setAsides(list); setLoaded(true); });
+    // Main owns the list and hands over each line as it happens, so the page
+    // fills in while it is open rather than only on the way in.
+    const stopAdding = window.haru.chat.onAside(aside => setAsides(current => [...current, aside]));
+    const stopClearing = window.haru.chat.onAsidesCleared(() => setAsides([]));
+    return () => { stopAdding(); stopClearing(); };
+  }, []);
+  const today = toISODate(new Date());
+  const days = [...new Set(asides.map(aside => aside.day || today))].sort().reverse();
+  return <section className="page asides">
+    <div className="field">
+      <h2>Off her own back</h2>
+      <p>Everything Haru comes out with unprompted — what she makes of your screen, nudges about your list, whatever she says when you poke her. It lives here rather than in the chat so the conversation stays the conversation. She still knows what she has just said: the last quarter of an hour of it reaches her alongside your next message, so answering one of these still makes sense to her. Older than that and it is history she has moved on from. Kept for a week.</p>
+    </div>
+    {loaded && !asides.length && <p className="nothing">Nothing yet. She has not said anything off her own back.</p>}
+    {days.map(day => <div className="aside-day" key={day}>
+      <h3>{asideDayLabel(day, today)}</h3>
+      <ol className="aside-list">
+        {asides.filter(aside => (aside.day || today) === day).reverse().map(aside => <li className="aside" key={aside.id}>
+          <div className="aside-meta">
+            <time>{asideClock(aside.at)}</time>
+            <span className="aside-why">{ASIDE_REASONS[aside.source] ?? ASIDE_REASONS.other}</span>
+          </div>
+          <p>{withEmphasis(aside.text)}</p>
+        </li>)}
+      </ol>
+    </div>)}
+    {asides.length > 0 && <div className="drawer-foot">
+      <button className="ghost" onClick={async () => setAsides(await window.haru!.chat.clearAsides())}>Clear the log</button>
+    </div>}
+  </section>;
 }
 
 export function MessageBubble({ message, onReact, onReply }: { message: Message; onReact?(reaction: Reaction): void; onReply?(): void }) {

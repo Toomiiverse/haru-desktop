@@ -114,6 +114,8 @@ window on the server — over remote desktop, or at the machine itself.
 ## Architecture
 
 - `electron/`: native window lifecycle and secure IPC bridge.
+- `electron/asides.ts`: everything she says without being spoken to — kept in its own
+  log rather than the transcript, and fed back to her as a short-lived note.
 - `electron/voice.ts`: text-to-speech boundary — prepares the text and adapts to each engine's HTTP contract.
 - `electron/listen.ts`: speech-to-text boundary — the mirror of `voice.ts`, same HTTP contract in reverse.
 - `electron/asr-server.py`: the local Whisper server behind it, run by `start-haru-asr.cmd`.
@@ -122,6 +124,17 @@ window on the server — over remote desktop, or at the machine itself.
 - `src/components.tsx`: UI components.
 - `src/services/ai.ts`: provider boundary; replace the demonstration provider with Ollama, OpenAI, or xAI adapters.
 - `src/types.ts`: shared renderer data contracts.
+
+Her unprompted remarks — about the screen, a screenshot, the tab you just opened, the
+list she is chasing you about — do not go in the chat. They go to the **Asides** tab, and
+the split is made in the main process, so nothing that speaks up on its own can reach the
+transcript. The chat is what was actually said between you; that is also what is fed back
+to the model, and what the day is summarised from. She is not left blind to her own
+voice: the last quarter of an hour of it rides along beside your next message as a note,
+so answering something she said out loud still makes sense to her, and the day's remarks
+are handed back to her before she writes another one so she does not make the same point
+twice. Notes expire. Messages did not, which is how a morning of her narrating a game
+became the bulk of what she thought you had been talking about.
 
 Speech is synthesised in the main process and played in the companion window, the one
 that holds the Live2D model. That is what lets the mouth follow the audio sample by

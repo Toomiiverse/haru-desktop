@@ -600,3 +600,31 @@
 /* Pushed right and quiet: it is a diagnostic, not part of the rule. */
 .corrections .used { margin-left: auto; color: var(--muted-2); font: 9px 'JetBrains Mono'; letter-spacing: .06em; text-transform: uppercase; }
 .corrections .reaction { width: 22px; height: 22px; }
+
+/* Her own log. Deliberately not bubbles: these were never a conversation, and
+   dressing them as one is what made them so easy to mistake for the transcript
+   in the first place. A time, a reason, and the line — a record, read as one. */
+.page.asides .field { max-width: 720px; }
+.aside-day { max-width: 720px; margin-top: 22px; }
+.aside-day h3 {
+  margin: 0 0 8px; color: var(--muted); font: 10px 'JetBrains Mono', monospace;
+  letter-spacing: .16em; text-transform: uppercase;
+}
+.aside-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+/* The rule down the left ties the day's lines together and keeps them visibly
+   apart from anything with a bubble around it. */
+.aside {
+  display: grid; grid-template-columns: 132px minmax(0, 1fr); gap: 14px;
+  padding: 9px 0 9px 14px; border-left: 2px solid var(--line);
+}
+.aside:hover { border-left-color: var(--accent); }
+.aside p { margin: 0; font-size: 14px; line-height: 1.55; color: var(--text-2); }
+.aside-meta { display: grid; gap: 2px; padding-top: 2px; }
+.aside-meta time { color: var(--text-3); font: 11px 'JetBrains Mono', monospace; font-variant-numeric: tabular-nums; }
+/* Why she spoke, kept quiet enough that the line itself still reads first. */
+.aside-why { color: var(--muted-2); font-size: 11px; line-height: 1.35; }
+.page.asides .drawer-foot { max-width: 720px; margin-top: 26px; }
+@media (max-width: 900px) {
+  .aside { grid-template-columns: minmax(0, 1fr); gap: 3px; }
+  .aside-meta { display: flex; gap: 9px; align-items: baseline; padding-top: 0; }
+}
