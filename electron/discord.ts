@@ -188,6 +188,20 @@ export class DiscordLink {
   private socket: WebSocket | null = null;
   private heart: ReturnType<typeof setInterval> | null = null;
   private sequence: number | null = null;
+  /**
+   * Message ids already dealt with.
+   *
+   * Resuming replays everything since the last acknowledged sequence, and
+   * Discord is explicit that an event may arrive more than once — a client is
+   * expected to be idempotent and this one was not. A dropped connection at the
+   * wrong moment therefore did not cost a reply, it bought several, each one
+   * generated afresh so they did not even look like duplicates: four different
+   * answers to one goodnight.
+   *
+   * Bounded because it is a set of strings that would otherwise grow for as long
+   * as she is connected, which on a server is measured in weeks.
+   */
+  private answered = new Set<string>();
   private session = '';
   private resumeUrl = '';
   private selfId = '';
@@ -230,12 +244,27 @@ export class DiscordLink {
 
   private open(url: string) {
     if (this.closed) return;
+    // Whatever was here before is not wanted. Nothing is supposed to call this
+    // with a live socket, but "supposed to" is doing a lot of work in a file
+    // whose whole job is a connection that keeps dropping — and the cost of
+    // being wrong is two sockets delivering the same message to the same
+    // handler, which is indistinguishable from her having said it twice.
+    try { this.socket?.close(1000); } catch { /* already gone */ }
     const socket = new WebSocket(url);
     this.socket = socket;
 
-    socket.addEventListener('message', event => void this.receive(String(event.data)));
+    socket.addEventListener('message', event => {
+      // Only from the connection that is current. A socket closing slowly can
+      // still deliver while its replacement is up, and its events would be
+      // answered by a link that has already moved on.
+      if (this.socket !== socket) return;
+      void this.receive(String(event.data));
+    });
     socket.addEventListener('error', () => { /* a close always follows */ });
     socket.addEventListener('close', event => {
+      // An old socket closing must not tear down the live one's heartbeat or
+      // schedule a second reconnect beside it.
+      if (this.socket !== socket) return;
       if (this.heart) clearInterval(this.heart);
       this.heart = null;
       if (this.closed) return;
@@ -251,6 +280,23 @@ export class DiscordLink {
       const next = this.session && this.resumeUrl ? this.resumeUrl + '/?v=10&encoding=json' : GATEWAY;
       setTimeout(() => this.open(next), wait);
     });
+  }
+
+  /**
+   * True the first time this id is seen, false every time after.
+   *
+   * A plain FIFO rather than anything cleverer: the only question ever asked is
+   * "recently?", and a few hundred ids is far more than a resume can replay.
+   */
+  private first(id: string): boolean {
+    if (this.answered.has(id)) return false;
+    this.answered.add(id);
+    if (this.answered.size > 500) {
+      // Sets iterate in insertion order, so this is the oldest.
+      const oldest = this.answered.values().next().value;
+      if (oldest !== undefined) this.answered.delete(oldest);
+    }
+    return true;
   }
 
   private say(payload: unknown) {
@@ -287,7 +333,7 @@ export class DiscordLink {
 
     if (packet.t === 'MESSAGE_REACTION_ADD') { await this.reacted(packet.d as ReactionEvent); return; }
     if (packet.t !== 'MESSAGE_CREATE') return;
-    const message = packet.d as { channel_id: string; content: string; author?: { id?: string; bot?: boolean } };
+    const message = packet.d as { id?: string; channel_id: string; content: string; author?: { id?: string; bot?: boolean } };
     if (!shouldAnswer(message, this.ownerId, this.selfId)) {
       // Named rather than dropped in silence. "She is connected and says
       // nothing" has three quite different causes and they are indistinguishable
@@ -300,6 +346,13 @@ export class DiscordLink {
         this.sink.onIgnored?.(why);
         console.warn('[discord] ' + why);
       }
+      return;
+    }
+
+    // Checked after shouldAnswer so the log still explains messages she declines,
+    // and before the typing indicator so a replay does not even twitch.
+    if (message.id && !this.first(message.id)) {
+      console.log('[discord] already answered ' + message.id + ' — this is a replay');
       return;
     }
 
@@ -340,6 +393,9 @@ export class DiscordLink {
     if (event.message_author_id && event.message_author_id !== this.selfId) return;
     const name = event.emoji?.name ?? '';
     if (!name) return;
+    // Same replay, same answer. Keyed on all three because putting a second
+    // emoji on the same message is a real thing somebody does on purpose.
+    if (!this.first(`${event.message_id}:${event.user_id}:${name}`)) return;
 
     try {
       const response = await fetch(`${API}/channels/${event.channel_id}/messages/${event.message_id}`, {
