@@ -60,7 +60,13 @@ module.exports = {
   // anything however well the rest of it is wired.
   publish: feed
     ? [{ provider: 'generic', url: feed }]
-    : [{ provider: 'github', owner: 'Toomiiverse', repo: 'haru-desktop' }],
+    // releaseType matters more than it looks. electron-builder defaults GitHub
+    // releases to *draft*, and a draft is invisible to the public API, creates
+    // no tag, and cannot be seen by the updater — so a publish that worked
+    // perfectly leaves every machine reporting it is up to date, and the only
+    // way to tell that apart from a publish that never ran is to look at the
+    // releases page while signed in. Published outright instead.
+    : [{ provider: 'github', owner: 'Toomiiverse', repo: 'haru-desktop', releaseType: 'release' }],
   files: [
     'dist/**',
     'dist-electron/**',
