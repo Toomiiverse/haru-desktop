@@ -42,6 +42,18 @@ export type ListenConfig = {
    * only decides whether the next thing said counts as a reply.
    */
   replyWindow: boolean;
+  /**
+   * Cut her off by talking over her, instead of waiting for a gap.
+   *
+   * Only meaningful alongside wakeWord or replyWindow — those are what get the
+   * microphone open again afterwards. Its own setting rather than folded into
+   * either of them: unlike answering to her name or picking up after her, this
+   * one runs the mic *while she is talking*, over the same speakers it is
+   * trying to hear past. Echo cancellation is doing real work here, not just
+   * housekeeping, so it is worth being able to switch off on its own if it
+   * ever mistakes her voice for someone interrupting her.
+   */
+  bargeIn: boolean;
 };
 
 export const DEFAULT_LISTEN: ListenConfig = {
@@ -52,6 +64,7 @@ export const DEFAULT_LISTEN: ListenConfig = {
   wakeWord: false,
   chimeVolume: 0.06,
   replyWindow: false,
+  bargeIn: false,
 };
 
 /** Reads a stored config forward, so a partial or older record still starts up. */
@@ -67,6 +80,7 @@ export function readListenConfig(saved: unknown): ListenConfig {
     wakeWord: record.wakeWord === true,
     chimeVolume: typeof record.chimeVolume === 'number' ? Math.max(0, Math.min(1, record.chimeVolume)) : DEFAULT_LISTEN.chimeVolume,
     replyWindow: record.replyWindow === true,
+    bargeIn: record.bargeIn === true,
   };
 }
 

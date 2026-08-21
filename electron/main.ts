@@ -6207,6 +6207,11 @@ app.whenReady().then(() => {
   ipcMain.handle('voice:speaking', (_e, speaking: boolean) => {
     speakingNow = Boolean(speaking);
     duckOthers(speakingNow);
+    // Told to every window, not just acted on here: the barge-in listener
+    // lives in the chat window and only that window knows whether someone
+    // just started talking over her, but only this process knows when "over
+    // her" starts and ends.
+    sendToWindows('voice:speakingChanged', speakingNow);
     if (speakingNow) return;
     // She finished, so there is no longer a sentence to be cut off in the
     // middle of. Cleared here rather than at the end of speak(), which returns

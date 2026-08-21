@@ -97,6 +97,7 @@ interface Window {
       onDuck(callback: (factor: number) => void): () => void;
       onInsistence(callback: (factor: number) => void): () => void;
       onChange(callback: (config: import('./types').VoiceConfig) => void): () => void;
+      onSpeakingChanged(callback: (speaking: boolean) => void): () => void;
     };
 
     wardrobe: {

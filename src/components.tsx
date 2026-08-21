@@ -857,6 +857,11 @@ function ListenField() {
         <span>Listen for {WAKE_WINDOW_MS / 1000} seconds whenever she speaks first</span>
       </label>
       {config.replyWindow && !config.wakeWord && <p className="status-note">Covers the times she starts it — the line when she comes up, a reaction to what you have open, a reminder, being poked. The microphone opens once she has finished talking, not while, and closes again on its own. No name needed; she already has your attention.</p>}
+      {(config.replyWindow || config.wakeWord) && <label className="check-row">
+        <input type="checkbox" checked={config.bargeIn} disabled={busy} onChange={event => save({ bargeIn: event.target.checked })}/>
+        <span>Let me cut her off by talking over her</span>
+      </label>}
+      {config.bargeIn && (config.replyWindow || config.wakeWord) && <p className="status-note">Starts listening the moment she opens her mouth, and stops her the instant it is sure someone is talking over her rather than a chair creaking or her own voice bleeding back through the speakers — which costs it a beat of delay on purpose. If she ever cuts herself off for no reason, this is the setting to turn back off; it depends on echo cancellation doing its job in this specific room.</p>}
       <div className="stack">
         <span>Chime {config.chimeVolume > 0 ? `— ${Math.round(config.chimeVolume * 100)}%` : '— off'}</span>
         <div className="row-actions">
@@ -2126,7 +2131,10 @@ function MicButton({ sending, onText }: { sending: boolean; onText(text: string,
       clearTimeout(shut);
       shut = setTimeout(closeUnlessSpeaking, WAKE_WINDOW_MS);
       // Already listening for her name: nothing to open, the flag is enough.
-      if (config.wakeWord || temporary) return;
+      // And if the barge-in listener below is still holding the mic open to
+      // finish capturing what just cut her off, this is that same answer —
+      // opening a second microphone under it would only split it in two.
+      if (config.wakeWord || temporary || openMic.current) return;
       void (async () => {
         try {
           const started = await startListening(async clip => {
@@ -2150,6 +2158,93 @@ function MicButton({ sending, onText }: { sending: boolean; onText(text: string,
 
     return () => { gone = true; close(); unsubscribe?.(); };
   }, [config?.engine, config?.replyWindow, config?.wakeWord, config?.autoSend, muted]);
+
+  // Cutting her off by talking over her, rather than waiting for a gap — the
+  // other half of what the two listeners above do. They both open the mic
+  // once she has stopped; this one opens it the moment she starts, and its
+  // only job is deciding whether what comes back is a real interruption.
+  //
+  // Its own stream, opened fresh each time she starts a line and dropped once
+  // she either finishes on her own or gets cut off, rather than left running:
+  // long-lived was tried first, and the trouble with it is that "listening
+  // for someone talking over her" is meaningless while she is silent, and
+  // there the reply window already owns the microphone.
+  //
+  // A higher trigger than usual, a grace period before it is trusted at all,
+  // and a short stretch of continued speech before it acts — a chair creak or
+  // her own voice bleeding back through the speakers should not cost her the
+  // sentence, only someone actually talking should.
+  useEffect(() => {
+    if (!window.haru || !config || config.engine === 'off' || !config.bargeIn || (!config.wakeWord && !config.replyWindow) || muted) return;
+    let listener: Listener | null = null;
+    let cancelled = false;
+    let poll = 0;
+    let armedAt = 0;
+    let confirmSince = 0;
+    let interrupted = false;
+    let safety: ReturnType<typeof setTimeout> | undefined;
+
+    const teardown = () => {
+      clearTimeout(safety);
+      cancelAnimationFrame(poll);
+      confirmSince = 0;
+      interrupted = false;
+      if (openMic.current === listener) openMic.current = null;
+      listener?.stop();
+      listener = null;
+    };
+
+    const arm = async () => {
+      if (listener || cancelled) return;
+      try {
+        const started = await startListening(async clip => {
+          if (cancelled) return;
+          const wasInterrupted = interrupted;
+          // Torn down here rather than left for the speaking-stopped handler
+          // below: that edge already fired — she went quiet the moment this
+          // exact interruption cut her off — so waiting for it again would
+          // wait forever.
+          if (wasInterrupted) teardown();
+          if (!wasInterrupted) return;
+          try {
+            const text = await window.haru!.listen.transcribe(clip.bytes, clip.mime);
+            if (!text || !isUsableFollowUp(text)) return;
+            onText(text, true);
+          } catch { /* she is already stopped; a failed transcript only loses the words */ }
+        }, { triggerOverFloor: BARGE_TRIGGER_OVER_FLOOR });
+        if (cancelled) { started.stop(); return; }
+        listener = started;
+        openMic.current = started;
+        armedAt = performance.now();
+        const check = () => {
+          poll = requestAnimationFrame(check);
+          if (!listener) return;
+          if (performance.now() - armedAt < BARGE_GRACE_MS || !listener.speaking()) { confirmSince = 0; return; }
+          if (!confirmSince) confirmSince = performance.now();
+          else if (!interrupted && performance.now() - confirmSince >= BARGE_CONFIRM_MS) {
+            interrupted = true;
+            void window.haru!.voice.stop();
+            // A safety net, not the normal path: the listener is meant to
+            // tear itself down once the utterance it is capturing finishes,
+            // above. This is only here for the case where it never does —
+            // the mic dropping out mid-capture, say — so a stuck flag cannot
+            // hold the reply window shut indefinitely.
+            safety = setTimeout(teardown, BARGE_SAFETY_MS);
+          }
+        };
+        poll = requestAnimationFrame(check);
+      } catch { /* no microphone; barge-in just never fires */ }
+    };
+
+    const unsubscribe = window.haru.voice.onSpeakingChanged(speaking => {
+      if (speaking) { void arm(); return; }
+      // She stopped on her own — nothing interrupted her, so there is nothing
+      // left to capture. If something did, the listener above closes itself.
+      if (!interrupted) teardown();
+    });
+
+    return () => { cancelled = true; unsubscribe?.(); teardown(); };
+  }, [config?.engine, config?.bargeIn, config?.wakeWord, config?.replyWindow, muted]);
 
   // A sound for the microphone opening and closing.
   //
@@ -2340,7 +2435,22 @@ function AttachButton({ note, onShown }: { note: string; onShown(reaction: strin
 const MAX_CLOSE_DEFERRALS = 8;
 
 /** How long a bare "Haru?" leaves her listening for what comes next. */
-const WAKE_WINDOW_MS = 8000;
+const WAKE_WINDOW_MS = 5000;
+
+// Barge-in tuning. The normal listener trusts a room a little louder than its
+// own floor because the thing it is told to ignore is silence; this one has
+// to ignore her own voice, several times louder and coming from right next to
+// the microphone, so it needs a much bigger margin above the floor before it
+// believes something is speech at all.
+const BARGE_TRIGGER_OVER_FLOOR = 6;
+/** Ignored for this long after arming — her sentence has barely started, and
+ *  echo cancellation's adaptive filter has not caught up with it yet either. */
+const BARGE_GRACE_MS = 300;
+/** How long the trigger has to hold before it is trusted as a real interruption. */
+const BARGE_CONFIRM_MS = 220;
+/** Upper bound on how long a confirmed interruption is given to finish
+ *  capturing before its listener is torn down regardless. */
+const BARGE_SAFETY_MS = 20_000;
 
 const WEEKDAYS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
 
