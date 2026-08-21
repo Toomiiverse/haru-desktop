@@ -396,6 +396,20 @@ export function CompanionWindow() {
   // What she offered to say back. Empty means the text box; anything in it means
   // the buttons, because a box and a set of choices at once is two questions.
   const [choices, setChoices] = useState<string[]>([]);
+  // The last thing you said, shown on your own side of the exchange. Kept until
+  // the box closes rather than cleared when she answers: a reply with the line
+  // it is answering still on screen reads as a conversation, and a reply on its
+  // own reads as a notification.
+  const [mine, setMine] = useState('');
+  // What your plate says. YOU unless you have said otherwise — a name in a
+  // dialogue box is half of what makes it feel like one, and "YOU" is what the
+  // genre has always used for the unnamed side.
+  const [speaker, setSpeaker] = useState('YOU');
+  useEffect(() => {
+    window.haru?.settings.get('companion.speakerName')
+      .then(saved => { if (typeof saved === 'string' && saved.trim()) setSpeaker(saved.trim().slice(0, 16)); })
+      .catch(() => { /* never set: YOU is the default and needs no rescue */ });
+  }, []);
   const box = useRef<HTMLInputElement | null>(null);
   const openRef = useRef(false);
   openRef.current = asking;
@@ -405,6 +419,7 @@ export function CompanionWindow() {
     setDraft('');
     setWaiting(false);
     setChoices([]);
+    setMine('');
     void window.haru?.companion.close();
   }, []);
 
@@ -420,6 +435,10 @@ export function CompanionWindow() {
     const said = (text ?? draft).trim();
     if (!said || waiting) return;
     setDraft('');
+    // Yours goes up immediately, before hers comes back. On a local model
+    // that gap is two to six seconds, and an exchange where your own line does
+    // not appear until she answers feels like the send did not register.
+    setMine(said);
     // Cleared before the question goes, not after the answer comes back: leaving
     // the old buttons up while she thinks invites picking one twice.
     setChoices([]);
@@ -501,7 +520,14 @@ export function CompanionWindow() {
           and a box at opposite ends of the window, which read as two things
           happening rather than one conversation. */}
       {(caption || asking) && <div className="companion-dialogue">
-        <div className="dialogue-box">
+        {/* Yours first, because it came first: read top to bottom, the exchange
+            is in the order it happened. Right-aligned against her left, which is
+            what makes two boxes read as two people rather than as a list. */}
+        {mine && <div className="dialogue-box mine">
+          <div className="dialogue-name">{speaker}</div>
+          <div className="dialogue-line said">{mine}</div>
+        </div>}
+        <div className="dialogue-box hers">
           <div className="dialogue-name">Haru</div>
           {caption && <div className="dialogue-line"><span>
             <i className="typed">{caption.slice(0, typed)}</i>

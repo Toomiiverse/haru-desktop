@@ -1,6 +1,6 @@
 import { Component, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Paperclip, MicOff, CalendarDays, Check, ChevronDown, CornerDownRight, Mic, Quote, Reply, SquareCheck, ChevronLeft, ChevronRight, CircleDot, Import, MessageSquarePlus, Plus, NotebookPen, MessageSquare, Square, ImagePlus, Sparkles, ThumbsDown, ThumbsUp, Trash2, X } from 'lucide-react';
-import type { Aside, AsideSource, AniListConfig, Character, DesktopConfig, GamingConfig, ScreenshotConfig, WatchingConfig, VisionConfig, HaruNote, JournalConfig, JournalEntry, JournalField, JournalRange, JournalStats, JournalFieldStats, RoamConfig, EmotionName, GoogleStatus, KeptItem, ListenConfig, Memory, MemoryKind, Message, Profile, ProviderConfig, Reaction, SearchConfig, SessionSummary, VoiceConfig, VoiceEngine, VoiceReference, WardrobeControl, WebStatus } from './types';
+import { Paperclip, MicOff, CalendarDays, Check, ChevronDown, CornerDownRight, FileAudio, FileText, FileVideo, Mic, Quote, Reply, SquareCheck, ChevronLeft, ChevronRight, CircleDot, Import, MessageSquarePlus, Plus, NotebookPen, MessageSquare, Square, ImagePlus, Sparkles, ThumbsDown, ThumbsUp, Trash2, X } from 'lucide-react';
+import type { Aside, AsideSource, Attachment, AniListConfig, Character, DesktopConfig, GamingConfig, ScreenshotConfig, WatchingConfig, VisionConfig, HaruNote, JournalConfig, JournalEntry, JournalField, JournalRange, JournalStats, JournalFieldStats, RoamConfig, EmotionName, GoogleStatus, KeptItem, ListenConfig, Memory, MemoryKind, Message, Profile, ProviderConfig, Reaction, SearchConfig, SessionSummary, VoiceConfig, VoiceEngine, VoiceReference, WardrobeControl, WebStatus } from './types';
 import { buildMonthGrid, datesInView, dayLabel, rangeLabel, shiftISODate, toISODate, weekOf, type CalendarView } from './date';
 import { startListening, startRecording, type Listener, type Recorder } from './companion/microphone';
 import { isUsableFollowUp, matchWake, readsAsFarewell } from './companion/wake';
@@ -367,6 +367,8 @@ export function JournalDrawer({ onClose }: { onClose(): void }) {
 }
 export function ProfileDrawer({ onClose }: { onClose(): void }) {
   const [profile, setProfile] = useState<Profile>({ nickname: '', occupation: '', about: '' });
+  const [speakerName, setSpeakerName] = useState('');
+  useEffect(() => { window.haru?.settings.get('companion.speakerName').then(saved => { if (typeof saved === 'string') setSpeakerName(saved); }).catch(() => {}); }, []);
   const [memories, setMemories] = useState<Memory[]>([]);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [draft, setDraft] = useState('');
@@ -401,6 +403,10 @@ export function ProfileDrawer({ onClose }: { onClose(): void }) {
   return <section className="page">
     <div className="field"><h2>About you</h2><p>Haru sees this in every conversation, so it can talk to you as a person it already knows.</p>
       <div className="form-grid"><input value={profile.nickname} disabled={!loaded} onChange={edit('nickname')} placeholder="What should Haru call you?"/><input value={profile.occupation} disabled={!loaded} onChange={edit('occupation')} placeholder="What do you do?"/></div>
+      {/* Separate from the nickname above on purpose: that is what she calls you
+          in conversation, this is the name on your side of her dialogue box. One
+          can be "Tommy" while the other stays "YOU". */}
+      <div className="form-grid"><input value={speakerName} disabled={!loaded} onChange={event => { setSpeakerName(event.target.value.slice(0, 16)); void window.haru?.settings.set('companion.speakerName', event.target.value.trim().slice(0, 16)); }} placeholder="Name on your dialogue box (YOU)"/></div>
       <textarea className="short" value={profile.about} disabled={!loaded} onChange={edit('about')} placeholder="Anything else worth knowing — how you like to be spoken to, what you're working on, who's in your life."/>
     </div>
     <div className="field"><h2>What Haru remembers{memories.length > 0 && <span className="kept-count">{memories.length}</span>}</h2>
@@ -2022,6 +2028,53 @@ export function AsidesPage() {
   </section>;
 }
 
+/**
+ * What an attached file looks like when it is not a picture.
+ *
+ * A thumbnail of a PDF would be a thumbnail of a white rectangle, so these get a
+ * name and an icon that says which kind of thing it is. The size is there
+ * because "did that upload" is a question a chip with no size cannot answer.
+ */
+const FILE_ICONS = { audio: FileAudio, video: FileVideo, document: FileText, text: FileText } as const;
+
+function fileSize(bytes: number): string {
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
+  if (bytes >= 1024) return `${Math.round(bytes / 1024)}KB`;
+  return `${bytes}B`;
+}
+
+function FileChip({ file }: { file: Attachment }) {
+  const Icon = FILE_ICONS[file.kind as keyof typeof FILE_ICONS] ?? FileText;
+  return <span className="file-chip"><Icon size={14}/><b>{file.name}</b><small>{fileSize(file.bytes)}</small></span>;
+}
+
+/** One staged file, still removable because it has not been sent yet. */
+function StagedFile({ file, onRemove }: { file: Attachment; onRemove(): void }) {
+  return <div className={file.kind === 'image' ? 'staged-file picture' : 'staged-file'}>
+    {file.kind === 'image'
+      ? <img src={file.url} alt={file.name} title={file.name}/>
+      : <FileChip file={file}/>}
+    <button type="button" onClick={onRemove} aria-label={`Remove ${file.name}`} title="Remove"><X size={11}/></button>
+  </div>;
+}
+
+/**
+ * What came with a message, above the words rather than instead of them.
+ *
+ * This is the whole visible half of the change. A picture used to arrive as its
+ * own message reading "Showed her C:\Users\…\2026-08-20-212146-….jpeg", which is
+ * not a thing anybody wanted to read and was not even the filename — the path
+ * was shortened with a pattern that only matches forward slashes, so on Windows
+ * it never matched at all.
+ */
+function Attached({ files }: { files: Attachment[] }) {
+  return <div className="attached">
+    {files.map(file => file.kind === 'image'
+      ? <img key={file.id} className="attached-picture" src={file.url} alt={file.name} title={file.name}/>
+      : <FileChip key={file.id} file={file}/>)}
+  </div>;
+}
+
 export function MessageBubble({ message, onReact, onReply }: { message: Message; onReact?(reaction: Reaction): void; onReply?(): void }) {
   // Only Haru's own replies can be rated or replied to, and the greeting is not
   // a real reply. Nothing to act on when she did not actually say anything.
@@ -2030,7 +2083,10 @@ export function MessageBubble({ message, onReact, onReply }: { message: Message;
     {/* Kept on the message itself, so which reply was meant stays readable long
         after the exchange rather than only while it is being written. */}
     {message.replyTo && <div className="reply-quote"><CornerDownRight size={11}/><span>{message.replyTo.excerpt}</span></div>}
-    <div className={message.ignored ? 'bubble ignored' : 'bubble'}>{withEmphasis(message.content)}</div>
+    {message.attachments?.length ? <Attached files={message.attachments}/> : null}
+    {/* A picture on its own is a whole message, so an empty bubble under it would
+        be an empty bubble rather than a missing one. */}
+    {message.content.trim() ? <div className={message.ignored ? 'bubble ignored' : 'bubble'}>{withEmphasis(message.content)}</div> : null}
     {/* Only under what she heard, and only for the person who said it. */}
     {message.role === 'user' && message.heard && <HeardCheck heard={message.heard}/>}
     {actionable && onReact && <div className={message.reaction ? 'reactions rated' : 'reactions'}>
@@ -2051,7 +2107,16 @@ export function MessageBubble({ message, onReact, onReply }: { message: Message;
  */
 const COMPOSER_MAX_HEIGHT = 168;
 
-export function Composer({ sending, replyingTo, onCancelReply, onSend, onShowPicture }: { sending: boolean; replyingTo?: { id: string; excerpt: string } | null; onCancelReply?(): void; onSend(text: string, heard?: string): void; onShowPicture?(reaction: string | null, saved: string): void }) {
+export function Composer({ sending, replyingTo, onCancelReply, onSend, staged, onStage, onUnstage }: {
+  sending: boolean;
+  replyingTo?: { id: string; excerpt: string } | null;
+  onCancelReply?(): void;
+  onSend(text: string, heard?: string): void;
+  /** Held above rather than here, so a file dropped anywhere on the page lands in the same place. */
+  staged: Attachment[];
+  onStage(files: Attachment[]): void;
+  onUnstage(file: Attachment): void;
+}) {
   const [draft, setDraft] = useState('');
   const box = useRef<HTMLTextAreaElement>(null);
   // Grows with what is in it, up to a ceiling.
@@ -2070,7 +2135,10 @@ export function Composer({ sending, replyingTo, onCancelReply, onSend, onShowPic
   function submit(event: React.FormEvent) {
     event.preventDefault();
     const text = draft.trim();
-    if (!text || sending) return;
+    // A file on its own is a message. Showing someone a photograph without a
+    // caption is a thing people do, and refusing to send it is the app deciding
+    // that a picture is not worth saying on its own.
+    if ((!text && !staged.length) || sending) return;
     setDraft('');
     onSend(text);
   }
@@ -2096,16 +2164,38 @@ export function Composer({ sending, replyingTo, onCancelReply, onSend, onShowPic
     }
     setDraft(current => (current.trim() ? `${current.replace(/\s+$/, '')} ${text}` : text));
   }
+  /**
+   * A pasted picture, which is the way a screenshot actually arrives.
+   *
+   * Win+Shift+S puts an image on the clipboard and nowhere else — there is no
+   * file to pick, so without this the commonest thing anybody would want to show
+   * her is the one thing that could not be shown. Text pastes are left alone.
+   */
+  async function paste(event: React.ClipboardEvent<HTMLTextAreaElement>) {
+    const pictures = [...event.clipboardData.items].filter(item => item.kind === 'file' && item.type.startsWith('image/'));
+    if (!pictures.length || !window.haru) return;
+    event.preventDefault();
+    for (const item of pictures) {
+      const file = item.getAsFile();
+      if (!file) continue;
+      const named = file.name && /\.[a-z0-9]+$/i.test(file.name) ? file.name : `pasted.${item.type.split('/')[1]?.replace(/[^a-z0-9]/gi, '') || 'png'}`;
+      onStage([await window.haru.attachments.stageBytes(named, new Uint8Array(await file.arrayBuffer()))]);
+    }
+  }
+
   return <div className="compose-wrap">
     {replyingTo && <div className="replying-to"><CornerDownRight size={12}/><span>Replying to: {replyingTo.excerpt}</span><button onClick={onCancelReply} aria-label="Cancel reply"><X size={12}/></button></div>}
+    {staged.length > 0 && <div className="staged">
+      {staged.map(file => <StagedFile key={file.id} file={file} onRemove={() => onUnstage(file)}/>)}
+    </div>}
     <form className="compose" onSubmit={submit}>
       <MicButton sending={sending} onText={dictated}/>
-      {/* The note travels with the picture and is cleared, because it has been
-          asked. With nothing typed she looks and says nothing — showing someone
-          a photograph is not the same as asking their opinion of it. */}
-      <PictureButton note={draft} onShown={(reaction, saved) => { setDraft(''); onShowPicture?.(reaction, saved); }}/>
+      {/* Both of these now only stage. Nothing is read and no model is called
+          until Send, so you can pick the file first and decide what to ask
+          afterwards — which is the way round everybody expects. */}
+      <PictureButton onStaged={onStage}/>
       {/* Anything that is not a picture. Same destination, wider picker. */}
-      <AttachButton note={draft} onShown={(reaction, saved) => { setDraft(''); onShowPicture?.(reaction, saved); }}/>
+      <AttachButton onStaged={onStage}/>
       {/* Never disabled. Locking the box while she thinks means the sentence you
           had in your head has to survive her reply, and a reply can take five
           seconds — you lose the thought, not the time. Send is still gated, so
@@ -2114,8 +2204,9 @@ export function Composer({ sending, replyingTo, onCancelReply, onSend, onShowPic
           at all — shift+enter in one does nothing, whatever you bind to it.
           Enter still sends; shift+enter breaks the line. */}
       <textarea ref={box} rows={1} value={draft}
-        placeholder={replyingTo ? 'What did she get wrong?' : sending ? 'Keep typing — she is still thinking…' : 'Say something to Haru…'}
+        placeholder={replyingTo ? 'What did she get wrong?' : sending ? 'Keep typing — she is still thinking…' : staged.length ? 'What do you want her to do with it?' : 'Say something to Haru…'}
         onChange={event => setDraft(event.target.value)}
+        onPaste={event => void paste(event)}
         onKeyDown={event => {
           // Not while an IME is composing: enter is how you accept a candidate
           // in Japanese or Chinese input, and sending there would fire on every
@@ -2124,7 +2215,7 @@ export function Composer({ sending, replyingTo, onCancelReply, onSend, onShowPic
           event.preventDefault();
           submit(event);
         }}/>
-      <button disabled={sending || !draft.trim()}>{sending ? 'Thinking…' : 'Send'}</button>
+      <button disabled={sending || (!draft.trim() && !staged.length)}>{sending ? 'Thinking…' : 'Send'}</button>
     </form>
   </div>;
 }
@@ -2439,25 +2530,25 @@ function MicButton({ sending, onText }: { sending: boolean; onText(text: string,
  * Absent unless it is switched on, like the microphone — a button that opens a
  * file picker and then fails is worse than no button.
  */
-function PictureButton({ note, onShown }: { note: string; onShown(reaction: string | null, saved: string): void }) {
+function PictureButton({ onStaged }: { onStaged(files: Attachment[]): void }) {
   const [on, setOn] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => { window.haru?.vision.get().then(config => setOn(config.enabled)); }, []);
   if (!window.haru || !on) return null;
+  // Nothing is asked and nothing is read: the file becomes a chip in the box and
+  // waits there until Send, which is the whole point of the change. It used to
+  // take whatever was in the draft as the question, which meant typing first.
   async function show() {
     setBusy(true); setError(null);
     try {
-      const result = await window.haru!.vision.show(note, 'picture');
-      // The path comes back whether or not she said anything, so the picture can
-      // be recorded in the conversation even when she is holding her tongue.
-      if (result) onShown(result.reaction, result.saved);
+      onStaged(await window.haru!.attachments.pick('picture'));
     } catch (problem) {
       setError(problem instanceof Error ? problem.message.replace(/^Error invoking remote method .[^.]*.:s*(Error:s*)?/, '') : String(problem));
     } finally { setBusy(false); }
   }
   return <>
-    <button type="button" className="mic" onClick={() => void show()} disabled={busy} title={error ?? 'Show her a picture'} aria-label="Show her a picture">
+    <button type="button" className="mic" onClick={() => void show()} disabled={busy} title={error ?? 'Attach a picture'} aria-label="Attach a picture">
       {busy ? <span className="mic-thinking"/> : <ImagePlus size={15}/>}
     </button>
     {error && <span className="mic-error" title={error}>!</span>}
@@ -2477,7 +2568,7 @@ function PictureButton({ note, onShown }: { note: string; onShown(reaction: stri
  * pictures are the common case and deserve a picker that is not cluttered with
  * every extension she can read.
  */
-function AttachButton({ note, onShown }: { note: string; onShown(reaction: string | null, saved: string): void }) {
+function AttachButton({ onStaged }: { onStaged(files: Attachment[]): void }) {
   const [ready, setReady] = useState<{ vision: boolean; ffmpeg: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -2490,8 +2581,7 @@ function AttachButton({ note, onShown }: { note: string; onShown(reaction: strin
   async function attach() {
     setBusy(true); setError(null);
     try {
-      const result = await window.haru!.vision.show(note, 'any');
-      if (result) onShown(result.reaction, result.saved);
+      onStaged(await window.haru!.attachments.pick('any'));
     } catch (problem) {
       setError(problem instanceof Error ? problem.message.replace(/^Error invoking remote method .[^.]*.:s*(Error:s*)?/, '') : String(problem));
     } finally { setBusy(false); }
@@ -2499,8 +2589,8 @@ function AttachButton({ note, onShown }: { note: string; onShown(reaction: strin
   // Said in the tooltip rather than discovered at the file dialog, since sound
   // and video are exactly the things someone would reach for first.
   const label = ready.ffmpeg
-    ? 'Give her a file — sound, video, a PDF, text or data'
-    : 'Give her a file — PDFs, text and data (sound and video need ffmpeg)';
+    ? 'Attach a file — sound, video, a PDF, text or data'
+    : 'Attach a file — PDFs, text and data (sound and video need ffmpeg)';
   return <>
     <button type="button" className="mic" onClick={() => void attach()} disabled={busy} title={error ?? label} aria-label={label}>
       {busy ? <span className="mic-thinking"/> : <Paperclip size={15}/>}

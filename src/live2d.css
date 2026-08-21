@@ -23,7 +23,32 @@ html[data-view="companion"],html[data-view="companion"] body{background:transpar
    when there is no more coming, and the replies you can give underneath.
    The shape is doing work — it says "this is a conversation with a character"
    before a word is read, which a floating grey tooltip never manages. */
-.companion-dialogue{position:absolute;top:0;left:0;right:0;display:flex;justify-content:center;pointer-events:none;padding:6px 6px 0}
+/* Two sides now. Stacked rather than side by side — her window is narrower than
+   she is tall, and two boxes abreast would each be too thin to hold a sentence.
+   Yours pinned right and hers left is what carries the sense of an exchange. */
+.companion-dialogue{position:absolute;top:0;left:0;right:0;display:flex;flex-direction:column;gap:5px;pointer-events:none;padding:6px 6px 0}
+.dialogue-box.hers{align-self:flex-start}
+.dialogue-box.mine{align-self:flex-end}
+/* Yours is the quieter of the two: she is the one being listened to, and a
+   reply of your own competing with hers for attention reads as two characters
+   talking over each other. Cooler, dimmer, and no name plate colour of its own. */
+.dialogue-box.mine{
+  background:oklch(14% 0.015 265 / 0.8);
+  border-color:oklch(70% 0.06 265 / 0.32);
+  padding:11px 11px 9px;
+}
+.dialogue-box.mine .dialogue-name{
+  left:auto;right:12px;
+  background:linear-gradient(oklch(72% 0.05 265), oklch(62% 0.06 265));
+}
+/* Two lines and no more. There is very little clear space above her head, and
+   your own message is the half of the exchange you already know — it is there
+   for context, not to be read again. */
+.dialogue-box.mine .said{
+  max-height:calc(2 * 1.5em);overflow:hidden;
+  color:oklch(86% 0.01 265);text-align:right;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;
+}
 .dialogue-box{
   /* Narrow on purpose. Her window is far wider than she is, and a box allowed to
      fill it reads as a banner across the desktop rather than as something she is
