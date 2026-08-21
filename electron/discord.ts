@@ -18,8 +18,15 @@
 const GATEWAY = 'wss://gateway.discord.gg/?v=10&encoding=json';
 const API = 'https://discord.com/api/v10';
 
-/** DMs, their content, and guild messages — nothing else is any of her business. */
-const INTENTS = (1 << 12) | (1 << 15) | (1 << 9);
+/**
+ * DMs, their content, guild messages, and the reactions put on both — nothing
+ * else is any of her business.
+ *
+ * The two reaction bits are not privileged and need nothing turning on in the
+ * developer portal, unlike Message Content. If reactions stop arriving, that is
+ * this constant, not a setting on the website.
+ */
+const INTENTS = (1 << 12) | (1 << 15) | (1 << 9) | (1 << 13) | (1 << 10);
 
 /** Discord refuses anything longer, and truncating her mid-sentence is worse than two messages. */
 export const DISCORD_LIMIT = 2000;
@@ -157,6 +164,11 @@ export function backoffMs(attempt: number): number {
 
 type Sink = {
   answer(text: string, channelId: string): Promise<{ reply: string; ignored?: boolean }>;
+  /**
+   * They put an emoji on something she said. `custom` marks a server emoji,
+   * whose name is somebody's in-joke rather than a character with a meaning.
+   */
+  reacted?(emoji: string, custom: boolean, herLine: string): Promise<{ reply: string; ignored?: boolean }>;
   onReady?(username: string): void;
   /** Said out loud in Setup, because a console is not somewhere anyone looks. */
   onTrouble?(why: string): void;
@@ -273,6 +285,7 @@ export class DiscordLink {
       return;
     }
 
+    if (packet.t === 'MESSAGE_REACTION_ADD') { await this.reacted(packet.d as ReactionEvent); return; }
     if (packet.t !== 'MESSAGE_CREATE') return;
     const message = packet.d as { channel_id: string; content: string; author?: { id?: string; bot?: boolean } };
     if (!shouldAnswer(message, this.ownerId, this.selfId)) {
@@ -304,4 +317,60 @@ export class DiscordLink {
       console.warn('[discord] could not answer:', error instanceof Error ? error.message : error);
     }
   }
+
+  /**
+   * An emoji put on one of her messages.
+   *
+   * Two things have to be true before this is worth a word, and both are
+   * checked rather than assumed: it was the owner reacting, and the message was
+   * hers. Reacting to a reaction on somebody else's message would be her
+   * answering a conversation she is not in.
+   *
+   * message_author_id is on the event in guilds and absent in DMs, so the
+   * message is fetched when it is missing. That is one REST call per reaction,
+   * which is nothing at the rate people react and everything to getting it
+   * right — and the fetch is needed anyway, because she cannot say anything
+   * sensible about a reaction without the line it was put on.
+   */
+  private async reacted(event: ReactionEvent) {
+    if (!this.sink.reacted) return;
+    if (event.user_id !== this.ownerId) return;
+    // Her own reactions to herself, if she is ever given the ability.
+    if (event.user_id === this.selfId) return;
+    if (event.message_author_id && event.message_author_id !== this.selfId) return;
+    const name = event.emoji?.name ?? '';
+    if (!name) return;
+
+    try {
+      const response = await fetch(`${API}/channels/${event.channel_id}/messages/${event.message_id}`, {
+        headers: { Authorization: 'Bot ' + this.token },
+      });
+      if (!response.ok) {
+        // Reading message history is a permission of its own, and in a DM it is
+        // implicit. Worth naming rather than silently never reacting.
+        console.warn(`[discord] could not read the message that was reacted to (${response.status})`);
+        return;
+      }
+      const message = await response.json() as { content?: string; author?: { id?: string } };
+      if (message.author?.id !== this.selfId) return;
+      const herLine = (message.content ?? '').trim();
+      if (!herLine) return;
+
+      const answer = await this.sink.reacted(name, Boolean(event.emoji?.id), herLine);
+      if (answer.ignored || !answer.reply.trim()) return;
+      await this.send(event.channel_id, answer.reply);
+    } catch (error) {
+      console.warn('[discord] could not react:', error instanceof Error ? error.message : error);
+    }
+  }
 }
+
+/** MESSAGE_REACTION_ADD, as much of it as she reads. */
+type ReactionEvent = {
+  user_id: string;
+  channel_id: string;
+  message_id: string;
+  /** Present in guilds, absent in DMs — see reacted(). */
+  message_author_id?: string;
+  emoji?: { id?: string | null; name?: string };
+};

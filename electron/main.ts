@@ -55,6 +55,7 @@ import { addAside, alreadySaidRecently, asideContext, asidesOn, pruneAsides, rea
 import { attachmentsInPlay, describeAttached, READ_IT_ALL_PROMPT, readAttachments, type Attachment, type Opened } from './attachments';
 import { describePull, isTailnetAddress, mergeCheckIns, readCheckInSource } from './checkinsource';
 import { DiscordLink, looksLikeUserId, readDiscordConfig, useOfChannel, type DiscordConfig } from './discord';
+import { reactedPrompt, readReaction, REACTION_COOLDOWN_MS } from './reacted';
 import { startWebServer, type WebDeps } from './webserver';
 import { CHECK_EVERY_MS, describeUpdate, progressStep, whyNotCheck, type UpdateState } from './updates';
 import { BREVITY, summonedLine } from './summoned';
@@ -5938,6 +5939,70 @@ async function answerOnDiscord(text: string, channelId = '') {
   return { reply, ignored: answer.ignored };
 }
 
+/** Last time an emoji earned a line, so a handful of them earns one. */
+let reactedAt = 0;
+
+/**
+ * They put an emoji on something she said.
+ *
+ * Treated as a reply rather than as telemetry, because that is what it is: an
+ * emoji is what people send instead of typing "that was funny", and answering it
+ * with silence is answering a reply with silence. The tone is read from the
+ * emoji, the sentence is left to her.
+ *
+ * Moves her mood exactly as a thumb in her own window does. A heart on Discord
+ * and a thumbs-up at the desk are the same gesture through different glass, and
+ * having only one of them count would make her mood depend on where you were
+ * standing.
+ */
+async function reactedOnDiscord(emoji: string, custom: boolean, herLine: string) {
+  const now = Date.now();
+  // Reacting is cheap and people do it in handfuls. The first one gets the line.
+  if (now - reactedAt < REACTION_COOLDOWN_MS) {
+    console.log('[discord] reaction noted, no reply — she answered one a moment ago');
+    return { reply: '', ignored: true };
+  }
+  const config = store.get('ai.config') as ProviderConfig | undefined;
+  if (!config?.model) return { reply: '', ignored: true };
+
+  const reading = readReaction(emoji, custom);
+  // Before the reply is written, and whether or not one gets written: the mood
+  // is the durable part, and a reaction that only counted when she happened to
+  // be off cooldown would make her temper a function of her rate limiter.
+  if (reading.shift) {
+    const mood = getMood();
+    setMood({ ...mood, irritation: nextIrritation(mood.irritation, reading.shift), ego: nextEgo(mood.ego, reading.shift) });
+    nudgeVitals(reading.shift === 'liked' ? 'praised' : 'criticised');
+  }
+  // Reacting is them addressing her, so it starts the quiet period a message
+  // does — otherwise she takes a heart as her cue to bring up something else.
+  noteUserSpoke();
+  reactedAt = now;
+
+  const mood = getMood();
+  if (isIgnoring(mood.irritation)) return { reply: '', ignored: true };
+
+  const character = getActiveCharacter();
+  const system = [
+    character.identity,
+    character.style,
+    rightNow(),
+    moodInstruction(mood.irritation),
+    egoInstruction(mood.ego),
+  ].filter(Boolean).join(' ');
+  try {
+    // The hosted model, for the reason every other Discord path uses it: this is
+    // a chat app, and a cold start here reads as her ignoring you — which is
+    // precisely the wrong answer to somebody putting a heart on something.
+    const line = await ollamaQuip(system, reactedPrompt(reading, herLine), fastBrain(config, herLine));
+    console.log(`[discord] reacted to ${custom ? 'a custom emoji' : emoji} — taken as ${reading.taken}`);
+    return { reply: line, ignored: false };
+  } catch (error) {
+    console.warn('[discord] could not answer a reaction:', error instanceof Error ? error.message : error);
+    return { reply: '', ignored: true };
+  }
+}
+
 /**
  * The pestering, on the long interval this channel deserves.
  *
@@ -5972,6 +6037,7 @@ async function startDiscord() {
   discordTrouble = '';
   discord = new DiscordLink(token, config.ownerId, {
     answer: (text, channelId) => answerOnDiscord(text, channelId),
+    reacted: (emoji, custom, herLine) => reactedOnDiscord(emoji, custom, herLine),
     onReady: name => { discordUser = name; discordTrouble = ''; },
     onTrouble: why => { discordTrouble = why; },
     onIgnored: why => { discordTrouble = why; },
