@@ -9,7 +9,22 @@ export const demoProvider: AIProvider = { async send(messages) { const last = me
 export const ollamaProvider: AIProvider = {
   async send(messages, config) {
     if (!window.haru) return demoProvider.send(messages, config);
-    return window.haru.ai.send(messages.map(m => ({ role: m.role, content: m.content })), config);
+    // A deliberate subset rather than the whole message: her id, the thumbs she
+    // was given and what was misheard are the window's business, not the model's.
+    //
+    // `at` and `attachments` do have to travel. Without `at` every message looks
+    // like it was said just now — which is what markTimeGaps exists to fix and
+    // could not, because the field was being dropped here. Without `attachments`
+    // a picture never reaches her at all.
+    return window.haru.ai.send(
+      messages.map(message => ({
+        role: message.role,
+        content: message.content,
+        ...(message.at ? { at: message.at } : {}),
+        ...(message.attachments?.length ? { attachments: message.attachments } : {}),
+      })),
+      config,
+    );
   },
 };
 

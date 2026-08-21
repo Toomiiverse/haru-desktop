@@ -1,4 +1,4 @@
-// Showing her a picture.
+// Her local eyes.
 //
 // Two models, on purpose. Her own model cannot see, and the one that can does
 // not sound like her — asked to be Haru about a photograph, gemma writes a
@@ -7,22 +7,33 @@
 // she reacts to that report in her own voice, the same way she answers from
 // search results rather than reading them out.
 //
-// It also means the vision model is swappable without touching her character,
-// and that her personality lives in exactly one place.
+// That split is right for what is left here — the screen she is watching and the
+// screenshots that appear in a folder, neither of which she was asked about and
+// neither of which ever leaves the machine.
+//
+// It is wrong for a picture somebody hands her and asks about, and used to be
+// done that way anyway: two sentences of caption were all that survived, so
+// "make sense of this" about a diagram was answered from a description that had
+// never contained the diagram. Those go to the answering model inside the
+// conversation now, image and all — see ./attachments. This file only gets them
+// back when there is no model to send them to.
 
 export type VisionConfig = {
   enabled: boolean;
-  /** Send pictures they choose to show her to the hosted model instead of the
-   *  local one. Screenshots ignore this and are always read locally — see
-   *  screenshots.ts for why that is not negotiable. */
-  remote: boolean;
-  /** A model with the `vision` capability. gemma4:12b has it; qwen2.5 does not. */
+  /**
+   * A model with the `vision` capability. gemma4:12b has it; qwen2.5 does not.
+   *
+   * This is her local pair of eyes, and it now has one job: screenshots and the
+   * screen she is watching, which never leave the machine. A picture the user
+   * attaches goes to the answering model inside the conversation instead, and
+   * only comes back here when there is no hosted model to send it to.
+   */
   model: string;
   /** Where copies are kept. Empty means the default under Pictures. */
   folder: string;
 };
 
-export const DEFAULT_VISION: VisionConfig = { enabled: false, model: 'gemma4:12b', folder: '', remote: false };
+export const DEFAULT_VISION: VisionConfig = { enabled: false, model: 'gemma4:12b', folder: '' };
 
 export function readVisionConfig(saved: unknown): VisionConfig {
   if (!saved || typeof saved !== 'object') return DEFAULT_VISION;
@@ -31,7 +42,6 @@ export function readVisionConfig(saved: unknown): VisionConfig {
     enabled: record.enabled === true,
     model: typeof record.model === 'string' && record.model.trim() ? record.model.trim() : DEFAULT_VISION.model,
     folder: typeof record.folder === 'string' ? record.folder.trim() : '',
-    remote: record.remote === true,
   };
 }
 
@@ -41,47 +51,6 @@ const LOOK_TIMEOUT_MS = 120_000;
 
 /** What she is told is in the picture. Deliberately flat — this is evidence. */
 export type Sighting = { description: string; model: string };
-
-/**
- * The same look, done by a hosted model.
- *
- * Goes to /chat/completions rather than the /responses endpoint the docs point
- * at for images — measured, the chat endpoint takes them perfectly well, which
- * means this is a different content shape rather than a whole second API.
- *
- * Worth recording what the measurement actually said, since the choice rests on
- * it. On a 0.4MB upload: grok-4.5 5.3s, grok-4.3 6.1s, gemma locally 6.9s. The
- * gap in wording was the more interesting half — the hosted models read "a brown
- * rectangular building on a green field", gemma read "a brown rectangle". Both
- * are true; only one is what somebody meant to show you.
- */
-export async function lookRemote(imageBase64: string, model: string, endpoint: string, headers: Record<string, string>, fetchImpl: Fetcher): Promise<Sighting> {
-  const response = await fetchImpl(`${endpoint.replace(/\/+$/, '')}/chat/completions`, {
-    method: 'POST',
-    headers,
-    signal: AbortSignal.timeout(LOOK_TIMEOUT_MS),
-    body: JSON.stringify({
-      model,
-      stream: false,
-      max_tokens: 200,
-      messages: [{
-        role: 'user',
-        content: [
-          { type: 'text', text: LOOK_PROMPT },
-          { type: 'image_url', image_url: { url: `data:image/png;base64,${imageBase64}` } },
-        ],
-      }],
-    }),
-  });
-  if (!response.ok) {
-    const detail = await response.text().catch(() => '');
-    throw new Error(`${model} could not look at it (${response.status})${detail ? `: ${detail.slice(0, 160)}` : ''}`);
-  }
-  const payload = await response.json() as { choices?: { message?: { content?: string } }[] };
-  const description = (payload.choices?.[0]?.message?.content ?? '').trim();
-  if (!description) throw new Error(`${model} returned nothing`);
-  return { description, model };
-}
 
 type Fetcher = (url: string, init: { method: string; headers: Record<string, string>; body: string; signal?: AbortSignal }) => Promise<Response>;
 
@@ -149,85 +118,15 @@ export async function look(imageBase64: string | string[], config: VisionConfig,
   return { description, model: config.model };
 }
 
-/**
- * How the sighting reaches her. Framed as her own eyes rather than as a report
- * from elsewhere — she should not say "the description mentions a dog", she
- * should say she can see a dog.
- */
-export function reactionPrompt(sighting: Sighting, note: string): string {
-  return [
-    'They have just shown you a picture. This is what is in it:',
-    sighting.description,
-    note ? `They said: "${note}"` : '',
-    'React to it the way you would if they turned a phone round and showed you. One or two lines, your own voice.',
-    'Talk about what is actually in it. Do not describe it back to them like a caption, do not say "the image shows", do not mention descriptions or models or that anything was analysed — as far as they are concerned you simply looked at it.',
-  ].filter(Boolean).join(' ');
-}
-
-/**
- * Her reaction and the memory verdict in one request.
- *
- * They were two calls to the same model, one straight after the other, which is
- * a whole round trip spent asking a question that could have travelled with the
- * first. Both want exactly the same input — the description — so there was never
- * a reason to send it twice.
- *
- * The marker is on its own line and deliberately unlike anything she would write,
- * because the parse has to fail safely: no marker means the whole thing is her
- * reaction and nothing is remembered, which is the harmless direction.
- */
-export const KEEP_MARKER = '<<KEEP>>';
-
-export function reactAndRememberPrompt(sighting: Sighting, note: string): string {
-  return [
-    reactionPrompt(sighting, note),
-    `\n\nThen, on a new line, write ${KEEP_MARKER} followed by one short third-person sentence if the picture says something lasting about them — a pet, a person, where they live, something they own, a hobby, a project — with no pronoun for them: "Has a black cat called Miso", "Drives a green Subaru".`,
-    `If it is a screenshot, a meme, a passing joke or anything that will not matter next month, write ${KEEP_MARKER} nothing.`,
-    'They never see that line, so keep it out of what you say to them.',
-  ].join(' ');
-}
-
-/** Splits the two apart, tolerating a model that ignored the format entirely. */
-export function splitReaction(reply: string): { reaction: string; fact: string } {
-  const at = reply.indexOf(KEEP_MARKER);
-  if (at < 0) return { reaction: reply.trim(), fact: '' };
-  const fact = reply.slice(at + KEEP_MARKER.length).trim().replace(/^["']|["'.]$/g, '');
-  return {
-    reaction: reply.slice(0, at).trim(),
-    fact: !fact || /^nothing\b/i.test(fact) || fact.length < 9 ? '' : fact,
-  };
-}
-
 // How long a picture stays worth talking about. Long enough to go and make tea
 // and come back to it, short enough that "what do you reckon" tomorrow morning
 // is not answered about yesterday's photograph.
+//
+// It used to bound a description held to one side of the conversation. Now it
+// bounds how long an attachment keeps riding along with the messages after it —
+// see attachmentsInPlay in ./attachments. Same question, and it should not have
+// two answers, so it kept the one it already had.
 export const PICTURE_HOLDS_MS = 30 * 60_000;
-
-/**
- * A picture she has looked at and is saying nothing about yet.
- *
- * Uploading is not itself a remark. Sending a photograph with no word attached
- * means "look at this", not "tell me what you think of this" — and answering the
- * second when the first was asked is the thing that makes her exhausting.
- */
-export type HeldPicture = { description: string; name: string; at: number };
-
-/**
- * What she is told about a picture she has been shown but not asked about.
- *
- * The instruction is nearly all restraint. She has the description, so she can
- * answer the moment they ask; the point is that she must not treat having seen
- * something as a reason to start talking about it.
- */
-export function heldPicturePrompt(held: HeldPicture | null, now: number): string {
-  if (!held || now - held.at > PICTURE_HOLDS_MS) return '';
-  return [
-    'They have shown you a picture. This is what is in it:',
-    held.description,
-    'They have not asked you anything about it. Do not comment on it, do not bring it up, and do not work it into a reply about something else — they may simply have wanted it kept.',
-    'If they do ask, you have already seen it: answer about what is actually in it, in your own words, without mentioning descriptions or that anything was analysed.',
-  ].join(' ');
-}
 
 /**
  * What she says while she is still looking.

@@ -1,7 +1,7 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, type MenuItemConstructorOptions, nativeTheme, net, powerMonitor, protocol, safeStorage, screen, shell, desktopCapturer } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, type MenuItemConstructorOptions, nativeImage, nativeTheme, net, powerMonitor, protocol, safeStorage, screen, shell, desktopCapturer } from 'electron';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
-import { appendFileSync, copyFileSync, existsSync, readdirSync, mkdirSync, readFileSync, statSync, watch, writeFileSync, type FSWatcher } from 'node:fs';
+import { appendFileSync, copyFileSync, existsSync, readdirSync, mkdirSync, readFileSync, rmSync, statSync, watch, writeFileSync, type FSWatcher } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import AdmZip from 'adm-zip';
@@ -30,7 +30,7 @@ import { angleFor, mayNotice, noteNoticed, readNotices, type Page as NoticedPage
 import { CAPTURE_HEIGHT, CAPTURE_WIDTH, glancePrompt, readWatchingConfig, shouldLook, splitGlance, worthMentioning, type WatchingConfig } from './watching';
 import { buildGameIndex, gameFor } from './steam';
 import { pdfPrompt, readPdf } from './pdf';
-import { attachmentPrompt, classify, discard, duration, extractAudio, extractFrames, findFfmpeg, OPENABLE, readText } from './attach';
+import { classify, discard, extractAudio, extractFrames, findFfmpeg, OPENABLE, readText, type FileKind } from './attach';
 import { markTimeGaps, sinceLast } from './history';
 import { correct, noteUsed, readHearing, remember } from './hearing';
 import { assumeItIsTheirs, identifyWork, noteWork, readFollowing, recogniseNow, summariseFollowing } from './following';
@@ -38,7 +38,7 @@ import { lookUpPlace, readWindowsLocation } from './location';
 import { convertImage, normaliseFormat, FORMATS } from './convert';
 import { cancelPower, closeApp, findApps, isCancellable, launch, listRunning, matchApp, matchRunning, normalisePower, POWER_DELAY_S, readDesktopConfig, runPower, type DesktopConfig } from './desktop';
 import { looksLikeScreenshot, maySpeak, readScreenshotConfig, screenshotPrompt, SETTLE_MS, SETTLE_TRIES, type ScreenshotConfig } from './screenshots';
-import { heldPicturePrompt, look, lookRemote, photoName, reactAndRememberPrompt, readVisionConfig, splitReaction, whileLooking, type HeldPicture, type VisionConfig } from './vision';
+import { look, photoName, readVisionConfig, whileLooking, type VisionConfig } from './vision';
 import { NO_INVENTED_HISTORY, NO_NON_SEQUITURS, readsAsRough, roomInstruction } from './room';
 import { journalStance } from './journal';
 import { haruNote, rangeStats, type HaruNote, type RangeName, type RangeStats } from './journal';
@@ -52,12 +52,12 @@ import { forgetDevice, forgetEveryDevice, readWebAccess, setPassword, weakPasswo
 import { conversationMayLeave } from './sensitivity';
 import { addCheckIn, checkInInstruction, checkInsOn, readCheckIns, type CheckIn } from './checkins';
 import { addAside, alreadySaidRecently, asideContext, asidesOn, pruneAsides, readAsides, type Aside, type AsideSource } from './asides';
+import { attachmentsInPlay, describeAttached, READ_IT_ALL_PROMPT, readAttachments, type Attachment, type Opened } from './attachments';
 import { describePull, isTailnetAddress, mergeCheckIns, readCheckInSource } from './checkinsource';
 import { DiscordLink, looksLikeUserId, readDiscordConfig, useOfChannel, type DiscordConfig } from './discord';
 import { startWebServer, type WebDeps } from './webserver';
 import { BREVITY, summonedLine } from './summoned';
 import { CHOICES_TOOL, readChoices } from './choices';
-import { setupSonarrHandlers } from './sonarr-api';
 
 type Bounds = { x: number; y: number; width: number; height: number };
 type Live2DModel = { path: string; name: string; url: string };
@@ -93,7 +93,13 @@ const live2dRoots = new Map<string, string>();
 let mainWindow: BrowserWindow | null = null;
 let companionWindow: BrowserWindow | null = null;
 
-protocol.registerSchemesAsPrivileged([{ scheme: 'haru-model', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } }]);
+protocol.registerSchemesAsPrivileged([
+  { scheme: 'haru-model', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } },
+  // How an attached picture reaches the window. file:// is not loadable from the
+  // renderer and a data: URI would mean carrying the whole image through the
+  // bridge and into the stored transcript — for a thumbnail.
+  { scheme: 'haru-photo', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } },
+]);
 
 // Her replies play without anyone having clicked anything, which is exactly what
 // Chromium's autoplay policy exists to stop. Must be set before the app is ready.
@@ -450,7 +456,6 @@ function performChatResetIfDue() {
     const whole = ((store.get('chat.archive') as Record<string, unknown[]> | undefined) ?? {})[previousKey] ?? [];
     summariseSession(whole as { role?: string; content?: string }[], previousKey, { replace: true });
   }
-  heldPicture = null;
   store.set('chat.dayKey', key);
   store.delete('chat.messages' as never);
   // Her log is trimmed rather than cleared. The conversation starts fresh every
@@ -1074,7 +1079,6 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {
 let speakingLine = '';
 
 /** A picture she has seen and been asked nothing about. See vision.ts. */
-let heldPicture: HeldPicture | null = null;
 
 let screenshotWatcher: FSWatcher | null = null;
 let screenshotSpokeAt = 0;
@@ -1104,32 +1108,6 @@ const LOCAL_MODELS = 'http://localhost:11434';
 function visionEndpoint(provider: ProviderConfig | undefined): string {
   const chat = provider?.endpoint?.trim();
   return chat && !isRemote(chat) ? chat : LOCAL_MODELS;
-}
-
-/**
- * Looks at a picture they chose to show her, remotely when that is set up.
- *
- * Falls back to the local model rather than failing: a rejected key or a flat
- * network should cost the better description, not the whole feature. Screenshots
- * never come through here — they call look() directly and stay local whatever
- * this says.
- */
-async function lookAtPicture(imageBase64: string, vision: VisionConfig, provider: ProviderConfig) {
-  const away = store.get('escalate.provider') as ProviderConfig | undefined;
-  const started = Date.now();
-  if (vision.remote && away?.model && isOpenAIShaped(away.provider) && getRemoteKey()) {
-    try {
-      const sighting = await lookRemote(imageBase64, away.model, away.endpoint, modelHeaders(away.endpoint), net.fetch);
-      console.log(`[vision] ${away.model} took ${((Date.now() - started) / 1000).toFixed(1)}s to look`);
-      return sighting;
-    } catch (error) {
-      console.warn(`[vision] ${away.model} could not look (${error instanceof Error ? error.message : error}) — falling back to ${vision.model}`);
-    }
-  }
-  const local = Date.now();
-  const sighting = await look(imageBase64, vision, visionEndpoint(provider), modelHeaders(visionEndpoint(provider)), net.fetch);
-  console.log(`[vision] ${vision.model} took ${((Date.now() - local) / 1000).toFixed(1)}s to look`);
-  return sighting;
 }
 
 let lastLookAt = 0;
@@ -1963,105 +1941,6 @@ async function transcribeFile(wav: string): Promise<string> {
   );
 }
 
-/**
- * A file that is not a picture.
- *
- * Each kind is reduced to something a model can read — frames, a transcript,
- * plain text — and then answered in one call, the same way a picture is. The
- * reduction is the whole feature: no model anywhere takes an mp4, and what
- * looks like "it understands video" is always this done for you somewhere else.
- */
-async function openAttachment(
-  source: string,
-  kind: 'audio' | 'video' | 'text' | 'document',
-  asked: string,
-  // Null when ffmpeg is missing, which is fine: only sound and video need it,
-  // and those are refused before this is called.
-  tools: { ffmpeg: string; ffprobe: string } | null,
-  vision: VisionConfig,
-  provider: ProviderConfig,
-): Promise<{ reaction: string | null; saved: string; held?: boolean }> {
-  const name = path.basename(source);
-  const temporary: string[] = [];
-  if (asked) {
-    // Into the conversation, not her log: they asked a question through the
-    // composer and the answer lands in the conversation, so the "hold on" that
-    // precedes it has to be in the same place. Splitting the two halves of one
-    // exchange across two tabs is worse than either version of the noise.
-    const holdOn = whileLooking();
-    sendToWindows('chat:interject', holdOn);
-    void speak(holdOn);
-  }
-  try {
-    const parts: { description?: string; transcript?: string; text?: string; seconds?: number } = {};
-    if (kind === 'document') {
-      // Its own path rather than a branch of the text one: a PDF can be a scan,
-      // which is a document she genuinely cannot read, and that has to be said
-      // rather than reported as an empty file.
-      const read = await readPdf(source);
-      console.log(`[attach] ${name} — ${read.pages} page(s), ${read.scanned ? 'scanned, no readable text' : read.text.length + ' chars'}`);
-      if (!asked) {
-        heldPicture = { description: (read.scanned ? 'a scanned document, unreadable' : read.text).slice(0, 2000), name, at: Date.now() };
-        return { reaction: null, saved: source, held: true };
-      }
-      const character = getActiveCharacter();
-      const reaction = await ollamaQuip([character.identity, character.style, rightNow()].filter(Boolean).join(' '), pdfPrompt(name, read, asked), provider);
-      return { reaction, saved: source };
-    }
-    if (kind === 'text') {
-      parts.text = readText(source);
-      console.log(`[attach] read ${name} (${parts.text.length} chars)`);
-    } else {
-      if (!tools) throw new Error('that needs ffmpeg, which is not installed');
-      parts.seconds = await duration(source, tools);
-      if (kind === 'video') {
-        const frames = await extractFrames(source, tools);
-        temporary.push(...frames);
-        // All of them in one request rather than one each. Measured at 3373ms
-        // against 1109ms for the same four frames — a 67% saving that costs
-        // nothing, because the model was going to read the same pixels either
-        // way and the round trips were the expensive part.
-        //
-        // It reads better as well as faster. Four separate descriptions are four
-        // stills; asked about them together the model said "the video is a
-        // static image that does not change between frames", which is a fact
-        // about the video that no single frame contains.
-        const sighting = await look(
-          frames.map(frame => readFileSync(frame).toString('base64')),
-          vision, visionEndpoint(provider), modelHeaders(visionEndpoint(provider)), net.fetch,
-          { ask: `These are ${frames.length} frames taken at even intervals across one video, in order. Say plainly what the video shows and what happens across it, in two or three sentences. Describe it as one video, not as separate pictures.` },
-        );
-        parts.description = sighting.description;
-        console.log(`[attach] ${name} — ${frames.length} frames read in one pass`);
-      }
-      const wav = await extractAudio(source, tools, 600);
-      temporary.push(wav);
-      try {
-        parts.transcript = (await transcribeFile(wav)).trim() || undefined;
-        console.log(`[attach] ${name} — ${parts.transcript ? `${parts.transcript.length} chars of speech` : 'no speech in it'}`);
-      } catch (error) {
-        // A silent video is normal and not a failure worth refusing over.
-        console.warn('[attach] could not transcribe:', error instanceof Error ? error.message : error);
-      }
-    }
-
-    if (!asked) {
-      const held = parts.text ?? [parts.description, parts.transcript].filter(Boolean).join(' — ');
-      heldPicture = { description: held.slice(0, 2000), name, at: Date.now() };
-      console.log(`[attach] holding ${name} — nothing asked, so nothing said`);
-      return { reaction: null, saved: source, held: true };
-    }
-    const character = getActiveCharacter();
-    const reaction = await ollamaQuip(
-      [character.identity, character.style, rightNow()].filter(Boolean).join(' '),
-      attachmentPrompt(kind, name, parts, asked),
-      provider,
-    );
-    return { reaction, saved: source };
-  } finally {
-    discard(temporary);
-  }
-}
 
 /** She notices what they have opened. */
 async function reactToActivity(activity: Activity, url = '') {
@@ -2231,6 +2110,246 @@ let currentPlace: string | null = null;
 function photoFolder() {
   const chosen = readVisionConfig(store.get('vision')).folder;
   return chosen || path.join(app.getPath('pictures'), 'Haru');
+}
+
+// --- attachments ------------------------------------------------------------
+
+/**
+ * Staging a file costs a copy and nothing else.
+ *
+ * No model is called here, and that is the point of the whole change. Picking a
+ * file used to run the entire job on the spot — which is why it had to steal the
+ * draft box for a question, and why attaching before you had decided what to ask
+ * was not a thing you could do. Now it copies, names, and gets out of the way.
+ *
+ * The copy is taken before anything else can fail, the same reasoning as the old
+ * path: if the model is down they still wanted the file kept, and the copy is
+ * the part they cannot redo.
+ */
+function stageAttachment(source: string, name = path.basename(source)): Attachment {
+  const kind = classify(name);
+  if (kind === 'unreadable') throw new Error(`${path.extname(name) || 'that'} is not something I can open. Pictures, sound, video, text and data files all work.`);
+  const folder = photoFolder();
+  mkdirSync(folder, { recursive: true });
+  // photoName sanitises and keeps only a basename, so nothing here can be talked
+  // into writing outside the folder by a crafted filename.
+  const saved = path.join(folder, photoName(name, new Date()));
+  copyFileSync(source, saved);
+  return describeStaged(saved, name, kind);
+}
+
+function describeStaged(saved: string, name: string, kind: FileKind): Attachment {
+  if (kind === 'unreadable') throw new Error('that is not something I can open');
+  return {
+    id: randomUUID(),
+    kind,
+    name,
+    saved,
+    // Only the basename travels: the folder is resolved again when the request
+    // arrives, so a URL cannot name a file outside it.
+    url: `haru-photo://local/${encodeURIComponent(path.basename(saved))}`,
+    bytes: statSync(saved).size,
+  };
+}
+
+/**
+ * Several at once, because a message can carry several.
+ *
+ * One bad file does not lose the rest: an unopenable thing among four is
+ * reported and skipped, rather than throwing away three good ones and leaving
+ * the user to work out which was at fault.
+ */
+function stageAll(paths: string[], tools: { ffmpeg: string; ffprobe: string } | null): Attachment[] {
+  const staged: Attachment[] = [];
+  const refused: string[] = [];
+  for (const source of paths) {
+    const kind = classify(source);
+    // Refused here rather than at send time, so it is said while the file is
+    // still in front of them and not after they have typed a question about it.
+    if (kind === 'unreadable') { refused.push(`${path.basename(source)} is not something I can open`); continue; }
+    if ((kind === 'audio' || kind === 'video') && !tools) { refused.push(`${path.basename(source)} needs ffmpeg, which is not installed`); continue; }
+    try {
+      staged.push(stageAttachment(source));
+    } catch (error) {
+      refused.push(`${path.basename(source)} — ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  if (staged.length) console.log(`[attach] staged ${staged.map(file => `${file.name} (${file.kind})`).join(', ')}`);
+  // Only when nothing at all got through, so one bad file among four is a log
+  // line and four bad files is an error the user actually sees.
+  if (!staged.length && refused.length) throw new Error(refused.join('; '));
+  if (refused.length) console.warn(`[attach] skipped: ${refused.join('; ')}`);
+  return staged;
+}
+
+/**
+ * A pasted picture, which has no path at all.
+ *
+ * Ctrl+V is the case that matters most in practice — Win+Shift+S then paste is
+ * how a screenshot actually gets shared, and there is no file on disk anywhere
+ * in that journey. So the bytes cross the bridge exactly once, here, and are on
+ * disk before anything else happens.
+ */
+function stageBytes(name: string, bytes: Uint8Array): Attachment {
+  const folder = photoFolder();
+  mkdirSync(folder, { recursive: true });
+  const saved = path.join(folder, photoName(name, new Date()));
+  writeFileSync(saved, Buffer.from(bytes));
+  return describeStaged(saved, name, classify(name));
+}
+
+/**
+ * Removing a chip before sending takes the copy with it.
+ *
+ * Only inside the folder we put it in, checked rather than trusted: this deletes
+ * a file at a path handed over by the window, and the window is the one part of
+ * this app that renders somebody else's content.
+ */
+function discardStaged(attachment: { saved?: string }) {
+  const target = path.resolve(String(attachment?.saved ?? ''));
+  const folder = path.resolve(photoFolder());
+  if (!target.startsWith(folder + path.sep)) {
+    console.warn('[attach] refused to discard a file outside the pictures folder');
+    return;
+  }
+  try { rmSync(target, { force: true }); } catch (error) {
+    console.warn('[attach] could not discard the copy:', error instanceof Error ? error.message : error);
+  }
+}
+
+/**
+ * How wide a picture is allowed to be on its way to a model.
+ *
+ * A 4K screenshot is several megabytes of base64 and a real amount of money per
+ * turn, and no model reads the extra pixels — they are downscaled at the other
+ * end regardless. 1536 is enough for small print in a screenshot to survive,
+ * which is the demanding case.
+ */
+const SEND_WIDTH = 1536;
+
+function imageForSending(file: string): string {
+  const bytes = readFileSync(file);
+  const picture = nativeImage.createFromPath(file);
+  // Chromium decodes png/jpg/webp/gif/bmp and not much else — heic, avif and
+  // some tiffs come back empty. Sending the original is better than sending
+  // nothing, and the provider may well read it.
+  if (picture.isEmpty()) return bytes.toString('base64');
+  if (picture.getSize().width <= SEND_WIDTH) return bytes.toString('base64');
+  return picture.resize({ width: SEND_WIDTH, quality: 'good' }).toPNG().toString('base64');
+}
+
+/**
+ * Only files we put there ourselves.
+ *
+ * Attachments arrive from the window, which means these paths are asked for by
+ * the renderer and then read off the disk here — and the renderer is the one
+ * part of this app that displays content somebody else wrote. A path is not
+ * something to take on trust just because it came from our own window: a bad one
+ * would have this reading any file on the machine and posting it to a model.
+ *
+ * So the shape is re-read and the location is checked, rather than assumed from
+ * the fact that we wrote it a minute ago.
+ */
+function ourFiles(attachments: Attachment[] | undefined): Attachment[] {
+  if (!attachments?.length) return [];
+  const folder = path.resolve(photoFolder());
+  return readAttachments(attachments).filter(file => {
+    if (path.resolve(file.saved).startsWith(folder + path.sep)) return true;
+    console.warn(`[attach] ignoring ${file.name} — it is not in the pictures folder`);
+    return false;
+  });
+}
+
+/**
+ * Whatever had to be done to a file to turn it into words.
+ *
+ * Cached by attachment id, because this is the expensive half and a follow-up
+ * question about the same video must not transcribe it a second time. In memory
+ * only: the conversation is wiped daily, so none of it is worth a file.
+ */
+const openedFiles = new Map<string, string>();
+
+async function readAttachment(attachment: Attachment, vision: VisionConfig, provider: ProviderConfig): Promise<string> {
+  const already = openedFiles.get(attachment.id);
+  if (already !== undefined) return already;
+  const opened = await openFile(attachment, vision, provider);
+  openedFiles.set(attachment.id, opened);
+  return opened;
+}
+
+/**
+ * A file reduced to something a model can read.
+ *
+ * The reduction is the whole feature and it is unchanged — frames, a transcript,
+ * plain text. What has gone is the half that used to answer: a one-shot quip
+ * with no conversation, no tools and no memory behind it. The chat answers now.
+ */
+async function openFile(attachment: Attachment, vision: VisionConfig, provider: ProviderConfig): Promise<string> {
+  const source = attachment.saved;
+  const name = attachment.name;
+  const tools = findFfmpeg();
+  const temporary: string[] = [];
+  try {
+    if (attachment.kind === 'document') {
+      // Its own path rather than a branch of the text one: a PDF can be a scan,
+      // which is a document she genuinely cannot read, and that has to be said
+      // rather than reported as an empty file.
+      const read = await readPdf(source);
+      console.log(`[attach] ${name} — ${read.pages} page(s), ${read.scanned ? 'scanned, no readable text' : read.text.length + ' chars'}`);
+      return read.scanned ? '' : read.text;
+    }
+    if (attachment.kind === 'text') {
+      const text = readText(source);
+      console.log(`[attach] read ${name} (${text.length} chars)`);
+      return text;
+    }
+    if (attachment.kind === 'image') {
+      // Only ever reached when she cannot be sent the picture itself — see
+      // eyesFor. A far fuller read than the glance prompt, because this text is
+      // now the only thing standing in for the image.
+      const sighting = await look(imageForSending(source), vision, visionEndpoint(provider), modelHeaders(visionEndpoint(provider)), net.fetch, { ask: READ_IT_ALL_PROMPT });
+      console.log(`[attach] ${vision.model} read ${name} into ${sighting.description.length} chars`);
+      return sighting.description;
+    }
+    if (!tools) throw new Error('that needs ffmpeg, which is not installed');
+    // Sound and video are the one case with a real wait in it — pulling frames
+    // and transcribing ten minutes of audio takes tens of seconds. A picture
+    // needs nothing said, because the composer is already showing that she is
+    // thinking; half a minute of that on a video reads as broken rather than
+    // slow. Said once per file: this whole function is cached by attachment.
+    const holdOn = whileLooking();
+    sendToWindows('chat:interject', holdOn);
+    void speak(holdOn);
+    const parts: string[] = [];
+    if (attachment.kind === 'video') {
+      const frames = await extractFrames(source, tools);
+      temporary.push(...frames);
+      // All of them in one request rather than one each. Measured at 3373ms
+      // against 1109ms for the same four frames, and it reads better too: asked
+      // about them together the model can say the video does not change between
+      // frames, which is a fact about the video that no single frame contains.
+      const sighting = await look(
+        frames.map(frame => readFileSync(frame).toString('base64')),
+        vision, visionEndpoint(provider), modelHeaders(visionEndpoint(provider)), net.fetch,
+        { ask: `These are ${frames.length} frames taken at even intervals across one video, in order. Say plainly what the video shows and what happens across it, in two or three sentences. Describe it as one video, not as separate pictures.` },
+      );
+      parts.push(sighting.description);
+      console.log(`[attach] ${name} — ${frames.length} frames read in one pass`);
+    }
+    const wav = await extractAudio(source, tools, 600);
+    temporary.push(wav);
+    try {
+      const said = (await transcribeFile(wav)).trim();
+      if (said) parts.push(`What is said in it: ${said}`);
+      console.log(`[attach] ${name} — ${said ? `${said.length} chars of speech` : 'no speech in it'}`);
+    } catch (error) {
+      // A silent video is normal and not a failure worth refusing over.
+      console.warn('[attach] could not transcribe:', error instanceof Error ? error.message : error);
+    }
+    return parts.join('\n');
+  } finally {
+    discard(temporary);
+  }
 }
 
 let currentActivity: Activity | null = null;
@@ -2902,7 +3021,11 @@ function trimEndpoint(endpoint: string) {
 }
 
 type ToolCall = { function?: { name?: string; arguments?: unknown } };
-type OllamaMessage = { role: string; content?: string; tool_calls?: ToolCall[]; tool_name?: string };
+// images is base64, hung off the message the way Ollama wants it. Declared here
+// rather than left to arrive implicitly through a spread, because provider.ts
+// has to translate it for the OpenAI dialect and a field nothing names is a
+// field the next person deletes.
+type OllamaMessage = { role: string; content?: string; tool_calls?: ToolCall[]; tool_name?: string; images?: string[] };
 
 const MAX_TOOL_ROUNDS = 4;
 // Ollama's default context reserves a KV cache big enough to push a 14B model
@@ -3475,7 +3598,6 @@ function chatSystemPrompt({ irritation, ego, goodnight, shout, latestMessage, fr
     // agenda is: asked what they are in the middle of, a model that would have
     // to choose to check simply answers instead.
     aniListSummary(),
-    heldPicturePrompt(heldPicture, Date.now()),
     journalPrompt(readJournalConfig(store.get('journal.config')), getJournal(), localDateKey(now)),
     // What they jotted down on their phone while the day was happening. This is
     // the whole reason for taking them: back at the desk she can ask about the
@@ -5058,25 +5180,101 @@ function noteTheyAccounted(said: string) {
  * escalating sends the history with it. A key pasted three turns ago is still in
  * what would be posted.
  */
-function brainFor(message: string, local: ProviderConfig, conversation: { role: string; content: string }[] = []): { config: ProviderConfig; escalated: boolean; because: string } {
+type Brain = { config: ProviderConfig; escalated: boolean; because: string; sees: boolean };
+
+/**
+ * `pictures` forces the question out to the hosted model, whatever decide() says.
+ *
+ * Not a preference — the local default cannot see at all. qwen2.5 handed an
+ * image has nothing to answer from, so a picture that stays home is a picture
+ * nobody looks at, which is the whole complaint this change exists to fix.
+ *
+ * `sees` on the way back is what tells the caller whether to send the image or
+ * to have it read into words first. It is returned rather than inferred, because
+ * every reason for refusing below is a reason the picture must not travel, and
+ * working that out twice in two places is how the two answers drift apart.
+ */
+function brainFor(
+  message: string,
+  local: ProviderConfig,
+  conversation: { role: string; content: string }[] = [],
+  { pictures = false } = {},
+): Brain {
   const setting = readEscalateConfig(store.get('escalate'));
   const away = store.get('escalate.provider') as ProviderConfig | undefined;
-  if (!setting.enabled || !away?.model || !isOpenAIShaped(away.provider)) return { config: local, escalated: false, because: 'no second model set up' };
+  const hosted = Boolean(away?.model && isOpenAIShaped(away.provider));
+  // Escalation being switched off is a preference about cost on ordinary
+  // questions. A picture is not an ordinary question: there is no local answer
+  // to fall back to, only a worse one. So only the absence of a second model
+  // stops this, not the setting.
+  if (!hosted || (!setting.enabled && !pictures)) return { config: local, escalated: false, because: 'no second model set up', sees: false };
 
-  const verdict = decide(message, setting);
-  if (!verdict.escalate) return { config: local, escalated: false, because: verdict.because };
+  const verdict = pictures ? { escalate: true, because: 'there is a picture in it' } : decide(message, setting);
+  if (!verdict.escalate) return { config: local, escalated: false, because: verdict.because, sees: false };
 
   // pageWasRead is already true whenever a stranger's page is in the turn, and a
   // page she fetched is not ours to forward either.
+  //
+  // An attachment is a file from this machine and would trip that flag by the
+  // same reasoning — which would make every attached picture unsendable and this
+  // whole path unreachable. Attaching something is a deliberate act of handing it
+  // over, which reading a stranger's web page is not, so the flag is left to the
+  // page-reading case and the content scan below still applies in full.
   const allowed = conversationMayLeave([...conversation, { role: 'user', content: message }], pageWasRead);
   if (!allowed.safe) {
     console.log(`[router] keeping this one local — ${allowed.because}`);
-    return { config: local, escalated: false, because: `stays here: ${allowed.because}` };
+    return { config: local, escalated: false, because: `stays here: ${allowed.because}`, sees: false };
   }
-  return { config: { ...away, temperature: local.temperature }, escalated: true, because: verdict.because };
+  return { config: { ...away!, temperature: local.temperature }, escalated: true, because: verdict.because, sees: true };
 }
 
-async function ollamaChat(messages: { role: string; content: string; at?: string }[], config: ProviderConfig, { hands = true, brief = false, choices = false }: { hands?: boolean; brief?: boolean; choices?: boolean } = {}) {
+/**
+ * The attachments folded into the messages that carry them.
+ *
+ * A picture she is being sent needs nothing done to it beyond being made small
+ * enough to be worth sending. Everything else — and a picture she cannot be sent
+ * — has to become words first, which is the expensive half and the cached one.
+ *
+ * Failures are per-file and never lose the turn: a video whose transcription
+ * fell over still leaves her the question and an honest note that she could not
+ * open it, which is a far better answer than an error where the reply should be.
+ */
+async function withAttachments<T extends { role: string; content: string; at?: string; attachments?: Attachment[] }>(
+  messages: T[],
+  inPlay: Map<number, Attachment[]>,
+  sees: boolean,
+  vision: VisionConfig,
+  provider: ProviderConfig,
+): Promise<(T & { images?: string[] })[]> {
+  if (!inPlay.size) return messages;
+  const out: (T & { images?: string[] })[] = [...messages];
+  for (const [at, attachments] of inPlay) {
+    const opened: Opened[] = [];
+    const images: string[] = [];
+    for (const attachment of attachments) {
+      try {
+        if (attachment.kind === 'image' && sees) {
+          images.push(imageForSending(attachment.saved));
+          opened.push({ attachment });
+          continue;
+        }
+        opened.push({ attachment, readable: await readAttachment(attachment, vision, provider) });
+      } catch (error) {
+        console.warn(`[attach] could not open ${attachment.name}:`, error instanceof Error ? error.message : error);
+        opened.push({ attachment, readable: '' });
+      }
+    }
+    const note = describeAttached(opened);
+    out[at] = {
+      ...messages[at],
+      content: [messages[at].content, note].filter(Boolean).join('\n\n'),
+      ...(images.length ? { images } : {}),
+    };
+  }
+  return out;
+}
+
+async function ollamaChat(messages: { role: string; content: string; at?: string; attachments?: Attachment[] }[], config: ProviderConfig, { hands = true, brief = false, choices = false }: { hands?: boolean; brief?: boolean; choices?: boolean } = {}) {
   const latest = messages.at(-1)?.content ?? '';
   // They are talking to her, so the silence she was waiting out is over.
   noteUserSpoke();
@@ -5117,13 +5315,35 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // Same prompt, same tools, same memory — with one sentence added when the
   // answer has to fit in a caption rather than a chat window.
   const system = chatSystemPrompt({ ...mood, latestMessage: latest, fresh });
-  const conversation: OllamaMessage[] = [{ role: 'system', content: brief ? `${system} ${BREVITY}` : system }, ...markTimeGaps(withoutStaleDenials(messages, hasItems))];
+  // What she can still see. Not only this message: a picture has to ride along
+  // again on the next turn or "what is in week three" cannot be answered, and
+  // attachmentsInPlay is where the bound on doing that lives.
+  const vetted = messages.map(message => (message.attachments?.length ? { ...message, attachments: ourFiles(message.attachments) } : message));
+  const inPlay = attachmentsInPlay(vetted, Date.now());
+  const carried = [...inPlay.values()].flat();
+  const pictures = carried.some(file => file.kind === 'image');
   // Chosen once for the whole turn, tool rounds included: swapping models
   // half-way through a tool loop would hand one model's call to another to
   // answer, and the two do not agree on how a call is even identified.
-  const brain = brainFor(latest, config, messages);
+  const brain = brainFor(latest, config, messages, { pictures });
   if (brain.escalated) console.log(`[ai] sent out to ${brain.config.model} — ${brain.because}`);
   config = brain.config;
+  const vision = readVisionConfig(store.get('vision'));
+  // Said out loud, once, when a picture has just been attached and cannot be
+  // sent. She still answers — from a written-out reading of it — but the answer
+  // is measurably thinner, and silently thinner is the worst version of that.
+  if (pictures && !brain.sees && vetted.at(-1)?.attachments?.some(file => file.kind === 'image')) {
+    console.log(`[attach] reading the picture here instead of sending it — ${brain.because}`);
+    sendToWindows('ai:fellBack', brain.because.startsWith('stays here')
+      ? `That picture is staying on this machine — ${brain.because.replace(/^stays here: /, '')}. She is reading it with the local model instead, which is less sharp.`
+      : 'No second model is set up, so she is reading that picture with the local model rather than looking at it properly. Set one up in Setup → Where she thinks for a better answer.');
+  }
+  // Reading a file is the slow part, so it happens once the brain is settled and
+  // its result is cached — a follow-up about the same video must not transcribe
+  // it a second time.
+  const withFiles = await withAttachments(vetted, inPlay, brain.sees, vision, config);
+  if (carried.length) console.log(`[attach] ${carried.length} in play — ${carried.map(file => `${file.name}${file.kind === 'image' && brain.sees ? ' (sent)' : ' (read)'}`).join(', ')}`);
+  const conversation: OllamaMessage[] = [{ role: 'system', content: brief ? `${system} ${BREVITY}` : system }, ...markTimeGaps(withoutStaleDenials(withFiles, hasItems))];
   // Once a stranger's page is in the conversation, she finishes this turn with
   // her mouth and not her hands. Told firmly that a page cannot give it orders, a
   // 14B still obeyed one in four of them — so the guarantee cannot rest on the
@@ -5939,10 +6159,41 @@ app.whenReady().then(() => {
       return new Response('Model file not found on disk', { status: 404 });
     }
   });
+  /**
+   * An attached picture, on its way to the window.
+   *
+   * The same shape as haru-model above and the same escape check, for the same
+   * reason: this resolves a path out of a URL the renderer asked for. The root
+   * is read fresh on every request rather than captured, so pointing the folder
+   * somewhere else in setup does not leave a handler serving the old one.
+   *
+   * Only a basename is ever in the URL, and resolve + startsWith is what makes
+   * that true rather than merely intended.
+   */
+  protocol.handle('haru-photo', async request => {
+    const root = path.resolve(photoFolder());
+    // The whole path, not everything after the first segment. haru-model drops
+    // its first segment because that one is a model id — this scheme has no id,
+    // only a filename, so the same slice threw the name away and left every
+    // thumbnail resolving to the folder itself and failing the check below.
+    const name = decodeURIComponent(new URL(request.url).pathname).replace(/^\/+/, '');
+    const target = path.resolve(root, `./${name}`);
+    if (!name || !target.startsWith(root + path.sep)) {
+      console.error(`[haru-photo] refused ${request.url} — resolves outside the pictures folder`);
+      return new Response('Not available', { status: 404 });
+    }
+    try {
+      return await net.fetch(pathToFileURL(target).toString());
+    } catch (error) {
+      // A thumbnail for a file that has been deleted or moved. Worth a line, not
+      // worth an alarm: the conversation still holds what was said about it.
+      console.warn(`[haru-photo] could not read ${path.basename(target)}:`, error instanceof Error ? error.message : error);
+      return new Response('Not on disk', { status: 404 });
+    }
+  });
   // Registered once, at startup. It was inside the protocol handler above, so it
   // never ran until a model file was requested and then threw on the second
   // request — ipcMain.handle refuses a duplicate channel.
-  setupSonarrHandlers();
   nativeTheme.themeSource = 'dark';
   ipcMain.handle('settings:get', (_e, key) => store.get(key));
   ipcMain.handle('settings:set', (_e, key, value) => store.set(key, value));
@@ -6248,18 +6499,23 @@ app.whenReady().then(() => {
   });
   ipcMain.handle('vision:openFolder', () => { void shell.openPath(photoFolder()); });
   /**
-   * Show her a picture. Returns her reaction so the renderer can put it in the
-   * conversation; the copy and the memory happen here.
+   * Staging, which is all that picking a file does now.
+   *
+   * The old handler here opened a picker and then ran the whole job on the spot:
+   * it took whatever was in the draft box as the question, called a vision model
+   * and posted an answer that never went through the conversation. That is why
+   * you had to type before choosing a file, and why the answer knew nothing
+   * about anything else you had said.
+   *
+   * Nothing is read here and no model is called. The file is copied, named, and
+   * handed back as a chip for the composer; the reading happens on Send, in the
+   * ordinary chat path, where she has her character and her memory to hand.
    */
-  ipcMain.handle('vision:show', async (_e, note: string, only: 'picture' | 'any' = 'any') => {
-    const config = readVisionConfig(store.get('vision'));
-    if (!config.enabled) throw new Error('Looking at pictures is switched off in setup.');
-    const provider = store.get('ai.config') as ProviderConfig | undefined;
-    if (!provider?.model) throw new Error('No model is configured.');
+  ipcMain.handle('attachments:pick', async (_e, only: 'picture' | 'any' = 'any') => {
     const tools = findFfmpeg();
     const picked = await dialog.showOpenDialog({
       title: only === 'picture' ? 'Show Haru a picture' : 'Give Haru a file',
-      properties: ['openFile'],
+      properties: ['openFile', 'multiSelections'],
       // Sound and video only when ffmpeg is there to open them: offering a file
       // type that then fails is worse than not offering it.
       filters: only === 'picture' ? [{ name: 'Pictures', extensions: OPENABLE.image }] : [
@@ -6271,75 +6527,20 @@ app.whenReady().then(() => {
         { name: 'All files', extensions: ['*'] },
       ],
     });
-    if (picked.canceled || !picked.filePaths.length) return null;
-    const source = picked.filePaths[0];
-    const kind = classify(source);
-    if (kind === 'unreadable') throw new Error(`${path.extname(source) || 'that'} is not something I can open. Pictures, sound, video, text and data files all work.`);
-    if ((kind === 'audio' || kind === 'video') && !tools) throw new Error('Opening sound and video needs ffmpeg, which is not installed.');
-    // Everything but a picture goes through the wider intake, which pulls the
-    // file apart into things a model can actually read.
-    if (kind !== 'image') return openAttachment(source, kind, note?.trim() ?? '', tools, config, provider);
-
-    // Copied first, before anything can fail. If the model is down they still
-    // wanted the picture kept, and the copy is the part they cannot redo.
-    const folder = photoFolder();
-    mkdirSync(folder, { recursive: true });
-    const saved = path.join(folder, photoName(source, new Date()));
-    copyFileSync(source, saved);
-
-    const asked = note?.trim() ?? '';
-    // Only when they actually asked something. Sending a photograph with nothing
-    // attached means "look at this", not "tell me what you make of this", and
-    // announcing that she is looking is already half a reaction.
-    if (asked) {
-      // sendToWindows rather than interject(): interject is rate-limited for
-      // things she says off her own back, and this answers a button they just
-      // pressed — the one case where staying quiet is wrong. It stays in the
-      // conversation for the same reason, since the reaction it promises does.
-      const holdOn = whileLooking();
-      sendToWindows('chat:interject', holdOn);
-      void speak(holdOn);
-    }
-
-    const bytes = readFileSync(source);
-    const sighting = await lookAtPicture(bytes.toString('base64'), config, provider);
-    // The description is logged, the picture is not, and neither is where it
-    // came from — the same rule as everything else she is shown.
-    console.log(`[vision] looked at ${path.basename(saved)} (${(bytes.length / 1024 | 0)}KB) -> ${sighting.description.length} chars`);
-
-    // Nothing was asked, so nothing is said. She keeps the picture in mind and
-    // waits, which is what showing somebody a photograph normally earns.
-    if (!asked) {
-      heldPicture = { description: sighting.description, name: path.basename(saved), at: Date.now() };
-      console.log(`[vision] holding ${heldPicture.name} — nothing asked, so nothing said`);
-      return { reaction: null, saved, held: true };
-    }
-
-    const character = getActiveCharacter();
-    // One call, not two. What she says and what is worth keeping both depend on
-    // the same description, so asking twice was a round trip spent re-sending
-    // something the model had already been given.
-    const answered = await ollamaQuip(
-      [character.identity, character.style, rightNow(), summariseFollowing(getFollowing(), Date.now()), assumeItIsTheirs(getFollowing(), Date.now())].filter(Boolean).join(' '),
-      reactAndRememberPrompt(sighting, asked),
-      provider,
-    );
-    const { reaction, fact } = splitReaction(answered);
-    // Still held afterwards: having answered one question about a picture does
-    // not mean the next one is about something else.
-    heldPicture = { description: sighting.description, name: path.basename(saved), at: Date.now() };
-
-    // Still a separate judgement, just no longer a separate request: most
-    // pictures are a joke, and a memory store full of memes is one nobody can
-    // find anything in.
-    if (fact) {
-      addMemory(fact, 'fact');
-      console.log(`[vision] remembered from the picture: "${fact}"`);
-    }
-
-    void speak(reaction, classifyEmotion(reaction, provider));
-    return { reaction, saved };
+    if (picked.canceled || !picked.filePaths.length) return [];
+    return stageAll(picked.filePaths, tools);
   });
+  /** Dropped onto the window. Same staging, no dialog. */
+  ipcMain.handle('attachments:stageFiles', (_e, paths: string[]) => stageAll(Array.isArray(paths) ? paths : [], findFfmpeg()));
+  /** Pasted. There is no file on disk anywhere in that journey — see stageBytes. */
+  ipcMain.handle('attachments:stageBytes', (_e, name: string, bytes: Uint8Array) => {
+    const staged = stageBytes(String(name || 'pasted.png'), bytes);
+    console.log(`[attach] staged ${staged.name} from the clipboard (${(staged.bytes / 1024 | 0)}KB)`);
+    return staged;
+  });
+  /** Taken off the composer before it was ever sent. */
+  ipcMain.handle('attachments:discard', (_e, attachment: Attachment) => { discardStaged(attachment); });
+
   ipcMain.handle('gaming:get', () => readGamingConfig(store.get('gaming')));
   ipcMain.handle('gaming:set', (_e, config: GamingConfig) => {
     const saved = readGamingConfig(config);

@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, webUtils } from 'electron';
 
 contextBridge.exposeInMainWorld('electron', {
   // Your existing stuff
@@ -20,6 +20,8 @@ type Message = { id: string; role: 'user' | 'assistant'; content: string; time: 
 // belonged to the conversation, and giving it that shape is what let it be
 // appended to one. See electron/asides.ts.
 type Aside = { id: string; at: string; day: string; source: string; text: string };
+// A file that came with a message. A path rather than bytes — see electron/attachments.ts.
+type Attachment = { id: string; kind: string; name: string; saved: string; url: string; bytes: number };
 type ProviderConfig = { provider: string; model: string; endpoint: string; temperature: number };
 type KeptItem = { id: string; title: string; date: string; time?: string; kind: 'task' | 'event'; done: boolean; heardAbout?: string; googleEventId?: string; googleTaskId?: string };
 type GoogleStatus = { hasCredentials: boolean; connected: boolean; email?: string; lastSync?: string; lastError?: string; tasksGranted?: boolean };
@@ -111,8 +113,20 @@ contextBridge.exposeInMainWorld('haru', {
   vision: {
     get: () => ipcRenderer.invoke('vision:get') as Promise<VisionConfig>,
     set: (config: VisionConfig) => ipcRenderer.invoke('vision:set', config) as Promise<VisionConfig>,
-    show: (note: string, only: 'picture' | 'any' = 'any') => ipcRenderer.invoke('vision:show', note, only) as Promise<{ reaction: string | null; saved: string; held?: boolean } | null>,
     openFolder: () => ipcRenderer.invoke('vision:openFolder') as Promise<void>,
+  },
+  // Files staged on a message rather than sent as an errand of their own. None
+  // of these calls a model: staging is a copy and nothing else, and the reading
+  // happens on Send. See electron/attachments.ts.
+  attachments: {
+    pick: (only: 'picture' | 'any' = 'any') => ipcRenderer.invoke('attachments:pick', only) as Promise<Attachment[]>,
+    stageFiles: (paths: string[]) => ipcRenderer.invoke('attachments:stageFiles', paths) as Promise<Attachment[]>,
+    stageBytes: (name: string, bytes: Uint8Array) => ipcRenderer.invoke('attachments:stageBytes', name, bytes) as Promise<Attachment>,
+    discard: (attachment: Attachment) => ipcRenderer.invoke('attachments:discard', attachment) as Promise<void>,
+    // What a dropped File actually is on disk. File.path was removed in Electron
+    // 32 and there is no replacement reachable from the renderer — this is the
+    // only way across, and it has to be done here where the electron module is.
+    pathFor: (file: File) => { try { return webUtils.getPathForFile(file); } catch { return ''; } },
   },
   gaming: {
     get: () => ipcRenderer.invoke('gaming:get') as Promise<GamingConfig>,

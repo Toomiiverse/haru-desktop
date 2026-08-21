@@ -36,11 +36,19 @@ export const DEFAULT_ENDPOINTS: Record<Provider, string> = {
 };
 
 export type ToolCall = { id?: string; function?: { name?: string; arguments?: unknown } };
-export type ChatMessage = { role: string; content?: string; tool_calls?: ToolCall[]; tool_name?: string };
+export type ChatMessage = {
+  role: string; content?: string; tool_calls?: ToolCall[]; tool_name?: string;
+  /** Base64 pictures travelling with this message, in Ollama's shape. See toOpenAIMessages. */
+  images?: string[];
+};
+
+/** A picture, in the shape OpenAI's chat endpoint wants it. */
+type ImagePart = { type: 'image_url'; image_url: { url: string } };
+type TextPart = { type: 'text'; text: string };
 
 type OpenAIMessage = {
   role: string;
-  content?: string | null;
+  content?: string | null | (TextPart | ImagePart)[];
   tool_calls?: { id: string; type: 'function'; function: { name: string; arguments: string } }[];
   tool_call_id?: string;
 };
@@ -85,6 +93,27 @@ export function toOpenAIMessages(conversation: ChatMessage[]): OpenAIMessage[] {
       });
       continue;
     }
+    // A message carrying pictures. Ollama hangs them off the message as base64 in
+    // an `images` array; OpenAI wants the content field to stop being a string
+    // and become a list of parts instead. This is the only real difference
+    // between the two dialects on this, and the whole reason an attached image
+    // could not reach a hosted model before — everything upstream is written
+    // against Ollama's shape, and this line used to flatten the pictures away.
+    if (message.images?.length) {
+      out.push({
+        role: message.role,
+        content: [
+          ...(message.content ? [{ type: 'text' as const, text: message.content }] : []),
+          ...message.images.map(image => ({
+            type: 'image_url' as const,
+            // Already a data: URL if the caller had a mime type worth keeping;
+            // otherwise base64, which is what every local path produces.
+            image_url: { url: image.startsWith('data:') ? image : `data:image/png;base64,${image}` },
+          })),
+        ],
+      });
+      continue;
+    }
     out.push({ role: message.role, content: message.content ?? '' });
   }
   return out;
@@ -122,8 +151,17 @@ export function toOpenAIBody(options: {
   };
 }
 
+/**
+ * What comes back, which is not the same shape as what goes out.
+ *
+ * Only a request has parts: a picture is something you send, never something the
+ * model answers with. Sharing one type for both directions meant the reply
+ * appeared able to hold an image, which nothing downstream could have read.
+ */
+type OpenAIReplyMessage = Omit<OpenAIMessage, 'content'> & { content?: string | null };
+
 type OpenAIReply = {
-  choices?: { message?: OpenAIMessage; finish_reason?: string }[];
+  choices?: { message?: OpenAIReplyMessage; finish_reason?: string }[];
   error?: { message?: string; code?: string } | string;
 };
 

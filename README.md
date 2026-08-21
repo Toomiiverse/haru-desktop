@@ -114,6 +114,8 @@ window on the server — over remote desktop, or at the machine itself.
 ## Architecture
 
 - `electron/`: native window lifecycle and secure IPC bridge.
+- `electron/attachments.ts`: files that travel with a message — staging, what she can
+  still see, and how a file that is not a picture becomes words.
 - `electron/asides.ts`: everything she says without being spoken to — kept in its own
   log rather than the transcript, and fed back to her as a short-lived note.
 - `electron/voice.ts`: text-to-speech boundary — prepares the text and adapts to each engine's HTTP contract.
@@ -124,6 +126,22 @@ window on the server — over remote desktop, or at the machine itself.
 - `src/components.tsx`: UI components.
 - `src/services/ai.ts`: provider boundary; replace the demonstration provider with Ollama, OpenAI, or xAI adapters.
 - `src/types.ts`: shared renderer data contracts.
+
+Attaching a file does not send it. The paperclip, a drag onto the conversation and Ctrl+V
+all do the same thing: copy the file, put a chip in the box, and stop. Nothing is read and
+no model is called until you press Send, so you can pick the file first and decide what to
+ask afterwards, and several can ride on one message.
+
+On Send the attachment travels *with* the message through the ordinary chat path, which
+already has her character, the conversation, her tools and her memory. A picture goes to
+the hosted model as an image — she is looking at it, not at a caption of it — and rides
+along on later turns too, for three attachment-bearing messages or half an hour, whichever
+runs out first. That bound is the cost: every attached picture is billed and leaves the
+machine. With no hosted model set up, or with something secret-shaped in the conversation,
+it stays here and is read into words by the local vision model instead, and she says so.
+
+Screenshots and the screen she watches are untouched by all of that. They never leave the
+machine.
 
 Her unprompted remarks — about the screen, a screenshot, the tab you just opened, the
 list she is chasing you about — do not go in the chat. They go to the **Asides** tab, and

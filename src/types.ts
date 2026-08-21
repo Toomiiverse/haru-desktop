@@ -10,7 +10,20 @@ export type Reaction = 'up' | 'down';
  * context be told from new. Optional: everything written before this existed
  * has none, and guessing one would be worse than the flatness it fixes.
  */
+/**
+ * A file that came with a message, rather than instead of one.
+ *
+ * It carries a path, not bytes: the copy is kept on disk and read again at send
+ * time, so nothing large crosses the bridge and nothing large lands in the
+ * stored transcript — and an attachment still shows its thumbnail after a
+ * restart. See electron/attachments.ts.
+ */
+export type AttachmentKind = 'image' | 'audio' | 'video' | 'text' | 'document';
+export interface Attachment { id: string; kind: AttachmentKind; name: string; saved: string; url: string; bytes: number; }
+
 export interface Message { id: string; role: Role; content: string; time: string; at?: string;
+  /** What was attached to this message. Sent with it, and shown above the bubble. */
+  attachments?: Attachment[];
   /** Set when this message arrived by voice, holding what the speech server
    *  actually returned. Kept so a correction can be taught against the exact
    *  text that was misheard rather than against whatever was edited afterwards. */

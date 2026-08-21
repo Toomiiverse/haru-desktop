@@ -2,13 +2,13 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { AsidesPage, JournalDrawer, CharacterDrawer, Composer, Kept, MessageBubble, ProfileDrawer, SettingsDrawer, Suggestion, Topbar, WardrobeDrawer } from './components';
 import { getProvider, testConnection } from './services/ai';
 import { randomGloat, randomRetort } from './retorts';
-import type { KeptItem, Message, ProviderConfig, Reaction } from './types';
+import type { Attachment, KeptItem, Message, ProviderConfig, Reaction } from './types';
 
 const greeting: Message = { id: 'greeting', role: 'assistant', time: 'now', content: "Hey! About time you showed up. We’ve got work to do. Move it!" };
 const defaultProviderConfig: ProviderConfig = { provider: 'ollama', model: 'qwen2.5:14b', endpoint: 'http://localhost:11434', temperature: 0.7 };
 
 export default function App() {
-  const [messages, setMessages] = useState<Message[]>([]); const [hydrated, setHydrated] = useState(false); const [kept, setKept] = useState<KeptItem[]>([]); const [sending, setSending] = useState(false); const [page, setPage] = useState<'chat'|'asides'|'character'|'profile'|'settings'|'journal'>('chat'); const [wardrobeOpen, setWardrobeOpen] = useState(false); const [live2dModel, setLive2dModel] = useState<{name: string; path: string; url: string} | null>(null); const [importing, setImporting] = useState(false); const [providerConfig, setProviderConfig] = useState<ProviderConfig>(defaultProviderConfig); const [replyingTo, setReplyingTo] = useState<{ id: string; excerpt: string } | null>(null);
+  const [messages, setMessages] = useState<Message[]>([]); const [hydrated, setHydrated] = useState(false); const [kept, setKept] = useState<KeptItem[]>([]); const [sending, setSending] = useState(false); const [page, setPage] = useState<'chat'|'asides'|'character'|'profile'|'settings'|'journal'>('chat'); const [wardrobeOpen, setWardrobeOpen] = useState(false); const [live2dModel, setLive2dModel] = useState<{name: string; path: string; url: string} | null>(null); const [importing, setImporting] = useState(false); const [providerConfig, setProviderConfig] = useState<ProviderConfig>(defaultProviderConfig); const [replyingTo, setReplyingTo] = useState<{ id: string; excerpt: string } | null>(null); const [staged, setStaged] = useState<Attachment[]>([]);
   useEffect(() => { window.haru?.live2d.get().then(model => { if (model) setLive2dModel(model); }); }, []);
   useEffect(() => { window.haru?.settings.get('ai.config').then(saved => { if (saved) setProviderConfig(current => ({ ...current, ...(saved as Partial<ProviderConfig>) })); }); }, []);
   // Kept items are owned by the main process — the chat tool loop writes to them
@@ -124,12 +124,46 @@ export default function App() {
     setMessages(current => [...current, { id: crypto.randomUUID(), role: 'assistant' as const, content: content || fallback, time: 'now', at: new Date().toISOString() }]);
   }
 
+  const stage = useCallback((files: Attachment[]) => { if (files.length) setStaged(current => [...current, ...files]); }, []);
+  // Taking a file back off the composer deletes the copy that was made for it.
+  // Only before sending: once it is in the conversation the picture is part of
+  // the record, and the thumbnail has to keep working.
+  const unstage = useCallback((file: Attachment) => {
+    setStaged(current => current.filter(other => other.id !== file.id));
+    void window.haru?.attachments.discard(file);
+  }, []);
+
+  /**
+   * Dropping a file anywhere on the chat.
+   *
+   * The path has to be asked for rather than read: File.path was removed in
+   * Electron 32, and `webUtils.getPathForFile` — reachable only from preload —
+   * is what replaced it. A drop from somewhere with no file behind it (a browser
+   * image, say) yields an empty path and is skipped rather than half-staged.
+   */
+  const [dragging, setDragging] = useState(false);
+  const onDrop = useCallback(async (event: React.DragEvent) => {
+    event.preventDefault();
+    setDragging(false);
+    if (!window.haru) return;
+    const paths = [...event.dataTransfer.files].map(file => window.haru!.attachments.pathFor(file)).filter(Boolean);
+    if (!paths.length) return;
+    try { stage(await window.haru.attachments.stageFiles(paths)); } catch (error) {
+      console.warn('could not attach what was dropped', error);
+    }
+  }, [stage]);
+
   async function send(content: string, heard?: string) {
     const epoch = conversation.current;
     const target = replyingTo;
-    const user: Message = { id: crypto.randomUUID(), role: 'user', content, time: 'now', at: new Date().toISOString(), ...(heard ? { heard } : {}), ...(target ? { replyTo: target } : {}) };
+    const attachments = staged;
+    const user: Message = { id: crypto.randomUUID(), role: 'user', content, time: 'now', at: new Date().toISOString(), ...(heard ? { heard } : {}), ...(target ? { replyTo: target } : {}), ...(attachments.length ? { attachments } : {}) };
     setMessages(current => [...current, user]);
     setReplyingTo(null);
+    // Cleared as it goes, not when the reply lands: the file is on the message
+    // now, and leaving the chips sitting there through a slow answer is how the
+    // same picture gets sent twice.
+    setStaged([]);
     setSending(true);
     try {
       // The reference travels as its own note rather than being spliced into
@@ -186,11 +220,13 @@ export default function App() {
     {page === 'settings' && <SettingsDrawer config={providerConfig} onSave={saveProviderConfig} onTest={testConnection} onClose={backToChat}/>}
     {page === 'journal' && <JournalDrawer onClose={backToChat}/>}
     {page === 'asides' && <AsidesPage/>}
-    {page === 'chat' && <div className="haru-body"><section className="chat-panel"><div className="messages" ref={messagesRef}>{empty ? <div className="empty-state"><MessageBubble message={greeting}/><p>Anything that sounds like a task or an appointment gets captured for real — not just talked about.</p>{suggestions}</div> : <>{messages.map(message => <MessageBubble key={message.id} message={message} onReact={reaction => react(message.id, reaction)} onReply={() => setReplyingTo({ id: message.id, excerpt: message.content.replace(/\s+/g, ' ').trim().slice(0, 80) })}/>)}{onlyOpening && <div className="empty-state">{suggestions}</div>}</>}</div><Composer sending={sending} replyingTo={replyingTo} onCancelReply={() => setReplyingTo(null)} onSend={send} onShowPicture={(reaction, saved) => setMessages(current => [...current,
-        // The picture itself goes in as theirs, so there is a record of having
-        // shown it even when she says nothing back — which is the normal case.
-        { id: crypto.randomUUID(), role: 'user' as const, content: `Showed her ${saved.replace(/^.*[\/]/, '')}`, time: 'now', at: new Date().toISOString() },
-        ...(reaction ? [{ id: crypto.randomUUID(), role: 'assistant' as const, content: reaction, time: 'now', at: new Date().toISOString() }] : []),
-      ])}/></section><Kept items={kept} onToggle={id => { window.haru ? window.haru.kept.toggle(id) : setKept(items => items.map(item => item.id===id ? {...item, done: !item.done} : item)); }} model={live2dModel} importing={importing} onImport={importLive2d} onRemove={removeLive2d}/></div>}
+    {/* The whole chat is the drop target, not a strip at the bottom. Aiming at
+        a small zone is the part of drag-and-drop people hate, and there is
+        nothing else on this page a file could sensibly be dropped onto.
+        dragOver must be prevented or the browser opens the file instead. */}
+    {page === 'chat' && <div className="haru-body"><section className={dragging ? 'chat-panel dropping' : 'chat-panel'}
+      onDragOver={event => { event.preventDefault(); setDragging(true); }}
+      onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setDragging(false); }}
+      onDrop={event => void onDrop(event)}><div className="messages" ref={messagesRef}>{empty ? <div className="empty-state"><MessageBubble message={greeting}/><p>Anything that sounds like a task or an appointment gets captured for real — not just talked about.</p>{suggestions}</div> : <>{messages.map(message => <MessageBubble key={message.id} message={message} onReact={reaction => react(message.id, reaction)} onReply={() => setReplyingTo({ id: message.id, excerpt: message.content.replace(/\s+/g, ' ').trim().slice(0, 80) })}/>)}{onlyOpening && <div className="empty-state">{suggestions}</div>}</>}</div><Composer sending={sending} replyingTo={replyingTo} onCancelReply={() => setReplyingTo(null)} onSend={send} staged={staged} onStage={stage} onUnstage={unstage}/></section><Kept items={kept} onToggle={id => { window.haru ? window.haru.kept.toggle(id) : setKept(items => items.map(item => item.id===id ? {...item, done: !item.done} : item)); }} model={live2dModel} importing={importing} onImport={importLive2d} onRemove={removeLive2d}/></div>}
   </main>;
 }
