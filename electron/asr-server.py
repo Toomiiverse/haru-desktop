@@ -31,6 +31,7 @@ DEVICE = os.environ.get("HARU_ASR_DEVICE", "cuda")
 # and the accuracy difference is not audible in dictation.
 COMPUTE = os.environ.get("HARU_ASR_COMPUTE", "float16" if DEVICE == "cuda" else "int8")
 PORT = int(os.environ.get("HARU_ASR_PORT", "9881"))
+HOST = os.environ.get("HARU_ASR_HOST", "127.0.0.1")
 
 app = FastAPI()
 model = None
@@ -95,5 +96,5 @@ async def transcribe(file: UploadFile = File(...), language: str = Form("en"), p
 
 
 if __name__ == "__main__":
-    print(f"[asr] listening on 127.0.0.1:{PORT}", flush=True)
-    uvicorn.run(app, host="127.0.0.1", port=PORT, log_level="warning")
+    print(f"[asr] listening on {HOST}:{PORT}", flush=True)
+    uvicorn.run(app, host=HOST, port=PORT, log_level="warning")
