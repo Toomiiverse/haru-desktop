@@ -5524,7 +5524,15 @@ function webDeps(): WebDeps {
     saveAccess: saveWebAccess,
     history: () => (store.get('chat.messages') as { role: string; content: string; at?: string }[] | undefined) ?? [],
     async say(text) {
-      const config = store.get('ai.config') as ProviderConfig | undefined;
+      // Reached through the web door — the phone PWA or the Discord bridge —
+      // which for how this is actually used means away from this machine.
+      // Sitting at her window (ai:send, the desktop chat) stays on the local
+      // model; a message that had to cross the internet to get here goes to
+      // whichever provider is configured for that, falling back to the local
+      // one if nobody set an away provider up.
+      const localConfig = store.get('ai.config') as ProviderConfig | undefined;
+      const away = store.get('ai.awayConfig') as ProviderConfig | undefined;
+      const config = (away?.model ? away : localConfig) as ProviderConfig | undefined;
       if (!config?.model) throw new Error('no model is set up');
       const messages = [...(store.get('chat.messages') as { role: string; content: string; at?: string }[] ?? []), { role: 'user', content: text, at: new Date().toISOString() }];
       const answer = await ollamaChat(messages, config, { hands: false });
@@ -5533,11 +5541,16 @@ function webDeps(): WebDeps {
       // Read here rather than on the phone, because only this side knows which
       // expressions the model carries — and for this model the honest answer is
       // often "none for that", which is a nothing the page can act on.
+      //
+      // Classified on the local model even when the reply itself went to the
+      // away provider: it is a small, structured, format-constrained call, and
+      // xAI does not honour that constraint the way Ollama does — sent there it
+      // came back "unparseable" every time and her expression stopped updating.
       let emotion: string | null = null;
       let expression: string | null = null;
       if (reply && !answer.ignored) {
         try {
-          const felt = await classifyEmotion(reply, config);
+          const felt = await classifyEmotion(reply, localConfig?.model ? localConfig : config);
           if (felt) {
             emotion = felt.emotion;
             expression = faceForEmotion(felt.emotion, modelExpressions());
