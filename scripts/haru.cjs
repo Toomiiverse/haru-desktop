@@ -32,6 +32,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const readline = require('node:readline');
+const { execFileSync } = require('node:child_process');
 
 const HOME = os.homedir();
 const CONFIG_DIR = process.env.XDG_CONFIG_HOME ? path.join(process.env.XDG_CONFIG_HOME, 'haru') : path.join(HOME, '.config', 'haru');
@@ -130,34 +131,57 @@ async function login() {
     return value ?? '';
   };
 
+  /**
+   * The password, read without any of it reaching the screen.
+   *
+   * Two locks on the same door, because getting this wrong does not fail — it
+   * prints a password, into a terminal and into whatever is keeping the
+   * scrollback. The first version of this silenced one of them and the password
+   * was echoed in full.
+   *
+   * There are two things echoing. The terminal's own line discipline does it,
+   * and readline in terminal mode does it again on its own account; pausing
+   * readline does not detach either. So stty stops the terminal and the writer
+   * hook stops readline, and neither is trusted to be enough alone.
+   *
+   * Restored on the way out however that happens, including a crash. Leaving a
+   * terminal with echo switched off is a worse thing to do to somebody than
+   * anything this script is for.
+   */
   const secretly = async question => {
-    // Nothing to hide the typing from when it is piped in, and setRawMode does
-    // not exist on a pipe — so only a real terminal gets the silent treatment.
+    // Nothing to hide it from when it is piped in, and no terminal to silence.
     if (!process.stdin.isTTY) return asks(question);
-    // Read straight from the stream with echo off, rather than muting readline's
-    // own output. Redrawing the prompt over the typing is the other way to do
-    // this and it looks fine right up until the password is wider than the
-    // terminal, at which point it smears across the line.
-    rl.pause();
     process.stdout.write(question);
-    process.stdin.setRawMode(true);
-    process.stdin.resume();
-    let typed = '';
-    try {
-      for await (const chunk of process.stdin) {
-        const text = chunk.toString('utf8');
-        // Ctrl-C has to keep meaning ctrl-C while the terminal is raw.
-        if (text === '\u0003') { process.stdin.setRawMode(false); process.stdout.write('\n'); process.exit(130); }
-        if (text === '\r' || text === '\n') break;
-        if (text === '\u007f' || text === '\b') { typed = typed.slice(0, -1); continue; }
-        typed += text;
-      }
-    } finally {
-      process.stdin.setRawMode(false);
-      process.stdout.write('\n');
-      rl.resume();
+
+    const echo = rl._writeToOutput && rl._writeToOutput.bind(rl);
+    const stty = argument => {
+      try { execFileSync('stty', [argument], { stdio: ['inherit', 'ignore', 'ignore'] }); return true; } catch { return false; }
+    };
+    let restored = false;
+    const restore = () => {
+      if (restored) return;
+      restored = true;
+      if (echo) rl._writeToOutput = echo;
+      stty('echo');
+    };
+
+    const silenced = stty('-echo');
+    if (echo) rl._writeToOutput = () => {};
+    // Belt and braces: if stty is not there at all, readline's own muting is
+    // the only thing standing between the password and the screen, and that is
+    // worth knowing about rather than discovering afterwards.
+    if (!silenced && !echo) {
+      restore();
+      throw new Error('Cannot switch this terminal off from echoing, so the password would be printed. Set HARU_URL and sign in from somewhere else.');
     }
-    return typed;
+    process.on('exit', restore);
+    try {
+      const { value } = await lines.next();
+      return value ?? '';
+    } finally {
+      restore();
+      process.stdout.write('\n');
+    }
   };
 
   try {
