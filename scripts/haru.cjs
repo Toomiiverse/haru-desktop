@@ -32,7 +32,6 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const readline = require('node:readline');
-const { execFileSync } = require('node:child_process');
 
 const HOME = os.homedir();
 const CONFIG_DIR = process.env.XDG_CONFIG_HOME ? path.join(process.env.XDG_CONFIG_HOME, 'haru') : path.join(HOME, '.config', 'haru');
@@ -134,47 +133,36 @@ async function login() {
   /**
    * The password, read without any of it reaching the screen.
    *
-   * Two locks on the same door, because getting this wrong does not fail — it
-   * prints a password, into a terminal and into whatever is keeping the
-   * scrollback. The first version of this silenced one of them and the password
-   * was echoed in full.
+   * readline in terminal mode has already put the tty into raw mode and taken
+   * over the echoing itself, so the thing to silence is readline, not the
+   * terminal. Reaching past it to stty works for exactly one prompt and then
+   * ruins the next one: stty echo hands echoing back to a terminal that is still
+   * raw, and from then on every arrow key arrives on screen as ^[[D.
    *
-   * There are two things echoing. The terminal's own line discipline does it,
-   * and readline in terminal mode does it again on its own account; pausing
-   * readline does not detach either. So stty stops the terminal and the writer
-   * hook stops readline, and neither is trusted to be enough alone.
+   * So the writer is muted and nothing else is touched. Restored afterwards, and
+   * again on the way out however that happens.
    *
-   * Restored on the way out however that happens, including a crash. Leaving a
-   * terminal with echo switched off is a worse thing to do to somebody than
-   * anything this script is for.
+   * If the hook is not there — a Node that has renamed it — this refuses to ask
+   * rather than asking and printing the answer. Being unable to sign in here is
+   * the better of those two outcomes by a distance.
    */
   const secretly = async question => {
     // Nothing to hide it from when it is piped in, and no terminal to silence.
     if (!process.stdin.isTTY) return asks(question);
-    process.stdout.write(question);
 
     const echo = rl._writeToOutput && rl._writeToOutput.bind(rl);
-    const stty = argument => {
-      try { execFileSync('stty', [argument], { stdio: ['inherit', 'ignore', 'ignore'] }); return true; } catch { return false; }
-    };
+    if (!echo) throw new Error('Cannot stop this terminal echoing, so the password would be printed on screen. Sign in from another machine and copy ~/.config/haru/cli.json across.');
+
     let restored = false;
     const restore = () => {
       if (restored) return;
       restored = true;
-      if (echo) rl._writeToOutput = echo;
-      stty('echo');
+      rl._writeToOutput = echo;
     };
-
-    const silenced = stty('-echo');
-    if (echo) rl._writeToOutput = () => {};
-    // Belt and braces: if stty is not there at all, readline's own muting is
-    // the only thing standing between the password and the screen, and that is
-    // worth knowing about rather than discovering afterwards.
-    if (!silenced && !echo) {
-      restore();
-      throw new Error('Cannot switch this terminal off from echoing, so the password would be printed. Set HARU_URL and sign in from somewhere else.');
-    }
     process.on('exit', restore);
+
+    process.stdout.write(question);
+    rl._writeToOutput = () => {};
     try {
       const { value } = await lines.next();
       return value ?? '';
