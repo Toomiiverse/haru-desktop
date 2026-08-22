@@ -110,6 +110,63 @@ export function claimsDesktopAction(reply: string): DesktopClaim {
 }
 
 /**
+ * She said the thing is off the list. Is it?
+ *
+ * The same failure as claimsDesktopAction one category over, and the comment
+ * there is the reason this exists: a plainly described tool still missed one
+ * time in five on a long conversation, so wording is not what closes this.
+ * Caught in code instead.
+ *
+ * It is the quieter of the two and therefore the worse. "I'm powering down your
+ * computer" is found out the moment somebody looks at the machine; "ticked off,
+ * then" is found out twelve hours later when she chases the same task again,
+ * long after anybody could connect the two.
+ *
+ * Present and past both count. She narrates it as she goes — "at least you're
+ * ticking off today's breakfast" — as readily as she reports it afterwards, and
+ * either way the list is unchanged.
+ */
+/** The verbs, shared by all three shapes below. */
+const TICK_VERB = '(tick|mark|check|cross|strike|struck)(ed|ing)?';
+const CLAIMED_TICK = new RegExp([
+  // Her doing it: "I've ticked that off", "I am marking it done".
+  `\\b${I_WILL}${TICK_VERB}\\b[^.!?]{0,40}?\\b(off|done|complete|completed)\\b`,
+  // Them doing it, narrated by her: "you're ticking off today's breakfast".
+  `\\b(you'?re|you are|you'?ve|you have)\\s+(just\\s+|finally\\s+|actually\\s+)*${TICK_VERB}\\b[^.!?]{0,40}?\\b(off|done)\\b`,
+  // Bare declarations that the list has already changed.
+  "\\b(ticked off|crossed off|checked off|struck off|marked (it|that|them) (as )?done|off (your|the) list)\\b",
+].join('|'), 'i');
+
+/**
+ * Offering to do it is not claiming to have done it.
+ *
+ * An offer retried with the tool pressed on her would tick off something nobody
+ * confirmed, which is this same failure arriving from the other direction.
+ *
+ * Narrower than NOT_A_CLAIM, deliberately. That one also refuses anything ending
+ * in a question mark, which is right for "shall I shut it down?" and wrong here:
+ * half of what she says ends in a rhetorical one, and "crossed off your list.
+ * Happy now?" is a claim with a taunt on the end.
+ */
+const OFFERING_TO_TICK = /\b(shall i|should i|can i|do you want|want me to|would you like|do you need)\b/i;
+
+/**
+ * Saying she has not is the opposite of saying she has.
+ *
+ * "You still have not ticked off the bins" contains the phrase and means its
+ * negation, and a retry there would tick off the very thing she was chasing them
+ * about. The window is short because the negator belongs to the verb — further
+ * out and it is a different clause about something else.
+ */
+const NOT_TICKED = /\b(not|never|n'?t)\b[^.!?]{0,20}?(tick|mark|check|cross|struck|strike)/i;
+
+export function claimsTickOff(reply: string): boolean {
+  const text = (reply ?? '').trim();
+  if (!text || OFFERING_TO_TICK.test(text) || NOT_TICKED.test(text)) return false;
+  return CLAIMED_TICK.test(text);
+}
+
+/**
  * The chat template leaking into what she said.
  *
  * Found in the wild: a stored message whose text began, literally, with

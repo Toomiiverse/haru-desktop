@@ -45,7 +45,7 @@ import { haruNote, rangeStats, type HaruNote, type RangeName, type RangeStats } 
 import { describeRating, entryFor, journalPrompt, readEntries, readJournalConfig, readRating, recentTrend, shouldAsk, upsertEntry, SCALE_MAX, type JournalConfig, type JournalEntry } from './journal';
 import { formatList, formatMedia, formatMissing, lookUp, readAniListConfig, userList, type AniListConfig, type ListEntry, type MediaKind } from './anilist';
 import { createDesktopShortcut, desktopShortcutPath, isAutoStartEnabled, setAutoStart, startedHidden } from './startup';
-import { claimsDesktopAction, dropRoleHeader, dropTackedOnParagraphs, dropInventedContact, dropInventedScreenTalk, dropRepeatedAgendaMentions, dropRepeatedParagraphs, dropStageDirections } from './reply';
+import { claimsDesktopAction, claimsTickOff, dropRoleHeader, dropTackedOnParagraphs, dropInventedContact, dropInventedScreenTalk, dropRepeatedAgendaMentions, dropRepeatedParagraphs, dropStageDirections } from './reply';
 import { hasShout, readVoiceConfig, referenceFor, shoutReference, spokenCase, speakableText, splitForSpeech, synthesise, type SpeechClip, type VoiceConfig } from './voice';
 import { formatMemoryPrompt, isWorthKeeping, isWorthRemembering, MEMORY_KINDS, migrateMemories, pruneMemories, rememberInto, selectMemories, summaryPrompt, type MemoryKind, type MemoryRecord, type SessionSummary } from './memory';
 import { forgetDevice, forgetEveryDevice, readWebAccess, setPassword, weakPassword, type WebAccess } from './web';
@@ -5440,6 +5440,7 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // against whether anything was done.
   const ran = new Set<string>();
   let claimRetried = false;
+  let tickRetried = false;
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
     // Reading anything ends her reach for the rest of the turn. pageWasRead
     // already withdraws every tool, and this makes the narrower promise explicit
@@ -5502,6 +5503,28 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
       conversation.push({
         role: 'user',
         content: 'You just said you had done that, but you did not actually do it — you have to call the tool for it to happen. Do it now if they asked for it. If you are not going to, say plainly that you have not done it rather than implying you have.',
+      });
+      continue;
+    }
+    // The same check for the list, and the quieter of the two by far.
+    //
+    // "I'm powering down your computer" is found out the moment anybody looks at
+    // the machine. "Ticked off, then" is found out twelve hours later, when she
+    // chases the same task again and nobody can connect the two — which is
+    // exactly how a breakfast reported at ten in the morning got shouted about
+    // at half past nine at night.
+    //
+    // Only when there is something it could plausibly have meant: with no open
+    // task the claim is empty talk and a retry would only invite her to invent
+    // one to tick.
+    if (claimsTickOff(message.content) && !tickRetried && !ran.has('complete_kept_item')
+      && getKept().some(item => item.kind === 'task' && !item.done)) {
+      tickRetried = true;
+      console.warn('[agenda] claimed a tick-off without calling anything — retrying once');
+      conversation.push(message);
+      conversation.push({
+        role: 'user',
+        content: 'You just said that is ticked off, but it is still on their list — saying so does not change it, calling complete_kept_item does. Call it now for the task you meant. If you did not mean any of the ones actually on the list, say plainly that it is not ticked off rather than implying it is.',
       });
       continue;
     }
