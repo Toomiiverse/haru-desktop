@@ -95,6 +95,44 @@ simply cannot reach the model until you do.
 **Run one of her, not two.** Two installs means two `config.json` files, and they
 diverge the moment either is used: the same memory in two versions, with no merge.
 
+### Talking to her from a terminal
+
+`scripts/haru.cjs` is a client for the web door above — not a second Haru, and
+deliberately not trying to be one. Everything worth having stays on her side: one
+config.json, one transcript, one set of memories, one mood. Ask her something
+from a laptop and it lands in the same conversation you left on the desk, because
+it is the same conversation.
+
+It needs nothing installed. Node's own fetch, Node's own readline, no build step.
+
+```
+haru --login          sign in once; she remembers the machine for 90 days
+haru "what's on"      ask and exit
+haru                  a prompt to keep typing into
+haru --agenda         what is still on the list
+echo "..." | haru     piped in counts as asking
+```
+
+Put it on your path with a symlink and it behaves like any other command:
+
+```sh
+chmod +x scripts/haru.cjs
+ln -s "$PWD/scripts/haru.cjs" ~/.local/bin/haru
+haru --login
+```
+
+Signing in asks to be remembered, which matters more than it sounds: a plain
+session lasts twelve hours and lives only in her memory, so it dies with every
+restart and every update, and the sign-in route is rate limited on purpose.
+A remembered device lasts ninety days and is written into her config — it shows
+up in Setup beside the phones, and can be taken away from there like any other.
+
+The token is kept in `~/.config/haru/cli.json`, written 0600. `HARU_URL`
+overrides where she is, for pointing at a tunnel instead of localhost.
+
+The web door has to be switched on in her settings for any of this to work; it
+is the same door, and it is shut by default.
+
 ### Getting a new version onto another machine
 
 The server updates itself: `./update.sh` pulls, installs, builds and restarts her
