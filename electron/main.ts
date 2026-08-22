@@ -13,7 +13,7 @@ import { nextPokeCount, pokeEmotion, pokeInstruction, pokeIrritation, pokeTier, 
 import { applyEvent, chooseIdleAction, DEFAULT_VITALS, driftVitals, nextTickDelayMs, type Environment, type Vitals } from './vitals';
 import { classificationPrompt, emotionToVitals, EMOTION_SCHEMA, NEUTRAL_EMOTION, parseEmotion, type Emotion , faceForEmotion } from './emotion';
 import { withDiscoveredExpressions } from './expressions';
-import { chaseableOverdue, findItem, formatAgenda, itemStatus, missedInstruction, putOffInstruction, putOffUntil, relevantItems, readsAsBareReport, tickOffInstruction, readsAsDone, doneClause, readsAsNotDone, relativeDay } from './agenda';
+import { chaseableOverdue, findItem, formatAgenda, itemStatus, missedInstruction, putOffInstruction, putOffUntil, relevantItems, readsAsAnswerToHer, readsAsBareReport, tickOffInstruction, readsAsDone, doneClause, readsAsNotDone, relativeDay } from './agenda';
 import { openingAngles, pickAngle, shouldPipeUp } from './opening';
 import { allDayDueMinutes, isEveningCheck, reminderInstruction, reminderTier, reminderVolume, shouldRemind, type ReminderState } from './reminders';
 import { isHeated, readTone, sharpen, toneGesture, tonePose } from './tone';
@@ -3594,7 +3594,15 @@ function chatSystemPrompt({ irritation, ego, goodnight, shout, latestMessage, fr
     // The time matters as much as the date: without it she invented one when
     // asked, and she was already reasoning about what had been missed against a
     // clock she could not actually see.
-    `It is ${formatTimeOfDay(now.getHours(), now.getMinutes())} on ${weekday} ${localDateKey(now)}, in the user's timezone (${CHAT_TIMEZONE}). Use that when asked the time or the date rather than guessing.`,
+    //
+    // The second sentence is a prohibition rather than a permission, and it was
+    // the other way round until a non-reasoning model took it as an invitation.
+    // Answering "yes i did, I already told you" with "9:57 PM on Saturday, 22nd
+    // August 2026, it is" is what a model does when the message carries little
+    // and the prompt hands it one very concrete fact: it answers the question it
+    // can see the answer to. Telling it plainly not to costs nothing, and the
+    // clock on their own screen was never the thing they were short of.
+    `It is ${formatTimeOfDay(now.getHours(), now.getMinutes())} on ${weekday} ${localDateKey(now)}, in the user's timezone (${CHAT_TIMEZONE}). That is background, so you know when things are due and how long it has been. Use it if they ask what the time or the date is, and otherwise never state it — they can see their own clock.`,
     profileSummary(latestMessage),
     // Beside the profile rather than behind the lookup tool, for the reason the
     // agenda is: asked what they are in the middle of, a model that would have
@@ -4831,7 +4839,12 @@ function tickOffSpoken(said: string) {
   const reported = doneClause(said);
   if (!reported) return null;
   const open = getKept().filter(item => item.kind === 'task' && !item.done);
-  const match = findItem(open, reported) ?? (REFERS_BACK.test(reported) || readsAsBareReport(reported) ? whatSheWasChasing(open) : null);
+  // Three ways of naming nothing: a pronoun standing in for it, a bare report,
+  // and an answer to a question she asked — where the object is missing because
+  // she supplied it herself a minute ago. Only reached when the clause names no
+  // open task, and only resolved if she actually chased one recently.
+  const namesNothing = REFERS_BACK.test(reported) || readsAsBareReport(reported) || readsAsAnswerToHer(reported);
+  const match = findItem(open, reported) ?? (namesNothing ? whatSheWasChasing(open) : null);
   if (!match) return null;
   toggleKept(match.id, true);
   console.log(`[agenda] ticked off from what they said: "${match.title}"`);

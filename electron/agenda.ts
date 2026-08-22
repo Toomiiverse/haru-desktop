@@ -333,6 +333,35 @@ export function readsAsBareReport(text: string) {
 }
 
 /**
+ * "Yes I did." An answer whose object was supplied by her own question.
+ *
+ * Deliberately not a fifth widening of READS_AS_DONE_BARE, which the note above
+ * rightly says is a losing game. This is a different shape: not a report that
+ * happens to name nothing, but a reply to a yes-or-no question, where the object
+ * is missing because she just said it. She asks "did you eat breakfast yet?" and
+ * the only natural answer in English is "yes I did" — no noun, no pronoun,
+ * nothing for findItem to match and nothing for REFERS_BACK to catch. So the
+ * most ordinary possible answer to the question she asks most often fell through
+ * every path, and the task stayed open to be chased again twelve hours later.
+ *
+ * The lookahead is what keeps it honest. "I did the shopping" names its object
+ * and must not be treated as an answer to a question about something else — if
+ * that is on the list findItem will match it, and if it is not, she should not
+ * tick off whatever she happened to be chasing instead. Only a verb with nothing
+ * of its own after it counts.
+ *
+ * It stays safe because of where it is used rather than how it is written: the
+ * caller only reaches whatSheWasChasing, which resolves nothing unless she chased
+ * one specific task within the last half hour. An affirmative out of the blue
+ * still ticks nothing off.
+ */
+const ANSWERS_HER = /^\s*(?:(?:yes|yeah|yep|yup|aye|ok|okay)\b[,!.\s]*)?i(?:'ve| have)?\s+(?:just\s+|already\s+)?(?:did|done)\b(?!\s+(?:the|a|an|my|your|his|her|our|their|another|both|all)\b)/i;
+
+export function readsAsAnswerToHer(text: string) {
+  return !readsAsNotDone(text) && ANSWERS_HER.test(text);
+}
+
+/**
  * Telling her that ticking things off is her job too.
  *
  * The pattern above has now been widened four times for four ways of saying the
