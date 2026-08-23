@@ -5468,6 +5468,7 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
     // so that loosening one does not silently loosen the other.
     if (pageWasRead) handsAllowed = false;
     const toolsWanted = { tools: !pageWasRead && !emptyRetried };
+    const roundStarted = Date.now();
     let message: OllamaMessage;
     try {
       message = await ollamaPost(conversation, config, toolsWanted);
@@ -5480,7 +5481,12 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
     if (message.tool_calls?.length) {
       // Logged by name: when a tool does not fire, the useful question is whether
       // the model reached for the wrong one or for none at all.
-      console.log(`[ai] tool calls: ${message.tool_calls.map(call => call.function?.name ?? '?').join(', ')}`);
+      //
+      // Timed as well, because each of these is a whole extra round trip before
+      // the user sees a word, and away from the desk that is the difference
+      // between a reply and a wait. Which tools are worth offering to a phone is
+      // a question this log is here to answer with numbers.
+      console.log(`[ai] round ${round + 1} took ${Date.now() - roundStarted}ms — tool calls: ${message.tool_calls.map(call => call.function?.name ?? '?').join(', ')}`);
       for (const call of message.tool_calls) if (call.function?.name) ran.add(call.function.name);
       conversation.push(message);
       for (const call of message.tool_calls) conversation.push({ role: 'tool', tool_name: call.function?.name, content: await runChatTool(call, latest) });
@@ -5991,12 +5997,18 @@ async function answerOnDiscord(text: string, channelId = '') {
   //
   // Still routed rather than forced: no second model configured, or a credential
   // sitting in the recent transcript, and this comes straight back home.
+  const started = Date.now();
   const answer = await ollamaChat(messages, config, { hands: false, away: 'it came in over Discord' });
   const reply = answer.content ?? '';
   // Lands in the desktop transcript too, so coming back to the desk does not
   // mean finding half a conversation missing.
   sendToWindows('chat:fromPhone', { text, reply, ignored: Boolean(answer.ignored) });
-  console.log('[discord] answered ' + text.length + ' chars with ' + reply.length);
+  // The transcript length is here beside the timing on purpose. Every message
+  // sends the whole of chat.messages back to the model — untrimmed, as far back
+  // as the last daily wipe — and whether that is worth doing something about
+  // depends entirely on how long it actually gets in a day, which nobody has
+  // ever measured.
+  console.log(`[discord] answered ${text.length} chars with ${reply.length} in ${Date.now() - started}ms (${messages.length} messages of history)`);
   return { reply, ignored: answer.ignored };
 }
 
@@ -6169,33 +6181,42 @@ function webDeps(): WebDeps {
       // often not even in front of them, and since the local model became a
       // serverless pod the first message of a session pays a cold start. The
       // desk keeps the local one — that is what the GPU is for.
+      const started = Date.now();
       const answer = await ollamaChat(messages, config, { hands: false, away: 'it came in from the phone' });
       const reply = answer.content ?? '';
       sendToWindows('chat:fromPhone', { text, reply, ignored: Boolean(answer.ignored) });
-      // Read here rather than on the phone, because only this side knows which
-      // expressions the model carries — and for this model the honest answer is
-      // often "none for that", which is a nothing the page can act on.
-      let emotion: string | null = null;
-      let expression: string | null = null;
-      if (reply && !answer.ignored) {
-        try {
-          // The same road as the reply, and it has to be. This is a second
-          // request the phone waits on before it sees anything, so leaving it
-          // pointed at a pod would answer fast and then stall for the cold
-          // start anyway — paying the full wait to pick a face.
-          const felt = await classifyEmotion(reply, fastBrain(config, reply));
-          if (felt) {
-            emotion = felt.emotion;
-            expression = faceForEmotion(felt.emotion, modelExpressions());
-          }
-        } catch (error) {
-          // A face is worth less than an answer: if the classifier fails she
-          // still speaks, she just keeps the face she had.
-          console.warn('[web] could not read her expression:', error instanceof Error ? error.message : error);
-        }
+      // Her face used to be read here, before returning, and the phone waited on
+      // it — a second round trip to a model, spent so her eyebrows would be
+      // right at the instant the text appeared rather than a moment after. That
+      // is the trade /api/speak already refused for her voice, and it is a worse
+      // trade for a face: nobody is looking at the stage while they are reading
+      // the reply that has not arrived yet. It moved to /api/expression.
+      console.log(`[web] answered ${text.length} chars with ${reply.length} in ${Date.now() - started}ms (${messages.length} messages of history)`);
+      return { reply, ignored: answer.ignored };
+    },
+    /**
+     * Which face to pull about a line she has just said.
+     *
+     * Read on this side rather than the phone's, because only this side knows
+     * which expressions the loaded model actually carries — and the honest
+     * answer is often "none for that", which is a nothing the page can act on.
+     */
+    async expression(text) {
+      const config = store.get('ai.config') as ProviderConfig | undefined;
+      if (!config?.model) return { emotion: null, expression: null };
+      try {
+        const started = Date.now();
+        const felt = await classifyEmotion(text, fastBrain(config, text));
+        if (!felt) return { emotion: null, expression: null };
+        const expression = faceForEmotion(felt.emotion, modelExpressions());
+        console.log(`[web] face for that: ${felt.emotion}${expression ? ` (${expression})` : ' — no face for it'} in ${Date.now() - started}ms`);
+        return { emotion: felt.emotion, expression };
+      } catch (error) {
+        // A face is worth less than an answer: if the classifier fails she still
+        // speaks, she just keeps the face she had.
+        console.warn('[web] could not read her expression:', error instanceof Error ? error.message : error);
+        return { emotion: null, expression: null };
       }
-      console.log(`[web] answered ${text.length} chars with ${reply.length}${emotion ? ` — ${emotion}${expression ? ` (${expression})` : ' (no face for it)'}` : ''}`);
-      return { reply, ignored: answer.ignored, emotion, expression };
     },
     // Sent as a bare date plus a day-offset rather than one formatted string —
     // the phone buckets into daily/weekly/monthly by daysAway, and doing that

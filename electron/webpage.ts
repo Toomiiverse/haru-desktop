@@ -342,6 +342,24 @@ const ci=$('ci');
 // to the later play() on the same element, which Safari does allow.
 const player=new Audio();
 function primeVoice(){ player.play().catch(()=>{}); player.pause(); }
+// Her face, asked for after the words are already on screen rather than before.
+//
+// This used to ride along with the reply, which meant every message on the phone
+// waited on a second round trip to a model before a single word appeared — spent
+// so that her expression would change at the same instant as the text instead of
+// a moment later. Nobody is watching the stage while they are waiting to read
+// something, so it bought nothing and cost the whole wait.
+//
+// Fired beside speak() rather than before it. In practice the face still wins:
+// this is one short classification, while a voice line has to be synthesised.
+async function face(text){
+  try{
+    const r=await fetch('/api/expression',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({text})});
+    if(!r.ok) return;
+    const {expression}=await r.json();
+    if(window.haruFace) window.haruFace(expression||null);
+  }catch(e){ console.warn('[face] '+(e&&e.message||e)); }
+}
 async function speak(text){
   try{
     player.pause();
@@ -426,10 +444,9 @@ $('cf').addEventListener('submit',async ev=>{
     if(a.ignored) $('chat').insertAdjacentHTML('beforeend','<div class="msg sys">She is not answering that.</div>');
     else {
       $('chat').insertAdjacentHTML('beforeend','<div class="msg them">'+esc(a.reply)+'</div>');
-      // Her face before her voice: the expression should already have changed by
-      // the time the first syllable arrives, the way it does when someone is
-      // about to say something.
-      if(window.haruFace) window.haruFace(a.expression||null);
+      // Both started here and neither waited on: the words are already on screen,
+      // and her face and her voice can catch up in their own time.
+      void face(a.reply);
       void speak(a.reply);
     }
   }catch(r){

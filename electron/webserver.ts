@@ -27,6 +27,14 @@ export type WebDeps = {
   saveAccess(access: WebAccess): void;
   /** Her real answer, through the same pipeline the desktop uses — minus hands. */
   say(text: string): Promise<{ reply: string; ignored?: boolean; expression?: string | null; emotion?: string | null }>;
+  /**
+   * What her face should do about a line she has just said.
+   *
+   * Asked for separately, for the same reason her voice is: it costs a whole
+   * round trip to a model, and a reply that waits for one before it appears is
+   * a reply that arrives late for no benefit the reader can see.
+   */
+  expression(text: string): Promise<{ emotion: string | null; expression: string | null }>;
   history(): { role: string; content: string; at?: string }[];
   /** date is a bare YYYY-MM-DD; daysAway is its offset from today so the page can bucket into daily/weekly/monthly without redoing timezone-aware date math client-side. */
   agenda(): { id: string; title: string; date: string; time: string | null; kind: string; done?: boolean; daysAway: number }[];
@@ -406,6 +414,18 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
     if (!text) return json(res, 400, { error: 'Say something.' });
     const answer = await deps.say(text);
     return json(res, 200, answer);
+  }
+
+  // Her face, on the same terms as her voice below and for the same reason.
+  // Reading an expression means asking a model what a line sounds like, which is
+  // a second round trip; done inside /api/chat it was time the reader spent
+  // looking at a waiting bubble, paid entirely so her eyebrows would be right at
+  // the exact moment the text landed. Out here it costs them nothing.
+  if (req.method === 'POST' && path === '/api/expression') {
+    const body = await readBody(req) as { text?: unknown };
+    const text = typeof body.text === 'string' ? body.text.trim() : '';
+    if (!text) return json(res, 400, { error: 'Nothing to read.' });
+    return json(res, 200, await deps.expression(text.slice(0, 2000)));
   }
 
   // Her voice. Asked for separately rather than returned with the reply,
