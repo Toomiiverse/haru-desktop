@@ -8,7 +8,7 @@ import AdmZip from 'adm-zip';
 import Store from 'electron-store';
 import { formatTimeOfDay, localDateKey, parseTimeOfDay, resolveDate, zonedNow } from './dates';
 import { connectGoogle, disconnectGoogle, googleStatus, pullEvents, pullTasks, pushItem, pushTask, removeItem, removeTask, saveCredentials } from './google';
-import { afterCooldown, afterEgoCooldown, afterPoke, egoInstruction, goodnightInstruction, IGNORE_THRESHOLD, isGoodnight, isIgnoring, isLowEffort, leverageInstruction, moodInstruction, nextEgo, nextIrritation, shoutInstruction, shoutState, type ShoutState } from './mood';
+import { afterCooldown, afterEgoCooldown, afterPoke, egoInstruction, goodnightInstruction, IGNORE_THRESHOLD, isGoodnight, isIgnoring, isLowEffort, isRedo, leverageInstruction, moodInstruction, nextEgo, nextIrritation, notTwiceInstruction, shoutInstruction, shoutState, type ShoutState } from './mood';
 import { nextPokeCount, pokeEmotion, pokeInstruction, pokeIrritation, pokeTier, type PokeKind } from './poke';
 import { applyEvent, chooseIdleAction, DEFAULT_VITALS, driftVitals, nextTickDelayMs, type Environment, type Vitals } from './vitals';
 import { classificationPrompt, emotionToVitals, EMOTION_SCHEMA, NEUTRAL_EMOTION, parseEmotion, type Emotion , faceForEmotion } from './emotion';
@@ -3523,7 +3523,17 @@ function advanceMood(latest: string, history: { role?: string; content?: string 
   const previousUser = [...history].reverse().find(message => message.role === 'user')?.content?.trim().toLowerCase();
   const repeated = previousUser !== undefined && previousUser === latest.trim().toLowerCase();
   // Signing off is terse by nature; it should not read as a lazy message.
-  const event = goodnight === 'said' ? 'substantive' : repeated ? 'repeat' : isLowEffort(latest) ? 'low-effort' : 'substantive';
+  //
+  // The redo check comes before both of the others and outranks them. "try
+  // again" typed twice is a repeat by the letter of it, and bare "again" is a
+  // lone word, so without this it was charged twice over for being a complaint
+  // about her own bad answer — which is how two words of perfectly fair feedback
+  // used to cost her six points of patience.
+  const event = goodnight === 'said' ? 'substantive'
+    : isRedo(latest) ? 'redo'
+    : repeated ? 'repeat'
+    : isLowEffort(latest) ? 'low-effort'
+    : 'substantive';
   irritation = nextIrritation(irritation, event);
   // Shouting stings the way a thumbs-down does; an apology buys some of it back.
   if (shout === 'shouted') irritation = nextIrritation(irritation, 'disliked');
@@ -3585,7 +3595,7 @@ function searchInstruction() {
   return 'You can look things up online with search_web.' + browsing + ' Use it whenever they ask about something you cannot know from here — news, prices, results, opening times, whether something is out yet, who someone is, how to do something in an app or service that is not yours — and any time you would otherwise be hedging or guessing at a fact. Do not use it for their own list or anything they have told you. Having looked, answer in your own words, as though you simply knew: no announcing that you are searching, no reading the results back, no urls, no citing sources unless they ask where it came from. If what comes back does not answer them, say so rather than making the closest thing fit.';
 }
 
-function chatSystemPrompt({ irritation, ego, goodnight, shout, latestMessage, fresh }: { irritation: number; ego: number; goodnight: 'said' | 'after' | 'none'; shout: ShoutState; latestMessage: string; fresh: FreshStart | null }) {
+function chatSystemPrompt({ irritation, ego, goodnight, shout, latestMessage, fresh, herRecentReplies = [] }: { irritation: number; ego: number; goodnight: 'said' | 'after' | 'none'; shout: ShoutState; latestMessage: string; fresh: FreshStart | null; herRecentReplies?: string[] }) {
   const now = zonedNow(CHAT_TIMEZONE);
   const weekday = new Intl.DateTimeFormat('en-US', { weekday: 'long' }).format(now);
   const character = getActiveCharacter();
@@ -3676,6 +3686,12 @@ function chatSystemPrompt({ irritation, ego, goodnight, shout, latestMessage, fr
     moodInstruction(irritation),
     egoInstruction(ego),
     leverageInstruction(ego),
+    // Immediately after the three lines that cause it, and for the same reason
+    // freshStartInstruction sits where it does: being told she is fed up is what
+    // produces the stock sentence, so the correction has to be read second or it
+    // is simply overridden by "you cannot be bothered". Silent unless she has
+    // actually started repeating herself.
+    notTwiceInstruction(herRecentReplies),
     journalStance(getJournal(), localDateKey(now)),
     // Last of the tone lines: what they just said outranks anything she knew
     // beforehand, including her own mood.
@@ -5381,7 +5397,12 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // ago and she read the lot as current — see ./history.
   // Same prompt, same tools, same memory — with one sentence added when the
   // answer has to fit in a caption rather than a chat window.
-  const system = chatSystemPrompt({ ...mood, latestMessage: latest, fresh });
+  // Her own last few replies, so she can be told when she has started opening
+  // all of them the same way. Only her side: what the user wrote is not evidence
+  // of her repeating herself, and feeding the whole exchange back would be the
+  // thing asides.ts found makes replies worse.
+  const herRecentReplies = messages.filter(message => message.role === 'assistant').map(message => message.content).filter(Boolean);
+  const system = chatSystemPrompt({ ...mood, latestMessage: latest, fresh, herRecentReplies });
   // What she can still see. Not only this message: a picture has to ride along
   // again on the next turn or "what is in week three" cannot be answered, and
   // attachmentsInPlay is where the bound on doing that lives.

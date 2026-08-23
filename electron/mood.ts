@@ -20,16 +20,39 @@ const FILLER = new Set([
 
 const VAGUE = /^(tell me something|say something|talk to me|entertain me|amuse me|i'?m bored|bored|whatever|anything|something|surprise me|do something|go on|and\??|so\??|then\??)$/;
 
+/**
+ * Asking her to have another go, which is not the same as pestering her.
+ *
+ * "try again" typed twice used to be read as a repeat and cost her three points
+ * of patience each time — so a bad answer of hers made her angrier at the person
+ * who pointed it out. That is the wrong way round: the message is a complaint
+ * about her last reply, and the one thing it is not is lazy.
+ *
+ * Anchored at both ends, like VAGUE, because a redo is terse by nature. "another
+ * one" is asking for a second attempt; "another question about the invoice" is
+ * not, and only the whole-string anchor tells them apart.
+ */
+const REDO = /^(try (again|once more)|again|do (it|that|this) (again|properly)|do (again|properly)|redo( it| that)?|re-?write( it| that)?|re-?word( it| that)?|another( one)?|one more( time)?|no,? again|nope,? again|same again|not (quite|right|that))$/i;
+
+export function isRedo(text: string): boolean {
+  const clean = text.trim().toLowerCase().replace(/[!.?…,]+$/, '').trim();
+  return REDO.test(clean);
+}
+
 export function isLowEffort(text: string): boolean {
   const trimmed = text.trim();
   const clean = trimmed.toLowerCase().replace(/[!.?…,]+$/, '').trim();
   if (!clean) return true;
   if (FILLER.has(clean) || FILLER.has(trimmed.toLowerCase())) return true;
   if (VAGUE.test(clean)) return true;
-  // A lone word that is not asking anything carries no more than the fillers do.
-  // The question mark is read off the original text, since `clean` has had it
-  // stripped — otherwise a genuine "why?" reads as lazy.
-  return clean.split(/\s+/).length === 1 && !trimmed.endsWith('?');
+  // Every one-word message that was not a question used to land here, on the
+  // grounds that a lone word carries no more than a filler does. It does though:
+  // "expand", "shorter", "rewrite", "continue", "publish" are instructions, and
+  // charging two points of patience for each of them is how an ordinary working
+  // session — which is mostly short instructions — talked her into being fed up
+  // and kept her there. FILLER and VAGUE already cover the openers with nothing
+  // in them, which is all this was ever meant to catch.
+  return false;
 }
 
 // Time away counts for more than anything said: walking off and coming back
@@ -40,8 +63,12 @@ export function afterCooldown(level: number, minutesSinceLastMessage: number) {
   return Math.max(0, level - Math.floor(minutesSinceLastMessage / COOLDOWN_MINUTES));
 }
 
-export function nextIrritation(level: number, event: 'low-effort' | 'substantive' | 'repeat' | 'disliked' | 'liked') {
-  const delta = { 'low-effort': 2, repeat: 3, disliked: 2, substantive: -1, liked: -2 }[event];
+// 'redo' is deliberately worth nothing rather than counting as a real message.
+// Being told to have another go should not wind her up — she earned it — but it
+// should not calm her down either, because that would hand the user a point of
+// patience every time she got something wrong.
+export function nextIrritation(level: number, event: 'low-effort' | 'substantive' | 'repeat' | 'redo' | 'disliked' | 'liked') {
+  const delta = { 'low-effort': 2, repeat: 3, disliked: 2, redo: 0, substantive: -1, liked: -2 }[event];
   return Math.min(IRRITATION_MAX, Math.max(0, level + delta));
 }
 
@@ -163,6 +190,60 @@ export function isIgnoring(level: number) {
 // her talking again rather than waiting it out being the only route.
 export function afterPoke(level: number) {
   return Math.max(0, level - 1);
+}
+
+// How many of her own last replies are looked at, and how much of each counts as
+// "the opening". Six words is enough to catch a stock sentence and short enough
+// that two replies which merely start on the same subject are not mistaken for
+// one being copied.
+const OPENERS_CHECKED = 4;
+const OPENER_WORDS = 6;
+
+/**
+ * The one thing that stops her copying her own last reply.
+ *
+ * Told to be fed up, she wrote "Ugh, this is getting boring as hell already" —
+ * and then wrote it again, because by the third turn the transcript itself was
+ * the instruction. A model reading five of its own replies that all open the
+ * same way treats that as the required format, and no amount of tone wording
+ * fixes it: the evidence outweighs the sentence. Asked to stop, she agreed and
+ * did it again in the next breath, since her promise is one turn and the pattern
+ * is still sitting there underneath it.
+ *
+ * So this names the phrase and forbids the phrasing — not the subject. That
+ * distinction is the whole reason it is safe to use on replies at all:
+ * alreadySaidRecently in asides.ts feeds whole remarks and rules out talking
+ * about them again, which was tried on replies and made them measurably worse.
+ * This says nothing about what she may talk about.
+ *
+ * Silent unless there is something to report, so a conversation where she is not
+ * repeating herself carries none of this in its prompt.
+ */
+export function notTwiceInstruction(replies: string[], checked = OPENERS_CHECKED): string {
+  const opener = (text: string) => text
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, OPENER_WORDS)
+    .join(' ');
+
+  const recent = replies.slice(-checked).map(opener).filter(line => line.split(' ').length >= 3);
+  const seen = new Map<string, number>();
+  for (const line of recent) seen.set(line, (seen.get(line) ?? 0) + 1);
+
+  // The most repeated one, and only if it actually repeated.
+  let worst = '';
+  let count = 0;
+  for (const [line, times] of seen) if (times > count) { worst = line; count = times; }
+  if (count < 2) return '';
+
+  // Quoted back from the original rather than the normalised form, so she is
+  // shown the sentence she wrote instead of a stripped version of it that would
+  // read as her being misquoted.
+  const original = replies.slice(-checked).find(text => opener(text) === worst) ?? worst;
+  const phrase = original.replace(/\s+/g, ' ').split(' ').slice(0, OPENER_WORDS).join(' ');
+  return `You have opened ${count} of your last few replies with "${phrase}". You are repeating yourself and it is obvious. Do not use that phrasing again — open this reply differently, on a different word, and say what you mean some other way. This is about the wording only: the subject is still yours to talk about.`;
 }
 
 export function moodInstruction(level: number): string {
