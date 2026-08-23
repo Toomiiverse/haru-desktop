@@ -395,16 +395,34 @@ mic.addEventListener('pointerdown',e=>{e.preventDefault();startHearing();});
 for(const done of ['pointerup','pointerleave','pointercancel']) mic.addEventListener(done,stopHearing);
 
 ci.addEventListener('input',()=>{ci.style.height='auto';ci.style.height=Math.min(ci.scrollHeight,112)+'px';});
+// Counts sends, only so each waiting bubble can be told from the last one.
+let waiting=0;
 $('cf').addEventListener('submit',async ev=>{
   ev.preventDefault();
   const text=ci.value.trim(); if(!text)return;
   primeVoice();
   ci.value=''; ci.style.height='auto'; $('cb').disabled=true;
-  $('chat').insertAdjacentHTML('beforeend','<div class="msg me">'+esc(text)+'</div><div class="msg them" id=wait>…</div>');
+  // The waiting bubble used to be id="wait", a fixed string, and was taken back
+  // out with a bare document.getElementById('wait').remove().
+  //
+  // Two things went wrong with that. bubbles() rebuilds the list with innerHTML,
+  // so any tab switch or nudge arriving mid-send destroyed the element — and the
+  // lookup then returned null and .remove() threw. Because the identical call
+  // sat in the catch as well as the try, the throw escaped the handler
+  // altogether, which meant the line re-enabling the send button never ran: her
+  // reply was thrown away and the composer stayed dead until a reload. The fixed
+  // id also collided whenever two sends overlapped, so one bubble was orphaned
+  // on screen for good.
+  //
+  // So: an id of its own, removal that tolerates the node having gone, and the
+  // button re-enabled from a finally where nothing can step over it.
+  const id='wait'+(++waiting);
+  $('chat').insertAdjacentHTML('beforeend','<div class="msg me">'+esc(text)+'</div><div class="msg them" id='+id+'>…</div>');
   $('chat').scrollTop=$('chat').scrollHeight;
+  const stopWaiting=()=>{const bubble=document.getElementById(id); if(bubble) bubble.remove();};
   try{
     const a=await post('/api/chat',{text});
-    document.getElementById('wait').remove();
+    stopWaiting();
     if(a.ignored) $('chat').insertAdjacentHTML('beforeend','<div class="msg sys">She is not answering that.</div>');
     else {
       $('chat').insertAdjacentHTML('beforeend','<div class="msg them">'+esc(a.reply)+'</div>');
@@ -415,11 +433,12 @@ $('cf').addEventListener('submit',async ev=>{
       void speak(a.reply);
     }
   }catch(r){
-    document.getElementById('wait').remove();
+    stopWaiting();
     if(r&&r.status===401){location.reload();return;}
     $('chat').insertAdjacentHTML('beforeend','<div class="msg sys">That did not get through.</div>');
+  }finally{
+    $('cb').disabled=false; $('chat').scrollTop=$('chat').scrollHeight;
   }
-  $('cb').disabled=false; $('chat').scrollTop=$('chat').scrollHeight;
 });
 load();
 
