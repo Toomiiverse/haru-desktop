@@ -453,7 +453,7 @@ $('cf').addEventListener('submit',async ev=>{
       if(done)break;
       buf+=dec.decode(value,{stream:true});
       let at;
-      while((at=buf.indexOf('\n'))>=0){
+      while((at=buf.indexOf('\\n'))>=0){
         const line=buf.slice(0,at).trim(); buf=buf.slice(at+1);
         if(!line.startsWith('data:'))continue;
         let ev; try{ev=JSON.parse(line.slice(5));}catch{continue;}
@@ -532,10 +532,20 @@ setInterval(askIfSheHasSomethingToSay,4*60_000);
   // is its biggest bill, so she stays a portrait there — the words matter more
   // than the face, and a connection that is struggling with the words has no
   // business paying for the face too. The Network Information API is a guess
-  // about the *default* connection, not the tunnel's, so this is skipped when
-  // the browser says nothing at all: only an explicit slow reading backs out.
+  // about the *default* connection, not the tunnel's, so an explicit slow
+  // reading is what backs out on a browser that has one.
+  //
+  // Safari — every version, on the phone this page exists for — never has one
+  // at all. A missing reading there was originally let through as "the browser
+  // said nothing," which on an iPhone means every load pulls the full 28MB and
+  // starts a 60fps WebGL ticker regardless of the tunnel, and a weak enough
+  // phone-and-tunnel pair never finishes rendering a frame quickly enough to
+  // still take a tap on the tab bar. So: no reading at all, on a phone, is read
+  // the cautious way instead — the one browser this can't measure is the one
+  // it can least afford to guess wrong about.
   const net=globalThis.navigator&&navigator.connection;
-  const slow=net&&(net.saveData||(['slow-2g','2g'].includes(net.effectiveType)||(typeof net.downlink==='number'&&net.downlink<1)));
+  const isPhone=/iPhone|iPad|iPod|Android/i.test(navigator.userAgent||'');
+  const slow=net?(net.saveData||(['slow-2g','2g'].includes(net.effectiveType)||(typeof net.downlink==='number'&&net.downlink<1))):isPhone;
   if(slow){
     console.log('[stage] slow connection ('+net.effectiveType+', '+net.downlink+'Mbps) — staying with the portrait');
     host.classList.add('faceless');
