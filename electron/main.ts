@@ -61,6 +61,7 @@ import { CHECK_EVERY_MS, describeUpdate, progressStep, whyNotCheck, type UpdateS
 import { BREVITY, summonedLine } from './summoned';
 import { CHOICES_TOOL, readChoices } from './choices';
 import { quickAnswer, type AgendaLine } from './quick';
+import { newTrace } from './trace';
 
 type Bounds = { x: number; y: number; width: number; height: number };
 type Live2DModel = { path: string; name: string; url: string };
@@ -3044,6 +3045,13 @@ const CHAT_NUM_CTX = 8192;
 // on top of everything else — which is exactly the wait this whole change is
 // about. Thirty minutes of VRAM is the price of a reply that starts talking.
 const OLLAMA_KEEP_ALIVE = 30 * 60;
+// A reply sent somewhere she is not — a phone, Discord — is read on a screen
+// that is not the desk, where every extra sentence is extra tokens before the
+// reader sees anything. Capped so a far-away turn stays a line or two; the desk
+// keeps the full leash, because a conversation in front of her is allowed to
+// run long. Generous enough that a tool call is never cut off mid-arguments:
+// a round that needs tools still has room to emit them.
+const AWAY_MAX_TOKENS = 240;
 
 /**
  * Named rather than inferred. Left to itself TypeScript reads the literal below
@@ -5453,7 +5461,7 @@ async function withAttachments<T extends { role: string; content: string; at?: s
   return out;
 }
 
-async function ollamaChat(messages: { role: string; content: string; at?: string; attachments?: Attachment[] }[], config: ProviderConfig, { hands = true, brief = false, choices = false, away = '', onChunk, onChunkReset }: { hands?: boolean; brief?: boolean; choices?: boolean; away?: string; onChunk?: (text: string) => void; onChunkReset?: () => void } = {}) {
+async function ollamaChat(messages: { role: string; content: string; at?: string; attachments?: Attachment[] }[], config: ProviderConfig, { hands = true, brief = false, choices = false, away = '', onChunk, onChunkReset, traceId }: { hands?: boolean; brief?: boolean; choices?: boolean; away?: string; onChunk?: (text: string) => void; onChunkReset?: () => void; traceId?: string } = {}) {
   const latest = messages.at(-1)?.content ?? '';
   // They are talking to her, so the silence she was waiting out is over.
   noteUserSpoke();
@@ -5476,7 +5484,7 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // The category only, never the title — a log outlives the moment, and a
   // browsing history written to disk is a different thing from her reading a
   // window title and forgetting it.
-  console.log(`[ai] chat request: model=${config.model} messages=${messages.length} irritation=${irritation} ego=${ego} goodnight=${mood.goodnight} screen=${currentActivity ? currentActivity.kind : 'none'}`);
+  console.log(`[ai] chat request: model=${config.model} messages=${messages.length} irritation=${irritation} ego=${ego} goodnight=${mood.goodnight} screen=${currentActivity ? currentActivity.kind : 'none'}${traceId ? ` trace=${traceId}` : ''}`);
   // Past the threshold she does not answer at all. Returned rather than thrown:
   // the renderer marks the turn as ignored instead of showing an error.
   if (isIgnoring(irritation)) {
@@ -5571,7 +5579,15 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
     // so that loosening one does not silently loosen the other.
     if (pageWasRead) handsAllowed = false;
     roundStreamed = '';
-    const toolsWanted: PostOptions = { tools: !pageWasRead && !emptyRetried, ...(forwardChunk ? { onChunk: forwardChunk } : {}) };
+    const toolsWanted: PostOptions = {
+      tools: !pageWasRead && !emptyRetried,
+      // A message from outside the desk — a phone, Discord — gets a short leash.
+      // The reader is watching a chat app, a long reply is a long wait, and
+      // away-turns were found to run long: the cap keeps her concise without
+      // touching the desk, where a full answer is the point of the window.
+      ...(away ? { maxTokens: AWAY_MAX_TOKENS } : {}),
+      ...(forwardChunk ? { onChunk: forwardChunk } : {}),
+    };
     const roundStarted = Date.now();
     let message: OllamaMessage;
     try {
@@ -5590,7 +5606,7 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
       // the user sees a word, and away from the desk that is the difference
       // between a reply and a wait. Which tools are worth offering to a phone is
       // a question this log is here to answer with numbers.
-      console.log(`[ai] round ${round + 1} took ${Date.now() - roundStarted}ms — tool calls: ${message.tool_calls.map(call => call.function?.name ?? '?').join(', ')}`);
+      console.log(`[ai] round ${round + 1} took ${Date.now() - roundStarted}ms — tool calls: ${message.tool_calls.map(call => call.function?.name ?? '?').join(', ')}${traceId ? ` trace=${traceId}` : ''}`);
       for (const call of message.tool_calls) if (call.function?.name) ran.add(call.function.name);
       resetStream();
       conversation.push(message);
@@ -6149,8 +6165,14 @@ async function answerOnDiscord(text: string, channelId = '') {
   // that turns out to be a greeting or a time check should be instant, and if
   // the routing answers, the model is never even asked. Falls through silently
   // when the message needs any judgement at all.
+  const trace = newTrace();
   const quick = quickHit(text, history);
-  if (quick) { announceQuick(quick, text); return { reply: quick.reply, ignored: false }; }
+  trace.mark('intent');
+  if (quick) {
+    announceQuick(quick, text);
+    trace.done('discord', { tier: quick.tier, chars: quick.reply.length });
+    return { reply: quick.reply, ignored: false };
+  }
   const messages = [...history, { role: 'user', content: text, at: new Date().toISOString() }];
   // Out to the hosted model rather than to whatever answers at the desk.
   //
@@ -6164,8 +6186,9 @@ async function answerOnDiscord(text: string, channelId = '') {
   // Still routed rather than forced: no second model configured, or a credential
   // sitting in the recent transcript, and this comes straight back home.
   const started = Date.now();
-  const answer = await ollamaChat(messages, config, { hands: false, away: 'it came in over Discord' });
+  const answer = await ollamaChat(messages, config, { hands: false, away: 'it came in over Discord', traceId: trace.id });
   const reply = answer.content ?? '';
+  trace.mark('reply');
   // Lands in the desktop transcript too, so coming back to the desk does not
   // mean finding half a conversation missing.
   sendToWindows('chat:fromPhone', { text, reply, ignored: Boolean(answer.ignored) });
@@ -6175,6 +6198,7 @@ async function answerOnDiscord(text: string, channelId = '') {
   // depends entirely on how long it actually gets in a day, which nobody has
   // ever measured.
   console.log(`[discord] answered ${text.length} chars with ${reply.length} in ${Date.now() - started}ms (${messages.length} messages of history)`);
+  trace.done('discord', { tier: 'llm', chars: reply.length });
   return { reply, ignored: answer.ignored };
 }
 
@@ -6199,25 +6223,32 @@ async function answerOnDiscordStreamed(text: string, channelId: string, onChunk:
     return answer;
   }
   const history = (store.get('chat.messages') as { role: string; content: string; at?: string }[] ?? []);
+  const trace = newTrace();
   const quick = quickHit(text, history);
+  trace.mark('intent');
   if (quick) {
     // The whole reply is one chunk: the placeholder is already up, so the edit
     // reads the same as a stream that happened to finish instantly.
     onChunk(quick.reply);
     announceQuick(quick, text);
-    console.log(`[discord] quick tier ${quick.tier} in ${Date.now() - started}ms`);
+    trace.done('discord', { tier: quick.tier, chars: quick.reply.length });
     return { reply: quick.reply, ignored: false };
   }
   const messages = [...history, { role: 'user', content: text, at: new Date().toISOString() }];
   const answer = await ollamaChat(messages, config, {
     hands: false,
     away: 'it came in over Discord',
-    onChunk,
-    onChunkReset: () => onChunk('\uFFFD'),
+    traceId: trace.id,
+    onChunk: chunk => { trace.mark('first'); onChunk(chunk); },
+    // A round thrown away after showing words never stood: TTFT is measured on
+    // what the reader actually keeps, so the stamp goes back with the text.
+    onChunkReset: () => { trace.unmark('first'); onChunk('\uFFFD'); },
   });
   const reply = answer.content ?? '';
+  trace.mark('reply');
   sendToWindows('chat:fromPhone', { text, reply, ignored: Boolean(answer.ignored) });
   console.log(`[discord] streamed ${text.length} chars in ${Date.now() - started}ms, ${reply.length} chars (${messages.length} messages of history)`);
+  trace.done('discord', { tier: 'llm', chars: reply.length });
   return { reply, ignored: answer.ignored };
 }
 
@@ -6389,8 +6420,14 @@ function webDeps(): WebDeps {
       // The quick route answers what it can before the model is even asked: a
       // time check or a greeting from a phone should be instant, not the cold
       // start a hosted pod pays. Falls through when the message needs judgement.
+      const trace = newTrace();
       const quick = quickHit(text, history);
-      if (quick) { announceQuick(quick, text); return { reply: quick.reply, ignored: false }; }
+      trace.mark('intent');
+      if (quick) {
+        announceQuick(quick, text);
+        trace.done('web', { tier: quick.tier, chars: quick.reply.length });
+        return { reply: quick.reply, ignored: false };
+      }
       const messages = [...history, { role: 'user', content: text, at: new Date().toISOString() }];
       // Out to the hosted model, for the same reason Discord is: this is a
       // phone. There is no window to show that she is thinking, the tab is
@@ -6398,8 +6435,9 @@ function webDeps(): WebDeps {
       // serverless pod the first message of a session pays a cold start. The
       // desk keeps the local one — that is what the GPU is for.
       const started = Date.now();
-      const answer = await ollamaChat(messages, config, { hands: false, away: 'it came in from the phone' });
+      const answer = await ollamaChat(messages, config, { hands: false, away: 'it came in from the phone', traceId: trace.id });
       const reply = answer.content ?? '';
+      trace.mark('reply');
       sendToWindows('chat:fromPhone', { text, reply, ignored: Boolean(answer.ignored) });
       // Her face used to be read here, before returning, and the phone waited on
       // it — a second round trip to a model, spent so her eyebrows would be
@@ -6408,16 +6446,20 @@ function webDeps(): WebDeps {
       // trade for a face: nobody is looking at the stage while they are reading
       // the reply that has not arrived yet. It moved to /api/expression.
       console.log(`[web] answered ${text.length} chars with ${reply.length} in ${Date.now() - started}ms (${messages.length} messages of history)`);
+      trace.done('web', { tier: 'llm', chars: reply.length });
       return { reply, ignored: answer.ignored };
     },
     async sayStream(text, onChunk) {
       const config = store.get('ai.config') as ProviderConfig | undefined;
       if (!config?.model) throw new Error('no model is set up');
       const history = (store.get('chat.messages') as { role: string; content: string; at?: string }[] ?? []);
+      const trace = newTrace();
       const quick = quickHit(text, history);
+      trace.mark('intent');
       if (quick) {
         onChunk(quick.reply);
         announceQuick(quick, text);
+        trace.done('web', { tier: quick.tier, chars: quick.reply.length });
         return { reply: quick.reply, ignored: false };
       }
       const messages = [...history, { role: 'user', content: text, at: new Date().toISOString() }];
@@ -6425,15 +6467,20 @@ function webDeps(): WebDeps {
       const answer = await ollamaChat(messages, config, {
         hands: false,
         away: 'it came in from the phone',
-        onChunk,
+        traceId: trace.id,
+        onChunk: chunk => { trace.mark('first'); onChunk(chunk); },
         // The reader sees only what survives, but a round that ends in a tool
         // call or a retry can leave a few streamed words behind it. Sink them
         // with nothing: the streamed text is replaced by the reply that counts.
-        onChunkReset: () => onChunk('\uFFFD'),
+        // The first-word stamp goes with them, or the trace would claim a TTFT
+        // on words nobody ever saw.
+        onChunkReset: () => { trace.unmark('first'); onChunk('\uFFFD'); },
       });
       const reply = answer.content ?? '';
+      trace.mark('reply');
       sendToWindows('chat:fromPhone', { text, reply, ignored: Boolean(answer.ignored) });
       console.log(`[web] streamed ${text.length} chars in ${Date.now() - started}ms, ${reply.length} chars (${messages.length} messages of history)`);
+      trace.done('web', { tier: 'llm', chars: reply.length });
       return { reply, ignored: answer.ignored };
     },
     /**

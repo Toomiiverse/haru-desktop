@@ -527,6 +527,24 @@ setInterval(askIfSheHasSomethingToSay,4*60_000);
 (async function stage(){
   const host=document.querySelector('.stage');
   if(!host) return;
+  // The model is 28MB over a tunnel that is often the bottleneck. On a visibly
+  // slow or metered connection the chat is the point of the page and the stage
+  // is its biggest bill, so she stays a portrait there — the words matter more
+  // than the face, and a connection that is struggling with the words has no
+  // business paying for the face too. The Network Information API is a guess
+  // about the *default* connection, not the tunnel's, so this is skipped when
+  // the browser says nothing at all: only an explicit slow reading backs out.
+  const net=globalThis.navigator&&navigator.connection;
+  const slow=net&&(net.saveData||(['slow-2g','2g'].includes(net.effectiveType)||(typeof net.downlink==='number'&&net.downlink<1)));
+  if(slow){
+    console.log('[stage] slow connection ('+net.effectiveType+', '+net.downlink+'Mbps) — staying with the portrait');
+    host.classList.add('faceless');
+    const note=document.createElement('p');
+    note.className='stagenote';
+    note.textContent='Your connection is slow, so she is staying a portrait. The chat works the same.';
+    host.appendChild(note);
+    return;
+  }
   const script=src=>new Promise((ok,no)=>{const s=document.createElement('script');s.src=src;s.onload=ok;s.onerror=()=>no(new Error(src));document.head.appendChild(s);});
   try{
     const {entry,pose}=await get('/api/model');
