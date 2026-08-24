@@ -5921,7 +5921,12 @@ function createCompanionWindow() {
   companionWindow.on('resized', persistBounds);
 
   setInterval(() => {
-    if (!companionWindow || !companionWindow.isVisible()) return;
+    // isVisible() throws on a destroyed window rather than returning false,
+    // and nothing ever nulls this variable out on close — so the window
+    // reference outlives the window, and this poll firing every 33ms will
+    // eventually land between a destroy and the next tick. Caught this once
+    // already as an uncaught "Object has been destroyed" from here.
+    if (!companionWindow || companionWindow.isDestroyed() || !companionWindow.isVisible()) return;
     const point = screen.getCursorScreenPoint();
     const bounds = companionWindow.getBounds();
     companionWindow.webContents.send('companion:cursor', { x: point.x - bounds.x, y: point.y - bounds.y });
