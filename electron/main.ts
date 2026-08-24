@@ -3022,7 +3022,10 @@ function trimEndpoint(endpoint: string) {
   return endpoint.replace(/\/+$/, '');
 }
 
-type ToolCall = { function?: { name?: string; arguments?: unknown } };
+// id is carried by the OpenAI dialect only — a streamed tool call carries it on
+// its first delta — and travels through the same shape so both dialects can
+// share one reassembly.
+type ToolCall = { id?: string; function?: { name?: string; arguments?: unknown } };
 // images is base64, hung off the message the way Ollama wants it. Declared here
 // rather than left to arrive implicitly through a spread, because provider.ts
 // has to translate it for the OpenAI dialect and a field nothing names is a
@@ -3035,6 +3038,11 @@ const MAX_TOOL_ROUNDS = 4;
 // fits entirely in VRAM. Chat is wiped daily, so a day's history never needs the
 // larger window.
 const CHAT_NUM_CTX = 8192;
+// How long the local model is kept resident after a request. Without this, an
+// idle machine's model is evicted and the next phone message pays a cold start
+// on top of everything else — which is exactly the wait this whole change is
+// about. Thirty minutes of VRAM is the price of a reply that starts talking.
+const OLLAMA_KEEP_ALIVE = 30 * 60;
 
 /**
  * Named rather than inferred. Left to itself TypeScript reads the literal below
@@ -4348,7 +4356,9 @@ function requireKeyFor(endpoint: string, provider: Provider) {
  * purpose: every composer in this file calls ollamaPost, and none of them should
  * have to know or care which provider answered.
  */
-async function openAIPost(conversation: OllamaMessage[], config: ProviderConfig, { tools = true, temperature = config.temperature, format, maxTokens }: { tools?: boolean; temperature?: number; format?: unknown; maxTokens?: number } = {}) {
+type PostOptions = { tools?: boolean; temperature?: number; format?: unknown; maxTokens?: number; onChunk?: (text: string) => void };
+
+async function openAIPost(conversation: OllamaMessage[], config: ProviderConfig, { tools = true, temperature = config.temperature, format, maxTokens, onChunk }: PostOptions = {}) {
   requireKeyFor(config.endpoint, (config.provider as Provider) ?? 'openai');
   const body = toOpenAIBody({
     model: config.model,
@@ -4357,6 +4367,7 @@ async function openAIPost(conversation: OllamaMessage[], config: ProviderConfig,
     temperature,
     maxTokens,
     json: Boolean(format),
+    stream: Boolean(onChunk),
   });
   const response = await net.fetch(`${trimEndpoint(config.endpoint)}/chat/completions`, {
     method: 'POST',
@@ -4370,11 +4381,59 @@ async function openAIPost(conversation: OllamaMessage[], config: ProviderConfig,
     if (response.status === 400 && /tool|function/i.test(detail) && tools) {
       toolless.add(config.model);
       console.warn(`[ai] ${config.model} rejected the tools — retrying without them. She cannot save reminders on this model.`);
-      return openAIPost(conversation, config, { tools: false, temperature, format, maxTokens });
+      return openAIPost(conversation, config, { tools: false, temperature, format, maxTokens, onChunk });
     }
     throw new Error(describeFailure(response.status, detail, (config.provider as Provider) ?? 'openai'));
   }
+  if (onChunk) return streamOpenAI(response, onChunk);
   return fromOpenAIReply(await response.json()) as OllamaMessage;
+}
+
+/**
+ * A streamed reply from an OpenAI-shaped endpoint, read as SSE.
+ *
+ * Content arrives as a series of `data:` lines holding a delta each, and tool
+ * calls arrive in pieces across several deltas — the name and id on the first,
+ * the arguments as string fragments that only make sense once joined. Both are
+ * reassembled here so the caller sees the same shape it would have got from a
+ * non-streamed request.
+ */
+async function streamOpenAI(response: Response, onChunk: (text: string) => void): Promise<OllamaMessage> {
+  if (!response.body) throw new Error('The provider returned nothing to read.');
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let content = '';
+  const toolCalls: NonNullable<OllamaMessage['tool_calls']> = [];
+  let buffer = '';
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let at: number;
+    while ((at = buffer.indexOf('\n')) >= 0) {
+      const line = buffer.slice(0, at).trim();
+      buffer = buffer.slice(at + 1);
+      if (!line.startsWith('data:')) continue;
+      const data = line.slice(5).trim();
+      if (data === '[DONE]') { buffer = ''; break; }
+      let payload: { choices?: { delta?: { content?: string; tool_calls?: { index?: number; id?: string; function?: { name?: string; arguments?: string } }[] } }[] };
+      try { payload = JSON.parse(data) as typeof payload; } catch { continue; }
+      const delta = payload.choices?.[0]?.delta;
+      if (!delta) continue;
+      if (delta.content) { content += delta.content; onChunk(delta.content); }
+      for (const call of delta.tool_calls ?? []) {
+        const at = call.index ?? toolCalls.length;
+        const held = toolCalls[at] ?? (toolCalls[at] = { function: { name: '', arguments: '' } });
+        if (call.id) held.id = call.id;
+        held.function = held.function ?? { name: '', arguments: '' };
+        if (call.function?.name) held.function.name = call.function.name;
+        if (call.function?.arguments) held.function.arguments = (held.function.arguments ?? '') + call.function.arguments;
+      }
+    }
+  }
+  const message: OllamaMessage = { role: 'assistant', content };
+  if (toolCalls.some(call => call.function?.name)) message.tool_calls = toolCalls;
+  return message;
 }
 
 /**
@@ -4463,10 +4522,10 @@ function capacitySpill(config: ProviderConfig): ProviderConfig | null {
  * silently becoming eight times slower with no explanation, which reads as
  * something being wrong with her rather than with the pod.
  */
-async function ollamaPost(conversation: OllamaMessage[], config: ProviderConfig, { tools = true, temperature = config.temperature, format, maxTokens }: { tools?: boolean; temperature?: number; format?: unknown; maxTokens?: number } = {}) {
+async function ollamaPost(conversation: OllamaMessage[], config: ProviderConfig, { tools = true, temperature = config.temperature, format, maxTokens, onChunk }: PostOptions = {}) {
   // One place, so chat, quips, openings and remarks all follow the same rule.
   config = modelForNow(config);
-  const options = { tools, temperature, format, maxTokens };
+  const options = { tools, temperature, format, maxTokens, onChunk };
   const home = homeTwin(config);
   const address = trimEndpoint(config.endpoint);
 
@@ -4496,11 +4555,11 @@ async function ollamaPost(conversation: OllamaMessage[], config: ProviderConfig,
   }
 }
 
-async function sendToProvider(conversation: OllamaMessage[], config: ProviderConfig, { tools = true, temperature = config.temperature, format, maxTokens }: { tools?: boolean; temperature?: number; format?: unknown; maxTokens?: number } = {}) {
+async function sendToProvider(conversation: OllamaMessage[], config: ProviderConfig, { tools = true, temperature = config.temperature, format, maxTokens, onChunk }: PostOptions = {}) {
   // Routed here rather than at every call site: there are a dozen composers in
   // this file and none of them should know which provider is answering.
-  if (isOpenAIShaped(config.provider)) return openAIPost(conversation, config, { tools, temperature, format, maxTokens });
-  const send = async (withTools: boolean) => {
+  if (isOpenAIShaped(config.provider)) return openAIPost(conversation, config, { tools, temperature, format, maxTokens, onChunk });
+  const send = async (withTools: boolean, streaming: boolean) => {
     try {
       return await net.fetch(`${trimEndpoint(config.endpoint)}/api/chat`, {
         method: 'POST',
@@ -4509,8 +4568,8 @@ async function sendToProvider(conversation: OllamaMessage[], config: ProviderCon
           model: config.model, messages: conversation,
           ...(withTools ? { tools: chatTools() } : {}),
           ...(format ? { format } : {}),
-          stream: false,
-          options: { temperature, num_ctx: CHAT_NUM_CTX, ...(maxTokens ? { num_predict: maxTokens } : {}) },
+          stream: streaming,
+          options: { temperature, num_ctx: CHAT_NUM_CTX, keep_alive: OLLAMA_KEEP_ALIVE, ...(maxTokens ? { num_predict: maxTokens } : {}) },
         }),
       });
     } catch (error) {
@@ -4522,7 +4581,7 @@ async function sendToProvider(conversation: OllamaMessage[], config: ProviderCon
   };
 
   const wanted = tools && !toolless.has(config.model);
-  let response = await send(wanted);
+  let response = await send(wanted, Boolean(onChunk));
   if (!response.ok && wanted && response.status === 400) {
     const body = await response.text().catch(() => '');
     if (/does not support tools/i.test(body)) {
@@ -4530,7 +4589,7 @@ async function sendToProvider(conversation: OllamaMessage[], config: ProviderCon
       // the ability to write anything down, so this is said out loud once.
       toolless.add(config.model);
       console.warn(`[ai] ${config.model} does not support tools — retrying without them. She cannot save reminders or tick things off on this model.`);
-      response = await send(false);
+      response = await send(false, Boolean(onChunk));
     } else {
       throw new Error(`Ollama returned 400: ${body || response.statusText}`);
     }
@@ -4550,10 +4609,46 @@ async function sendToProvider(conversation: OllamaMessage[], config: ProviderCon
     }
     throw new Error(`Ollama returned ${response.status}: ${body || response.statusText}`);
   }
+  if (onChunk) return streamOllama(response, onChunk);
   const data = await response.json() as { message?: OllamaMessage; error?: string };
   if (data.error) throw new Error(data.error);
   if (!data.message) throw new Error('Ollama response did not include a message.');
   return data.message;
+}
+
+/**
+ * A streamed reply from Ollama, read as one JSON object per line.
+ *
+ * Content comes as fragments on each line, and a tool call arrives on its own
+ * line with no content — so what is reassembled here is the same message the
+ * non-streamed path would have returned, content and tool calls included.
+ * `onChunk` is only ever given content, never the tool-call lines.
+ */
+async function streamOllama(response: Response, onChunk: (text: string) => void): Promise<OllamaMessage> {
+  if (!response.body) throw new Error('Ollama returned nothing to read.');
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let content = '';
+  let toolCalls: NonNullable<OllamaMessage['tool_calls']> | undefined;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    for (const line of decoder.decode(value, { stream: true }).split('\n')) {
+      if (!line.trim()) continue;
+      let payload: { message?: OllamaMessage };
+      try { payload = JSON.parse(line) as typeof payload; } catch { continue; }
+      const piece = payload.message;
+      if (!piece) continue;
+      // The final line carries done:true with the tail of the message, so it is
+      // forwarded like any other — sequential streaming means nothing is sent
+      // twice.
+      if (piece.content) { content += piece.content; onChunk(piece.content); }
+      if (piece.tool_calls?.length) toolCalls = toolCalls ?? piece.tool_calls;
+    }
+  }
+  const message: OllamaMessage = { role: 'assistant', content };
+  if (toolCalls?.length) message.tool_calls = toolCalls;
+  return message;
 }
 
 // Shown to the model as tone reference rather than picked from — the point of
@@ -5357,7 +5452,7 @@ async function withAttachments<T extends { role: string; content: string; at?: s
   return out;
 }
 
-async function ollamaChat(messages: { role: string; content: string; at?: string; attachments?: Attachment[] }[], config: ProviderConfig, { hands = true, brief = false, choices = false, away = '' }: { hands?: boolean; brief?: boolean; choices?: boolean; away?: string } = {}) {
+async function ollamaChat(messages: { role: string; content: string; at?: string; attachments?: Attachment[] }[], config: ProviderConfig, { hands = true, brief = false, choices = false, away = '', onChunk, onChunkReset }: { hands?: boolean; brief?: boolean; choices?: boolean; away?: string; onChunk?: (text: string) => void; onChunkReset?: () => void } = {}) {
   const latest = messages.at(-1)?.content ?? '';
   // They are talking to her, so the silence she was waiting out is over.
   noteUserSpoke();
@@ -5462,12 +5557,20 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   const ran = new Set<string>();
   let claimRetried = false;
   let tickRetried = false;
+  // What the reader has been shown so far this round. The moment a round is
+  // thrown away — a tool call arrives, the reply comes back empty, a retry is
+  // pressed — any words already streamed would be a lie, so the sink is told to
+  // take them back and the reader waits for the round that actually survives.
+  let roundStreamed = '';
+  const forwardChunk = onChunk ? (chunk: string) => { roundStreamed += chunk; onChunk(chunk); } : undefined;
+  const resetStream = () => { if (roundStreamed) { roundStreamed = ''; onChunkReset?.(); } };
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
     // Reading anything ends her reach for the rest of the turn. pageWasRead
     // already withdraws every tool, and this makes the narrower promise explicit
     // so that loosening one does not silently loosen the other.
     if (pageWasRead) handsAllowed = false;
-    const toolsWanted = { tools: !pageWasRead && !emptyRetried };
+    roundStreamed = '';
+    const toolsWanted: PostOptions = { tools: !pageWasRead && !emptyRetried, ...(forwardChunk ? { onChunk: forwardChunk } : {}) };
     const roundStarted = Date.now();
     let message: OllamaMessage;
     try {
@@ -5488,8 +5591,13 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
       // a question this log is here to answer with numbers.
       console.log(`[ai] round ${round + 1} took ${Date.now() - roundStarted}ms — tool calls: ${message.tool_calls.map(call => call.function?.name ?? '?').join(', ')}`);
       for (const call of message.tool_calls) if (call.function?.name) ran.add(call.function.name);
+      resetStream();
       conversation.push(message);
-      for (const call of message.tool_calls) conversation.push({ role: 'tool', tool_name: call.function?.name, content: await runChatTool(call, latest) });
+      // The calls in one round run together rather than one after another — a
+      // search and a page read have nothing to wait for. Order is kept: each
+      // result answers the call it was born from, whichever finished first.
+      const results = await Promise.all(message.tool_calls.map(async call => ({ call, content: await runChatTool(call, latest) })));
+      for (const { call, content } of results) conversation.push({ role: 'tool', tool_name: call.function?.name, content });
       if (pageWasRead) console.log('[search] page read — tools withdrawn for the rest of this reply');
       continue;
     }
@@ -5506,6 +5614,7 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
     if (!message.content) {
       if (!emptyRetried) {
         emptyRetried = true;
+        resetStream();
         console.warn('[ai] empty response with no tool call — retrying once without tools');
         conversation.push({ role: 'user', content: 'Answer them in words. Do not call anything.' });
         continue;
@@ -5525,6 +5634,7 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
     const wanted = claim === 'power' ? 'power' : 'open_app';
     if (claim && !claimRetried && !pageWasRead && handsAllowed && !ran.has(wanted) && !ran.has('close_app')) {
       claimRetried = true;
+      resetStream();
       console.warn(`[ai] claimed a ${claim} action without calling anything — retrying once`);
       conversation.push(message);
       conversation.push({
@@ -5547,6 +5657,7 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
     if (claimsTickOff(message.content) && !tickRetried && !ran.has('complete_kept_item')
       && getKept().some(item => item.kind === 'task' && !item.done)) {
       tickRetried = true;
+      resetStream();
       console.warn('[agenda] claimed a tick-off without calling anything — retrying once');
       conversation.push(message);
       conversation.push({
@@ -6012,6 +6123,39 @@ async function answerOnDiscord(text: string, channelId = '') {
   return { reply, ignored: answer.ignored };
 }
 
+/**
+ * The same answer, with the words arriving while she is still writing them.
+ *
+ * The one difference from answerOnDiscord is onChunk: the Discord link posts a
+ * placeholder the moment the message lands and rewrites it as each stretch of
+ * the reply arrives. Everything else — the routing, the mood, the check-in
+ * channel, the transcript entry — is the same path.
+ */
+async function answerOnDiscordStreamed(text: string, channelId: string, onChunk: (chunk: string) => void) {
+  const started = Date.now();
+  const config = store.get('ai.config') as ProviderConfig | undefined;
+  if (!config?.model) return { reply: '', ignored: true };
+  // A check-in channel answers with a one-line quip through ollamaQuip, which
+  // has no streaming of its own — the placeholder is already up, so the line is
+  // handed over whole, which is one edit and reads identically.
+  if (channelId && useOfChannel(getDiscordConfig(), channelId) === 'checkin') {
+    const answer = await answerOnDiscord(text, channelId);
+    if (!answer.ignored && answer.reply.trim()) onChunk(answer.reply);
+    return answer;
+  }
+  const messages = [...(store.get('chat.messages') as { role: string; content: string; at?: string }[] ?? []), { role: 'user', content: text, at: new Date().toISOString() }];
+  const answer = await ollamaChat(messages, config, {
+    hands: false,
+    away: 'it came in over Discord',
+    onChunk,
+    onChunkReset: () => onChunk('\uFFFD'),
+  });
+  const reply = answer.content ?? '';
+  sendToWindows('chat:fromPhone', { text, reply, ignored: Boolean(answer.ignored) });
+  console.log(`[discord] streamed ${text.length} chars in ${Date.now() - started}ms, ${reply.length} chars (${messages.length} messages of history)`);
+  return { reply, ignored: answer.ignored };
+}
+
 /** Last time an emoji earned a line, so a handful of them earns one. */
 let reactedAt = 0;
 
@@ -6110,6 +6254,7 @@ async function startDiscord() {
   discordTrouble = '';
   discord = new DiscordLink(token, config.ownerId, {
     answer: (text, channelId) => answerOnDiscord(text, channelId),
+    answerStream: (text, channelId, onChunk) => answerOnDiscordStreamed(text, channelId, onChunk),
     reacted: (emoji, custom, herLine) => reactedOnDiscord(emoji, custom, herLine),
     onReady: name => { discordUser = name; discordTrouble = ''; },
     onTrouble: why => { discordTrouble = why; },
@@ -6192,6 +6337,25 @@ function webDeps(): WebDeps {
       // trade for a face: nobody is looking at the stage while they are reading
       // the reply that has not arrived yet. It moved to /api/expression.
       console.log(`[web] answered ${text.length} chars with ${reply.length} in ${Date.now() - started}ms (${messages.length} messages of history)`);
+      return { reply, ignored: answer.ignored };
+    },
+    async sayStream(text, onChunk) {
+      const config = store.get('ai.config') as ProviderConfig | undefined;
+      if (!config?.model) throw new Error('no model is set up');
+      const messages = [...(store.get('chat.messages') as { role: string; content: string; at?: string }[] ?? []), { role: 'user', content: text, at: new Date().toISOString() }];
+      const started = Date.now();
+      const answer = await ollamaChat(messages, config, {
+        hands: false,
+        away: 'it came in from the phone',
+        onChunk,
+        // The reader sees only what survives, but a round that ends in a tool
+        // call or a retry can leave a few streamed words behind it. Sink them
+        // with nothing: the streamed text is replaced by the reply that counts.
+        onChunkReset: () => onChunk('\uFFFD'),
+      });
+      const reply = answer.content ?? '';
+      sendToWindows('chat:fromPhone', { text, reply, ignored: Boolean(answer.ignored) });
+      console.log(`[web] streamed ${text.length} chars in ${Date.now() - started}ms, ${reply.length} chars (${messages.length} messages of history)`);
       return { reply, ignored: answer.ignored };
     },
     /**

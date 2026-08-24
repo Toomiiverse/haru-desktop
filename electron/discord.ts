@@ -30,6 +30,8 @@ const INTENTS = (1 << 12) | (1 << 15) | (1 << 9) | (1 << 13) | (1 << 10);
 
 /** Discord refuses anything longer, and truncating her mid-sentence is worse than two messages. */
 export const DISCORD_LIMIT = 2000;
+/** How often a reply in progress may be rewritten. Discord allows five edits per five seconds per channel. */
+const EDIT_INTERVAL_MS = 1000;
 
 export type DiscordConfig = {
   enabled: boolean;
@@ -165,6 +167,15 @@ export function backoffMs(attempt: number): number {
 type Sink = {
   answer(text: string, channelId: string): Promise<{ reply: string; ignored?: boolean }>;
   /**
+   * The same answer, written out while it is still being composed.
+   *
+   * `onChunk` is called with each new stretch of the final reply, in order. It
+   * is only ever given words that will still be on screen when the reply is
+   * done — the one exception is a round thrown away at the last moment, which
+   * signals itself with a single U+FFFD for the reader to clear.
+   */
+  answerStream?(text: string, channelId: string, onChunk: (chunk: string) => void): Promise<{ reply: string; ignored?: boolean }>;
+  /**
    * They put an emoji on something she said. `custom` marks a server emoji,
    * whose name is somebody's in-joke rather than a character with a meaning.
    */
@@ -232,14 +243,85 @@ export class DiscordLink {
   }
 
   async send(channelId: string, text: string) {
-    for (const part of splitForDiscord(text)) {
-      const res = await fetch(API + '/channels/' + channelId + '/messages', {
-        method: 'POST',
+    for (const part of splitForDiscord(text)) await this.post(channelId, part);
+  }
+
+  /** One message, or nothing if Discord refused it. */
+  private async post(channelId: string, content: string): Promise<{ id: string } | null> {
+    const res = await fetch(API + '/channels/' + channelId + '/messages', {
+      method: 'POST',
+      headers: { Authorization: 'Bot ' + this.token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content }),
+    });
+    if (!res.ok) { console.warn('[discord] could not send (' + res.status + ')'); return null; }
+    return (await res.json()) as { id: string };
+  }
+
+  /**
+   * A reply that shows up while it is still being written.
+   *
+   * A placeholder goes up the moment she starts thinking, and is rewritten as
+   * the words arrive — a phone watching a chat app reads a message appearing as
+   * an answer, where an edit is a noisier way to say the same thing. Rewrites
+   * are throttled: Discord allows five edits per channel per five seconds, so
+   * one a second is safely inside that and still looks live.
+   *
+   * A reply longer than one message spills into a second message the way send()
+   * cuts up a finished reply; the pieces are trimmed to what the final text
+   * actually is, and extras are taken back.
+   */
+  async beginReply(channelId: string): Promise<{ update(text: string): Promise<void>; finish(text: string): Promise<void> } | null> {
+    const first = await this.post(channelId, '…');
+    if (!first) return null;
+    const parts: { id: string; text: string }[] = [{ id: first.id, text: '' }];
+    let lastEdit = 0;
+
+    const edit = async (part: { id: string; text: string }, text: string, force: boolean) => {
+      if (!force && text === part.text) return;
+      part.text = text;
+      const now = Date.now();
+      if (!force && now - lastEdit < EDIT_INTERVAL_MS) return;
+      lastEdit = now;
+      const res = await fetch(`${API}/channels/${channelId}/messages/${part.id}`, {
+        method: 'PATCH',
         headers: { Authorization: 'Bot ' + this.token, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: part }),
+        body: JSON.stringify({ content: text }),
       });
-      if (!res.ok) { console.warn('[discord] could not send (' + res.status + ')'); return; }
-    }
+      if (!res.ok) console.warn(`[discord] could not edit the reply in progress (${res.status})`);
+    };
+
+    const remove = async (part: { id: string }) => {
+      await fetch(`${API}/channels/${channelId}/messages/${part.id}`, {
+        method: 'DELETE',
+        headers: { Authorization: 'Bot ' + this.token },
+      });
+    };
+
+    const sync = async (text: string, force: boolean) => {
+      // The round being thrown away shows itself as a bare U+FFFD; back to the
+      // placeholder rather than printing a character nobody asked for.
+      if (text === '\uFFFD') text = '…';
+      const pieces = splitForDiscord(text || '…');
+      while (parts.length < pieces.length) {
+        const extra = await this.post(channelId, '…');
+        if (!extra) break;
+        parts.push({ id: extra.id, text: '' });
+      }
+      for (let i = 0; i < parts.length; i++) {
+        const wanted = pieces[i] ?? '';
+        if (wanted === parts[i].text) continue;
+        await edit(parts[i], wanted || '…', force);
+      }
+      // The finished reply settled shorter than the stream reached: take the
+      // overflow back so a dead tail does not sit under the real answer.
+      for (let i = pieces.length; i < parts.length; i++) await remove(parts[i]);
+      parts.length = Math.min(parts.length, pieces.length);
+    };
+
+    return {
+      update: text => sync(text, false),
+      finish: text => sync(text, true),
+    };
   }
 
   private open(url: string) {
@@ -363,6 +445,28 @@ export class DiscordLink {
         method: 'POST',
         headers: { Authorization: 'Bot ' + this.token },
       });
+      // Streamed when the sink can: a placeholder appears immediately and is
+      // rewritten as the words arrive, so a phone sees an answer starting rather
+      // than a typing indicator that never ends. Falls back to the one-shot
+      // path when the placeholder cannot be posted.
+      if (this.sink.answerStream) {
+        const reply = await this.beginReply(message.channel_id);
+        if (!reply) {
+          const answer = await this.sink.answer(message.content, message.channel_id);
+          if (answer.ignored || !answer.reply.trim()) return;
+          await this.send(message.channel_id, answer.reply);
+          return;
+        }
+        try {
+          const answer = await this.sink.answerStream(message.content, message.channel_id, chunk => void reply.update(chunk));
+          if (answer.ignored || !answer.reply.trim()) return await reply.finish('');
+          await reply.finish(answer.reply);
+        } catch (error) {
+          console.warn('[discord] could not answer:', error instanceof Error ? error.message : error);
+          await reply.finish('');
+        }
+        return;
+      }
       const answer = await this.sink.answer(message.content, message.channel_id);
       if (answer.ignored || !answer.reply.trim()) return;
       await this.send(message.channel_id, answer.reply);

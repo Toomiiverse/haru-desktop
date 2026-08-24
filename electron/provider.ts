@@ -137,6 +137,7 @@ export function toOpenAIBody(options: {
   temperature: number;
   maxTokens?: number;
   json?: boolean;
+  stream?: boolean;
 }) {
   return {
     model: options.model,
@@ -147,7 +148,7 @@ export function toOpenAIBody(options: {
     temperature: options.temperature,
     ...(options.maxTokens ? { max_tokens: options.maxTokens } : {}),
     ...(options.json ? { response_format: { type: 'json_object' } } : {}),
-    stream: false,
+    stream: Boolean(options.stream),
   };
 }
 

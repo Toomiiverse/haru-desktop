@@ -438,16 +438,47 @@ $('cf').addEventListener('submit',async ev=>{
   $('chat').insertAdjacentHTML('beforeend','<div class="msg me">'+esc(text)+'</div><div class="msg them" id='+id+'>…</div>');
   $('chat').scrollTop=$('chat').scrollHeight;
   const stopWaiting=()=>{const bubble=document.getElementById(id); if(bubble) bubble.remove();};
+  // The waiting bubble doubles as the reply bubble: words land in it as the
+  // stream delivers them, and the final processed reply replaces them when the
+  // stream ends. textContent rather than innerHTML — her words are text, not
+  // markup, and the model is not a source we escape from, it is the source.
+  const show=t=>{const bubble=document.getElementById(id); if(!bubble) return false; bubble.textContent=t; $('chat').scrollTop=$('chat').scrollHeight; return true;};
   try{
-    const a=await post('/api/chat',{text});
-    stopWaiting();
-    if(a.ignored) $('chat').insertAdjacentHTML('beforeend','<div class="msg sys">She is not answering that.</div>');
-    else {
-      $('chat').insertAdjacentHTML('beforeend','<div class="msg them">'+esc(a.reply)+'</div>');
-      // Both started here and neither waited on: the words are already on screen,
-      // and her face and her voice can catch up in their own time.
-      void face(a.reply);
-      void speak(a.reply);
+    const r=await fetch('/api/chat/stream',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({text})});
+    if(!r.ok) throw r;
+    const reader=r.body.getReader(); const dec=new TextDecoder();
+    let buf='',said='',reply=null,ignored=false,error=null;
+    while(true){
+      const {done,value}=await reader.read();
+      if(done)break;
+      buf+=dec.decode(value,{stream:true});
+      let at;
+      while((at=buf.indexOf('\n'))>=0){
+        const line=buf.slice(0,at).trim(); buf=buf.slice(at+1);
+        if(!line.startsWith('data:'))continue;
+        let ev; try{ev=JSON.parse(line.slice(5));}catch{continue;}
+        if(ev.error) error=ev.error;
+        else if(ev.text==='\uFFFD'){ said=''; show('…'); }
+        else if(ev.text){ said+=ev.text; show(said); }
+        else if(ev.done){ reply=ev.reply; ignored=Boolean(ev.ignored); }
+      }
+    }
+    if(error) throw new Error(error);
+    if(ignored){
+      // Whatever she was about to say does not exist: the bubble goes, the note
+      // takes its place, and nothing is spoken.
+      stopWaiting();
+      $('chat').insertAdjacentHTML('beforeend','<div class="msg sys">She is not answering that.</div>');
+    } else {
+      // The processed reply is the one that counts — the stream can carry words
+      // she later trims as repetition — so it replaces what was shown.
+      if(reply!==null) show(reply);
+      if(reply){
+        // Both started here and neither waited on: the words are already on screen,
+        // and her face and her voice can catch up in their own time.
+        void face(reply);
+        void speak(reply);
+      }
     }
   }catch(r){
     stopWaiting();

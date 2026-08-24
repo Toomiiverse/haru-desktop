@@ -28,6 +28,17 @@ export type WebDeps = {
   /** Her real answer, through the same pipeline the desktop uses — minus hands. */
   say(text: string): Promise<{ reply: string; ignored?: boolean; expression?: string | null; emotion?: string | null }>;
   /**
+   * The same answer, with the words while they are still being written.
+   *
+   * `onChunk` is called with each new stretch of the final reply, in order.
+   * Whatever was shown so far is exactly what survives: the chat loop only
+   * streams the round that ends the turn, so there is no text here that gets
+   * taken back. One exception: a round that is thrown away at the last moment
+   * (a tool call was coming, a retry was pressed) signals itself by handing a
+   * single U+FFFD — the reader clears what it has and waits for the next chunk.
+   */
+  sayStream(text: string, onChunk: (chunk: string) => void): Promise<{ reply: string; ignored?: boolean }>;
+  /**
    * What her face should do about a line she has just said.
    *
    * Asked for separately, for the same reason her voice is: it costs a whole
@@ -414,6 +425,30 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
     if (!text) return json(res, 400, { error: 'Say something.' });
     const answer = await deps.say(text);
     return json(res, 200, answer);
+  }
+
+  // The same chat, as a stream. A phone that waits for the whole reply waits in
+  // silence; a phone that watches the words arrive reads "she is thinking" as
+  // "she is answering". Kept as a separate route so the plain /api/chat above
+  // stays for the terminal client, which has nothing to gain from a stream.
+  if (req.method === 'POST' && path === '/api/chat/stream') {
+    const body = await readBody(req) as { text?: unknown };
+    const text = typeof body.text === 'string' ? body.text.trim() : '';
+    if (!text) return json(res, 400, { error: 'Say something.' });
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'Cache-Control': 'no-store',
+      'Connection': 'keep-alive',
+    });
+    const emit = (value: unknown) => { if (!res.destroyed) res.write(`data: ${JSON.stringify(value)}\n\n`); };
+    try {
+      const answer = await deps.sayStream(text, chunk => emit({ text: chunk }));
+      emit({ done: true, reply: answer.reply, ignored: Boolean(answer.ignored) });
+    } catch (error) {
+      console.error('[web] ' + (error instanceof Error ? error.message : String(error)));
+      emit({ error: error instanceof Error ? error.message : String(error) });
+    }
+    return res.end();
   }
 
   // Her face, on the same terms as her voice below and for the same reason.
