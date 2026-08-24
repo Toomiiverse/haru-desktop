@@ -60,6 +60,7 @@ import { startWebServer, type WebDeps } from './webserver';
 import { CHECK_EVERY_MS, describeUpdate, progressStep, whyNotCheck, type UpdateState } from './updates';
 import { BREVITY, summonedLine } from './summoned';
 import { CHOICES_TOOL, readChoices } from './choices';
+import { quickAnswer, type AgendaLine } from './quick';
 
 type Bounds = { x: number; y: number; width: number; height: number };
 type Live2DModel = { path: string; name: string; url: string };
@@ -6063,6 +6064,53 @@ function ratingIn(text: string): number | undefined {
   return undefined;
 }
 
+/**
+ * The deterministic route: canned FAQ, templates, then the lookups the model
+ * would have done through its tools — all without a model in the loop.
+ *
+ * `history` is the conversation up to but not including `text`, so the mood
+ * side effects a quick hit causes (she was spoken to, she was fed up or not by
+ * what was said) advance exactly as they would have on the full path. Mood
+ * still gates from outside: while she is ignoring, quick.ts answers nothing
+ * and the caller lets the full path carry the silence.
+ */
+function quickHit(text: string, history: { role?: string; content?: string }[]) {
+  const mood = getMood();
+  const now = zonedNow(CHAT_TIMEZONE);
+  const todayKey = localDateKey(now);
+  const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+  const kept = getKept();
+  const linesFor = (date: string): AgendaLine[] => kept
+    .filter(item => item.date === date)
+    .map(item => ({ title: item.title, time: item.time, done: item.done }));
+  const character = getActiveCharacter();
+  const herName = /You are ([^.,!?]+)/.exec(character.identity)?.[1]?.trim() ?? 'Haru';
+  const hit = quickAnswer(text, {
+    now,
+    todayKey,
+    nickname: getProfile().nickname,
+    herName,
+    agenda: { today: linesFor(todayKey), tomorrow: linesFor(localDateKey(tomorrow)) },
+    checkInsToday: checkInsOn(getCheckIns(), todayKey).length,
+    irritation: mood.irritation,
+    ignoring: isIgnoring(mood.irritation),
+  });
+  if (!hit) return null;
+  // The same turn-keeping the full path does, so a quick answer is not a
+  // conversation hole: she heard them, and her patience moves for what they
+  // said rather than freezing until the next model reply.
+  noteUserSpoke();
+  advanceMood(text, history);
+  return hit;
+}
+
+/** The hit, said out loud: recorded in the transcript and logged with its tier
+ *  so the route a message took can be read back from the log. */
+function announceQuick(hit: { reply: string; tier: number }, text: string) {
+  sendToWindows('chat:fromPhone', { text, reply: hit.reply, ignored: false });
+  console.log(`[quick] tier ${hit.tier} — "${text.slice(0, 60)}" → ${hit.reply.length} chars`);
+}
+
 async function answerOnDiscord(text: string, channelId = '') {
   const config = store.get('ai.config') as ProviderConfig | undefined;
   if (!config?.model) return { reply: '', ignored: true };
@@ -6096,7 +6144,14 @@ async function answerOnDiscord(text: string, channelId = '') {
       return { reply: '', ignored: true };
     }
   }
-  const messages = [...(store.get('chat.messages') as { role: string; content: string; at?: string }[] ?? []), { role: 'user', content: text, at: new Date().toISOString() }];
+  const history = (store.get('chat.messages') as { role: string; content: string; at?: string }[] ?? []);
+  // The deterministic route earns its keep here first: a Discord notification
+  // that turns out to be a greeting or a time check should be instant, and if
+  // the routing answers, the model is never even asked. Falls through silently
+  // when the message needs any judgement at all.
+  const quick = quickHit(text, history);
+  if (quick) { announceQuick(quick, text); return { reply: quick.reply, ignored: false }; }
+  const messages = [...history, { role: 'user', content: text, at: new Date().toISOString() }];
   // Out to the hosted model rather than to whatever answers at the desk.
   //
   // Her own machine is the right place for a conversation you are sitting in
@@ -6143,7 +6198,17 @@ async function answerOnDiscordStreamed(text: string, channelId: string, onChunk:
     if (!answer.ignored && answer.reply.trim()) onChunk(answer.reply);
     return answer;
   }
-  const messages = [...(store.get('chat.messages') as { role: string; content: string; at?: string }[] ?? []), { role: 'user', content: text, at: new Date().toISOString() }];
+  const history = (store.get('chat.messages') as { role: string; content: string; at?: string }[] ?? []);
+  const quick = quickHit(text, history);
+  if (quick) {
+    // The whole reply is one chunk: the placeholder is already up, so the edit
+    // reads the same as a stream that happened to finish instantly.
+    onChunk(quick.reply);
+    announceQuick(quick, text);
+    console.log(`[discord] quick tier ${quick.tier} in ${Date.now() - started}ms`);
+    return { reply: quick.reply, ignored: false };
+  }
+  const messages = [...history, { role: 'user', content: text, at: new Date().toISOString() }];
   const answer = await ollamaChat(messages, config, {
     hands: false,
     away: 'it came in over Discord',
@@ -6320,7 +6385,13 @@ function webDeps(): WebDeps {
     async say(text) {
       const config = store.get('ai.config') as ProviderConfig | undefined;
       if (!config?.model) throw new Error('no model is set up');
-      const messages = [...(store.get('chat.messages') as { role: string; content: string; at?: string }[] ?? []), { role: 'user', content: text, at: new Date().toISOString() }];
+      const history = (store.get('chat.messages') as { role: string; content: string; at?: string }[] ?? []);
+      // The quick route answers what it can before the model is even asked: a
+      // time check or a greeting from a phone should be instant, not the cold
+      // start a hosted pod pays. Falls through when the message needs judgement.
+      const quick = quickHit(text, history);
+      if (quick) { announceQuick(quick, text); return { reply: quick.reply, ignored: false }; }
+      const messages = [...history, { role: 'user', content: text, at: new Date().toISOString() }];
       // Out to the hosted model, for the same reason Discord is: this is a
       // phone. There is no window to show that she is thinking, the tab is
       // often not even in front of them, and since the local model became a
@@ -6342,7 +6413,14 @@ function webDeps(): WebDeps {
     async sayStream(text, onChunk) {
       const config = store.get('ai.config') as ProviderConfig | undefined;
       if (!config?.model) throw new Error('no model is set up');
-      const messages = [...(store.get('chat.messages') as { role: string; content: string; at?: string }[] ?? []), { role: 'user', content: text, at: new Date().toISOString() }];
+      const history = (store.get('chat.messages') as { role: string; content: string; at?: string }[] ?? []);
+      const quick = quickHit(text, history);
+      if (quick) {
+        onChunk(quick.reply);
+        announceQuick(quick, text);
+        return { reply: quick.reply, ignored: false };
+      }
+      const messages = [...history, { role: 'user', content: text, at: new Date().toISOString() }];
       const started = Date.now();
       const answer = await ollamaChat(messages, config, {
         hands: false,
