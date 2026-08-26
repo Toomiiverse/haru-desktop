@@ -73,12 +73,7 @@ export function loginPage(): string {
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Haru">
 <title>Haru</title><style>${SHELL}
-  main { max-width: 25rem; margin: 0 auto; padding: 12vh 1.4rem 2rem; }
-  .face {
-    width: 116px; height: 116px; margin: 0 auto 1.5rem; border-radius: 50%;
-    background: var(--glass) center/cover no-repeat; border: 1px solid var(--edge);
-    box-shadow: 0 18px 50px oklch(30% 0.12 var(--hue) / 0.5);
-  }
+  main { max-width: 25rem; margin: 0 auto; padding: 14vh 1.4rem 2rem; }
   h1 { font-size: 1.75rem; margin: 0 0 .25rem; text-align: center; letter-spacing: -.02em; }
   p.sub { color: var(--ink-dim); margin: 0 0 2rem; font-size: .95rem; text-align: center; }
   label { display: block; margin: 0 0 .85rem; }
@@ -88,7 +83,6 @@ export function loginPage(): string {
   #go { width: 100%; padding: .85rem; }
 </style>
 <main>
-  <div class=face style="background-image:url('/portrait')"></div>
   <h1>Haru</h1>
   <p class=sub>She is at home. Sign in to reach her.</p>
   <form id=f>
@@ -127,35 +121,16 @@ export function appPage(): string {
 <title>Haru</title><style>${SHELL}
   body { display:flex; flex-direction:column; height:100dvh; overflow:hidden; }
 
-  /* The stage. She is the top of the page and everything else sits under her,
-     which is the whole point of the reference: a companion, not a chat log with
-     an avatar in the corner. */
-  .stage { position:relative; flex:0 0 auto; height:min(34dvh,260px); display:flex; align-items:flex-end; justify-content:center; }
-  .stage img { height:100%; object-fit:contain; filter:drop-shadow(0 16px 40px oklch(25% 0.12 var(--hue) / 0.6)); }
-  /* The model sits exactly where the portrait did, and the portrait stays until
-     it is drawing — 28MB over a tunnel is a few seconds, and a blank stage for
-     those seconds reads as broken rather than as loading. */
-  .stage canvas { position:absolute; inset:0; width:100%; height:100%; opacity:0; transition:opacity .6s ease; }
-  .stage.alive canvas { opacity:1; }
-  .stage.alive img { opacity:0; transition:opacity .6s ease; }
-  /* Faded into the page rather than cut off, so there is no hard edge where she ends. */
-  .stage::after { content:''; position:absolute; inset:auto 0 0 0; height:64px; background:linear-gradient(transparent, var(--bg)); pointer-events:none; }
-  .stage.faceless { height:auto; min-height:3.2rem; }
-  .stagenote { position:absolute; left:0; right:0; bottom:.4rem; margin:0; text-align:center; font-size:.76rem; color:var(--ink-dim); opacity:.75; padding:0 1rem; }
-  .who { position:absolute; top:.9rem; left:1.1rem; display:flex; align-items:center; gap:.5rem; font-weight:650; letter-spacing:-.01em; }
+  .topbar { display:flex; align-items:center; gap:.6rem; padding:.7rem 1rem; flex:0 0 auto; }
+  .topbar .name { font-weight:700; letter-spacing:-.01em; }
   .dot { width:8px; height:8px; border-radius:50%; background:var(--accent); box-shadow:0 0 12px var(--accent); }
-  .out { position:absolute; top:.75rem; right:.9rem; background:var(--glass); color:var(--ink-dim); border:1px solid var(--edge); padding:.4rem .9rem; font-size:.82rem; font-weight:500; backdrop-filter:blur(12px); }
+  #out { margin-left:auto; background:var(--glass); color:var(--ink-dim); border:1px solid var(--edge); padding:.4rem .9rem; font-size:.82rem; font-weight:500; backdrop-filter:blur(12px); }
 
-  nav { display:flex; gap:.3rem; padding:.35rem; margin:0 .9rem; background:var(--glass); border:1px solid var(--edge); border-radius:999px; backdrop-filter:blur(14px); }
-  nav button { flex:1; background:none; color:var(--ink-dim); padding:.5rem .4rem; font-size:.9rem; font-weight:550; }
-  nav button.on { background:var(--accent); color:var(--accent-ink); }
-
-  section { flex:1; overflow-y:auto; padding:1rem .9rem 1.2rem; display:none; -webkit-overflow-scrolling:touch; }
-  section.on { display:block; }
+  #chat { flex:1; overflow-y:auto; padding:1rem .9rem 1.2rem; -webkit-overflow-scrolling:touch; }
 
   .msg { max-width:82%; padding:.7rem 1rem; border-radius:var(--r-lg); margin:0 0 .55rem; white-space:pre-wrap; overflow-wrap:anywhere; }
   .msg b { font-weight:700; }
-  .msg code { font-family:ui-monospace,monospace; font-size:.88em; background:var(--surface-3,rgba(255,255,255,.08)); border-radius:.3rem; padding:.05rem .3rem; }
+  .msg code { font-family:ui-monospace,monospace; font-size:.88em; background:rgba(255,255,255,.08); border-radius:.3rem; padding:.05rem .3rem; }
   .them { background:var(--glass); border:1px solid var(--edge); border-bottom-left-radius:7px; backdrop-filter:blur(12px); }
   .me { background:var(--mine); border:1px solid var(--edge); margin-left:auto; border-bottom-right-radius:7px; }
   .sys { color:var(--ink-dim); font-size:.84rem; text-align:center; max-width:100%; background:none; border:0; }
@@ -169,62 +144,22 @@ export function appPage(): string {
   form.compose .icon.hot { background:var(--accent); border-color:var(--accent); animation:pulse 1.1s ease-in-out infinite; }
   @keyframes pulse { 50% { box-shadow:0 0 0 .55rem oklch(78% 0.13 var(--hue) / 0.18); } }
 
-  /* A wide window is not a big phone.
-     Stretched across a desktop browser the bubbles ran the full 1700px and the
-     text became unreadable at about six words a line, so the column is capped
-     at a comfortable measure and she moves alongside it rather than sitting on
-     top — which is closer to the reference on a wide screen anyway: the
-     character is the room, and the conversation happens in it. */
+  .quiet { color:var(--ink-dim); text-align:center; padding:2rem 0; }
+
+  /* A wide window is not a big phone. Stretched across a desktop browser the
+     bubbles ran the full 1700px and the text became unreadable at about six
+     words a line, so the column is capped at a comfortable measure and centred. */
   @media (min-width: 900px) {
-    body { display:grid; grid-template-columns: minmax(280px, 34vw) minmax(0, 1fr); grid-template-rows: auto 1fr auto; column-gap:1rem; padding:0 1.5rem; }
-    .stage { grid-row: 1 / -1; height:auto; align-items:center; padding-bottom:2rem; }
-    .stage img { height:auto; max-height:74dvh; max-width:100%; }
-    .stage::after { display:none; }
-    .who { top:1.4rem; left:.4rem; }
-    .out { position:fixed; top:1rem; right:1.5rem; z-index:3; }
-    nav { grid-column:2; margin:1rem 0 0; align-self:start; max-width:44rem; }
-    section { grid-column:2; padding:1rem 0; max-width:44rem; }
-    form.compose { grid-column:2; padding:.6rem 0 1.2rem; max-width:44rem; }
+    body { max-width:44rem; margin:0 auto; }
+    #out { position:fixed; top:1rem; right:1.5rem; z-index:3; }
     .msg { max-width:min(82%, 46rem); }
   }
-
-  .card { background:var(--glass); border:1px solid var(--edge); border-radius:var(--r-lg); padding:.85rem 1rem; margin:0 0 .6rem; backdrop-filter:blur(12px); }
-  .card h3 { margin:0 0 .15rem; font-size:1rem; font-weight:600; }
-  .card time { color:var(--ink-dim); font-size:.85rem; }
-  .card button { background:none; border:1px solid var(--edge); color:var(--ink-dim); padding:.4rem .85rem; font-size:.85rem; margin-top:.6rem; font-weight:500; }
-  .done { opacity:.4; }
-  .quiet { color:var(--ink-dim); text-align:center; padding:2rem 0; }
-  /* Same pill-group look as the top nav, scaled down for a filter inside a tab
-     rather than a switch between tabs. */
-  .subnav { display:flex; gap:.3rem; margin:0 0 .8rem; }
-  .subnav button { flex:1; background:var(--glass); border:1px solid var(--edge); color:var(--ink-dim); padding:.45rem 0; font-size:.82rem; font-weight:600; border-radius:10px; }
-  .subnav button.on { background:var(--accent); color:var(--accent-ink); border-color:var(--accent); }
-  .jrow { display:flex; gap:.6rem; margin:.6rem 0; }
-  /* Ten taps rather than a number field: on a phone, picking 7 should be one
-     thumb movement, not a keyboard. */
-  .scale { display:flex; gap:.25rem; }
-  .scale button { flex:1; padding:.5rem 0; background:var(--glass); border:1px solid var(--edge); color:var(--ink-dim); border-radius:10px; font-size:.85rem; font-weight:600; }
-  .scale button.on { background:var(--accent); color:var(--accent-ink); border-color:var(--accent); }
 </style>
-<div class=stage>
-  <div class=who><span class=dot></span> Haru</div>
-  <button class=out id=out>Sign out</button>
-  <img src="/portrait" alt="" onerror="this.closest('.stage').classList.add('faceless')">
-</div>
-<nav>
-  <button data-t=chat class=on>Chat</button>
-  <button data-t=agenda>Agenda</button>
-  <button data-t=journal>Check-ins</button>
-  <button data-t=memory>Memory</button>
-</nav>
-<section id=chat class=on></section>
+<div class=topbar><span class=dot></span><span class=name>Haru</span><button id=out>Sign out</button></div>
+<section id=chat></section>
 <form class=compose id=cf><button type=button id=mic class=icon title="Hold to talk">🎙</button><textarea id=ci rows=1 placeholder="Say something…"></textarea><button id=cb>Send</button></form>
-<section id=agenda></section>
-<section id=journal></section>
-<section id=memory></section>
 <script>
 const $=id=>document.getElementById(id);
-const clockOf=at=>{const d=new Date(at);return isNaN(d)?'':d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});};
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 // The same handful of marks she writes on the desktop, applied to text that has
 // already been escaped — so the only tags that can ever reach the page are the
@@ -232,21 +167,7 @@ const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&
 const md=s=>s.replace(/\\*\\*\\s*([^*]+?)\\s*\\*\\*/g,'<b>$1</b>').replace(/\`([^\`\\n]+?)\`/g,'<code>$1</code>').replace(/\\*([^*\\s][^*\\n]*?)\\*/g,'<i>$1</i>');
 const get=u=>fetch(u).then(r=>r.ok?r.json():Promise.reject(r));
 const post=(u,b)=>fetch(u,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(b||{})}).then(r=>r.ok?r.json():Promise.reject(r));
-let tab='chat';
-// Which of Daily/Weekly/Monthly is showing. A rolling window from today, not a
-// calendar boundary — "Monthly" a day before month-end would otherwise show
-// almost nothing, which is a worse surprise than the window not lining up with
-// a wall calendar.
-let agendaView='daily';
-let agendaItems=[];
 
-document.querySelectorAll('nav button[data-t]').forEach(b=>b.onclick=()=>{
-  tab=b.dataset.t;
-  document.querySelectorAll('nav button[data-t]').forEach(x=>x.classList.toggle('on',x===b));
-  document.querySelectorAll('section').forEach(s=>s.classList.toggle('on',s.id===tab));
-  $('cf').style.display = tab==='chat' ? 'flex' : 'none';
-  load();
-});
 $('out').onclick=()=>post('/api/logout').then(()=>location.reload());
 
 function bubbles(list){
@@ -257,69 +178,9 @@ function bubbles(list){
   $('chat').scrollTop = $('chat').scrollHeight;
 }
 
-function agendaCard(i){
-  const when = i.time ? esc(i.date)+' · '+esc(i.time) : esc(i.date);
-  return '<div class="card'+(i.done?' done':'')+'"><h3>'+esc(i.title)+'</h3><time>'+when+'</time>'+
-    (i.kind==='task'&&!i.done?'<br><button data-done="'+esc(i.id)+'">Tick off</button>':'')+'</div>';
-}
-async function agendaTickOff(id){
-  await post('/api/agenda/done',{id});
-  agendaItems=(await get('/api/agenda')).items;
-  renderAgenda();
-}
-// Reminders pin anything due today, tomorrow, or missed within the last week —
-// bounded to match how far back she considers a task "recently missed" rather
-// than dead (OVERDUE_WINDOW_DAYS in agenda.ts), so a task overdue by a month
-// does not sit pinned at the top forever.
-function renderAgenda(){
-  const windowDays = {daily:0, weekly:6, monthly:30}[agendaView];
-  const reminders = agendaItems.filter(i=>!i.done && i.daysAway<=1 && i.daysAway>=-7);
-  const inView = agendaItems.filter(i=>i.daysAway>=0 && i.daysAway<=windowDays);
-  $('agenda').innerHTML =
-    '<div class="subnav" id=agendaViews>'+['daily','weekly','monthly'].map(v=>
-      '<button data-view="'+v+'" class="'+(v===agendaView?'on':'')+'">'+v[0].toUpperCase()+v.slice(1)+'</button>').join('')+'</div>'+
-    (reminders.length ? '<p class=quiet style="text-align:left;padding:0 0 .4rem;font-size:.82rem">Coming up</p>'+reminders.map(agendaCard).join('') : '')+
-    (inView.length ? inView.map(agendaCard).join('') : '<p class=quiet>Nothing on.</p>');
-  $('agendaViews').querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>{agendaView=b.dataset.view;renderAgenda();});
-  $('agenda').querySelectorAll('[data-done]').forEach(b=>b.onclick=()=>{b.disabled=true;agendaTickOff(b.dataset.done);});
-}
-
 async function load(){
   try{
-    if(tab==='chat') bubbles((await get('/api/chat')).messages);
-    if(tab==='agenda'){
-      agendaItems=(await get('/api/agenda')).items;
-      renderAgenda();
-    }
-    if(tab==='journal'){
-      const {entries}=await get('/api/checkins');
-      $('journal').innerHTML =
-        '<div class=card><textarea id=jt rows=2 placeholder="What just happened?"></textarea>'+
-        '<p class=quiet style="text-align:left;padding:.5rem 0 .3rem;font-size:.82rem">How anxious, right now?</p>'+
-        '<div class=scale id=jscale>'+[1,2,3,4,5,6,7,8,9,10].map(n=>'<button type=button data-n="'+n+'">'+n+'</button>').join('')+'</div>'+
-        '<button id=jsave style="margin-top:.7rem">Note it</button></div>'+
-        (entries.length?entries.slice().reverse().map(e=>
-          '<div class=card><time>'+esc(clockOf(e.at))+(e.anxiety?' · anxiety '+e.anxiety+'/10':'')+'</time>'+
-          '<p style="margin:.3rem 0 0">'+esc(e.note)+'</p></div>').join('')
-          :'<p class=quiet>Nothing noted today. Jot things as they happen — she reads them when you are back at your desk.</p>');
-      // Tapping a number twice clears it: not every note is an anxious one, and
-      // being unable to unpick a mis-tap is how a form starts feeling like one.
-      let picked=null;
-      $('jscale').querySelectorAll('button').forEach(b=>b.onclick=()=>{
-        picked = picked===Number(b.dataset.n) ? null : Number(b.dataset.n);
-        $('jscale').querySelectorAll('button').forEach(x=>x.classList.toggle('on',Number(x.dataset.n)===picked));
-      });
-      $('jsave').onclick=async()=>{
-        const note=$('jt').value.trim(); if(!note)return;
-        $('jsave').disabled=true;
-        await post('/api/checkins',{note,anxiety:picked||undefined});
-        load();
-      };
-    }
-    if(tab==='memory'){
-      const {memories}=await get('/api/memory');
-      $('memory').innerHTML = memories.length ? memories.map(m=>'<div class=card>'+esc(m)+'</div>').join('') : '<p class=quiet>She has not written anything down.</p>';
-    }
+    bubbles((await get('/api/chat')).messages);
   }catch(r){ if(r&&r.status===401) location.reload(); }
 }
 
@@ -342,24 +203,6 @@ const ci=$('ci');
 // to the later play() on the same element, which Safari does allow.
 const player=new Audio();
 function primeVoice(){ player.play().catch(()=>{}); player.pause(); }
-// Her face, asked for after the words are already on screen rather than before.
-//
-// This used to ride along with the reply, which meant every message on the phone
-// waited on a second round trip to a model before a single word appeared — spent
-// so that her expression would change at the same instant as the text instead of
-// a moment later. Nobody is watching the stage while they are waiting to read
-// something, so it bought nothing and cost the whole wait.
-//
-// Fired beside speak() rather than before it. In practice the face still wins:
-// this is one short classification, while a voice line has to be synthesised.
-async function face(text){
-  try{
-    const r=await fetch('/api/expression',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({text})});
-    if(!r.ok) return;
-    const {expression}=await r.json();
-    if(window.haruFace) window.haruFace(expression||null);
-  }catch(e){ console.warn('[face] '+(e&&e.message||e)); }
-}
 async function speak(text){
   try{
     player.pause();
@@ -474,9 +317,8 @@ $('cf').addEventListener('submit',async ev=>{
       // she later trims as repetition — so it replaces what was shown.
       if(reply!==null) show(reply);
       if(reply){
-        // Both started here and neither waited on: the words are already on screen,
-        // and her face and her voice can catch up in their own time.
-        void face(reply);
+        // Started here and not waited on: the words are already on screen, and
+        // her voice can catch up in its own time.
         void speak(reply);
       }
     }
@@ -508,7 +350,6 @@ async function askIfSheHasSomethingToSay(){
     if(tab!=='chat'){ document.querySelector('nav button[data-t=chat]').click(); }
     $('chat').insertAdjacentHTML('beforeend','<div class="msg them">'+esc(line)+'</div>');
     $('chat').scrollTop=$('chat').scrollHeight;
-    if(window.haruFace) window.haruFace(null);
     void speak(line);
   }catch(r){ if(r&&r.status===401) location.reload(); }
 }
@@ -517,130 +358,5 @@ document.addEventListener('visibilitychange',()=>{ if(!document.hidden) askIfShe
 // Four minutes: she is being carried around, not watched. Anything faster reads
 // as pestering, and the spacing on her side would refuse it anyway.
 setInterval(askIfSheHasSomethingToSay,4*60_000);
-
-// ---- The stage ------------------------------------------------------------
-//
-// Loaded after everything else and allowed to fail without taking the page with
-// it. She is 28MB of model behind a tunnel: on a slow connection the chat should
-// already be working while this is still arriving, and on a phone that cannot
-// manage WebGL at all the portrait simply stays.
-(async function stage(){
-  const host=document.querySelector('.stage');
-  if(!host) return;
-  // The model is 28MB over a tunnel that is often the bottleneck. On a visibly
-  // slow or metered connection the chat is the point of the page and the stage
-  // is its biggest bill, so she stays a portrait there — the words matter more
-  // than the face, and a connection that is struggling with the words has no
-  // business paying for the face too. The Network Information API is a guess
-  // about the *default* connection, not the tunnel's, so an explicit slow
-  // reading is what backs out on a browser that has one.
-  //
-  // Safari — every version, on the phone this page exists for — never has one
-  // at all. A missing reading there was originally let through as "the browser
-  // said nothing," which on an iPhone means every load pulls the full 28MB and
-  // starts a 60fps WebGL ticker regardless of the tunnel, and a weak enough
-  // phone-and-tunnel pair never finishes rendering a frame quickly enough to
-  // still take a tap on the tab bar. So: no reading at all, on a phone, is read
-  // the cautious way instead — the one browser this can't measure is the one
-  // it can least afford to guess wrong about.
-  const net=globalThis.navigator&&navigator.connection;
-  const isPhone=/iPhone|iPad|iPod|Android/i.test(navigator.userAgent||'');
-  const slow=net?(net.saveData||(['slow-2g','2g'].includes(net.effectiveType)||(typeof net.downlink==='number'&&net.downlink<1))):isPhone;
-  if(slow){
-    console.log('[stage] slow connection ('+net.effectiveType+', '+net.downlink+'Mbps) — staying with the portrait');
-    host.classList.add('faceless');
-    const note=document.createElement('p');
-    note.className='stagenote';
-    note.textContent='Your connection is slow, so she is staying a portrait. The chat works the same.';
-    host.appendChild(note);
-    return;
-  }
-  const script=src=>new Promise((ok,no)=>{const s=document.createElement('script');s.src=src;s.onload=ok;s.onerror=()=>no(new Error(src));document.head.appendChild(s);});
-  try{
-    const {entry,pose}=await get('/api/model');
-    if(!entry){ console.log('[stage] no model imported on the desktop'); return; }
-    // Order matters: the plugin reads a global PIXI when it loads, and the
-    // Cubism runtime has to exist before any model is built.
-    await script('/lib/pixi.js');
-    // pixi builds its shaders with new Function(), which a policy without
-    // 'unsafe-eval' refuses — in every browser, which is why this failed in
-    // three of them and looked like a blocker in none. This module replaces that
-    // one mechanism, so the policy stays shut rather than being widened to allow
-    // eval on a page that renders somebody's chat history.
-    await script('/lib/noeval.js');
-    PIXI.install && PIXI.install({});
-    // Live2D's runtime, served from us rather than from their CDN. Fetched from
-    // outside, this was the one thing on the page a shield could quietly stop —
-    // and Brave with Shields up did exactly that.
-    try { await script('/lib/cubismcore.js'); }
-    catch { throw new Error('the Live2D runtime is missing from this build'); }
-    if(!window.Live2DCubismCore) throw new Error('the Live2D runtime loaded but did not start');
-    await script('/lib/live2d.js');
-    if(!window.PIXI||!PIXI.live2d) throw new Error('the Live2D plugin did not attach to pixi');
-    // The bundled build does not always find the ticker on its own, and without
-    // one she loads and then never moves.
-    try { PIXI.live2d.Live2DModel.registerTicker(PIXI.Ticker); } catch {}
-    const canvas=document.createElement('canvas');
-    host.appendChild(canvas);
-    const app=new PIXI.Application({view:canvas,backgroundAlpha:0,antialias:true,resolution:Math.min(devicePixelRatio||1,2),autoDensity:true,resizeTo:host});
-    const model=await PIXI.live2d.Live2DModel.from('/model/'+encodeURIComponent(entry),{autoInteract:false});
-    app.stage.addChild(model);
-    // Anchored at the bottom middle and scaled to fit, the same way the desktop
-    // does it: a Live2D model's own origin is nowhere useful.
-    const fit=()=>{
-      const w=app.renderer.screen.width,h=app.renderer.screen.height;
-      if(!model.width||!model.height)return;
-      model.scale.set(Math.min(w/(model.width/model.scale.x),h/(model.height/model.scale.y))*0.92);
-      model.anchor.set(0.5,1);
-      model.position.set(w/2,h);
-    };
-    fit();
-    new ResizeObserver(fit).observe(host);
-    // Her eyes follow a finger or a cursor, and nothing else — no dragging, no
-    // hit areas. On a phone the pointer is wherever it was last touched, which
-    // is close enough to being looked at.
-    host.addEventListener('pointermove',e=>{const r=host.getBoundingClientRect();model.focus(e.clientX-r.left,e.clientY-r.top);});
-    // Held here so a reply can reach her face. The server decides which
-    // expression, because only it knows what this model carries.
-    window.haruFace=name=>{
-      try{
-        if(name) model.expression(name);
-        else if(model.internalModel&&model.internalModel.motionManager&&model.internalModel.motionManager.expressionManager)
-          model.internalModel.motionManager.expressionManager.resetExpression();
-      }catch(e){ console.warn('[stage] '+(e&&e.message||e)); }
-    };
-    // Re-applied every frame rather than set once. The model rewrites its own
-    // parameters on each update from whatever motion is running, so a pose set
-    // at load is gone by the next tick — which looks exactly like it never
-    // worked. Added after the model, so it runs after that update and before
-    // the frame is drawn.
-    const posed=Object.entries(pose||{});
-    if(posed.length){
-      const core=model.internalModel&&model.internalModel.coreModel;
-      if(core&&core.setParameterValueById){
-        app.ticker.add(()=>{
-          for(const [id,value] of posed){
-            try{ core.setParameterValueById(id,value); }catch(e){ /* not on this model */ }
-          }
-        });
-        console.log('[stage] holding '+posed.length+' saved parameters');
-      }
-    }
-    const faces=(model.internalModel&&model.internalModel.settings&&model.internalModel.settings.expressions||[]).length;
-    host.classList.add('alive');
-    console.log('[stage] '+entry+' is up with '+faces+' expression(s)');
-  }catch(error){
-    // Said on the page, not only in a console nobody has open. The portrait
-    // staying put looks identical to the portrait being the design, so without
-    // this a broken stage is invisible — which is how the first attempt at it
-    // looked like it had simply been ignored.
-    const why=(error&&error.message||String(error));
-    console.warn('[stage] staying with the portrait: '+why);
-    const note=document.createElement('p');
-    note.className='stagenote';
-    note.textContent='She is not moving — '+why+'.';
-    host.appendChild(note);
-  }
-})();
 </script>`;
 }
