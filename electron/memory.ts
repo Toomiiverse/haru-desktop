@@ -40,7 +40,7 @@ export const RECURRING_THRESHOLD = 3;
 // Identity-defining records are always in the prompt; the rest compete for room.
 const ALWAYS_INCLUDED: MemoryKind[] = ['preference', 'relationship'];
 
-const STOP_WORDS = new Set(['the', 'a', 'an', 'and', 'or', 'but', 'is', 'are', 'was', 'were', 'be', 'been', 'to', 'of', 'in', 'on', 'at', 'for', 'with', 'about', 'my', 'me', 'i', 'you', 'your', 'it', 'that', 'this', 'they', 'them', 'has', 'have', 'had', 'do', 'does', 'did', 'so', 'if', 'as', 'by', 'from', 'up', 'out', 'not', 'can', 'will', 'just', 'what', 'when', 'how', 'who']);
+export const STOP_WORDS = new Set(['the', 'a', 'an', 'and', 'or', 'but', 'is', 'are', 'was', 'were', 'be', 'been', 'to', 'of', 'in', 'on', 'at', 'for', 'with', 'about', 'my', 'me', 'i', 'you', 'your', 'it', 'that', 'this', 'they', 'them', 'has', 'have', 'had', 'do', 'does', 'did', 'so', 'if', 'as', 'by', 'from', 'up', 'out', 'not', 'can', 'will', 'just', 'what', 'when', 'how', 'who']);
 
 export function keywords(text: string): Set<string> {
   return new Set(

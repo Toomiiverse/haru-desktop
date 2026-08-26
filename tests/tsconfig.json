@@ -1,0 +1,28 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "CommonJS",
+    "outDir": "../dist-test",
+    "rootDir": "..",
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "types": ["node"]
+  },
+  "include": [
+    "*.test.ts",
+    "helpers.ts",
+    "../electron/memory.ts",
+    "../electron/vitals.ts",
+    "../electron/mood.ts",
+    "../electron/emotion.ts",
+    "../electron/knowledge.ts",
+    "../electron/chunking.ts",
+    "../electron/embeddings.ts",
+    "../electron/ingestion.ts",
+    "../electron/retrieval.ts",
+    "../electron/context.ts",
+    "../electron/retrieveContext.ts",
+    "../electron/obsidian.ts"
+  ]
+}

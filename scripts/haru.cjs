@@ -239,6 +239,69 @@ async function agenda() {
   }
 }
 
+// Her stored knowledge — the documents she has been given to read and look
+// things up in. Every command here is a route on the same web door she chats
+// through, so nothing about them is a second copy of her state.
+async function knowledgeCommand(args) {
+  const [sub, ...rest] = args;
+  if (sub === 'search') {
+    const query = rest.join(' ');
+    if (!query) { console.error('Usage: haru knowledge search <query>'); process.exitCode = 1; return; }
+    const { results = [] } = await call('POST', '/api/knowledge/search', { query });
+    if (!results.length) { console.log('Nothing in her knowledge matches that.'); return; }
+    for (const result of results) {
+      const when = result.updatedAt ? result.updatedAt.slice(0, 10) : '';
+      const meta = [result.source, `v${result.version}`, result.category, `${(result.confidence * 100).toFixed(0)}%`, when].filter(Boolean).join(' · ');
+      console.log(`\n${meta}`);
+      console.log(wrap(result.content, '  '));
+    }
+    console.log();
+    return;
+  }
+  if (sub === 'ingest') {
+    const file = rest[0];
+    if (!file) { console.error('Usage: haru knowledge ingest <file> [category]'); process.exitCode = 1; return; }
+    const answer = await call('POST', '/api/knowledge/ingest', { path: file, category: rest[1] });
+    const word = answer.action === 'created' ? 'Added' : answer.action === 'updated' ? 'Updated' : 'Unchanged';
+    console.log(`${word}: ${answer.source} (${answer.sourceType}, ${answer.category}, ${answer.chunks} chunks).`);
+    return;
+  }
+  if (sub === 'delete') {
+    const source = rest.join(' ');
+    if (!source) { console.error('Usage: haru knowledge delete <source>'); process.exitCode = 1; return; }
+    const answer = await call('POST', '/api/knowledge/delete', { source });
+    if (!answer.deleted) { console.log(`Nothing in her knowledge is filed under "${source}".`); return; }
+    console.log(`Deleted ${source} (${answer.removedChunks} chunks).`);
+    return;
+  }
+  if (sub === 'reindex') {
+    const answer = await call('POST', '/api/knowledge/reindex', { source: rest.join(' ') || undefined });
+    console.log(`Reindexed ${answer.reindexed} document(s).`);
+    return;
+  }
+  if (sub === 'vault') {
+    const vault = rest.join(' ');
+    if (!vault) { console.error('Usage: haru knowledge vault <path>'); process.exitCode = 1; return; }
+    const report = await call('POST', '/api/knowledge/vault', { path: vault });
+    console.log(`Vault sync: ${report.files} files, +${report.added} added, ~${report.updated} updated, ${report.unchanged} unchanged, -${report.removed} removed (${report.ms}ms).`);
+    console.log('This vault will now re-sync itself hourly.');
+    return;
+  }
+  if (sub === 'stats') {
+    const stats = await call('GET', '/api/knowledge/stats');
+    console.log(`Documents:  ${stats.documents}`);
+    console.log(`Chunks:     ${stats.chunks} (${stats.stale} stale)`);
+    console.log(`Characters: ${stats.characters}`);
+    console.log(`Embedding:  ${stats.embedModels.join(', ') || 'none'}${stats.embedDimensions.length ? ` (${stats.embedDimensions.join(', ')} dims)` : ''}`);
+    if (stats.lastIngestedAt) console.log(`Last added: ${stats.lastIngestedAt.slice(0, 10)}`);
+    const byCategory = Object.entries(stats.byCategory || {}).filter(([, count]) => count > 0);
+    if (byCategory.length) console.log(`Categories: ${byCategory.map(([category, count]) => `${category} ${count}`).join(', ')}`);
+    return;
+  }
+  console.error('Usage: haru knowledge <search|ingest|delete|reindex|stats> …');
+  process.exitCode = 1;
+}
+
 async function repl() {
   console.log(`Talking to her at ${BASE}. Ctrl-D or "exit" to stop.\n`);
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout, prompt: 'you> ' });
@@ -274,6 +337,13 @@ async function main() {
       'haru               open a prompt and keep talking',
       'haru --agenda      what is still on the list',
       'haru --login       sign in and be remembered for 90 days',
+      'haru knowledge …   her stored knowledge',
+      '  search <query>   look something up in it',
+      '  ingest <file>    give her a document to read',
+      '  vault <path>     index an Obsidian vault, and keep it in sync',
+      '  delete <source>  drop a document',
+      '  reindex          re-read everything',
+      '  stats            what is in there',
       '',
       `Talking to: ${BASE}`,
       `Settings:   ${CONFIG_FILE}`,
@@ -285,6 +355,7 @@ async function main() {
 
   if (args[0] === '--login') return login();
   if (args[0] === '--agenda') return agenda();
+  if (args[0] === 'knowledge') return knowledgeCommand(args.slice(1));
 
   if (!stored.device && !stored.session && !process.env.HARU_URL) {
     console.error('No sign-in saved yet. Run:  haru --login');

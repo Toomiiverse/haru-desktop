@@ -62,6 +62,11 @@ import { BREVITY, summonedLine } from './summoned';
 import { CHOICES_TOOL, readChoices } from './choices';
 import { quickAnswer, type AgendaLine } from './quick';
 import { newTrace } from './trace';
+import { KNOWLEDGE_CATEGORIES, deleteDocument, emptyKnowledge, findDocumentBySource, knowledgeStats, loadKnowledge, normalizeKnowledge, readKnowledgeConfig, reconcileChunkIds, saveKnowledge, type KnowledgeCategory, type KnowledgeConfig, type KnowledgeStore } from './knowledge';
+import { baseExtractors, ingestFile, type Extractor, type IngestResult } from './ingestion';
+import { cachedEmbedder, createEmbedder, EmbeddingCache, type Embedder } from './embeddings';
+import { retrieveContext } from './retrieveContext';
+import { syncVaultFiles, type VaultSyncReport } from './obsidian';
 
 type Bounds = { x: number; y: number; width: number; height: number };
 type Live2DModel = { path: string; name: string; url: string };
@@ -96,6 +101,12 @@ const store = new Store<Record<string, unknown>>();
 const live2dRoots = new Map<string, string>();
 let mainWindow: BrowserWindow | null = null;
 let companionWindow: BrowserWindow | null = null;
+
+const KNOWLEDGE_PDF_CHARS = 200_000;
+const knowledgeFile = process.env.HARU_KNOWLEDGE_FILE ? process.env.HARU_KNOWLEDGE_FILE : path.join(app.getPath('userData'), 'knowledge.json');
+let knowledgeStore: KnowledgeStore = emptyKnowledge();
+const knowledgeEmbeddingCache = new EmbeddingCache();
+let knowledgeSaveTimer: ReturnType<typeof setTimeout> | null = null;
 
 protocol.registerSchemesAsPrivileged([
   { scheme: 'haru-model', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } },
@@ -3190,6 +3201,26 @@ const SEARCH_TOOL: ChatTool = {
  * not described as "open a url": given that, a model invents addresses it thinks
  * ought to exist and reads 404s. The address has to have come from somewhere.
  */
+/**
+ * Her own store, looked into rather than web-searched: the user's files, projects
+ * and setup are exactly the things a general model invents when it is wrong.
+ */
+const KNOWLEDGE_TOOL: ChatTool = {
+  type: 'function',
+  function: {
+    name: 'look_up_knowledge',
+    description: 'Search Haru\'s own stored knowledge — documents and notes the user has given her, their project files, machine and setup notes, saved personal records — for facts about their world that are not in your training. Use it for anything about their own stuff: their machine, their projects, files they have given you, things they have documented for you. Prefer it over web search for anything local. Results come with their source and date; prefer the most recently updated when sources conflict.',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'What to look for, written as keywords or a short question.' },
+        category: { type: 'string', enum: [...KNOWLEDGE_CATEGORIES], description: 'Restrict the search to one category, when you are sure which one it is.' },
+      },
+      required: ['query'],
+    },
+  },
+};
+
 const READ_PAGE_TOOL: ChatTool = {
   type: 'function',
   function: {
@@ -3377,6 +3408,7 @@ function chatTools() {
     tools.push(SEARCH_TOOL);
     if (search.readPages) tools.push(READ_PAGE_TOOL);
   }
+  if (getKnowledgeConfig().enabled) tools.push(KNOWLEDGE_TOOL);
   tools.push(CONVERT_TOOL);
   if (handsAllowed && desktop.launch) tools.push(LAUNCH_TOOL, CLOSE_TOOL);
   if (handsAllowed && desktop.power) tools.push(POWER_TOOL);
@@ -3427,6 +3459,208 @@ function addMemory(text: string, kind: MemoryKind = 'fact', subject?: string) {
   const { memories, created, record } = rememberInto(getMemories(), { text: fact, kind, subject, id: randomUUID(), now: new Date().toISOString() });
   setMemories(pruneMemories(memories, MAX_MEMORIES));
   return { created, record };
+}
+
+function getKnowledgeConfig(): KnowledgeConfig {
+  return readKnowledgeConfig(store.get('knowledge.config'));
+}
+
+function persistKnowledge() {
+  try {
+    saveKnowledge(knowledgeFile, knowledgeStore);
+  } catch (error) {
+    console.warn('[knowledge] could not save:', error instanceof Error ? error.message : String(error));
+  }
+}
+
+function scheduleKnowledgeSave() {
+  if (knowledgeSaveTimer) return;
+  knowledgeSaveTimer = setTimeout(() => {
+    knowledgeSaveTimer = null;
+    persistKnowledge();
+  }, 1500);
+}
+
+function touchChunks(ids: string[]) {
+  const now = new Date().toISOString();
+  let changed = false;
+  for (const chunk of knowledgeStore.chunks) {
+    if (ids.includes(chunk.id) && chunk.lastAccessedAt !== now) {
+      chunk.lastAccessedAt = now;
+      changed = true;
+    }
+  }
+  if (changed) scheduleKnowledgeSave();
+}
+
+function getKnowledgeEmbedder(): Embedder | null {
+  const ai = store.get('ai.config') as ProviderConfig | undefined;
+  if (!ai?.endpoint || !ai.model) return null;
+  const config = getKnowledgeConfig();
+  const endpoint = ai.endpoint;
+  const embedder = createEmbedder({
+    endpoint,
+    model: config.embedModel,
+    provider: isOpenAIShaped(ai.provider) ? 'openai' : 'ollama',
+    apiKey: keyFor(endpoint),
+  }, net.fetch);
+  return cachedEmbedder(embedder, knowledgeEmbeddingCache);
+}
+
+const pdfExtractor: Extractor = {
+  label: 'pdf',
+  match: name => /\.pdf$/i.test(name),
+  async extract(file) {
+    const read = await readPdf(file, KNOWLEDGE_PDF_CHARS);
+    if (read.scanned) throw new Error('a scanned PDF — there is no readable text in it');
+    return { text: read.text, sourceType: 'pdf' };
+  },
+};
+
+function knowledgeExtractors(): Extractor[] {
+  return [...baseExtractors(), pdfExtractor];
+}
+
+function coerceKnowledgeCategory(value: unknown): KnowledgeCategory | undefined {
+  if (typeof value !== 'string') return undefined;
+  return (KNOWLEDGE_CATEGORIES as readonly string[]).includes(value) ? value as KnowledgeCategory : undefined;
+}
+
+type KnowledgeJob = { run(): Promise<void> };
+const knowledgeJobs: KnowledgeJob[] = [];
+let knowledgeDraining = false;
+
+function enqueueKnowledge<T>(run: () => Promise<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    knowledgeJobs.push({
+      run: async () => {
+        try {
+          resolve(await run());
+        } catch (error) {
+          reject(error);
+          throw error;
+        }
+      },
+    });
+    void drainKnowledge();
+  });
+}
+
+async function drainKnowledge() {
+  if (knowledgeDraining) return;
+  knowledgeDraining = true;
+  try {
+    while (knowledgeJobs.length) {
+      const job = knowledgeJobs.shift()!;
+      try {
+        await job.run();
+      } catch {
+        // the waiter above was rejected already; nothing else to do
+      }
+      await new Promise(done => setImmediate(done));
+    }
+  } finally {
+    knowledgeDraining = false;
+  }
+}
+
+async function ingestKnowledge(args: {
+  file: string;
+  source?: string;
+  sourceType?: string;
+  text?: string;
+  category?: KnowledgeCategory;
+  metadata?: Record<string, unknown>;
+  confidence?: number;
+  persist?: boolean;
+}): Promise<IngestResult> {
+  const config = getKnowledgeConfig();
+  const embedder = getKnowledgeEmbedder();
+  if (!embedder) throw new Error('no model is set up, so nothing can be embedded');
+  const started = Date.now();
+  const result = await ingestFile(knowledgeStore, embedder, {
+    file: args.file,
+    source: args.source,
+    sourceType: args.sourceType,
+    text: args.text,
+    category: args.category,
+    metadata: args.metadata,
+    confidence: args.confidence,
+    chunkSize: config.chunkSize,
+    chunkOverlap: config.chunkOverlap,
+  }, knowledgeExtractors());
+  if (result.outcome.action !== 'unchanged') {
+    knowledgeStore = reconcileChunkIds(result.store);
+    if (args.persist !== false) persistKnowledge();
+  }
+  console.log(`[knowledge] ingested ${result.outcome.document.source} (${result.outcome.action}, ${result.outcome.chunks.length} chunks, ${Date.now() - started}ms)`);
+  return result;
+}
+
+function ingestKnowledgeFile(file: string, category?: KnowledgeCategory): Promise<IngestResult> {
+  return ingestKnowledge({ file, category });
+}
+
+function readVaultConfig(): { path: string } {
+  const saved = store.get('knowledge.vault') as { path?: unknown } | undefined;
+  return { path: typeof saved?.path === 'string' && saved.path.trim() ? saved.path.trim() : '' };
+}
+
+function saveVaultConfig(vaultPath: string) {
+  store.set('knowledge.vault', { path: vaultPath });
+}
+
+async function syncVault(vaultPath: string): Promise<VaultSyncReport> {
+  const vault = path.resolve(vaultPath);
+  if (!existsSync(vault) || !statSync(vault).isDirectory()) throw new Error(`no such vault: ${vaultPath}`);
+  const started = Date.now();
+  const report = await syncVaultFiles(vault, {
+    store: knowledgeStore,
+    ingest: async note => {
+      const result = await ingestKnowledge({
+        file: note.file,
+        source: note.relative,
+        sourceType: 'markdown',
+        text: note.text,
+        category: note.category,
+        metadata: note.metadata,
+        persist: false,
+      });
+      return result.outcome.action;
+    },
+    remove: source => {
+      const document = knowledgeStore.documents.find(doc => doc.source === source && doc.status === 'active');
+      if (document) knowledgeStore = deleteDocument(knowledgeStore, document.id, new Date().toISOString());
+    },
+  });
+  persistKnowledge();
+  const full = { ...report, ms: Date.now() - started };
+  console.log(`[knowledge] vault sync ${vault}: ${full.files} files, +${full.added} ~${full.updated} =${full.unchanged} -${full.removed} in ${full.ms}ms`);
+  return full;
+}
+
+async function autoSyncVault() {
+  const { path: vault } = readVaultConfig();
+  if (!vault) return;
+  try {
+    await enqueueKnowledge(() => syncVault(vault));
+  } catch (error) {
+    console.warn('[knowledge] auto vault sync failed:', error instanceof Error ? error.message : String(error));
+  }
+}
+
+async function reindexKnowledge(source?: string) {
+  const targets = knowledgeStore.documents.filter(document => document.status === 'active' && (!source || document.source === source));
+  let reindexed = 0;
+  for (const document of targets) {
+    try {
+      await enqueueKnowledge(() => ingestKnowledgeFile(document.source, document.category));
+      reindexed++;
+    } catch (error) {
+      console.warn(`[knowledge] reindex of ${document.source} failed:`, error instanceof Error ? error.message : String(error));
+    }
+  }
+  return reindexed;
 }
 
 // Assembled per message: identity-shaping records always, everything else only
@@ -3612,6 +3846,11 @@ function searchInstruction() {
   return 'You can look things up online with search_web.' + browsing + ' Use it whenever they ask about something you cannot know from here — news, prices, results, opening times, whether something is out yet, who someone is, how to do something in an app or service that is not yours — and any time you would otherwise be hedging or guessing at a fact. Do not use it for their own list or anything they have told you. Having looked, answer in your own words, as though you simply knew: no announcing that you are searching, no reading the results back, no urls, no citing sources unless they ask where it came from. If what comes back does not answer them, say so rather than making the closest thing fit.';
 }
 
+function knowledgeInstruction() {
+  if (!getKnowledgeConfig().enabled) return '';
+  return 'You also have a store of the user\'s own documents and notes — their files, projects, machine, setup, and things they have documented for you. For questions about their own world rather than the general one, call look_up_knowledge before answering or guessing: their machine, their projects, files they have given you, anything you were told to keep in writing. It comes back with its source and date; when sources conflict, prefer the most recently updated one, and when the store has nothing, say you do not have enough information rather than inventing an answer.';
+}
+
 function chatSystemPrompt({ irritation, ego, goodnight, shout, latestMessage, fresh, herRecentReplies = [] }: { irritation: number; ego: number; goodnight: 'said' | 'after' | 'none'; shout: ShoutState; latestMessage: string; fresh: FreshStart | null; herRecentReplies?: string[] }) {
   const now = zonedNow(CHAT_TIMEZONE);
   const weekday = new Intl.DateTimeFormat('en-US', { weekday: 'long' }).format(now);
@@ -3688,6 +3927,7 @@ function chatSystemPrompt({ irritation, ego, goodnight, shout, latestMessage, fr
     // tick-off nudge is: a standing instruction in a long prompt is something a
     // local model reads once and does not act on.
     lookItUpInstruction(latestMessage, readSearchConfig(store.get('search')).enabled),
+    knowledgeInstruction(),
     // Kept last so the tone instruction is the final thing read before replying,
     // which is what the drawer promises. Mood comes after it, since a bad mood
     // has to be able to override the usual warmth.
@@ -4227,6 +4467,42 @@ async function runChatTool(call: ToolCall, latestUserMessage: string): Promise<s
     console.log(`[ai] updated ${match.kind}: "${match.title}" -> ${JSON.stringify(changes)}`);
     return JSON.stringify({ saved: true, title: updated?.title, date: updated?.date, time: updated?.time ?? null, kind: match.kind });
   }
+  if (name === 'look_up_knowledge') {
+    const query = typeof args.query === 'string' ? args.query.trim() : '';
+    if (!query) return JSON.stringify({ error: 'query is required.' });
+    if (!getKnowledgeConfig().enabled) return JSON.stringify({ error: 'The knowledge store is switched off.' });
+    const category = coerceKnowledgeCategory(args.category);
+    const config = getKnowledgeConfig();
+    const started = Date.now();
+    try {
+      const embedder = getKnowledgeEmbedder();
+      const result = await retrieveContext({
+        knowledge: knowledgeStore,
+        embed: text => embedder ? embedder.embed(text) : Promise.reject(new Error('no model is set up')),
+        memories: getMemories(),
+        query,
+        now: new Date(),
+        limit: config.contextChunks,
+        threshold: config.threshold,
+        maxChars: config.contextChars,
+        filters: category ? { category } : undefined,
+      });
+      touchChunks(result.knowledge.map(item => item.chunk.id));
+      const sources = [...new Set(result.knowledge.map(item => item.chunk.source))];
+      console.log(`[knowledge] "${query.slice(0, 60)}" -> ${result.knowledge.length} chunk(s) from ${sources.join(', ') || 'nothing'} in ${Date.now() - started}ms`);
+      return JSON.stringify({
+        context: result.knowledgeText,
+        note: result.knowledge.length
+          ? 'Answer from the context above, in your own voice. If the sources conflict, prefer the most recently updated one, and do not present something possibly outdated as definitely true.'
+          : 'Say plainly that you do not have enough information rather than inventing an answer.',
+      });
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      console.warn(`[knowledge] lookup failed: ${reason}`);
+      return JSON.stringify({ error: `The knowledge lookup failed (${reason}). Say you could not check just now — do not answer from memory as though you had.` });
+    }
+  }
+
   if (name !== 'create_kept_item') return JSON.stringify({ error: `Unknown tool "${name}".` });
   const title = typeof args.title === 'string' ? args.title.trim() : '';
   // An omitted date means the user never named one ("remind me to stretch"),
@@ -6599,6 +6875,67 @@ function webDeps(): WebDeps {
         prompted: false,
       }));
     },
+    knowledge: {
+      async search(query, category) {
+        const embedder = getKnowledgeEmbedder();
+        const config = getKnowledgeConfig();
+        const cat = coerceKnowledgeCategory(category);
+        const started = Date.now();
+        const result = await retrieveContext({
+          knowledge: knowledgeStore,
+          embed: text => embedder ? embedder.embed(text) : Promise.reject(new Error('no model is set up')),
+          query,
+          now: new Date(),
+          limit: config.contextChunks,
+          threshold: config.threshold,
+          filters: cat ? { category: cat } : undefined,
+        });
+        console.log(`[knowledge] web search "${query.slice(0, 60)}" -> ${result.knowledge.length} chunk(s) in ${Date.now() - started}ms`);
+        return {
+          results: result.knowledge.map(item => ({
+            content: item.chunk.content,
+            source: item.chunk.source,
+            category: item.chunk.category,
+            heading: item.chunk.heading ?? null,
+            version: item.chunk.version,
+            confidence: item.chunk.confidence,
+            updatedAt: item.chunk.updatedAt,
+            score: Math.round(item.score * 1000) / 1000,
+          })),
+        };
+      },
+      stats: () => knowledgeStats(knowledgeStore),
+      async ingest(file, category) {
+        const result = await enqueueKnowledge(() => ingestKnowledgeFile(file, coerceKnowledgeCategory(category)));
+        return {
+          queued: false,
+          source: result.outcome.document.source,
+          sourceType: result.outcome.document.sourceType,
+          category: result.outcome.document.category,
+          action: result.outcome.action,
+          chunks: result.outcome.chunks.length,
+        };
+      },
+      async deleteDocument(source) {
+        const document = findDocumentBySource(knowledgeStore, source);
+        if (!document) return { deleted: false, removedChunks: 0 };
+        const before = knowledgeStore.chunks.filter(chunk => chunk.documentId === document.id && chunk.status === 'active').length;
+        knowledgeStore = deleteDocument(knowledgeStore, document.id, new Date().toISOString());
+        persistKnowledge();
+        console.log(`[knowledge] deleted ${document.source} (${before} active chunks)`);
+        return { deleted: true, removedChunks: before };
+      },
+      async reindex(source) {
+        const reindexed = await reindexKnowledge(source || undefined);
+        return { reindexed };
+      },
+      async vault(vaultPath) {
+        const resolved = path.resolve(vaultPath);
+        saveVaultConfig(resolved);
+        const report = await enqueueKnowledge(() => syncVault(resolved));
+        return report;
+      },
+    },
   };
 }
 
@@ -6720,6 +7057,18 @@ app.whenReady().then(() => {
   // After the single-instance gate: two copies racing to download the same
   // installer over each other is the one way this could do harm.
   watchForUpdates();
+
+  // Loaded here rather than at the top because app.getPath needs the app ready
+  // — but the file itself is a quiet local read, and a store that cannot be
+  // read is an empty one, never a crash.
+  knowledgeStore = normalizeKnowledge(loadKnowledge(knowledgeFile));
+  const knowledgeSummary = knowledgeStats(knowledgeStore);
+  console.log(`[knowledge] loaded ${knowledgeSummary.documents} document(s), ${knowledgeSummary.chunks} chunk(s) from ${knowledgeFile}${knowledgeSummary.embedModels.length ? ` (${knowledgeSummary.embedModels.join(', ')})` : ''}`);
+  // A saved vault keeps itself current without being asked: a first check a
+  // minute after boot, then hourly. Runs on the knowledge queue, so it never
+  // waits on or blocks a conversation.
+  setTimeout(() => { void autoSyncVault(); }, 60_000);
+  setInterval(() => { void autoSyncVault(); }, 60 * 60_000);
   protocol.handle('haru-model', async request => {
     const url = new URL(request.url);
     const segments = url.pathname.split('/').filter(Boolean);

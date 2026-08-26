@@ -110,8 +110,105 @@ haru --login          sign in once; she remembers the machine for 90 days
 haru "what's on"      ask and exit
 haru                  a prompt to keep typing into
 haru --agenda         what is still on the list
+haru knowledge …      her stored knowledge
 echo "..." | haru     piped in counts as asking
 ```
+
+### Her stored knowledge
+
+Separate from memory. Memory answers *what she remembers about you*; knowledge
+answers *what information she has access to* — documents she has been given to
+read, and can look things up in instead of guessing. The two stay apart: memory
+lives in `config.json` as today, knowledge lives in a second file,
+`knowledge.json`, beside it.
+
+Giving her a document to read:
+
+```
+haru knowledge ingest ~/haru/server.md
+```
+
+That file is extracted (markdown, text, JSON or PDF), split into chunks, embedded
+with the local model and stored. The same file again is a no-op — a changed file
+is re-ingested, the old chunks are marked stale rather than deleted, and a
+`version` counter on the document is bumped so her answers can tell old from new.
+
+Then she can be asked about it:
+
+```
+haru knowledge search "what linux is the server running"
+haru knowledge stats
+haru knowledge delete haru/server.md
+haru knowledge reindex
+```
+
+### An Obsidian vault as her knowledge
+
+If you keep your notes in Obsidian, point her at the vault once and it becomes
+her knowledge base — a whole folder of markdown, indexed and kept current:
+
+```
+haru knowledge vault /path/to/your/vault
+```
+
+It walks the vault (skipping `.obsidian/`, `.trash/`, templates and attachments),
+reads each note's frontmatter into its metadata, cleans `[[wikilinks]]` so notes
+read naturally, and files each note under a category drawn from its folder
+(`Projects/` → projects, `Personal/` → personal, `Daily/` → journal, and so on,
+overridable by a `category:`/`type:` field in the note itself). Each chunk's
+source is the note's path relative to the vault root, so a note that changes is
+re-ingested in place — version bumped, old chunks marked stale — and a note
+deleted from the vault stops surfacing but stays as history.
+
+The first sync embeds every chunk once (background, never blocks a chat; make
+sure `nomic-embed-text` is pulled on the Ollama host first). After that the vault
+re-syncs itself hourly — new, changed and deleted notes are picked up with no
+command and no re-embedding of notes that have not changed.
+
+Inside a conversation she looks in the vault the same way she looks anywhere
+else: the `look_up_knowledge` tool finds the relevant notes and answers with
+their source and date.
+
+Inside a conversation she reaches it herself with the `look_up_knowledge` tool,
+the way she reaches the web with `search_web`. What is retrieved comes back to
+her with its source, its date and a confidence, and she is told to prefer the
+most recently updated source when they conflict — so a stale "the server runs
+Ubuntu" loses to a current "it runs Arch Linux" instead of arguing with it.
+
+## Knowledge architecture
+
+- `electron/knowledge.ts`: the store — chunk and document records, categories,
+  the `knowledge.json` file, content hashing, and the ingest/update/delete
+  logic (a changed file supersedes its own old chunks rather than duplicating).
+- `electron/chunking.ts`: splitting a document into chunks — markdown-aware, so
+  headings, lists, code blocks and tables are kept together rather than cut at
+  arbitrary character counts, with configurable size and overlap.
+- `electron/embeddings.ts`: the embedding boundary — an `Embedder` interface
+  with an Ollama implementation (the default) and an OpenAI-shaped one, plus an
+  in-memory cache so a repeated query or a chunk already embedded is never
+  embedded twice.
+- `electron/ingestion.ts`: the pipeline — pick an extractor by file type, read
+  the text, clean it, chunk it, embed it, store it. New file types are one more
+  extractor.
+- `electron/retrieval.ts`: hybrid search — vector similarity plus keyword
+  matching (so "nomic-embed-text" or a file name is found even when the
+  embeddings are weak), filtered by category or source, then reranked by
+  semantic score, keyword overlap, recency, confidence and any category or
+  source boost.
+- `electron/context.ts`: turns the retrieved chunks into the prompt — deduped,
+  grouped by document, capped in size, each with its source, category, version,
+  section, updated date and confidence.
+- `electron/retrieveContext.ts`: `retrieveContext(query)` — the one door that
+  can reach both memory (`selectMemories`) and knowledge, keeping the two
+  systems separate underneath.
+- `electron/obsidian.ts`: the vault ingestor — walking an Obsidian vault,
+  parsing YAML frontmatter, cleaning wikilinks, mapping folders to categories,
+  and diffing the vault against the store so the hourly sync adds, updates and
+  removes only what actually changed.
+
+The whole layer is optional and off unless a document is given to her. Embedding
+happens through the same Ollama endpoint she already talks to, so there is no new
+database, no new service and no new dependency.
 
 Put it on your path with a symlink and it behaves like any other command:
 

@@ -71,6 +71,14 @@ export type WebDeps = {
   speak(text: string): Promise<{ audio: Uint8Array; mime: string } | null>;
   /** What they just said, through the same ears and the same corrections as the desktop. */
   hear(audio: Uint8Array, mime: string): Promise<string>;
+  knowledge: {
+    search(query: string, category?: string): Promise<{ results: { content: string; source: string; category: string; heading: string | null; version: number; confidence: number; updatedAt: string; score: number }[] }>;
+    stats(): Record<string, unknown>;
+    ingest(file: string, category?: string): Promise<{ queued: boolean; source: string; sourceType: string; category: string; action: string; chunks: number }>;
+    deleteDocument(source: string): Promise<{ deleted: boolean; removedChunks: number }>;
+    reindex(source?: string): Promise<{ reindexed: number }>;
+    vault(path: string): Promise<{ added: number; updated: number; unchanged: number; removed: number; files: number; ms: number }>;
+  };
 };
 
 /**
@@ -550,6 +558,46 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
     const rating = (value: unknown) => (typeof value === 'number' && value >= 1 && value <= 10 ? Math.round(value) : undefined);
     await deps.writeJournal({ text, mood: rating(body.mood), anxiety: rating(body.anxiety) });
     return json(res, 200, { entries: deps.journal().slice(-30) });
+  }
+
+  // Her own knowledge store: what she has been given to read, searched or
+  // inspected from the terminal. Same auth as everything else here.
+  if (req.method === 'POST' && path === '/api/knowledge/search') {
+    const body = await readBody(req) as { query?: unknown; category?: unknown };
+    const query = typeof body.query === 'string' ? body.query.trim() : '';
+    if (!query) return json(res, 400, { error: 'query is required.' });
+    return json(res, 200, await deps.knowledge.search(query, typeof body.category === 'string' ? body.category : undefined));
+  }
+
+  if (req.method === 'GET' && path === '/api/knowledge/stats') {
+    return json(res, 200, deps.knowledge.stats());
+  }
+
+  if (req.method === 'POST' && path === '/api/knowledge/ingest') {
+    const body = await readBody(req) as { path?: unknown; category?: unknown };
+    const file = typeof body.path === 'string' ? body.path.trim() : '';
+    if (!file) return json(res, 400, { error: 'path is required.' });
+    return json(res, 200, await deps.knowledge.ingest(file, typeof body.category === 'string' ? body.category : undefined));
+  }
+
+  if (req.method === 'POST' && path === '/api/knowledge/delete') {
+    const body = await readBody(req) as { source?: unknown };
+    const source = typeof body.source === 'string' ? body.source.trim() : '';
+    if (!source) return json(res, 400, { error: 'source is required.' });
+    return json(res, 200, await deps.knowledge.deleteDocument(source));
+  }
+
+  if (req.method === 'POST' && path === '/api/knowledge/reindex') {
+    const body = await readBody(req) as { source?: unknown };
+    return json(res, 200, await deps.knowledge.reindex(typeof body.source === 'string' ? body.source.trim() : undefined));
+  }
+
+  // An Obsidian vault: walked, ingested, and remembered so it can re-sync.
+  if (req.method === 'POST' && path === '/api/knowledge/vault') {
+    const body = await readBody(req) as { path?: unknown };
+    const vault = typeof body.path === 'string' ? body.path.trim() : '';
+    if (!vault) return json(res, 400, { error: 'path is required.' });
+    return json(res, 200, await deps.knowledge.vault(vault));
   }
 
   return json(res, 404, { error: 'Nothing here.' });
