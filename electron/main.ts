@@ -1,5 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, type MenuItemConstructorOptions, nativeImage, nativeTheme, net, powerMonitor, protocol, safeStorage, screen, shell, desktopCapturer } from 'electron';
 import path from 'node:path';
+import os from 'node:os';
 import { createHash, randomUUID } from 'node:crypto';
 import { appendFileSync, copyFileSync, existsSync, readdirSync, mkdirSync, readFileSync, rmSync, statSync, watch, writeFileSync, type FSWatcher } from 'node:fs';
 import { spawn } from 'node:child_process';
@@ -4532,7 +4533,20 @@ const toolless = new Set<string>();
  * a problem.
  */
 function isRemote(endpoint: string) {
-  return !/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\]|0\.0\.0\.0)(:|\/|$)/i.test(endpoint.trim());
+  const value = endpoint.trim();
+  if (/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\]|0\.0\.0\.0)(:|\/|$)/i.test(value)) return false;
+  // A machine is not a different machine just because it is reached by one of
+  // its own non-loopback addresses. This box answers on a Tailscale IP; calling
+  // that "remote" invents a home twin on loopback that does not exist, and a
+  // single transient failure then pins every reply to a dead address.
+  let host = '';
+  try { host = new URL(value).hostname; } catch { return true; }
+  for (const addresses of Object.values(os.networkInterfaces())) {
+    for (const address of addresses ?? []) {
+      if (address?.address === host) return false;
+    }
+  }
+  return true;
 }
 
 /**
