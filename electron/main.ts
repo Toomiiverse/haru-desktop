@@ -50,6 +50,7 @@ import { dropRoleHeader, dropTackedOnParagraphs, dropInventedContact, dropInvent
 import { runToolLoop } from './toolloop';
 import { chatTools, coerceKnowledgeCategory, runChatTool, type ToolAvailability, type ToolDeps } from './tools';
 import { createMemoryStore } from './memorystore';
+import { createKnowledgeStore } from './knowledgestore';
 import { chatSystemPrompt, freshStartInstruction, type FreshStart, type RatedReply } from './prompt';
 import { hasShout, readVoiceConfig, referenceFor, shoutReference, spokenCase, speakableText, splitForSpeech, synthesise, type SpeechClip, type VoiceConfig } from './voice';
 import { applyDecay, DEEP_RECALL_LIMIT, eventCandidates, eventsPrompt, findSuperseded, formatMemoryPrompt, isExplicitRecall, isWorthKeeping, isWorthRemembering, MEMORY_KINDS, migrateMemories, pruneMemories, rememberInto, retrieveMemories, semanticSimilarities, summaryPrompt, supersede, vectorSimilarity, type ForgettingEntry, type MemoryKind, type MemoryRecord, type MemorySource, type RetrievalFactors, type ScoredMemory, type SessionSummary } from './memory';
@@ -69,11 +70,11 @@ import { BREVITY, summonedLine } from './summoned';
 import { CHOICES_TOOL, readChoices } from './choices';
 import { quickAnswer, type AgendaLine } from './quick';
 import { newTrace } from './trace';
-import { KNOWLEDGE_CATEGORIES, deleteDocument, emptyKnowledge, findDocumentBySource, knowledgeStats, readKnowledgeConfig, reconcileChunkIds, type KnowledgeCategory, type KnowledgeConfig, type KnowledgeStore } from './knowledge';
-import { baseExtractors, ingestFile, type Extractor, type IngestResult } from './ingestion';
-import { cachedEmbedder, createEmbedder, EmbeddingCache, type Embedder } from './embeddings';
+import { KNOWLEDGE_CATEGORIES, knowledgeStats, type KnowledgeCategory } from './knowledge';
+import type { IngestResult } from './ingestion';
+import type { Embedder } from './embeddings';
 import { retrieveContext } from './retrieveContext';
-import { syncVaultFiles, type VaultSyncReport } from './obsidian';
+import type { VaultSyncReport } from './obsidian';
 import { collectAll, collectDocker, collectDockerLight, collectGpu, collectProcesses, collectServices, collectSystem, diagnose, KNOWN_SERVICES, USER_SERVICES, type Diagnosis } from './system';
 import { checkEvents, sampleFromCollectors, type EventThresholds, type SystemSample } from './systemState';
 
@@ -116,7 +117,6 @@ const live2dRoots = new Map<string, string>();
 let mainWindow: BrowserWindow | null = null;
 let companionWindow: BrowserWindow | null = null;
 
-const KNOWLEDGE_PDF_CHARS = 200_000;
 const knowledgeFile = process.env.HARU_KNOWLEDGE_FILE ? process.env.HARU_KNOWLEDGE_FILE : path.join(app.getPath('userData'), 'knowledge.json');
 
 // The one persistence facade. It owns both store files; nothing else reads or
@@ -132,10 +132,6 @@ try {
 }
 store.migrate();
 store.hardenPermissions();
-
-let knowledgeStore: KnowledgeStore = emptyKnowledge();
-const knowledgeEmbeddingCache = new EmbeddingCache();
-let knowledgeSaveTimer: ReturnType<typeof setTimeout> | null = null;
 
 protocol.registerSchemesAsPrivileged([
   { scheme: 'haru-model', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } },
@@ -3169,6 +3165,28 @@ function getProfile(): Profile {
  * shims below, which keep the old names so the call sites read as they always
  * did.
  */
+/**
+ * The live knowledge layer. Everything below reaches it through the shims, which
+ * keep the old names so the call sites read as they always did.
+ */
+const knowledge = createKnowledgeStore({
+  store,
+  fetch: net.fetch,
+  apiKeyFor: keyFor,
+});
+
+const getKnowledgeConfig = knowledge.config;
+const getKnowledgeEmbedder = knowledge.embedder;
+const persistKnowledge = knowledge.persist;
+const touchChunks = knowledge.touch;
+const enqueueKnowledge = knowledge.enqueue;
+const ingestKnowledgeFile = knowledge.ingestPath;
+const readVaultConfig = () => ({ path: knowledge.vaultPath() });
+const saveVaultConfig = knowledge.saveVaultPath;
+const syncVault = knowledge.syncVault;
+const autoSyncVault = knowledge.autoSyncVault;
+const reindexKnowledge = knowledge.reindex;
+
 const memoryStore = createMemoryStore({
   store,
   broadcast: (channel, payload) => { for (const win of BrowserWindow.getAllWindows()) win.webContents.send(channel, payload); },
@@ -3185,210 +3203,6 @@ const refreshMemoryVectors = memoryStore.refreshVectors;
 const scheduleMemoryVectorRefresh = memoryStore.scheduleVectorRefresh;
 const runMemoryConsolidation = memoryStore.consolidate;
 const runMemoryDecay = memoryStore.decay;
-
-function getKnowledgeConfig(): KnowledgeConfig {
-  return readKnowledgeConfig(store.get('knowledge.config'));
-}
-
-function persistKnowledge() {
-  try {
-    store.setKnowledge(knowledgeStore);
-  } catch (error) {
-    console.warn('[knowledge] could not save:', error instanceof Error ? error.message : String(error));
-  }
-}
-
-function scheduleKnowledgeSave() {
-  if (knowledgeSaveTimer) return;
-  knowledgeSaveTimer = setTimeout(() => {
-    knowledgeSaveTimer = null;
-    persistKnowledge();
-  }, 1500);
-}
-
-function touchChunks(ids: string[]) {
-  const now = new Date().toISOString();
-  let changed = false;
-  for (const chunk of knowledgeStore.chunks) {
-    if (ids.includes(chunk.id) && chunk.lastAccessedAt !== now) {
-      chunk.lastAccessedAt = now;
-      changed = true;
-    }
-  }
-  if (changed) scheduleKnowledgeSave();
-}
-
-function getKnowledgeEmbedder(): Embedder | null {
-  const ai = store.get('ai.config') as ProviderConfig | undefined;
-  if (!ai?.endpoint || !ai.model) return null;
-  const config = getKnowledgeConfig();
-  const endpoint = ai.endpoint;
-  const embedder = createEmbedder({
-    endpoint,
-    model: config.embedModel,
-    provider: isOpenAIShaped(ai.provider) ? 'openai' : 'ollama',
-    apiKey: keyFor(endpoint),
-  }, net.fetch);
-  return cachedEmbedder(embedder, knowledgeEmbeddingCache);
-}
-
-// -- semantic memory retrieval -------------------------------------------------
-// Memories are embedded in the background whenever the list changes, and the
-// latest query is embedded once per turn, so retrieval can weight semantic
-// similarity alongside the keyword score. Without a reachable embedder the
-// whole layer degrades to keyword-only — the same fallback the knowledge store
-// uses — and nothing about the chat path depends on it.
-
-const pdfExtractor: Extractor = {
-  label: 'pdf',
-  match: name => /\.pdf$/i.test(name),
-  async extract(file) {
-    const read = await readPdf(file, KNOWLEDGE_PDF_CHARS);
-    if (read.scanned) throw new Error('a scanned PDF — there is no readable text in it');
-    return { text: read.text, sourceType: 'pdf' };
-  },
-};
-
-function knowledgeExtractors(): Extractor[] {
-  return [...baseExtractors(), pdfExtractor];
-}
-
-type KnowledgeJob = { run(): Promise<void> };
-const knowledgeJobs: KnowledgeJob[] = [];
-let knowledgeDraining = false;
-
-function enqueueKnowledge<T>(run: () => Promise<T>): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    knowledgeJobs.push({
-      run: async () => {
-        try {
-          resolve(await run());
-        } catch (error) {
-          reject(error);
-          throw error;
-        }
-      },
-    });
-    void drainKnowledge();
-  });
-}
-
-async function drainKnowledge() {
-  if (knowledgeDraining) return;
-  knowledgeDraining = true;
-  try {
-    while (knowledgeJobs.length) {
-      const job = knowledgeJobs.shift()!;
-      try {
-        await job.run();
-      } catch {
-        // the waiter above was rejected already; nothing else to do
-      }
-      await new Promise(done => setImmediate(done));
-    }
-  } finally {
-    knowledgeDraining = false;
-  }
-}
-
-async function ingestKnowledge(args: {
-  file: string;
-  source?: string;
-  sourceType?: string;
-  text?: string;
-  category?: KnowledgeCategory;
-  metadata?: Record<string, unknown>;
-  confidence?: number;
-  persist?: boolean;
-}): Promise<IngestResult> {
-  const config = getKnowledgeConfig();
-  const embedder = getKnowledgeEmbedder();
-  if (!embedder) throw new Error('no model is set up, so nothing can be embedded');
-  const started = Date.now();
-  const result = await ingestFile(knowledgeStore, embedder, {
-    file: args.file,
-    source: args.source,
-    sourceType: args.sourceType,
-    text: args.text,
-    category: args.category,
-    metadata: args.metadata,
-    confidence: args.confidence,
-    chunkSize: config.chunkSize,
-    chunkOverlap: config.chunkOverlap,
-  }, knowledgeExtractors());
-  if (result.outcome.action !== 'unchanged') {
-    knowledgeStore = reconcileChunkIds(result.store);
-    if (args.persist !== false) persistKnowledge();
-  }
-  console.log(`[knowledge] ingested ${result.outcome.document.source} (${result.outcome.action}, ${result.outcome.chunks.length} chunks, ${Date.now() - started}ms)`);
-  return result;
-}
-
-function ingestKnowledgeFile(file: string, category?: KnowledgeCategory): Promise<IngestResult> {
-  return ingestKnowledge({ file, category });
-}
-
-function readVaultConfig(): { path: string } {
-  const saved = store.get('knowledge.vault') as { path?: unknown } | undefined;
-  return { path: typeof saved?.path === 'string' && saved.path.trim() ? saved.path.trim() : '' };
-}
-
-function saveVaultConfig(vaultPath: string) {
-  store.set('knowledge.vault', { path: vaultPath });
-}
-
-async function syncVault(vaultPath: string): Promise<VaultSyncReport> {
-  const vault = path.resolve(vaultPath);
-  if (!existsSync(vault) || !statSync(vault).isDirectory()) throw new Error(`no such vault: ${vaultPath}`);
-  const started = Date.now();
-  const report = await syncVaultFiles(vault, {
-    store: knowledgeStore,
-    ingest: async note => {
-      const result = await ingestKnowledge({
-        file: note.file,
-        source: note.relative,
-        sourceType: 'markdown',
-        text: note.text,
-        category: note.category,
-        metadata: note.metadata,
-        persist: false,
-      });
-      return result.outcome.action;
-    },
-    remove: source => {
-      const document = knowledgeStore.documents.find(doc => doc.source === source && doc.status === 'active');
-      if (document) knowledgeStore = deleteDocument(knowledgeStore, document.id, new Date().toISOString());
-    },
-  });
-  persistKnowledge();
-  const full = { ...report, ms: Date.now() - started };
-  console.log(`[knowledge] vault sync ${vault}: ${full.files} files, +${full.added} ~${full.updated} =${full.unchanged} -${full.removed} in ${full.ms}ms`);
-  return full;
-}
-
-async function autoSyncVault() {
-  const { path: vault } = readVaultConfig();
-  if (!vault) return;
-  try {
-    await enqueueKnowledge(() => syncVault(vault));
-  } catch (error) {
-    console.warn('[knowledge] auto vault sync failed:', error instanceof Error ? error.message : String(error));
-  }
-}
-
-async function reindexKnowledge(source?: string) {
-  const targets = knowledgeStore.documents.filter(document => document.status === 'active' && (!source || document.source === source));
-  let reindexed = 0;
-  for (const document of targets) {
-    try {
-      await enqueueKnowledge(() => ingestKnowledgeFile(document.source, document.category));
-      reindexed++;
-    } catch (error) {
-      console.warn(`[knowledge] reindex of ${document.source} failed:`, error instanceof Error ? error.message : String(error));
-    }
-  }
-  return reindexed;
-}
 
 type SystemConfig = { enabled: boolean; level: 1 | 2; allowlist: string[] };
 const DEFAULT_SYSTEM_CONFIG: SystemConfig = { enabled: true, level: 2, allowlist: ['restart_docker_container', 'start_service', 'stop_service', 'restart_haru'] };
@@ -3842,7 +3656,7 @@ function toolDeps(): ToolDeps {
     setBlocks, blockSources,
     getWardrobeControls, sendToWindows,
     readSystemConfig, getKnowledgeConfig, getKnowledgeEmbedder,
-    knowledgeStore: () => knowledgeStore,
+    knowledgeStore: knowledge.current,
     tryEmbedQuery,
     memoryVectors: memoryStore.vectors,
     touchChunks, getSearchKey,
@@ -6313,7 +6127,7 @@ function webDeps(): WebDeps {
         const cat = coerceKnowledgeCategory(category);
         const started = Date.now();
         const result = await retrieveContext({
-          knowledge: knowledgeStore,
+          knowledge: knowledge.current(),
           embed: text => embedder ? embedder.embed(text) : Promise.reject(new Error('no model is set up')),
           query,
           now: new Date(),
@@ -6335,7 +6149,7 @@ function webDeps(): WebDeps {
           })),
         };
       },
-      stats: () => knowledgeStats(knowledgeStore),
+      stats: () => knowledgeStats(knowledge.current()),
       async ingest(file, category) {
         const result = await enqueueKnowledge(() => ingestKnowledgeFile(file, coerceKnowledgeCategory(category)));
         return {
@@ -6348,13 +6162,7 @@ function webDeps(): WebDeps {
         };
       },
       async deleteDocument(source) {
-        const document = findDocumentBySource(knowledgeStore, source);
-        if (!document) return { deleted: false, removedChunks: 0 };
-        const before = knowledgeStore.chunks.filter(chunk => chunk.documentId === document.id && chunk.status === 'active').length;
-        knowledgeStore = deleteDocument(knowledgeStore, document.id, new Date().toISOString());
-        persistKnowledge();
-        console.log(`[knowledge] deleted ${document.source} (${before} active chunks)`);
-        return { deleted: true, removedChunks: before };
+        return knowledge.removeSource(source);
       },
       async reindex(source) {
         const reindexed = await reindexKnowledge(source || undefined);
@@ -6492,7 +6300,7 @@ app.whenReady().then(() => {
   // Loaded here rather than at the top because app.getPath needs the app ready
   // — but the file itself is a quiet local read, and a store that cannot be
   // read is an empty one, never a crash.
-  knowledgeStore = store.getKnowledge();
+  knowledge.load();
   void refreshMemoryVectors();
   // The consolidation sweep: once shortly after boot (when the vectors are
   // warm enough to be useful), then daily. Quiet when nothing changes.
@@ -6506,7 +6314,7 @@ app.whenReady().then(() => {
     pruneOldArchives();
     runHauntHygiene();
   }, 24 * 60 * 60_000);
-  const knowledgeSummary = knowledgeStats(knowledgeStore);
+  const knowledgeSummary = knowledgeStats(knowledge.current());
   console.log(`[knowledge] loaded ${knowledgeSummary.documents} document(s), ${knowledgeSummary.chunks} chunk(s) from ${knowledgeFile}${knowledgeSummary.embedModels.length ? ` (${knowledgeSummary.embedModels.join(', ')})` : ''}`);
   // A saved vault keeps itself current without being asked: a first check a
   // minute after boot, then hourly. Runs on the knowledge queue, so it never
