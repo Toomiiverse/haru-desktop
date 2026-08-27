@@ -6863,7 +6863,10 @@ function webDeps(): WebDeps {
       // The same voice, the same reference clip, the same server the desktop
       // speaks through. Nothing about her sounds different for being far away.
       const voice = readVoiceConfig(store.get('voice'));
-      if (voice.engine === 'off' || voice.engine === 'windows') return null;
+      // The desktop keeps the full TTS path. The web door can be told to go
+      // silent — voice.webEnabled off — and hand the phone canned voice lines
+      // instead, so a reply is not held hostage to an 8-17s synthesis round trip.
+      if (voice.engine === 'off' || voice.engine === 'windows' || !voice.webEnabled) return null;
       return synthesise(spokenCase(speakableText(text)), voice, referenceFor(voice), remoteAuth(voice.endpoint));
     },
     async hear(audio, mime) {

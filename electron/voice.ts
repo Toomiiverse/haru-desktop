@@ -40,6 +40,13 @@ export type VoiceConfig = {
   emotionVoices: Partial<Record<EmotionName, VoiceReference>>;
   /** Optional clip for shouted lines. Falls back to the annoyed clip. */
   shoutVoice?: VoiceReference;
+  /**
+   * Whether the web door may synthesise. The desktop keeps the full TTS path;
+   * a phone waits 8-17s a reply on it, which is where canned voice lines are
+   * meant to take over. When false, /api/speak answers 503 and the page stays
+   * silent rather than blocking on synthesis.
+   */
+  webEnabled: boolean;
 };
 
 export const DEFAULT_VOICE: VoiceConfig = {
@@ -51,6 +58,7 @@ export const DEFAULT_VOICE: VoiceConfig = {
   speed: 1,
   volume: 0.9,
   emotionVoices: {},
+  webEnabled: true,
 };
 
 /**
@@ -329,6 +337,7 @@ export function readVoiceConfig(saved: unknown): VoiceConfig {
     volume: typeof record.volume === 'number' ? Math.max(0, Math.min(1, record.volume)) : DEFAULT_VOICE.volume,
     emotionVoices: readEmotionVoices(record.emotionVoices),
     shoutVoice: readReference(record.shoutVoice),
+    webEnabled: record.webEnabled !== false,
   };
 }
 
