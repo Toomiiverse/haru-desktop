@@ -102,9 +102,25 @@ test('migrate runs the registered steps and enriches legacy memories', () => {
   assert.equal(migrated[0].status, 'active');
 });
 
-test('migrations registry carries the v2 step', () => {
-  assert.equal(MIGRATIONS.length >= 1, true);
+test('migrations registry carries the v2 and v3 steps', () => {
+  assert.equal(MIGRATIONS.length >= 2, true);
   assert.equal(MIGRATIONS[0].version, 2);
+  assert.equal(MIGRATIONS[1].version, 3);
+});
+
+test('migration v3 creates memory blocks without touching existing memory', () => {
+  const { store } = makeStore();
+  store.set('memories', [
+    { id: 'old1', text: 'Dislikes being nagged', kind: 'preference', createdAt: '2026-07-01T00:00:00.000Z', mentions: 3 },
+  ]);
+  store.set('memory.sessions', [{ day: '2026-08-01', summary: 'a day', createdAt: '2026-08-01T00:00:00.000Z' }]);
+  const report = store.migrate();
+  assert.equal(report.to, SCHEMA_VERSION);
+  const blocks = store.getBlocks();
+  assert.deepEqual(blocks.map(b => b.label), ['persona', 'human', 'preferences', 'relationship', 'current_project', 'working_state']);
+  assert.equal(blocks.find(b => b.label === 'persona')!.read_only, true);
+  assert.equal(store.getMemories()[0].text, 'Dislikes being nagged');
+  assert.equal(store.getSessions().length, 1);
 });
 
 test('verify detects a corrupt config file', () => {
@@ -126,9 +142,4 @@ test('recoverBackups restores the newest backup over a corrupt file', () => {
   assert.equal(restored, true);
   const reopened = new HaruStore({ cwd: dir, configName, knowledgeFile });
   assert.equal(reopened.get('value'), 'precious');
-});
-
-test('migrations registry carries the v2 step', () => {
-  assert.equal(MIGRATIONS.length >= 1, true);
-  assert.equal(MIGRATIONS[0].version, 2);
 });

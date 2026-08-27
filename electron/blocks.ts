@@ -290,6 +290,59 @@ export function fitToLimit(value: string, block: MemoryBlock): { value: string; 
   return { value: kept.join('\n'), cut: true };
 }
 
+// -- governed edits ------------------------------------------------------------
+
+/** The model-facing edit operations, as pure logic. The callers in main.ts
+ *  run these inside a transaction and route the content through Haru's memory
+ *  governance before anything persists; these helpers only answer whether the
+ *  block itself accepts the edit. */
+
+export type BlockEditResult = { ok: boolean; reason?: string };
+
+/**
+ * Append one line to a block's value. Append is the safe concurrent primitive
+ * — it only ever adds, so two writers cannot lose each other's work. Obvious
+ * duplication of an existing line is refused, and the limit is enforced.
+ */
+export function appendToBlockValue(current: string, content: string, block: MemoryBlock): { ok: boolean; value?: string; reason?: string } {
+  const trimmed = content.trim();
+  if (!trimmed) return { ok: false, reason: 'content is empty' };
+  const normalise = (line: string) => line.replace(/^-\s*/, '').trim().toLowerCase().replace(/[.!]+$/, '');
+  const existing = new Set(current.split('\n').map(normalise));
+  if (existing.has(normalise(trimmed))) return { ok: false, reason: 'that is already in the block' };
+  const next = current ? `${current}\n- ${trimmed}` : `- ${trimmed}`;
+  if (next.length > block.limit) return { ok: false, reason: `that would exceed the ${block.limit}-character limit` };
+  return { ok: true, value: next };
+}
+
+/**
+ * Replace one exact substring. Refuses when the target is missing — and when
+ * it appears more than once, because silently picking an occurrence is how the
+ * wrong content gets changed.
+ */
+export function replaceInBlockValue(current: string, oldSubstring: string, newSubstring: string, block: MemoryBlock): { ok: boolean; value?: string; reason?: string } {
+  const old = oldSubstring.trim();
+  const replacement = newSubstring.trim();
+  if (!old) return { ok: false, reason: 'old substring is empty' };
+  const occurrences = current.split(old).length - 1;
+  if (occurrences === 0) return { ok: false, reason: 'old substring not found in the block' };
+  if (occurrences > 1) return { ok: false, reason: `old substring appears ${occurrences} times — too ambiguous to replace safely` };
+  const next = current.replace(old, replacement);
+  if (next.length > block.limit) return { ok: false, reason: `the replacement would exceed the ${block.limit}-character limit` };
+  return { ok: true, value: next };
+}
+
+/** Mark a block as carrying an explicit governed value. */
+export function withEditedValue(block: MemoryBlock, value: string): MemoryBlock {
+  return { ...block, value, edited: true };
+}
+
+/** Drop the explicit value so the block derives from the engine again. */
+export function resetBlockToDerived(block: MemoryBlock): MemoryBlock {
+  const { value: _value, edited: _edited, ...rest } = block;
+  return rest;
+}
+
 // -- prompt rendering ----------------------------------------------------------
 
 /**

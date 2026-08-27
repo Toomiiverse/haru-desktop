@@ -50,7 +50,7 @@ import { claimsDesktopAction, claimsTickOff, dropRoleHeader, dropTackedOnParagra
 import { hasShout, readVoiceConfig, referenceFor, shoutReference, spokenCase, speakableText, splitForSpeech, synthesise, type SpeechClip, type VoiceConfig } from './voice';
 import { applyDecay, DEEP_RECALL_LIMIT, eventCandidates, eventsPrompt, findSuperseded, formatMemoryPrompt, isExplicitRecall, isWorthKeeping, isWorthRemembering, MEMORY_KINDS, migrateMemories, pruneMemories, rememberInto, retrieveMemories, semanticSimilarities, summaryPrompt, supersede, vectorSimilarity, type ForgettingEntry, type MemoryKind, type MemoryRecord, type MemorySource, type RetrievalFactors, type ScoredMemory, type SessionSummary } from './memory';
 import { consolidateMemories, type ConsolidationChange } from './consolidation';
-import { formatMemoryBlocks, type MemoryBlock } from './blocks';
+import { appendToBlockValue, canEditBlock, findBlock, formatMemoryBlocks, replaceInBlockValue, resolveBlockValue, resetBlockToDerived, withEditedValue, type BlockSources, type MemoryBlock } from './blocks';
 import { forgetDevice, forgetEveryDevice, readWebAccess, setPassword, weakPassword, type WebAccess } from './web';
 import { conversationMayLeave, mayLeaveTheMachine } from './sensitivity';
 import { addCheckIn, checkInInstruction, checkInsOn, readCheckIns, type CheckIn } from './checkins';
@@ -3265,6 +3265,38 @@ const CHAT_TOOLS: ChatTool[] = [{
       required: ['fact', 'kind'],
     },
   },
+}, {
+  type: 'function',
+  function: {
+    name: 'core_memory_append',
+    // The memory blocks mirror the deterministic engine, so this is the block
+    // face of the same write path — and the description has to say so, or the
+    // model treats the block as free text it owns rather than a governed view.
+    description: "Append one piece of information to a memory block, the way you would write a line into your own working memory. The append is validated: it must be a lasting fact about the user — not venting, small talk, or something true only of this moment — it must not duplicate what is already known, and the block has a character limit. What you append is recorded through the same memory engine the blocks come from, so it is checked against existing knowledge and surfaced when relevant rather than shown here instantly. Prefer this over remember_about_user when you are updating a block as a whole; use remember_about_user for a single fact with a specific kind. The persona block is read-only and cannot be appended to.",
+    parameters: {
+      type: 'object',
+      properties: {
+        label: { type: 'string', description: 'The block to append to: human, preferences, relationship, current_project or working_state.' },
+        content: { type: 'string', description: 'One short statement to add, in the third person, with no pronoun for the user: "Works on the PC Project most evenings".' },
+      },
+      required: ['label', 'content'],
+    },
+  },
+}, {
+  type: 'function',
+  function: {
+    name: 'core_memory_replace',
+    description: "Replace a specific existing piece of text in a memory block — the correction path when something you were told has changed and the old version is now wrong. The old text must appear exactly once in the block's current contents; if it is missing, or appears more than once, the replacement is refused rather than guessed. The change goes through the same memory governance as everything else, marking the outdated record as superseded. The persona block is read-only and cannot be replaced in.",
+    parameters: {
+      type: 'object',
+      properties: {
+        label: { type: 'string', description: 'The block to replace within: human, preferences, relationship, current_project or working_state.' },
+        old_substring: { type: 'string', description: 'Exactly the text currently in the block that you want to change — copied, not paraphrased.' },
+        new_substring: { type: 'string', description: 'What it should read instead.' },
+      },
+      required: ['label', 'old_substring', 'new_substring'],
+    },
+  },
 }];
 
 /**
@@ -4126,7 +4158,6 @@ async function systemContextFor(message: string): Promise<string> {
 // catch a stray "remember" from three turns ago and needlessly deepen every
 // reply after it.
 function profileSummary(message: string, recentContext = '', semantic?: Map<string, number>) {
-  const profile = getProfile();
   const query = recentContext ? `${recentContext} ${message}` : message;
   const limit = isExplicitRecall(message) ? DEEP_RECALL_LIMIT : undefined;
   const picked = retrieveMemories(getMemories(), query, { limit, semantic });
@@ -4141,16 +4172,7 @@ function profileSummary(message: string, recentContext = '', semantic?: Map<stri
   // the deterministic engine on every render — the retrieval above is what
   // decides what the human block shows — so the blocks can never drift from
   // the authoritative records.
-  const blocks = formatMemoryBlocks(store.getBlocks(), {
-    character: getCharacter(),
-    profile,
-    memories: getMemories(),
-    sessions: getSessions(),
-    following: Object.values(getFollowing()).map(work => ({ title: work.title, kind: work.kind, progress: work.progress })),
-    agenda: getKept().map(item => ({ title: item.title, kind: item.kind, done: item.done })),
-    query,
-    now: new Date(),
-  });
+  const blocks = formatMemoryBlocks(store.getBlocks(), blockSources(query));
   for (const entry of blocks.cut) {
     console.warn(`[blocks] ${entry.label} cut from ${entry.before} to ${entry.after} chars to fit its budget — selection was tighter than this; raise the block limit if it keeps happening`);
   }
@@ -4161,6 +4183,37 @@ function profileSummary(message: string, recentContext = '', semantic?: Map<stri
     lines.push('Earlier conversations are reflected in the working_state block. Refer back to them naturally when relevant, the way someone would who was there. Do not list them back or announce that you remember.');
   }
   return lines.length ? `About the user: ${lines.join(' ')}` : '';
+}
+
+/** Everything the block layer may draw on, straight from the live state. */
+function blockSources(query: string): BlockSources {
+  return {
+    character: getCharacter(),
+    profile: getProfile(),
+    memories: getMemories(),
+    sessions: getSessions(),
+    following: Object.values(getFollowing()).map(work => ({ title: work.title, kind: work.kind, progress: work.progress })),
+    agenda: getKept().map(item => ({ title: item.title, kind: item.kind, done: item.done })),
+    query,
+    now: new Date(),
+  };
+}
+
+/** What kind of memory a block edit proposes, from the block it lands in. */
+function kindForBlock(label: string): MemoryKind {
+  if (label === 'preferences') return 'preference';
+  if (label === 'relationship') return 'relationship';
+  return 'fact';
+}
+
+/** Default labels keep their derived view; custom blocks persist explicit
+ *  values, since nothing in the engine would otherwise surface them. */
+const DEFAULT_BLOCK_LABELS = new Set(['persona', 'human', 'preferences', 'relationship', 'current_project', 'working_state']);
+
+/** Write blocks and tell every window, so the inspector never goes stale. */
+function setBlocks(items: MemoryBlock[]) {
+  store.setBlocks(items);
+  for (const win of BrowserWindow.getAllWindows()) win.webContents.send('blocks:changed', items);
 }
 
 let lastMemoryRetrieval: { at: string; query: string; entries: { id: string; text: string; score: number; factors: RetrievalFactors }[] } | null = null;
@@ -4931,6 +4984,68 @@ async function runChatTool(call: ToolCall, latestUserMessage: string): Promise<s
     // Being told it is already known is useful to the model — it stops it
     // announcing a discovery when the user has merely repeated themselves.
     return JSON.stringify({ saved: true, known: !saved.created, mentions: saved.record.mentions, kind });
+  }
+  if (name === 'core_memory_append' || name === 'core_memory_replace') {
+    // The block face of the memory write path. The block checks run first —
+    // exists, editable, within budget — and only then does the content pass
+    // through the same governance as remember_about_user. LLM proposes, Haru
+    // decides; the block itself is a view, not a free-text scratchpad.
+    const label = typeof args.label === 'string' ? args.label.trim() : '';
+    const blocks = store.getBlocks();
+    const block = findBlock(blocks, label);
+    if (!block) return JSON.stringify({ error: `There is no memory block called "${label}". The blocks are human, preferences, relationship, current_project and working_state.` });
+    if (!canEditBlock(blocks, label)) return JSON.stringify({ error: `The "${label}" block is read-only — it is fixed by the user's configuration and cannot be changed through memory tools.` });
+    const current = resolveBlockValue(block, blockSources(''));
+    if (name === 'core_memory_append') {
+      const content = typeof args.content === 'string' ? args.content.trim() : '';
+      const edit = appendToBlockValue(current, content, block);
+      if (!edit.ok) return JSON.stringify({ error: edit.reason });
+      // Governance write-through: the engine decides whether this is worth
+      // keeping, at its own confidence — model proposals start uncertain.
+      const kind = kindForBlock(label);
+      const saved = addMemory(content, kind, undefined, { source: 'inferred' });
+      if (!saved?.record) {
+        return JSON.stringify({ saved: false, reason: 'Not recorded — that reads as either about this moment only or true of anyone. Keep things that would still matter to them in a month.' });
+      }
+      // Custom blocks (no engine surface of their own) persist the edited value;
+      // default blocks stay derived and pick the new record up through selection.
+      if (!DEFAULT_BLOCK_LABELS.has(label)) {
+        const next = edit.value!;
+        setBlocks(blocks.map(candidate => candidate.label === label ? withEditedValue(candidate, next) : candidate));
+      }
+      console.log(`[blocks] append → ${label}: "${content.slice(0, 60)}" (${saved.created ? 'new record' : `known, ${saved.record.mentions}x`})`);
+      return JSON.stringify({
+        saved: true,
+        known: !saved.created,
+        note: `Appended to the ${label} block and recorded in memory. It will surface in the block when it is relevant.`,
+      });
+    }
+    const oldSubstring = typeof args.old_substring === 'string' ? args.old_substring : '';
+    const newSubstring = typeof args.new_substring === 'string' ? args.new_substring : '';
+    const edit = replaceInBlockValue(current, oldSubstring, newSubstring, block);
+    if (!edit.ok) return JSON.stringify({ error: edit.reason });
+    const kind = kindForBlock(label);
+    const outdated = findSuperseded(getMemories(), oldSubstring);
+    const replacement = newSubstring.trim();
+    const saved = replacement ? addMemory(replacement, kind, undefined, { source: 'inferred' }) : null;
+    if (saved && !saved.record) {
+      return JSON.stringify({ saved: false, reason: 'The replacement was not recorded — it reads as either about this moment only or true of anyone.' });
+    }
+    store.transaction(() => {
+      if (outdated && saved?.record && outdated.id !== saved.record.id) {
+        setMemories(supersede(getMemories(), outdated.id, saved.record.id));
+        console.log(`[memory] "${outdated.text.slice(0, 50)}" superseded by "${newSubstring.slice(0, 50)}"`);
+      }
+      if (!DEFAULT_BLOCK_LABELS.has(label)) {
+        const next = edit.value!;
+        setBlocks(store.getBlocks().map(candidate => candidate.label === label ? withEditedValue(candidate, next) : candidate));
+      }
+    });
+    console.log(`[blocks] replace in ${label}: "${oldSubstring.slice(0, 40)}" → "${newSubstring.slice(0, 40)}"`);
+    return JSON.stringify({
+      saved: true,
+      note: `Replaced in the ${label} block. ${outdated ? 'The outdated record was superseded.' : 'No existing record matched the replaced text.'}`,
+    });
   }
   if (name === 'complete_kept_item') {
     const title = typeof args.title === 'string' ? args.title.trim() : '';
@@ -7954,6 +8069,33 @@ app.whenReady().then(() => {
   ipcMain.handle('memory:consolidate', () => runMemoryConsolidation());
   ipcMain.handle('memory:forgettingLog', () => store.getForgettingLog());
   ipcMain.handle('memory:lastRetrieval', () => lastMemoryRetrieval);
+  // The user is the administrator of the memory blocks: the model's tools
+  // refuse read-only blocks, but these can edit anything — including the
+  // persona — and can send a block back to its derived state.
+  ipcMain.handle('blocks:list', () => store.getBlocks());
+  ipcMain.handle('blocks:update', (_e, label: string, value: string, opts: { limit?: number; description?: string; read_only?: boolean } = {}) => {
+    const blocks = store.getBlocks();
+    const block = findBlock(blocks, label);
+    if (!block) return null;
+    const updated: MemoryBlock = { ...block };
+    if (typeof value === 'string') {
+      updated.value = value;
+      updated.edited = true;
+    }
+    if (typeof opts.limit === 'number' && Number.isFinite(opts.limit) && opts.limit > 0) updated.limit = opts.limit;
+    if (typeof opts.description === 'string') updated.description = opts.description;
+    if (typeof opts.read_only === 'boolean') updated.read_only = opts.read_only;
+    setBlocks(blocks.map(candidate => candidate.label === label ? updated : candidate));
+    return updated;
+  });
+  ipcMain.handle('blocks:reset', (_e, label: string) => {
+    const blocks = store.getBlocks();
+    const block = findBlock(blocks, label);
+    if (!block) return null;
+    const reset = resetBlockToDerived(block);
+    setBlocks(blocks.map(candidate => candidate.label === label ? reset : candidate));
+    return reset;
+  });
   ipcMain.handle('memory:clear', () => { setMemories([]); return getMemories(); });
   // Called when the message being sent was spoken rather than typed. Typed
   // messages deliberately do not do this: somebody at the keyboard has not asked

@@ -1,9 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  blockIdFor, blockLabelValid, canEditBlock, defaultMemoryBlocks, findBlock,
-  fitToLimit, linesFromRecords, mergeBlockDefaults, resolveBlockValue, blockMetadata,
-  formatMemoryBlocks, renderBlock,
+  appendToBlockValue, blockIdFor, blockLabelValid, canEditBlock, defaultMemoryBlocks,
+  findBlock, fitToLimit, formatMemoryBlocks, linesFromRecords, mergeBlockDefaults,
+  replaceInBlockValue, renderBlock, resolveBlockValue, blockMetadata,
+  resetBlockToDerived, withEditedValue,
 } from '../electron/blocks';
 import type { MemoryRecord, SessionSummary } from '../electron/memory';
 
@@ -223,4 +224,57 @@ test('formatMemoryBlocks reports what was cut to fit budgets', () => {
   const humanRender = text.match(/<human>[\s\S]*?<\/human>/)?.[0] ?? '';
   assert.ok(humanRender.includes('chars_current='));
   assert.ok(humanRender.includes('chars_limit=80'));
+});
+
+// -- governed edits ------------------------------------------------------------
+
+test('appendToBlockValue adds a bulleted line and preserves existing content', () => {
+  const block = findBlock(defaultMemoryBlocks(), 'human')!;
+  const first = appendToBlockValue('Goes by Tommy.', 'Works on the PC Project', block);
+  assert.equal(first.ok, true);
+  assert.equal(first.value, 'Goes by Tommy.\n- Works on the PC Project');
+  const second = appendToBlockValue(first.value!, 'Lives in Perth', block);
+  assert.equal(second.value, 'Goes by Tommy.\n- Works on the PC Project\n- Lives in Perth');
+});
+
+test('appendToBlockValue refuses empty, duplicate and oversized content', () => {
+  const block = findBlock(defaultMemoryBlocks(), 'human')!;
+  assert.equal(appendToBlockValue('', '  ', block).ok, false);
+  assert.equal(appendToBlockValue('Goes by Tommy.', 'Goes by Tommy.', block).ok, false);
+  assert.equal(appendToBlockValue('- Goes by Tommy.', 'goes by tommy', block).ok, false);
+  const tiny = { ...block, limit: 30 };
+  assert.equal(appendToBlockValue('Goes by Tommy.', 'Works on the PC Project every evening without fail', tiny).ok, false);
+});
+
+test('replaceInBlockValue replaces exactly once', () => {
+  const block = findBlock(defaultMemoryBlocks(), 'human')!;
+  const edit = replaceInBlockValue('Uses Ubuntu on the server.', 'Ubuntu', 'Debian', block);
+  assert.equal(edit.ok, true);
+  assert.equal(edit.value, 'Uses Debian on the server.');
+});
+
+test('replaceInBlockValue refuses missing and ambiguous targets', () => {
+  const block = findBlock(defaultMemoryBlocks(), 'human')!;
+  assert.equal(replaceInBlockValue('Uses Ubuntu.', 'Fedora', 'Debian', block).ok, false);
+  const ambiguous = replaceInBlockValue('likes tea and likes coffee', 'likes', 'hates', block);
+  assert.equal(ambiguous.ok, false);
+  assert.match(ambiguous.reason ?? '', /ambiguous/i);
+  assert.equal(replaceInBlockValue('Uses Ubuntu.', '  ', 'Debian', block).ok, false);
+});
+
+test('replaceInBlockValue enforces the limit', () => {
+  const tiny = { ...findBlock(defaultMemoryBlocks(), 'human')!, limit: 20 };
+  const edit = replaceInBlockValue('Uses Ubuntu.', 'Ubuntu', 'a much longer operating system name here', tiny);
+  assert.equal(edit.ok, false);
+});
+
+test('withEditedValue marks the block edited; resetBlockToDerived clears it', () => {
+  const human = findBlock(defaultMemoryBlocks(), 'human')!;
+  const edited = withEditedValue(human, 'Goes by Tommy.');
+  assert.equal(edited.edited, true);
+  assert.equal(edited.value, 'Goes by Tommy.');
+  const reset = resetBlockToDerived(edited);
+  assert.equal(reset.edited, undefined);
+  assert.equal(reset.value, undefined);
+  assert.deepEqual(reset, human);
 });

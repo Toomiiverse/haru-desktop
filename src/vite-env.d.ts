@@ -91,6 +91,12 @@ interface Window {
       clear(): Promise<import('./types').Memory[]>;
       onChange(callback: (items: import('./types').Memory[]) => void): () => void;
     };
+    blocks: {
+      list(): Promise<import('./types').MemoryBlock[]>;
+      update(label: string, value: string, opts?: { limit?: number; description?: string; read_only?: boolean }): Promise<import('./types').MemoryBlock | null>;
+      reset(label: string): Promise<import('./types').MemoryBlock | null>;
+      onChange(callback: (items: import('./types').MemoryBlock[]) => void): () => void;
+    };
     character: { get(): Promise<import('./types').Character>; set(identity: string, style: string): Promise<import('./types').Character>; reset(): Promise<import('./types').Character> };
     kept: { get(): Promise<import('./types').KeptItem[]>; toggle(id: string): Promise<void>; remove(id: string): Promise<void>; onChange(callback: (items: import('./types').KeptItem[]) => void): () => void };
     google: {

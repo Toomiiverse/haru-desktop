@@ -1,6 +1,6 @@
 import { Component, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Paperclip, MicOff, CalendarDays, Check, ChevronDown, CornerDownRight, FileAudio, FileText, FileVideo, Mic, Quote, Reply, SquareCheck, ChevronLeft, ChevronRight, CircleDot, Import, MessageSquarePlus, Plus, NotebookPen, MessageSquare, Square, ImagePlus, Sparkles, ThumbsDown, ThumbsUp, Trash2, X } from 'lucide-react';
-import type { Aside, AsideSource, Attachment, UpdateReport, AniListConfig, Character, DesktopConfig, GamingConfig, ScreenshotConfig, WatchingConfig, VisionConfig, HaruNote, ForgettingEntry, JournalConfig, JournalEntry, JournalField, JournalRange, JournalStats, JournalFieldStats, LastRetrieval, RoamConfig, EmotionName, GoogleStatus, KeptItem, ListenConfig, Memory, MemoryKind, Message, Profile, ProviderConfig, Reaction, SearchConfig, SessionSummary, VoiceConfig, VoiceEngine, VoiceReference, WardrobeControl, WebStatus } from './types';
+import type { Aside, AsideSource, Attachment, UpdateReport, AniListConfig, Character, DesktopConfig, GamingConfig, ScreenshotConfig, WatchingConfig, VisionConfig, HaruNote, ForgettingEntry, JournalConfig, JournalEntry, JournalField, JournalRange, JournalStats, JournalFieldStats, LastRetrieval, MemoryBlock, RoamConfig, EmotionName, GoogleStatus, KeptItem, ListenConfig, Memory, MemoryKind, Message, Profile, ProviderConfig, Reaction, SearchConfig, SessionSummary, VoiceConfig, VoiceEngine, VoiceReference, WardrobeControl, WebStatus } from './types';
 import { buildMonthGrid, datesInView, dayLabel, rangeLabel, shiftISODate, toISODate, weekOf, type CalendarView } from './date';
 import { startListening, startRecording, type Listener, type Recorder } from './companion/microphone';
 import { isUsableFollowUp, matchWake, readsAsFarewell } from './companion/wake';
@@ -374,6 +374,8 @@ export function ProfileDrawer({ onClose }: { onClose(): void }) {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [forgetting, setForgetting] = useState<ForgettingEntry[]>([]);
   const [retrieval, setRetrieval] = useState<LastRetrieval | null>(null);
+  const [blocks, setBlocks] = useState<MemoryBlock[]>([]);
+  const [blockDrafts, setBlockDrafts] = useState<Record<string, string>>({});
   const [draft, setDraft] = useState('');
   const [draftKind, setDraftKind] = useState<MemoryKind>('preference');
   const [loaded, setLoaded] = useState(false);
@@ -385,9 +387,12 @@ export function ProfileDrawer({ onClose }: { onClose(): void }) {
     window.haru.memory.sessions().then(setSessions);
     window.haru.memory.forgettingLog().then(setForgetting);
     window.haru.memory.lastRetrieval().then(setRetrieval);
+    window.haru.blocks.list().then(setBlocks);
     // Haru writes memories mid-conversation, so the list follows along rather
     // than going stale while the drawer sits open.
-    return window.haru.memory.onChange(setMemories);
+    const unsubMemories = window.haru.memory.onChange(setMemories);
+    const unsubBlocks = window.haru.blocks.onChange(setBlocks);
+    return () => { unsubMemories(); unsubBlocks(); };
   }, []);
 
   async function save() {
@@ -462,6 +467,23 @@ export function ProfileDrawer({ onClose }: { onClose(): void }) {
               <p className="status-note">For: “{retrieval.query}” — {retrieval.at.slice(0, 19)}</p>
               <ul className="memory-list">{retrieval.entries.map(entry => <li key={entry.id}><span>{entry.text}</span><span className="memory-meta-inline">score {entry.score.toFixed(3)} · rel {entry.factors.relevance.toFixed(2)} · imp {entry.factors.importance.toFixed(2)} · conf {entry.factors.confidence.toFixed(2)} · rec {entry.factors.recency.toFixed(2)}</span></li>)}</ul>
             </div>}
+      </div>
+      <div className="field"><h2>Memory blocks{blocks.length > 0 && <span className="kept-count">{blocks.length}</span>}</h2>
+        <p>Persistent context the model sees every turn. Values are derived from her memory on each render; editing here is the administrator path, allowed for every block including read-only ones. Reset sends a block back to its derived state.</p>
+        {blocks.length === 0
+          ? <p className="nothing">No blocks yet.</p>
+          : blocks.map(block => <div key={block.id} className="memory-group">
+              <h3>{block.label}{block.read_only && <span className="recurring" title="The agent cannot edit this block">RO</span>}{block.edited && <span className="recurring" title="Explicit value set by an edit">edited</span>}<span className="memory-meta-inline">{block.limit} chars</span></h3>
+              <p className="status-note">{block.description}</p>
+              <textarea className="short" rows={4} value={blockDrafts[block.label] ?? block.value ?? ''} onChange={event => setBlockDrafts(current => ({ ...current, [block.label]: event.target.value }))} placeholder="Derived from memory — write here to set an explicit value."/>
+              <div className="row-actions">
+                <button className="ghost" onClick={async () => {
+                  await window.haru!.blocks.update(block.label, blockDrafts[block.label] ?? block.value ?? '');
+                  setBlockDrafts(current => { const next = { ...current }; delete next[block.label]; return next; });
+                }}>Save</button>
+                <button className="ghost" disabled={!block.edited} onClick={async () => { await window.haru!.blocks.reset(block.label); }}>Reset to derived</button>
+              </div>
+            </div>)}
       </div>
     </div>
     <div className="field"><h2>Past conversations{sessions.length > 0 && <span className="kept-count">{sessions.length}</span>}</h2>

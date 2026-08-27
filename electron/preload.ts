@@ -46,6 +46,7 @@ type Memory = { id: string; text: string; kind: string; subject?: string; create
 type SessionSummary = { day: string; summary: string; createdAt: string };
 type ForgettingEntry = { id: string; text: string; at: string; reason: string; detail?: string };
 type LastRetrieval = { at: string; query: string; entries: { id: string; text: string; score: number; factors: { semantic: number; keyword: number; relevance: number; importance: number; confidence: number; recency: number; type: number } }[] };
+type MemoryBlock = { id: string; label: string; description: string; value?: string; limit: number; read_only: boolean; edited?: boolean };
 type ChatResult = { content: string; ignored: boolean; irritation: number; ego: number };
 type Mood = { irritation: number; ego: number };
 type Vitals = { energy: number; happiness: number; curiosity: number; affection: number; sleepiness: number; stress: number; focus: number };
@@ -353,6 +354,16 @@ contextBridge.exposeInMainWorld('haru', {
       const listener = (_event: Electron.IpcRendererEvent, items: Memory[]) => callback(items);
       ipcRenderer.on('memory:changed', listener);
       return () => ipcRenderer.removeListener('memory:changed', listener);
+    },
+  },
+  blocks: {
+    list: () => ipcRenderer.invoke('blocks:list') as Promise<MemoryBlock[]>,
+    update: (label: string, value: string, opts?: { limit?: number; description?: string; read_only?: boolean }) => ipcRenderer.invoke('blocks:update', label, value, opts) as Promise<MemoryBlock | null>,
+    reset: (label: string) => ipcRenderer.invoke('blocks:reset', label) as Promise<MemoryBlock | null>,
+    onChange: (callback: (items: MemoryBlock[]) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, items: MemoryBlock[]) => callback(items);
+      ipcRenderer.on('blocks:changed', listener);
+      return () => ipcRenderer.removeListener('blocks:changed', listener);
     },
   },
   character: {
