@@ -15,10 +15,11 @@ import { copyFileSync, existsSync, readFileSync, readdirSync, rmSync, statSync }
 import os from 'node:os';
 import path from 'node:path';
 import { emptyKnowledge, loadKnowledge, normalizeKnowledge, saveKnowledge, type KnowledgeStore } from './knowledge';
+import { mergeBlockDefaults, type MemoryBlock } from './blocks';
 import { migrateMemories, type ForgettingEntry, type MemoryRecord, type SessionSummary } from './memory';
 
 /** The current schema version of the store. Bumped by each schema migration. */
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 export type MigrationStep = {
   /** The schema version this step produces. Steps run in ascending order. */
@@ -47,6 +48,15 @@ export const MIGRATIONS: MigrationStep[] = [
       // derivation permanent so the file carries the new schema, not just the
       // in-memory view.
       haruStore.setMemories(migrateMemories(haruStore.getMemories(), new Date().toISOString()));
+    },
+  },
+  {
+    version: 3,
+    label: 'memory blocks arrive — label, description, limit, read_only; persona is read-only and mirrors the character config',
+    run: (haruStore) => {
+      // Defaults are merged rather than forced: any custom blocks the user
+      // already configured keep their shape, and the standard set fills in.
+      haruStore.setBlocks(mergeBlockDefaults(haruStore.get('memory.blocks')));
     },
   },
 ];
@@ -147,6 +157,16 @@ export class HaruStore {
     const combined = [...this.getForgettingLog(), ...entries];
     this.setForgettingLog(combined);
     return combined;
+  }
+
+  /** The memory-block configuration. Values are derived at render time; only
+   *  governed edits persist an explicit value. */
+  getBlocks(): MemoryBlock[] {
+    return mergeBlockDefaults(this.get('memory.blocks'));
+  }
+
+  setBlocks(blocks: MemoryBlock[]): void {
+    this.set('memory.blocks', blocks);
   }
 
   // -- knowledge. The file is read and written only here; main.ts holds its own

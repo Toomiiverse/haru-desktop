@@ -25,6 +25,7 @@
     "../electron/retrieveContext.ts",
     "../electron/store.ts",
     "../electron/consolidation.ts",
+    "../electron/blocks.ts",
     "../electron/obsidian.ts",
     "../electron/familiar.ts",
     "../electron/system.ts",

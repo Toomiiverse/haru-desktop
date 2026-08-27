@@ -50,6 +50,7 @@ import { claimsDesktopAction, claimsTickOff, dropRoleHeader, dropTackedOnParagra
 import { hasShout, readVoiceConfig, referenceFor, shoutReference, spokenCase, speakableText, splitForSpeech, synthesise, type SpeechClip, type VoiceConfig } from './voice';
 import { applyDecay, DEEP_RECALL_LIMIT, eventCandidates, eventsPrompt, findSuperseded, formatMemoryPrompt, isExplicitRecall, isWorthKeeping, isWorthRemembering, MEMORY_KINDS, migrateMemories, pruneMemories, rememberInto, retrieveMemories, semanticSimilarities, summaryPrompt, supersede, vectorSimilarity, type ForgettingEntry, type MemoryKind, type MemoryRecord, type MemorySource, type RetrievalFactors, type ScoredMemory, type SessionSummary } from './memory';
 import { consolidateMemories, type ConsolidationChange } from './consolidation';
+import { formatMemoryBlocks, type MemoryBlock } from './blocks';
 import { forgetDevice, forgetEveryDevice, readWebAccess, setPassword, weakPassword, type WebAccess } from './web';
 import { conversationMayLeave, mayLeaveTheMachine } from './sensitivity';
 import { addCheckIn, checkInInstruction, checkInsOn, readCheckIns, type CheckIn } from './checkins';
@@ -4126,10 +4127,6 @@ async function systemContextFor(message: string): Promise<string> {
 // reply after it.
 function profileSummary(message: string, recentContext = '', semantic?: Map<string, number>) {
   const profile = getProfile();
-  const lines: string[] = [];
-  if (profile.nickname.trim()) lines.push(`They go by ${profile.nickname.trim()}.`);
-  if (profile.occupation.trim()) lines.push(`Their work: ${profile.occupation.trim()}.`);
-  if (profile.about.trim()) lines.push(profile.about.trim());
   const query = recentContext ? `${recentContext} ${message}` : message;
   const limit = isExplicitRecall(message) ? DEEP_RECALL_LIMIT : undefined;
   const picked = retrieveMemories(getMemories(), query, { limit, semantic });
@@ -4140,8 +4137,29 @@ function profileSummary(message: string, recentContext = '', semantic?: Map<stri
     query,
     entries: picked.map(entry => ({ id: entry.memory.id, text: entry.memory.text, score: entry.score, factors: entry.factors })),
   };
-  const memoryBlock = formatMemoryPrompt(picked.map(entry => entry.memory), getSessions());
-  if (memoryBlock) lines.push(memoryBlock);
+  // Memory blocks: the Letta-inspired context layer. Values are derived from
+  // the deterministic engine on every render — the retrieval above is what
+  // decides what the human block shows — so the blocks can never drift from
+  // the authoritative records.
+  const blocks = formatMemoryBlocks(store.getBlocks(), {
+    character: getCharacter(),
+    profile,
+    memories: getMemories(),
+    sessions: getSessions(),
+    following: Object.values(getFollowing()).map(work => ({ title: work.title, kind: work.kind, progress: work.progress })),
+    agenda: getKept().map(item => ({ title: item.title, kind: item.kind, done: item.done })),
+    query,
+    now: new Date(),
+  });
+  for (const entry of blocks.cut) {
+    console.warn(`[blocks] ${entry.label} cut from ${entry.before} to ${entry.after} chars to fit its budget — selection was tighter than this; raise the block limit if it keeps happening`);
+  }
+  const lines: string[] = [];
+  if (blocks.text) lines.push(blocks.text);
+  const sessions = getSessions();
+  if (sessions.length) {
+    lines.push('Earlier conversations are reflected in the working_state block. Refer back to them naturally when relevant, the way someone would who was there. Do not list them back or announce that you remember.');
+  }
   return lines.length ? `About the user: ${lines.join(' ')}` : '';
 }
 
