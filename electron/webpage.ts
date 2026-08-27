@@ -1090,6 +1090,15 @@ export function appPage(): string {
 
   .quiet { color:var(--ink-dim); text-align:center; padding:2rem 0; }
 
+  /* Files waiting to ride the next message. Costing nothing until Send. */
+  #chips { display:flex; flex-wrap:wrap; gap:.4rem; padding:0 .9rem .25rem; flex:0 0 auto; }
+  #chips:empty { display:none; }
+  .chip { display:flex; align-items:center; gap:.35rem; background:var(--glass); border:1px solid var(--edge);
+    border-radius:999px; padding:.25rem .45rem .25rem .7rem; font-size:.82rem; backdrop-filter:blur(12px);
+    max-width:14rem; }
+  .chip span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .chip button { background:none; border:0; color:var(--ink-dim); padding:0 .25rem; font-size:1rem; line-height:1; font-weight:400; }
+
   /* Her, on stage: a pink bloub (Grok-style blob) that rotates and morphs
      through the full bloub catalogue, and wears her mood. Pure SVG — no Live2D
      runtime on the phone, nothing fetched from anywhere. */
@@ -1110,7 +1119,9 @@ export function appPage(): string {
 <div id=psheet hidden></div>
 <section id=stage></section>
 <section id=chat></section>
-<form class=compose id=cf><button type=button id=mic class=icon title="Hold to talk">🎙</button><textarea id=ci rows=1 placeholder="Say something…"></textarea><button id=cb>Send</button></form>
+<div id=chips></div>
+<form class=compose id=cf><button type=button id=att class=icon title="Attach a file">📎</button><button type=button id=mic class=icon title="Hold to talk">🎙</button><textarea id=ci rows=1 placeholder="Say something…"></textarea><button id=cb>Send</button></form>
+<input type=file id=af multiple hidden>
 <script>
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -1224,8 +1235,11 @@ ci.addEventListener('input',()=>{ci.style.height='auto';ci.style.height=Math.min
 let waiting=0;
 $('cf').addEventListener('submit',async ev=>{
   ev.preventDefault();
-  const text=ci.value.trim(); if(!text)return;
+  const text=ci.value.trim(); if(!text&&!staged.length)return;
   primeVoice();
+  // Taken off the shelf now, so a file picked while she is answering belongs to
+  // the next message, not this one. Put back if the send never got through.
+  const sent=staged; staged=[]; drawChips();
   ci.value=''; ci.style.height='auto'; $('cb').disabled=true;
   // The waiting bubble used to be id="wait", a fixed string, and was taken back
   // out with a bare document.getElementById('wait').remove().
@@ -1242,7 +1256,8 @@ $('cf').addEventListener('submit',async ev=>{
   // So: an id of its own, removal that tolerates the node having gone, and the
   // button re-enabled from a finally where nothing can step over it.
   const id='wait'+(++waiting);
-  $('chat').insertAdjacentHTML('beforeend','<div class="msg me">'+esc(text)+'</div><div class="msg them" id='+id+'>…</div>');
+  const mine=(text?esc(text):'')+(sent.length?(text?'\\n':'')+'📎 '+esc(sent.map(f=>f.name).join(', ')):'');
+  $('chat').insertAdjacentHTML('beforeend','<div class="msg me">'+mine+'</div><div class="msg them" id='+id+'>…</div>');
   $('chat').scrollTop=$('chat').scrollHeight;
   // Your message drops her into the thinking state while she works on the answer.
   if(window.bloub) window.bloub.think();
@@ -1253,7 +1268,7 @@ $('cf').addEventListener('submit',async ev=>{
   // markup, and the model is not a source we escape from, it is the source.
   const show=t=>{const bubble=document.getElementById(id); if(!bubble) return false; bubble.textContent=t; $('chat').scrollTop=$('chat').scrollHeight; return true;};
   try{
-    const r=await fetch('/api/chat/stream',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({text})});
+    const r=await fetch('/api/chat/stream',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(sent.length?{text,attachments:sent}:{text})});
     if(!r.ok) throw r;
     const reader=r.body.getReader(); const dec=new TextDecoder();
     let buf='',said='',reply=null,ignored=false,error=null;
@@ -1296,12 +1311,48 @@ $('cf').addEventListener('submit',async ev=>{
   }catch(r){
     stopWaiting();
     if(r&&r.status===401){location.reload();return;}
+    // The files never left: back on the shelf so pressing Send again works.
+    if(sent.length){ staged=sent.concat(staged); drawChips(); }
     $('chat').insertAdjacentHTML('beforeend','<div class="msg sys">That did not get through.</div>');
   }finally{
     $('cb').disabled=false; $('chat').scrollTop=$('chat').scrollHeight;
   }
 });
 load();
+
+// ---- Files that ride the next message --------------------------------------
+//
+// The paperclip stages, and staging costs a copy and nothing else — same as the
+// desktop. The bytes go up once, land in her keeping, and what comes back is
+// the record the send carries. Nothing is read and no model is called until
+// Send, so a file can be picked before deciding what to ask about it.
+let staged=[];
+function drawChips(){
+  $('chips').innerHTML=staged.map((f,i)=>'<span class=chip><span>'+esc(f.name)+'</span><button type=button data-i='+i+' title="Remove">&times;</button></span>').join('');
+  for(const b of $('chips').querySelectorAll('button')) b.onclick=()=>{
+    const f=staged.splice(Number(b.dataset.i),1)[0];
+    post('/api/attach/discard',{attachment:f}).catch(()=>{});
+    drawChips();
+  };
+}
+$('att').onclick=()=>$('af').click();
+$('af').onchange=async()=>{
+  const files=[...$('af').files].slice(0,6-staged.length);
+  $('af').value='';
+  for(const file of files){
+    try{
+      const r=await fetch('/api/attach?name='+encodeURIComponent(file.name||'file'),{method:'POST',headers:{'content-type':file.type||'application/octet-stream'},body:file});
+      const out=await r.json().catch(()=>({}));
+      if(!r.ok) throw new Error(out.error||'she could not take it');
+      staged.push(out.attachment);
+      drawChips();
+    }catch(e){
+      if(e&&e.status===401){location.reload();return;}
+      $('chat').insertAdjacentHTML('beforeend','<div class="msg sys">'+esc(file.name)+' did not attach — '+esc((e&&e.message)||'it did not get through')+'</div>');
+      $('chat').scrollTop=$('chat').scrollHeight;
+    }
+  }
+};
 
 // ---- Her, speaking first ---------------------------------------------------
 //

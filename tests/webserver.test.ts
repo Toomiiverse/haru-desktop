@@ -46,6 +46,10 @@ function deps(overrides: Partial<WebDeps> = {}): WebDeps {
     checkIns: () => [],
     addCheckIn: () => [],
     nudge: async () => null,
+    attach: {
+      stage: (name: string, bytes: Buffer) => ({ id: 'staged', kind: 'image', name, saved: 'X:\\pictures\\' + name, url: '', bytes: bytes.length }),
+      discard: () => {},
+    },
     push: {
       key: () => 'B'.repeat(87),
       subscribe: () => {},
@@ -111,7 +115,7 @@ test('a stranger gets the sign-in page and nothing else', async () => {
     assert.equal(front.status, 200);
     assert.ok((await front.text()).includes('Sign in to reach her'));
 
-    for (const path of ['/api/chat', '/api/agenda', '/api/memory', '/api/journal', '/api/checkins', '/api/knowledge/stats', '/api/model', '/api/push']) {
+    for (const path of ['/api/chat', '/api/agenda', '/api/memory', '/api/journal', '/api/checkins', '/api/knowledge/stats', '/api/model', '/api/push', '/api/attach']) {
       const refused = await web.call(path);
       assert.equal(refused.status, 401, `${path} answered a stranger`);
     }
@@ -308,6 +312,42 @@ test('with no model configured there is nothing to walk out of', async () => {
   try {
     await web.signIn();
     assert.equal((await web.call('/model/anything.json')).status, 404);
+  } finally { await web.stop(); }
+});
+
+// -- files that ride a message -------------------------------------------------------
+
+test('a file is staged under its own name and the record comes back', async () => {
+  const staged: { name: string; bytes: number }[] = [];
+  const web = await door({
+    attach: {
+      stage: (name, bytes) => { staged.push({ name, bytes: bytes.length }); return { id: 'a1', name }; },
+      discard: () => {},
+    },
+  });
+  try {
+    await web.signIn();
+    const ok = await web.call('/api/attach?name=cat.png', { method: 'POST', headers: { 'content-type': 'image/png' }, body: 'not really a png' });
+    assert.equal(ok.status, 200);
+    assert.equal(((await ok.json()).attachment as { id: string }).id, 'a1');
+    assert.deepEqual(staged, [{ name: 'cat.png', bytes: 16 }]);
+
+    assert.equal((await web.call('/api/attach', { method: 'POST', headers: { 'content-type': 'image/png' }, body: 'x' })).status, 400, 'a nameless file was staged');
+    assert.equal((await web.call('/api/attach?name=e.png', { method: 'POST', headers: { 'content-type': 'image/png' }, body: '' })).status, 400, 'an empty file was staged');
+  } finally { await web.stop(); }
+});
+
+test('attachments ride the message into say, capped rather than unbounded', async () => {
+  let got: unknown[] | undefined;
+  const web = await door({ say: async (_text, attachments) => { got = attachments; return { reply: 'Fine.' }; } });
+  try {
+    await web.signIn();
+    const files = Array.from({ length: 9 }, (_, i) => ({ id: 'f' + i }));
+    assert.equal((await web.call('/api/chat', { method: 'POST', body: JSON.stringify({ text: 'look', attachments: files }) })).status, 200);
+    assert.equal(got?.length, 6, 'more files than a message can carry were passed through');
+    // A file with nothing typed is still a message; nothing at all is not.
+    assert.equal((await web.call('/api/chat', { method: 'POST', body: JSON.stringify({ attachments: [{ id: 'f' }] }) })).status, 200);
+    assert.equal((await web.call('/api/chat', { method: 'POST', body: JSON.stringify({}) })).status, 400);
   } finally { await web.stop(); }
 });
 

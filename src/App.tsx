@@ -42,7 +42,9 @@ export default function App() {
   useEffect(() => window.haru?.chat.onFromPhone(turn => {
     setMessages(current => [
       ...current,
-      { id: crypto.randomUUID(), role: 'user' as const, content: turn.text, time: 'now', at: new Date().toISOString() },
+      // A file sent from the phone keeps riding here too, so the follow-up
+      // asked at the desk still has the picture in front of her.
+      { id: crypto.randomUUID(), role: 'user' as const, content: turn.text, time: 'now', at: new Date().toISOString(), ...(turn.attachments?.length ? { attachments: turn.attachments } : {}) },
       ...(turn.ignored ? [] : [{ id: crypto.randomUUID(), role: 'assistant' as const, content: turn.reply, time: 'now', at: new Date().toISOString() }]),
     ]);
   }), []);

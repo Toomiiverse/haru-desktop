@@ -6114,22 +6114,26 @@ function webDeps(): WebDeps {
     readAccess: getWebAccess,
     saveAccess: saveWebAccess,
     history: () => (store.get('chat.messages') as { role: string; content: string; at?: string }[] | undefined) ?? [],
-    async say(text) {
+    async say(text, attachments) {
       const config = store.get('ai.config') as ProviderConfig | undefined;
       if (!config?.model) throw new Error('no model is set up');
       const history = (store.get('chat.messages') as { role: string; content: string; at?: string }[] ?? []);
+      // What the page hands back is what stage() gave it, but it has been to a
+      // browser and back — re-read it, and let ollamaChat's path check judge it.
+      const files = readAttachments(attachments).slice(0, 6);
       // The quick route answers what it can before the model is even asked: a
       // time check or a greeting from a phone should be instant, not the cold
-      // start a hosted pod pays. Falls through when the message needs judgement.
+      // start a hosted pod pays. Falls through when the message needs judgement
+      // — and a message carrying a file always does.
       const trace = newTrace();
-      const quick = quickHit(text, history);
+      const quick = files.length ? null : quickHit(text, history);
       trace.mark('intent');
       if (quick) {
         announceQuick(quick, text);
         trace.done('web', { tier: quick.tier, chars: quick.reply.length });
         return { reply: quick.reply, ignored: false };
       }
-      const messages = [...history, { role: 'user', content: text, at: new Date().toISOString() }];
+      const messages = [...history, { role: 'user', content: text, at: new Date().toISOString(), ...(files.length ? { attachments: files } : {}) }];
       // Out to the hosted model, for the same reason Discord is: this is a
       // phone. There is no window to show that she is thinking, the tab is
       // often not even in front of them, and since the local model became a
@@ -6139,7 +6143,7 @@ function webDeps(): WebDeps {
       const answer = await ollamaChat(messages, config, { hands: false, away: 'it came in from the phone', traceId: trace.id });
       const reply = answer.content ?? '';
       trace.mark('reply');
-      sendToWindows('chat:fromPhone', { text, reply, ignored: Boolean(answer.ignored) });
+      sendToWindows('chat:fromPhone', { text, reply, ignored: Boolean(answer.ignored), ...(files.length ? { attachments: files } : {}) });
       // Her face used to be read here, before returning, and the phone waited on
       // it — a second round trip to a model, spent so her eyebrows would be
       // right at the instant the text appeared rather than a moment after. That
@@ -6150,12 +6154,13 @@ function webDeps(): WebDeps {
       trace.done('web', { tier: 'llm', chars: reply.length });
       return { reply, ignored: answer.ignored };
     },
-    async sayStream(text, onChunk) {
+    async sayStream(text, onChunk, attachments) {
       const config = store.get('ai.config') as ProviderConfig | undefined;
       if (!config?.model) throw new Error('no model is set up');
       const history = (store.get('chat.messages') as { role: string; content: string; at?: string }[] ?? []);
+      const files = readAttachments(attachments).slice(0, 6);
       const trace = newTrace();
-      const quick = quickHit(text, history);
+      const quick = files.length ? null : quickHit(text, history);
       trace.mark('intent');
       if (quick) {
         onChunk(quick.reply);
@@ -6163,7 +6168,7 @@ function webDeps(): WebDeps {
         trace.done('web', { tier: quick.tier, chars: quick.reply.length });
         return { reply: quick.reply, ignored: false };
       }
-      const messages = [...history, { role: 'user', content: text, at: new Date().toISOString() }];
+      const messages = [...history, { role: 'user', content: text, at: new Date().toISOString(), ...(files.length ? { attachments: files } : {}) }];
       const started = Date.now();
       const answer = await ollamaChat(messages, config, {
         hands: false,
@@ -6179,8 +6184,8 @@ function webDeps(): WebDeps {
       });
       const reply = answer.content ?? '';
       trace.mark('reply');
-      sendToWindows('chat:fromPhone', { text, reply, ignored: Boolean(answer.ignored) });
-      console.log(`[web] streamed ${text.length} chars in ${Date.now() - started}ms, ${reply.length} chars (${messages.length} messages of history)`);
+      sendToWindows('chat:fromPhone', { text, reply, ignored: Boolean(answer.ignored), ...(files.length ? { attachments: files } : {}) });
+      console.log(`[web] streamed ${text.length} chars in ${Date.now() - started}ms, ${reply.length} chars (${messages.length} messages of history${files.length ? `, ${files.length} file(s)` : ''})`);
       trace.done('web', { tier: 'llm', chars: reply.length });
       return { reply, ignored: answer.ignored };
     },
@@ -6260,6 +6265,22 @@ function webDeps(): WebDeps {
       prefs: () => getPush().prefs,
       savePrefs(prefs) { savePush({ prefs }); },
       test: () => pushToPhone('events', 'She can reach this phone.', '/', true),
+    },
+    attach: {
+      // The same staging a desktop paste gets — copied into her keeping, no
+      // model called. Refusals mirror stageAll's: an unopenable kind is said
+      // now, while the file is still in front of them, and sound or video is
+      // refused outright on a machine with no ffmpeg to pull it apart.
+      stage(name, bytes) {
+        const kind = classify(name);
+        if ((kind === 'audio' || kind === 'video') && !findFfmpeg()) {
+          throw new Error(`${name} needs ffmpeg, which is not installed on her machine.`);
+        }
+        const staged = stageBytes(name, bytes);
+        console.log(`[web] staged ${staged.name} (${staged.kind}, ${(staged.bytes / 1024).toFixed(0)}KB)`);
+        return staged;
+      },
+      discard(attachment) { discardStaged((attachment ?? {}) as { saved?: string }); },
     },
     portrait: () => {
       // The app icon doubles as her face on the phone. Read each time rather than

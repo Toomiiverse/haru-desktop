@@ -26,8 +26,10 @@ import type { CheckIn } from './checkins';
 export type WebDeps = {
   readAccess(): WebAccess;
   saveAccess(access: WebAccess): void;
-  /** Her real answer, through the same pipeline the desktop uses — minus hands. */
-  say(text: string): Promise<{ reply: string; ignored?: boolean; expression?: string | null; emotion?: string | null }>;
+  /** Her real answer, through the same pipeline the desktop uses — minus hands.
+   *  `attachments` are staged records handed back by attach.stage below; the
+   *  other side re-reads and re-vets them, so this is a courier, not a judge. */
+  say(text: string, attachments?: unknown[]): Promise<{ reply: string; ignored?: boolean; expression?: string | null; emotion?: string | null }>;
   /**
    * The same answer, with the words while they are still being written.
    *
@@ -38,7 +40,14 @@ export type WebDeps = {
    * (a tool call was coming, a retry was pressed) signals itself by handing a
    * single U+FFFD — the reader clears what it has and waits for the next chunk.
    */
-  sayStream(text: string, onChunk: (chunk: string) => void): Promise<{ reply: string; ignored?: boolean }>;
+  sayStream(text: string, onChunk: (chunk: string) => void, attachments?: unknown[]): Promise<{ reply: string; ignored?: boolean }>;
+  /** Files that ride the next message, staged the way a desktop paste is. */
+  attach: {
+    /** Copies the bytes into her keeping; returns the staged record the page
+     *  sends back with the message. Throws when the kind cannot be opened. */
+    stage(name: string, bytes: Buffer): unknown;
+    discard(attachment: unknown): void;
+  };
   /**
    * What her face should do about a line she has just said.
    *
@@ -173,6 +182,10 @@ const DEVICE_COOKIE = 'haru_device';
 const MAX_BODY = 256 * 1024;
 /** A recording is not a message. Roughly a minute of opus, and a hard stop. */
 const MAX_AUDIO = 8 * 1024 * 1024;
+/** A file attached to a message. Videos are the biggest honest case. */
+const MAX_UPLOAD = 50 * 1024 * 1024;
+/** A message can carry several files, not a folder. Matches the desktop's habit. */
+const MAX_FILES = 6;
 
 /** Logins that were not asked to be remembered. Gone when the app closes, deliberately. */
 const sessions = new Map<string, number>();
@@ -279,12 +292,13 @@ async function readBody(req: IncomingMessage): Promise<unknown> {
   try { return JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { throw new Error('not json'); }
 }
 
-async function readAudio(req: IncomingMessage): Promise<Buffer> {
+/** A raw body — a recording, an attached file — up to the cap its route allows. */
+async function readRaw(req: IncomingMessage, cap: number): Promise<Buffer> {
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of req) {
     size += (chunk as Buffer).length;
-    if (size > MAX_AUDIO) throw new Error('too much');
+    if (size > cap) throw new Error('too much');
     chunks.push(chunk as Buffer);
   }
   return Buffer.concat(chunks);
@@ -441,9 +455,9 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
 
   // Everything past here changes or reveals something, so it must be a real
   // request from her own page rather than a form somebody else submitted.
-  // A recording is the one thing posted here that is not JSON, and it checks its
-  // own content type below rather than being waved through.
-  if (req.method === 'POST' && path !== '/api/listen' && !/^application\/json/.test(req.headers['content-type'] ?? '')) {
+  // A recording and an attached file are the two things posted here that are
+  // not JSON; each checks its own body below rather than being waved through.
+  if (req.method === 'POST' && path !== '/api/listen' && path !== '/api/attach' && !/^application\/json/.test(req.headers['content-type'] ?? '')) {
     return json(res, 415, { error: 'Send JSON.' });
   }
 
@@ -452,10 +466,11 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
   }
 
   if (req.method === 'POST' && path === '/api/chat') {
-    const body = await readBody(req) as { text?: unknown };
+    const body = await readBody(req) as { text?: unknown; attachments?: unknown };
     const text = typeof body.text === 'string' ? body.text.trim() : '';
-    if (!text) return json(res, 400, { error: 'Say something.' });
-    const answer = await deps.say(text);
+    const files = Array.isArray(body.attachments) ? body.attachments.slice(0, MAX_FILES) : [];
+    if (!text && !files.length) return json(res, 400, { error: 'Say something.' });
+    const answer = await deps.say(text, files);
     return json(res, 200, answer);
   }
 
@@ -464,9 +479,12 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
   // "she is answering". Kept as a separate route so the plain /api/chat above
   // stays for the terminal client, which has nothing to gain from a stream.
   if (req.method === 'POST' && path === '/api/chat/stream') {
-    const body = await readBody(req) as { text?: unknown };
+    const body = await readBody(req) as { text?: unknown; attachments?: unknown };
     const text = typeof body.text === 'string' ? body.text.trim() : '';
-    if (!text) return json(res, 400, { error: 'Say something.' });
+    // A file with nothing typed is still a message — the desktop lets a picture
+    // be the whole of what is said, and she reacts to it.
+    const files = Array.isArray(body.attachments) ? body.attachments.slice(0, MAX_FILES) : [];
+    if (!text && !files.length) return json(res, 400, { error: 'Say something.' });
     res.writeHead(200, {
       'Content-Type': 'text/event-stream; charset=utf-8',
       'Cache-Control': 'no-store',
@@ -474,7 +492,7 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
     });
     const emit = (value: unknown) => { if (!res.destroyed) res.write(`data: ${JSON.stringify(value)}\n\n`); };
     try {
-      const answer = await deps.sayStream(text, chunk => emit({ text: chunk }));
+      const answer = await deps.sayStream(text, chunk => emit({ text: chunk }), files);
       emit({ done: true, reply: answer.reply, ignored: Boolean(answer.ignored) });
     } catch (error) {
       console.error('[web] ' + (error instanceof Error ? error.message : String(error)));
@@ -532,7 +550,7 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
       return json(res, 413, { error: 'That recording is too long.' });
     }
     let audio: Buffer;
-    try { audio = await readAudio(req); } catch {
+    try { audio = await readRaw(req, MAX_AUDIO); } catch {
       res.setHeader('Connection', 'close');
       return json(res, 413, { error: 'That recording is too long.' });
     }
@@ -540,6 +558,38 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
     const text = await deps.hear(audio, mime);
     console.log(`[web] heard ${(audio.length / 1024).toFixed(0)}KB -> ${text ? `"${text.slice(0, 60)}"` : 'nothing worth sending'}`);
     return json(res, 200, { text });
+  }
+
+  // A file for the next message. The bytes land here once and are staged the
+  // way a desktop paste is — copied into her keeping, no model called — and the
+  // staged record goes back to the page to ride the send. The name travels in
+  // the query because the body is the file itself.
+  if (req.method === 'POST' && path === '/api/attach') {
+    const name = (url.searchParams.get('name') ?? '').trim().slice(0, 200);
+    if (!name) return json(res, 400, { error: 'Name the file.' });
+    const declared = Number(req.headers['content-length'] ?? 0);
+    if (declared > MAX_UPLOAD) {
+      res.setHeader('Connection', 'close');
+      return json(res, 413, { error: 'That file is too big.' });
+    }
+    let bytes: Buffer;
+    try { bytes = await readRaw(req, MAX_UPLOAD); } catch {
+      res.setHeader('Connection', 'close');
+      return json(res, 413, { error: 'That file is too big.' });
+    }
+    if (!bytes.length) return json(res, 400, { error: 'The file was empty.' });
+    try {
+      return json(res, 200, { attachment: deps.attach.stage(name, bytes) });
+    } catch (error) {
+      return json(res, 400, { error: error instanceof Error ? error.message : 'That could not be attached.' });
+    }
+  }
+
+  // Removing a chip before sending takes the copy with it, same as the desktop.
+  if (req.method === 'POST' && path === '/api/attach/discard') {
+    const body = await readBody(req) as { attachment?: unknown };
+    deps.attach.discard(body.attachment);
+    return json(res, 200, { ok: true });
   }
 
   // Asked for when the page opens and while it stays open. This is how she
