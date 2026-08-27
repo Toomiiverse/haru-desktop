@@ -729,6 +729,10 @@ export function migrateMemories(saved: unknown, now: string): MemoryRecord[] {
         : [{ at: createdAt, kind: 'statement', source: 'conversation' }],
       mergedFrom: Array.isArray(record.mergedFrom) ? record.mergedFrom.filter(id => typeof id === 'string') : undefined,
       conflictsWith: Array.isArray(record.conflictsWith) ? record.conflictsWith.filter(id => typeof id === 'string') : undefined,
+      // Carried like the two above it. Left out, every read quietly revived what
+      // had been replaced: "lives in Manchester" came back alongside "lives in
+      // Sheffield", and the next write put the resurrection on disk.
+      supersededBy: typeof record.supersededBy === 'string' ? record.supersededBy : undefined,
     }];
   });
 }

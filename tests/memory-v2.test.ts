@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   baseConfidence, CONFIDENCE, guessMemoryType, mentionConfidence, migrateMemories,
-  scoreImportance, withConfirmation, withContradiction, rememberInto,
+  scoreImportance, withConfirmation, withContradiction, rememberInto, retrieveMemories,
 } from '../electron/memory';
 
 const NOW = '2026-08-01T00:00:00.000Z';
@@ -120,4 +120,24 @@ test('migrateMemories preserves provided v2 fields', () => {
   assert.equal(migrated[0].importance, 0.9);
   assert.equal(migrated[0].status, 'dormant');
   assert.equal(migrated[0].source, 'activity');
+});
+test('migration carries supersession, so what was replaced stays replaced', () => {
+  // It did not, and getMemories() migrates on every read: the replaced record
+  // came back with its replacement, and the next write saved it that way. The
+  // supersession survived exactly until something looked at it.
+  const raw = [
+    { id: 'now', text: 'Lives in Sheffield', kind: 'fact', createdAt: NOW, lastSeenAt: NOW, mentions: 1 },
+    { id: 'old', text: 'Lives in Manchester', kind: 'fact', createdAt: NOW, lastSeenAt: NOW, mentions: 1, supersededBy: 'now' },
+  ];
+  const migrated = migrateMemories(raw, NOW);
+  assert.equal(migrated.find(entry => entry.id === 'old')?.supersededBy, 'now');
+
+  // The round trip is what matters: read, write, read again.
+  const again = migrateMemories(migrated, NOW);
+  assert.equal(again.find(entry => entry.id === 'old')?.supersededBy, 'now');
+
+  // And the point of the field: it is never offered back.
+  const recalled = retrieveMemories(again, 'is he still in manchester or is it sheffield now', { now: new Date(NOW) });
+  assert.ok(!recalled.some(entry => entry.memory.id === 'old'), 'the replaced memory came back');
+  assert.ok(recalled.some(entry => entry.memory.id === 'now'), 'the current one should still be there');
 });
