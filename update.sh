@@ -17,6 +17,12 @@ git pull --ff-only
 echo "==> installing anything new"
 npm install --include=dev --no-audit --no-fund
 
+# Before the build and long before she is stopped, so a bad pull costs a failed
+# update rather than a dead Haru: set -e means a red test ends the script here,
+# with the old build still running and still answering.
+echo "==> checking she still works"
+npm test
+
 echo "==> building"
 npm run build
 

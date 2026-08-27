@@ -1,0 +1,38 @@
+# Run the tests before the server ever pulls.
+#
+# update.sh on the server does the same check, which is the one that actually
+# protects her — but it protects her by refusing to update, which is a broken
+# push you find out about at the far end. This one finds it here.
+name: test
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # The version the desk runs, so "it passed on mine" and "it passed on
+          # CI" mean the same thing. node --test, mock timers and getSetCookie
+          # are all used by the suite and all want a recent one.
+          node-version: '24'
+          cache: npm
+
+      # Dev dependencies included on purpose: typescript and the type packages
+      # are what the tests compile against.
+      - run: npm ci --include=dev --no-audit --no-fund
+
+      - name: Tests
+        run: npm test
+
+      # The suite never builds the renderer or the Electron entry point, so a
+      # broken import in either passes every test and then fails on the server,
+      # halfway through an update. Cheap here, expensive there.
+      - name: Build
+        run: npm run build

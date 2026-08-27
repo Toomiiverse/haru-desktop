@@ -9,26 +9,8 @@
     "strict": true,
     "types": ["node"]
   },
-  "include": [
-    "*.test.ts",
-    "helpers.ts",
-    "../electron/memory.ts",
-    "../electron/vitals.ts",
-    "../electron/mood.ts",
-    "../electron/emotion.ts",
-    "../electron/knowledge.ts",
-    "../electron/chunking.ts",
-    "../electron/embeddings.ts",
-    "../electron/ingestion.ts",
-    "../electron/retrieval.ts",
-    "../electron/context.ts",
-    "../electron/retrieveContext.ts",
-    "../electron/store.ts",
-    "../electron/consolidation.ts",
-    "../electron/blocks.ts",
-    "../electron/obsidian.ts",
-    "../electron/familiar.ts",
-    "../electron/system.ts",
-    "../electron/systemState.ts"
-  ]
+  // Only the tests. Whatever they import comes along on its own, which is what
+  // the list that used to sit here was doing by hand — and it had already
+  // fallen ten modules behind, while reading like a register of what is tested.
+  "include": ["*.test.ts", "helpers.ts"]
 }
