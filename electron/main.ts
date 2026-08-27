@@ -48,7 +48,7 @@ import { formatList, formatMedia, formatMissing, lookUp, readAniListConfig, user
 import { createDesktopShortcut, desktopShortcutPath, isAutoStartEnabled, setAutoStart, startedHidden } from './startup';
 import { claimsDesktopAction, claimsTickOff, dropRoleHeader, dropTackedOnParagraphs, dropInventedContact, dropInventedScreenTalk, dropRepeatedAgendaMentions, dropRepeatedParagraphs, dropStageDirections } from './reply';
 import { hasShout, readVoiceConfig, referenceFor, shoutReference, spokenCase, speakableText, splitForSpeech, synthesise, type SpeechClip, type VoiceConfig } from './voice';
-import { applyDecay, DEEP_RECALL_LIMIT, findSuperseded, formatMemoryPrompt, isExplicitRecall, isWorthKeeping, isWorthRemembering, MEMORY_KINDS, migrateMemories, pruneMemories, rememberInto, retrieveMemories, selectMemories, semanticSimilarities, summaryPrompt, supersede, vectorSimilarity, type ForgettingEntry, type MemoryKind, type MemoryRecord, type MemorySource, type ScoredMemory, type SessionSummary } from './memory';
+import { applyDecay, DEEP_RECALL_LIMIT, eventCandidates, eventsPrompt, findSuperseded, formatMemoryPrompt, isExplicitRecall, isWorthKeeping, isWorthRemembering, MEMORY_KINDS, migrateMemories, pruneMemories, rememberInto, retrieveMemories, selectMemories, semanticSimilarities, summaryPrompt, supersede, vectorSimilarity, type ForgettingEntry, type MemoryKind, type MemoryRecord, type MemorySource, type ScoredMemory, type SessionSummary } from './memory';
 import { consolidateMemories, type ConsolidationChange } from './consolidation';
 import { forgetDevice, forgetEveryDevice, readWebAccess, setPassword, weakPassword, type WebAccess } from './web';
 import { conversationMayLeave, mayLeaveTheMachine } from './sensitivity';
@@ -100,6 +100,12 @@ const GOOGLE_SYNC_INTERVAL_MS = 15 * 60_000;
 // call is not competing with startup.
 const GOOGLE_SYNC_STARTUP_DELAY_MS = 10_000;
 const GOOGLE_FOCUS_SYNC_MIN_GAP_MS = 30_000;
+// Raw transcripts are kept for a season, then rolled into their day summaries
+// only. The summaries are the long-term record; an archive that never shrank
+// would hold the sensitive past forever for no recall benefit.
+const ARCHIVE_RETENTION_DAYS = 90;
+const SESSIONS_KEPT = 365;
+const EVENTS_PER_DAY = 3;
 
 const live2dRoots = new Map<string, string>();
 let mainWindow: BrowserWindow | null = null;
@@ -388,10 +394,58 @@ function summariseSession(messages: { role?: string; content?: string }[], day: 
     // whatever mattered as long-term records.
     const kept = [...getSessions().filter(session => session.day !== day), { day, summary, createdAt: new Date().toISOString() }]
       .sort((a, b) => a.day.localeCompare(b.day))
-      .slice(-30);
-    store.set('memory.sessions', kept);
+      .slice(-SESSIONS_KEPT);
+    store.setSessions(kept);
     console.log(`[memory] summarised ${day} from ${messages.length} messages: ${summary}`);
+    extractDayEvents(messages, transcript, day, config);
   }).catch(error => console.warn('[memory] could not summarise session:', error instanceof Error ? error.message : error));
+}
+
+/**
+ * The second pass over a finished day: ask what happened that matters, gate the
+ * answer, and promote it. Runs after the summary lands, in the same quiet
+ * background rhythm — one more model call, never urgent.
+ */
+function extractDayEvents(messages: { role?: string; content?: string }[], transcript: string, day: string, config: ProviderConfig) {
+  if (messages.length < 4) return;
+  ollamaPost(
+    [{ role: 'system', content: eventsPrompt() }, { role: 'user', content: transcript }],
+    config,
+    { tools: false, temperature: 0.2, maxTokens: 300 },
+  ).then(message => {
+    const candidates = eventCandidates(message.content ?? '');
+    if (!candidates.length) { console.log(`[memory] nothing eventful from ${day}`); return; }
+    let promoted = 0;
+    for (const line of candidates.slice(0, EVENTS_PER_DAY)) {
+      if (!isWorthRemembering(line)) continue;
+      const saved = addMemory(line, 'event', undefined, { source: 'conversation' });
+      if (saved?.record) { promoted += 1; console.log(`[memory] event from ${day}: "${line.slice(0, 60)}"`); }
+    }
+    if (!promoted) console.log(`[memory] no events survived the gate from ${day}`);
+  }).catch(error => console.warn('[memory] could not extract events:', error instanceof Error ? error.message : error));
+}
+
+/**
+ * Raw transcripts have a shelf life: once a day has its summary, the transcript
+ * has given what it has to give, and keeping the sensitive past verbatim is a
+ * retention problem with no recall benefit. Runs at startup and on the daily
+ * tick; a day without a summary is never touched.
+ */
+function pruneOldArchives() {
+  const archive = (store.get('chat.archive') as Record<string, unknown[]> | undefined) ?? {};
+  const cutoff = localDateKey(new Date(Date.now() - ARCHIVE_RETENTION_DAYS * 86_400_000));
+  const sessions = getSessions();
+  let dropped = 0;
+  for (const day of Object.keys(archive)) {
+    if (day >= cutoff) continue;
+    if (!sessions.some(session => session.day === day)) continue;
+    delete archive[day];
+    dropped += 1;
+  }
+  if (dropped) {
+    store.set('chat.archive', archive);
+    console.log(`[memory] pruned ${dropped} archived day(s) older than ${ARCHIVE_RETENTION_DAYS} days — summaries kept`);
+  }
 }
 
 /**
@@ -425,37 +479,38 @@ function archiveMessages(messages: unknown[], dayKey: string) {
 function mergeArchiveFragments() {
   const archive = (store.get('chat.archive') as Record<string, unknown[]> | undefined) ?? {};
   const fragmented = Object.keys(archive).filter(key => key.includes('#'));
-  if (!fragmented.length) return;
-
-  // The keys belonging to each day, not their contents — this map is the plan,
-  // and the transcripts are only pulled through once the order is settled.
-  const merged: Record<string, string[]> = {};
-  for (const key of Object.keys(archive)) {
-    const [day] = key.split('#');
-    (merged[day] = merged[day] ?? []).push(key);
+  if (fragmented.length) {
+    // The keys belonging to each day, not their contents — this map is the plan,
+    // and the transcripts are only pulled through once the order is settled.
+    const merged: Record<string, string[]> = {};
+    for (const key of Object.keys(archive)) {
+      const [day] = key.split('#');
+      (merged[day] = merged[day] ?? []).push(key);
+    }
+    const rebuilt: Record<string, unknown[]> = {};
+    for (const [day, keys] of Object.entries(merged)) {
+      // Numeric, not lexical: sorted as strings, "#10" lands between "#1" and
+      // "#2" and the day comes back in the wrong order.
+      keys.sort((a, b) => (Number(a.split('#')[1] ?? 1)) - (Number(b.split('#')[1] ?? 1)));
+      rebuilt[day] = keys.flatMap(key => archive[key] ?? []);
+    }
+    store.set('chat.archive', rebuilt);
+    console.log(`[memory] merged ${Object.keys(archive).length} archive fragments into ${Object.keys(rebuilt).length} days`);
   }
-  const rebuilt: Record<string, unknown[]> = {};
-  for (const [day, keys] of Object.entries(merged)) {
-    // Numeric, not lexical: sorted as strings, "#10" lands between "#1" and
-    // "#2" and the day comes back in the wrong order.
-    keys.sort((a, b) => (Number(a.split('#')[1] ?? 1)) - (Number(b.split('#')[1] ?? 1)));
-    rebuilt[day] = keys.flatMap(key => archive[key] ?? []);
-  }
-  store.set('chat.archive', rebuilt);
-  console.log(`[memory] merged ${Object.keys(archive).length} archive fragments into ${Object.keys(rebuilt).length} days`);
 
-  // Now the days that never got distilled, and the ones distilled from a
-  // fragment. Sequential and deliberately unhurried — each is a model call, and
-  // nothing here is urgent enough to stall a launch over.
+  // Now the days that never got distilled — fragments or not. The rollover
+  // summarises the day it closes, and if the model was down that night or the
+  // app was not running, no summary exists. Every archived day without one is
+  // backfilled here, sequentially and deliberately unhurried: each is a model
+  // call, and nothing here is urgent enough to stall a launch over.
   const sessions = getSessions();
-  const days = Object.keys(rebuilt).sort();
+  const days = Object.keys((store.get('chat.archive') as Record<string, unknown[]> | undefined) ?? {}).sort();
   let delay = 0;
   for (const day of days) {
-    const existing = sessions.find(session => session.day === day);
-    const wasFragmented = (merged[day] ?? []).length > 1;
-    if (existing && !wasFragmented) continue;
+    if (sessions.some(session => session.day === day)) continue;
     delay += 20_000;
-    setTimeout(() => summariseSession(rebuilt[day] as { role?: string; content?: string }[], day, { replace: true }), delay);
+    const transcript = ((store.get('chat.archive') as Record<string, unknown[]> | undefined) ?? {})[day] ?? [];
+    setTimeout(() => summariseSession(transcript as { role?: string; content?: string }[], day, { replace: true }), delay);
   }
   if (delay) console.log(`[memory] backfilling ${delay / 20_000} day summaries in the background`);
 }
@@ -7711,9 +7766,11 @@ app.whenReady().then(() => {
   // warm enough to be useful), then daily. Quiet when nothing changes.
   setTimeout(() => { runMemoryConsolidation(); }, 60_000);
   setTimeout(() => { runMemoryDecay(); }, 90_000);
+  setTimeout(() => { pruneOldArchives(); }, 120_000);
   setInterval(() => {
     runMemoryConsolidation();
     runMemoryDecay();
+    pruneOldArchives();
   }, 24 * 60 * 60_000);
   const knowledgeSummary = knowledgeStats(knowledgeStore);
   console.log(`[knowledge] loaded ${knowledgeSummary.documents} document(s), ${knowledgeSummary.chunks} chunk(s) from ${knowledgeFile}${knowledgeSummary.embedModels.length ? ` (${knowledgeSummary.embedModels.join(', ')})` : ''}`);

@@ -659,6 +659,32 @@ export function isWorthKeeping(summary: string) {
   return clean.length > 0 && clean !== 'nothing notable' && clean.length < 300;
 }
 
+/**
+ * The second pass over a finished day: not a summary of what was said, but the
+ * one-off events worth promoting from that day into long-term memory. Kept
+ * separate from summaryPrompt because the summary is a single line for recall
+ * while this feeds the memory engine.
+ */
+export function eventsPrompt() {
+  return [
+    'List the events from this conversation worth remembering, one per line, under 15 words each, in the third person, as a note to your future self.',
+    'Include only what will still matter in a month: decisions made, projects completed or changed, notable personal events, lasting changes to their setup or plans.',
+    'Skip routine errands, reminders, small talk and passing feelings.',
+    'If nothing qualifies, reply with exactly: nothing notable.',
+    'Reply with the lines only.',
+  ].join(' ');
+}
+
+/** One extracted event line, cleaned for the memory gate. */
+export function eventCandidates(reply: string): string[] {
+  return reply
+    .split('\n')
+    .map(line => line.replace(/^[-*\d.)\s]+/, '').trim())
+    .filter(line => line.length > 0 && !/^nothing notable$/i.test(line))
+    .map(line => line.replace(/[.!]+$/, ''))
+    .filter(line => line.length > 0);
+}
+
 // Old flat records predate kinds and counters; they are read forward rather than
 // dropped, since they are the only history an existing user has.
 export function migrateMemories(saved: unknown, now: string): MemoryRecord[] {
