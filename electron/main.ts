@@ -46,7 +46,8 @@ import { haruNote, rangeStats, type HaruNote, type RangeName, type RangeStats } 
 import { describeRating, entryFor, journalPrompt, readEntries, readJournalConfig, readRating, recentTrend, shouldAsk, upsertEntry, SCALE_MAX, type JournalConfig, type JournalEntry } from './journal';
 import { formatList, formatMedia, formatMissing, lookUp, readAniListConfig, userList, type AniListConfig, type ListEntry, type MediaKind } from './anilist';
 import { createDesktopShortcut, desktopShortcutPath, isAutoStartEnabled, setAutoStart, startedHidden } from './startup';
-import { claimsDesktopAction, claimsTickOff, dropRoleHeader, dropTackedOnParagraphs, dropInventedContact, dropInventedScreenTalk, dropRepeatedAgendaMentions, dropRepeatedParagraphs, dropStageDirections } from './reply';
+import { dropRoleHeader, dropTackedOnParagraphs, dropInventedContact, dropInventedScreenTalk, dropRepeatedAgendaMentions, dropRepeatedParagraphs, dropStageDirections } from './reply';
+import { runToolLoop } from './toolloop';
 import { hasShout, readVoiceConfig, referenceFor, shoutReference, spokenCase, speakableText, splitForSpeech, synthesise, type SpeechClip, type VoiceConfig } from './voice';
 import { applyDecay, DEEP_RECALL_LIMIT, eventCandidates, eventsPrompt, findSuperseded, formatMemoryPrompt, isExplicitRecall, isWorthKeeping, isWorthRemembering, MEMORY_KINDS, migrateMemories, pruneMemories, rememberInto, retrieveMemories, semanticSimilarities, summaryPrompt, supersede, vectorSimilarity, type ForgettingEntry, type MemoryKind, type MemoryRecord, type MemorySource, type RetrievalFactors, type ScoredMemory, type SessionSummary } from './memory';
 import { consolidateMemories, type ConsolidationChange } from './consolidation';
@@ -3135,7 +3136,6 @@ type ToolCall = { id?: string; function?: { name?: string; arguments?: unknown }
 // field the next person deletes.
 type OllamaMessage = { role: string; content?: string; tool_calls?: ToolCall[]; tool_name?: string; images?: string[] };
 
-const MAX_TOOL_ROUNDS = 4;
 // Ollama's default context reserves a KV cache big enough to push a 14B model
 // partly onto the CPU on a 16GB card — measured at 10 tok/s vs 54 tok/s once it
 // fits entirely in VRAM. Chat is wiped daily, so a day's history never needs the
@@ -6564,176 +6564,83 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   handsAllowed = hands;
   offeringChoices = choices;
   pendingChoices = [];
-  // One retry per reply, so a model that answers nothing twice is reported
-  // rather than looped on.
-  let emptyRetried = false;
-  // Which tools actually ran, so a claim to have done something can be checked
-  // against whether anything was done.
-  const ran = new Set<string>();
-  let claimRetried = false;
-  let tickRetried = false;
   // What the reader has been shown so far this round. The moment a round is
   // thrown away — a tool call arrives, the reply comes back empty, a retry is
   // pressed — any words already streamed would be a lie, so the sink is told to
   // take them back and the reader waits for the round that actually survives.
   let roundStreamed = '';
   const forwardChunk = onChunk ? (chunk: string) => { roundStreamed += chunk; onChunk(chunk); } : undefined;
-  const resetStream = () => { if (roundStreamed) { roundStreamed = ''; onChunkReset?.(); } };
-  for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-    // Reading anything ends her reach for the rest of the turn. pageWasRead
-    // already withdraws every tool, and this makes the narrower promise explicit
-    // so that loosening one does not silently loosen the other.
-    if (pageWasRead) handsAllowed = false;
-    roundStreamed = '';
-    // The last round has its tools withdrawn too: without this, a turn that
-    // spends every round calling tools — retrying a save that keeps failing,
-    // say — hits the cap still mid tool-call, with the result thrown away and
-    // nothing said, even on a round whose tool call actually succeeded. Forcing
-    // words here means whatever just happened gets reported instead of lost.
-    const toolsWanted: PostOptions = {
-      tools: !pageWasRead && !emptyRetried && round < MAX_TOOL_ROUNDS - 1,
-      // A message from outside the desk — a phone, Discord — gets a short leash.
-      // The reader is watching a chat app, a long reply is a long wait, and
-      // away-turns were found to run long: the cap keeps her concise without
-      // touching the desk, where a full answer is the point of the window.
-      ...(away ? { maxTokens: AWAY_MAX_TOKENS } : {}),
-      ...(forwardChunk ? { onChunk: forwardChunk } : {}),
-    };
-    const roundStarted = Date.now();
-    let message: OllamaMessage;
-    try {
-      message = await ollamaPost(conversation, config, toolsWanted);
-    } catch (error) {
-      const spill = capacitySpill(config);
-      if (!spill) throw error;
-      console.warn(`[ai] ${config.model} did not answer (${error instanceof Error ? error.message : String(error)}) — spilling this reply to ${spill.model}`);
-      message = await sendToProvider(conversation, spill, toolsWanted);
-    }
-    if (message.tool_calls?.length) {
-      // Logged by name: when a tool does not fire, the useful question is whether
-      // the model reached for the wrong one or for none at all.
-      //
-      // Timed as well, because each of these is a whole extra round trip before
-      // the user sees a word, and away from the desk that is the difference
-      // between a reply and a wait. Which tools are worth offering to a phone is
-      // a question this log is here to answer with numbers.
-      console.log(`[ai] round ${round + 1} took ${Date.now() - roundStarted}ms — tool calls: ${message.tool_calls.map(call => call.function?.name ?? '?').join(', ')}${traceId ? ` trace=${traceId}` : ''}`);
-      for (const call of message.tool_calls) if (call.function?.name) ran.add(call.function.name);
-      resetStream();
-      conversation.push(message);
-      // The calls in one round run together rather than one after another — a
-      // search and a page read have nothing to wait for. Order is kept: each
-      // result answers the call it was born from, whichever finished first.
-      const results = await Promise.all(message.tool_calls.map(async call => ({ call, content: await runChatTool(call, latest) })));
-      for (const { call, content } of results) conversation.push({ role: 'tool', tool_name: call.function?.name, content });
-      if (pageWasRead) console.log('[search] page read — tools withdrawn for the rest of this reply');
-      continue;
-    }
-    // Empty, with no tool call either. Seen for real, and it reached the user as
-    // a red "Couldn't reach ollama" bubble in the middle of a conversation that
-    // was working seconds before.
-    //
-    // The commonest cause is the tool schema: the model means to call something,
-    // emits a malformed call, and Ollama hands back a message with neither
-    // content nor tool_calls. Asking again with the tools withdrawn nearly always
-    // produces the reply it was trying to write, so that is tried once before
-    // giving up — and it costs a round trip only in the case that was broken
-    // anyway.
-    if (!message.content) {
-      if (!emptyRetried) {
-        emptyRetried = true;
-        resetStream();
-        console.warn('[ai] empty response with no tool call — retrying once without tools');
-        conversation.push({ role: 'user', content: 'Answer them in words. Do not call anything.' });
-        continue;
+  // Fixed for the whole turn. Only `tools` changes round to round, and that is
+  // the loop's decision rather than this function's.
+  const roundOptions: PostOptions = {
+    // A message from outside the desk — a phone, Discord — gets a short leash.
+    // The reader is watching a chat app, a long reply is a long wait, and
+    // away-turns were found to run long: the cap keeps her concise without
+    // touching the desk, where a full answer is the point of the window.
+    ...(away ? { maxTokens: AWAY_MAX_TOKENS } : {}),
+    ...(forwardChunk ? { onChunk: forwardChunk } : {}),
+  };
+  const { content: spoken, ran } = await runToolLoop(conversation, {
+    ask: async (sending, { tools }) => {
+      try {
+        return await ollamaPost(sending, config, { ...roundOptions, tools });
+      } catch (error) {
+        const spill = capacitySpill(config);
+        if (!spill) throw error;
+        console.warn(`[ai] ${config.model} did not answer (${error instanceof Error ? error.message : String(error)}) — spilling this reply to ${spill.model}`);
+        return sendToProvider(sending, spill, { ...roundOptions, tools });
       }
-      throw new Error('The model returned nothing twice over. It may be overloaded — try again in a moment.');
-    }
-    // She said she did something to the machine. Did she?
-    //
-    // Wording alone does not fix this — a plainly described tool still missed
-    // one time in five on a long conversation — and the failure is the worst
-    // kind, because "I'm powering down your computer now" is indistinguishable
-    // from success until the user notices the machine is still on. So the claim
-    // is caught here and the turn is given one more go with the tool pressed on
-    // her. If she takes it, the claim becomes true; if not, she is told to say
-    // plainly that she did not do it.
-    const claim = claimsDesktopAction(message.content);
-    const wanted = claim === 'power' ? 'power' : 'open_app';
-    if (claim && !claimRetried && !pageWasRead && handsAllowed && !ran.has(wanted) && !ran.has('close_app')) {
-      claimRetried = true;
-      resetStream();
-      console.warn(`[ai] claimed a ${claim} action without calling anything — retrying once`);
-      conversation.push(message);
-      conversation.push({
-        role: 'user',
-        content: 'You just said you had done that, but you did not actually do it — you have to call the tool for it to happen. Do it now if they asked for it. If you are not going to, say plainly that you have not done it rather than implying you have.',
-      });
-      continue;
-    }
-    // The same check for the list, and the quieter of the two by far.
-    //
-    // "I'm powering down your computer" is found out the moment anybody looks at
-    // the machine. "Ticked off, then" is found out twelve hours later, when she
-    // chases the same task again and nobody can connect the two — which is
-    // exactly how a breakfast reported at ten in the morning got shouted about
-    // at half past nine at night.
-    //
-    // Only when there is something it could plausibly have meant: with no open
-    // task the claim is empty talk and a retry would only invite her to invent
-    // one to tick.
-    if (claimsTickOff(message.content) && !tickRetried && !ran.has('complete_kept_item')
-      && getKept().some(item => item.kind === 'task' && !item.done)) {
-      tickRetried = true;
-      resetStream();
-      console.warn('[agenda] claimed a tick-off without calling anything — retrying once');
-      conversation.push(message);
-      conversation.push({
-        role: 'user',
-        content: 'You just said that is ticked off, but it is still on their list — saying so does not change it, calling complete_kept_item does. Call it now for the task you meant. If you did not mean any of the ones actually on the list, say plainly that it is not ticked off rather than implying it is.',
-      });
-      continue;
-    }
-    // Whole paragraphs of her own recent replies come back verbatim otherwise.
-    // Only the last two are compared: the echo happens back-to-back, and looking
-    // further would start dropping a legitimate restatement — asked what is on
-    // today twice in a conversation, she has to be free to say it twice. Two
-    // covers the case where a retort or gloat sits between the two replies.
-    const recent = messages.filter(entry => entry.role === 'assistant').slice(-2).map(entry => entry.content);
-    // What she was legitimately given: their message, and whatever is actually
-    // on screen. Anything she names beyond that in a closing line was invented.
-    const grounded = `${latest} ${currentActivity?.label ?? ''}`;
-    // Agenda repeats first: it works on whole paragraphs and knows what the
-        // subject is, so it should get its say before the blunter filters start
-        // counting words.
-        const onList = getKept().map(item => item.title);
-        const deduped = dropRepeatedAgendaMentions(message.content, recent, onList, latest);
-        // Outermost on purpose: it counts paragraphs, so it has to see the ones
-        // that survive everything else rather than the ones about to be dropped.
-        // "ran" is what she actually reached for this turn, which is a fact about
-        // the reply rather than a guess from its text.
-        const trimmed = dropRoleHeader(dropInventedContact(dropStageDirections(dropInventedScreenTalk(dropRepeatedParagraphs(deduped, recent), grounded))));
-        const content = dropTackedOnParagraphs(trimmed, ran.has('search_web') || ran.has('read_web_page'));
-    if (content !== message.content) console.log(`[ai] dropped ${message.content.length - content.length} chars she had already said`);
-    console.log(`[ai] chat reply in ${Date.now() - started}ms, ${content.length} chars`);
-    // Cleared only once a reply actually exists, so a failed or unreachable turn
-    // leaves the note in place for the retry rather than losing it.
-    if (fresh) store.delete('chat.freshStart');
-    // Shared: the expression system consumes it through the broadcast inside,
-    // and the voice awaits it to choose a clip matching how this line was said.
-    const mood = classifyEmotion(content, config);
-    void speak(content, mood);
-    void tieToPlace(latest, content, config);
-    // Restarting herself kills the process she is answering from, so the
-    // restart waits until this reply is built and on its way — the words leave
-    // first, the restart follows a few seconds behind.
-    if (pendingHaruRestart) {
-      pendingHaruRestart = false;
-      setTimeout(() => { void runSystemCommand('systemctl', ['--user', 'restart', 'haru']); }, 5000);
-    }
-    return { content, ignored: false, irritation, ego };
+    },
+    runTool: call => runChatTool(call, latest),
+    // Read through rather than passed by value: runChatTool sets these while a
+    // round is in flight, and a copy taken before the round would miss it.
+    pageWasRead: () => pageWasRead,
+    handsAllowed: () => handsAllowed,
+    withdrawHands: () => { handsAllowed = false; },
+    hasOpenTask: () => getKept().some(item => item.kind === 'task' && !item.done),
+    resetStream: () => { if (roundStreamed) { roundStreamed = ''; onChunkReset?.(); } },
+    log: line => console.log(line),
+    warn: line => console.warn(line),
+    traceId,
+  });
+  // Whole paragraphs of her own recent replies come back verbatim otherwise.
+  // Only the last two are compared: the echo happens back-to-back, and looking
+  // further would start dropping a legitimate restatement — asked what is on
+  // today twice in a conversation, she has to be free to say it twice. Two
+  // covers the case where a retort or gloat sits between the two replies.
+  const recent = messages.filter(entry => entry.role === 'assistant').slice(-2).map(entry => entry.content);
+  // What she was legitimately given: their message, and whatever is actually
+  // on screen. Anything she names beyond that in a closing line was invented.
+  const grounded = `${latest} ${currentActivity?.label ?? ''}`;
+  // Agenda repeats first: it works on whole paragraphs and knows what the
+  // subject is, so it should get its say before the blunter filters start
+  // counting words.
+  const onList = getKept().map(item => item.title);
+  const deduped = dropRepeatedAgendaMentions(spoken, recent, onList, latest);
+  // Outermost on purpose: it counts paragraphs, so it has to see the ones
+  // that survive everything else rather than the ones about to be dropped.
+  // "ran" is what she actually reached for this turn, which is a fact about
+  // the reply rather than a guess from its text.
+  const trimmed = dropRoleHeader(dropInventedContact(dropStageDirections(dropInventedScreenTalk(dropRepeatedParagraphs(deduped, recent), grounded))));
+  const content = dropTackedOnParagraphs(trimmed, ran.has('search_web') || ran.has('read_web_page'));
+  if (content !== spoken) console.log(`[ai] dropped ${spoken.length - content.length} chars she had already said`);
+  console.log(`[ai] chat reply in ${Date.now() - started}ms, ${content.length} chars`);
+  // Cleared only once a reply actually exists, so a failed or unreachable turn
+  // leaves the note in place for the retry rather than losing it.
+  if (fresh) store.delete('chat.freshStart');
+  // Shared: the expression system consumes it through the broadcast inside,
+  // and the voice awaits it to choose a clip matching how this line was said.
+  const saidMood = classifyEmotion(content, config);
+  void speak(content, saidMood);
+  void tieToPlace(latest, content, config);
+  // Restarting herself kills the process she is answering from, so the
+  // restart waits until this reply is built and on its way — the words leave
+  // first, the restart follows a few seconds behind.
+  if (pendingHaruRestart) {
+    pendingHaruRestart = false;
+    setTimeout(() => { void runSystemCommand('systemctl', ['--user', 'restart', 'haru']); }, 5000);
   }
-  throw new Error('Haru kept calling tools without settling on a reply.');
+  return { content, ignored: false, irritation, ego };
 }
 
 /**
