@@ -250,7 +250,7 @@ async function post(url: string, body: unknown, auth: Record<string, string> = {
  * can parse is treated as fine — the check exists to catch a specific failure,
  * not to sit in judgement on formats it does not understand.
  */
-function isSilent(bytes: Uint8Array): boolean {
+export function isSilent(bytes: Uint8Array): boolean {
   if (bytes.length < 64) return true;
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   if (view.getUint32(0, false) !== 0x52494646) return false; // 'RIFF'
