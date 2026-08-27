@@ -143,3 +143,106 @@ test('recoverBackups restores the newest backup over a corrupt file', () => {
   const reopened = new HaruStore({ cwd: dir, configName, knowledgeFile });
   assert.equal(reopened.get('value'), 'precious');
 });
+test('the forgetting log is bounded, so the record of what she forgot cannot grow forever', () => {
+  const { store } = makeStore();
+  assert.deepEqual(store.getForgettingLog(), []);
+  const entry = (index: number) => ({ id: `m${index}`, text: `something ${index}`, at: '2026-08-20T00:00:00.000Z', reason: 'decay' as const });
+  const combined = store.appendForgettingLog(Array.from({ length: 250 }, (_, index) => entry(index)));
+  assert.equal(combined.length, 250, 'the caller is handed everything it just wrote');
+  const kept = store.getForgettingLog();
+  assert.equal(kept.length, 200, 'but only the last two hundred survive on disk');
+  assert.equal(kept.at(-1)?.id, 'm249', 'and it is the newest that survive');
+  assert.equal(kept[0].id, 'm50');
+});
+
+test('appending nothing changes nothing', () => {
+  const { store } = makeStore();
+  store.appendForgettingLog([{ id: 'm1', text: 'gone', at: '2026-08-20T00:00:00.000Z', reason: 'decay' }]);
+  assert.deepEqual(store.appendForgettingLog([]).map(entry => entry.id), ['m1']);
+  assert.equal(store.getForgettingLog().length, 1);
+});
+
+test('a half-written forgetting entry is skipped rather than handed back', () => {
+  // It is read straight out of a file somebody could have edited, and every
+  // caller expects an id and a timestamp to be there.
+  const { store } = makeStore();
+  store.set('memory.forgettingLog', [
+    { id: 'good', text: 'gone', at: '2026-08-20T00:00:00.000Z', reason: 'decay' },
+    { text: 'no id', at: '2026-08-20T00:00:00.000Z' },
+    { id: 'no timestamp', text: 'gone' },
+    null,
+    'not even an object',
+  ]);
+  assert.deepEqual(store.getForgettingLog().map(entry => entry.id), ['good']);
+});
+
+test('blocks come back with the standard set filled in, and keep what was saved', () => {
+  const { store } = makeStore();
+  const labels = store.getBlocks().map(block => block.label);
+  for (const label of ['persona', 'human', 'preferences', 'relationship', 'current_project', 'working_state']) {
+    assert.ok(labels.includes(label), `${label} is missing from a fresh store`);
+  }
+  assert.equal(store.getBlocks().find(block => block.label === 'persona')?.read_only, true,
+    'the persona is the one block a memory tool may never edit');
+
+  const edited = store.getBlocks().map(block => block.label === 'human' ? { ...block, value: 'They are called Tom.' } : block);
+  store.setBlocks(edited);
+  assert.equal(store.getBlocks().find(block => block.label === 'human')?.value, 'They are called Tom.');
+  assert.equal(store.getBlocks().length, edited.length, 'the defaults should not be merged in twice');
+});
+
+test('has answers for a key that was never set', () => {
+  const { store } = makeStore();
+  assert.equal(store.has('journal.config'), false);
+  store.set('journal.config', { enabled: true });
+  assert.equal(store.has('journal.config'), true);
+  store.delete('journal.config');
+  assert.equal(store.has('journal.config'), false);
+});
+
+test('several keys can be written at once', () => {
+  const { store } = makeStore();
+  store.set({ 'ai.config': { model: 'llama3' }, 'chat.dayKey': '2026-08-20' });
+  assert.deepEqual(store.get('ai.config'), { model: 'llama3' });
+  assert.equal(store.get('chat.dayKey'), '2026-08-20');
+});
+
+test('a knowledge file that is not there is an empty store, not a crash', () => {
+  // The comment above getKnowledge promises this: a store that cannot be read
+  // is an empty one, and she starts with no documents rather than not starting.
+  const { store } = makeStore();
+  const empty = store.getKnowledge();
+  assert.deepEqual(empty.chunks, []);
+  assert.deepEqual(empty.documents, []);
+});
+
+test('a corrupt knowledge file is an empty store, not a crash', () => {
+  const { store, knowledgeFile } = makeStore();
+  writeFileSync(knowledgeFile, '{ this is not json');
+  assert.deepEqual(store.getKnowledge().chunks, []);
+});
+
+test('a knowledge file of the wrong shape comes back clean, whoever cleans it', () => {
+  // Parseable json, but nothing in it is a document or a chunk. The guarantee is
+  // that callers get a well-formed store whatever is on disk; where that is
+  // enforced is an implementation detail, so this asserts the result rather than
+  // the route to it.
+  const { store, knowledgeFile } = makeStore();
+  writeFileSync(knowledgeFile, JSON.stringify({
+    documents: [{ nonsense: true }, null, 'a string'],
+    chunks: [{ also: 'nonsense' }, 42],
+    somethingElse: 'ignored',
+  }));
+  const loaded = store.getKnowledge();
+  assert.deepEqual(loaded.documents, []);
+  assert.deepEqual(loaded.chunks, []);
+  assert.deepEqual(Object.keys(loaded).sort(), ['chunks', 'documents'], 'nothing extra should survive');
+});
+
+test('a knowledge file that is a list, or a number, is not a store', () => {
+  const { store, knowledgeFile } = makeStore();
+  for (const junk of ['[]', '42', '"a string"', 'null']) {
+    writeFileSync(knowledgeFile, junk);
+    assert.deepEqual(store.getKnowledge(), { documents: [], chunks: [] }, `${junk} was not refused`);
+  }
+});

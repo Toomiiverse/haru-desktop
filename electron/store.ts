@@ -1,20 +1,32 @@
 // Haru's persistence layer — the only module that reads or writes the on-disk
 // store files: config.json for application/configuration state, knowledge.json
-// for structured memory. Everything else talks to this facade, so the backing
-// files could later be replaced with SQLite, Postgres, a vector store or a
-// graph database without changing any caller.
+// for structured memory.
 //
-// The facade keeps the electron-store instance fully inside itself: no other
-// module imports electron-store or knows where the files live. It also owns
-// the safety net — atomic saves, backups before migration, corruption recovery,
-// schema versioning and file permissions.
+// What that buys is real and worth keeping. No other module imports
+// electron-store or knows where the files live, and this is the one place that
+// owns the safety net: atomic saves, backups before migration, corruption
+// recovery, schema versioning and file permissions. Move a file, change how it
+// is written, add a migration — only this file changes.
+//
+// What it does not buy is a different database, and this header used to say
+// otherwise: that the files could be swapped for SQLite, Postgres or a graph
+// database without changing any caller. They cannot. get and set below are
+// electron-store's own surface re-exported, and 282 call sites across four
+// modules reach through them for 65 dotted string keys — 'chat.messages',
+// 'ai.config', 'journal.config' — and cast whatever comes back. That is a
+// key-value store's shape and it is load-bearing in every one of those callers.
+//
+// The typed accessors below — getMemories, setBlocks, appendForgettingLog — are
+// what an actual boundary looks like, and the distance to one is those 65 keys.
+// Said plainly here because a sentence promising portability is worse than no
+// sentence: it is the kind of thing somebody plans a weekend around.
 
 import Store from 'electron-store';
 import { execFile } from 'node:child_process';
 import { copyFileSync, existsSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { emptyKnowledge, loadKnowledge, normalizeKnowledge, saveKnowledge, type KnowledgeStore } from './knowledge';
+import { emptyKnowledge, loadKnowledge, saveKnowledge, type KnowledgeStore } from './knowledge';
 import { mergeBlockDefaults, type MemoryBlock } from './blocks';
 import { migrateMemories, type ForgettingEntry, type MemoryRecord, type SessionSummary } from './memory';
 
@@ -172,8 +184,11 @@ export class HaruStore {
   // -- knowledge. The file is read and written only here; main.ts holds its own
   //    in-memory copy and hands it over through these two methods.
 
+  /** Always a well-formed store: a missing file, an unparseable one, or one
+   *  full of the wrong shapes all come back empty rather than throwing.
+   *  loadKnowledge normalises what it reads, so this does not do it again. */
   getKnowledge(): KnowledgeStore {
-    return normalizeKnowledge(loadKnowledge(this.knowledgeFile));
+    return loadKnowledge(this.knowledgeFile);
   }
 
   setKnowledge(value: KnowledgeStore): void {
