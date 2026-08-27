@@ -16,7 +16,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   chaseableOverdue, doneClause, findItem, formatAgenda, itemStatus, missedInstruction,
-  putOffUntil, readsAsAnswerToHer, readsAsBareReport, readsAsDone, readsAsNotDone,
+  putOffUntil, readsAsAnswerToHer, readsAsBareReport, readsAsDone, readsAsNotDone, whenMismatchInstruction,
   relativeDay, relevantItems, tickOffInstruction, type AgendaItem,
 } from '../electron/agenda';
 
@@ -425,4 +425,49 @@ test('a clock time is a reschedule too', () => {
 test('a time with no intent around it is not a reschedule', () => {
   assert.equal(putOffUntil('I sat down at 5pm'), null);
   assert.equal(putOffUntil('the meeting was at 5pm'), null);
+});
+
+test('a named item at a day the list disagrees with is challenged, not accepted', () => {
+  // The live script this exists for: list says tomorrow, user says tonight @5pm.
+  const items = [item({ title: 'Scarlett Birthday Party', date: '2026-08-21' })];
+  const said = whenMismatchInstruction('Oh no my bad the party is tonight @5pm', items, at(12), TODAY);
+  assert.ok(said.includes('"Scarlett Birthday Party"'), 'the item has to be named');
+  assert.ok(said.includes('tomorrow'), 'what the list says rides along');
+  assert.ok(said.includes('ask which is right'), 'the disagreement is the subject');
+  assert.ok(said.includes('Never move it before they answer'), 'ask first, move second');
+  assert.ok(said.includes('update_kept_item'), 'and the move has a named path');
+});
+
+test('one distinctive word is enough to name an item here', () => {
+  // Looser than findItem on purpose: this gates a sentence, not a write.
+  const items = [item({ title: 'Scarlett Birthday Party', date: '2026-08-21' })];
+  assert.ok(whenMismatchInstruction('the party is tonight', items, at(12), TODAY) !== '');
+});
+
+test('agreement is not a disagreement', () => {
+  const items = [item({ title: 'Scarlett Birthday Party', date: '2026-08-21' })];
+  assert.equal(whenMismatchInstruction('the party is tomorrow', items, at(12), TODAY), '');
+});
+
+test('a when with no named item is left to the put-off reading', () => {
+  const items = [item({ title: 'Scarlett Birthday Party', date: '2026-08-21' })];
+  assert.equal(whenMismatchInstruction('Its not till later today @5pm', items, at(12), TODAY), '');
+});
+
+test('a day with no named item is not about anything on the list', () => {
+  // "later" bails on the day before the name gate is even asked, so this needs
+  // a day that resolves — the gate is the only thing standing.
+  const items = [item({ title: 'Scarlett Birthday Party', date: '2026-08-25' })];
+  assert.equal(whenMismatchInstruction('might go to the shops tomorrow', items, at(12), TODAY), '');
+});
+
+test('a when she cannot place on a day says nothing', () => {
+  // "later" and "next week" name no comparable day.
+  const items = [item({ title: 'Scarlett Birthday Party', date: '2026-08-21' })];
+  assert.equal(whenMismatchInstruction('the party is later', items, at(12), TODAY), '');
+});
+
+test('a finished item is nobody’s disagreement', () => {
+  const items = [item({ title: 'Scarlett Birthday Party', date: '2026-08-21', done: true })];
+  assert.equal(whenMismatchInstruction('the party is tonight', items, at(12), TODAY), '');
 });

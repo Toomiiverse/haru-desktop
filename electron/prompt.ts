@@ -21,7 +21,7 @@
 import { checkInInstruction, type CheckIn } from './checkins';
 import { asideContext, type Aside } from './asides';
 import { egoInstruction, goodnightInstruction, leverageInstruction, moodInstruction, notTwiceInstruction, shoutInstruction, type ShoutState } from './mood';
-import { findItem, formatAgenda, missedInstruction, putOffInstruction, tickOffInstruction, type AgendaItem } from './agenda';
+import { findItem, formatAgenda, missedInstruction, putOffInstruction, tickOffInstruction, whenMismatchInstruction, type AgendaItem } from './agenda';
 import { pushbackInstruction, type Pushback } from './pushback';
 import { lookItUpInstruction, type SearchConfig } from './search';
 import { summariseFollowing, type Following } from './following';
@@ -274,7 +274,9 @@ export function chatSystemPrompt(state: PromptState): string {
     // will are different admissions, and only one of them changes the list.
     state.movedJustNow
       ? `You have already moved "${state.movedJustNow.title}" to ${state.movedJustNow.to}. Tell them it is moved, and have an opinion about it being pushed — you are not a calendar politely accepting a change. Do not call any tool to move it again.`
-      : putOffInstruction(latestMessage),
+      // A named item at a day the list disagrees with outranks the plain
+      // put-off reading: the disagreement is the thing worth saying.
+      : whenMismatchInstruction(latestMessage, state.kept, now, today) || putOffInstruction(latestMessage),
     // The backstop for everything tickOffSpoken cannot be sure enough of.
     tickOffInstruction(latestMessage, openTasks.length > 0, findItem(openTasks, latestMessage)?.title ?? null),
     // Last but one, so it outranks the agenda and the nagging above it. Being

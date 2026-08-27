@@ -207,3 +207,14 @@ test('a cleared conversation is explained as housekeeping, not as a telling-off'
   assert.ok(daily.includes('clears the chat each morning'));
   assert.ok(!daily.includes('You may ask once'), 'no decision of theirs to be curious about');
 });
+
+test('a day the list disagrees with becomes the subject, and outranks the put-off reading', () => {
+  const prompt = chatSystemPrompt(state({
+    // The item sits days away from NOW in any timezone, so "tomorrow" disagrees
+    // with it whether this runs in Perth or on a UTC runner.
+    latestMessage: "I'll sort the party out, its tomorrow",
+    kept: [{ title: 'Scarlett Birthday Party', date: '2026-08-25', kind: 'event', done: false }],
+  }));
+  assert.ok(prompt.includes('ask which is right'), 'the disagreement instruction never made it in');
+  assert.ok(!prompt.includes('will not get to something'), 'the put-off reading should stand down');
+});

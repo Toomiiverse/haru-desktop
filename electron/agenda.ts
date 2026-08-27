@@ -2,7 +2,7 @@
 // that a time which has already been and gone is not just another line on a
 // list — she should notice, and want to know how it went.
 
-import { localDateKey, parseTimeOfDay } from './dates';
+import { localDateKey, parseTimeOfDay, resolveDate } from './dates';
 
 // heardAbout is when she asked how something went and was actually told. It is
 // separate from completedAt because they answer different questions: one is
@@ -499,6 +499,56 @@ export function putOffUntil(latestMessage: string): string | null {
   if (readsAsDone(latestMessage)) return null;
   if (!PUTTING_IT_OFF.test(latestMessage)) return null;
   return latestMessage.match(WHEN_INSTEAD)?.[0].toLowerCase() ?? null;
+}
+
+/**
+ * The user has just put a named item at a different day from the one on the
+ * list, and she should notice before anything moves.
+ *
+ * Seen live: the list had the party all-day tomorrow, the user said "tonight
+ * @5pm", and she went straight for a tool instead of going "the list says
+ * tomorrow!?". The disagreement is the interesting part — one of them is wrong,
+ * and silently accepting either side loses information. So she is told what the
+ * list says, told to make the difference the subject, and told to move it only
+ * once they have answered.
+ *
+ * The item match here is looser than findItem on purpose. findItem gates a
+ * write, where a wrong match rewrites their list; this gates a sentence, where
+ * a wrong match costs one odd question. One distinctive title word is enough —
+ * "the party" has to reach "Scarlett Birthday Party".
+ */
+function namedItem<T extends AgendaItem>(items: T[], message: string): T | null {
+  const asked = significant(message);
+  if (!asked.size) return null;
+  const spread = new Map<string, number>();
+  for (const item of items) for (const word of significant(item.title)) spread.set(word, (spread.get(word) ?? 0) + 1);
+  for (const item of items) {
+    for (const word of significant(item.title)) {
+      if ((spread.get(word) ?? 0) <= 1 && sharesRoot(word, asked)) return item;
+    }
+  }
+  return null;
+}
+
+export function whenMismatchInstruction(latestMessage: string, items: AgendaItem[], now: Date, todayKey: string): string {
+  const raw = WHEN_INSTEAD.exec(latestMessage)?.[1];
+  if (!raw) return '';
+  const item = namedItem(items.filter(entry => !entry.done), latestMessage);
+  if (!item) return '';
+  const cleaned = raw.replace(/^(?:on|until|till|by|at)\s+/i, '').replace(/^@\s*/, '');
+  // A bare clock time names no day, so it means today — "tonight @5pm" says
+  // tonight twice over.
+  const isTime = /\d/.test(cleaned) && /[ap]m$/i.test(cleaned.replace(/\s/g, ''));
+  const day = isTime ? todayKey : resolveDate(cleaned, now);
+  // "later", "next week", "after work" name no day she can compare; let the
+  // put-off instruction handle those.
+  if (!day || day === item.date) return '';
+  const weekday = new Intl.DateTimeFormat('en-US', { weekday: 'long' });
+  return [
+    `They have just put "${item.title}" at ${raw.trim()}, but their list has it ${relativeDay(item.date, todayKey, weekday)}. One of those is wrong, and you are allowed to be put out about which.`,
+    'Say what the list says, out loud, and ask which is right — do not silently accept either side.',
+    `Only once they confirm, move it with update_kept_item — title "${item.title}", the day they named, and the time if they gave one. Never move it before they answer.`,
+  ].join(' ');
 }
 
 export function putOffInstruction(latestMessage: string): string {
