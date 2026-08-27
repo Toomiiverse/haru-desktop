@@ -207,6 +207,16 @@ export function findItem<T extends AgendaItem>(items: T[], phrase: string): T | 
     // the rent" close a rental inspection and "I picked up Sam" close the
     // motherboard — both on a single three-letter stub, in a two-word title
     // where one word is already half the score.
+    //
+    // ponytail: this half-weight and the "Take medication" case above pull on
+    // the same rope, and the rope currently favours saying nothing. "I took my
+    // meds" scores 0.25 and misses, because the noun only agrees by its stub and
+    // "took" shares no root with "take" at all. Raising the half to a whole
+    // would land it — and would also let "I paid the rent" close out a rental
+    // inspection at exactly 0.5, which is the false tick this weight was added
+    // to stop. A missed tick is chased again; a false one writes to their list,
+    // so it stays at a half until there is real usage to tune against.
+    // Covered as a known gap in tests/agenda.test.ts.
     const weigh = (word: string) => { const how = howItMatches(word, asked); return how === null ? 0 : how === 'prefix' ? 0.5 : 1; };
     const sharedWords = [...words].filter(word => sharesRoot(word, asked));
     const shared = sharedWords.length;
