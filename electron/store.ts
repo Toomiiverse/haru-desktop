@@ -15,10 +15,10 @@ import { copyFileSync, existsSync, readFileSync, readdirSync, rmSync, statSync }
 import os from 'node:os';
 import path from 'node:path';
 import { emptyKnowledge, loadKnowledge, normalizeKnowledge, saveKnowledge, type KnowledgeStore } from './knowledge';
-import type { MemoryRecord, SessionSummary } from './memory';
+import { migrateMemories, type MemoryRecord, type SessionSummary } from './memory';
 
 /** The current schema version of the store. Bumped by each schema migration. */
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 export type MigrationStep = {
   /** The schema version this step produces. Steps run in ascending order. */
@@ -38,7 +38,18 @@ export type MigrationReport = {
  * step is responsible for the shape of the data it produces; steps never
  * touch data written by later steps.
  */
-export const MIGRATIONS: MigrationStep[] = [];
+export const MIGRATIONS: MigrationStep[] = [
+  {
+    version: 2,
+    label: 'memories gain confidence, importance, source, status, memoryType, evidence and triples',
+    run: (haruStore) => {
+      // migrateMemories derives the v2 fields on read; this step makes that
+      // derivation permanent so the file carries the new schema, not just the
+      // in-memory view.
+      haruStore.setMemories(migrateMemories(haruStore.getMemories(), new Date().toISOString()));
+    },
+  },
+];
 
 export type HaruStoreOptions = {
   /** Where knowledge.json lives. */

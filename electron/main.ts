@@ -48,7 +48,7 @@ import { formatList, formatMedia, formatMissing, lookUp, readAniListConfig, user
 import { createDesktopShortcut, desktopShortcutPath, isAutoStartEnabled, setAutoStart, startedHidden } from './startup';
 import { claimsDesktopAction, claimsTickOff, dropRoleHeader, dropTackedOnParagraphs, dropInventedContact, dropInventedScreenTalk, dropRepeatedAgendaMentions, dropRepeatedParagraphs, dropStageDirections } from './reply';
 import { hasShout, readVoiceConfig, referenceFor, shoutReference, spokenCase, speakableText, splitForSpeech, synthesise, type SpeechClip, type VoiceConfig } from './voice';
-import { DEEP_RECALL_LIMIT, findSuperseded, formatMemoryPrompt, isExplicitRecall, isWorthKeeping, isWorthRemembering, MEMORY_KINDS, migrateMemories, pruneMemories, rememberInto, selectMemories, summaryPrompt, supersede, type MemoryKind, type MemoryRecord, type SessionSummary } from './memory';
+import { DEEP_RECALL_LIMIT, findSuperseded, formatMemoryPrompt, isExplicitRecall, isWorthKeeping, isWorthRemembering, MEMORY_KINDS, migrateMemories, pruneMemories, rememberInto, selectMemories, summaryPrompt, supersede, type MemoryKind, type MemoryRecord, type MemorySource, type SessionSummary } from './memory';
 import { forgetDevice, forgetEveryDevice, readWebAccess, setPassword, weakPassword, type WebAccess } from './web';
 import { conversationMayLeave, mayLeaveTheMachine } from './sensitivity';
 import { addCheckIn, checkInInstruction, checkInsOn, readCheckIns, type CheckIn } from './checkins';
@@ -2545,7 +2545,7 @@ async function tieToPlace(said: string, replied: string, config: ProviderConfig)
     );
     const text = summary.replace(/^["'\s]+|["'\s]+$/g, '').split('\n')[0].trim();
     if (!text || text.length < 12) return;
-    const saved = addMemory(text, 'event', updated.label);
+    const saved = addMemory(text, 'event', updated.label, { source: 'activity' });
     store.set('haunts', markRemembered(getHaunts(), place));
     console.log(`[familiar] remembered ${updated.label}: "${text}"${saved?.created ? '' : ' (already known)'}`);
   } catch (error) {
@@ -3188,6 +3188,8 @@ const CHAT_TOOLS: ChatTool[] = [{
         fact: { type: 'string', description: 'One short statement that will still make sense on its own months from now, with no pronoun for the user: "Has a dog called Miso", not "Miso" and not "his dog". Other people keep their own names — "Emma is their girlfriend". Write only what they actually said, without embellishing it.' },
         kind: { type: 'string', enum: [...MEMORY_KINDS], description: 'Exactly one of these four words and nothing else: "preference" for how they like things done or want you to behave, "relationship" for a person or pet, "event" for something happening in their life, "fact" for anything else including habits and routines.' },
         subject: { type: 'string', description: 'Who or what it concerns, if there is one — a person, a pet, a project.' },
+        predicate: { type: 'string', description: 'Optional: the relation the subject stands in, for relational facts — "has", "lives in", "works on", "is allergic to", "created". Only for facts that can be written as subject–relation–object.' },
+        object: { type: 'string', description: 'Optional: what the subject relates to — "Miso", "Perth", "the PC Project". Only alongside predicate.' },
         replaces: { type: 'string', description: 'Only if this fact makes an earlier one wrong or out of date — name what changed using a word actually drawn from what you already knew (it will be right there in what you were told about them), not a description of it: "Ubuntu", not "the old OS". Leave out entirely for anything new rather than a correction.' },
       },
       required: ['fact', 'kind'],
@@ -3606,7 +3608,7 @@ function getSessions(): SessionSummary[] {
   return (store.get('memory.sessions') as SessionSummary[] | undefined) ?? [];
 }
 
-function addMemory(text: string, kind: MemoryKind = 'fact', subject?: string) {
+function addMemory(text: string, kind: MemoryKind = 'fact', subject?: string, extra: { source?: MemorySource; predicate?: string; object?: string } = {}) {
   const fact = text.trim();
   if (!fact) return null;
   // Turned away here rather than in the tool handler, so that nothing which can
@@ -3617,7 +3619,10 @@ function addMemory(text: string, kind: MemoryKind = 'fact', subject?: string) {
     console.log(`[memory] not worth keeping: "${fact.slice(0, 60)}"`);
     return { created: false, record: null };
   }
-  const { memories, created, record } = rememberInto(getMemories(), { text: fact, kind, subject, id: randomUUID(), now: new Date().toISOString() });
+  const { memories, created, record } = rememberInto(getMemories(), {
+    text: fact, kind, subject, id: randomUUID(), now: new Date().toISOString(),
+    source: extra.source, predicate: extra.predicate, object: extra.object,
+  });
   setMemories(pruneMemories(memories, MAX_MEMORIES));
   return { created, record };
 }
@@ -4705,11 +4710,13 @@ async function runChatTool(call: ToolCall, latestUserMessage: string): Promise<s
       kind = 'fact';
     }
     const subject = typeof args.subject === 'string' && args.subject.trim() ? args.subject.trim() : undefined;
+    const predicate = typeof args.predicate === 'string' && args.predicate.trim() ? args.predicate.trim() : undefined;
+    const object = typeof args.object === 'string' && args.object.trim() ? args.object.trim() : undefined;
     // Found before the save, against what is active right now — searching after
     // would risk the new record matching its own hint back to itself.
     const replaces = typeof args.replaces === 'string' && args.replaces.trim() ? args.replaces.trim() : undefined;
     const outdated = replaces ? findSuperseded(getMemories(), replaces) : null;
-    const saved = addMemory(fact, kind, subject);
+    const saved = addMemory(fact, kind, subject, { source: 'explicit', predicate, object });
     if (!saved) return JSON.stringify({ error: 'fact is required.' });
     if (!saved.record) {
       // Said back plainly, because the alternative is her announcing that she
@@ -7711,7 +7718,7 @@ app.whenReady().then(() => {
   ipcMain.handle('profile:get', () => getProfile());
   ipcMain.handle('profile:set', (_e, profile: Profile) => { store.set('profile', profile); return getProfile(); });
   ipcMain.handle('memory:list', () => getMemories());
-  ipcMain.handle('memory:add', (_e, text: string, kind: MemoryKind = 'fact') => { addMemory(text, kind); return getMemories(); });
+  ipcMain.handle('memory:add', (_e, text: string, kind: MemoryKind = 'fact') => { addMemory(text, kind, undefined, { source: 'explicit' }); return getMemories(); });
   ipcMain.handle('memory:sessions', () => getSessions());
   ipcMain.handle('memory:forgetSessions', () => { store.set('memory.sessions', []); return []; });
   ipcMain.handle('memory:remove', (_e, id: string) => { setMemories(getMemories().filter(memory => memory.id !== id)); return getMemories(); });

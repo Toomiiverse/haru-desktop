@@ -95,7 +95,8 @@ export interface JournalTrend { days: number; mood?: number; anxiety?: number; e
 export interface RoamConfig { enabled: boolean; restlessness: number; avoidFullscreen: boolean; }
 export interface Profile { nickname: string; occupation: string; about: string; }
 export type MemoryKind = 'preference' | 'relationship' | 'event' | 'fact';
-export interface Memory { id: string; text: string; kind: MemoryKind; subject?: string; createdAt: string; lastSeenAt: string; mentions: number; }
+export type MemoryStatus = 'active' | 'dormant' | 'archived';
+export interface Memory { id: string; text: string; kind: MemoryKind; subject?: string; createdAt: string; lastSeenAt: string; mentions: number; confidence?: number; importance?: number; source?: string; status?: MemoryStatus; memoryType?: string; }
 export interface SessionSummary { day: string; summary: string; createdAt: string; }
 export interface ProviderConfig { provider: 'ollama' | 'openai' | 'xai' | 'venice'; model: string; endpoint: string; temperature: number; }
 // 'windows' is spoken by the renderer through the built-in SAPI voices; the rest

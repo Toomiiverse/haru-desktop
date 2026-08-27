@@ -421,6 +421,9 @@ export function ProfileDrawer({ onClose }: { onClose(): void }) {
               <ul className="memory-list">{group.map(memory => <li key={memory.id}>
                 <span>{memory.text}{memory.subject && <em> · {memory.subject}</em>}</span>
                 {memory.mentions >= 3 && <span className="recurring" title={`Mentioned ${memory.mentions} times`}>×{memory.mentions}</span>}
+                {(memory.confidence ?? 1) < 0.6 && <span className="recurring" title="Low confidence — believed on thin evidence">?{Math.round((memory.confidence ?? 0) * 100)}%</span>}
+                {(memory.importance ?? 0) >= 0.8 && <span className="recurring" title="Important — kept regardless of recency">★</span>}
+                {memory.status && memory.status !== 'active' && <span className="recurring" title={memory.status}>{memory.status[0].toUpperCase()}</span>}
                 <button className="remove-model" onClick={async () => setMemories(await window.haru!.memory.remove(memory.id))} aria-label={`Forget: ${memory.text}`}><Trash2 size={12}/></button>
               </li>)}</ul></div>;
           })}

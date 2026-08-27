@@ -76,15 +76,35 @@ test('backup copies both files and rotation keeps only maxBackups', () => {
   assert.equal(existsSync(path.join(dir, backups[0])), true);
 });
 
-test('migrate stamps the schema version and is idempotent', () => {
+test('migrate is idempotent after the first run', () => {
   const { store } = makeStore();
-  const first = store.migrate();
-  assert.equal(first.from, 0);
-  assert.equal(first.to, SCHEMA_VERSION);
-  assert.deepEqual(first.steps, []);
-  assert.equal(store.get('schema.version'), SCHEMA_VERSION);
+  store.migrate();
   const again = store.migrate();
   assert.equal(again.steps.length, 0);
+  assert.equal(again.to, SCHEMA_VERSION);
+});
+
+test('migrate runs the registered steps and enriches legacy memories', () => {
+  const { store } = makeStore();
+  store.set('memories', [
+    { id: 'old1', text: 'Dislikes being nagged', createdAt: '2026-07-01T00:00:00.000Z', mentions: 3 },
+  ]);
+  const report = store.migrate();
+  assert.equal(report.from, 0);
+  assert.equal(report.to, SCHEMA_VERSION);
+  assert.equal(report.steps.length, MIGRATIONS.length);
+  assert.equal(store.get('schema.version'), SCHEMA_VERSION);
+  const migrated = store.getMemories();
+  assert.equal(migrated.length, 1);
+  assert.equal(typeof migrated[0].confidence, 'number');
+  assert.equal(typeof migrated[0].importance, 'number');
+  assert.equal(migrated[0].source, 'conversation');
+  assert.equal(migrated[0].status, 'active');
+});
+
+test('migrations registry carries the v2 step', () => {
+  assert.equal(MIGRATIONS.length >= 1, true);
+  assert.equal(MIGRATIONS[0].version, 2);
 });
 
 test('verify detects a corrupt config file', () => {
@@ -108,6 +128,7 @@ test('recoverBackups restores the newest backup over a corrupt file', () => {
   assert.equal(reopened.get('value'), 'precious');
 });
 
-test('migrations registry is empty until later phases fill it', () => {
-  assert.deepEqual(MIGRATIONS, []);
+test('migrations registry carries the v2 step', () => {
+  assert.equal(MIGRATIONS.length >= 1, true);
+  assert.equal(MIGRATIONS[0].version, 2);
 });

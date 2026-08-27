@@ -15,6 +15,25 @@
 export const MEMORY_KINDS = ['preference', 'relationship', 'event', 'fact'] as const;
 export type MemoryKind = typeof MEMORY_KINDS[number];
 
+/** Where a memory came from. Reliable sources start with higher confidence. */
+export type MemorySource = 'conversation' | 'explicit' | 'inferred' | 'activity' | 'import';
+
+/** Lifecycle state. DORMANT and ARCHIVED are set by decay, never silently. */
+export type MemoryStatus = 'active' | 'dormant' | 'archived';
+
+/** The kind of knowing, alongside the interaction kind in `kind`. */
+export type MemoryType = 'semantic' | 'episodic' | 'procedural' | 'relational';
+
+export type EvidenceKind = 'statement' | 'repeat' | 'confirmation' | 'contradiction' | 'inference';
+
+/** One observed moment behind a memory — what makes it worth believing. */
+export type EvidenceEntry = {
+  at: string;
+  kind: EvidenceKind;
+  source: MemorySource;
+  detail?: string;
+};
+
 export type MemoryRecord = {
   id: string;
   text: string;
@@ -32,6 +51,24 @@ export type MemoryRecord = {
    * surfacing in selectMemories but survives a prune the same as anything else.
    */
   supersededBy?: string;
+  // v2 — filled by migrateMemories for legacy records; optional so old data
+  // stays valid without a rewrite.
+  /** How much evidence this memory has behind it, 0..1. */
+  confidence?: number;
+  /** How much this matters independent of recency, 0..1. */
+  importance?: number;
+  source?: MemorySource;
+  status?: MemoryStatus;
+  memoryType?: MemoryType;
+  /** Optional triple slots so relational memories can later become a graph. */
+  predicate?: string;
+  object?: string;
+  /** The observed moments behind this memory, oldest first. */
+  evidence?: EvidenceEntry[];
+  /** Ids of memories folded into this one by consolidation. */
+  mergedFrom?: string[];
+  /** Ids of memories that claim the opposite of this one. */
+  conflictsWith?: string[];
 };
 
 export type SessionSummary = {
@@ -181,24 +218,45 @@ export function isWorthRemembering(text: string): boolean {
  */
 export function rememberInto(
   memories: MemoryRecord[],
-  incoming: { text: string; kind: MemoryKind; subject?: string; id: string; now: string },
+  incoming: { text: string; kind: MemoryKind; subject?: string; id: string; now: string; source?: MemorySource; predicate?: string; object?: string },
 ): { memories: MemoryRecord[]; created: boolean; record: MemoryRecord } {
   const text = incoming.text.trim();
   const existing = memories.find(memory => isSameMemory(memory.text, text));
   if (existing) {
+    const base = baseConfidence(existing.source ?? 'conversation');
     const updated: MemoryRecord = {
       ...existing,
       // The newer phrasing wins when it carries more detail.
       text: text.length > existing.text.length ? text : existing.text,
       subject: existing.subject ?? incoming.subject,
+      predicate: existing.predicate ?? incoming.predicate,
+      object: existing.object ?? incoming.object,
       lastSeenAt: incoming.now,
       mentions: existing.mentions + 1,
+      // A consistent repeat is fresh evidence for the same claim.
+      confidence: mentionConfidence(existing.mentions + 1, base),
+      evidence: [...(existing.evidence ?? []), { at: incoming.now, kind: 'repeat', source: existing.source ?? 'conversation' }],
+      importance: Math.max(existing.importance ?? 0, scoreImportance(existing.kind, existing.text)),
     };
     return { memories: memories.map(memory => memory.id === existing.id ? updated : memory), created: false, record: updated };
   }
+  const source = incoming.source ?? 'conversation';
   const record: MemoryRecord = {
-    id: incoming.id, text, kind: incoming.kind, subject: incoming.subject,
-    createdAt: incoming.now, lastSeenAt: incoming.now, mentions: 1,
+    id: incoming.id,
+    text,
+    kind: incoming.kind,
+    subject: incoming.subject,
+    predicate: incoming.predicate,
+    object: incoming.object,
+    createdAt: incoming.now,
+    lastSeenAt: incoming.now,
+    mentions: 1,
+    confidence: baseConfidence(source),
+    importance: scoreImportance(incoming.kind, text),
+    source,
+    status: 'active',
+    memoryType: guessMemoryType(incoming.kind, text),
+    evidence: [{ at: incoming.now, kind: 'statement', source }],
   };
   return { memories: [...memories, record], created: true, record };
 }
@@ -283,7 +341,12 @@ export function selectMemories(memories: MemoryRecord[], message: string, limit 
 function describe(memory: MemoryRecord) {
   const recurring = memory.mentions >= RECURRING_THRESHOLD ? ` [comes up often, ${memory.mentions} times]` : '';
   const subject = memory.subject ? ` (${memory.subject})` : '';
-  return `${memory.text}${subject}${recurring}`;
+  const important = (memory.importance ?? 0) >= 0.8 ? ' [important to them]' : '';
+  // Uncertainty is worth naming; certainty is the default and stays silent so
+  // the block does not grow into trivia.
+  const uncertain = (memory.confidence ?? 1) < 0.6 ? ` [not certain — ${Math.round((memory.confidence ?? 0) * 100)}%]` : '';
+  const stale = memory.status === 'dormant' ? ' [has not come up in a while]' : '';
+  return `${memory.text}${subject}${recurring}${important}${uncertain}${stale}`;
 }
 
 /**
@@ -336,14 +399,135 @@ export function migrateMemories(saved: unknown, now: string): MemoryRecord[] {
     if (!entry || typeof entry !== 'object') return [];
     const record = entry as Partial<MemoryRecord>;
     if (typeof record.text !== 'string' || !record.text.trim()) return [];
+    const mentions = typeof record.mentions === 'number' && record.mentions > 0 ? record.mentions : 1;
+    const kind = MEMORY_KINDS.includes(record.kind as MemoryKind) ? record.kind as MemoryKind : 'fact';
+    const text = record.text.trim();
+    const createdAt = typeof record.createdAt === 'string' ? record.createdAt : now;
     return [{
       id: typeof record.id === 'string' ? record.id : `${Date.now()}-${Math.random().toString(36).slice(2)}`,
-      text: record.text.trim(),
-      kind: MEMORY_KINDS.includes(record.kind as MemoryKind) ? record.kind as MemoryKind : 'fact',
+      text,
+      kind,
       subject: typeof record.subject === 'string' ? record.subject : undefined,
-      createdAt: typeof record.createdAt === 'string' ? record.createdAt : now,
+      createdAt,
       lastSeenAt: typeof record.lastSeenAt === 'string' ? record.lastSeenAt : (typeof record.createdAt === 'string' ? record.createdAt : now),
-      mentions: typeof record.mentions === 'number' && record.mentions > 0 ? record.mentions : 1,
+      mentions,
+      // v2 fields. Legacy records have none of them; they are derived here so
+      // old data gains the new lifecycle without being rewritten by hand, and
+      // the derivation is idempotent — a record that already has a field keeps
+      // it.
+      confidence: typeof record.confidence === 'number' && Number.isFinite(record.confidence)
+        ? Math.min(1, Math.max(0, record.confidence))
+        : mentionConfidence(mentions, baseConfidence('conversation')),
+      importance: typeof record.importance === 'number' && Number.isFinite(record.importance)
+        ? Math.min(1, Math.max(0, record.importance))
+        : scoreImportance(kind, text),
+      source: record.source === 'conversation' || record.source === 'explicit' || record.source === 'inferred' || record.source === 'activity' || record.source === 'import'
+        ? record.source
+        : 'conversation',
+      status: record.status === 'active' || record.status === 'dormant' || record.status === 'archived' ? record.status : 'active',
+      memoryType: record.memoryType === 'semantic' || record.memoryType === 'episodic' || record.memoryType === 'procedural' || record.memoryType === 'relational'
+        ? record.memoryType
+        : guessMemoryType(kind, text),
+      predicate: typeof record.predicate === 'string' ? record.predicate : undefined,
+      object: typeof record.object === 'string' ? record.object : undefined,
+      evidence: Array.isArray(record.evidence)
+        ? record.evidence.filter(entry => entry && typeof entry.at === 'string' && (entry.kind === 'statement' || entry.kind === 'repeat' || entry.kind === 'confirmation' || entry.kind === 'contradiction' || entry.kind === 'inference'))
+        : [{ at: createdAt, kind: 'statement', source: 'conversation' }],
+      mergedFrom: Array.isArray(record.mergedFrom) ? record.mergedFrom.filter(id => typeof id === 'string') : undefined,
+      conflictsWith: Array.isArray(record.conflictsWith) ? record.conflictsWith.filter(id => typeof id === 'string') : undefined,
     }];
   });
 }
+
+// -- confidence --------------------------------------------------------------
+
+export const CONFIDENCE = {
+  explicitBase: 0.9,
+  conversationBase: 0.8,
+  inferredBase: 0.55,
+  activityBase: 0.45,
+  repeatedStep: 0.03,
+  confirmationStep: 0.05,
+  contradictionPenalty: 0.3,
+  max: 0.98,
+  min: 0.1,
+} as const;
+
+/** How believable a brand-new memory is, from where it came. */
+export function baseConfidence(source: MemorySource): number {
+  switch (source) {
+    case 'explicit': return CONFIDENCE.explicitBase;
+    case 'inferred': return CONFIDENCE.inferredBase;
+    case 'activity': return CONFIDENCE.activityBase;
+    case 'import': return CONFIDENCE.conversationBase;
+    default: return CONFIDENCE.conversationBase;
+  }
+}
+
+const round2 = (value: number) => Math.round(value * 100) / 100;
+
+/** Confidence grows with every consistent repeat, capped so no memory is ever
+ *  held as certain beyond reasonable doubt. */
+export function mentionConfidence(mentions: number, base: number): number {
+  const gained = Math.max(0, (mentions - 1)) * CONFIDENCE.repeatedStep;
+  return round2(Math.min(CONFIDENCE.max, Math.max(CONFIDENCE.min, base + gained)));
+}
+
+export function withConfirmation(confidence: number): number {
+  return round2(Math.min(CONFIDENCE.max, confidence + CONFIDENCE.confirmationStep));
+}
+
+export function withContradiction(confidence: number): number {
+  return round2(Math.max(CONFIDENCE.min, confidence - CONFIDENCE.contradictionPenalty));
+}
+
+// -- importance --------------------------------------------------------------
+
+/**
+ * Importance is independent of recency on purpose: a fact mentioned yesterday
+ * must not outrank one from months ago that shapes every conversation. These
+ * are deterministic heuristics rather than another model call — the judgement
+ * has to be explainable and cheap (memory.ts already refuses to trust the
+ * model with worthiness, see isWorthRemembering).
+ */
+
+const IMPORTANT_TOPICS = /\b(medicat\w+|allerg\w+|diabet\w+|health\w+|project\w*|compan\w+|business\w*|work\b|job\b|income\w*|rent\w*|mortgage\w*|deadline\w*|important\b|never\s+forget|birthday\w*|anniversar\w*|wedding\w*|address\b|phone\w*\s+number\b)\b/i;
+
+const TRIVIAL_TOPICS = /\b(youtube|video\b|clip\b|stream\b|episode\b|manga\b|anime\b|game\b|steam\b|browser\b|tab\b|window\b|download\w*|watched\b|played\b)\b/i;
+
+export function scoreImportance(kind: MemoryKind, text: string): number {
+  const said = text ?? '';
+  switch (kind) {
+    // These shape how she talks to him — always in the prompt, so they are
+    // always important.
+    case 'preference': return 0.85;
+    case 'relationship': return 0.8;
+    // A moment in time matters while it is current and as history afterwards.
+    case 'event': return 0.45;
+    default: {
+      if (IMPORTANT_TOPICS.test(said)) return 0.8;
+      if (TRIVIAL_TOPICS.test(said)) return 0.2;
+      // Something nameable — a person, a place, a project — is worth more than
+      // a generic sentence about now.
+      if (namesSomething(said)) return 0.6;
+      return 0.4;
+    }
+  }
+}
+
+// -- memory types ------------------------------------------------------------
+
+/** How a memory behaves, derived from its kind and wording. */
+export function guessMemoryType(kind: MemoryKind, text: string): MemoryType {
+  switch (kind) {
+    case 'relationship': return 'relational';
+    case 'event': return 'episodic';
+    case 'preference': return PROCEDURAL_WORDING.test(text ?? '') ? 'procedural' : 'semantic';
+    default: return PROCEDURAL_WORDING.test(text ?? '') ? 'procedural' : 'semantic';
+  }
+}
+
+// A tendency rather than a stance: "usually", "commonly", "tends to" describe
+// how the user goes about things; "does not like to X" is a preference about
+// how Haru behaves, not a pattern of the user's own doing.
+const PROCEDURAL_WORDING = /\b(often|usually|commonly|always|tends? to|prefers? to|typically)\b/i;
