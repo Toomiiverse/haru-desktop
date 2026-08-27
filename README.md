@@ -210,6 +210,59 @@ The whole layer is optional and off unless a document is given to her. Embedding
 happens through the same Ollama endpoint she already talks to, so there is no new
 database, no new service and no new dependency.
 
+## Memory architecture
+
+Her memory of you lives in `config.json` as `memories` and `memory.sessions`,
+and it is a lifecycle, not a pile:
+
+- **Observe → extract → classify**: the `remember_about_user` tool hands the
+  model's candidates to `memory.ts`, where the worthiness gate (`isWorthRemembering`)
+  rejects what is true of anyone, true of nowhere, true only of now, or an
+  instruction not to mention something. What survives is scored: **confidence**
+  from how it was learned (explicit 0.9, inferred 0.55, activity 0.45) and how
+  often it has held up (repeats add evidence, capped at 0.98); **importance**
+  from what it is (preferences and relationships 0.8+, medication and project
+  facts high, video/game trivia near zero) independent of recency.
+- **Retrieve**: each message selects memories by relevance — semantic similarity
+  (the same Ollama embedder the knowledge layer uses, refreshed in the
+  background; keyword overlap as fallback) weighted by importance, confidence
+  and a recency half-life that is ten years for what matters and six weeks for
+  trivia. Preferences, relationships and anything of importance 0.8+ are always
+  offered. A record of the last retrieval (query, entries, each factor) is kept
+  for the inspector in the profile drawer.
+- **Consolidate**: once after boot and then daily, duplicates and near-duplicates
+  merge — by keyword overlap, or semantic similarity so "nagged" and "corrected"
+  can be seen as the same stance — and contradictions are flagged with the older
+  claim's confidence reduced. Merges keep provenance: `mergedFrom` ids and the
+  evidence log survive, nothing is destroyed.
+- **Decay and forget**: low-importance memories drift DORMANT after two idle
+  half-lives, ARCHIVED after four, forgotten after six; high-importance ones
+  never move on their own. Every departure — decay, consolidation, supersession,
+  pruning at the 60-memory cap — is written to the forgetting log, so forgetting
+  is explainable from the profile drawer, not silent. Pruning itself uses the
+  lifecycle score and never evicts preferences, relationships, high-importance
+  records or deliberately archived ones.
+- **Episodic**: each finished day becomes a one-line summary (backfilled for any
+  day that was missed when the model was down or the app was closed), and a
+  second pass promotes up to three important events a day into memory. Raw
+  transcripts are kept 90 days and then rolled into summaries only.
+- **Activity**: raw telemetry is never stored; the `haunts` list holds places,
+  not noise — valueless entries expire after a week, telemetry-shaped keys
+  after a day, and a place is only promoted to memory after it shows a pattern
+  (repeated visits or a stay spread across days).
+
+All of it sits behind `electron/store.ts`, the only module that reads or writes
+the store files. The facade is deliberately small — typed accessors, atomic
+writes, backups before any schema migration, corruption recovery, schema
+versioning, and Windows ACL hardening — so the JSON backing (config.json +
+knowledge.json) can later be replaced with SQLite, Postgres, a vector store or a
+graph database without touching any caller. No such move is planned until JSON
+demonstrably stops being enough; until then, no new database, no new service.
+
+Carrying her to another machine: `scripts/export-personality.cjs` writes the
+personality state without the diary — chat archives and check-in notes are
+stripped unless asked for, machine keys and secrets never leave.
+
 Put it on your path with a symlink and it behaves like any other command:
 
 ```sh
