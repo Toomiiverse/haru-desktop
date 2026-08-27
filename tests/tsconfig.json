@@ -23,6 +23,7 @@
     "../electron/retrieval.ts",
     "../electron/context.ts",
     "../electron/retrieveContext.ts",
+    "../electron/store.ts",
     "../electron/obsidian.ts",
     "../electron/system.ts",
     "../electron/systemState.ts"

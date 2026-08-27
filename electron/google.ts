@@ -1,7 +1,6 @@
 import { net, safeStorage, shell } from 'electron';
 import { createHash, randomBytes } from 'node:crypto';
 import { createServer } from 'node:http';
-import type Store from 'electron-store';
 import { formatTimeOfDay, parseTimeOfDay } from './dates';
 
 // Desktop OAuth uses a loopback redirect: Google sends the code back to a
@@ -26,7 +25,10 @@ export type CalendarEvent = { id: string; title: string; date: string; time?: st
 export type GoogleTask = { id: string; title: string; date: string; done: boolean; completedAt?: string };
 type KeptForSync = { id: string; title: string; date: string; time?: string; kind: 'task' | 'event'; googleEventId?: string };
 
-type StoreLike = Pick<Store<Record<string, unknown>>, 'get' | 'set' | 'delete'>;
+// The persistence facade's surface — google.ts never touches files, only the
+// store handed to it. Values are unknown on read (callers cast), matching how
+// the facade exposes the store.
+type StoreLike = { get(key: string, defaultValue?: unknown): unknown; set(key: string, value: unknown): void; delete(key: string): void };
 
 let accessToken: { value: string; expiresAt: number } | null = null;
 

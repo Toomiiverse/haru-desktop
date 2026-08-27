@@ -6,7 +6,7 @@ import { appendFileSync, copyFileSync, existsSync, readdirSync, mkdirSync, readF
 import { execFile, spawn } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import AdmZip from 'adm-zip';
-import Store from 'electron-store';
+import { HaruStore } from './store';
 import { formatTimeOfDay, localDateKey, parseTimeOfDay, resolveDate, zonedNow } from './dates';
 import { connectGoogle, disconnectGoogle, googleStatus, pullEvents, pullTasks, pushItem, pushTask, removeItem, removeTask, saveCredentials } from './google';
 import { afterCooldown, afterEgoCooldown, afterPoke, egoInstruction, goodnightInstruction, IGNORE_THRESHOLD, isGoodnight, isIgnoring, isLowEffort, isRedo, leverageInstruction, moodInstruction, nextEgo, nextIrritation, notTwiceInstruction, shoutInstruction, shoutState, type ShoutState } from './mood';
@@ -63,7 +63,7 @@ import { BREVITY, summonedLine } from './summoned';
 import { CHOICES_TOOL, readChoices } from './choices';
 import { quickAnswer, type AgendaLine } from './quick';
 import { newTrace } from './trace';
-import { KNOWLEDGE_CATEGORIES, deleteDocument, emptyKnowledge, findDocumentBySource, knowledgeStats, loadKnowledge, normalizeKnowledge, readKnowledgeConfig, reconcileChunkIds, saveKnowledge, type KnowledgeCategory, type KnowledgeConfig, type KnowledgeStore } from './knowledge';
+import { KNOWLEDGE_CATEGORIES, deleteDocument, emptyKnowledge, findDocumentBySource, knowledgeStats, readKnowledgeConfig, reconcileChunkIds, type KnowledgeCategory, type KnowledgeConfig, type KnowledgeStore } from './knowledge';
 import { baseExtractors, ingestFile, type Extractor, type IngestResult } from './ingestion';
 import { cachedEmbedder, createEmbedder, EmbeddingCache, type Embedder } from './embeddings';
 import { retrieveContext } from './retrieveContext';
@@ -100,13 +100,27 @@ const GOOGLE_SYNC_INTERVAL_MS = 15 * 60_000;
 const GOOGLE_SYNC_STARTUP_DELAY_MS = 10_000;
 const GOOGLE_FOCUS_SYNC_MIN_GAP_MS = 30_000;
 
-const store = new Store<Record<string, unknown>>();
 const live2dRoots = new Map<string, string>();
 let mainWindow: BrowserWindow | null = null;
 let companionWindow: BrowserWindow | null = null;
 
 const KNOWLEDGE_PDF_CHARS = 200_000;
 const knowledgeFile = process.env.HARU_KNOWLEDGE_FILE ? process.env.HARU_KNOWLEDGE_FILE : path.join(app.getPath('userData'), 'knowledge.json');
+
+// The one persistence facade. It owns both store files; nothing else reads or
+// writes them. Opening can fail on a corrupt file, in which case the newest
+// backup is restored and we try once more before giving up.
+let store: HaruStore;
+try {
+  store = new HaruStore({ knowledgeFile });
+} catch (error) {
+  console.warn('[store] could not open the store:', error instanceof Error ? error.message : error);
+  if (!HaruStore.recoverBackups({ knowledgeFile })) throw error;
+  store = new HaruStore({ knowledgeFile });
+}
+store.migrate();
+store.hardenPermissions();
+
 let knowledgeStore: KnowledgeStore = emptyKnowledge();
 const knowledgeEmbeddingCache = new EmbeddingCache();
 let knowledgeSaveTimer: ReturnType<typeof setTimeout> | null = null;
@@ -3614,7 +3628,7 @@ function getKnowledgeConfig(): KnowledgeConfig {
 
 function persistKnowledge() {
   try {
-    saveKnowledge(knowledgeFile, knowledgeStore);
+    store.setKnowledge(knowledgeStore);
   } catch (error) {
     console.warn('[knowledge] could not save:', error instanceof Error ? error.message : String(error));
   }
@@ -7564,7 +7578,7 @@ app.whenReady().then(() => {
   // Loaded here rather than at the top because app.getPath needs the app ready
   // — but the file itself is a quiet local read, and a store that cannot be
   // read is an empty one, never a crash.
-  knowledgeStore = normalizeKnowledge(loadKnowledge(knowledgeFile));
+  knowledgeStore = store.getKnowledge();
   const knowledgeSummary = knowledgeStats(knowledgeStore);
   console.log(`[knowledge] loaded ${knowledgeSummary.documents} document(s), ${knowledgeSummary.chunks} chunk(s) from ${knowledgeFile}${knowledgeSummary.embedModels.length ? ` (${knowledgeSummary.embedModels.join(', ')})` : ''}`);
   // A saved vault keeps itself current without being asked: a first check a
