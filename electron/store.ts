@@ -83,10 +83,18 @@ export type HaruStoreOptions = {
   maxBackups?: number;
 };
 
+// The counter is what makes two backups in the same millisecond two files.
+// Found by the server: its disk is fast enough that back-to-back backups landed
+// on identical stamps, and the second copy silently overwrote the first — a
+// backup eating the previous backup, which is the one failure a backup must not
+// have. Appended after the milliseconds so names still sort by age.
+let backupSequence = 0;
+
 function backupStamp(): string {
   const pad = (value: number) => String(value).padStart(2, '0');
   const now = new Date();
-  return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}-${String(now.getMilliseconds()).padStart(3, '0')}`;
+  backupSequence = (backupSequence + 1) % 1000;
+  return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}-${String(now.getMilliseconds()).padStart(3, '0')}-${String(backupSequence).padStart(3, '0')}`;
 }
 
 export class HaruStore {
