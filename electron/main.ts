@@ -5436,6 +5436,19 @@ async function nudgeForPhone(): Promise<{ line: string; about: string } | null> 
 
 // ---- Reaching her from Discord --------------------------------------------
 
+/**
+ * Discord is switched off in this build, on request, while the rest of the way
+ * in is being worked on.
+ *
+ * Done here rather than by clearing the setting, because the setting is theirs:
+ * the token stays encrypted where it was, the owner id and the channel roles
+ * stay written down, and turning it back on is this one constant rather than
+ * setting the whole thing up again. Every path out to Discord — answering,
+ * pestering, forwarding an aside — already checks that the link exists, so
+ * refusing to open it is the whole of the off switch.
+ */
+const DISCORD_DISABLED = true;
+
 let discord: DiscordLink | null = null;
 let discordUser = '';
 let discordTrouble = '';
@@ -5866,6 +5879,12 @@ async function forwardAsideToDiscord(aside: Aside) {
 }
 
 async function startDiscord() {
+  if (DISCORD_DISABLED) {
+    // Said out loud in the settings panel, so the toggle does not look broken.
+    discordTrouble = 'Switched off in this build.';
+    console.log('[discord] not connecting — switched off in this build');
+    return;
+  }
   const config = getDiscordConfig();
   const token = getDiscordToken();
   if (!config.enabled || !token || !config.ownerId) return;
