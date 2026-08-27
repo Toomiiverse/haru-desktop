@@ -63,6 +63,417 @@ const SHELL = `
   .err { color: oklch(72% 0.16 25); min-height: 1.4em; font-size: .9rem; }
 `;
 
+// Her on stage: the bloub (jeremy-prt/bloub, MIT) bot engine, ported to plain
+// JS for this no-build page. One black shape morphing through idle / wink /
+// wide / notify, the two eyes as holes punched in the body, gaze drift, breathing
+// and blinking. No library, no clock state outside the block — sample(t) is a
+// pure function of time, and every constant below is a measurement off the
+// reference video, not a choice. The block builds and runs itself on #stage.
+const BLOUB = `
+(() => {
+  const TAU = Math.PI * 2;
+  const clamp = (v, lo = 0, hi = 1) => v < lo ? lo : v > hi ? hi : v;
+  const lerp = (a, b, t) => a + (b - a) * t;
+  const r2 = (v) => Math.round(v * 100) / 100;
+  const easeOutQuint = (t) => 1 - (1 - t) ** 5;
+  const loopNoise = (t, period, seed = 0) => {
+    const p = (t / period) * TAU;
+    return 0.55 * Math.sin(p + seed) + 0.3 * Math.sin(2 * p + seed * 1.7 + 1.1) + 0.15 * Math.sin(3 * p + seed * 2.3 + 2.4);
+  };
+  const createRng = (seed) => {
+    let a = seed >>> 0;
+    return () => {
+      a = (a + 0x6d2b79f5) >>> 0;
+      let t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  };
+
+  // The measured frame: ball radius 100, viewBox half-side 158.
+  const RAYON = 100, DEMI = 158, VB = 2 * DEMI;
+
+  // Eyes live on a sphere, not flat. Measured, not chosen.
+  const EYE_SPLIT = 15.46, EYE_W = 0.186, EYE_H = 0.412;
+  const REST_GAZE = { yaw: 28.49, pitch: 28.62, roll: -13 };
+
+  const deg = (d) => (d * Math.PI) / 180;
+  const spin = (u, v, a) => {
+    const c = Math.cos(a), s = Math.sin(a);
+    return [
+      [u[0] * c + v[0] * s, u[1] * c + v[1] * s, u[2] * c + v[2] * s],
+      [v[0] * c - u[0] * s, v[1] * c - u[1] * s, v[2] * c - u[2] * s]
+    ];
+  };
+  function eyePoses(gaze, scale, split) {
+    split = split === undefined ? EYE_SPLIT : split;
+    let f = [0, 0, 1], right = [1, 0, 0], down = [0, 1, 0];
+    let s = spin(f, right, deg(gaze.yaw)); f = s[0]; right = s[1];
+    s = spin(down, f, deg(gaze.pitch)); down = s[0]; f = s[1];
+    s = spin(right, down, deg(gaze.roll)); right = s[0]; down = s[1];
+    const build = (side) => {
+      s = spin(f, right, deg(split * side));
+      const ef = s[0], er = s[1];
+      return { x: ef[0] * scale, y: ef[1] * scale, a: er[0], b: er[1], c: down[0], d: down[1], depth: ef[2] };
+    };
+    return [build(-1), build(1)];
+  }
+
+  // Deterministic blink calendar: 1.9-4.6 s apart, the occasional double blink.
+  const BLINK_RNG = createRng(0x5eed);
+  const BLINKS = (() => {
+    const out = []; let t = 1.4;
+    while (t < 900) { out.push(t); t += 1.9 + BLINK_RNG() * 2.7; if (BLINK_RNG() < 0.18) { out.push(t); t += 0.24; } }
+    return out;
+  })();
+  const BLINK_DUR = 0.18;
+  function blinkLid(t) {
+    for (let i = 0; i < BLINKS.length; i++) {
+      const start = BLINKS[i];
+      if (t < start) break;
+      const k = (t - start) / BLINK_DUR;
+      if (k >= 0 && k <= 1) return k < 0.45 ? 1 - k / 0.45 : (k - 0.45) / 0.55;
+    }
+    return 1;
+  }
+  function liveliness(t, opt) {
+    opt = opt || {};
+    const wander = opt.wander === undefined ? 1 : opt.wander;
+    const blink = opt.blink === undefined ? true : opt.blink;
+    const float = opt.float === undefined ? true : opt.float;
+    return {
+      dYaw: (loopNoise(t, 11.3, 0.4) * 5.5 + loopNoise(t, 3.7, 2.1) * 1.6) * wander,
+      dPitch: (loopNoise(t, 9.1, 1.3) * 4.2 + loopNoise(t, 4.3, 0.7) * 1.3) * wander,
+      dRoll: loopNoise(t, 13.7, 3.2) * 2.2 * wander,
+      lid: blink ? blinkLid(t) : 1,
+      driftX: float ? loopNoise(t, 7.9, 1.9) * 0.006 : 0,
+      driftY: float ? loopNoise(t, 5.3, 0.3) * 0.007 : 0,
+      breath: float ? 1 + Math.sin((t / 3.4) * Math.PI * 2) * 0.005 : 1
+    };
+  }
+  const blinkScale = (lid) => 0.06 + 0.94 * clamp(lid);
+
+  // The silhouette is a radial profile sampled at the same 64 angles everywhere,
+  // so any two shapes morph by interpolating radii.
+  const N = 64;
+  const COS = Array.from({ length: N }, (_, i) => Math.cos((i / N) * TAU));
+  const SIN = Array.from({ length: N }, (_, i) => Math.sin((i / N) * TAU));
+  function circle(radius, pose) {
+    const radii = new Array(N); radii.fill(radius);
+    return Object.assign({ radii: radii, rot: 0, cx: 0, cy: 0, sx: 1, sy: 1 }, pose || {});
+  }
+  function toPoints(s, scale, out) {
+    out = out || [];
+    const cr = Math.cos(s.rot), sr = Math.sin(s.rot);
+    for (let i = 0; i < N; i++) {
+      const r = s.radii[i] || 1;
+      const x = r * COS[i], y = r * SIN[i];
+      const rx = x * cr - y * sr, ry = x * sr + y * cr;
+      const p = out[i] || { x: 0, y: 0 };
+      p.x = (rx * s.sx + s.cx) * scale;
+      p.y = (ry * s.sy + s.cy) * scale;
+      out[i] = p;
+    }
+    out.length = N;
+    return out;
+  }
+  function closedPath(pts, tension) {
+    tension = tension === undefined ? 1 / 6 : tension;
+    const n = pts.length;
+    if (n < 3) return '';
+    let d = 'M' + r2(pts[0].x) + ' ' + r2(pts[0].y);
+    for (let i = 0; i < n; i++) {
+      const p0 = pts[(i - 1 + n) % n], p1 = pts[i], p2 = pts[(i + 1) % n], p3 = pts[(i + 2) % n];
+      const c1x = p1.x + (p2.x - p0.x) * tension, c1y = p1.y + (p2.y - p0.y) * tension;
+      const c2x = p2.x - (p3.x - p1.x) * tension, c2y = p2.y - (p3.y - p1.y) * tension;
+      d += 'C' + r2(c1x) + ' ' + r2(c1y) + ' ' + r2(c2x) + ' ' + r2(c2y) + ' ' + r2(p2.x) + ' ' + r2(p2.y);
+    }
+    return d + 'Z';
+  }
+  function radiusAtAngle(radii, angle) {
+    const t = ((((angle / TAU) % 1) + 1) % 1) * N;
+    const i = Math.floor(t);
+    return lerp(radii[i % N] || 1, radii[(i + 1) % N] || 1, t - i);
+  }
+  function capsulePath(w, h) {
+    const hw = Math.max(w, 0.01) / 2, hh = Math.max(h, 0.01) / 2, r = Math.min(hw, hh);
+    return 'M' + r2(-hw) + ' ' + r2(-hh + r) + 'A' + r2(r) + ' ' + r2(r) + ' 0 0 1 ' + r2(-hw + r) + ' ' + r2(-hh) + 'L' + r2(hw - r) + ' ' + r2(-hh) + 'A' + r2(r) + ' ' + r2(r) + ' 0 0 1 ' + r2(hw) + ' ' + r2(-hh + r) + 'L' + r2(hw) + ' ' + r2(hh - r) + 'A' + r2(r) + ' ' + r2(r) + ' 0 0 1 ' + r2(hw - r) + ' ' + r2(hh) + 'L' + r2(-hw + r) + ' ' + r2(hh) + 'A' + r2(r) + ' ' + r2(r) + ' 0 0 1 ' + r2(-hw) + ' ' + r2(hh - r) + 'Z';
+  }
+
+  // Notification pastille, measured off the video: on the circumference at -42deg.
+  const NOTIF_BLUE = '#2496e8', NOTIF_ANGLE = -42, NOTIF_DIST = 1.003, NOTIF_R = 0.15, NOTIF_POP = 1.14, NOTIF_MARGIN = 0.054;
+
+  const pair = (w, h) => [{ w: w, h: h, open: 1 }, { w: w, h: h, open: 1 }];
+  function base(over) {
+    return Object.assign({
+      sil: circle(1), offX: 0, offY: 0,
+      gaze: { yaw: REST_GAZE.yaw, pitch: REST_GAZE.pitch, roll: REST_GAZE.roll },
+      split: EYE_SPLIT, eyes: pair(EYE_W, EYE_H), eyeAlpha: 1, bodyAlpha: 1,
+      dots: [], arcs: [], notif: null, dotsBehind: false
+    }, over || {});
+  }
+  // The four core states. morph is the entry fade (measured exponential ease-out);
+  // blinkIn masks a shape change with a blink, as in the reference.
+  const STATES = {
+    idle:   { id: 'idle',   morph: 0.45, blinkIn: false, duration: 2.4, pose: () => base() },
+    wink:   { id: 'wink',   morph: 0.3,  blinkIn: true,  duration: 1.6, pose: () => base({ gaze: { yaw: -5.37, pitch: 4.55, roll: 6.7 }, split: 16.25, eyes: [{ w: 0.236, h: 0.464, open: 1 }, { w: 0.447, h: 0.089, open: 1 }] }) },
+    wide:   { id: 'wide',   morph: 0.55, blinkIn: true,  duration: 1.8, pose: () => base({ gaze: { yaw: 6.92, pitch: -21.96, roll: 11.6 }, split: 18.43, eyes: pair(0.356, 0.875) }) },
+    notify: { id: 'notify', morph: 0.5,  blinkIn: true,  duration: 2.2, pose: (t) => {
+      const p = clamp(t / 0.45);
+      const pop = 1 + (NOTIF_POP - 1) * Math.sin(p * Math.PI) * (1 - p * 0.35);
+      const r = NOTIF_R * (p < 1 ? pop : 1);
+      const a = (NOTIF_ANGLE * Math.PI) / 180;
+      return base({ gaze: { yaw: -21.94, pitch: -5.82, roll: -12.2 }, split: 18.89, eyes: pair(0.505, 0.498), notif: { x: Math.cos(a) * NOTIF_DIST, y: Math.sin(a) * NOTIF_DIST, r: r, notch: r + NOTIF_MARGIN } });
+    } }
+  };
+  const CYCLE = ['idle', 'wink', 'wide', 'notify'].map(s => ({ state: s, duration: STATES[s].duration }));
+
+  // Clock-free engine: sample(t) is a pure function of time.
+  function BotEngine() {
+    this.scale = RAYON;
+    this.cur = 'idle';
+    this.prev = null;
+    this.departFige = null;
+    this.tCur = 0;
+    this.tPrev = 0;
+    this.blinkAt = -10;
+    this.pts = [];
+    this.look = { yaw: 0, pitch: 0, mix: 0, spin: 0, wander: 1 };
+    this.lookPrev = this.look;
+    this.lookAt = -10;
+    this.lookMorph = 0.24;
+  }
+  const NO_LOOK = { yaw: 0, pitch: 0, mix: 0, spin: 0, wander: 1 };
+  BotEngine.prototype.lookAtTime = function (now) {
+    const k = (now - this.lookAt) / this.lookMorph;
+    if (k >= 1) return this.look;
+    const t = easeOutQuint(clamp(k));
+    const a = this.lookPrev, b = this.look;
+    return { yaw: lerp(a.yaw, b.yaw, t), pitch: lerp(a.pitch, b.pitch, t), mix: lerp(a.mix, b.mix, t), spin: lerp(a.spin, b.spin, t), wander: lerp(a.wander, b.wander, t) };
+  };
+  BotEngine.prototype.setLook = function (look, now, morph) {
+    if (look && !Number.isFinite(look.yaw + look.pitch + look.mix + look.spin + look.wander)) return;
+    this.lookPrev = this.lookAtTime(now);
+    this.look = look || NO_LOOK;
+    this.lookAt = now;
+    this.lookMorph = morph === undefined ? 0.24 : morph;
+  };
+  BotEngine.prototype.posed = function (def, t) { return def.pose(t); };
+  BotEngine.prototype.origine = function (now) {
+    if (this.departFige) return this.departFige;
+    if (!this.prev) return null;
+    return this.posed(STATES[this.prev], Math.max(0, now - this.tPrev));
+  };
+  const lerpEye = (a, b, t) => ({ w: lerp(a.w, b.w, t), h: lerp(a.h, b.h, t), open: lerp(a.open, b.open, t), tilt: lerp(a.tilt || 0, b.tilt || 0, t) });
+  BotEngine.prototype.blendPose = function (a, b, t) {
+    return {
+      sil: {
+        radii: a.sil.radii.map((r, i) => lerp(r, b.sil.radii[i], t)),
+        rot: a.sil.rot + (b.sil.rot - a.sil.rot) * t,
+        cx: lerp(a.sil.cx, b.sil.cx, t), cy: lerp(a.sil.cy, b.sil.cy, t),
+        sx: lerp(a.sil.sx, b.sil.sx, t), sy: lerp(a.sil.sy, b.sil.sy, t)
+      },
+      offX: lerp(a.offX, b.offX, t), offY: lerp(a.offY, b.offY, t),
+      gaze: { yaw: lerp(a.gaze.yaw, b.gaze.yaw, t), pitch: lerp(a.gaze.pitch, b.gaze.pitch, t), roll: lerp(a.gaze.roll, b.gaze.roll, t) },
+      split: lerp(a.split, b.split, t),
+      eyes: [lerpEye(a.eyes[0], b.eyes[0], t), lerpEye(a.eyes[1], b.eyes[1], t)],
+      eyeAlpha: lerp(a.eyeAlpha, b.eyeAlpha, t),
+      bodyAlpha: lerp(a.bodyAlpha, b.bodyAlpha, t),
+      dots: b.dots, arcs: b.arcs,
+      notif: t < 0.5 ? a.notif : b.notif,
+      dotsBehind: t < 0.5 ? a.dotsBehind : b.dotsBehind
+    };
+  };
+  BotEngine.prototype.setState = function (id, now) {
+    if (id === this.cur) return;
+    const morph = STATES[this.cur].morph;
+    const enPleinFondu = this.prev !== null && now - this.tCur < morph;
+    this.departFige = enPleinFondu ? this.poseComposee(now) : null;
+    this.prev = this.cur;
+    this.tPrev = this.tCur;
+    this.cur = id;
+    this.tCur = now;
+    if (STATES[id].blinkIn) this.blinkAt = now;
+  };
+  BotEngine.prototype.poseComposee = function (now) {
+    const def = STATES[this.cur];
+    const pose = this.posed(def, Math.max(0, now - this.tCur));
+    const since = now - this.tCur;
+    if (since >= def.morph) return pose;
+    const origine = this.origine(now);
+    if (!origine) return pose;
+    return this.blendPose(origine, pose, easeOutQuint(clamp(since / def.morph)));
+  };
+  BotEngine.prototype.sample = function (now) {
+    const R = this.scale;
+    const def = STATES[this.cur];
+    let pose = this.posed(def, Math.max(0, now - this.tCur));
+    const since = now - this.tCur;
+    const origine = since < def.morph ? this.origine(now) : null;
+    if (origine) pose = this.blendPose(origine, pose, easeOutQuint(clamp(since / def.morph)));
+
+    const alive = pose.eyeAlpha > 0.01;
+    const look = this.lookAtTime(now);
+    const life = liveliness(now, { wander: alive ? look.wander : 0, blink: alive });
+    const gaze = {
+      yaw: lerp(pose.gaze.yaw, look.yaw, look.mix) + life.dYaw - look.spin,
+      pitch: lerp(pose.gaze.pitch, look.pitch, look.mix) + life.dPitch,
+      roll: pose.gaze.roll + life.dRoll
+    };
+    const forced = clamp((now - this.blinkAt) / 0.2);
+    const forcedLid = forced < 1 ? Math.abs(forced * 2 - 1) : 1;
+    const lid = Math.min(life.lid, forcedLid);
+    const offX = pose.offX + life.driftX;
+    const offY = pose.offY + life.driftY;
+
+    const sil = { radii: pose.sil.radii, rot: pose.sil.rot, cx: pose.sil.cx + offX, cy: pose.sil.cy + offY, sx: pose.sil.sx, sy: pose.sil.sy * life.breath };
+    const bodyPath = closedPath(toPoints(sil, R, this.pts));
+
+    const bodyRadius = (x, y) => radiusAtAngle(pose.sil.radii, Math.atan2(y, x) - pose.sil.rot);
+    const eyes = [];
+    if (pose.eyeAlpha > 0.01) {
+      const poses = eyePoses(gaze, R, pose.split);
+      for (let i = 0; i < 2; i++) {
+        const e = poses[i];
+        if (e.depth <= 0.02) continue;
+        const cfg = pose.eyes[i];
+        const fit = bodyRadius(e.x, e.y);
+        const phi = ((cfg.tilt || 0) * Math.PI) / 180;
+        const cp = Math.cos(phi), sp = Math.sin(phi);
+        const ax = e.a * cp + e.c * sp, ay = e.b * cp + e.d * sp;
+        const cx2 = -e.a * sp + e.c * cp, cy2 = -e.b * sp + e.d * cp;
+        const k = blinkScale(Math.min(lid, cfg.open));
+        eyes.push({
+          d: capsulePath(cfg.w * R, cfg.h * R),
+          matrix: 'matrix(' + r2(ax) + ',' + r2(ay * k) + ',' + r2(cx2) + ',' + r2(cy2 * k) + ',' + r2(e.x * fit + offX * R) + ',' + r2(e.y * fit + offY * R) + ')',
+          alpha: pose.eyeAlpha * clamp(e.depth / 0.12)
+        });
+      }
+    }
+
+    const nFit = pose.notif ? bodyRadius(pose.notif.x, pose.notif.y) : 1;
+    const nx = pose.notif ? (pose.notif.x * nFit + offX) * R : 0;
+    const ny = pose.notif ? (pose.notif.y * nFit + offY) * R : 0;
+    return {
+      bodyPath: bodyPath,
+      bodyAlpha: pose.bodyAlpha,
+      eyes: eyes,
+      notif: pose.notif ? { x: nx, y: ny, r: pose.notif.r * R } : null,
+      notch: pose.notif ? { x: nx, y: ny, r: pose.notif.notch * R } : null
+    };
+  };
+
+  // ---- stage ----------------------------------------------------------
+  const host = document.getElementById('stage');
+  if (!host) return;
+  host.innerHTML = '<svg id="bloub" viewBox="-158 -158 316 316" aria-hidden="true">' +
+    '<defs><mask id="bm" maskUnits="userSpaceOnUse" x="-158" y="-158" width="316" height="316">' +
+    '<path id="bmBody" fill="#fff"/><g id="bmEyes"></g><circle id="bmNotch" fill="#000" r="0" style="display:none"/>' +
+    '</mask></defs>' +
+    '<g id="bo"><path id="bBody" fill="#fff"/><g mask="url(#bm)"><rect x="-158" y="-158" width="316" height="316" fill="#0a0a0c"/></g></g>' +
+    '<circle id="bNotif" fill="#2496e8" r="0" style="display:none"/>' +
+    '</svg>';
+  const svg = document.getElementById('bloub');
+  const bmBody = document.getElementById('bmBody');
+  const bmEyes = document.getElementById('bmEyes');
+  const bmNotch = document.getElementById('bmNotch');
+  const bBody = document.getElementById('bBody');
+  const bo = document.getElementById('bo');
+  const bNotif = document.getElementById('bNotif');
+
+  const engine = new BotEngine();
+  let block = 0, nextAt = Infinity, clock = 0, last = 0, blockStart = 0;
+  function apply(i) {
+    const b = CYCLE[i];
+    blockStart = clock;
+    engine.setState(b.state, clock);
+    nextAt = blockStart + b.duration;
+  }
+  // The page tells her when she is talking: jump the cycle to the notify block
+  // so the pastille pops, then the sequence carries on from there.
+  function flashNotify() {
+    const i = CYCLE.findIndex((b) => b.state === 'notify');
+    if (i < 0) return;
+    block = i;
+    apply(i);
+  }
+  window.bloub = { notify: flashNotify };
+  function draw(frame) {
+    bBody.setAttribute('d', frame.bodyPath);
+    bo.setAttribute('opacity', frame.bodyAlpha);
+    let s = '';
+    for (let i = 0; i < frame.eyes.length; i++) {
+      const e = frame.eyes[i];
+      s += '<path d="' + e.d + '" transform="' + e.matrix + '" opacity="' + r2(e.alpha) + '" fill="#000"/>';
+    }
+    bmEyes.innerHTML = s;
+    if (frame.notch) {
+      bmNotch.setAttribute('cx', frame.notch.x);
+      bmNotch.setAttribute('cy', frame.notch.y);
+      bmNotch.setAttribute('r', frame.notch.r);
+      bmNotch.style.display = '';
+    } else bmNotch.style.display = 'none';
+    if (frame.notif) {
+      bNotif.setAttribute('cx', frame.notif.x);
+      bNotif.setAttribute('cy', frame.notif.y);
+      bNotif.setAttribute('r', frame.notif.r);
+      bNotif.style.display = '';
+    } else bNotif.style.display = 'none';
+  }
+
+  // Pointer follow, mouse only — a finger has no lingering cursor, so on touch
+  // the bot just drifts. The target is measured against the window, not the
+  // avatar, so the gaze saturates at the screen edge whatever her size.
+  const finePointer = window.matchMedia && window.matchMedia('(pointer: fine)').matches;
+  let pointer = null, aiming = false, turnSince = 0;
+  const TURN = 26, YAW_MAX = 16, PITCH_MAX = 13, PITCH = 10, SPIN = 360, TURN_TIME = 1.1;
+  const lookTarget = (nx, ny, tour, hasPointer) => ({
+    yaw: -TURN + nx * YAW_MAX,
+    pitch: PITCH - ny * PITCH_MAX,
+    mix: tour,
+    spin: SPIN * (1 - tour),
+    wander: hasPointer ? 0 : 1
+  });
+  function aim() {
+    if (engine.cur !== 'idle') { release(); return; }
+    const box = svg.getBoundingClientRect();
+    if (!box || box.width === 0 || box.height === 0) return;
+    if (!aiming) turnSince = clock;
+    const hw = Math.max(1, window.innerWidth / 2);
+    const hh = Math.max(1, window.innerHeight / 2);
+    const nx = pointer ? clamp((pointer.x - (box.left + box.width / 2)) / hw, -1, 1) : 0;
+    const ny = pointer ? clamp((pointer.y - (box.top + box.height / 2)) / hh, -1, 1) : 0;
+    const tour = easeOutQuint(clamp((clock - turnSince) / TURN_TIME));
+    engine.setLook(lookTarget(nx, ny, tour, pointer !== null), clock);
+    aiming = true;
+  }
+  function release() {
+    if (!aiming) return;
+    engine.setLook(null, clock, TURN_TIME);
+    aiming = false;
+  }
+  if (finePointer) {
+    window.addEventListener('pointermove', (e) => { if (e.pointerType === 'touch') return; pointer = { x: e.clientX, y: e.clientY }; });
+    document.addEventListener('pointerleave', () => { pointer = null; });
+  }
+
+  function tick(ms) {
+    const dt = last ? Math.min((ms - last) / 1000, 0.064) : 0;
+    last = ms;
+    clock += dt;
+    if (clock >= nextAt) {
+      block = (block + 1) % CYCLE.length;
+      apply(block);
+    }
+    if (finePointer) aim();
+    draw(engine.sample(clock));
+    requestAnimationFrame(tick);
+  }
+  apply(0);
+  requestAnimationFrame(tick);
+})();
+`;
+
 export function loginPage(): string {
   return `<!doctype html><html lang=en><meta charset=utf-8>
 <meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover">
@@ -146,6 +557,12 @@ export function appPage(): string {
 
   .quiet { color:var(--ink-dim); text-align:center; padding:2rem 0; }
 
+  /* Her, on stage: a bloub (Grok-style blob) that breathes, blinks and drifts.
+     Pure SVG — no Live2D runtime on the phone, nothing fetched from anywhere. */
+  #stage { flex:0 0 auto; display:flex; justify-content:center; align-items:center; padding:.35rem 1rem 0; }
+  #bloub { width:min(31vw, 136px); height:min(31vw, 136px); display:block;
+    filter:drop-shadow(0 12px 26px rgba(0,0,0,.45)); }
+
   /* A wide window is not a big phone. Stretched across a desktop browser the
      bubbles ran the full 1700px and the text became unreadable at about six
      words a line, so the column is capped at a comfortable measure and centred. */
@@ -156,6 +573,7 @@ export function appPage(): string {
   }
 </style>
 <div class=topbar><span class=dot></span><span class=name>Haru</span><button id=out>Sign out</button></div>
+<section id=stage></section>
 <section id=chat></section>
 <form class=compose id=cf><button type=button id=mic class=icon title="Hold to talk">🎙</button><textarea id=ci rows=1 placeholder="Say something…"></textarea><button id=cb>Send</button></form>
 <script>
@@ -319,6 +737,7 @@ $('cf').addEventListener('submit',async ev=>{
       if(reply){
         // Started here and not waited on: the words are already on screen, and
         // her voice can catch up in its own time.
+        if(window.bloub) window.bloub.notify();
         void speak(reply);
       }
     }
@@ -347,9 +766,9 @@ async function askIfSheHasSomethingToSay(){
   try{
     const {line}=await get('/api/nudge');
     if(!line) return;
-    if(tab!=='chat'){ document.querySelector('nav button[data-t=chat]').click(); }
     $('chat').insertAdjacentHTML('beforeend','<div class="msg them">'+esc(line)+'</div>');
     $('chat').scrollTop=$('chat').scrollHeight;
+    if(window.bloub) window.bloub.notify();
     void speak(line);
   }catch(r){ if(r&&r.status===401) location.reload(); }
 }
@@ -358,5 +777,6 @@ document.addEventListener('visibilitychange',()=>{ if(!document.hidden) askIfShe
 // Four minutes: she is being carried around, not watched. Anything faster reads
 // as pestering, and the spacing on her side would refuse it anyway.
 setInterval(askIfSheHasSomethingToSay,4*60_000);
+${BLOUB}
 </script>`;
 }
