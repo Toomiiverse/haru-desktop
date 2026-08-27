@@ -4332,7 +4332,6 @@ function chatSystemPrompt({ irritation, ego, goodnight, shout, latestMessage, fr
   const weekday = new Intl.DateTimeFormat('en-US', { weekday: 'long' }).format(now);
   const character = getActiveCharacter();
   return [
-    character.identity,
     // The time matters as much as the date: without it she invented one when
     // asked, and she was already reasoning about what had been missed against a
     // clock she could not actually see.
@@ -4409,8 +4408,10 @@ function chatSystemPrompt({ irritation, ego, goodnight, shout, latestMessage, fr
     // the same moment it is told the tools exist.
     ...(machineNote ? [machineNote] : []),
     // Kept last so the tone instruction is the final thing read before replying,
-    // which is what the drawer promises. Mood comes after it, since a bad mood
-    // has to be able to override the usual warmth.
+    // which is what the drawer promises. The persona sits with it for the same
+    // reason: a long prompt makes the opening lines the ones a small model
+    // forgets, and her being Haru is a tone instruction above all.
+    character.identity,
     character.style,
     // Her unprompted lines have always been told how long to be; her actual
     // replies never were, and it shows. A typical answer came back as four
