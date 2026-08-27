@@ -223,7 +223,7 @@ async function authorisedFetch(store: StoreLike, path: string, init: RequestInit
 
 // Sending a floating dateTime with an explicit timeZone avoids computing UTC
 // offsets here and keeps the event correct if the zone ever changes.
-function eventTimes(item: KeptForSync, timeZone: string) {
+export function eventTimes(item: KeptForSync, timeZone: string) {
   const parsed = item.time ? parseTimeOfDay(item.time) : null;
   if (!parsed) {
     const end = new Date(`${item.date}T00:00:00Z`);
