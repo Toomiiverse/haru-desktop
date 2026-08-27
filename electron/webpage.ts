@@ -428,6 +428,12 @@ const BLOUB = `
     };
   }
 
+  // The shapes idle may drift into. The morph is a pure function of time: each
+// 9s beat picks a pseudo-random target (sometimes the same one, so change is a
+// chance, not a rule), and the profile eases into it over the first part of the
+// beat while the whole thing keeps rotating.
+  const IDLE_SHAPES = [new Array(N).fill(1), PROFILES.egg, PROFILES.hexagon, PROFILES.triangle];
+
   // The states: each is a pose(t) plus the shape-change rules the video showed.
   function base(over) {
     return Object.assign({
@@ -454,13 +460,25 @@ const BLOUB = `
   }
   const STATES = {
     idle: { id: 'idle', morph: 0.45, blinkIn: false, baseFace: true, baseBody: true, duration: 9, minDuration: undefined, pose: (t, now) => {
-      // A gentle rotating idle: the resting blob slowly turns through a faint
-      // egg so the rotation reads, on top of the usual breathing and blinking.
-      // The phase uses the absolute clock so the spin is continuous across rest
-      // blocks instead of snapping back on each entry.
-      const spin = ((now === undefined ? t : now) * TAU) / 12;
+      // A living idle: she slowly rotates through a faint shape that itself
+      // morphs into a different silhouette on a random-looking beat, on top of
+      // the usual breathing and blinking. Everything is a pure function of the
+      // absolute clock, so the motion never snaps when a rest block begins.
+      const time = now === undefined ? t : now;
+      const spin = (time * TAU) / 12;
+      const PERIOD = 9;
+      const MORPH_FRAC = 0.42;
+      const epoch = Math.floor(time / PERIOD);
+      const phase = (time - epoch * PERIOD) / PERIOD;
+      const hashN = (n) => { const x = Math.sin(n * 12.9898) * 43758.5453; return x - Math.floor(x); };
+      const target = Math.floor(hashN(epoch) * IDLE_SHAPES.length);
+      const prev = Math.floor(hashN(epoch - 1) * IDLE_SHAPES.length);
+      const k = easings.easeInOutCubic(clamp(phase / MORPH_FRAC));
+      const from = IDLE_SHAPES[prev], to = IDLE_SHAPES[target];
+      const baseArr = new Array(N);
+      for (let i = 0; i < N; i++) baseArr[i] = lerp(from[i], to[i], k);
       const radii = new Array(N);
-      for (let i = 0; i < N; i++) radii[i] = lerp(1, radiusAtAngle(PROFILES.egg, (i / N) * TAU - spin), 0.32);
+      for (let i = 0; i < N; i++) radii[i] = radiusAtAngle(baseArr, (i / N) * TAU - spin);
       return base({ sil: { radii: radii, rot: 0, cx: 0, cy: 0, sx: 1, sy: 1 } });
     } },
     thinking: { id: 'thinking', morph: 0.4, blinkIn: true, baseFace: false, baseBody: false, duration: 2.6, minDuration: undefined, pose: (t) => {
