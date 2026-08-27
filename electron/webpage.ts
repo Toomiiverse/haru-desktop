@@ -1050,10 +1050,25 @@ export function appPage(): string {
 <title>Haru</title><style>${SHELL}
   body { display:flex; flex-direction:column; height:100dvh; overflow:hidden; }
 
-  .topbar { display:flex; align-items:center; gap:.6rem; padding:.7rem 1rem; flex:0 0 auto; }
+  /* Installed on a phone the page draws under the status bar (viewport-fit=cover),
+     so the bar pads itself past the clock the same way the compose box pads
+     itself past the home indicator. Zero everywhere that has no notch. */
+  .topbar { display:flex; align-items:center; gap:.6rem; padding:calc(.7rem + env(safe-area-inset-top)) 1rem .7rem; flex:0 0 auto; }
   .topbar .name { font-weight:700; letter-spacing:-.01em; }
   .dot { width:8px; height:8px; border-radius:50%; background:var(--accent); box-shadow:0 0 12px var(--accent); }
-  #out { margin-left:auto; background:var(--glass); color:var(--ink-dim); border:1px solid var(--edge); padding:.4rem .9rem; font-size:.82rem; font-weight:500; backdrop-filter:blur(12px); }
+  #out { background:var(--glass); color:var(--ink-dim); border:1px solid var(--edge); padding:.4rem .9rem; font-size:.82rem; font-weight:500; backdrop-filter:blur(12px); }
+  #bell { margin-left:auto; background:var(--glass); color:var(--ink); border:1px solid var(--edge); padding:.35rem .7rem; font-size:.95rem; line-height:1; backdrop-filter:blur(12px); }
+
+  /* The bell's little card: what may buzz the phone, and when it must not. */
+  #psheet { position:absolute; top:calc(3.6rem + env(safe-area-inset-top)); right:.9rem; z-index:5; width:min(21rem, calc(100vw - 1.8rem));
+    background:var(--bg-lift); border:1px solid var(--edge); border-radius:var(--r-lg); padding:1rem;
+    box-shadow:0 18px 40px rgba(0,0,0,.5); }
+  #psheet p { margin:.35rem 0 0; color:var(--ink-dim); font-size:.9rem; }
+  #psheet button { width:100%; margin-top:.6rem; }
+  #psheet .off { background:var(--glass); color:var(--ink); border:1px solid var(--edge); }
+  .prow { display:flex; align-items:center; gap:.5rem; margin:.4rem 0; font-size:.95rem; }
+  .prow input[type=checkbox] { width:auto; accent-color:var(--accent); }
+  .prow input[type=time] { width:auto; padding:.3rem .5rem; }
 
   #chat { flex:1; overflow-y:auto; padding:1rem .9rem 1.2rem; -webkit-overflow-scrolling:touch; }
 
@@ -1091,7 +1106,8 @@ export function appPage(): string {
     .msg { max-width:min(82%, 46rem); }
   }
 </style>
-<div class=topbar><span class=dot></span><span class=name>Haru</span><button id=out>Sign out</button></div>
+<div class=topbar><span class=dot></span><span class=name>Haru</span><button id=bell title="Notifications">🔔</button><button id=out>Sign out</button></div>
+<div id=psheet hidden></div>
 <section id=stage></section>
 <section id=chat></section>
 <form class=compose id=cf><button type=button id=mic class=icon title="Hold to talk">🎙</button><textarea id=ci rows=1 placeholder="Say something…"></textarea><button id=cb>Send</button></form>
@@ -1106,6 +1122,17 @@ const get=u=>fetch(u).then(r=>r.ok?r.json():Promise.reject(r));
 const post=(u,b)=>fetch(u,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(b||{})}).then(r=>r.ok?r.json():Promise.reject(r));
 
 $('out').onclick=()=>post('/api/logout').then(()=>location.reload());
+
+// Installed on an iPhone, the reported viewport stops short of the screen: the
+// page painted under the status bar but ended in a dead band above the home
+// indicator — the background glow visibly seamed where the layout gave up.
+// Only installed mode (navigator.standalone) lies like this, so only installed
+// mode is corrected, and only in portrait — screen.height does not rotate on
+// iOS, so landscape keeps the stylesheet's own 100dvh.
+if(navigator.standalone){
+  const fit=()=>{ document.body.style.height = window.innerWidth<window.innerHeight ? screen.height+'px' : ''; };
+  fit(); addEventListener('resize',fit);
+}
 
 function bubbles(list){
   $('chat').innerHTML = list.map(m=>{
@@ -1305,6 +1332,106 @@ document.addEventListener('visibilitychange',()=>{ if(!document.hidden) askIfShe
 // Four minutes: she is being carried around, not watched. Anything faster reads
 // as pestering, and the spacing on her side would refuse it anyway.
 setInterval(askIfSheHasSomethingToSay,4*60_000);
+
+// ---- Being told about her when nothing of hers is open ---------------------
+//
+// iOS only offers web push to a page installed from Share → Add to Home
+// Screen, and only asks permission inside a tap. So the worker is registered on
+// every load — it has to exist before anything can subscribe — and everything
+// that needs a gesture waits behind the bell.
+let sw=null;
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.register('/sw.js').then(async r=>{
+    sw=r;
+    // A subscription the server has forgotten — pruned as dead once, a restored
+    // config — comes back on its own: re-posting the same one is a no-op.
+    try{ const sub=await r.pushManager.getSubscription(); if(sub) await post('/api/push/subscribe',keysOf(sub)); }catch{}
+  }).catch(()=>{});
+}
+function keysOf(sub){ const j=sub.toJSON(); return {endpoint:sub.endpoint,p256dh:j.keys.p256dh,auth:j.keys.auth}; }
+function rawKey(s){ const raw=atob(s.replace(/-/g,'+').replace(/_/g,'/')); const bytes=new Uint8Array(raw.length); for(let i=0;i<raw.length;i++)bytes[i]=raw.charCodeAt(i); return bytes; }
+const sheet=$('psheet');
+$('bell').onclick=()=>{ if(sheet.hidden) void drawBell(); else sheet.hidden=true; };
+async function drawBell(){
+  sheet.hidden=false;
+  if(!sw||!('PushManager' in window)){
+    sheet.innerHTML='<p>Notifications need her installed first: open the Share menu, Add to Home Screen, then open her from there.</p>';
+    return;
+  }
+  if(Notification.permission==='denied'){
+    sheet.innerHTML='<p>Notifications for her are switched off in the phone settings.</p>';
+    return;
+  }
+  let server;
+  try{ server=await get('/api/push'); }
+  catch(r){ if(r&&r.status===401){location.reload();return;} sheet.innerHTML='<p>Could not reach her.</p>'; return; }
+  const sub=await sw.pushManager.getSubscription().catch(()=>null);
+  if(!sub){
+    sheet.innerHTML='<button id=pon>Let her reach this phone</button><p>She will only speak up when she has something: a reminder, or a thought of her own. Quiet overnight.</p>';
+    $('pon').onclick=async()=>{
+      try{
+        if(await Notification.requestPermission()!=='granted'){ sheet.innerHTML='<p>She was not allowed to.</p>'; return; }
+        const fresh=await sw.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:rawKey(server.key)});
+        await post('/api/push/subscribe',keysOf(fresh));
+        void drawBell();
+      }catch(e){ console.warn('[push] '+(e&&e.message||e)); sheet.innerHTML='<p>That did not work.</p>'; }
+    };
+    return;
+  }
+  const p=server.prefs;
+  const row=(id,label,on)=>'<label class=prow><input type=checkbox id='+id+(on?' checked':'')+'> '+label+'</label>';
+  sheet.innerHTML=
+    row('pr','Her own thoughts',p.random)+
+    row('pe','Reminders and the journal',p.events)+
+    row('ps','The machine she runs on',p.system)+
+    '<div class=prow>Quiet from <input type=time id=pf value="'+p.quietFrom+'"> to <input type=time id=pt value="'+p.quietTo+'"></div>'+
+    '<button id=ptry>Send a test</button>'+
+    '<button id=poff class=off>Stop notifying this phone</button>';
+  const save=()=>post('/api/push/prefs',{random:$('pr').checked,events:$('pe').checked,system:$('ps').checked,quietFrom:$('pf').value,quietTo:$('pt').value}).catch(()=>{});
+  for(const id of ['pr','pe','ps','pf','pt']) $(id).onchange=save;
+  $('ptry').onclick=async()=>{
+    $('ptry').disabled=true;
+    try{ const r=await post('/api/push/test'); $('ptry').textContent=r.delivered?'Sent — check the lock screen':'Nothing went out'; }
+    catch{ $('ptry').textContent='That did not work'; }
+  };
+  $('poff').onclick=async()=>{
+    try{ await post('/api/push/unsubscribe',{endpoint:sub.endpoint}); }catch{}
+    try{ await sub.unsubscribe(); }catch{}
+    void drawBell();
+  };
+}
 ${BLOUB}
 </script>`;
+}
+
+/**
+ * The worker behind her notifications — the one piece of the page that runs
+ * with nothing open.
+ *
+ * Kept to the two events push needs. Every push puts up a notification: that is
+ * the deal with iOS, and a worker that swallows one quietly loses the
+ * permission. A tap brings the installed app to the front — there is exactly
+ * one conversation, so the front page is the conversation — and any address the
+ * payload names that is not one of ours falls back to '/'.
+ */
+export function serviceWorker(): string {
+  return `self.addEventListener('install',()=>self.skipWaiting());
+self.addEventListener('activate',e=>e.waitUntil(self.clients.claim()));
+self.addEventListener('push',e=>{
+  let m={}; try{ m=e.data?e.data.json():{}; }catch{}
+  e.waitUntil(self.registration.showNotification(m.title||'Haru',{
+    body:m.body||'',
+    icon:'/portrait',
+    data:{url:typeof m.url==='string'&&m.url.startsWith('/')&&!m.url.startsWith('//')?m.url:'/'}
+  }));
+});
+self.addEventListener('notificationclick',e=>{
+  e.notification.close();
+  const url=(e.notification.data&&e.notification.data.url)||'/';
+  e.waitUntil(self.clients.matchAll({type:'window',includeUncontrolled:true}).then(open=>{
+    for(const client of open){ if('focus' in client){ client.focus(); return; } }
+    return self.clients.openWindow(url);
+  }));
+});
+`;
 }

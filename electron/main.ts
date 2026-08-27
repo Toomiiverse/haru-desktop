@@ -65,6 +65,7 @@ import { describePull, isTailnetAddress, mergeCheckIns, readCheckInSource } from
 import { DiscordLink, looksLikeUserId, readDiscordConfig, useOfChannel, type DiscordConfig } from './discord';
 import { reactedPrompt, readReaction, REACTION_COOLDOWN_MS } from './reacted';
 import { startWebServer, type WebDeps } from './webserver';
+import { inQuietHours, newVapidKeys, pushRequest, readPushDevices, readPushPrefs, type PushDevice, type PushPrefs } from './push';
 import { CHECK_EVERY_MS, describeUpdate, progressStep, whyNotCheck, type UpdateState } from './updates';
 import { BREVITY, summonedLine } from './summoned';
 import { CHOICES_TOOL, readChoices } from './choices';
@@ -908,9 +909,10 @@ function noteAside(text: string, source: AsideSource): Aside | null {
   const { asides, aside } = addAside(getAsides(), line, source, new Date(), localDateKey(zonedNow(CHAT_TIMEZONE)));
   store.set('chat.asides', asides);
   sendToWindows('chat:aside', aside);
-  // Fire-and-forget: a Discord hiccup must not hold up the desk or the phone
-  // over a line that has already been said there.
+  // Fire-and-forget: a Discord or push hiccup must not hold up the desk or the
+  // phone over a line that has already been said there.
   void forwardAsideToDiscord(aside);
+  void forwardAsideToPush(aside);
   return aside;
 }
 
@@ -5930,6 +5932,144 @@ function stopDiscord() {
   discord = null;
 }
 
+// ---- Reaching the phone when nothing of hers is open -----------------------
+
+/** Where the phone subscriptions, their preferences and the signing pair live.
+ *  Top-level, for the dot-path reason above. */
+function getPush(): { devices: PushDevice[]; prefs: PushPrefs } {
+  const saved = (store.get('push') ?? {}) as Record<string, unknown>;
+  return { devices: readPushDevices(saved.devices), prefs: readPushPrefs(saved.prefs) };
+}
+
+function savePush(next: { devices?: PushDevice[]; prefs?: PushPrefs }) {
+  const merged = { ...((store.get('push') ?? {}) as Record<string, unknown>) };
+  if (next.devices) merged.devices = next.devices;
+  if (next.prefs) merged.prefs = next.prefs;
+  store.set('push', merged);
+}
+
+/**
+ * The signing pair the subscriptions are created against, made once and kept.
+ *
+ * The private half is stored the way every other credential here is —
+ * encrypted by the OS, never handed to the renderer or the page. If it is ever
+ * lost (a machine move; DPAPI does not travel), a fresh pair is made and every
+ * old subscription starts being refused, not dropped — turning the bell off
+ * and on again on the phone is the recovery, same as every other key here.
+ */
+function vapidKeys(): { publicKey: string; privateKey: string } {
+  const saved = (store.get('push') ?? {}) as { vapidPublic?: unknown; vapidPrivate?: unknown };
+  const privateKey = decryptSecret(typeof saved.vapidPrivate === 'string' ? saved.vapidPrivate : undefined);
+  if (typeof saved.vapidPublic === 'string' && saved.vapidPublic && privateKey) {
+    return { publicKey: saved.vapidPublic, privateKey };
+  }
+  const fresh = newVapidKeys();
+  store.set('push', {
+    ...((store.get('push') ?? {}) as Record<string, unknown>),
+    vapidPublic: fresh.publicKey,
+    vapidPrivate: encryptSecret(fresh.privateKey),
+  });
+  console.log('[push] made a fresh signing pair');
+  return fresh;
+}
+
+/** What every notification says on the lock screen it lands on. */
+const PUSH_TITLE = 'Haru 🌸';
+
+/**
+ * One line, to every phone that asked — or quietly nothing.
+ *
+ * Refusals are cheap and early: nobody subscribed, this kind switched off, or
+ * quiet hours. A push service answering 404 or 410 is saying the phone revoked
+ * that subscription, so it is dropped rather than retried forever; any other
+ * refusal is logged and left alone, because a transient failure is not consent
+ * to forget a phone.
+ */
+async function pushToPhone(kind: 'random' | 'events' | 'system', text: string, url = '/', force = false): Promise<boolean> {
+  const { devices, prefs } = getPush();
+  if (!devices.length) return false;
+  // force is the sheet's proof button: being asked to prove itself is the one
+  // time a refusal for preferences or quiet hours reads as broken.
+  if (!force && (!prefs[kind] || inQuietHours(prefs, zonedNow(CHAT_TIMEZONE)))) return false;
+  const keys = vapidKeys();
+  const payload = JSON.stringify({ title: PUSH_TITLE, body: text.slice(0, 500), url });
+  let delivered = false;
+  for (const device of devices) {
+    try {
+      const request = pushRequest(device, payload, keys);
+      const response = await net.fetch(request.url, { method: 'POST', headers: request.headers, body: new Uint8Array(request.body) });
+      if (response.status === 404 || response.status === 410) {
+        savePush({ devices: getPush().devices.filter(d => d.endpoint !== device.endpoint) });
+        console.log(`[push] "${device.name}" is gone — dropped its subscription`);
+      } else if (!response.ok) {
+        console.warn(`[push] the push service refused for "${device.name}": ${response.status}`);
+      } else {
+        delivered = true;
+      }
+    } catch (error) {
+      console.warn('[push] could not send:', error instanceof Error ? error.message : error);
+    }
+  }
+  return delivered;
+}
+
+/**
+ * Which asides buzz the phone, and as which kind — the same judgement
+ * DISCORD_WORTHY_ASIDES makes, split by kind so the preferences can refuse
+ * one sort of interruption without silencing the rest.
+ */
+const PUSH_KIND: Partial<Record<AsideSource, 'random' | 'events' | 'system'>> = {
+  reminder: 'events',
+  journal: 'events',
+  idle: 'random',
+  system: 'system',
+};
+
+/** Forwards an aside to the phones, when it is one of the ones worth a buzz. */
+async function forwardAsideToPush(aside: Aside) {
+  const kind = PUSH_KIND[aside.source];
+  if (kind) await pushToPhone(kind, aside.text);
+}
+
+// The interval Discord defaults to, for the same reason it is floored there:
+// this is the channel that makes a noise on a phone, and a companion that
+// buzzes every ten minutes gets muted.
+// ponytail: fixed interval; make it a preference if 3h ever proves wrong.
+const PUSH_PESTER_MS = 3 * 60 * 60_000;
+let pushPesterTimer: ReturnType<typeof setInterval> | null = null;
+
+/**
+ * The pestering, without Discord: her chasing reminders and occasionally
+ * piping up while nobody has the page open. The composers are shared with the
+ * other away channels — nudgeForPhone for the chase, spontaneousDiscordNudge
+ * for the unprompted line — so being chased here still counts as being chased
+ * everywhere, through the same spacing record.
+ */
+async function pesterOnPush() {
+  const { devices, prefs } = getPush();
+  if (!webServer || !devices.length) return;
+  // Checked before composing, not after: nudgeForPhone spends a chase attempt
+  // and a model call, and quiet hours would throw both away.
+  if (inQuietHours(prefs, zonedNow(CHAT_TIMEZONE))) return;
+  if (prefs.events) {
+    const said = await nudgeForPhone();
+    if (said) {
+      if (await pushToPhone('events', said.line)) console.log(`[push] pestered about "${said.about}"`);
+      return;
+    }
+  }
+  // Same gates nudgeForPhone opens with — see pesterOnDiscord, which this mirrors.
+  if (!prefs.random) return;
+  if (chasing || Date.now() - lastRemindedAt < REMINDER_SPACING_MS) return;
+  if (isSilenced(store.get('pushback') as Pushback | undefined, Date.now())) return;
+  if (Math.random() >= SPONTANEOUS_NUDGE_CHANCE) return;
+  const line = await spontaneousDiscordNudge();
+  if (!line) return;
+  lastRemindedAt = Date.now();
+  // interject writes it to the aside log, and the aside forwarder sends it on.
+  if (interject(line, { source: 'idle' })) console.log('[push] sent a spontaneous nudge');
+}
+
 const DEFAULT_WEB_PORT = 8787;
 let webServer: { port: number; stop(): Promise<void> } | null = null;
 
@@ -6103,6 +6243,24 @@ function webDeps(): WebDeps {
       return checkInsOn(getCheckIns(), localDateKey(now));
     },
     nudge: () => nudgeForPhone(),
+    push: {
+      key: () => vapidKeys().publicKey,
+      subscribe(device, name) {
+        const { devices } = getPush();
+        const rest = devices.filter(d => d.endpoint !== device.endpoint);
+        savePush({ devices: [{ ...device, name, added: new Date().toISOString() }, ...rest] });
+        // Logged only when it is new — the page re-posts its subscription on
+        // every load to revive a pruned one, and that should stay silent.
+        if (rest.length === devices.length) console.log(`[push] "${name}" subscribed (${rest.length + 1} in all)`);
+      },
+      unsubscribe(endpoint) {
+        savePush({ devices: getPush().devices.filter(d => d.endpoint !== endpoint) });
+        console.log('[push] a phone unsubscribed');
+      },
+      prefs: () => getPush().prefs,
+      savePrefs(prefs) { savePush({ prefs }); },
+      test: () => pushToPhone('events', 'She can reach this phone.', '/', true),
+    },
     portrait: () => {
       // The app icon doubles as her face on the phone. Read each time rather than
       // held: it is 1.5MB, wanted about once a day, and the browser caches it.
@@ -6226,6 +6384,9 @@ async function startWebDoor() {
   try {
     webServer = await startWebServer(DEFAULT_WEB_PORT, webDeps());
     webTrouble = '';
+    // Started once and left running: each tick re-checks the door and the
+    // subscriptions itself, so closing the door silences it with no bookkeeping.
+    if (!pushPesterTimer) pushPesterTimer = setInterval(() => { void pesterOnPush(); }, PUSH_PESTER_MS);
   } catch (error) {
     const why = error instanceof Error ? error.message : String(error);
     // "Check the log" was useless advice twice over: there was no log, and the

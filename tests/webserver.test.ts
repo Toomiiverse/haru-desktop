@@ -19,6 +19,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { startWebServer, type WebDeps } from '../electron/webserver';
 import { setPassword, type WebAccess } from '../electron/web';
+import { readPushPrefs } from '../electron/push';
 
 const USERNAME = 'tom';
 const PASSWORD = 'a-long-enough-password';
@@ -45,6 +46,14 @@ function deps(overrides: Partial<WebDeps> = {}): WebDeps {
     checkIns: () => [],
     addCheckIn: () => [],
     nudge: async () => null,
+    push: {
+      key: () => 'B'.repeat(87),
+      subscribe: () => {},
+      unsubscribe: () => {},
+      prefs: () => readPushPrefs({}),
+      savePrefs: () => {},
+      test: async () => true,
+    },
     portrait: () => Buffer.from('not really a png'),
     model: () => null,
     libFolder: () => null,
@@ -102,7 +111,7 @@ test('a stranger gets the sign-in page and nothing else', async () => {
     assert.equal(front.status, 200);
     assert.ok((await front.text()).includes('Sign in to reach her'));
 
-    for (const path of ['/api/chat', '/api/agenda', '/api/memory', '/api/journal', '/api/checkins', '/api/knowledge/stats', '/api/model']) {
+    for (const path of ['/api/chat', '/api/agenda', '/api/memory', '/api/journal', '/api/checkins', '/api/knowledge/stats', '/api/model', '/api/push']) {
       const refused = await web.call(path);
       assert.equal(refused.status, 401, `${path} answered a stranger`);
     }
@@ -127,6 +136,9 @@ test('her face and the manifest are public, because they give nothing away', asy
     const manifest = await web.call('/manifest.webmanifest');
     assert.equal(manifest.status, 200);
     assert.equal((await manifest.json()).start_url, '/');
+    // The worker too: the browser process fetches it on its own schedule, and
+    // does not reliably carry the login cookie when it does.
+    assert.equal((await web.call('/sw.js')).status, 200, 'the notification worker must be reachable without a cookie');
   } finally { await web.stop(); }
 });
 
@@ -296,6 +308,66 @@ test('with no model configured there is nothing to walk out of', async () => {
   try {
     await web.signIn();
     assert.equal((await web.call('/model/anything.json')).status, 404);
+  } finally { await web.stop(); }
+});
+
+// -- being told about her ------------------------------------------------------------
+
+test('a subscription is held to the shape a push service actually hands out', async () => {
+  // The endpoint is a URL the server will later POST to, so this is the one
+  // place a signed-in phone could point her at somewhere arbitrary.
+  const taken: { endpoint: string; name: string }[] = [];
+  const web = await door({
+    push: {
+      key: () => 'k', unsubscribe: () => {}, prefs: () => readPushPrefs({}), savePrefs: () => {}, test: async () => true,
+      subscribe: (device, name) => { taken.push({ endpoint: device.endpoint, name }); },
+    },
+  });
+  try {
+    await web.signIn();
+    const p256dh = Buffer.alloc(65, 4).toString('base64url');
+    const auth = Buffer.alloc(16, 9).toString('base64url');
+    const subscribe = (body: object) => web.call('/api/push/subscribe', { method: 'POST', body: JSON.stringify(body) });
+
+    assert.equal((await subscribe({ endpoint: 'http://push.example/a', p256dh, auth })).status, 400, 'a plaintext endpoint was accepted');
+    assert.equal((await subscribe({ endpoint: 'https://push.example/a', p256dh: 'short', auth })).status, 400, 'a wrong-sized key was accepted');
+    assert.equal((await subscribe({ endpoint: 'https://push.example/a', p256dh, auth: 'short' })).status, 400, 'a wrong-sized secret was accepted');
+    assert.equal(taken.length, 0, 'a refused subscription was stored anyway');
+
+    assert.equal((await subscribe({ endpoint: 'https://push.example/a', p256dh, auth })).status, 200);
+    assert.equal(taken.length, 1);
+  } finally { await web.stop(); }
+});
+
+test('the worker and the public key are served to a signed-in phone, and preferences read back sane', async () => {
+  let prefs = readPushPrefs({});
+  const web = await door({
+    push: {
+      key: () => 'k', subscribe: () => {}, unsubscribe: () => {},
+      prefs: () => prefs, savePrefs: (next) => { prefs = next; },
+      test: async () => true,
+    },
+  });
+  try {
+    await web.signIn();
+    const worker = await web.call('/sw.js');
+    assert.equal(worker.status, 200);
+    assert.match(worker.headers.get('content-type') ?? '', /javascript/);
+    assert.ok((await worker.text()).includes('showNotification'), 'the worker does not show notifications');
+
+    const info = await (await web.call('/api/push')).json();
+    assert.ok(info.key, 'no public key for the page to subscribe with');
+    assert.equal(info.prefs.quietFrom, '23:00');
+
+    // Junk fields come back as the defaults, not as junk — and a real change sticks.
+    const saved = await (await web.call('/api/push/prefs', { method: 'POST', body: JSON.stringify({ random: 'yes', events: false, quietFrom: '99:99' }) })).json();
+    assert.equal(saved.prefs.random, true, 'a string was taken for a flag');
+    assert.equal(saved.prefs.quietFrom, '23:00', 'a nonsense time was stored');
+    assert.equal(saved.prefs.events, false, 'a real preference did not stick');
+
+    // And the proof button reports what the send path said.
+    const tried = await (await web.call('/api/push/test', { method: 'POST', body: '{}' })).json();
+    assert.equal(tried.delivered, true);
   } finally { await web.stop(); }
 });
 

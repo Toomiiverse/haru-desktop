@@ -19,7 +19,8 @@ import {
   type WebAccess, passwordMatches, newToken, deviceFor, rememberDevice, touchDevice,
   noteFailure, lockedFor, clearFailures, type Attempts, DEVICE_DAYS,
 } from './web';
-import { loginPage, appPage } from './webpage';
+import { loginPage, appPage, serviceWorker } from './webpage';
+import { readPushPrefs, type PushPrefs } from './push';
 import type { CheckIn } from './checkins';
 
 export type WebDeps = {
@@ -59,6 +60,18 @@ export type WebDeps = {
   addCheckIn(note: string, anxiety: number | undefined): CheckIn[];
   /** Anything she would say first, unprompted, or nothing. */
   nudge(): Promise<{ line: string; about: string } | null>;
+  /** Being told about her when nothing of hers is open. The keys stored are the
+   *  phone's own; the one secret — the signing key — never appears here. */
+  push: {
+    /** The public half of the VAPID pair, for the page to subscribe with. */
+    key(): string;
+    subscribe(device: { endpoint: string; p256dh: string; auth: string }, name: string): void;
+    unsubscribe(endpoint: string): void;
+    prefs(): PushPrefs;
+    savePrefs(prefs: PushPrefs): void;
+    /** One real push, now, preferences ignored. True if a push service took it. */
+    test(): Promise<boolean>;
+  };
   /** Her picture, or nothing if this build has none. */
   portrait(): Buffer | null;
   /** The Live2D model to stand on the stage: the folder it lives in and its entry file. */
@@ -215,7 +228,8 @@ function send(res: ServerResponse, status: number, body: string, type = 'applica
       "img-src 'self' data: blob:",
       "media-src 'self' blob:",
       "connect-src 'self'",
-      "worker-src blob:",
+      // 'self' for the service worker that shows notifications; blob: predates it.
+      "worker-src 'self' blob:",
       "form-action 'none'",
       "frame-ancestors 'none'",
       "base-uri 'none'",
@@ -355,6 +369,16 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
         { src: '/portrait', sizes: '1254x1254', type: 'image/png', purpose: 'maskable' },
       ],
     }), 'application/manifest+json; charset=utf-8');
+  }
+
+  // The worker that shows her notifications when the page is closed. Public
+  // for the manifest's reason — a browser fetches it on its own schedule, from
+  // the browser process, where the login cookie does not reliably travel — and
+  // safe for the manifest's reason too: it is generic code that says nothing a
+  // stranger could not guess. Everything it is ever handed arrives by push,
+  // sealed to the phone's own keys.
+  if (req.method === 'GET' && path === '/sw.js') {
+    return send(res, 200, serviceWorker(), 'text/javascript; charset=utf-8');
   }
 
   if (req.method === 'POST' && path === '/api/login') return login(req, res, deps, access, now);
@@ -518,12 +542,52 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
     return json(res, 200, { text });
   }
 
-  // Asked for when the page opens and while it stays open. A phone cannot be
-  // pushed to from here — no notifications, deliberately — so this is how she
-  // gets to speak first, at the one moment she has their attention anyway.
+  // Asked for when the page opens and while it stays open. This is how she
+  // speaks first while she has their attention; the push routes below are how
+  // she speaks first when she does not.
   if (req.method === 'GET' && path === '/api/nudge') {
     const said = await deps.nudge();
     return json(res, 200, said ?? { line: null });
+  }
+
+  // Being told about her when nothing of hers is open. What is stored is the
+  // phone's own endpoint and public keys — revealing nothing — and what goes
+  // out later is sealed to that phone, so the push service ferries it unread.
+  if (req.method === 'GET' && path === '/api/push') {
+    return json(res, 200, { key: deps.push.key(), prefs: deps.push.prefs() });
+  }
+
+  if (req.method === 'POST' && path === '/api/push/subscribe') {
+    const body = await readBody(req) as { endpoint?: unknown; p256dh?: unknown; auth?: unknown };
+    const endpoint = typeof body.endpoint === 'string' ? body.endpoint : '';
+    const p256dh = typeof body.p256dh === 'string' ? body.p256dh : '';
+    const auth = typeof body.auth === 'string' ? body.auth : '';
+    // The endpoint is a URL this server will later POST to, so it is held to
+    // the exact shape a push service hands out: https, and keys that decode to
+    // a P-256 point and a 16-byte secret. Anything else is not a subscription.
+    if (!/^https:\/\//.test(endpoint) || endpoint.length > 2048) return json(res, 400, { error: 'That is not a push endpoint.' });
+    if (Buffer.from(p256dh, 'base64url').length !== 65 || Buffer.from(auth, 'base64url').length !== 16) {
+      return json(res, 400, { error: 'Those are not subscription keys.' });
+    }
+    deps.push.subscribe({ endpoint, p256dh, auth }, me.device?.name ?? 'a phone');
+    return json(res, 200, { ok: true });
+  }
+
+  if (req.method === 'POST' && path === '/api/push/unsubscribe') {
+    const body = await readBody(req) as { endpoint?: unknown };
+    if (typeof body.endpoint !== 'string' || !body.endpoint) return json(res, 400, { error: 'Which one?' });
+    deps.push.unsubscribe(body.endpoint);
+    return json(res, 200, { ok: true });
+  }
+
+  if (req.method === 'POST' && path === '/api/push/prefs') {
+    // The reader, not the body, decides what a preference is allowed to be.
+    deps.push.savePrefs(readPushPrefs(await readBody(req)));
+    return json(res, 200, { prefs: deps.push.prefs() });
+  }
+
+  if (req.method === 'POST' && path === '/api/push/test') {
+    return json(res, 200, { delivered: await deps.push.test() });
   }
 
   if (req.method === 'GET' && path === '/api/agenda') return json(res, 200, { items: deps.agenda() });

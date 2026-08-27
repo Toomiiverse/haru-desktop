@@ -80,6 +80,24 @@ phone*, put a tunnel in front of `127.0.0.1:8787`, then open that URL and instal
 it — Chrome and Edge offer it from the address bar, iOS from Share → Add to Home
 Screen. It gets its own window, its own icon and no address bar, on both.
 
+**She can reach the phone when nothing of hers is open.** Web push, so a
+reminder she is chasing, the journal ask, or a thought of her own lands on the
+lock screen, and tapping it opens the installed app on the conversation. On an
+iPhone this only works from the installed version — Share → Add to Home Screen,
+open her from there — because iOS offers push to installed web apps only
+(16.4 or newer). Then tap the bell in her top bar and let her. The same bell
+holds the preferences: which kinds of interruption are allowed, and the quiet
+hours (11pm–8am unless changed) in her timezone during which the phone is left
+alone. Several phones can subscribe; each is turned off from its own bell, or
+dies on its own when revoked — she notices the refusal and drops it.
+
+There is nothing to configure on the server side: the signing keys make
+themselves on first use and live in her config, the private half encrypted the
+way every other credential is. The messages go out sealed to the phone, so the
+push service in the middle (Apple's, for an iPhone) ferries them unread. She
+does not push what she would not say: the same spacing, silencing and mood
+gates that stop her pestering in chat stop her pestering the lock screen.
+
 **What does not come with the repo.** These are hers, not the code's:
 
 - `%APPDATA%\haru-desktop\config.json` — the conversation, her memories, the
