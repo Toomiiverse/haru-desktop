@@ -67,6 +67,18 @@ for (const [name, html] of PAGES) {
     assert.ok(html.trimEnd().endsWith('</script>'), 'the page does not end where it should');
   });
 
+  test(`${name} ships a script the browser can actually parse`, () => {
+    // The pages are template literals, and a \n or \/ meant for the emitted
+    // JS collapses in the literal unless doubled — a syntax error nothing here
+    // type-checks and the phone reports as a page that silently does nothing.
+    // Caught twice by hand; this is the check that catches it third time.
+    const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(match => match[1]);
+    assert.ok(scripts.length > 0, 'no script found — has the page changed shape?');
+    for (const source of scripts) {
+      assert.doesNotThrow(() => new Function(source), `${name}'s script does not parse`);
+    }
+  });
+
   test(`${name} carries no unresolved interpolation`, () => {
     // A `${` that survives into the output is a template literal that was quoted
     // when it meant to be evaluated, and it ships as visible junk.

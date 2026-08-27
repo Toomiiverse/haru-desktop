@@ -110,6 +110,14 @@ DPAPI, which is tied to the account and the machine that wrote them. They travel
 as unreadable noise and have to be typed again in Setup. Nothing warns you — she
 simply cannot reach the model until you do.
 
+On the server, where Setup has no screen to open on, the second model — the
+one attached pictures and hard questions go out to — is set up from the
+terminal instead: stop her, run `node scripts/second-brain.cjs`, and it asks
+for the provider (xAI or OpenAI), the model, and the key, checks the key
+against the provider before writing anything, and locks config.json down to
+600. Without a second model she reads pictures with the local vision model,
+and with neither set up she cannot read them at all.
+
 **Run one of her, not two.** Two installs means two `config.json` files, and they
 diverge the moment either is used: the same memory in two versions, with no merge.
 

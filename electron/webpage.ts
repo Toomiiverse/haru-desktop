@@ -1336,10 +1336,33 @@ function drawChips(){
   };
 }
 $('att').onclick=()=>$('af').click();
+// A phone photo is several megabytes going up a home tunnel, and her own cap on
+// a picture's way to a model is 1536 pixels wide — anything above that is
+// thrown away at the other end regardless. Shrunk here, the upload is a tenth
+// the size and nothing the model would ever see is lost. It also turns a HEIC
+// into a JPEG on the one machine guaranteed to know how to read a HEIC.
+async function shrunk(file){
+  if(!/^image\\//.test(file.type)||file.size<400*1024) return file;
+  try{
+    const url=URL.createObjectURL(file);
+    const img=new Image();
+    await new Promise((ok,no)=>{img.onload=ok;img.onerror=no;img.src=url;});
+    URL.revokeObjectURL(url);
+    const scale=Math.min(1,1536/(img.naturalWidth||1536));
+    const canvas=document.createElement('canvas');
+    canvas.width=Math.max(1,Math.round(img.naturalWidth*scale));
+    canvas.height=Math.max(1,Math.round(img.naturalHeight*scale));
+    canvas.getContext('2d').drawImage(img,0,0,canvas.width,canvas.height);
+    const blob=await new Promise(ok=>canvas.toBlob(ok,'image/jpeg',0.85));
+    if(!blob||blob.size>=file.size) return file;
+    return new File([blob],file.name.replace(/\\.[^.]+$/,'')+'.jpg',{type:'image/jpeg'});
+  }catch{ return file; }
+}
 $('af').onchange=async()=>{
-  const files=[...$('af').files].slice(0,6-staged.length);
+  const picked=[...$('af').files].slice(0,6-staged.length);
   $('af').value='';
-  for(const file of files){
+  for(const original of picked){
+    const file=await shrunk(original);
     try{
       const r=await fetch('/api/attach?name='+encodeURIComponent(file.name||'file'),{method:'POST',headers:{'content-type':file.type||'application/octet-stream'},body:file});
       const out=await r.json().catch(()=>({}));
