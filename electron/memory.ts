@@ -500,6 +500,13 @@ export function semanticSimilarities(memories: MemoryRecord[], queryVector: numb
   return out;
 }
 
+/** Cosine similarity between two memory vectors; undefined when either side
+ *  has none, so callers can fall back to keyword scoring. */
+export function vectorSimilarity(a: number[] | undefined, b: number[] | undefined): number | undefined {
+  if (!a || !b) return undefined;
+  return cosineSimilarity(a, b);
+}
+
 function describe(memory: MemoryRecord) {
   const recurring = memory.mentions >= RECURRING_THRESHOLD ? ` [comes up often, ${memory.mentions} times]` : '';
   const subject = memory.subject ? ` (${memory.subject})` : '';

@@ -48,7 +48,8 @@ import { formatList, formatMedia, formatMissing, lookUp, readAniListConfig, user
 import { createDesktopShortcut, desktopShortcutPath, isAutoStartEnabled, setAutoStart, startedHidden } from './startup';
 import { claimsDesktopAction, claimsTickOff, dropRoleHeader, dropTackedOnParagraphs, dropInventedContact, dropInventedScreenTalk, dropRepeatedAgendaMentions, dropRepeatedParagraphs, dropStageDirections } from './reply';
 import { hasShout, readVoiceConfig, referenceFor, shoutReference, spokenCase, speakableText, splitForSpeech, synthesise, type SpeechClip, type VoiceConfig } from './voice';
-import { DEEP_RECALL_LIMIT, findSuperseded, formatMemoryPrompt, isExplicitRecall, isWorthKeeping, isWorthRemembering, MEMORY_KINDS, migrateMemories, pruneMemories, rememberInto, retrieveMemories, selectMemories, semanticSimilarities, summaryPrompt, supersede, type MemoryKind, type MemoryRecord, type MemorySource, type ScoredMemory, type SessionSummary } from './memory';
+import { DEEP_RECALL_LIMIT, findSuperseded, formatMemoryPrompt, isExplicitRecall, isWorthKeeping, isWorthRemembering, MEMORY_KINDS, migrateMemories, pruneMemories, rememberInto, retrieveMemories, selectMemories, semanticSimilarities, summaryPrompt, supersede, vectorSimilarity, type MemoryKind, type MemoryRecord, type MemorySource, type ScoredMemory, type SessionSummary } from './memory';
+import { consolidateMemories, type ConsolidationChange } from './consolidation';
 import { forgetDevice, forgetEveryDevice, readWebAccess, setPassword, weakPassword, type WebAccess } from './web';
 import { conversationMayLeave, mayLeaveTheMachine } from './sensitivity';
 import { addCheckIn, checkInInstruction, checkInsOn, readCheckIns, type CheckIn } from './checkins';
@@ -3712,6 +3713,23 @@ function scheduleMemoryVectorRefresh(): void {
  *  for its embedding once. */
 const queryVectorCache = new Map<string, number[]>();
 const QUERY_CACHE_MAX = 100;
+
+/**
+ * The nightly review: duplicates and near-duplicates merge (with provenance),
+ * contradictions get flagged and the older claim loses confidence. Uses the
+ * memory vectors when they exist, so "nagged" and "corrected" can be seen as
+ * the same stance without sharing a word.
+ */
+function runMemoryConsolidation(): ConsolidationChange[] {
+  const { memories, changes } = consolidateMemories(getMemories(), {
+    similarity: (a, b) => vectorSimilarity(memoryVectors.get(a.id), memoryVectors.get(b.id)),
+  });
+  if (changes.length) {
+    setMemories(memories);
+    for (const change of changes) console.log(`[memory] ${change.kind}: ${change.detail}`);
+  }
+  return changes;
+}
 
 async function tryEmbedQuery(text: string): Promise<number[] | null> {
   const trimmed = text.trim();
@@ -7665,6 +7683,10 @@ app.whenReady().then(() => {
   // read is an empty one, never a crash.
   knowledgeStore = store.getKnowledge();
   void refreshMemoryVectors();
+  // The consolidation sweep: once shortly after boot (when the vectors are
+  // warm enough to be useful), then daily. Quiet when nothing changes.
+  setTimeout(() => { runMemoryConsolidation(); }, 60_000);
+  setInterval(() => { runMemoryConsolidation(); }, 24 * 60 * 60_000);
   const knowledgeSummary = knowledgeStats(knowledgeStore);
   console.log(`[knowledge] loaded ${knowledgeSummary.documents} document(s), ${knowledgeSummary.chunks} chunk(s) from ${knowledgeFile}${knowledgeSummary.embedModels.length ? ` (${knowledgeSummary.embedModels.join(', ')})` : ''}`);
   // A saved vault keeps itself current without being asked: a first check a
@@ -7801,6 +7823,7 @@ app.whenReady().then(() => {
   ipcMain.handle('memory:sessions', () => getSessions());
   ipcMain.handle('memory:forgetSessions', () => { store.set('memory.sessions', []); return []; });
   ipcMain.handle('memory:remove', (_e, id: string) => { setMemories(getMemories().filter(memory => memory.id !== id)); return getMemories(); });
+  ipcMain.handle('memory:consolidate', () => runMemoryConsolidation());
   ipcMain.handle('memory:clear', () => { setMemories([]); return getMemories(); });
   // Called when the message being sent was spoken rather than typed. Typed
   // messages deliberately do not do this: somebody at the keyboard has not asked
