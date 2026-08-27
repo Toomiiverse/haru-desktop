@@ -338,6 +338,168 @@ export function selectMemories(memories: MemoryRecord[], message: string, limit 
   return [...always, ...ranked].slice(0, limit);
 }
 
+// -- unified retrieval --------------------------------------------------------
+
+/**
+ * Retrieval that scores what to show for a message the way the lifecycle says
+ * it should: relevance (semantic and keyword) is weighted by importance,
+ * confidence and recency, so an important fact mentioned months ago beats a
+ * trivia from yesterday when both are on-topic, and recency alone never
+ * decides anything.
+ */
+
+function cosineSimilarity(a: number[], b: number[]): number {
+  const len = Math.min(a.length, b.length);
+  let dot = 0;
+  let na = 0;
+  let nb = 0;
+  for (let i = 0; i < len; i++) {
+    dot += a[i] * b[i];
+    na += a[i] * a[i];
+    nb += b[i] * b[i];
+  }
+  if (!na || !nb) return 0;
+  return Math.max(0, dot / (Math.sqrt(na) * Math.sqrt(nb)));
+}
+
+function keywordSimilarity(query: string, text: string): number {
+  const asked = [...keywords(query)];
+  const held = keywords(text);
+  if (!asked.length || !held.size) return 0;
+  const matched = asked.filter(word => held.has(word)).length;
+  return Math.min(1, matched / asked.length);
+}
+
+/** How long a memory of this importance stays vivid. */
+export function memoryHalfLifeDays(importance: number): number {
+  if (importance >= 0.8) return 10 * 365;
+  if (importance >= 0.5) return 180;
+  return 45;
+}
+
+export function memoryRecency(lastSeenAt: string, now: Date, halfLifeDays: number): number {
+  const seen = Date.parse(lastSeenAt);
+  if (!Number.isFinite(seen)) return 0;
+  const days = Math.max(0, (now.getTime() - seen) / 86_400_000);
+  return Math.pow(0.5, days / halfLifeDays);
+}
+
+/** Memories at or above this importance are always offered, like preferences. */
+export const ALWAYS_IMPORTANT = 0.8;
+
+/** How much a memory type is worth when the topic matches at all. */
+function typeWeight(kind: MemoryKind): number {
+  switch (kind) {
+    case 'preference': return 1;
+    case 'relationship': return 1;
+    case 'fact': return 0.9;
+    case 'event': return 0.85;
+  }
+}
+
+/** A dormant memory has to be clearly on-topic to come back, not just vaguely
+ *  related — silence since then means the tie has to be argued for. One shared
+ *  content word out of three is enough to argue with. */
+const DORMANT_ADMISSION = 0.25;
+
+export type RetrieveOptions = {
+  limit?: number;
+  /** id → semantic similarity (0..1), computed by the caller with an embedder.
+   *  Absent or missing ids fall back to the keyword score. */
+  semantic?: Map<string, number>;
+  now?: Date;
+};
+
+export type RetrievalFactors = {
+  semantic: number;
+  keyword: number;
+  relevance: number;
+  importance: number;
+  confidence: number;
+  recency: number;
+  type: number;
+};
+
+export type ScoredMemory = {
+  memory: MemoryRecord;
+  score: number;
+  factors: RetrievalFactors;
+};
+
+export function retrieveMemories(memories: MemoryRecord[], message: string, options: RetrieveOptions = {}): ScoredMemory[] {
+  const now = options.now ?? new Date();
+  const limit = options.limit ?? 14;
+  const asked = keywords(message);
+  const always: ScoredMemory[] = [];
+  const scored: ScoredMemory[] = [];
+
+  for (const memory of memories) {
+    if (memory.supersededBy) continue;                    // replaced — history only
+    if (memory.status === 'archived') continue;           // shelved — must be unarchived deliberately
+    const importance = memory.importance ?? 0.4;
+    const confidence = memory.confidence ?? 0.5;
+    const keyword = asked.size ? keywordSimilarity(message, memory.text) : 0;
+    const semantic = options.semantic?.get(memory.id) ?? keyword;
+    const relevance = 0.45 * semantic + 0.35 * keyword + 0.2 * typeWeight(memory.kind);
+    const recency = memoryRecency(memory.lastSeenAt, now, memoryHalfLifeDays(importance));
+    const entry: ScoredMemory = {
+      memory,
+      score: relevance * (0.4 + 0.6 * importance) * (0.5 + 0.5 * confidence) * recency,
+      factors: {
+        semantic, keyword, relevance,
+        importance: 0.4 + 0.6 * importance,
+        confidence: 0.5 + 0.5 * confidence,
+        recency,
+        type: typeWeight(memory.kind),
+      },
+    };
+    // Preferences, relationships and anything of high importance shape how she
+    // talks whatever the topic is. Everything else has to actually relate to
+    // what was said — keyword or semantic overlap — or be something that keeps
+    // coming back on its own.
+    const keptAlive = memory.kind === 'preference' || memory.kind === 'relationship' || importance >= ALWAYS_IMPORTANT;
+    const related = Math.max(semantic, keyword) > 0 || memory.mentions >= RECURRING_THRESHOLD;
+    if (keptAlive) always.push(entry);
+    else if (memory.status === 'dormant' ? Math.max(semantic, keyword) >= DORMANT_ADMISSION : related) scored.push(entry);
+  }
+
+  // One ranking, not two buckets in series: a highly relevant memory ranks
+  // above an important one that has nothing to do with the question.
+  const ranked = [...always, ...scored].sort((a, b) => b.score - a.score);
+  const out: ScoredMemory[] = [];
+  for (const entry of ranked) {
+    if (out.length >= limit) break;
+    out.push(entry);
+  }
+  // The always-included guarantee: if one of them was crowded out by the cut,
+  // it displaces the weakest non-always entry rather than vanishing.
+  const alwaysIds = new Set(always.map(entry => entry.memory.id));
+  const present = new Set(out.map(entry => entry.memory.id));
+  for (const entry of always.sort((a, b) => b.score - a.score)) {
+    if (present.has(entry.memory.id)) continue;
+    const weakest = [...out].reverse().find(candidate => !alwaysIds.has(candidate.memory.id));
+    if (weakest) {
+      out.splice(out.indexOf(weakest), 1, entry);
+      present.add(entry.memory.id);
+    } else if (out.length < limit) {
+      out.push(entry);
+      present.add(entry.memory.id);
+    }
+  }
+  return out;
+}
+
+/** Precompute id → semantic similarity for every memory that has a vector,
+ *  using the cosine distance to the query's own embedding. */
+export function semanticSimilarities(memories: MemoryRecord[], queryVector: number[], vectors: Map<string, number[]>): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const memory of memories) {
+    const vector = vectors.get(memory.id);
+    if (vector) out.set(memory.id, cosineSimilarity(vector, queryVector));
+  }
+  return out;
+}
+
 function describe(memory: MemoryRecord) {
   const recurring = memory.mentions >= RECURRING_THRESHOLD ? ` [comes up often, ${memory.mentions} times]` : '';
   const subject = memory.subject ? ` (${memory.subject})` : '';

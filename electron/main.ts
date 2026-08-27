@@ -48,7 +48,7 @@ import { formatList, formatMedia, formatMissing, lookUp, readAniListConfig, user
 import { createDesktopShortcut, desktopShortcutPath, isAutoStartEnabled, setAutoStart, startedHidden } from './startup';
 import { claimsDesktopAction, claimsTickOff, dropRoleHeader, dropTackedOnParagraphs, dropInventedContact, dropInventedScreenTalk, dropRepeatedAgendaMentions, dropRepeatedParagraphs, dropStageDirections } from './reply';
 import { hasShout, readVoiceConfig, referenceFor, shoutReference, spokenCase, speakableText, splitForSpeech, synthesise, type SpeechClip, type VoiceConfig } from './voice';
-import { DEEP_RECALL_LIMIT, findSuperseded, formatMemoryPrompt, isExplicitRecall, isWorthKeeping, isWorthRemembering, MEMORY_KINDS, migrateMemories, pruneMemories, rememberInto, selectMemories, summaryPrompt, supersede, type MemoryKind, type MemoryRecord, type MemorySource, type SessionSummary } from './memory';
+import { DEEP_RECALL_LIMIT, findSuperseded, formatMemoryPrompt, isExplicitRecall, isWorthKeeping, isWorthRemembering, MEMORY_KINDS, migrateMemories, pruneMemories, rememberInto, retrieveMemories, selectMemories, semanticSimilarities, summaryPrompt, supersede, type MemoryKind, type MemoryRecord, type MemorySource, type ScoredMemory, type SessionSummary } from './memory';
 import { forgetDevice, forgetEveryDevice, readWebAccess, setPassword, weakPassword, type WebAccess } from './web';
 import { conversationMayLeave, mayLeaveTheMachine } from './sensitivity';
 import { addCheckIn, checkInInstruction, checkInsOn, readCheckIns, type CheckIn } from './checkins';
@@ -3596,16 +3596,17 @@ function getProfile(): Profile {
 }
 
 function getMemories(): MemoryRecord[] {
-  return migrateMemories(store.get('memories'), new Date().toISOString());
+  return migrateMemories(store.getMemories(), new Date().toISOString());
 }
 
 function setMemories(items: MemoryRecord[]) {
-  store.set('memories', items);
+  store.setMemories(items);
+  scheduleMemoryVectorRefresh();
   for (const win of BrowserWindow.getAllWindows()) win.webContents.send('memory:changed', items);
 }
 
 function getSessions(): SessionSummary[] {
-  return (store.get('memory.sessions') as SessionSummary[] | undefined) ?? [];
+  return store.getSessions();
 }
 
 function addMemory(text: string, kind: MemoryKind = 'fact', subject?: string, extra: { source?: MemorySource; predicate?: string; object?: string } = {}) {
@@ -3671,6 +3672,63 @@ function getKnowledgeEmbedder(): Embedder | null {
     apiKey: keyFor(endpoint),
   }, net.fetch);
   return cachedEmbedder(embedder, knowledgeEmbeddingCache);
+}
+
+// -- semantic memory retrieval -------------------------------------------------
+// Memories are embedded in the background whenever the list changes, and the
+// latest query is embedded once per turn, so retrieval can weight semantic
+// similarity alongside the keyword score. Without a reachable embedder the
+// whole layer degrades to keyword-only — the same fallback the knowledge store
+// uses — and nothing about the chat path depends on it.
+
+/** id → embedding of that memory's text. */
+let memoryVectors = new Map<string, number[]>();
+let memoryVectorTimer: ReturnType<typeof setTimeout> | null = null;
+
+async function refreshMemoryVectors(): Promise<void> {
+  const embedder = getKnowledgeEmbedder();
+  if (!embedder) return;
+  const memories = getMemories().filter(memory => !memory.supersededBy);
+  if (!memories.length) { memoryVectors = new Map(); return; }
+  try {
+    const vectors = await embedder.embedBatch(memories.map(memory => memory.text));
+    const next = new Map<string, number[]>();
+    memories.forEach((memory, index) => next.set(memory.id, vectors[index]));
+    memoryVectors = next;
+  } catch (error) {
+    console.warn('[memory] could not embed memories, retrieval will be keyword-only:', error instanceof Error ? error.message : error);
+  }
+}
+
+function scheduleMemoryVectorRefresh(): void {
+  if (memoryVectorTimer) return;
+  memoryVectorTimer = setTimeout(() => {
+    memoryVectorTimer = null;
+    void refreshMemoryVectors();
+  }, 2000);
+}
+
+/** Embed the query if the embedder is up; cached so repeated phrasing pays
+ *  for its embedding once. */
+const queryVectorCache = new Map<string, number[]>();
+const QUERY_CACHE_MAX = 100;
+
+async function tryEmbedQuery(text: string): Promise<number[] | null> {
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+  const cached = queryVectorCache.get(trimmed);
+  if (cached) return cached;
+  const embedder = getKnowledgeEmbedder();
+  if (!embedder) return null;
+  try {
+    const vector = await embedder.embed(trimmed);
+    const oldest = queryVectorCache.keys().next().value;
+    if (queryVectorCache.size >= QUERY_CACHE_MAX && oldest !== undefined) queryVectorCache.delete(oldest);
+    queryVectorCache.set(trimmed, vector);
+    return vector;
+  } catch {
+    return null;
+  }
 }
 
 const pdfExtractor: Extractor = {
@@ -3956,7 +4014,7 @@ async function systemContextFor(message: string): Promise<string> {
 // The recall check stays on `message` alone, though — a wider window would
 // catch a stray "remember" from three turns ago and needlessly deepen every
 // reply after it.
-function profileSummary(message: string, recentContext = '') {
+function profileSummary(message: string, recentContext = '', semantic?: Map<string, number>) {
   const profile = getProfile();
   const lines: string[] = [];
   if (profile.nickname.trim()) lines.push(`They go by ${profile.nickname.trim()}.`);
@@ -3964,7 +4022,8 @@ function profileSummary(message: string, recentContext = '') {
   if (profile.about.trim()) lines.push(profile.about.trim());
   const query = recentContext ? `${recentContext} ${message}` : message;
   const limit = isExplicitRecall(message) ? DEEP_RECALL_LIMIT : undefined;
-  const memoryBlock = formatMemoryPrompt(selectMemories(getMemories(), query, limit), getSessions());
+  const picked = retrieveMemories(getMemories(), query, { limit, semantic });
+  const memoryBlock = formatMemoryPrompt(picked.map(entry => entry.memory), getSessions());
   if (memoryBlock) lines.push(memoryBlock);
   return lines.length ? `About the user: ${lines.join(' ')}` : '';
 }
@@ -4149,7 +4208,7 @@ function systemInstruction() {
   return 'You can inspect the machine you are running on — the OS, CPU, GPU and VRAM, memory, disk, network, processes, Docker containers and services — with get_system_info, get_gpu_info, get_processes, get_docker_status, get_service_status and diagnose_system. When they ask about the server, the GPU, VRAM, what is eating memory or disk, whether Docker or a service is working, or how the machine is doing, call the relevant tool and answer from its results: your training knows nothing about this machine. You can also restart a container or a user service, or restart yourself, but only after they have explicitly said to — and then call the action once with confirm: true.';
 }
 
-function chatSystemPrompt({ irritation, ego, goodnight, shout, latestMessage, fresh, herRecentReplies = [], recentUserContext = '', machineNote = '' }: { irritation: number; ego: number; goodnight: 'said' | 'after' | 'none'; shout: ShoutState; latestMessage: string; fresh: FreshStart | null; herRecentReplies?: string[]; recentUserContext?: string; machineNote?: string }) {
+function chatSystemPrompt({ irritation, ego, goodnight, shout, latestMessage, fresh, herRecentReplies = [], recentUserContext = '', machineNote = '', semantic }: { irritation: number; ego: number; goodnight: 'said' | 'after' | 'none'; shout: ShoutState; latestMessage: string; fresh: FreshStart | null; herRecentReplies?: string[]; recentUserContext?: string; machineNote?: string; semantic?: Map<string, number> }) {
   const now = zonedNow(CHAT_TIMEZONE);
   const weekday = new Intl.DateTimeFormat('en-US', { weekday: 'long' }).format(now);
   const character = getActiveCharacter();
@@ -4167,7 +4226,7 @@ function chatSystemPrompt({ irritation, ego, goodnight, shout, latestMessage, fr
     // can see the answer to. Telling it plainly not to costs nothing, and the
     // clock on their own screen was never the thing they were short of.
     `It is ${formatTimeOfDay(now.getHours(), now.getMinutes())} on ${weekday} ${localDateKey(now)}, in the user's timezone (${CHAT_TIMEZONE}). That is background, so you know when things are due and how long it has been. Use it if they ask what the time or the date is, and otherwise never state it — they can see their own clock.`,
-    profileSummary(latestMessage, recentUserContext),
+    profileSummary(latestMessage, recentUserContext, semantic),
     // Beside the profile rather than behind the lookup tool, for the reason the
     // agenda is: asked what they are in the middle of, a model that would have
     // to choose to check simply answers instead.
@@ -4852,10 +4911,17 @@ async function runChatTool(call: ToolCall, latestUserMessage: string): Promise<s
     const started = Date.now();
     try {
       const embedder = getKnowledgeEmbedder();
+      // The same semantic pass the chat uses, so the lookup and the prompt
+      // agree on which memories are relevant to the query.
+      const queryVector = await tryEmbedQuery(query);
+      const semantic = queryVector && memoryVectors.size
+        ? semanticSimilarities(getMemories(), queryVector, memoryVectors)
+        : undefined;
       const result = await retrieveContext({
         knowledge: knowledgeStore,
         embed: text => embedder ? embedder.embed(text) : Promise.reject(new Error('no model is set up')),
         memories: getMemories(),
+        semantic,
         query,
         now: new Date(),
         limit: config.contextChunks,
@@ -4866,8 +4932,13 @@ async function runChatTool(call: ToolCall, latestUserMessage: string): Promise<s
       touchChunks(result.knowledge.map(item => item.chunk.id));
       const sources = [...new Set(result.knowledge.map(item => item.chunk.source))];
       console.log(`[knowledge] "${query.slice(0, 60)}" -> ${result.knowledge.length} chunk(s) from ${sources.join(', ') || 'nothing'} in ${Date.now() - started}ms`);
+      // Memories selected alongside the knowledge go in too — the door that
+      // reaches both systems is meant to hand back both.
+      const known = result.memories.length
+        ? `\n\nWhat you already know about them that relates to this: ${result.memories.map(entry => entry.memory.text).join('; ')}.`
+        : '';
       return JSON.stringify({
-        context: result.knowledgeText,
+        context: `${result.knowledgeText}${known}`,
         note: result.knowledge.length
           ? 'Answer from the context above, in your own voice. If the sources conflict, prefer the most recently updated one, and do not present something possibly outdated as definitely true.'
           : 'Say plainly that you do not have enough information rather than inventing an answer.',
@@ -6181,7 +6252,14 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // Collected before the prompt so a machine question is answered from facts,
   // not from the model's assumptions about what it runs on.
   const machineNote = await systemContextFor(latest);
-  const system = chatSystemPrompt({ ...mood, latestMessage: latest, fresh, herRecentReplies, recentUserContext, machineNote });
+  // Semantic retrieval: embed this turn's query (cached) and fold the memory
+  // similarities into what she gets told, so "the thing we did to the server"
+  // can find the memory even with no words in common.
+  const queryVector = await tryEmbedQuery(`${recentUserContext} ${latest}`);
+  const semantic = queryVector && memoryVectors.size
+    ? semanticSimilarities(getMemories(), queryVector, memoryVectors)
+    : undefined;
+  const system = chatSystemPrompt({ ...mood, latestMessage: latest, fresh, herRecentReplies, recentUserContext, machineNote, semantic });
   // What she can still see. Not only this message: a picture has to ride along
   // again on the next turn or "what is in week three" cannot be answered, and
   // attachmentsInPlay is where the bound on doing that lives.
@@ -7586,6 +7664,7 @@ app.whenReady().then(() => {
   // — but the file itself is a quiet local read, and a store that cannot be
   // read is an empty one, never a crash.
   knowledgeStore = store.getKnowledge();
+  void refreshMemoryVectors();
   const knowledgeSummary = knowledgeStats(knowledgeStore);
   console.log(`[knowledge] loaded ${knowledgeSummary.documents} document(s), ${knowledgeSummary.chunks} chunk(s) from ${knowledgeFile}${knowledgeSummary.embedModels.length ? ` (${knowledgeSummary.embedModels.join(', ')})` : ''}`);
   // A saved vault keeps itself current without being asked: a first check a

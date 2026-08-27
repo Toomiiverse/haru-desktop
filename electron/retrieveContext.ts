@@ -1,4 +1,4 @@
-import { selectMemories, type MemoryRecord } from './memory';
+import { retrieveMemories, type MemoryRecord, type ScoredMemory } from './memory';
 import { hybridSearch, keywordOnly, type RetrieveOptions, type ScoredChunk } from './retrieval';
 import { buildKnowledgeContext, emptyKnowledgeContext } from './context';
 import type { KnowledgeStore } from './knowledge';
@@ -7,6 +7,9 @@ export type RetrieveContextOptions = {
   knowledge: KnowledgeStore;
   embed(text: string): Promise<number[]>;
   memories?: MemoryRecord[];
+  /** id → semantic similarity, precomputed with the same embedder. Absent ids
+   *  fall back to keyword scoring inside retrieveMemories. */
+  semantic?: Map<string, number>;
   query: string;
   now?: Date;
   limit?: number;
@@ -19,7 +22,7 @@ export type RetrieveContextOptions = {
 export type RetrieveContextResult = {
   knowledge: ScoredChunk[];
   knowledgeText: string;
-  memories: MemoryRecord[];
+  memories: ScoredMemory[];
 };
 
 export async function retrieveContext(options: RetrieveContextOptions): Promise<RetrieveContextResult> {
@@ -43,6 +46,6 @@ export async function retrieveContext(options: RetrieveContextOptions): Promise<
     ? buildKnowledgeContext(knowledge, { maxItems, maxChars })
     : emptyKnowledgeContext();
   if (embeddingError) console.warn(`[knowledge] embeddings unavailable (${embeddingError}) — keyword search only`);
-  const memories = options.memories?.length ? selectMemories(options.memories, options.query) : [];
+  const memories = options.memories?.length ? retrieveMemories(options.memories, options.query, { semantic: options.semantic }) : [];
   return { knowledge, knowledgeText, memories };
 }
