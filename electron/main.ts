@@ -48,7 +48,7 @@ import { formatList, formatMedia, formatMissing, lookUp, readAniListConfig, user
 import { createDesktopShortcut, desktopShortcutPath, isAutoStartEnabled, setAutoStart, startedHidden } from './startup';
 import { claimsDesktopAction, claimsTickOff, dropRoleHeader, dropTackedOnParagraphs, dropInventedContact, dropInventedScreenTalk, dropRepeatedAgendaMentions, dropRepeatedParagraphs, dropStageDirections } from './reply';
 import { hasShout, readVoiceConfig, referenceFor, shoutReference, spokenCase, speakableText, splitForSpeech, synthesise, type SpeechClip, type VoiceConfig } from './voice';
-import { DEEP_RECALL_LIMIT, findSuperseded, formatMemoryPrompt, isExplicitRecall, isWorthKeeping, isWorthRemembering, MEMORY_KINDS, migrateMemories, pruneMemories, rememberInto, retrieveMemories, selectMemories, semanticSimilarities, summaryPrompt, supersede, vectorSimilarity, type MemoryKind, type MemoryRecord, type MemorySource, type ScoredMemory, type SessionSummary } from './memory';
+import { applyDecay, DEEP_RECALL_LIMIT, findSuperseded, formatMemoryPrompt, isExplicitRecall, isWorthKeeping, isWorthRemembering, MEMORY_KINDS, migrateMemories, pruneMemories, rememberInto, retrieveMemories, selectMemories, semanticSimilarities, summaryPrompt, supersede, vectorSimilarity, type ForgettingEntry, type MemoryKind, type MemoryRecord, type MemorySource, type ScoredMemory, type SessionSummary } from './memory';
 import { consolidateMemories, type ConsolidationChange } from './consolidation';
 import { forgetDevice, forgetEveryDevice, readWebAccess, setPassword, weakPassword, type WebAccess } from './web';
 import { conversationMayLeave, mayLeaveTheMachine } from './sensitivity';
@@ -3625,7 +3625,14 @@ function addMemory(text: string, kind: MemoryKind = 'fact', subject?: string, ex
     text: fact, kind, subject, id: randomUUID(), now: new Date().toISOString(),
     source: extra.source, predicate: extra.predicate, object: extra.object,
   });
-  setMemories(pruneMemories(memories, MAX_MEMORIES));
+  const pruned = pruneMemories(memories, MAX_MEMORIES);
+  if (pruned.evicted.length) {
+    store.appendForgettingLog(pruned.evicted.map(memory => ({
+      id: memory.id, text: memory.text, at: new Date().toISOString(), reason: 'prune' as const,
+      detail: `evicted at the ${MAX_MEMORIES}-memory cap`,
+    })));
+  }
+  setMemories(pruned.memories);
   return { created, record };
 }
 
@@ -3729,6 +3736,23 @@ function runMemoryConsolidation(): ConsolidationChange[] {
     for (const change of changes) console.log(`[memory] ${change.kind}: ${change.detail}`);
   }
   return changes;
+}
+
+/**
+ * The decay pass: low-importance records drift DORMANT → ARCHIVED → forgotten
+ * by their half-lives, high-importance ones never move, and everything that
+ * leaves is written to the forgetting log first.
+ */
+function runMemoryDecay(): void {
+  const { memories, transitions, forgotten } = applyDecay(getMemories(), new Date());
+  if (!transitions.length && !forgotten.length) return;
+  store.setMemories(memories);
+  for (const win of BrowserWindow.getAllWindows()) win.webContents.send('memory:changed', memories);
+  for (const transition of transitions) console.log(`[memory] ${transition.id} ${transition.from} → ${transition.to} (${transition.halfLives.toFixed(1)} half-lives)`);
+  if (forgotten.length) {
+    store.appendForgettingLog(forgotten.map(entry => ({ ...entry, reason: 'decay' as const })));
+    for (const entry of forgotten) console.log(`[memory] forgot: "${entry.text.slice(0, 60)}"`);
+  }
 }
 
 async function tryEmbedQuery(text: string): Promise<number[] | null> {
@@ -7686,7 +7710,11 @@ app.whenReady().then(() => {
   // The consolidation sweep: once shortly after boot (when the vectors are
   // warm enough to be useful), then daily. Quiet when nothing changes.
   setTimeout(() => { runMemoryConsolidation(); }, 60_000);
-  setInterval(() => { runMemoryConsolidation(); }, 24 * 60 * 60_000);
+  setTimeout(() => { runMemoryDecay(); }, 90_000);
+  setInterval(() => {
+    runMemoryConsolidation();
+    runMemoryDecay();
+  }, 24 * 60 * 60_000);
   const knowledgeSummary = knowledgeStats(knowledgeStore);
   console.log(`[knowledge] loaded ${knowledgeSummary.documents} document(s), ${knowledgeSummary.chunks} chunk(s) from ${knowledgeFile}${knowledgeSummary.embedModels.length ? ` (${knowledgeSummary.embedModels.join(', ')})` : ''}`);
   // A saved vault keeps itself current without being asked: a first check a
@@ -7824,6 +7852,7 @@ app.whenReady().then(() => {
   ipcMain.handle('memory:forgetSessions', () => { store.set('memory.sessions', []); return []; });
   ipcMain.handle('memory:remove', (_e, id: string) => { setMemories(getMemories().filter(memory => memory.id !== id)); return getMemories(); });
   ipcMain.handle('memory:consolidate', () => runMemoryConsolidation());
+  ipcMain.handle('memory:forgettingLog', () => store.getForgettingLog());
   ipcMain.handle('memory:clear', () => { setMemories([]); return getMemories(); });
   // Called when the message being sent was spoken rather than typed. Typed
   // messages deliberately do not do this: somebody at the keyboard has not asked

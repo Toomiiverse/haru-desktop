@@ -44,6 +44,7 @@ type RoamConfig = { enabled: boolean; restlessness: number; avoidFullscreen: boo
 type Profile = { nickname: string; occupation: string; about: string };
 type Memory = { id: string; text: string; kind: string; subject?: string; createdAt: string; lastSeenAt: string; mentions: number };
 type SessionSummary = { day: string; summary: string; createdAt: string };
+type ForgettingEntry = { id: string; text: string; at: string; reason: string; detail?: string };
 type ChatResult = { content: string; ignored: boolean; irritation: number; ego: number };
 type Mood = { irritation: number; ego: number };
 type Vitals = { energy: number; happiness: number; curiosity: number; affection: number; sleepiness: number; stress: number; focus: number };
@@ -343,6 +344,8 @@ contextBridge.exposeInMainWorld('haru', {
     sessions: () => ipcRenderer.invoke('memory:sessions') as Promise<SessionSummary[]>,
     forgetSessions: () => ipcRenderer.invoke('memory:forgetSessions') as Promise<SessionSummary[]>,
     remove: (id: string) => ipcRenderer.invoke('memory:remove', id) as Promise<Memory[]>,
+    consolidate: () => ipcRenderer.invoke('memory:consolidate') as Promise<unknown[]>,
+    forgettingLog: () => ipcRenderer.invoke('memory:forgettingLog') as Promise<ForgettingEntry[]>,
     clear: () => ipcRenderer.invoke('memory:clear') as Promise<Memory[]>,
     onChange: (callback: (items: Memory[]) => void) => {
       const listener = (_event: Electron.IpcRendererEvent, items: Memory[]) => callback(items);

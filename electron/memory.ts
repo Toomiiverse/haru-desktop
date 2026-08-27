@@ -262,16 +262,115 @@ export function rememberInto(
 }
 
 // Forgetting favours things said once and long ago; something raised repeatedly
-// survives even when it has not come up lately.
-export function pruneMemories(memories: MemoryRecord[], limit: number): MemoryRecord[] {
-  if (memories.length <= limit) return memories;
-  const scored = memories.map(memory => ({
-    memory,
-    score: memory.mentions * 2
-      + (ALWAYS_INCLUDED.includes(memory.kind) ? 3 : 0)
-      + new Date(memory.lastSeenAt).getTime() / 1e12,
-  }));
-  return scored.sort((a, b) => b.score - a.score).slice(0, limit).map(entry => entry.memory);
+// survives even when it has not come up lately. Pruning only ever happens when
+// the list is over the cap, and it now uses the full lifecycle score — an
+// important, well-evidenced memory outlives a trivial one that happens to have
+// been mentioned recently. Preference, relationship and high-importance
+// records are never pruned while anything else can go first, and archived
+// records are never pruned at all — shelving is deliberate, and deliberate is
+// not evictable.
+export type PruneResult = {
+  memories: MemoryRecord[];
+  /** What the cap took. The caller logs these rather than letting them vanish. */
+  evicted: MemoryRecord[];
+};
+
+export function pruneMemories(memories: MemoryRecord[], limit: number): PruneResult {
+  if (memories.length <= limit) return { memories, evicted: [] };
+  const archived = memories.filter(memory => memory.status === 'archived');
+  const rest = memories.filter(memory => memory.status !== 'archived');
+  const untouchable = rest.filter(memory => memory.kind === 'preference' || memory.kind === 'relationship' || (memory.importance ?? 0) >= ALWAYS_IMPORTANT);
+  const touchable = rest.filter(memory => !untouchable.includes(memory));
+  if (touchable.length <= limit - untouchable.length - archived.length) return { memories, evicted: [] };
+  const scored = touchable.map(memory => ({ memory, score: pruneScore(memory) })).sort((a, b) => b.score - a.score);
+  const keepCount = Math.max(0, limit - untouchable.length - archived.length);
+  const kept = scored.slice(0, keepCount).map(entry => entry.memory);
+  const evicted = scored.slice(keepCount).map(entry => entry.memory);
+  if (!evicted.length) return { memories, evicted: [] };
+  return { memories: [...kept, ...untouchable, ...archived], evicted };
+}
+
+function pruneScore(memory: MemoryRecord): number {
+  const importance = memory.importance ?? 0.4;
+  const confidence = memory.confidence ?? 0.5;
+  const now = new Date();
+  return (memory.mentions + 1)
+    * (0.5 + importance)
+    * (0.4 + confidence)
+    * memoryRecency(memory.lastSeenAt, now, 60);
+}
+
+// -- decay and forgetting -----------------------------------------------------
+
+/** Why a memory stopped being part of her current knowledge. Every departure
+ *  lands in the forgetting log so forgetting is explainable, never silent. */
+export type ForgetReason = 'decay' | 'consolidation' | 'supersession' | 'explicit' | 'prune';
+
+export type ForgettingEntry = {
+  /** The id of the record that left. */
+  id: string;
+  /** What it said, so the log reads on its own. */
+  text: string;
+  at: string;
+  reason: ForgetReason;
+  detail?: string;
+};
+
+export type DecayTransition = {
+  id: string;
+  from: MemoryStatus;
+  to: MemoryStatus;
+  halfLives: number;
+};
+
+export type DecayResult = {
+  memories: MemoryRecord[];
+  transitions: DecayTransition[];
+  /** Records that reached the end of their half-lives and left entirely. The
+   *  caller logs these; they are not deleted without a trace. */
+  forgotten: ForgettingEntry[];
+};
+
+/**
+ * The controlled forgetting pass. A memory moves ACTIVE → DORMANT after two
+ * half-lives without being seen, → ARCHIVED after four, and is forgotten after
+ * six — but only if its importance allows it. High-importance records
+ * (>= 0.8, effectively permanent, ten-year half-life) never leave ACTIVE on
+ * their own; superseded and archived records are history and are left alone.
+ */
+export function applyDecay(memories: MemoryRecord[], now: Date): DecayResult {
+  const transitions: DecayTransition[] = [];
+  const forgotten: ForgettingEntry[] = [];
+  const out: MemoryRecord[] = [];
+  for (const memory of memories) {
+    if (memory.supersededBy || memory.status === 'archived') {
+      out.push(memory);
+      continue;
+    }
+    const importance = memory.importance ?? 0.4;
+    if (importance >= ALWAYS_IMPORTANT) {
+      out.push(memory);
+      continue;
+    }
+    const status = memory.status ?? 'active';
+    const seen = Date.parse(memory.lastSeenAt);
+    const days = Number.isFinite(seen) ? Math.max(0, (now.getTime() - seen) / 86_400_000) : 0;
+    const halfLives = days / memoryHalfLifeDays(importance);
+    if (halfLives >= 6) {
+      forgotten.push({ id: memory.id, text: memory.text, at: now.toISOString(), reason: 'decay', detail: `idle for ${Math.round(halfLives)} half-lives` });
+      continue;
+    }
+    let next: MemoryStatus = status;
+    if (halfLives >= 4) next = 'archived';
+    else if (halfLives >= 2) next = 'dormant';
+    if (next !== status) {
+      transitions.push({ id: memory.id, from: status, to: next, halfLives });
+      out.push({ ...memory, status: next });
+    } else {
+      out.push(memory);
+    }
+  }
+  return { memories: out, transitions, forgotten };
 }
 
 export function recurringMemories(memories: MemoryRecord[]) {

@@ -15,7 +15,7 @@ import { copyFileSync, existsSync, readFileSync, readdirSync, rmSync, statSync }
 import os from 'node:os';
 import path from 'node:path';
 import { emptyKnowledge, loadKnowledge, normalizeKnowledge, saveKnowledge, type KnowledgeStore } from './knowledge';
-import { migrateMemories, type MemoryRecord, type SessionSummary } from './memory';
+import { migrateMemories, type ForgettingEntry, type MemoryRecord, type SessionSummary } from './memory';
 
 /** The current schema version of the store. Bumped by each schema migration. */
 export const SCHEMA_VERSION = 2;
@@ -129,6 +129,24 @@ export class HaruStore {
 
   setSessions(items: SessionSummary[]): void {
     this.set('memory.sessions', items);
+  }
+
+  /** The trail of what she forgot and why — bounded so the log itself cannot
+   *  grow forever. */
+  getForgettingLog(): ForgettingEntry[] {
+    const saved = (this.get('memory.forgettingLog') as ForgettingEntry[] | undefined) ?? [];
+    return saved.filter(entry => entry && typeof entry.id === 'string' && typeof entry.at === 'string');
+  }
+
+  setForgettingLog(entries: ForgettingEntry[]): void {
+    this.set('memory.forgettingLog', entries.slice(-200));
+  }
+
+  appendForgettingLog(entries: ForgettingEntry[]): ForgettingEntry[] {
+    if (!entries.length) return this.getForgettingLog();
+    const combined = [...this.getForgettingLog(), ...entries];
+    this.setForgettingLog(combined);
+    return combined;
   }
 
   // -- knowledge. The file is read and written only here; main.ts holds its own

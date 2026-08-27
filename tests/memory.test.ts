@@ -167,23 +167,44 @@ test('selectMemories always includes preference/relationship kinds regardless of
 
 // ---- pruneMemories ----
 
-test('pruneMemories keeps the highest-scored records: mentions dominate, always-included kinds get a bonus, recency is a tie-breaker', () => {
+test('pruneMemories keeps the highest-scored records and reports what it took', () => {
   const memories: MemoryRecord[] = [
-    { id: 'low-old', text: 'a', kind: 'fact', createdAt: '2020-01-01T00:00:00.000Z', lastSeenAt: '2020-01-01T00:00:00.000Z', mentions: 1 },
-    { id: 'high-old', text: 'b', kind: 'fact', createdAt: '2020-01-01T00:00:00.000Z', lastSeenAt: '2020-01-01T00:00:00.000Z', mentions: 5 },
-    { id: 'pref-very-old', text: 'c', kind: 'preference', createdAt: '2015-01-01T00:00:00.000Z', lastSeenAt: '2015-01-01T00:00:00.000Z', mentions: 1 },
-    { id: 'low-recent', text: 'd', kind: 'fact', createdAt: '2026-01-01T00:00:00.000Z', lastSeenAt: '2026-01-01T00:00:00.000Z', mentions: 1 },
-    { id: 'mid-recent', text: 'e', kind: 'fact', createdAt: '2026-01-01T00:00:00.000Z', lastSeenAt: '2026-01-01T00:00:00.000Z', mentions: 2 },
+    { id: 'pref', text: 'c', kind: 'preference', createdAt: '2015-01-01T00:00:00.000Z', lastSeenAt: '2015-01-01T00:00:00.000Z', mentions: 1, importance: 0.85, confidence: 0.9 },
+    { id: 'high', text: 'b', kind: 'fact', createdAt: '2020-01-01T00:00:00.000Z', lastSeenAt: '2026-06-01T00:00:00.000Z', mentions: 5, importance: 0.5, confidence: 0.9 },
+    { id: 'low-old', text: 'a', kind: 'fact', createdAt: '2020-01-01T00:00:00.000Z', lastSeenAt: '2020-01-01T00:00:00.000Z', mentions: 1, importance: 0.2, confidence: 0.4 },
+    { id: 'low-recent', text: 'd', kind: 'fact', createdAt: '2026-01-01T00:00:00.000Z', lastSeenAt: '2026-01-01T00:00:00.000Z', mentions: 1, importance: 0.2, confidence: 0.4 },
+    { id: 'mid-recent', text: 'e', kind: 'fact', createdAt: '2026-01-01T00:00:00.000Z', lastSeenAt: '2026-01-01T00:00:00.000Z', mentions: 2, importance: 0.4, confidence: 0.8 },
   ];
-  const pruned = pruneMemories(memories, 3);
-  assert.deepEqual(pruned.map(m => m.id), ['high-old', 'pref-very-old', 'mid-recent']);
+  const result = pruneMemories(memories, 3);
+  const ids = result.memories.map(m => m.id);
+  // The preference is untouchable; the well-mentioned recent fact survives, and
+  // the two weakest — old and low-importance — go before anything fresher.
+  assert.ok(ids.includes('pref'));
+  assert.ok(ids.includes('high'));
+  assert.ok(ids.includes('mid-recent'));
+  assert.ok(!ids.includes('low-old'));
+  assert.ok(!ids.includes('low-recent'));
+  assert.equal(result.evicted.length, 2);
+  assert.deepEqual(result.evicted.map(m => m.id).sort(), ['low-old', 'low-recent']);
+});
+
+test('pruneMemories never evicts archived records', () => {
+  const memories: MemoryRecord[] = [
+    { id: 'archived', text: 'a', kind: 'fact', createdAt: '2020-01-01T00:00:00.000Z', lastSeenAt: '2020-01-01T00:00:00.000Z', mentions: 1, status: 'archived' },
+    { id: 'low', text: 'b', kind: 'fact', createdAt: '2020-01-01T00:00:00.000Z', lastSeenAt: '2020-01-01T00:00:00.000Z', mentions: 1, importance: 0.2, confidence: 0.4 },
+  ];
+  const result = pruneMemories(memories, 1);
+  assert.deepEqual(result.memories.map(m => m.id), ['archived']);
+  assert.deepEqual(result.evicted.map(m => m.id), ['low']);
 });
 
 test('pruneMemories is a no-op under the limit', () => {
   const memories: MemoryRecord[] = [{
     id: 'x', text: 'x', kind: 'fact', createdAt: '2026-01-01T00:00:00.000Z', lastSeenAt: '2026-01-01T00:00:00.000Z', mentions: 1,
   }];
-  assert.equal(pruneMemories(memories, 10), memories);
+  const result = pruneMemories(memories, 10);
+  assert.deepEqual(result.memories, memories);
+  assert.deepEqual(result.evicted, []);
 });
 
 // ---- supersession ----
