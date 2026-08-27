@@ -99,6 +99,48 @@ function prune(haunts: Haunts): Haunts {
 }
 
 /**
+ * Telemetry-shaped keys that say nothing about the person: the Steam helper
+ * process, a raw URL as a window title, a command prompt path, an OS "wants to
+ * open" prompt. They are not a haunt — they are noise that would otherwise take
+ * a slot real places deserve.
+ */
+const JUNK_HAUNTS = [
+  /^steamwebhelper$/i,
+  /^(cmd|powershell|windows powershell|command prompt|terminal|explorer|explorer\.exe)$/i,
+  /^(c|d|e):\\/i,
+  /:\/\//,
+  /^www\./,
+  /\/watch\b|\/watch\?/,
+  /\bwants? to open\b/i,
+];
+
+export function isJunkHaunt(key: string): boolean {
+  return JUNK_HAUNTS.some(pattern => pattern.test(key));
+}
+
+/** How long a valueless haunt is worth keeping before it is just noise. */
+export const EMPTY_HAUNT_DAYS = 7;
+
+/**
+ * Expire haunts that never earned their place: a visit that logged no minutes
+ * and no exchange says nothing about the person, and a junk key says even
+ * less. Anything with minutes, notes or a last word survives — that is the
+ * record of a real place.
+ */
+export function expireHaunts(haunts: Haunts, nowMs: number, emptyDays = EMPTY_HAUNT_DAYS): Haunts {
+  let changed = false;
+  const out: Haunts = {};
+  for (const [key, haunt] of Object.entries(haunts)) {
+    const ageDays = Math.max(0, (nowMs - Date.parse(haunt.lastSeen)) / 86_400_000);
+    const valueless = (haunt.minutes ?? 0) === 0 && !(haunt.notes?.length) && !haunt.lastSaid;
+    if (isJunkHaunt(key) && ageDays >= 1) { changed = true; continue; }
+    if (valueless && ageDays >= emptyDays) { changed = true; continue; }
+    out[key] = haunt;
+  }
+  return changed ? out : haunts;
+}
+
+/**
  * Records that they are here now. Time is accumulated from the gap since the
  * last sighting rather than measured, which is the only thing available from a
  * poll — and close enough for "you have been at this a while".
@@ -174,9 +216,17 @@ export function belongsToPlace(haunt: Haunt, message: string, sheRaisedItMs: num
   return sheRaisedItMs !== undefined && nowMs - sheRaisedItMs < 10 * 60_000;
 }
 
-/** Enough history to be worth committing to memory rather than left in passing. */
+/**
+ * Enough history to be worth committing to memory rather than left in passing.
+ * A pattern, not a glimpse: they either keep coming back to it, or one long
+ * visit spread over real time. One 30-minute sitting with two comments is a
+ * moment; returning to it across days is a fact about the person.
+ */
 export function worthRemembering(haunt: Haunt) {
-  return !haunt.remembered && (haunt.notes?.length ?? 0) >= 2 && haunt.minutes >= 30;
+  if (haunt.remembered) return false;
+  if ((haunt.notes?.length ?? 0) < 2 || haunt.minutes < 30) return false;
+  const spreadDays = (Date.parse(haunt.lastSeen) - Date.parse(haunt.firstSeen)) / 86_400_000;
+  return haunt.visits >= 3 || spreadDays >= 2;
 }
 
 export function markRemembered(haunts: Haunts, key: string): Haunts {

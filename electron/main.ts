@@ -20,7 +20,7 @@ import { allDayDueMinutes, isEveningCheck, reminderInstruction, reminderTier, re
 import { isHeated, readTone, sharpen, toneGesture, tonePose } from './tone';
 import { isSilenced, nextPushback, PUSHBACK_LIMIT, pushbackInstruction, readsAsDropIt, type Pushback } from './pushback';
 import { activityInstruction, isJustATool, isNotable, readActivity, type Activity, type ActivityKind } from './activity';
-import { belongsToPlace, familiarity, markRemembered, noteExchange, noteVisit, readHaunts, rememberSaid, worthRemembering } from './familiar';
+import { belongsToPlace, expireHaunts, familiarity, markRemembered, noteExchange, noteVisit, readHaunts, rememberSaid, worthRemembering } from './familiar';
 import { discoverWardrobe, type ParameterRange, type WardrobeControl } from './wardrobe';
 import { looksLikeNothing, readListenConfig, transcribe, type ListenConfig } from './listen';
 import { decide, readEscalateConfig, type EscalateConfig } from './escalate';
@@ -2122,6 +2122,19 @@ const FAMILIAR_COOLDOWN_MS = 45 * 60_000;
 
 function getHaunts() {
   return readHaunts(store.get('haunts'));
+}
+
+/**
+ * The hygiene pass over activity tracking: valueless visits expire after a
+ * week, telemetry-shaped keys after a day, so the list holds places, not noise.
+ */
+function runHauntHygiene() {
+  const haunts = getHaunts();
+  const cleaned = expireHaunts(haunts, Date.now());
+  if (cleaned !== haunts) {
+    store.set('haunts', cleaned);
+    console.log(`[haunts] expired ${Object.keys(haunts).length - Object.keys(cleaned).length} valueless or junk haunt(s)`);
+  }
 }
 
 function getFollowing() {
@@ -7767,10 +7780,12 @@ app.whenReady().then(() => {
   setTimeout(() => { runMemoryConsolidation(); }, 60_000);
   setTimeout(() => { runMemoryDecay(); }, 90_000);
   setTimeout(() => { pruneOldArchives(); }, 120_000);
+  setTimeout(() => { runHauntHygiene(); }, 150_000);
   setInterval(() => {
     runMemoryConsolidation();
     runMemoryDecay();
     pruneOldArchives();
+    runHauntHygiene();
   }, 24 * 60 * 60_000);
   const knowledgeSummary = knowledgeStats(knowledgeStore);
   console.log(`[knowledge] loaded ${knowledgeSummary.documents} document(s), ${knowledgeSummary.chunks} chunk(s) from ${knowledgeFile}${knowledgeSummary.embedModels.length ? ` (${knowledgeSummary.embedModels.join(', ')})` : ''}`);

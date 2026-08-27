@@ -26,6 +26,7 @@
     "../electron/store.ts",
     "../electron/consolidation.ts",
     "../electron/obsidian.ts",
+    "../electron/familiar.ts",
     "../electron/system.ts",
     "../electron/systemState.ts"
   ]
