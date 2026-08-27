@@ -413,3 +413,16 @@ test('something happening about now is marked as such', () => {
   const block = formatAgenda([item({ title: 'Dentist', time: '2:30 PM' })], at(14, 30), TODAY);
   assert.ok(block.includes('[happening about now]'));
 });
+
+test('a clock time is a reschedule too', () => {
+  // The live case: told "Its not till later today @5pm" she had a day word to
+  // catch, by luck. "I'll get to it at 5pm" had nothing until times counted.
+  assert.equal(putOffUntil("I'll get to it at 5pm"), 'at 5pm');
+  assert.equal(putOffUntil("I can't do it until 7:30pm"), '7:30pm');
+  assert.equal(putOffUntil('Its not till later today @5pm'), 'later');
+});
+
+test('a time with no intent around it is not a reschedule', () => {
+  assert.equal(putOffUntil('I sat down at 5pm'), null);
+  assert.equal(putOffUntil('the meeting was at 5pm'), null);
+});

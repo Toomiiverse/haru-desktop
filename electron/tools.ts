@@ -118,7 +118,7 @@ export const CHAT_TOOLS: ChatTool[] = [{
     parameters: {
       type: 'object',
       properties: {
-        title: { type: 'string', description: 'Roughly what it was, in their words or yours — e.g. "milk" or "the washing".' },
+        title: { type: 'string', description: 'Roughly what it was — e.g. "milk" or "the washing". A few words, never their whole message.' },
         undo: { type: 'boolean', description: 'Set true if they say it is not done after all, correcting something previously ticked off. Use this rather than deleting it — it still needs doing.' },
       },
       required: ['title'],
@@ -132,7 +132,7 @@ export const CHAT_TOOLS: ChatTool[] = [{
     parameters: {
       type: 'object',
       properties: {
-        title: { type: 'string', description: 'Roughly what it is now, so it can be found.' },
+        title: { type: 'string', description: "A few words from the item's own title, so it can be found — never the user's whole message." },
         newTitle: { type: 'string', description: 'The new wording, if they are renaming it.' },
         date: { type: 'string', description: 'The new day, in their words — "tomorrow", "friday", "the 15th".' },
         time: { type: 'string', description: 'The new time, such as "8:00 AM".' },
@@ -151,7 +151,7 @@ export const CHAT_TOOLS: ChatTool[] = [{
     parameters: {
       type: 'object',
       properties: {
-        title: { type: 'string', description: 'Roughly what it is, so it can be found.' },
+        title: { type: 'string', description: "A few words from the item's own title, so it can be found — never the user's whole message." },
       },
       required: ['title'],
     },
@@ -667,6 +667,23 @@ export type ToolDeps = {
 };
 
 
+/**
+ * What to tell the model when a title matched nothing. The list itself rides
+ * along because the model gets another round: pasting the user's whole sentence
+ * as a title is its commonest miss — seen live with "Its not till later today
+ * @5pm" handed over verbatim — and with the real titles in hand it can call
+ * again with the right one instead of reading an error back out loud.
+ */
+function nothingMatched(title: string, candidates: { title: string }[]): string {
+  const listed = candidates.slice(0, 8).map(item => `"${item.title}"`).join(', ');
+  return JSON.stringify({
+    saved: false,
+    reason: listed
+      ? `Nothing on the list matches "${title}". The list has: ${listed}. If they mean one of those, call this again with that item's own title. If not, ask which one they mean — in your own voice. Never read this message back to them.`
+      : `Their list is empty — there is nothing to change. Say so in your own voice rather than reading this back.`,
+  });
+}
+
 export async function runChatTool(call: ToolCall, latestUserMessage: string, deps: ToolDeps): Promise<string> {
   // Destructured under the names the body already used, so what moved here is
   // the same code and not a rewrite of it.
@@ -964,8 +981,9 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
     // a time on it — "Pick up CPU" arrived as an event because that is where it
     // was written down — and refusing to close those left them outstanding for
     // ever with nothing the user could say to settle it.
-    const match = findItem(kept.filter(item => item.done === undo), title);
-    if (!match) return JSON.stringify({ saved: false, reason: `Nothing on the list matches "${title}".` });
+    const candidates = kept.filter(item => item.done === undo);
+    const match = findItem(candidates, title);
+    if (!match) return nothingMatched(title, candidates);
     toggleKept(match.id, !undo);
     console.log(`[ai] ${undo ? 'un-ticked' : 'ticked off'}: "${match.title}"`);
     return JSON.stringify({ saved: true, title: match.title, date: match.date, done: !undo });
@@ -974,7 +992,7 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
     const title = typeof args.title === 'string' ? args.title.trim() : '';
     if (!title) return JSON.stringify({ error: 'title is required.' });
     const match = findItem(getKept(), title);
-    if (!match) return JSON.stringify({ saved: false, reason: `Nothing on the list matches "${title}".` });
+    if (!match) return nothingMatched(title, getKept());
     if (name === 'delete_kept_item') {
       // The last line of defence for the not-done-versus-cancelled confusion.
       // Refused rather than obeyed, with the reason, so she un-ticks instead.

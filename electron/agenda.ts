@@ -485,7 +485,9 @@ export function missedInstruction(latestMessage: string): string {
 // Written out in full when it stands alone, abbreviated only after a word that
 // makes it a date: "sat" and "sun" are ordinary English otherwise, and "I sat
 // down" is not a reschedule.
-const WHEN_INSTEAD = /\b(tomorrow|tonight|later|next week|this weekend|another day|after work|in the morning|(?:on|until|till|by)\s+(?:mon|tues?|wed(?:nes)?|thurs?|fri|sat(?:ur)?|sun)(?:day)?|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i;
+// A clock time counts as well: "Its not till later today @5pm" is a
+// reschedule to a time rather than a day, and update_kept_item can carry it.
+const WHEN_INSTEAD = /\b(tomorrow|tonight|later|next week|this weekend|another day|after work|in the morning|(?:on|until|till|by)\s+(?:mon|tues?|wed(?:nes)?|thurs?|fri|sat(?:ur)?|sun)(?:day)?|monday|tuesday|wednesday|thursday|friday|saturday|sunday|(?:@\s*|at\s+)?\d{1,2}(?::\d{2})?\s*[ap]m)\b/i;
 // "move it" and "push it" were too literal by half: "Move the task to tomorrow"
 // is about as plain as an instruction gets and matched none of it, because the
 // object was a noun rather than a pronoun. The verbs are enough on their own —
@@ -504,7 +506,7 @@ export function putOffInstruction(latestMessage: string): string {
   if (!when) return '';
   return [
     `They have just said they will not get to something until ${when}.`,
-    'If it is one of the tasks already on their list, move it to that day with update_kept_item rather than adding a second one, and tell them you have moved it.',
+    "If it is one of the tasks already on their list, move it to that day or time with update_kept_item rather than adding a second one — the title is the item's own words, not their sentence — and tell them you have moved it.",
     'Have an opinion about it being pushed — you are not a calendar politely accepting a change — but move it anyway.',
     'If you cannot tell which task they mean, ask which one instead of guessing.',
   ].join(' ');

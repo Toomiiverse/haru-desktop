@@ -244,3 +244,35 @@ test('a block that does not exist is named, not silently ignored', async () => {
   const reply = await run('core_memory_append', { label: 'nonsense', content: 'x' });
   assert.match(reply, /no memory block called .*nonsense/);
 });
+
+test('a title that matches nothing hands back the list, so the next round can correct itself', async () => {
+  // Seen live: the model pasted the user's whole sentence in as the title,
+  // matched nothing, and read the bare error back out loud in assistant-speak.
+  const kept = [
+    { id: '1', title: 'Scarlett Birthday Party', date: '2026-08-29', kind: 'event' as const, done: false },
+    { id: '2', title: 'Get Scarlett a birthday present', date: '2026-08-28', kind: 'task' as const, done: false },
+  ];
+  const reply = await run('delete_kept_item', { title: 'Its not till later today @5pm' }, '', { getKept: () => kept });
+  // The reply is JSON, so the quotes around each title arrive escaped — match
+  // the words, not the quoting.
+  assert.match(reply, /Scarlett Birthday Party/, 'the real titles should ride along');
+  assert.match(reply, /Get Scarlett a birthday present/);
+  assert.match(reply, /call this again with that item's own title/, 'the retry is the point of another round');
+  assert.match(reply, /Never read this message back/, 'or she recites the error in assistant-speak');
+});
+
+test('an empty list says so instead of naming nothing', async () => {
+  const reply = await run('update_kept_item', { title: 'anything', date: 'tomorrow' }, '', { getKept: () => [] });
+  assert.match(reply, /list is empty/);
+  assert.match(reply, /your own voice/);
+});
+
+test('a miss on complete only offers items on the right side of done', async () => {
+  const kept = [
+    { id: '1', title: 'Bins', date: '2026-08-28', kind: 'task' as const, done: true },
+    { id: '2', title: 'Dentist', date: '2026-08-28', kind: 'task' as const, done: false },
+  ];
+  const reply = await run('complete_kept_item', { title: 'zzz nothing zzz' }, '', { getKept: () => kept });
+  assert.match(reply, /Dentist/, 'the open item is a candidate');
+  assert.ok(!reply.includes('Bins'), 'the finished one is not — it cannot be ticked off again');
+});
