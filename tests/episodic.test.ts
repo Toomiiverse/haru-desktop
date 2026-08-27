@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { eventCandidates, eventsPrompt } from '../electron/memory';
+import { eventCandidates, eventsPrompt, isWorthAnEvent } from '../electron/memory';
 
 test('eventCandidates strips bullets and empties', () => {
   const reply = [
@@ -29,4 +29,32 @@ test('eventsPrompt asks for lasting events only', () => {
   assert.match(prompt, /will still matter in a month/);
   assert.match(prompt, /nothing notable/);
   assert.match(prompt, /Reply with the lines only/);
+});
+
+test('isWorthAnEvent accepts real, nameable events', () => {
+  assert.equal(isWorthAnEvent('Tommy downloaded Linux Arch'), true);
+  assert.equal(isWorthAnEvent('Fired up the PC Project website'), true);
+  assert.equal(isWorthAnEvent('Got the motherboard from Umart Belmont'), true);
+  assert.equal(isWorthAnEvent('Picked up 16 GB of RAM'), true);
+  assert.equal(isWorthAnEvent('Signed the lease on the Northbridge unit'), true);
+});
+
+test('isWorthAnEvent rejects instructions to Haru', () => {
+  assert.equal(isWorthAnEvent('Haru to research screenshot identifier tools'), false);
+  assert.equal(isWorthAnEvent('Haru to add anime-themed PC build preference'), false);
+  assert.equal(isWorthAnEvent('Haru to tone down professional email responses'), false);
+  assert.equal(isWorthAnEvent('Haru monitors productivity closely during work'), false);
+});
+
+test('isWorthAnEvent rejects generic, unnameable moments', () => {
+  assert.equal(isWorthAnEvent('Followed emergency procedures efficiently'), false);
+  assert.equal(isWorthAnEvent('Evacuated building due to undetailed incident'), false);
+  assert.equal(isWorthAnEvent('Prepared for evacuation by gathering essentials'), false);
+});
+
+test('isWorthAnEvent rejects passing moments even with the subject named', () => {
+  assert.equal(isWorthAnEvent('Tommy cleaned up the room'), false);
+  assert.equal(isWorthAnEvent('Tommy feels tired today'), false);
+  assert.equal(isWorthAnEvent('Tommy procrastinates on work emails'), false);
+  assert.equal(isWorthAnEvent('Tommy was reminded to manage tasks effectively'), false);
 });

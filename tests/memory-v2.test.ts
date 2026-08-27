@@ -76,6 +76,18 @@ test('rememberInto records triples when provided', () => {
   assert.equal(record.memoryType, 'relational');
 });
 
+test('rememberInto carries evidence detail through create and repeat', () => {
+  const first = rememberInto([], {
+    text: 'Tommy downloaded Linux Arch', kind: 'event', id: 'm3', now: NOW, source: 'conversation', evidenceDetail: "from 2026-08-13's conversation",
+  });
+  assert.equal(first.record.evidence?.[0].detail, "from 2026-08-13's conversation");
+  const second = rememberInto(first.memories, {
+    text: 'Tommy downloaded Linux Arch', kind: 'event', id: 'm4', now: NOW, evidenceDetail: "from 2026-08-14's conversation",
+  });
+  assert.equal(second.record.evidence?.length, 2);
+  assert.equal(second.record.evidence?.[1].detail, "from 2026-08-14's conversation");
+});
+
 test('a repeat bumps confidence and adds evidence, keeping importance', () => {
   const first = rememberInto([], { text: 'Allergic to shellfish', kind: 'fact', id: 'm1', now: NOW });
   const second = rememberInto(first.memories, { text: 'Allergic to shellfish', kind: 'fact', id: 'm2', now: NOW });

@@ -218,7 +218,7 @@ export function isWorthRemembering(text: string): boolean {
  */
 export function rememberInto(
   memories: MemoryRecord[],
-  incoming: { text: string; kind: MemoryKind; subject?: string; id: string; now: string; source?: MemorySource; predicate?: string; object?: string },
+  incoming: { text: string; kind: MemoryKind; subject?: string; id: string; now: string; source?: MemorySource; predicate?: string; object?: string; evidenceDetail?: string },
 ): { memories: MemoryRecord[]; created: boolean; record: MemoryRecord } {
   const text = incoming.text.trim();
   const existing = memories.find(memory => isSameMemory(memory.text, text));
@@ -235,7 +235,9 @@ export function rememberInto(
       mentions: existing.mentions + 1,
       // A consistent repeat is fresh evidence for the same claim.
       confidence: mentionConfidence(existing.mentions + 1, base),
-      evidence: [...(existing.evidence ?? []), { at: incoming.now, kind: 'repeat', source: existing.source ?? 'conversation' }],
+      evidence: [...(existing.evidence ?? []), incoming.evidenceDetail
+        ? { at: incoming.now, kind: 'repeat', source: existing.source ?? 'conversation', detail: incoming.evidenceDetail }
+        : { at: incoming.now, kind: 'repeat', source: existing.source ?? 'conversation' }],
       importance: Math.max(existing.importance ?? 0, scoreImportance(existing.kind, existing.text)),
     };
     return { memories: memories.map(memory => memory.id === existing.id ? updated : memory), created: false, record: updated };
@@ -256,7 +258,9 @@ export function rememberInto(
     source,
     status: 'active',
     memoryType: guessMemoryType(incoming.kind, text),
-    evidence: [{ at: incoming.now, kind: 'statement', source }],
+    evidence: [incoming.evidenceDetail
+      ? { at: incoming.now, kind: 'statement', source, detail: incoming.evidenceDetail }
+      : { at: incoming.now, kind: 'statement', source }],
   };
   return { memories: [...memories, record], created: true, record };
 }
@@ -683,6 +687,32 @@ export function eventCandidates(reply: string): string[] {
     .filter(line => line.length > 0 && !/^nothing notable$/i.test(line))
     .map(line => line.replace(/[.!]+$/, ''))
     .filter(line => line.length > 0);
+}
+
+/**
+ * The stricter gate for episodic extraction. A finished day's events are
+ * promoted only when they are actually events: something that happened to the
+ * user, nameable, and not a passing moment. Instructions to Haru are refused —
+ * "Haru to research X" is a task or a preference, not something that happened
+ * in their life — and generic moments ("Tommy cleaned up the room", "Tommy
+ * feels tired") are refused too. The write path keeps its own isWorthRemembering
+ * gate; this one runs first, on the extraction's output.
+ */
+const GENERIC_MOMENT = /\b(procrastinat\w*|feel\w*|struggl\w*|annoyed|bored|tired|cleaned?|dodged?|avoided?|monitor\w*|remind\w*)\b/i;
+
+export function isWorthAnEvent(text: string): boolean {
+  const clean = (text ?? '').trim();
+  if (!isWorthRemembering(clean)) return false;
+  // A sentence addressed to Haru is material for the preference/task systems,
+  // not an event in the user's life.
+  if (/^haru\b/i.test(clean)) return false;
+  // A passing moment stays a moment even when it names the subject — "work
+  // emails" in a procrastination sentence does not make it an event.
+  if (GENERIC_MOMENT.test(clean)) return false;
+  // Otherwise it has to name something concrete — a proper noun, a number, a
+  // quoted title — or be about something that matters long-term.
+  if (IMPORTANT_TOPICS.test(clean) || namesSomething(clean)) return true;
+  return false;
 }
 
 // Old flat records predate kinds and counters; they are read forward rather than

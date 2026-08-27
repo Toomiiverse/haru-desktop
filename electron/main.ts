@@ -53,7 +53,7 @@ import { createMemoryStore } from './memorystore';
 import { createKnowledgeStore } from './knowledgestore';
 import { chatSystemPrompt, freshStartInstruction, type FreshStart, type RatedReply } from './prompt';
 import { hasShout, readVoiceConfig, referenceFor, shoutReference, spokenCase, speakableText, splitForSpeech, synthesise, type SpeechClip, type VoiceConfig } from './voice';
-import { applyDecay, DEEP_RECALL_LIMIT, eventCandidates, eventsPrompt, findSuperseded, formatMemoryPrompt, isExplicitRecall, isWorthKeeping, isWorthRemembering, MEMORY_KINDS, migrateMemories, pruneMemories, rememberInto, retrieveMemories, semanticSimilarities, summaryPrompt, supersede, vectorSimilarity, type ForgettingEntry, type MemoryKind, type MemoryRecord, type MemorySource, type RetrievalFactors, type ScoredMemory, type SessionSummary } from './memory';
+import { applyDecay, DEEP_RECALL_LIMIT, eventCandidates, eventsPrompt, findSuperseded, formatMemoryPrompt, isExplicitRecall, isWorthAnEvent, isWorthKeeping, isWorthRemembering, MEMORY_KINDS, migrateMemories, pruneMemories, rememberInto, retrieveMemories, semanticSimilarities, summaryPrompt, supersede, vectorSimilarity, type ForgettingEntry, type MemoryKind, type MemoryRecord, type MemorySource, type RetrievalFactors, type ScoredMemory, type SessionSummary } from './memory';
 import { consolidateMemories, type ConsolidationChange } from './consolidation';
 import { appendToBlockValue, canEditBlock, findBlock, formatMemoryBlocks, replaceInBlockValue, resolveBlockValue, resetBlockToDerived, withEditedValue, type BlockSources, type MemoryBlock } from './blocks';
 import { forgetDevice, forgetEveryDevice, readWebAccess, setPassword, weakPassword, type WebAccess } from './web';
@@ -418,8 +418,11 @@ function extractDayEvents(messages: { role?: string; content?: string }[], trans
     if (!candidates.length) { console.log(`[memory] nothing eventful from ${day}`); return; }
     let promoted = 0;
     for (const line of candidates.slice(0, EVENTS_PER_DAY)) {
-      if (!isWorthRemembering(line)) continue;
-      const saved = addMemory(line, 'event', undefined, { source: 'conversation' });
+      // The event gate is deliberately stricter than the general write path:
+      // extraction output is model prose, and "Haru to research X" or "Tommy
+      // cleaned up the room" is not an event in their life.
+      if (!isWorthAnEvent(line)) continue;
+      const saved = addMemory(line, 'event', undefined, { source: 'conversation', evidenceDetail: `from ${day}'s conversation` });
       if (saved?.record) { promoted += 1; console.log(`[memory] event from ${day}: "${line.slice(0, 60)}"`); }
     }
     if (!promoted) console.log(`[memory] no events survived the gate from ${day}`);

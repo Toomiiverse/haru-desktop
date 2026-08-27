@@ -95,7 +95,7 @@ export function createMemoryStore(deps: MemoryStoreDeps) {
     text: string,
     kind: MemoryKind = 'fact',
     subject?: string,
-    extra: { source?: MemorySource; predicate?: string; object?: string } = {},
+    extra: { source?: MemorySource; predicate?: string; object?: string; evidenceDetail?: string } = {},
   ) {
     const fact = text.trim();
     if (!fact) return null;
@@ -109,7 +109,7 @@ export function createMemoryStore(deps: MemoryStoreDeps) {
     }
     const { memories, created, record } = rememberInto(getMemories(), {
       text: fact, kind, subject, id: randomUUID(), now: new Date().toISOString(),
-      source: extra.source, predicate: extra.predicate, object: extra.object,
+      source: extra.source, predicate: extra.predicate, object: extra.object, evidenceDetail: extra.evidenceDetail,
     });
     const pruned = pruneMemories(memories, MAX_MEMORIES);
     if (pruned.evicted.length) {
