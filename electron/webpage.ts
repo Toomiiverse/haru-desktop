@@ -64,18 +64,24 @@ const SHELL = `
 `;
 
 // Her on stage: the bloub (jeremy-prt/bloub, MIT) bot engine, ported to plain
-// JS for this no-build page. One black shape morphing through idle / wink /
-// wide / notify, the two eyes as holes punched in the body, gaze drift, breathing
-// and blinking. No library, no clock state outside the block — sample(t) is a
-// pure function of time, and every constant below is a measurement off the
-// reference video, not a choice. The block builds and runs itself on #stage.
+// JS for this no-build page. One pink shape morphing through the full measured
+// catalogue — idle, thinking, wink, wide, alert, notify, exclaim, sleep, egg,
+// hexagon, play, orbit, burst, comet — with the eyes as holes punched in the
+// body and the mood engine's twelve emotions mapped onto states and resting
+// faces. No library, no clock state outside the block — sample(t) is a pure
+// function of time, and every constant below is a measurement off the reference
+// video, not a choice. The block builds and runs itself on #stage.
 const BLOUB = `
 (() => {
   const TAU = Math.PI * 2;
   const clamp = (v, lo = 0, hi = 1) => v < lo ? lo : v > hi ? hi : v;
   const lerp = (a, b, t) => a + (b - a) * t;
   const r2 = (v) => Math.round(v * 100) / 100;
-  const easeOutQuint = (t) => 1 - (1 - t) ** 5;
+  const easings = {
+    easeOutCubic: (t) => 1 - (1 - t) ** 3,
+    easeInOutCubic: (t) => (t < 0.5 ? 4 * t ** 3 : 1 - (-2 * t + 2) ** 3 / 2),
+    easeOutQuint: (t) => 1 - (1 - t) ** 5
+  };
   const loopNoise = (t, period, seed = 0) => {
     const p = (t / period) * TAU;
     return 0.55 * Math.sin(p + seed) + 0.3 * Math.sin(2 * p + seed * 1.7 + 1.1) + 0.15 * Math.sin(3 * p + seed * 2.3 + 2.4);
@@ -153,14 +159,33 @@ const BLOUB = `
   }
   const blinkScale = (lid) => 0.06 + 0.94 * clamp(lid);
 
-  // The silhouette is a radial profile sampled at the same 64 angles everywhere,
-  // so any two shapes morph by interpolating radii.
+  // Radial profiles, sampled at the same 64 angles everywhere so any two shapes
+  // morph by interpolating radii.
   const N = 64;
   const COS = Array.from({ length: N }, (_, i) => Math.cos((i / N) * TAU));
   const SIN = Array.from({ length: N }, (_, i) => Math.sin((i / N) * TAU));
+  const PROFILES = {
+    egg: [0.8369,0.8424,0.8497,0.8585,0.8674,0.8775,0.8878,0.8983,0.9089,0.9185,0.9288,0.9374,0.9445,0.9504,0.9543,0.9559,0.9555,0.9519,0.9466,0.9389,0.9302,0.9193,0.9085,0.8969,0.8852,0.8734,0.8625,0.8513,0.8411,0.8325,0.8243,0.8179,0.8137,0.8112,0.8102,0.8128,0.8178,0.8262,0.8374,0.8518,0.8702,0.8922,0.9169,0.9446,0.9741,1.0023,1.0267,1.0433,1.0481,1.0393,1.0216,0.9970,0.9697,0.9418,0.9169,0.8949,0.8760,0.8604,0.8490,0.8394,0.8337,0.8314,0.8305,0.8326],
+    hexagon: [0.9210,0.9282,0.9441,0.9706,0.9984,1.0059,0.9896,0.9562,0.9290,0.9124,0.9047,0.9058,0.9157,0.9349,0.9642,0.9873,0.9882,0.9665,0.9336,0.9105,0.8968,0.8918,0.8955,0.9080,0.9293,0.9611,0.9820,0.9812,0.9590,0.9282,0.9089,0.8978,0.8964,0.9026,0.9189,0.9439,0.9778,0.9990,0.9964,0.9713,0.9439,0.9274,0.9196,0.9206,0.9308,0.9502,0.9799,1.0121,1.0226,1.0071,0.9752,0.9510,0.9366,0.9316,0.9351,0.9485,0.9711,1.0026,1.0213,1.0155,0.9863,0.9547,0.9347,0.9232],
+    triangle: [0.7819,0.8211,0.8747,0.9440,1.0223,1.0960,1.1401,1.1340,1.0808,1.0047,0.9265,0.8603,0.8104,0.7730,0.7450,0.7273,0.7151,0.7118,0.7148,0.7245,0.7427,0.7680,0.8037,0.8518,0.9148,0.9876,1.0583,1.1073,1.1109,1.0667,0.9940,0.9164,0.8482,0.7948,0.7555,0.7261,0.7056,0.6925,0.6859,0.6869,0.6938,0.7084,0.7305,0.7615,0.8040,0.8595,0.9311,1.0092,1.0791,1.1171,1.1054,1.0501,0.9779,0.9050,0.8450,0.7990,0.7656,0.7413,0.7258,0.7160,0.7146,0.7204,0.7330,0.7528]
+  };
+  function silhouette(name, pose) {
+    return Object.assign({ radii: PROFILES[name].slice(), rot: 0, cx: 0, cy: 0, sx: 1, sy: 1 }, pose || {});
+  }
   function circle(radius, pose) {
     const radii = new Array(N); radii.fill(radius);
     return Object.assign({ radii: radii, rot: 0, cx: 0, cy: 0, sx: 1, sy: 1 }, pose || {});
+  }
+  function blend(a, b, t) {
+    const dst = { radii: new Array(N), rot: 0, cx: 0, cy: 0, sx: 1, sy: 1 };
+    for (let i = 0; i < N; i++) dst.radii[i] = lerp(a.radii[i] || 1, b.radii[i] || 1, t);
+    let dRot = b.rot - a.rot;
+    while (dRot > Math.PI) dRot -= TAU;
+    while (dRot < -Math.PI) dRot += TAU;
+    dst.rot = a.rot + dRot * t;
+    dst.cx = lerp(a.cx, b.cx, t); dst.cy = lerp(a.cy, b.cy, t);
+    dst.sx = lerp(a.sx, b.sx, t); dst.sy = lerp(a.sy, b.sy, t);
+    return dst;
   }
   function toPoints(s, scale, out) {
     out = out || [];
@@ -199,11 +224,211 @@ const BLOUB = `
     const hw = Math.max(w, 0.01) / 2, hh = Math.max(h, 0.01) / 2, r = Math.min(hw, hh);
     return 'M' + r2(-hw) + ' ' + r2(-hh + r) + 'A' + r2(r) + ' ' + r2(r) + ' 0 0 1 ' + r2(-hw + r) + ' ' + r2(-hh) + 'L' + r2(hw - r) + ' ' + r2(-hh) + 'A' + r2(r) + ' ' + r2(r) + ' 0 0 1 ' + r2(hw) + ' ' + r2(-hh + r) + 'L' + r2(hw) + ' ' + r2(hh - r) + 'A' + r2(r) + ' ' + r2(r) + ' 0 0 1 ' + r2(hw - r) + ' ' + r2(hh) + 'L' + r2(-hw + r) + ' ' + r2(hh) + 'A' + r2(r) + ' ' + r2(r) + ' 0 0 1 ' + r2(-hw) + ' ' + r2(hh - r) + 'Z';
   }
+  function profileFromPolygon(poly, cx, cy) {
+    const radii = new Array(N).fill(0);
+    const n = poly.length;
+    for (let k = 0; k < N; k++) {
+      const dx = COS[k], dy = SIN[k];
+      let best = 0;
+      for (let i = 0; i < n; i++) {
+        const a = poly[i], b = poly[(i + 1) % n];
+        const ex = b.x - a.x, ey = b.y - a.y;
+        const den = dx * ey - dy * ex;
+        if (Math.abs(den) < 1e-9) continue;
+        const px = a.x - cx, py = a.y - cy;
+        const t = (px * ey - py * ex) / den;
+        const u = (px * dy - py * dx) / den;
+        if (t > best && u >= 0 && u <= 1) best = t;
+      }
+      radii[k] = best;
+    }
+    return radii;
+  }
+  function hullOfCircles(x1, y1, r1, x2, y2, r2v, steps) {
+    steps = steps === undefined ? 96 : steps;
+    const dx = x2 - x1, dy = y2 - y1;
+    const dist = Math.hypot(dx, dy) || 1e-6;
+    const base = Math.atan2(dy, dx);
+    const spread = Math.acos(Math.max(-1, Math.min(1, (r1 - r2v) / dist)));
+    const pts = [];
+    for (let i = 0; i <= steps / 2; i++) {
+      const a = base + spread + ((TAU - 2 * spread) * i) / (steps / 2);
+      pts.push({ x: x1 + Math.cos(a) * r1, y: y1 + Math.sin(a) * r1 });
+    }
+    for (let i = 0; i <= steps / 2; i++) {
+      const a = base - spread + ((2 * spread) * i) / (steps / 2);
+      pts.push({ x: x2 + Math.cos(a) * r2v, y: y2 + Math.sin(a) * r2v });
+    }
+    return pts;
+  }
+  function polyPath(pts, scale) {
+    scale = scale === undefined ? 1 : scale;
+    if (pts.length < 3) return '';
+    let d = '';
+    for (let i = 0; i < pts.length; i++) {
+      const p = pts[i];
+      d += (i === 0 ? 'M' : 'L') + r2(p.x * scale) + ' ' + r2(p.y * scale);
+    }
+    return d + 'Z';
+  }
 
-  // Notification pastille, measured off the video: on the circumference at -42deg.
+  // Decoration: arcs with hue-wheel gradients, particles, the notification pastille.
+  function wheel(hue, s, l) {
+    s = s === undefined ? 0.55 : s; l = l === undefined ? 0.62 : l;
+    const h = ((hue % 360) + 360) % 360;
+    const c = (1 - Math.abs(2 * l - 1)) * s;
+    const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+    const m = l - c / 2;
+    const rgb = h < 60 ? [c, x, 0] : h < 120 ? [x, c, 0] : h < 180 ? [0, c, x] : h < 240 ? [0, x, c] : h < 300 ? [x, 0, c] : [c, 0, x];
+    const hex = (v) => Math.round((v + m) * 255).toString(16).padStart(2, '0');
+    return '#' + hex(rgb[0]) + hex(rgb[1]) + hex(rgb[2]);
+  }
+  function arcRender(seed, t, scale, id, opacity) {
+    opacity = opacity === undefined ? 1 : opacity;
+    const spin = seed.phase + t * seed.speed * TAU;
+    const cu = Math.cos(seed.tilt), su = Math.sin(seed.tilt);
+    const kz = Math.sqrt(Math.max(0, 1 - seed.k * seed.k));
+    const span = seed.sweep * TAU;
+    let front = '', back = '', prev = null;
+    for (let i = 0; i <= 64; i++) {
+      const th = spin + (i / 64) * span;
+      const ct = Math.cos(th), st = Math.sin(th);
+      const x = seed.a * (ct * cu + st * -su * seed.k) + seed.cx;
+      const y = seed.a * (ct * su + st * cu * seed.k) + seed.cy;
+      const z = seed.a * st * kz;
+      const behind = z < 0;
+      const sx = r2(x * scale), sy = r2(y * scale);
+      const cmd = behind !== prev ? 'M' : 'L';
+      if (behind) back += cmd + sx + ' ' + sy;
+      else front += cmd + sx + ' ' + sy;
+      prev = behind;
+    }
+    const gx = Math.cos(seed.tilt) * seed.a * scale;
+    const gy = Math.sin(seed.tilt) * seed.a * scale;
+    return {
+      id: id,
+      front: front,
+      back: back,
+      width: seed.width * scale,
+      opacity: opacity,
+      grad: {
+        x1: r2(seed.cx * scale - gx), y1: r2(seed.cy * scale - gy),
+        x2: r2(seed.cx * scale + gx), y2: r2(seed.cy * scale + gy),
+        stops: [wheel(seed.hue), wheel(seed.hue + seed.hueSpan * 0.5), wheel(seed.hue + seed.hueSpan)]
+      }
+    };
+  }
+  const RING_RNG = createRng(0xa11ce);
+  const RINGS = Array.from({ length: 6 }, (_, i) => ({
+    a: 1.3 + RING_RNG() * 0.1,
+    k: 0.05 + RING_RNG() * 0.4,
+    tilt: (i / 6) * Math.PI + RING_RNG() * 0.5,
+    speed: 3 + RING_RNG() * 0.7,
+    phase: RING_RNG() * TAU,
+    sweep: 0.6 + RING_RNG() * 0.25,
+    hue: (i * 360) / 6 + RING_RNG() * 30,
+    hueSpan: 60 + RING_RNG() * 60,
+    width: 0.05 + RING_RNG() * 0.012,
+    cx: 0,
+    cy: 0.1
+  }));
+  const SWOOSH = Array.from({ length: 4 }, (_, i) => ({
+    a: 0.78 + i * 0.2,
+    k: 0.05 + i * 0.02,
+    tilt: -0.62 + i * 0.05,
+    speed: 0.3,
+    phase: 0.06 * i,
+    sweep: 0.4,
+    hue: 95 + i * 62,
+    hueSpan: 100,
+    width: 0.05,
+    cx: 0,
+    cy: -0.12
+  }));
+  const DOT_X = [-0.557, -0.013, 0.532], DOT_R = 0.165, DOT_PEAK = 1.25;
+  const P_RNG = createRng(0xbeef);
+  const PARTICLES = Array.from({ length: 5 }, (_, i) => ({
+    birth: i * 0.2,
+    angle: P_RNG() * TAU,
+    rho: 0.58 + P_RNG() * 0.18
+  }));
+  function particles(t, scale) {
+    const out = [];
+    for (const p of PARTICLES) {
+      const u = t - p.birth;
+      if (u < 0 || u > 0.62) continue;
+      const rho = p.rho * Math.pow(0.75, u * 10);
+      const a = p.angle + (u * 100 * Math.PI) / 180;
+      out.push({
+        x: Math.cos(a) * rho * scale,
+        y: Math.sin(a) * rho * scale,
+        r: (0.04 + 0.028 * clamp(u / 0.55)) * scale,
+        depth: clamp(1 - rho / 0.8),
+        opacity: clamp(u / 0.06) * clamp((0.62 - u) / 0.08)
+      });
+    }
+    return out;
+  }
+  const COMET_RNG = createRng(0xc0e7);
+  const COMET_RIBBONS = Array.from({ length: 4 }, (_, i) => {
+    const d = i - 1.5;
+    return {
+      a: 0.85 * (1 + d * 0.03),
+      k: (0.15 / 0.85) * (1 + d * 0.16),
+      tilt: (34 * Math.PI) / 180 + d * 0.035,
+      speed: 210 / 360,
+      phase: -i * 0.045 + COMET_RNG() * 0.012,
+      sweep: 0.34,
+      hue: i * 85 + COMET_RNG() * 20,
+      hueSpan: 80,
+      width: 0.095,
+      cx: 0,
+      cy: 0
+    };
+  });
+  const COMET_DOT = 0.129;
   const NOTIF_BLUE = '#2496e8', NOTIF_ANGLE = -42, NOTIF_DIST = 1.003, NOTIF_R = 0.15, NOTIF_POP = 1.14, NOTIF_MARGIN = 0.054;
 
-  const pair = (w, h) => [{ w: w, h: h, open: 1 }, { w: w, h: h, open: 1 }];
+  function mixHex(from, to, t) {
+    const parse = (h) => { const v = parseInt(h.slice(1), 16); return [(v >> 16) & 255, (v >> 8) & 255, v & 255]; };
+    const a = parse(from), b = parse(to);
+    const c = a.map((x, i) => Math.round(x + (b[i] - x) * t));
+    return '#' + c.map((x) => x.toString(16).padStart(2, '0')).join('');
+  }
+
+  // Expressions: the resting face (only applied on baseFace states, i.e. idle).
+  const eye = (w, h, tilt, open) => ({ w: w, h: h, tilt: tilt === undefined ? 0 : tilt, open: open === undefined ? 1 : open });
+  const pair = (w, h, tilt, open) => [eye(w, h, tilt, open), eye(w, h, -tilt, open)];
+  const EXPRESSIONS = [
+    { id: 'neutre', gaze: { yaw: REST_GAZE.yaw, pitch: REST_GAZE.pitch, roll: REST_GAZE.roll }, split: EYE_SPLIT, eyes: [eye(EYE_W, EYE_H), eye(EYE_W, EYE_H)] },
+    { id: 'attentif', gaze: { yaw: 4, pitch: 5, roll: -4 }, split: 16, eyes: pair(0.21, 0.44) },
+    { id: 'surpris', gaze: { yaw: 3, pitch: -3, roll: 0 }, split: 19, eyes: pair(0.45, 0.47) },
+    { id: 'excite', gaze: { yaw: 6, pitch: -14, roll: 0 }, split: 19.5, eyes: pair(0.4, 0.56, -10) },
+    { id: 'heureux', gaze: { yaw: 5, pitch: 9, roll: 0 }, split: 17, eyes: pair(0.27, 0.17, 14) },
+    { id: 'hilare', gaze: { yaw: 4, pitch: 14, roll: 0 }, split: 18, eyes: pair(0.34, 0.13, 20) },
+    { id: 'colere', gaze: { yaw: 3, pitch: 7, roll: 0 }, split: 17, eyes: pair(0.34, 0.15, 30) },
+    { id: 'triste', gaze: { yaw: 3, pitch: -13, roll: 0 }, split: 16, eyes: pair(0.22, 0.4, -28) },
+    { id: 'effraye', gaze: { yaw: 2, pitch: -20, roll: 0 }, split: 20.5, eyes: pair(0.4, 0.6) },
+    { id: 'mefiant', gaze: { yaw: 12, pitch: 6, roll: -6 }, split: 16, eyes: [eye(0.21, 0.4), eye(0.22, 0.15)] },
+    { id: 'confus', gaze: { yaw: -14, pitch: 3, roll: 8 }, split: 16.5, eyes: [eye(0.2, 0.44, -18), eye(0.28, 0.17, 14)] },
+    { id: 'curieux', gaze: { yaw: 16, pitch: -9, roll: -15 }, split: 16.5, eyes: [eye(0.24, 0.46, -8), eye(0.2, 0.38, -8)] },
+    { id: 'fier', gaze: { yaw: 5, pitch: 17, roll: 0 }, split: 17, eyes: pair(0.3, 0.15, 18) },
+    { id: 'timide', gaze: { yaw: -19, pitch: -14, roll: -7 }, split: 14, eyes: pair(0.17, 0.3) },
+    { id: 'blase', gaze: { yaw: -22, pitch: 2, roll: 0 }, split: 16, eyes: pair(0.3, 0.12) },
+    { id: 'somnolent', gaze: { yaw: 6, pitch: -9, roll: -3 }, split: 16, eyes: pair(0.2, 0.42, 0, 0.42) }
+  ];
+  const EXPRESSION_BY_ID = new Map(EXPRESSIONS.map((e) => [e.id, e]));
+  function blendExpression(a, b, t) {
+    const lEye = (x, y) => ({ w: lerp(x.w, y.w, t), h: lerp(x.h, y.h, t), tilt: lerp(x.tilt || 0, y.tilt || 0, t), open: lerp(x.open, y.open, t) });
+    return {
+      id: b.id,
+      gaze: { yaw: lerp(a.gaze.yaw, b.gaze.yaw, t), pitch: lerp(a.gaze.pitch, b.gaze.pitch, t), roll: lerp(a.gaze.roll, b.gaze.roll, t) },
+      split: lerp(a.split, b.split, t),
+      eyes: [lEye(a.eyes[0], b.eyes[0]), lEye(a.eyes[1], b.eyes[1])]
+    };
+  }
+
+  // The states: each is a pose(t) plus the shape-change rules the video showed.
   function base(over) {
     return Object.assign({
       sil: circle(1), offX: 0, offY: 0,
@@ -212,21 +437,119 @@ const BLOUB = `
       dots: [], arcs: [], notif: null, dotsBehind: false
     }, over || {});
   }
-  // The four core states. morph is the entry fade (measured exponential ease-out);
-  // blinkIn masks a shape change with a blink, as in the reference.
+  const BAR_UPRIGHT_CY = -0.1875;
+  const BAR_UPRIGHT = profileFromPolygon(hullOfCircles(0, -0.505, 0.132, 0, 0.13, 0.075), 0, BAR_UPRIGHT_CY);
+  const BAR_ITALIC = profileFromPolygon(hullOfCircles(0, -0.2535, 0.1345, 0, 0.2535, 0.1345), 0, 0);
+  const barUpright = (pose) => Object.assign({ radii: BAR_UPRIGHT.slice(), rot: 0, cx: 0, cy: BAR_UPRIGHT_CY, sx: 1, sy: 1 }, pose || {});
+  const barItalic = (pose) => Object.assign({ radii: BAR_ITALIC.slice(), rot: 0, cx: 0, cy: 0, sx: 1, sy: 1 }, pose || {});
+  const TEAR = polyPath(hullOfCircles(0, 0, 0.118, 0, 0.172, 0.012));
+  const TRI_ORBIT = 0.213;
+  function spinningTriangle(rot) {
+    return silhouette('triangle', { rot: rot, cx: -TRI_ORBIT * Math.sin(rot), cy: TRI_ORBIT * Math.cos(rot) });
+  }
+  function dotPulse(t, index) {
+    const p = ((((t - index * 0.5) / 1.5) % 1) + 1) % 1;
+    const k = p < 0.5 ? 0.5 - 0.5 * Math.cos(p * TAU) : 0;
+    return clamp(k * 2);
+  }
   const STATES = {
-    idle:   { id: 'idle',   morph: 0.45, blinkIn: false, duration: 2.4, pose: () => base() },
-    wink:   { id: 'wink',   morph: 0.3,  blinkIn: true,  duration: 1.6, pose: () => base({ gaze: { yaw: -5.37, pitch: 4.55, roll: 6.7 }, split: 16.25, eyes: [{ w: 0.236, h: 0.464, open: 1 }, { w: 0.447, h: 0.089, open: 1 }] }) },
-    wide:   { id: 'wide',   morph: 0.55, blinkIn: true,  duration: 1.8, pose: () => base({ gaze: { yaw: 6.92, pitch: -21.96, roll: 11.6 }, split: 18.43, eyes: pair(0.356, 0.875) }) },
-    notify: { id: 'notify', morph: 0.5,  blinkIn: true,  duration: 2.2, pose: (t) => {
+    idle: { id: 'idle', morph: 0.45, blinkIn: false, baseFace: true, baseBody: true, duration: 2.4, minDuration: undefined, pose: () => base() },
+    thinking: { id: 'thinking', morph: 0.4, blinkIn: true, baseFace: false, baseBody: false, duration: 2.6, minDuration: undefined, pose: (t) => {
+      const mid = dotPulse(t, 1);
+      const emerge = 0.3 + 0.7 * easings.easeOutCubic(clamp(t / 0.3));
+      return base({
+        sil: circle(DOT_R * (1 + (DOT_PEAK - 1) * mid), { cx: DOT_X[1] }),
+        eyeAlpha: 0,
+        dots: [0, 2].map((i) => {
+          const k = dotPulse(t, i);
+          return { x: DOT_X[i] * emerge, y: 0, r: DOT_R * (1 + (DOT_PEAK - 1) * k), opacity: 0.55 + 0.45 * k };
+        })
+      });
+    } },
+    wink: { id: 'wink', morph: 0.3, blinkIn: true, baseFace: false, baseBody: true, duration: 1.6, minDuration: undefined, pose: () => base({ gaze: { yaw: -5.37, pitch: 4.55, roll: 6.7 }, split: 16.25, eyes: [{ w: 0.236, h: 0.464, open: 1 }, { w: 0.447, h: 0.089, open: 1 }] }) },
+    wide: { id: 'wide', morph: 0.55, blinkIn: true, baseFace: false, baseBody: true, duration: 1.8, minDuration: undefined, pose: () => base({ gaze: { yaw: 6.92, pitch: -21.96, roll: 11.6 }, split: 18.43, eyes: pair(0.356, 0.875) }) },
+    alert: { id: 'alert', morph: 0.45, blinkIn: false, baseFace: false, baseBody: false, duration: 2.4, minDuration: 2, pose: (t) => {
+      const p = clamp(t / 1.5);
+      const travel = easings.easeInOutCubic(p) * 0.82 - 0.087;
+      const back = t > 1.6 ? clamp((t - 1.6) / 0.4) : 0;
+      const x = travel * (1 - back) + 0.1 * back;
+      const buzz = Math.sin(t * 2.5 * TAU) * 0.005;
+      const tilt = (17.7 * Math.PI) / 180;
+      return base({
+        sil: barItalic({ rot: tilt, cx: x, cy: -0.325 - buzz }),
+        eyeAlpha: 0,
+        dots: [{ x: x - Math.sin(tilt) * 0.58, y: -0.325 + Math.cos(tilt) * 0.58 + buzz * 2.8, r: 0.118, d: TEAR, rot: (tilt * 180) / Math.PI, opacity: 1 }]
+      });
+    } },
+    notify: { id: 'notify', morph: 0.5, blinkIn: true, baseFace: false, baseBody: true, duration: 2.2, minDuration: undefined, pose: (t) => {
       const p = clamp(t / 0.45);
       const pop = 1 + (NOTIF_POP - 1) * Math.sin(p * Math.PI) * (1 - p * 0.35);
       const r = NOTIF_R * (p < 1 ? pop : 1);
       const a = (NOTIF_ANGLE * Math.PI) / 180;
       return base({ gaze: { yaw: -21.94, pitch: -5.82, roll: -12.2 }, split: 18.89, eyes: pair(0.505, 0.498), notif: { x: Math.cos(a) * NOTIF_DIST, y: Math.sin(a) * NOTIF_DIST, r: r, notch: r + NOTIF_MARGIN } });
+    } },
+    exclaim: { id: 'exclaim', morph: 0.45, blinkIn: false, baseFace: false, baseBody: false, duration: 2, minDuration: undefined, pose: () => base({ sil: barUpright(), eyeAlpha: 0, dots: [{ x: -0.012, y: 0.526, r: 0.113, opacity: 1 }] }) },
+    sleep: { id: 'sleep', morph: 0.5, blinkIn: false, baseFace: false, baseBody: false, duration: 2.4, minDuration: undefined, pose: (t) => base({ sil: circle(0.1585, { cy: 0.11 + Math.sin(t * (TAU / 0.6)) * 0.19 }), eyeAlpha: 0 }) },
+    egg: { id: 'egg', morph: 0.4, blinkIn: true, baseFace: false, baseBody: false, duration: 1.8, minDuration: undefined, pose: () => base({ sil: silhouette('egg'), gaze: { yaw: 19.97, pitch: 26.01, roll: -17.1 }, split: 11.07, eyes: pair(0.164, 0.385) }) },
+    hexagon: { id: 'hexagon', morph: 0.4, blinkIn: true, baseFace: false, baseBody: false, duration: 1.6, minDuration: undefined, pose: () => base({ sil: silhouette('hexagon'), gaze: { yaw: 23.11, pitch: 24.42, roll: -13.3 }, split: 13.37, eyes: pair(0.177, 0.411) }) },
+    play: { id: 'play', morph: 0.5, blinkIn: true, baseFace: false, baseBody: false, duration: 2, minDuration: undefined, pose: (t) => {
+      const fade = clamp(t / 0.35) * clamp((2.2 - t) / 0.5);
+      return base({
+        sil: spinningTriangle(0),
+        gaze: { yaw: 12, pitch: -8, roll: -6 }, split: 15, eyes: pair(0.18, 0.34),
+        arcs: SWOOSH.map((s, i) => ({ id: 'sw' + i, seed: { ...s, cx: 0.45 - t * 0.42 }, t: t, opacity: fade }))
+      });
+    } },
+    orbit: { id: 'orbit', morph: 0.6, blinkIn: false, baseFace: false, baseBody: false, duration: 3.4, minDuration: 2.5, pose: (t) => {
+      const ramp = easings.easeInOutCubic(clamp(t / 0.35));
+      const rot = -TAU * 1.25 * t * ramp;
+      const back = easings.easeInOutCubic(clamp((t - 1.6) / 0.9));
+      const tri = spinningTriangle(rot);
+      const ball = circle(1, { rot: rot });
+      const sil = {
+        radii: tri.radii.map((r, i) => r + (ball.radii[i] - r) * back),
+        rot: rot,
+        cx: tri.cx * (1 - back),
+        cy: tri.cy * (1 - back),
+        sx: 1,
+        sy: 1
+      };
+      const fade = clamp(t / 0.8) * clamp((3.6 - t) / 0.9);
+      return base({
+        sil: sil,
+        gaze: { yaw: REST_GAZE.yaw + Math.sin(t * 6.5) * 65 * (1 - back), pitch: -4 + back * 32, roll: -13 },
+        eyes: pair(0.18, 0.34 + back * 0.07),
+        arcs: RINGS.map((s, i) => ({ id: 'rg' + i, seed: s, t: t, opacity: fade * clamp((t - i * 0.13) / 0.3) }))
+      });
+    } },
+    burst: { id: 'burst', morph: 0.4, blinkIn: false, baseFace: false, baseBody: false, duration: 2.6, minDuration: 2.4, pose: (t) => {
+      const collapse = 1 - 0.834 * easings.easeOutQuint(clamp(t / 0.7));
+      const regrow = easings.easeOutQuint(clamp((t - 1.7) / 0.7));
+      return base({
+        sil: circle(collapse + (1 - collapse) * regrow),
+        eyeAlpha: clamp((t - 1.85) / 0.4),
+        dots: particles(t, 1),
+        dotsBehind: true
+      });
+    } },
+    comet: { id: 'comet', morph: 0.45, blinkIn: false, baseFace: false, baseBody: false, duration: 2.4, minDuration: 2.4, pose: (t) => {
+      const collapse = 1 - (1 - COMET_DOT) * easings.easeOutQuint(clamp(t / 0.55));
+      const regrow = easings.easeOutQuint(clamp((t - 1.85) / 0.6));
+      const fade = clamp((t - 0.15) / 0.25) * clamp((1.95 - t) / 0.3);
+      return base({
+        sil: circle(collapse + (1 - collapse) * regrow, { cy: Math.sin(clamp(t / 1.7) * Math.PI) * 0.035 }),
+        eyeAlpha: clamp((t - 2) / 0.35),
+        arcs: COMET_RIBBONS.map((s, i) => ({ id: 'cm' + i, seed: s, t: t, opacity: fade }))
+      });
     } }
   };
-  const CYCLE = ['idle', 'wink', 'wide', 'notify'].map(s => ({ state: s, duration: STATES[s].duration }));
+  const SEQUENCE = ['idle', 'thinking', 'wink', 'wide', 'alert', 'notify', 'exclaim', 'sleep', 'egg', 'hexagon', 'play', 'orbit', 'burst', 'comet'];
+  const MIN_BLOCK = Math.max.apply(null, SEQUENCE.map((s) => STATES[s].morph));
+  function makeBlock(state) {
+    const d = Math.max(MIN_BLOCK, STATES[state].minDuration || MIN_BLOCK);
+    return { state: state, duration: Math.round(Math.max(d, STATES[state].duration) * 100) / 100 };
+  }
+  const CYCLE = SEQUENCE.map(makeBlock);
 
   // Clock-free engine: sample(t) is a pure function of time.
   function BotEngine() {
@@ -238,16 +561,20 @@ const BLOUB = `
     this.tPrev = 0;
     this.blinkAt = -10;
     this.pts = [];
+    this.expr = null;
+    this.exprPrev = null;
+    this.exprAt = -10;
     this.look = { yaw: 0, pitch: 0, mix: 0, spin: 0, wander: 1 };
     this.lookPrev = this.look;
     this.lookAt = -10;
     this.lookMorph = 0.24;
   }
   const NO_LOOK = { yaw: 0, pitch: 0, mix: 0, spin: 0, wander: 1 };
+  const SHAPE_MORPH = 0.45;
   BotEngine.prototype.lookAtTime = function (now) {
     const k = (now - this.lookAt) / this.lookMorph;
     if (k >= 1) return this.look;
-    const t = easeOutQuint(clamp(k));
+    const t = easings.easeOutQuint(clamp(k));
     const a = this.lookPrev, b = this.look;
     return { yaw: lerp(a.yaw, b.yaw, t), pitch: lerp(a.pitch, b.pitch, t), mix: lerp(a.mix, b.mix, t), spin: lerp(a.spin, b.spin, t), wander: lerp(a.wander, b.wander, t) };
   };
@@ -258,7 +585,26 @@ const BLOUB = `
     this.lookAt = now;
     this.lookMorph = morph === undefined ? 0.24 : morph;
   };
-  BotEngine.prototype.posed = function (def, t) { return def.pose(t); };
+  BotEngine.prototype.setExpression = function (expr, now) {
+    if (expr === this.expr) return;
+    this.exprPrev = this.expr;
+    this.expr = expr;
+    this.exprAt = now === undefined ? 0 : now;
+  };
+  BotEngine.prototype.exprAtTime = function (now) {
+    const to = this.expr, from = this.exprPrev;
+    if (!to || !from) return to;
+    const k = (now - this.exprAt) / SHAPE_MORPH;
+    if (k >= 1) return to;
+    return blendExpression(from, to, easings.easeOutQuint(clamp(k)));
+  };
+  BotEngine.prototype.posed = function (def, t) {
+    let pose = def.pose(t);
+    if (def.baseFace && this.expr) {
+      pose = Object.assign({}, pose, { gaze: this.expr.gaze, split: this.expr.split, eyes: this.expr.eyes });
+    }
+    return pose;
+  };
   BotEngine.prototype.origine = function (now) {
     if (this.departFige) return this.departFige;
     if (!this.prev) return null;
@@ -266,23 +612,35 @@ const BLOUB = `
   };
   const lerpEye = (a, b, t) => ({ w: lerp(a.w, b.w, t), h: lerp(a.h, b.h, t), open: lerp(a.open, b.open, t), tilt: lerp(a.tilt || 0, b.tilt || 0, t) });
   BotEngine.prototype.blendPose = function (a, b, t) {
+    const out = 1 - t;
+    const sil = blend(a.sil, b.sil, t);
     return {
-      sil: {
-        radii: a.sil.radii.map((r, i) => lerp(r, b.sil.radii[i], t)),
-        rot: a.sil.rot + (b.sil.rot - a.sil.rot) * t,
-        cx: lerp(a.sil.cx, b.sil.cx, t), cy: lerp(a.sil.cy, b.sil.cy, t),
-        sx: lerp(a.sil.sx, b.sil.sx, t), sy: lerp(a.sil.sy, b.sil.sy, t)
-      },
+      sil: sil,
       offX: lerp(a.offX, b.offX, t), offY: lerp(a.offY, b.offY, t),
       gaze: { yaw: lerp(a.gaze.yaw, b.gaze.yaw, t), pitch: lerp(a.gaze.pitch, b.gaze.pitch, t), roll: lerp(a.gaze.roll, b.gaze.roll, t) },
       split: lerp(a.split, b.split, t),
       eyes: [lerpEye(a.eyes[0], b.eyes[0], t), lerpEye(a.eyes[1], b.eyes[1], t)],
       eyeAlpha: lerp(a.eyeAlpha, b.eyeAlpha, t),
       bodyAlpha: lerp(a.bodyAlpha, b.bodyAlpha, t),
-      dots: b.dots, arcs: b.arcs,
+      dots: [
+        ...a.dots.map((d) => Object.assign({}, d, { opacity: d.opacity * out })),
+        ...b.dots.map((d) => Object.assign({}, d, { opacity: d.opacity * t }))
+      ],
+      arcs: [
+        ...a.arcs.map((r) => Object.assign({}, r, { id: 'a' + r.id, opacity: r.opacity * out })),
+        ...b.arcs.map((r) => Object.assign({}, r, { id: 'b' + r.id, opacity: r.opacity * t }))
+      ],
       notif: t < 0.5 ? a.notif : b.notif,
       dotsBehind: t < 0.5 ? a.dotsBehind : b.dotsBehind
     };
+  };
+  BotEngine.prototype.reset = function (id, now) {
+    this.cur = id;
+    this.prev = null;
+    this.departFige = null;
+    this.tCur = now;
+    this.tPrev = now;
+    this.blinkAt = -10;
   };
   BotEngine.prototype.setState = function (id, now) {
     if (id === this.cur) return;
@@ -302,7 +660,7 @@ const BLOUB = `
     if (since >= def.morph) return pose;
     const origine = this.origine(now);
     if (!origine) return pose;
-    return this.blendPose(origine, pose, easeOutQuint(clamp(since / def.morph)));
+    return this.blendPose(origine, pose, easings.easeOutQuint(clamp(since / def.morph)));
   };
   BotEngine.prototype.sample = function (now) {
     const R = this.scale;
@@ -310,7 +668,7 @@ const BLOUB = `
     let pose = this.posed(def, Math.max(0, now - this.tCur));
     const since = now - this.tCur;
     const origine = since < def.morph ? this.origine(now) : null;
-    if (origine) pose = this.blendPose(origine, pose, easeOutQuint(clamp(since / def.morph)));
+    if (origine) pose = this.blendPose(origine, pose, easings.easeOutQuint(clamp(since / def.morph)));
 
     const alive = pose.eyeAlpha > 0.01;
     const look = this.lookAtTime(now);
@@ -351,6 +709,9 @@ const BLOUB = `
       }
     }
 
+    const dots = pose.dots.filter((p) => p.opacity > 0.01 && p.r > 0.0005).map((p) => Object.assign({}, p, { x: (p.x + offX) * R, y: (p.y + offY) * R, r: p.r * R }));
+    const arcs = pose.arcs.filter((a) => a.opacity > 0.01).map((a) => arcRender(a.seed, a.t, R, a.id, a.opacity));
+
     const nFit = pose.notif ? bodyRadius(pose.notif.x, pose.notif.y) : 1;
     const nx = pose.notif ? (pose.notif.x * nFit + offX) * R : 0;
     const ny = pose.notif ? (pose.notif.y * nFit + offY) * R : 0;
@@ -358,6 +719,9 @@ const BLOUB = `
       bodyPath: bodyPath,
       bodyAlpha: pose.bodyAlpha,
       eyes: eyes,
+      dots: dots,
+      dotsBehind: pose.dotsBehind,
+      arcs: arcs,
       notif: pose.notif ? { x: nx, y: ny, r: pose.notif.r * R } : null,
       notch: pose.notif ? { x: nx, y: ny, r: pose.notif.notch * R } : null
     };
@@ -367,11 +731,18 @@ const BLOUB = `
   const host = document.getElementById('stage');
   if (!host) return;
   host.innerHTML = '<svg id="bloub" viewBox="-158 -158 316 316" aria-hidden="true">' +
-    '<defs><mask id="bm" maskUnits="userSpaceOnUse" x="-158" y="-158" width="316" height="316">' +
+    '<defs>' +
+    '<mask id="bm" maskUnits="userSpaceOnUse" x="-158" y="-158" width="316" height="316">' +
     '<path id="bmBody" fill="#fff"/><g id="bmEyes"></g><circle id="bmNotch" fill="#000" r="0" style="display:none"/>' +
-    '</mask></defs>' +
-    '<g id="bo"><path id="bBody" fill="#fff"/><g mask="url(#bm)"><rect x="-158" y="-158" width="316" height="316" fill="#0a0a0c"/></g></g>' +
+    '</mask>' +
+    '<g id="bGrads"></g>' +
+    '</defs>' +
+    '<g id="bArcsBack" fill="none" stroke-linecap="round"></g>' +
+    '<g id="bDotsBack"></g>' +
+    '<g id="bo"><path id="bBody" fill="#fff"/><g mask="url(#bm)"><rect x="-158" y="-158" width="316" height="316" fill="#e152b0"/></g></g>' +
+    '<g id="bDotsFront"></g>' +
     '<circle id="bNotif" fill="#2496e8" r="0" style="display:none"/>' +
+    '<g id="bArcsFront" fill="none" stroke-linecap="round"></g>' +
     '</svg>';
   const svg = document.getElementById('bloub');
   const bmBody = document.getElementById('bmBody');
@@ -380,25 +751,67 @@ const BLOUB = `
   const bBody = document.getElementById('bBody');
   const bo = document.getElementById('bo');
   const bNotif = document.getElementById('bNotif');
+  const bArcsBack = document.getElementById('bArcsBack');
+  const bArcsFront = document.getElementById('bArcsFront');
+  const bDotsBack = document.getElementById('bDotsBack');
+  const bDotsFront = document.getElementById('bDotsFront');
+  const bGrads = document.getElementById('bGrads');
+  const INK = '#e152b0', PAPER = '#ffffff';
 
   const engine = new BotEngine();
   let block = 0, nextAt = Infinity, clock = 0, last = 0, blockStart = 0;
-  function apply(i) {
+  function apply(i, from) {
+    from = from === undefined ? 0 : from;
     const b = CYCLE[i];
-    blockStart = clock;
+    blockStart = clock - from;
     engine.setState(b.state, clock);
     nextAt = blockStart + b.duration;
   }
-  // The page tells her when she is talking: jump the cycle to the notify block
-  // so the pastille pops, then the sequence carries on from there.
-  function flashNotify() {
-    const i = CYCLE.findIndex((b) => b.state === 'notify');
+  function flashState(state) {
+    const i = CYCLE.findIndex((b) => b.state === state);
     if (i < 0) return;
     block = i;
     apply(i);
   }
-  window.bloub = { notify: flashNotify };
+  // Haru's mood engine has twelve emotions; each drives a bloub state (her
+  // animation for that mood) and a resting expression (the face idle carries
+  // once the state has passed). The states are the measured bloub catalogue.
+  const EMOTION_STATES = {
+    neutral:      { state: 'idle',     expr: 'neutre' },
+    happy:        { state: 'play',     expr: 'heureux' },
+    curious:      { state: 'thinking', expr: 'curieux' },
+    smug:         { state: 'wink',     expr: 'fier' },
+    annoyed:      { state: 'alert',    expr: 'colere' },
+    bored:        { state: 'idle',     expr: 'blase' },
+    sleepy:       { state: 'sleep',    expr: 'somnolent' },
+    surprised:    { state: 'wide',     expr: 'surpris' },
+    affectionate: { state: 'idle',     expr: 'heureux' },
+    embarrassed:  { state: 'idle',     expr: 'timide' },
+    determined:   { state: 'orbit',    expr: 'fier' },
+    worried:      { state: 'exclaim',  expr: 'effraye' }
+  };
+  window.bloub = {
+    // The pastille pops: called when she is talking.
+    notify: () => flashState('notify'),
+    // Map Haru's mood to a bloub state + resting face. The state jumps in (her
+    // animation for that mood), the expression stays so idle carries the face.
+    express: (emotion) => {
+      const M = EMOTION_STATES[emotion] || EMOTION_STATES['neutral'];
+      const expr = EXPRESSION_BY_ID.get(M.expr);
+      engine.setExpression(expr, clock);
+      if (M.state !== 'idle') flashState(M.state);
+    }
+  };
+  function dotAttrs(dot) {
+    const fill = dot.color || (dot.depth === undefined ? INK : mixHex(PAPER, INK, dot.depth));
+    const common = 'fill="' + fill + '" opacity="' + dot.opacity + '"';
+    if (dot.d) {
+      return '<path ' + common + ' d="' + dot.d + '" transform="translate(' + dot.x + ' ' + dot.y + ') rotate(' + (dot.rot || 0) + ') scale(' + RAYON + ')"/>';
+    }
+    return '<circle ' + common + ' cx="' + r2(dot.x) + '" cy="' + r2(dot.y) + '" r="' + r2(dot.r) + '"/>';
+  }
   function draw(frame) {
+    bmBody.setAttribute('d', frame.bodyPath);
     bBody.setAttribute('d', frame.bodyPath);
     bo.setAttribute('opacity', frame.bodyAlpha);
     let s = '';
@@ -419,6 +832,26 @@ const BLOUB = `
       bNotif.setAttribute('r', frame.notif.r);
       bNotif.style.display = '';
     } else bNotif.style.display = 'none';
+    // dots: a dot may be a path (the "!" drop) or a circle.
+    let db = '', df = '';
+    for (let i = 0; i < frame.dots.length; i++) (frame.dotsBehind ? (db += dotAttrs(frame.dots[i])) : (df += dotAttrs(frame.dots[i])));
+    bDotsBack.innerHTML = db;
+    bDotsFront.innerHTML = df;
+    // arcs with their per-frame gradients.
+    let grads = '', ab = '', af = '';
+    for (let i = 0; i < frame.arcs.length; i++) {
+      const a = frame.arcs[i];
+      const g = 'g' + a.id;
+      grads += '<linearGradient id="' + g + '" gradientUnits="userSpaceOnUse" x1="' + a.grad.x1 + '" y1="' + a.grad.y1 + '" x2="' + a.grad.x2 + '" y2="' + a.grad.y2 + '">' +
+        '<stop offset="0" stop-color="' + a.grad.stops[0] + '"/><stop offset="0.5" stop-color="' + a.grad.stops[1] + '"/><stop offset="1" stop-color="' + a.grad.stops[2] + '"/>' +
+        '</linearGradient>';
+      const stroke = 'stroke="url(#' + g + ')" stroke-width="' + r2(a.width) + '" opacity="' + r2(a.opacity) + '"';
+      ab += '<path ' + stroke + ' d="' + a.back + '"/>';
+      af += '<path ' + stroke + ' d="' + a.front + '"/>';
+    }
+    bGrads.innerHTML = grads;
+    bArcsBack.innerHTML = ab;
+    bArcsFront.innerHTML = af;
   }
 
   // Pointer follow, mouse only — a finger has no lingering cursor, so on touch
@@ -443,7 +876,7 @@ const BLOUB = `
     const hh = Math.max(1, window.innerHeight / 2);
     const nx = pointer ? clamp((pointer.x - (box.left + box.width / 2)) / hw, -1, 1) : 0;
     const ny = pointer ? clamp((pointer.y - (box.top + box.height / 2)) / hh, -1, 1) : 0;
-    const tour = easeOutQuint(clamp((clock - turnSince) / TURN_TIME));
+    const tour = easings.easeOutQuint(clamp((clock - turnSince) / TURN_TIME));
     engine.setLook(lookTarget(nx, ny, tour, pointer !== null), clock);
     aiming = true;
   }
@@ -557,8 +990,9 @@ export function appPage(): string {
 
   .quiet { color:var(--ink-dim); text-align:center; padding:2rem 0; }
 
-  /* Her, on stage: a bloub (Grok-style blob) that breathes, blinks and drifts.
-     Pure SVG — no Live2D runtime on the phone, nothing fetched from anywhere. */
+  /* Her, on stage: a pink bloub (Grok-style blob) that rotates and morphs
+     through the full bloub catalogue, and wears her mood. Pure SVG — no Live2D
+     runtime on the phone, nothing fetched from anywhere. */
   #stage { flex:0 0 auto; display:flex; justify-content:center; align-items:center; padding:.35rem 1rem 0; }
   #bloub { width:min(31vw, 136px); height:min(31vw, 136px); display:block;
     filter:drop-shadow(0 12px 26px rgba(0,0,0,.45)); }
@@ -737,7 +1171,11 @@ $('cf').addEventListener('submit',async ev=>{
       if(reply){
         // Started here and not waited on: the words are already on screen, and
         // her voice can catch up in its own time.
-        if(window.bloub) window.bloub.notify();
+        if(window.bloub){
+          window.bloub.notify();
+          // Her mood for that line drives the bloub's state and face.
+          post('/api/expression',{text:reply}).then(r=>window.bloub.express(r.emotion)).catch(()=>{});
+        }
         void speak(reply);
       }
     }
@@ -768,7 +1206,10 @@ async function askIfSheHasSomethingToSay(){
     if(!line) return;
     $('chat').insertAdjacentHTML('beforeend','<div class="msg them">'+esc(line)+'</div>');
     $('chat').scrollTop=$('chat').scrollHeight;
-    if(window.bloub) window.bloub.notify();
+    if(window.bloub){
+      window.bloub.notify();
+      post('/api/expression',{text:line}).then(r=>window.bloub.express(r.emotion)).catch(()=>{});
+    }
     void speak(line);
   }catch(r){ if(r&&r.status===401) location.reload(); }
 }
