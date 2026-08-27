@@ -533,9 +533,18 @@ const BLOUB = `
       const back = easings.easeInOutCubic(clamp((t - 1.6) / 0.9));
       const tri = spinningTriangle(rot);
       const ball = circle(1, { rot: rot });
+      const mixed = tri.radii.map((r, i) => r + (ball.radii[i] - r) * back);
+      // Baked into the radii rather than carried as sil.rot, the way idle does
+      // it, and for the same reason: this rotation winds past a full turn, and
+      // blend() normalises a rotation delta to the shortest arc. Left as a rot,
+      // the moment that delta crossed π the blend reversed direction and the
+      // whole body jumped ~130 units in a single frame. Sampled here, there is
+      // no angle left for the blend to wrap.
+      const radii = new Array(N);
+      for (let i = 0; i < N; i++) radii[i] = radiusAtAngle(mixed, (i / N) * TAU - rot);
       const sil = {
-        radii: tri.radii.map((r, i) => r + (ball.radii[i] - r) * back),
-        rot: rot,
+        radii: radii,
+        rot: 0,
         cx: tri.cx * (1 - back),
         cy: tri.cy * (1 - back),
         sx: 1,
@@ -597,6 +606,12 @@ const BLOUB = `
   // Transitions run this many times longer than the measured morph, so the
   // motion stays fluid instead of snapping between states.
   const MORPH_SLOW = 2.4;
+  // Blending one pose into another is eased in as well as out. easeOutQuint
+  // arrives gently but leaves at five times the average rate, which at 60fps
+  // put 7.5% of the whole transition into its first frame — the snap on every
+  // state change. The gaze below keeps the quint on purpose: eyes really do
+  // flick and settle. A body does not.
+  const morphEase = easings.easeInOutCubic;
   BotEngine.prototype.lookAtTime = function (now) {
     const k = (now - this.lookAt) / this.lookMorph;
     if (k >= 1) return this.look;
@@ -622,7 +637,7 @@ const BLOUB = `
     if (!to || !from) return to;
     const k = (now - this.exprAt) / SHAPE_MORPH;
     if (k >= 1) return to;
-    return blendExpression(from, to, easings.easeOutQuint(clamp(k)));
+    return blendExpression(from, to, morphEase(clamp(k)));
   };
   BotEngine.prototype.posed = function (def, t, now) {
     let pose = def.pose(t, now);
@@ -686,7 +701,7 @@ const BLOUB = `
     if (since >= def.morph * MORPH_SLOW) return pose;
     const origine = this.origine(now);
     if (!origine) return pose;
-    return this.blendPose(origine, pose, easings.easeOutQuint(clamp(since / (def.morph * MORPH_SLOW))));
+    return this.blendPose(origine, pose, morphEase(clamp(since / (def.morph * MORPH_SLOW))));
   };
   BotEngine.prototype.sample = function (now) {
     const R = this.scale;
@@ -694,7 +709,7 @@ const BLOUB = `
     let pose = this.posed(def, Math.max(0, now - this.tCur), now);
     const since = now - this.tCur;
     const origine = since < def.morph * MORPH_SLOW ? this.origine(now) : null;
-    if (origine) pose = this.blendPose(origine, pose, easings.easeOutQuint(clamp(since / (def.morph * MORPH_SLOW))));
+    if (origine) pose = this.blendPose(origine, pose, morphEase(clamp(since / (def.morph * MORPH_SLOW))));
 
     const alive = pose.eyeAlpha > 0.01;
     const look = this.lookAtTime(now);
@@ -786,25 +801,33 @@ const BLOUB = `
 
   const engine = new BotEngine();
   let nextAt = Infinity, clock = 0, last = 0, blockStart = 0;
+  // A mood that arrived while a reaction was still playing, waiting its turn.
+  let queued = null;
   const REST_STATES = ['idle', 'wink', 'wide'];
-  const REST_RANGE = {
-    idle: [6, 12],
-    wink: [3, 6],
-    wide: [3, 6]
-  };
+  // She rests in idle. A wink or a wide look is punctuation between long
+  // stretches of it, not somewhere to sit: held for as long as the catalogue
+  // says the gesture lasts and no longer, and always followed by idle.
+  //
+  // Holding them instead — 3 to 6 seconds each, either able to follow the
+  // other — put her in a wink or a stare 51% of the time, and ran sequences
+  // like wink, wide, wink, wide with no idle between. A wink is a gesture. At
+  // four seconds, twice a minute, it stops reading as one.
+  const IDLE_RANGE = [10, 25];
+  const PUNCTUATION = ['wink', 'wide'];
   function restDuration(state) {
     const d = STATES[state];
     return Math.round(Math.max(d.duration, d.minDuration || 0) * 100) / 100;
   }
   function holdOf(state) {
-    const r = REST_RANGE[state];
-    if (r) return Math.round((r[0] + Math.random() * (r[1] - r[0])) * 10) / 10;
-    return restDuration(state);
+    if (state !== 'idle') return restDuration(state);
+    return Math.round((IDLE_RANGE[0] + Math.random() * (IDLE_RANGE[1] - IDLE_RANGE[0])) * 10) / 10;
   }
-  // Pick a random resting state, never the one she is in.
+  // Idle and a gesture, alternating: every gesture is bracketed by stillness,
+  // which is what makes it read as a gesture rather than a tic.
   function applyRest() {
-    const pool = REST_STATES.filter((s) => s !== engine.cur);
-    const state = pool[Math.floor(Math.random() * pool.length)];
+    const state = engine.cur === 'idle'
+      ? PUNCTUATION[Math.floor(Math.random() * PUNCTUATION.length)]
+      : 'idle';
     blockStart = clock;
     engine.setState(state, clock);
     nextAt = blockStart + holdOf(state);
@@ -846,11 +869,20 @@ const BLOUB = `
     think: () => playFor('thinking', 20),
     // Map Haru's mood to a bloub state + resting face. The state plays once as
     // a reaction, then she settles back into the resting loop with that face.
+    //
+    // The mood for a line arrives a round trip after notify() has already
+    // popped the pastille for that same line. Cutting notify off 250ms in to
+    // start the mood made one event read as two — a stutter rather than a
+    // reaction. So a reaction still playing is allowed to finish and the mood
+    // follows it. Thinking is the exception: the answer is here, so stop
+    // thinking about it.
     express: (emotion) => {
       const M = EMOTION_STATES[emotion] || EMOTION_STATES['neutral'];
       const expr = EXPRESSION_BY_ID.get(M.expr);
       engine.setExpression(expr, clock);
-      if (M.state !== 'idle') flashState(M.state);
+      if (M.state === 'idle') return;
+      if (engine.cur === 'thinking' || REST_STATES.indexOf(engine.cur) >= 0) flashState(M.state);
+      else queued = M.state;
     },
     // Read-only: what she is doing right now, for the page to know.
     state: () => ({ cur: engine.cur, expr: engine.expr ? engine.expr.id : 'neutre' })
@@ -947,7 +979,10 @@ const BLOUB = `
     const dt = last ? Math.min((ms - last) / 1000, 0.064) : 0;
     last = ms;
     clock += dt;
-    if (clock >= nextAt) applyRest();
+    if (clock >= nextAt) {
+      if (queued) { const q = queued; queued = null; playFor(q); }
+      else applyRest();
+    }
     if (finePointer) aim();
     draw(engine.sample(clock));
     requestAnimationFrame(tick);
