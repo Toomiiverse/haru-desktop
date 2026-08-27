@@ -453,10 +453,12 @@ const BLOUB = `
     return clamp(k * 2);
   }
   const STATES = {
-    idle: { id: 'idle', morph: 0.45, blinkIn: false, baseFace: true, baseBody: true, duration: 3.2, minDuration: undefined, pose: (t) => {
+    idle: { id: 'idle', morph: 0.45, blinkIn: false, baseFace: true, baseBody: true, duration: 9, minDuration: undefined, pose: (t, now) => {
       // A gentle rotating idle: the resting blob slowly turns through a faint
       // egg so the rotation reads, on top of the usual breathing and blinking.
-      const spin = (t * TAU) / 12;
+      // The phase uses the absolute clock so the spin is continuous across rest
+      // blocks instead of snapping back on each entry.
+      const spin = ((now === undefined ? t : now) * TAU) / 12;
       const radii = new Array(N);
       for (let i = 0; i < N; i++) radii[i] = lerp(1, radiusAtAngle(PROFILES.egg, (i / N) * TAU - spin), 0.32);
       return base({ sil: { radii: radii, rot: 0, cx: 0, cy: 0, sx: 1, sy: 1 } });
@@ -550,15 +552,9 @@ const BLOUB = `
       });
     } }
   };
-  const MIN_BLOCK = Math.max.apply(null, ['idle', 'wink', 'wide', 'notify'].map((s) => STATES[s].morph));
-  function makeBlock(state) {
-    const d = Math.max(MIN_BLOCK, STATES[state].minDuration || MIN_BLOCK);
-    return { state: state, duration: Math.round(Math.max(d, STATES[state].duration) * 100) / 100 };
-  }
-  // The resting loop: the subtle idle animations only. The dramatic states
-  // (thinking, alert, play, orbit, burst, ...) are reactions — played once when
-  // her mood calls for them, then she settles back into the resting loop.
-  const REST_CYCLE = ['idle', 'wink', 'wide', 'notify'].map(makeBlock);
+  // Resting is random and quiet, never the dramatic states: she picks among
+  // idle / wink / wide at random, holds each for a long, fluid beat, and only
+  // the mood engine or a message pulls her into a reaction state.
 
   // Clock-free engine: sample(t) is a pure function of time.
   function BotEngine() {
@@ -580,6 +576,9 @@ const BLOUB = `
   }
   const NO_LOOK = { yaw: 0, pitch: 0, mix: 0, spin: 0, wander: 1 };
   const SHAPE_MORPH = 0.45;
+  // Transitions run this many times longer than the measured morph, so the
+  // motion stays fluid instead of snapping between states.
+  const MORPH_SLOW = 2.4;
   BotEngine.prototype.lookAtTime = function (now) {
     const k = (now - this.lookAt) / this.lookMorph;
     if (k >= 1) return this.look;
@@ -607,8 +606,8 @@ const BLOUB = `
     if (k >= 1) return to;
     return blendExpression(from, to, easings.easeOutQuint(clamp(k)));
   };
-  BotEngine.prototype.posed = function (def, t) {
-    let pose = def.pose(t);
+  BotEngine.prototype.posed = function (def, t, now) {
+    let pose = def.pose(t, now);
     if (def.baseFace && this.expr) {
       pose = Object.assign({}, pose, { gaze: this.expr.gaze, split: this.expr.split, eyes: this.expr.eyes });
     }
@@ -617,7 +616,7 @@ const BLOUB = `
   BotEngine.prototype.origine = function (now) {
     if (this.departFige) return this.departFige;
     if (!this.prev) return null;
-    return this.posed(STATES[this.prev], Math.max(0, now - this.tPrev));
+    return this.posed(STATES[this.prev], Math.max(0, now - this.tPrev), now);
   };
   const lerpEye = (a, b, t) => ({ w: lerp(a.w, b.w, t), h: lerp(a.h, b.h, t), open: lerp(a.open, b.open, t), tilt: lerp(a.tilt || 0, b.tilt || 0, t) });
   BotEngine.prototype.blendPose = function (a, b, t) {
@@ -654,7 +653,7 @@ const BLOUB = `
   BotEngine.prototype.setState = function (id, now) {
     if (id === this.cur) return;
     const morph = STATES[this.cur].morph;
-    const enPleinFondu = this.prev !== null && now - this.tCur < morph;
+    const enPleinFondu = this.prev !== null && now - this.tCur < morph * MORPH_SLOW;
     this.departFige = enPleinFondu ? this.poseComposee(now) : null;
     this.prev = this.cur;
     this.tPrev = this.tCur;
@@ -664,20 +663,20 @@ const BLOUB = `
   };
   BotEngine.prototype.poseComposee = function (now) {
     const def = STATES[this.cur];
-    const pose = this.posed(def, Math.max(0, now - this.tCur));
+    const pose = this.posed(def, Math.max(0, now - this.tCur), now);
     const since = now - this.tCur;
-    if (since >= def.morph) return pose;
+    if (since >= def.morph * MORPH_SLOW) return pose;
     const origine = this.origine(now);
     if (!origine) return pose;
-    return this.blendPose(origine, pose, easings.easeOutQuint(clamp(since / def.morph)));
+    return this.blendPose(origine, pose, easings.easeOutQuint(clamp(since / (def.morph * MORPH_SLOW))));
   };
   BotEngine.prototype.sample = function (now) {
     const R = this.scale;
     const def = STATES[this.cur];
-    let pose = this.posed(def, Math.max(0, now - this.tCur));
+    let pose = this.posed(def, Math.max(0, now - this.tCur), now);
     const since = now - this.tCur;
-    const origine = since < def.morph ? this.origine(now) : null;
-    if (origine) pose = this.blendPose(origine, pose, easings.easeOutQuint(clamp(since / def.morph)));
+    const origine = since < def.morph * MORPH_SLOW ? this.origine(now) : null;
+    if (origine) pose = this.blendPose(origine, pose, easings.easeOutQuint(clamp(since / (def.morph * MORPH_SLOW))));
 
     const alive = pose.eyeAlpha > 0.01;
     const look = this.lookAtTime(now);
@@ -768,30 +767,39 @@ const BLOUB = `
   const INK = '#e152b0', PAPER = '#ffffff';
 
   const engine = new BotEngine();
-  let block = 0, nextAt = Infinity, clock = 0, last = 0, blockStart = 0;
-  let reacting = false;
+  let nextAt = Infinity, clock = 0, last = 0, blockStart = 0;
+  const REST_STATES = ['idle', 'wink', 'wide'];
+  const REST_RANGE = {
+    idle: [6, 12],
+    wink: [3, 6],
+    wide: [3, 6]
+  };
   function restDuration(state) {
     const d = STATES[state];
     return Math.round(Math.max(d.duration, d.minDuration || 0) * 100) / 100;
   }
-  function applyRest(i) {
-    reacting = false;
-    block = i;
-    blockStart = clock;
-    engine.setState(REST_CYCLE[i].state, clock);
-    nextAt = blockStart + REST_CYCLE[i].duration;
+  function holdOf(state) {
+    const r = REST_RANGE[state];
+    if (r) return Math.round((r[0] + Math.random() * (r[1] - r[0])) * 10) / 10;
+    return restDuration(state);
   }
-  function playReaction(state) {
-    reacting = true;
+  // Pick a random resting state, never the one she is in.
+  function applyRest() {
+    const pool = REST_STATES.filter((s) => s !== engine.cur);
+    const state = pool[Math.floor(Math.random() * pool.length)];
     blockStart = clock;
     engine.setState(state, clock);
-    nextAt = blockStart + restDuration(state);
+    nextAt = blockStart + holdOf(state);
+  }
+  // A one-off reaction state: played once, then she settles back into rest.
+  function playFor(state, hold) {
+    blockStart = clock;
+    engine.setState(state, clock);
+    nextAt = blockStart + (hold === undefined ? holdOf(state) : hold);
   }
   function flashState(state) {
-    if (state === 'idle') { applyRest(0); return; }
-    const i = REST_CYCLE.findIndex((b) => b.state === state);
-    if (i >= 0) applyRest(i);
-    else playReaction(state);
+    if (state === 'idle') { applyRest(); return; }
+    playFor(state);
   }
   // Haru's mood engine has twelve emotions; each drives a bloub state (her
   // animation for that mood) and a resting expression (the face idle carries
@@ -811,8 +819,13 @@ const BLOUB = `
     worried:      { state: 'exclaim',  expr: 'effraye' }
   };
   window.bloub = {
-    // The pastille pops: called when she is talking.
+    // Called when she is talking (a nudge or a spoken reply): the pastille pops
+    // as a one-off reaction, then she settles back into rest.
     notify: () => flashState('notify'),
+    // Called when the user sends a message: she drops into the thinking state
+    // and stays there until the reply's mood lands (or a long timeout), so the
+    // avatar reads as listening while she works on the answer.
+    think: () => playFor('thinking', 20),
     // Map Haru's mood to a bloub state + resting face. The state plays once as
     // a reaction, then she settles back into the resting loop with that face.
     express: (emotion) => {
@@ -916,15 +929,12 @@ const BLOUB = `
     const dt = last ? Math.min((ms - last) / 1000, 0.064) : 0;
     last = ms;
     clock += dt;
-    if (clock >= nextAt) {
-      if (reacting) applyRest(0);
-      else applyRest((block + 1) % REST_CYCLE.length);
-    }
+    if (clock >= nextAt) applyRest();
     if (finePointer) aim();
     draw(engine.sample(clock));
     requestAnimationFrame(tick);
   }
-  applyRest(0);
+  applyRest();
   requestAnimationFrame(tick);
 })();
 `;
@@ -1154,6 +1164,8 @@ $('cf').addEventListener('submit',async ev=>{
   const id='wait'+(++waiting);
   $('chat').insertAdjacentHTML('beforeend','<div class="msg me">'+esc(text)+'</div><div class="msg them" id='+id+'>…</div>');
   $('chat').scrollTop=$('chat').scrollHeight;
+  // Your message drops her into the thinking state while she works on the answer.
+  if(window.bloub) window.bloub.think();
   const stopWaiting=()=>{const bubble=document.getElementById(id); if(bubble) bubble.remove();};
   // The waiting bubble doubles as the reply bubble: words land in it as the
   // stream delivers them, and the final processed reply replaces them when the
