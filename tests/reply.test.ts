@@ -14,7 +14,7 @@ import assert from 'node:assert/strict';
 import {
   claimsDesktopAction, claimsTickOff, dropInventedContact, dropInventedScreenTalk,
   dropRepeatedAgendaMentions, dropRepeatedParagraphs, dropRoleHeader,
-  dropStageDirections, dropTackedOnParagraphs,
+  dropStageDirections, dropTackedOnParagraphs, readsLikeAssistant,
 } from '../electron/reply';
 
 // -- claiming to have touched the machine -------------------------------------
@@ -303,4 +303,31 @@ test('a list is a shape, not padding', () => {
   // exactly what was wanted.
   const reply = 'Here is how you set it up.\n\n1. Open the dashboard.\n\n2. Add a subscription plan.';
   assert.equal(dropTackedOnParagraphs(reply, false), reply);
+});
+
+// -- the register of a help desk --------------------------------------------------
+
+test('the support-desk register is recognised, in the words it actually arrived in', () => {
+  // All four of these reached a screen tonight, through three different doors.
+  for (const beige of [
+    "I'm sorry to hear that. Could you please clarify what specifically is not true so I can understand better and address it correctly?",
+    "It's good to hear that! Sometimes unexpected positive experiences can be quite pleasant.",
+    "I'm glad you think so! If there's anything else you need help with or want to chat about, feel free to let me know.",
+    'It seems there was no task or event on your list that matched that. Could you please provide more details? I hope this helps.',
+  ]) {
+    assert.equal(readsLikeAssistant(beige), true, `not caught: ${beige.slice(0, 50)}`);
+  }
+});
+
+test('her own voice is never the register of a help desk', () => {
+  for (const hers of [
+    "Oh, really? What's not a good thing, Tommy? Spit it out!",
+    'Wow. Bold move thinking I fucked up. Fine. I’ll adjust, princess.',
+    'Fine. The bins go out on Thursday, as you well know.',
+    "I'm sorry. There — I said it once, don't get used to it.",
+    'Glad that’s over. Now do the dishes.',
+    'You need help. Professional help. But fine, ask your question.',
+  ]) {
+    assert.equal(readsLikeAssistant(hers), false, `false alarm: ${hers.slice(0, 50)}`);
+  }
 });

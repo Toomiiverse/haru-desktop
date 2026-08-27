@@ -24,7 +24,7 @@
 // reported rather than looped on.
 
 import type { ChatMessage, ToolCall } from './provider';
-import { claimsDesktopAction, claimsTickOff } from './reply';
+import { claimsDesktopAction, claimsTickOff, readsLikeAssistant } from './reply';
 
 /** How many rounds a single reply may spend before it has to settle. */
 export const MAX_TOOL_ROUNDS = 4;
@@ -104,6 +104,7 @@ export async function runToolLoop(conversation: ChatMessage[], deps: ToolLoopDep
   let emptyRetried = false;
   let claimRetried = false;
   let tickRetried = false;
+  let voiceRetried = false;
 
   for (let round = 0; round < maxRounds; round++) {
     // Reading anything ends her reach for the rest of the turn. pageWasRead
@@ -203,6 +204,22 @@ export async function runToolLoop(conversation: ChatMessage[], deps: ToolLoopDep
       conversation.push({
         role: 'user',
         content: 'You just said that is ticked off, but it is still on their list — saying so does not change it, calling complete_kept_item does. Call it now for the task you meant. If you did not mean any of the ones actually on the list, say plainly that it is not ticked off rather than implying it is.',
+      });
+      continue;
+    }
+
+    // She answered in the register of a help desk. Four different doors let a
+    // model without her voice into the conversation in one evening, and one
+    // flat reply teaches the next turn to match it — so the register is
+    // corrected at the door they all share, once, whichever way it came in.
+    if (readsLikeAssistant(message.content) && !voiceRetried) {
+      voiceRetried = true;
+      resetStream();
+      warn('[ai] replied like a support agent — retrying once in her own voice');
+      conversation.push(message);
+      conversation.push({
+        role: 'user',
+        content: 'That reply reads like a customer-support agent, and you are not one. Say the same thing again as yourself — the prompt says who you are — without apologising, without offering further assistance, and without mentioning this note.',
       });
       continue;
     }

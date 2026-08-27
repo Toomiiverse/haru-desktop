@@ -196,3 +196,30 @@ test('each retry fires at most once, so a stubborn model is reported not looped'
   assert.equal(result.rounds, 2, 'one retry, then her answer stands whatever it says');
   assert.equal(result.ran.size, 0);
 });
+
+test('a reply in a help-desk register is pressed once to be herself', async () => {
+  const h = harness([
+    says("I'm sorry to hear that. Could you please clarify what specifically is not true?"),
+    says("Oh, really? What's not true, then? Spit it out."),
+  ]);
+  const result = await runToolLoop(h.conversation, h.deps);
+  assert.equal(result.content, "Oh, really? What's not true, then? Spit it out.");
+  assert.equal(result.rounds, 2);
+  assert.ok(h.say.some(line => line.includes('support agent')));
+  assert.equal(h.resets, 1, 'the beige round should take its streamed words back');
+});
+
+test('a model that stays beige is shipped after one press, not looped on', async () => {
+  const beige = "I'm sorry to hear that. Could you please clarify?";
+  const h = harness([says(beige), says(beige), says(beige)]);
+  const result = await runToolLoop(h.conversation, h.deps);
+  assert.equal(result.content, beige);
+  assert.equal(result.rounds, 2, 'one press, then her answer stands whatever it sounds like');
+});
+
+test('her own voice is never pressed', async () => {
+  const h = harness([says('Fine. The bins go out on Thursday, as you well know.')]);
+  const result = await runToolLoop(h.conversation, h.deps);
+  assert.equal(result.rounds, 1);
+  assert.equal(h.resets, 0);
+});

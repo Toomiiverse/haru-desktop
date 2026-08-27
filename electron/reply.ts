@@ -177,6 +177,29 @@ export function claimsTickOff(reply: string): boolean {
   return CLAIMED_TICK.test(text);
 }
 
+
+/**
+ * A reply in the register of a support desk rather than her own.
+ *
+ * Not one wording problem but a channel problem: four different doors let a
+ * model without her voice speak into the transcript in a single evening — the
+ * gaming swap, a quote-reply, the picture path, and escalation, which answers
+ * every turn while a picture is in play — and one flat reply anchors the next.
+ * Measured directly: three assistant-voiced turns in the history flip even the
+ * 14B with the full persona in hand. Wording in the prompt cannot close four
+ * doors at once, so the register is caught at the door they all share, and the
+ * turn gets one more go — the same shape as the desktop-claim retry above.
+ *
+ * The list is hallmark support-desk filler, kept narrow on purpose: her actual
+ * voice never says these, and a false positive costs one retried round, never
+ * any text.
+ */
+const SUPPORT_AGENT = /\b(?:i'?m sorry to hear that|it'?s (?:good|great) to hear|glad to hear that|could you please (?:clarify|specify|provide)|how can i assist|i can assist you|feel free to (?:ask|reach out|let me know)|if there'?s anything else (?:you need|i can)|don'?t hesitate to|i hope this helps|i'?m here to help|as an ai\b)\b/i;
+
+export function readsLikeAssistant(reply: string): boolean {
+  return SUPPORT_AGENT.test(reply ?? '');
+}
+
 /**
  * The chat template leaking into what she said.
  *
