@@ -1,6 +1,6 @@
 import { Component, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Paperclip, MicOff, CalendarDays, Check, ChevronDown, CornerDownRight, FileAudio, FileText, FileVideo, Mic, Quote, Reply, SquareCheck, ChevronLeft, ChevronRight, CircleDot, Import, MessageSquarePlus, Plus, NotebookPen, MessageSquare, Square, ImagePlus, Sparkles, ThumbsDown, ThumbsUp, Trash2, X } from 'lucide-react';
-import type { Aside, AsideSource, Attachment, UpdateReport, AniListConfig, Character, DesktopConfig, GamingConfig, ScreenshotConfig, WatchingConfig, VisionConfig, HaruNote, JournalConfig, JournalEntry, JournalField, JournalRange, JournalStats, JournalFieldStats, RoamConfig, EmotionName, GoogleStatus, KeptItem, ListenConfig, Memory, MemoryKind, Message, Profile, ProviderConfig, Reaction, SearchConfig, SessionSummary, VoiceConfig, VoiceEngine, VoiceReference, WardrobeControl, WebStatus } from './types';
+import type { Aside, AsideSource, Attachment, UpdateReport, AniListConfig, Character, DesktopConfig, GamingConfig, ScreenshotConfig, WatchingConfig, VisionConfig, HaruNote, ForgettingEntry, JournalConfig, JournalEntry, JournalField, JournalRange, JournalStats, JournalFieldStats, LastRetrieval, RoamConfig, EmotionName, GoogleStatus, KeptItem, ListenConfig, Memory, MemoryKind, Message, Profile, ProviderConfig, Reaction, SearchConfig, SessionSummary, VoiceConfig, VoiceEngine, VoiceReference, WardrobeControl, WebStatus } from './types';
 import { buildMonthGrid, datesInView, dayLabel, rangeLabel, shiftISODate, toISODate, weekOf, type CalendarView } from './date';
 import { startListening, startRecording, type Listener, type Recorder } from './companion/microphone';
 import { isUsableFollowUp, matchWake, readsAsFarewell } from './companion/wake';
@@ -372,6 +372,8 @@ export function ProfileDrawer({ onClose }: { onClose(): void }) {
   useEffect(() => { window.haru?.settings.get('companion.speakerName').then(saved => { if (typeof saved === 'string') setSpeakerName(saved); }).catch(() => {}); }, []);
   const [memories, setMemories] = useState<Memory[]>([]);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
+  const [forgetting, setForgetting] = useState<ForgettingEntry[]>([]);
+  const [retrieval, setRetrieval] = useState<LastRetrieval | null>(null);
   const [draft, setDraft] = useState('');
   const [draftKind, setDraftKind] = useState<MemoryKind>('preference');
   const [loaded, setLoaded] = useState(false);
@@ -381,6 +383,8 @@ export function ProfileDrawer({ onClose }: { onClose(): void }) {
     window.haru.profile.get().then(current => { setProfile(current); setLoaded(true); });
     window.haru.memory.list().then(setMemories);
     window.haru.memory.sessions().then(setSessions);
+    window.haru.memory.forgettingLog().then(setForgetting);
+    window.haru.memory.lastRetrieval().then(setRetrieval);
     // Haru writes memories mid-conversation, so the list follows along rather
     // than going stale while the drawer sits open.
     return window.haru.memory.onChange(setMemories);
@@ -419,11 +423,24 @@ export function ProfileDrawer({ onClose }: { onClose(): void }) {
             if (!group.length) return null;
             return <div key={kind} className="memory-group"><h3>{label}</h3>
               <ul className="memory-list">{group.map(memory => <li key={memory.id}>
-                <span>{memory.text}{memory.subject && <em> · {memory.subject}</em>}</span>
-                {memory.mentions >= 3 && <span className="recurring" title={`Mentioned ${memory.mentions} times`}>×{memory.mentions}</span>}
-                {(memory.confidence ?? 1) < 0.6 && <span className="recurring" title="Low confidence — believed on thin evidence">?{Math.round((memory.confidence ?? 0) * 100)}%</span>}
-                {(memory.importance ?? 0) >= 0.8 && <span className="recurring" title="Important — kept regardless of recency">★</span>}
-                {memory.status && memory.status !== 'active' && <span className="recurring" title={memory.status}>{memory.status[0].toUpperCase()}</span>}
+                <details>
+                  <summary>
+                    <span>{memory.text}{memory.subject && <em> · {memory.subject}</em>}</span>
+                    {memory.mentions >= 3 && <span className="recurring" title={`Mentioned ${memory.mentions} times`}>×{memory.mentions}</span>}
+                    {(memory.confidence ?? 1) < 0.6 && <span className="recurring" title="Low confidence — believed on thin evidence">?{Math.round((memory.confidence ?? 0) * 100)}%</span>}
+                    {(memory.importance ?? 0) >= 0.8 && <span className="recurring" title="Important — kept regardless of recency">★</span>}
+                    {memory.status && memory.status !== 'active' && <span className="recurring" title={memory.status}>{memory.status[0].toUpperCase()}</span>}
+                  </summary>
+                  <dl className="memory-meta">
+                    <dt>Believed at</dt><dd>{Math.round((memory.confidence ?? 0.5) * 100)}%</dd>
+                    <dt>Importance</dt><dd>{Math.round((memory.importance ?? 0.4) * 100)}%</dd>
+                    <dt>Source</dt><dd>{memory.source ?? 'conversation'}</dd>
+                    <dt>Type</dt><dd>{memory.memoryType ?? 'semantic'}</dd>
+                    <dt>Heard</dt><dd>{memory.createdAt.slice(0, 10)}</dd>
+                    <dt>Last seen</dt><dd>{memory.lastSeenAt.slice(0, 10)}</dd>
+                    {memory.predicate && <><dt>Relation</dt><dd>{memory.subject ?? '—'} → {memory.predicate} → {memory.object ?? '—'}</dd></>}
+                  </dl>
+                </details>
                 <button className="remove-model" onClick={async () => setMemories(await window.haru!.memory.remove(memory.id))} aria-label={`Forget: ${memory.text}`}><Trash2 size={12}/></button>
               </li>)}</ul></div>;
           })}
@@ -431,6 +448,20 @@ export function ProfileDrawer({ onClose }: { onClose(): void }) {
         <input value={draft} onChange={event => setDraft(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); void addMemory(); } }} placeholder="Add something yourself…"/>
         <select value={draftKind} onChange={event => setDraftKind(event.target.value as MemoryKind)}>{MEMORY_GROUPS.map(([kind, label]) => <option key={kind} value={kind}>{label}</option>)}</select>
         <button className="ghost" disabled={!draft.trim()} onClick={addMemory}>Add</button>
+        <button className="ghost" title="Merge duplicates and flag contradictions now" onClick={async () => { await window.haru!.memory.consolidate(); setMemories(await window.haru!.memory.list()); }}>Tidy</button>
+      </div>
+      <div className="field"><h2>What she forgot</h2>
+        {forgetting.length === 0
+          ? <p className="nothing">Nothing forgotten yet — the log fills when decay or pruning lets something go.</p>
+          : <ul className="memory-list">{forgetting.slice().reverse().slice(0, 12).map(entry => <li key={`${entry.id}-${entry.at}`}><span><em>{entry.reason}</em> — {entry.text}</span><span className="memory-meta-inline">{entry.at.slice(0, 16)}{entry.detail ? ` · ${entry.detail}` : ''}</span></li>)}</ul>}
+      </div>
+      <div className="field"><h2>Why this was retrieved</h2>
+        {retrieval === null
+          ? <p className="nothing">Nothing retrieved yet — say something to Haru and the last memory search will appear here with its scoring.</p>
+          : <div>
+              <p className="status-note">For: “{retrieval.query}” — {retrieval.at.slice(0, 19)}</p>
+              <ul className="memory-list">{retrieval.entries.map(entry => <li key={entry.id}><span>{entry.text}</span><span className="memory-meta-inline">score {entry.score.toFixed(3)} · rel {entry.factors.relevance.toFixed(2)} · imp {entry.factors.importance.toFixed(2)} · conf {entry.factors.confidence.toFixed(2)} · rec {entry.factors.recency.toFixed(2)}</span></li>)}</ul>
+            </div>}
       </div>
     </div>
     <div className="field"><h2>Past conversations{sessions.length > 0 && <span className="kept-count">{sessions.length}</span>}</h2>

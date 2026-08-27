@@ -87,6 +87,7 @@ interface Window {
       remove(id: string): Promise<import('./types').Memory[]>;
       consolidate(): Promise<unknown[]>;
       forgettingLog(): Promise<import('./types').ForgettingEntry[]>;
+      lastRetrieval(): Promise<import('./types').LastRetrieval | null>;
       clear(): Promise<import('./types').Memory[]>;
       onChange(callback: (items: import('./types').Memory[]) => void): () => void;
     };

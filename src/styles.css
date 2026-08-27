@@ -125,6 +125,13 @@
 .memory-list li{display:flex;align-items:center;gap:8px;padding:7px 10px;border:1px solid var(--surface-3);border-radius:8px;background:var(--bg-sunk);font-size:12.5px;line-height:1.45}
 .memory-list li span{flex:1}
 .memory-list li span em{color:var(--muted-soft);font-style:normal}
+.memory-list details{flex:1;min-width:0}
+.memory-list summary{display:flex;align-items:center;gap:8px;cursor:pointer;list-style:none}
+.memory-list summary::-webkit-details-marker{display:none}
+.memory-meta{display:grid;grid-template-columns:auto 1fr;gap:2px 10px;margin:8px 0 0;font:11px 'JetBrains Mono',monospace;color:var(--muted)}
+.memory-meta dt{color:var(--muted-soft)}
+.memory-meta dd{margin:0}
+.memory-meta-inline{font:10px 'JetBrains Mono',monospace;color:var(--muted-soft);flex:none}
 .memory-group{margin-top:10px}
 .memory-group h3{margin:0;font:10px 'JetBrains Mono',monospace;letter-spacing:.1em;text-transform:uppercase;color:var(--muted-soft)}
 /* Marks something raised again and again, which is what she treats as a theme. */

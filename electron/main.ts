@@ -48,7 +48,7 @@ import { formatList, formatMedia, formatMissing, lookUp, readAniListConfig, user
 import { createDesktopShortcut, desktopShortcutPath, isAutoStartEnabled, setAutoStart, startedHidden } from './startup';
 import { claimsDesktopAction, claimsTickOff, dropRoleHeader, dropTackedOnParagraphs, dropInventedContact, dropInventedScreenTalk, dropRepeatedAgendaMentions, dropRepeatedParagraphs, dropStageDirections } from './reply';
 import { hasShout, readVoiceConfig, referenceFor, shoutReference, spokenCase, speakableText, splitForSpeech, synthesise, type SpeechClip, type VoiceConfig } from './voice';
-import { applyDecay, DEEP_RECALL_LIMIT, eventCandidates, eventsPrompt, findSuperseded, formatMemoryPrompt, isExplicitRecall, isWorthKeeping, isWorthRemembering, MEMORY_KINDS, migrateMemories, pruneMemories, rememberInto, retrieveMemories, selectMemories, semanticSimilarities, summaryPrompt, supersede, vectorSimilarity, type ForgettingEntry, type MemoryKind, type MemoryRecord, type MemorySource, type ScoredMemory, type SessionSummary } from './memory';
+import { applyDecay, DEEP_RECALL_LIMIT, eventCandidates, eventsPrompt, findSuperseded, formatMemoryPrompt, isExplicitRecall, isWorthKeeping, isWorthRemembering, MEMORY_KINDS, migrateMemories, pruneMemories, rememberInto, retrieveMemories, selectMemories, semanticSimilarities, summaryPrompt, supersede, vectorSimilarity, type ForgettingEntry, type MemoryKind, type MemoryRecord, type MemorySource, type RetrievalFactors, type ScoredMemory, type SessionSummary } from './memory';
 import { consolidateMemories, type ConsolidationChange } from './consolidation';
 import { forgetDevice, forgetEveryDevice, readWebAccess, setPassword, weakPassword, type WebAccess } from './web';
 import { conversationMayLeave, mayLeaveTheMachine } from './sensitivity';
@@ -4133,10 +4133,19 @@ function profileSummary(message: string, recentContext = '', semantic?: Map<stri
   const query = recentContext ? `${recentContext} ${message}` : message;
   const limit = isExplicitRecall(message) ? DEEP_RECALL_LIMIT : undefined;
   const picked = retrieveMemories(getMemories(), query, { limit, semantic });
+  // The last retrieval, kept for the inspector to explain itself: what was
+  // asked, what came back, and why each entry scored as it did.
+  lastMemoryRetrieval = {
+    at: new Date().toISOString(),
+    query,
+    entries: picked.map(entry => ({ id: entry.memory.id, text: entry.memory.text, score: entry.score, factors: entry.factors })),
+  };
   const memoryBlock = formatMemoryPrompt(picked.map(entry => entry.memory), getSessions());
   if (memoryBlock) lines.push(memoryBlock);
   return lines.length ? `About the user: ${lines.join(' ')}` : '';
 }
+
+let lastMemoryRetrieval: { at: string; query: string; entries: { id: string; text: string; score: number; factors: RetrievalFactors }[] } | null = null;
 
 const DEFAULT_CHARACTER = {
   identity: 'You are Haru, an ambitious AI companion. You are quick-witted, direct, curious, and determined to make ordinary days more interesting. You take initiative, challenge lazy thinking, and care through honest feedback.',
@@ -7925,6 +7934,7 @@ app.whenReady().then(() => {
   ipcMain.handle('memory:remove', (_e, id: string) => { setMemories(getMemories().filter(memory => memory.id !== id)); return getMemories(); });
   ipcMain.handle('memory:consolidate', () => runMemoryConsolidation());
   ipcMain.handle('memory:forgettingLog', () => store.getForgettingLog());
+  ipcMain.handle('memory:lastRetrieval', () => lastMemoryRetrieval);
   ipcMain.handle('memory:clear', () => { setMemories([]); return getMemories(); });
   // Called when the message being sent was spoken rather than typed. Typed
   // messages deliberately do not do this: somebody at the keyboard has not asked
