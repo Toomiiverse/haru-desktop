@@ -1,0 +1,44 @@
+/* ZZZ launcher — dark card, acid full-width selection like the LOGIN button */
+* {
+    bg:     #0d0d0dff;
+    card:   #1a1a1aff;
+    fg:     #ecececff;
+    acid:   #d3fd00ff;
+    ink:    #111111ff;
+    font:   "Anton 12";
+}
+
+window {
+    background-color: @card;
+    border: 3px solid;
+    border-color: @acid;
+    border-radius: 16px;
+    width: 480px;
+    padding: 18px;
+}
+
+inputbar {
+    background-color: @bg;
+    text-color: @fg;
+    border-radius: 12px;
+    padding: 10px 14px;
+    margin: 0 0 10px 0;
+}
+
+listview {
+    background-color: transparent;
+    lines: 8;
+    spacing: 4px;
+}
+
+element {
+    padding: 8px 12px;
+    border-radius: 10px;
+    text-color: @fg;
+    background-color: transparent;
+}
+
+element selected {
+    background-color: @acid;
+    text-color: @ink;
+}

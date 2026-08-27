@@ -1,0 +1,12 @@
+# ZZZ notification card
+background-color=#1a1a1aff
+text-color=#ecececff
+border-color=#d3fd00ff
+border-size=3
+border-radius=14
+padding=10
+font=Anton 11
+
+[urgency=critical]
+border-color=#ff4b33ff
+text-color=#ecececff

@@ -1,0 +1,42 @@
+/* ZZZ nav pill — rounded black bar, acid active workspace */
+* {
+    font-family: "Anton", "Archivo Black", sans-serif;
+    font-size: 14px;
+}
+
+window#waybar {
+    background: #0d0d0d;
+    border: 3px solid #1a1a1a;
+    border-radius: 20px;
+    margin: 8px 14px;
+    padding: 2px 10px;
+    color: #ececec;
+}
+
+#workspaces button {
+    padding: 2px 10px;
+    margin: 4px 3px;
+    border-radius: 12px;
+    background: transparent;
+    color: #8a8a8a;
+}
+
+#workspaces button.active {
+    background: #d3fd00;
+    color: #111111;
+    font-style: italic;
+}
+
+#workspaces button:hover {
+    background: #2a2a2a;
+    color: #ececec;
+}
+
+#clock, #battery, #network, #pulseaudio, #cpu, #tray {
+    padding: 0 10px;
+    color: #ececec;
+}
+
+#battery.critical, #network.disconnected {
+    color: #ff4b33;
+}

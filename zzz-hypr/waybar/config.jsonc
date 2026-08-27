@@ -1,0 +1,15 @@
+{
+  "layer": "top",
+  "position": "top",
+  "height": 38,
+  "modules-left": ["hyprland/workspaces"],
+  "modules-center": ["clock"],
+  "modules-right": ["pulseaudio", "network", "battery", "tray"],
+  "hyprland/workspaces": {
+    "format": "{icon}",
+    "format-icons": { "1": "01", "2": "02", "3": "03", "4": "04", "5": "05" }
+  },
+  "clock": {
+    "format": "{:%H:%M}"
+  }
+}
