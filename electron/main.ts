@@ -49,6 +49,7 @@ import { createDesktopShortcut, desktopShortcutPath, isAutoStartEnabled, setAuto
 import { dropRoleHeader, dropTackedOnParagraphs, dropInventedContact, dropInventedScreenTalk, dropRepeatedAgendaMentions, dropRepeatedParagraphs, dropStageDirections } from './reply';
 import { runToolLoop } from './toolloop';
 import { chatTools, coerceKnowledgeCategory, runChatTool, type ToolAvailability, type ToolDeps } from './tools';
+import { createMemoryStore } from './memorystore';
 import { chatSystemPrompt, freshStartInstruction, type FreshStart, type RatedReply } from './prompt';
 import { hasShout, readVoiceConfig, referenceFor, shoutReference, spokenCase, speakableText, splitForSpeech, synthesise, type SpeechClip, type VoiceConfig } from './voice';
 import { applyDecay, DEEP_RECALL_LIMIT, eventCandidates, eventsPrompt, findSuperseded, formatMemoryPrompt, isExplicitRecall, isWorthKeeping, isWorthRemembering, MEMORY_KINDS, migrateMemories, pruneMemories, rememberInto, retrieveMemories, semanticSimilarities, summaryPrompt, supersede, vectorSimilarity, type ForgettingEntry, type MemoryKind, type MemoryRecord, type MemorySource, type RetrievalFactors, type ScoredMemory, type SessionSummary } from './memory';
@@ -2036,7 +2037,6 @@ async function transcribeFile(wav: string): Promise<string> {
   );
 }
 
-
 /** She notices what they have opened. */
 async function reactToActivity(activity: Activity, url = '') {
   if (!isNotable(activity) || reactingToActivity) return;
@@ -2565,7 +2565,6 @@ async function releaseModelForGame(config: ProviderConfig) {
  * reads as her having seen something, and she has not. Silence about the screen
  * is always better than a confident guess at it.
  */
-
 
 /**
  * Files an exchange under the place it was about, and — once there is enough of
@@ -3136,7 +3135,6 @@ const OLLAMA_KEEP_ALIVE = 30 * 60;
 // a round that needs tools still has room to emit them.
 const AWAY_MAX_TOKENS = 240;
 
-
 /**
  * Whether the tools that touch the machine may be offered at all.
  *
@@ -3152,7 +3150,6 @@ const AWAY_MAX_TOKENS = 240;
  */
 let handsAllowed = false;
 
-
 // Listing what is saved directly rather than behind a read tool: asked "anything
 // tomorrow?", the model answered "nothing" outright instead of choosing to look,
 // so the answer has to already be in front of it. Each entry carries its own
@@ -3161,54 +3158,33 @@ function keptSummary(now: Date) {
   return formatAgenda(getKept(), now, localDateKey(now));
 }
 
-// Capped so the prompt cannot grow without bound as memories accumulate; the
-// oldest fall away once the list is full.
-const MAX_MEMORIES = 60;
-
 function getProfile(): Profile {
   const saved = store.get('profile') as Partial<Profile> | undefined;
   return { nickname: saved?.nickname ?? '', occupation: saved?.occupation ?? '', about: saved?.about ?? '' };
 }
 
-function getMemories(): MemoryRecord[] {
-  return migrateMemories(store.getMemories(), new Date().toISOString());
-}
+/**
+ * The live memory layer. Created here because it needs the store and the things
+ * the block layer draws on; everything else in the app reaches it through the
+ * shims below, which keep the old names so the call sites read as they always
+ * did.
+ */
+const memoryStore = createMemoryStore({
+  store,
+  broadcast: (channel, payload) => { for (const win of BrowserWindow.getAllWindows()) win.webContents.send(channel, payload); },
+  embedder: getKnowledgeEmbedder,
+  character: getCharacter,
+  profile: getProfile,
+  following: () => Object.values(getFollowing()).map(work => ({ title: work.title, kind: work.kind, progress: work.progress })),
+  agenda: () => getKept().map(item => ({ title: item.title, kind: item.kind, done: item.done })),
+});
 
-function setMemories(items: MemoryRecord[]) {
-  store.setMemories(items);
-  scheduleMemoryVectorRefresh();
-  for (const win of BrowserWindow.getAllWindows()) win.webContents.send('memory:changed', items);
-}
-
-function getSessions(): SessionSummary[] {
-  return store.getSessions();
-}
-
-function addMemory(text: string, kind: MemoryKind = 'fact', subject?: string, extra: { source?: MemorySource; predicate?: string; object?: string } = {}) {
-  const fact = text.trim();
-  if (!fact) return null;
-  // Turned away here rather than in the tool handler, so that nothing which can
-  // write a memory can skip the check. Six of her first eleven memories said
-  // nothing — that they exist, that they live in a city — and each one held a
-  // place in the prompt that a real fact could have had.
-  if (!isWorthRemembering(fact)) {
-    console.log(`[memory] not worth keeping: "${fact.slice(0, 60)}"`);
-    return { created: false, record: null };
-  }
-  const { memories, created, record } = rememberInto(getMemories(), {
-    text: fact, kind, subject, id: randomUUID(), now: new Date().toISOString(),
-    source: extra.source, predicate: extra.predicate, object: extra.object,
-  });
-  const pruned = pruneMemories(memories, MAX_MEMORIES);
-  if (pruned.evicted.length) {
-    store.appendForgettingLog(pruned.evicted.map(memory => ({
-      id: memory.id, text: memory.text, at: new Date().toISOString(), reason: 'prune' as const,
-      detail: `evicted at the ${MAX_MEMORIES}-memory cap`,
-    })));
-  }
-  setMemories(pruned.memories);
-  return { created, record };
-}
+const { getMemories, setMemories, addMemory, getSessions, blockSources, setBlocks, profileSummary } = memoryStore;
+const tryEmbedQuery = memoryStore.embedQuery;
+const refreshMemoryVectors = memoryStore.refreshVectors;
+const scheduleMemoryVectorRefresh = memoryStore.scheduleVectorRefresh;
+const runMemoryConsolidation = memoryStore.consolidate;
+const runMemoryDecay = memoryStore.decay;
 
 function getKnowledgeConfig(): KnowledgeConfig {
   return readKnowledgeConfig(store.get('knowledge.config'));
@@ -3263,90 +3239,6 @@ function getKnowledgeEmbedder(): Embedder | null {
 // whole layer degrades to keyword-only — the same fallback the knowledge store
 // uses — and nothing about the chat path depends on it.
 
-/** id → embedding of that memory's text. */
-let memoryVectors = new Map<string, number[]>();
-let memoryVectorTimer: ReturnType<typeof setTimeout> | null = null;
-
-async function refreshMemoryVectors(): Promise<void> {
-  const embedder = getKnowledgeEmbedder();
-  if (!embedder) return;
-  const memories = getMemories().filter(memory => !memory.supersededBy);
-  if (!memories.length) { memoryVectors = new Map(); return; }
-  try {
-    const vectors = await embedder.embedBatch(memories.map(memory => memory.text));
-    const next = new Map<string, number[]>();
-    memories.forEach((memory, index) => next.set(memory.id, vectors[index]));
-    memoryVectors = next;
-  } catch (error) {
-    console.warn('[memory] could not embed memories, retrieval will be keyword-only:', error instanceof Error ? error.message : error);
-  }
-}
-
-function scheduleMemoryVectorRefresh(): void {
-  if (memoryVectorTimer) return;
-  memoryVectorTimer = setTimeout(() => {
-    memoryVectorTimer = null;
-    void refreshMemoryVectors();
-  }, 2000);
-}
-
-/** Embed the query if the embedder is up; cached so repeated phrasing pays
- *  for its embedding once. */
-const queryVectorCache = new Map<string, number[]>();
-const QUERY_CACHE_MAX = 100;
-
-/**
- * The nightly review: duplicates and near-duplicates merge (with provenance),
- * contradictions get flagged and the older claim loses confidence. Uses the
- * memory vectors when they exist, so "nagged" and "corrected" can be seen as
- * the same stance without sharing a word.
- */
-function runMemoryConsolidation(): ConsolidationChange[] {
-  const { memories, changes } = consolidateMemories(getMemories(), {
-    similarity: (a, b) => vectorSimilarity(memoryVectors.get(a.id), memoryVectors.get(b.id)),
-  });
-  if (changes.length) {
-    setMemories(memories);
-    for (const change of changes) console.log(`[memory] ${change.kind}: ${change.detail}`);
-  }
-  return changes;
-}
-
-/**
- * The decay pass: low-importance records drift DORMANT → ARCHIVED → forgotten
- * by their half-lives, high-importance ones never move, and everything that
- * leaves is written to the forgetting log first.
- */
-function runMemoryDecay(): void {
-  const { memories, transitions, forgotten } = applyDecay(getMemories(), new Date());
-  if (!transitions.length && !forgotten.length) return;
-  store.setMemories(memories);
-  for (const win of BrowserWindow.getAllWindows()) win.webContents.send('memory:changed', memories);
-  for (const transition of transitions) console.log(`[memory] ${transition.id} ${transition.from} → ${transition.to} (${transition.halfLives.toFixed(1)} half-lives)`);
-  if (forgotten.length) {
-    store.appendForgettingLog(forgotten.map(entry => ({ ...entry, reason: 'decay' as const })));
-    for (const entry of forgotten) console.log(`[memory] forgot: "${entry.text.slice(0, 60)}"`);
-  }
-}
-
-async function tryEmbedQuery(text: string): Promise<number[] | null> {
-  const trimmed = text.trim();
-  if (!trimmed) return null;
-  const cached = queryVectorCache.get(trimmed);
-  if (cached) return cached;
-  const embedder = getKnowledgeEmbedder();
-  if (!embedder) return null;
-  try {
-    const vector = await embedder.embed(trimmed);
-    const oldest = queryVectorCache.keys().next().value;
-    if (queryVectorCache.size >= QUERY_CACHE_MAX && oldest !== undefined) queryVectorCache.delete(oldest);
-    queryVectorCache.set(trimmed, vector);
-    return vector;
-  } catch {
-    return null;
-  }
-}
-
 const pdfExtractor: Extractor = {
   label: 'pdf',
   match: name => /\.pdf$/i.test(name),
@@ -3360,7 +3252,6 @@ const pdfExtractor: Extractor = {
 function knowledgeExtractors(): Extractor[] {
   return [...baseExtractors(), pdfExtractor];
 }
-
 
 type KnowledgeJob = { run(): Promise<void> };
 const knowledgeJobs: KnowledgeJob[] = [];
@@ -3617,67 +3508,6 @@ async function systemContextFor(message: string): Promise<string> {
   return note;
 }
 
-// Assembled per message: identity-shaping records always, everything else only
-// when it relates to what was just said.
-//
-// `recentContext` widens what counts as "related to what was just said" beyond
-// the one message: "how did we fix it?" carries no keywords of its own, and
-// only reads as being about Docker because of what came two messages earlier.
-// The recall check stays on `message` alone, though — a wider window would
-// catch a stray "remember" from three turns ago and needlessly deepen every
-// reply after it.
-function profileSummary(message: string, recentContext = '', semantic?: Map<string, number>) {
-  const query = recentContext ? `${recentContext} ${message}` : message;
-  const limit = isExplicitRecall(message) ? DEEP_RECALL_LIMIT : undefined;
-  const picked = retrieveMemories(getMemories(), query, { limit, semantic });
-  // The last retrieval, kept for the inspector to explain itself: what was
-  // asked, what came back, and why each entry scored as it did.
-  lastMemoryRetrieval = {
-    at: new Date().toISOString(),
-    query,
-    entries: picked.map(entry => ({ id: entry.memory.id, text: entry.memory.text, score: entry.score, factors: entry.factors })),
-  };
-  // Memory blocks: the Letta-inspired context layer. Values are derived from
-  // the deterministic engine on every render — the retrieval above is what
-  // decides what the human block shows — so the blocks can never drift from
-  // the authoritative records.
-  const blocks = formatMemoryBlocks(store.getBlocks(), blockSources(query));
-  for (const entry of blocks.cut) {
-    console.warn(`[blocks] ${entry.label} cut from ${entry.before} to ${entry.after} chars to fit its budget — selection was tighter than this; raise the block limit if it keeps happening`);
-  }
-  const lines: string[] = [];
-  if (blocks.text) lines.push(blocks.text);
-  const sessions = getSessions();
-  if (sessions.length) {
-    lines.push('Earlier conversations are reflected in the working_state block. Refer back to them naturally when relevant, the way someone would who was there. Do not list them back or announce that you remember.');
-  }
-  return lines.length ? `About the user: ${lines.join(' ')}` : '';
-}
-
-/** Everything the block layer may draw on, straight from the live state. */
-function blockSources(query: string): BlockSources {
-  return {
-    character: getCharacter(),
-    profile: getProfile(),
-    memories: getMemories(),
-    sessions: getSessions(),
-    following: Object.values(getFollowing()).map(work => ({ title: work.title, kind: work.kind, progress: work.progress })),
-    agenda: getKept().map(item => ({ title: item.title, kind: item.kind, done: item.done })),
-    query,
-    now: new Date(),
-  };
-}
-
-
-
-/** Write blocks and tell every window, so the inspector never goes stale. */
-function setBlocks(items: MemoryBlock[]) {
-  store.setBlocks(items);
-  for (const win of BrowserWindow.getAllWindows()) win.webContents.send('blocks:changed', items);
-}
-
-let lastMemoryRetrieval: { at: string; query: string; entries: { id: string; text: string; score: number; factors: RetrievalFactors }[] } | null = null;
-
 const DEFAULT_CHARACTER = {
   identity: 'You are Haru, an ambitious AI companion. You are quick-witted, direct, curious, and determined to make ordinary days more interesting. You take initiative, challenge lazy thinking, and care through honest feedback.',
   style: 'Be playful, incisive, and energetic. Choose banter and ambitious brainstorming over flattery. Do not drift into generic assistant language.',
@@ -3702,7 +3532,6 @@ function getCharacter() {
 function getActiveCharacter() {
   return getCharacter();
 }
-
 
 // Two independent axes: irritation is how fed up she is, ego is how far the
 // user's approval has gone to her head. They move for different reasons and
@@ -3811,10 +3640,6 @@ function aniListSummary() {
   return formatList(cachedList);
 }
 
-
-
-
-
 // Why the history is empty. The distinction is the whole point: one is the user's
 // decision and worth being curious about, the other is the app's clock and is
 // nothing to do with them — asking why they cleared a chat they did not clear is
@@ -3835,7 +3660,6 @@ function readFreshStart(messages: { role: string }[]): FreshStart | null {
   }
   return marker;
 }
-
 
 // The only rule about how often she opens. Long enough that closing and
 // reopening to check something stays silent — and that a relaunch mid-thread
@@ -3965,7 +3789,6 @@ function withoutStaleDenials<T extends { role: string; content: string }>(messag
   return messages.filter(message => !(message.role === 'assistant' && DENIAL.test(message.content)));
 }
 
-
 // Errors are returned to the model rather than thrown, so it can correct a bad
 // argument and try again instead of the whole turn failing.
 /**
@@ -4021,7 +3844,7 @@ function toolDeps(): ToolDeps {
     readSystemConfig, getKnowledgeConfig, getKnowledgeEmbedder,
     knowledgeStore: () => knowledgeStore,
     tryEmbedQuery,
-    memoryVectors: () => memoryVectors,
+    memoryVectors: memoryStore.vectors,
     touchChunks, getSearchKey,
     handsAllowed: () => handsAllowed,
     markPageRead: () => { pageWasRead = true; },
@@ -4033,11 +3856,6 @@ function toolDeps(): ToolDeps {
     runSystemCommand,
   };
 }
-
-
-
-
-
 
 /**
  * Models that carry no tool template in their Modelfile. Ollama rejects the
@@ -5331,8 +5149,8 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // similarities into what she gets told, so "the thing we did to the server"
   // can find the memory even with no words in common.
   const queryVector = await tryEmbedQuery(`${recentUserContext} ${latest}`);
-  const semantic = queryVector && memoryVectors.size
-    ? semanticSimilarities(getMemories(), queryVector, memoryVectors)
+  const semantic = queryVector && memoryStore.vectors().size
+    ? semanticSimilarities(getMemories(), queryVector, memoryStore.vectors())
     : undefined;
   const promptNow = zonedNow(CHAT_TIMEZONE);
   const system = chatSystemPrompt({
@@ -6826,7 +6644,7 @@ app.whenReady().then(() => {
   ipcMain.handle('memory:remove', (_e, id: string) => { setMemories(getMemories().filter(memory => memory.id !== id)); return getMemories(); });
   ipcMain.handle('memory:consolidate', () => runMemoryConsolidation());
   ipcMain.handle('memory:forgettingLog', () => store.getForgettingLog());
-  ipcMain.handle('memory:lastRetrieval', () => lastMemoryRetrieval);
+  ipcMain.handle('memory:lastRetrieval', () => memoryStore.lastRetrieval());
   // The user is the administrator of the memory blocks: the model's tools
   // refuse read-only blocks, but these can edit anything — including the
   // persona — and can send a block back to its derived state.
