@@ -157,8 +157,19 @@ const OFFERING_TO_TICK = /\b(shall i|should i|can i|do you want|want me to|would
  * negation, and a retry there would tick off the very thing she was chasing them
  * about. The window is short because the negator belongs to the verb — further
  * out and it is a different clause about something else.
+ *
+ * The contraction needs its own alternative rather than sharing the leading \b:
+ * in "haven't" the n follows a letter, so there is no word boundary in front of
+ * it and that branch could never match. It cost the commonest phrasing there is
+ * — "you still haven't ticked off the bins" was read as a claim that they had,
+ * and the retry it triggered would tick off the very thing she was chasing them
+ * about. The apostrophe is required, so this does not also swallow "want".
+ *
+ * ponytail: a word list, so a negation phrased without one still reads as a
+ * claim ("nothing has been crossed off your list"). Widen only with evidence —
+ * every word added here is another way for a real claim to go uncaught.
  */
-const NOT_TICKED = /\b(not|never|n'?t)\b[^.!?]{0,20}?(tick|mark|check|cross|struck|strike)/i;
+const NOT_TICKED = /(\bnot\b|\bnever\b|n['’]t\b)[^.!?]{0,20}?(tick|mark|check|cross|struck|strike)/i;
 
 export function claimsTickOff(reply: string): boolean {
   const text = (reply ?? '').trim();
