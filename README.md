@@ -250,6 +250,18 @@ and it is a lifecycle, not a pile:
   not noise — valueless entries expire after a week, telemetry-shaped keys
   after a day, and a place is only promoted to memory after it shows a pattern
   (repeated visits or a stay spread across days).
+- **Memory blocks**: a Letta-inspired context layer on top of the engine —
+  labelled, character-limited, agent-editable blocks (`persona`, `human`,
+  `preferences`, `relationship`, `current_project`, `working_state`) rendered
+  into the prompt with their description and live `chars_current`/`chars_limit`
+  budget. Blocks are views, not a second database: values are derived from the
+  engine on every render, and the model edits them through `core_memory_append`
+  / `core_memory_replace`, which route the content through the same governance
+  as everything else (worthiness gate, dedup, confidence starting at 0.55 for
+  model proposals, supersession on replace). LLM proposes, Haru decides. The
+  `persona` block is read-only to the model — it mirrors the character
+  configuration, which only the user edits. Budget cuts are never silent: the
+  log reports every trim, and consolidation comes before truncation.
 
 All of it sits behind `electron/store.ts`, the only module that reads or writes
 the store files. The facade is deliberately small — typed accessors, atomic
