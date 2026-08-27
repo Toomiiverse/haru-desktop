@@ -63,8 +63,8 @@ function cannedFaq(said: string): string | null {
   if (/^(hi|hello|hey|heya|hiya|yo|hi there|hello there|hey there)( \w+)?$/.test(said)) {
     return "Hey. What's up?";
   }
-  if (/^(are you (there|awake|up|here|online)|you (there|awake|up|here))$/.test(said)) {
-    return "Always. What do you need?";
+  if (/^(are you (there|awake|up|here|online|alive)|you (there|awake|up|here|alive)|still (alive|there))( \w+)?$/.test(said)) {
+    return "Obviously. Not dead yet. What do you need?";
   }
   if (/^(thank you|thanks|thankyou|thx|ty|tysm)$/.test(said)) {
     return 'Anytime.';
