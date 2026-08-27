@@ -1,0 +1,134 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {
+  driftVitals,
+  applyEvent,
+  sleepinessForHour,
+  isNight,
+  chooseIdleAction,
+  DEFAULT_VITALS,
+  type Vitals,
+  type Environment,
+} from '../electron/vitals';
+
+// ---- sleepinessForHour: the day curve ----
+
+test('sleepinessForHour follows the documented day curve', () => {
+  assert.equal(sleepinessForHour(0), 0.9);   // dead of night
+  assert.equal(sleepinessForHour(4), 0.9);   // flattest around 4am
+  assert.equal(sleepinessForHour(6), 0.7);   // early morning
+  assert.equal(sleepinessForHour(8), 0.3);   // waking up
+  assert.equal(sleepinessForHour(13), 0.15); // daytime, most awake
+  assert.equal(sleepinessForHour(19), 0.35); // evening wind-down begins
+  assert.equal(sleepinessForHour(22), 0.6);  // later evening
+  assert.equal(sleepinessForHour(23), 0.9);  // late night again
+});
+
+test('isNight matches the late/early hours used by sleepinessForHour', () => {
+  assert.equal(isNight(23), true);
+  assert.equal(isNight(0), true);
+  assert.equal(isNight(5), true);
+  assert.equal(isNight(6), false);
+  assert.equal(isNight(13), false);
+  assert.equal(isNight(22), false);
+});
+
+// ---- driftVitals: pure function of environment + elapsed time, no conversation ----
+
+test('driftVitals moves sleepiness toward the hour-derived target over simulated ticks, with no conversation involved', () => {
+  let vitals: Vitals = { ...DEFAULT_VITALS, sleepiness: 0.2 };
+  const midnightIdle: Environment = { hour: 0, idleSeconds: 700, onBattery: false, windowFocused: false };
+  // sleepinessForHour(0) === 0.9, and idleSeconds > 60 so this is not "active".
+  for (let i = 0; i < 50; i++) {
+    vitals = driftVitals(vitals, midnightIdle, 20);
+  }
+  assert.ok(vitals.sleepiness > 0.8, `expected sleepiness to approach 0.9, got ${vitals.sleepiness}`);
+});
+
+test('driftVitals keeps values clamped to [0, 1] even over many extreme ticks', () => {
+  let vitals: Vitals = { ...DEFAULT_VITALS };
+  const extreme: Environment = { hour: 3, idleSeconds: 0, onBattery: true, windowFocused: true };
+  for (let i = 0; i < 200; i++) {
+    vitals = driftVitals(vitals, extreme, 999);
+  }
+  for (const key of Object.keys(vitals) as (keyof Vitals)[]) {
+    assert.ok(vitals[key] >= 0 && vitals[key] <= 1, `${key} out of range: ${vitals[key]}`);
+  }
+});
+
+test('driftVitals: being actively used keeps sleepiness lower than sitting idle at the same hour', () => {
+  const nightHour: Environment = { hour: 1, idleSeconds: 0, onBattery: false, windowFocused: false }; // active (idle < 60)
+  const nightIdle: Environment = { hour: 1, idleSeconds: 700, onBattery: false, windowFocused: false }; // not active
+
+  let active: Vitals = { ...DEFAULT_VITALS, sleepiness: 0.2 };
+  let idle: Vitals = { ...DEFAULT_VITALS, sleepiness: 0.2 };
+  for (let i = 0; i < 100; i++) {
+    active = driftVitals(active, nightHour, 20);
+    idle = driftVitals(idle, nightIdle, 20);
+  }
+  assert.ok(active.sleepiness < idle.sleepiness, `expected active (${active.sleepiness}) < idle (${idle.sleepiness})`);
+});
+
+test('driftVitals does not move anything on a zero-second tick', () => {
+  const vitals: Vitals = { ...DEFAULT_VITALS };
+  const env: Environment = { hour: 10, idleSeconds: 0, onBattery: false, windowFocused: true };
+  const next = driftVitals(vitals, env, 0);
+  for (const key of Object.keys(vitals) as (keyof Vitals)[]) {
+    assert.ok(Math.abs(next[key] - vitals[key]) < 1e-9, `${key} moved on a zero-second tick`);
+  }
+});
+
+// ---- applyEvent: discrete nudges ----
+
+test('applyEvent: praised raises happiness, affection and energy', () => {
+  const base: Vitals = { ...DEFAULT_VITALS, happiness: 0.5, affection: 0.5, energy: 0.5 };
+  const next = applyEvent(base, 'praised');
+  assert.ok(next.happiness > base.happiness);
+  assert.ok(next.affection > base.affection);
+  assert.ok(next.energy > base.energy);
+});
+
+test('applyEvent: criticised lowers happiness and raises stress', () => {
+  const base: Vitals = { ...DEFAULT_VITALS, happiness: 0.5, stress: 0.2 };
+  const next = applyEvent(base, 'criticised');
+  assert.ok(next.happiness < base.happiness);
+  assert.ok(next.stress > base.stress);
+});
+
+test('applyEvent clamps at the top of the range', () => {
+  const base: Vitals = { ...DEFAULT_VITALS, happiness: 0.95, affection: 0.95, energy: 0.95 };
+  const next = applyEvent(base, 'praised');
+  assert.ok(next.happiness <= 1 && next.affection <= 1 && next.energy <= 1);
+});
+
+test('applyEvent clamps at the bottom of the range', () => {
+  const base: Vitals = { ...DEFAULT_VITALS, happiness: 0.05, stress: 0.02 };
+  const next = applyEvent(base, 'criticised');
+  assert.ok(next.happiness >= 0);
+});
+
+// ---- chooseIdleAction: weighted random, deterministic via injected rng ----
+
+test('chooseIdleAction returns "blink" when the random roll lands at the very start', () => {
+  const env: Environment = { hour: 12, idleSeconds: 0, onBattery: false, windowFocused: true };
+  const action = chooseIdleAction(DEFAULT_VITALS, env, () => 0);
+  assert.equal(action, 'blink');
+});
+
+test('chooseIdleAction returns null ("nothing") when the random roll lands in the tail, since stillness dominates', () => {
+  const env: Environment = { hour: 12, idleSeconds: 0, onBattery: false, windowFocused: true };
+  const action = chooseIdleAction(DEFAULT_VITALS, env, () => 0.999999);
+  assert.equal(action, null);
+});
+
+test('doze is only reachable at night, high sleepiness, and alone', () => {
+  const daytimeAlone: Environment = { hour: 14, idleSeconds: 1000, onBattery: false, windowFocused: false };
+  const sleepyVitals: Vitals = { ...DEFAULT_VITALS, sleepiness: 0.95 };
+  // Even maximally sleepy, doze cannot fire during the day.
+  // Sample many rolls across the space and confirm 'doze' never comes back.
+  for (let i = 0; i < 20; i++) {
+    const roll = i / 20;
+    const action = chooseIdleAction(sleepyVitals, daytimeAlone, () => roll);
+    assert.notEqual(action, 'doze');
+  }
+});

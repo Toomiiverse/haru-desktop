@@ -1,0 +1,114 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {
+  parseEmotion,
+  faceForEmotion,
+  emotionToVitals,
+  EMOTIONS,
+  NEUTRAL_EMOTION,
+} from '../electron/emotion';
+
+// ---- parseEmotion: validation, clamping, graceful failure ----
+
+test('parseEmotion accepts a fully valid object', () => {
+  const parsed = parseEmotion({ emotion: 'happy', confidence: 0.8, energy: 0.6, intent: 'celebrate', focus: 'user' });
+  assert.deepEqual(parsed, { emotion: 'happy', confidence: 0.8, energy: 0.6, intent: 'celebrate', focus: 'user' });
+});
+
+test('parseEmotion rejects an invalid emotion enum value', () => {
+  assert.equal(parseEmotion({ emotion: 'furious', confidence: 0.8, energy: 0.6, intent: 'tease', focus: 'user' }), null);
+});
+
+test('parseEmotion returns null for a missing/non-object payload rather than throwing', () => {
+  assert.equal(parseEmotion(null), null);
+  assert.equal(parseEmotion(undefined), null);
+  assert.equal(parseEmotion(42), null);
+  assert.equal(parseEmotion('not json'), null);
+});
+
+test('parseEmotion clamps out-of-range numeric fields instead of failing', () => {
+  const parsed = parseEmotion({ emotion: 'curious', confidence: 5, energy: -3, intent: 'listen', focus: 'user' });
+  assert.ok(parsed);
+  assert.equal(parsed!.confidence, 1);
+  assert.equal(parsed!.energy, 0);
+});
+
+test('parseEmotion falls back to defaults for an invalid intent/focus rather than rejecting the whole object', () => {
+  const parsed = parseEmotion({ emotion: 'bored', confidence: 0.4, energy: 0.4, intent: 'nonsense', focus: 'nowhere' });
+  assert.ok(parsed);
+  assert.equal(parsed!.intent, 'listen');
+  assert.equal(parsed!.focus, 'user');
+});
+
+test('parseEmotion parses a JSON string payload the same as an object', () => {
+  const raw = JSON.stringify({ emotion: 'smug', confidence: 0.9, energy: 0.5, intent: 'tease', focus: 'user' });
+  const parsed = parseEmotion(raw);
+  assert.ok(parsed);
+  assert.equal(parsed!.emotion, 'smug');
+});
+
+test('every EMOTIONS value round-trips through parseEmotion', () => {
+  for (const emotion of EMOTIONS) {
+    const parsed = parseEmotion({ emotion, confidence: 0.5, energy: 0.5, intent: 'listen', focus: 'user' });
+    assert.equal(parsed?.emotion, emotion);
+  }
+});
+
+test('NEUTRAL_EMOTION is a valid, parseable fallback', () => {
+  const parsed = parseEmotion(NEUTRAL_EMOTION);
+  assert.deepEqual(parsed, NEUTRAL_EMOTION);
+});
+
+// ---- faceForEmotion: regex-matched against whatever a model actually ships ----
+
+test('faceForEmotion matches the real model expression set for annoyed/worried/surprised', () => {
+  const available = ['Angry', 'Cry', 'scare', 'Blush', 'Blush 2', 'Full Blush', 'hat off on'];
+  assert.equal(faceForEmotion('annoyed', available), 'Angry');
+  assert.equal(faceForEmotion('worried', available), 'Cry');
+  assert.equal(faceForEmotion('surprised', available), 'scare');
+  assert.equal(faceForEmotion('affectionate', available), 'Blush');
+  assert.equal(faceForEmotion('embarrassed', available), 'Full Blush');
+});
+
+test('faceForEmotion returns null when nothing in the available set matches', () => {
+  assert.equal(faceForEmotion('surprised', ['Angry', 'Cry']), null);
+});
+
+test('faceForEmotion returns null for emotions deliberately left faceless', () => {
+  // 'neutral', 'smug', 'bored', 'sleepy', 'determined' have no FACES entry at all.
+  const available = ['Angry', 'Cry', 'scare', 'Blush', 'Blush 2', 'Full Blush'];
+  assert.equal(faceForEmotion('neutral', available), null);
+  assert.equal(faceForEmotion('smug', available), null);
+  assert.equal(faceForEmotion('bored', available), null);
+});
+
+// ---- emotionToVitals: scaled by confidence ----
+
+test('emotionToVitals nudges vitals in the documented direction, scaled by confidence', () => {
+  const vitals = { happiness: 0.5, energy: 0.5, curiosity: 0.5, affection: 0.5, sleepiness: 0.2, stress: 0.2 };
+  const confident = emotionToVitals({ emotion: 'happy', confidence: 1, energy: 0.5, intent: 'celebrate', focus: 'user' }, vitals);
+  assert.ok(confident.happiness > vitals.happiness);
+});
+
+test('emotionToVitals barely moves vitals when confidence is near zero', () => {
+  const vitals = { happiness: 0.5, energy: 0.5, curiosity: 0.5, affection: 0.5, sleepiness: 0.2, stress: 0.2 };
+  const hedged = emotionToVitals({ emotion: 'annoyed', confidence: 0.01, energy: 0.5, intent: 'dismiss', focus: 'user' }, vitals);
+  assert.ok(Math.abs(hedged.happiness - vitals.happiness) < 0.01);
+});
+
+test('emotionToVitals keeps every value clamped to [0, 1]', () => {
+  const vitals = { happiness: 0.95, energy: 0.95, curiosity: 0.5, affection: 0.95, sleepiness: 0.2, stress: 0.2 };
+  const next = emotionToVitals({ emotion: 'happy', confidence: 1, energy: 1, intent: 'celebrate', focus: 'user' }, vitals);
+  for (const key of Object.keys(next) as (keyof typeof next)[]) {
+    assert.ok(next[key] >= 0 && next[key] <= 1, `${key} out of range: ${next[key]}`);
+  }
+});
+
+test('emotionToVitals leaves neutral readings with no effect', () => {
+  const vitals = { happiness: 0.5, energy: 0.5, curiosity: 0.5, affection: 0.5, sleepiness: 0.2, stress: 0.2 };
+  const next = emotionToVitals({ emotion: 'neutral', confidence: 1, energy: 0.5, intent: 'listen', focus: 'user' }, vitals);
+  assert.equal(next.happiness, vitals.happiness);
+  assert.equal(next.curiosity, vitals.curiosity);
+  assert.equal(next.affection, vitals.affection);
+  assert.equal(next.stress, vitals.stress);
+});

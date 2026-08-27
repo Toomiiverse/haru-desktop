@@ -128,7 +128,10 @@ export function isShouting(text: string) {
   return /[!?]{2,}|!/.test(text);
 }
 
-const APOLOGY = /(sorry|apolog|my bad|didn'?t mean|did not mean|no offence|no offense|forgive me|take it back|calm(ed)? down|my fault|i was rude|won'?t happen again)/i;
+// "calmed down" (past tense, describing themself) is treated as apology-adjacent;
+// a bare imperative "calm down" is not — telling her to calm down while still
+// annoyed is not the same as apologising, and used to forgive her for free.
+const APOLOGY = /(sorry|apolog|my bad|didn'?t mean|did not mean|no offence|no offense|forgive me|take it back|calmed down|my fault|i was rude|won'?t happen again)/i;
 
 export function isApology(text: string) {
   return APOLOGY.test(text);

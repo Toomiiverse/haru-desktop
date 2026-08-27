@@ -35,22 +35,25 @@ function html(body: string) {
 }
 
 // safeStorage is backed by DPAPI on Windows and the login keychain elsewhere.
-// Without it we would be writing a long-lived refresh token to disk in the clear,
-// so connecting fails loudly instead.
-function requireEncryption() {
-  if (!safeStorage.isEncryptionAvailable()) throw new Error('This system has no secure storage available, so Google credentials cannot be saved safely.');
-}
-
+// A headless box that never unlocked a login session has neither — safeStorage
+// refuses outright rather than half-working there — so this falls back to
+// keeping the value as readable as everything else in config.json, the same
+// plain:/enc: fallback used for the other saved keys (see encryptSecret in
+// main.ts). The prefix is what makes it honest about which case it is.
 function setSecret(store: StoreLike, key: string, value: string) {
-  requireEncryption();
-  store.set(key, safeStorage.encryptString(value).toString('base64'));
+  const saved = safeStorage.isEncryptionAvailable()
+    ? 'enc:' + safeStorage.encryptString(value).toString('base64')
+    : 'plain:' + value;
+  store.set(key, saved);
 }
 
 function getSecret(store: StoreLike, key: string): string | undefined {
   const saved = store.get(key) as string | undefined;
   if (!saved) return undefined;
+  if (saved.startsWith('plain:')) return saved.slice('plain:'.length);
+  const encoded = saved.startsWith('enc:') ? saved.slice('enc:'.length) : saved; // old format, saved before the fallback existed
   try {
-    return safeStorage.decryptString(Buffer.from(saved, 'base64'));
+    return safeStorage.decryptString(Buffer.from(encoded, 'base64'));
   } catch {
     return undefined;
   }
@@ -64,7 +67,6 @@ export function saveCredentials(store: StoreLike, clientId: string, clientSecret
   const id = clientId.trim();
   const secret = clientSecret.trim();
   if (!id || !secret) throw new Error('Both the client ID and client secret are required.');
-  requireEncryption();
   store.set('google.clientId', id);
   setSecret(store, 'google.clientSecret', secret);
 }
@@ -107,7 +109,6 @@ async function postForm(url: string, body: Record<string, string>) {
 // consent URL) cannot be built until the OS has handed us a port.
 export async function connectGoogle(store: StoreLike) {
   const { clientId, clientSecret } = credentials(store);
-  requireEncryption();
   const verifier = base64url(randomBytes(48));
   const challenge = base64url(createHash('sha256').update(verifier).digest());
   const state = base64url(randomBytes(16));

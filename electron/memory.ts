@@ -25,6 +25,13 @@ export type MemoryRecord = {
   lastSeenAt: string;
   /** How many times this has come up. 1 means mentioned once. */
   mentions: number;
+  /**
+   * Set to the id of whatever replaced this once it goes out of date — "uses
+   * Ubuntu" superseded by "switched the server to Debian". Kept rather than
+   * deleted, since it is still true history, just no longer current; it stops
+   * surfacing in selectMemories but survives a prune the same as anything else.
+   */
+  supersededBy?: string;
 };
 
 export type SessionSummary = {
@@ -36,6 +43,18 @@ export type SessionSummary = {
 
 /** Mentioned this many times or more and it is something they keep returning to. */
 export const RECURRING_THRESHOLD = 3;
+
+// Anchored loosely rather than at the start: "so do you remember" and "wait,
+// what did I say about" both ask the same thing partway into a sentence.
+const EXPLICIT_RECALL = /\b(do you remember|d'?you remember|remember when|remember what|we (talked|spoke) about|we discussed|you know how (i|we)|what did (i|you) say about|what did i tell you about|last time (we|i)|recall when|recall what)\b/i;
+
+/** Asking her to reach back rather than just answer from what's in front of her — worth a wider search than the usual per-message budget. */
+export function isExplicitRecall(text: string): boolean {
+  return EXPLICIT_RECALL.test(text);
+}
+
+/** How many memories a turn gets when they've explicitly asked her to recall something, instead of the usual `selectMemories` default. */
+export const DEEP_RECALL_LIMIT = 30;
 
 // Identity-defining records are always in the prompt; the rest compete for room.
 const ALWAYS_INCLUDED: MemoryKind[] = ['preference', 'relationship'];
@@ -203,14 +222,50 @@ export function recurringMemories(memories: MemoryRecord[]) {
 }
 
 /**
+ * Which active memory a new fact replaces, if any.
+ *
+ * Matched by containment rather than a tuned overlap score: every word the
+ * hint names has to actually be present in the old record's text. That is a
+ * deliberately narrow bar — a vague paraphrase like "the old configuration"
+ * will not find anything, on purpose, because keyword matching has no way to
+ * know that means Ubuntu. It works because the model is not guessing blind:
+ * the memory it means to replace is already sitting in its own prompt, so it
+ * can hand back a word actually drawn from it ("Ubuntu"), not a description of
+ * it. When more than one active memory contains the hint, the one with the
+ * fewest words left over wins — the more specific match.
+ */
+export function findSuperseded(memories: MemoryRecord[], hint: string): MemoryRecord | null {
+  const asked = keywords(hint);
+  if (!asked.size) return null;
+  let best: MemoryRecord | null = null;
+  let bestExtra = Infinity;
+  for (const memory of memories) {
+    if (memory.supersededBy) continue; // already replaced — nothing left here to supersede again
+    const held = keywords(memory.text);
+    if (![...asked].every(word => held.has(word))) continue;
+    const extra = held.size - asked.size;
+    if (extra < bestExtra) { bestExtra = extra; best = memory; }
+  }
+  return best;
+}
+
+/** Marks one memory as replaced by another. Both records stay in the list. */
+export function supersede(memories: MemoryRecord[], oldId: string, newId: string): MemoryRecord[] {
+  return memories.map(memory => memory.id === oldId ? { ...memory, supersededBy: newId } : memory);
+}
+
+/**
  * Chooses what to put in front of her for this message. Preferences and
  * relationships always go in — they shape how she talks regardless of subject.
  * Everything else has to earn its place by relating to what was just said, so a
  * long memory does not crowd out the conversation.
  */
 export function selectMemories(memories: MemoryRecord[], message: string, limit = 14): MemoryRecord[] {
-  const always = memories.filter(memory => ALWAYS_INCLUDED.includes(memory.kind));
-  const rest = memories.filter(memory => !ALWAYS_INCLUDED.includes(memory.kind));
+  // Superseded records are history, not current knowledge — they stay in the
+  // store for findSuperseded to search, but never surface in a prompt.
+  const active = memories.filter(memory => !memory.supersededBy);
+  const always = active.filter(memory => ALWAYS_INCLUDED.includes(memory.kind));
+  const rest = active.filter(memory => !ALWAYS_INCLUDED.includes(memory.kind));
   const asked = keywords(message);
   const ranked = rest
     .map(memory => {

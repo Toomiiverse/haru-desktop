@@ -32,6 +32,7 @@ export type AsideSource =
   | 'page'        // noticing which of her own pages they opened
   | 'poke'        // being prodded in the companion window
   | 'kept'        // remarking on something ticked off
+  | 'system'      // a threshold on the machine she runs on
   | 'other';
 
 export type Aside = {
@@ -50,7 +51,7 @@ export const MAX_ASIDES = 400;
 /** How long the log keeps a day before dropping it. */
 export const ASIDE_DAYS = 7;
 
-const SOURCES: AsideSource[] = ['screen', 'screenshot', 'activity', 'fullscreen', 'reminder', 'idle', 'journal', 'page', 'poke', 'kept', 'other'];
+const SOURCES: AsideSource[] = ['screen', 'screenshot', 'activity', 'fullscreen', 'reminder', 'idle', 'journal', 'page', 'poke', 'kept', 'system', 'other'];
 
 export function readAsides(saved: unknown): Aside[] {
   if (!Array.isArray(saved)) return [];

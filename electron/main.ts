@@ -3,7 +3,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { createHash, randomUUID } from 'node:crypto';
 import { appendFileSync, copyFileSync, existsSync, readdirSync, mkdirSync, readFileSync, rmSync, statSync, watch, writeFileSync, type FSWatcher } from 'node:fs';
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import AdmZip from 'adm-zip';
 import Store from 'electron-store';
@@ -48,7 +48,7 @@ import { formatList, formatMedia, formatMissing, lookUp, readAniListConfig, user
 import { createDesktopShortcut, desktopShortcutPath, isAutoStartEnabled, setAutoStart, startedHidden } from './startup';
 import { claimsDesktopAction, claimsTickOff, dropRoleHeader, dropTackedOnParagraphs, dropInventedContact, dropInventedScreenTalk, dropRepeatedAgendaMentions, dropRepeatedParagraphs, dropStageDirections } from './reply';
 import { hasShout, readVoiceConfig, referenceFor, shoutReference, spokenCase, speakableText, splitForSpeech, synthesise, type SpeechClip, type VoiceConfig } from './voice';
-import { formatMemoryPrompt, isWorthKeeping, isWorthRemembering, MEMORY_KINDS, migrateMemories, pruneMemories, rememberInto, selectMemories, summaryPrompt, type MemoryKind, type MemoryRecord, type SessionSummary } from './memory';
+import { DEEP_RECALL_LIMIT, findSuperseded, formatMemoryPrompt, isExplicitRecall, isWorthKeeping, isWorthRemembering, MEMORY_KINDS, migrateMemories, pruneMemories, rememberInto, selectMemories, summaryPrompt, supersede, type MemoryKind, type MemoryRecord, type SessionSummary } from './memory';
 import { forgetDevice, forgetEveryDevice, readWebAccess, setPassword, weakPassword, type WebAccess } from './web';
 import { conversationMayLeave, mayLeaveTheMachine } from './sensitivity';
 import { addCheckIn, checkInInstruction, checkInsOn, readCheckIns, type CheckIn } from './checkins';
@@ -68,6 +68,8 @@ import { baseExtractors, ingestFile, type Extractor, type IngestResult } from '.
 import { cachedEmbedder, createEmbedder, EmbeddingCache, type Embedder } from './embeddings';
 import { retrieveContext } from './retrieveContext';
 import { syncVaultFiles, type VaultSyncReport } from './obsidian';
+import { collectAll, collectDocker, collectDockerLight, collectGpu, collectProcesses, collectServices, collectSystem, diagnose, KNOWN_SERVICES, USER_SERVICES, type Diagnosis } from './system';
+import { checkEvents, sampleFromCollectors, type EventThresholds, type SystemSample } from './systemState';
 
 type Bounds = { x: number; y: number; width: number; height: number };
 type Live2DModel = { path: string; name: string; url: string };
@@ -720,7 +722,7 @@ function classifyEmotion(reply: string, config: ProviderConfig): Promise<Emotion
     { tools: false, temperature: 0.1, format: EMOTION_SCHEMA, maxTokens: 120 },
   ).then(message => {
     const parsed = parseEmotion(message.content ?? '');
-    if (!parsed) { console.warn('[emotion] unparseable classification, keeping previous'); return null; }
+    if (!parsed) { console.warn(`[emotion] unparseable classification, keeping previous: ${JSON.stringify(message.content ?? '')}`); return null; }
     // How hard she said it, which the classifier does not answer: asked to label
     // a line full of swearing it will report the intent, quite correctly, and
     // that intent is often placid. Her face should follow the delivery.
@@ -832,6 +834,9 @@ function noteAside(text: string, source: AsideSource): Aside | null {
   const { asides, aside } = addAside(getAsides(), line, source, new Date(), localDateKey(zonedNow(CHAT_TIMEZONE)));
   store.set('chat.asides', asides);
   sendToWindows('chat:aside', aside);
+  // Fire-and-forget: a Discord hiccup must not hold up the desk or the phone
+  // over a line that has already been said there.
+  void forwardAsideToDiscord(aside);
   return aside;
 }
 
@@ -3169,6 +3174,7 @@ const CHAT_TOOLS: ChatTool[] = [{
         fact: { type: 'string', description: 'One short statement that will still make sense on its own months from now, with no pronoun for the user: "Has a dog called Miso", not "Miso" and not "his dog". Other people keep their own names — "Emma is their girlfriend". Write only what they actually said, without embellishing it.' },
         kind: { type: 'string', enum: [...MEMORY_KINDS], description: 'Exactly one of these four words and nothing else: "preference" for how they like things done or want you to behave, "relationship" for a person or pet, "event" for something happening in their life, "fact" for anything else including habits and routines.' },
         subject: { type: 'string', description: 'Who or what it concerns, if there is one — a person, a pet, a project.' },
+        replaces: { type: 'string', description: 'Only if this fact makes an earlier one wrong or out of date — name what changed using a word actually drawn from what you already knew (it will be right there in what you were told about them), not a description of it: "Ubuntu", not "the old OS". Leave out entirely for anything new rather than a correction.' },
       },
       required: ['fact', 'kind'],
     },
@@ -3221,6 +3227,141 @@ const KNOWLEDGE_TOOL: ChatTool = {
     },
   },
 };
+
+/**
+ * The read-only half: facts about the machine she runs on, answered with
+ * structured JSON rather than a terminal someone would have to read. Nothing
+ * here changes anything, so nothing here needs permission beyond being on.
+ */
+const SYSTEM_TOOLS: ChatTool[] = [
+  {
+    type: 'function',
+    function: {
+      name: 'get_system_info',
+      description: 'Facts about the server you are running on — the OS, hostname, CPU model and load, RAM, disk usage and network status. Use it when they ask anything about the machine itself: what it runs, how much memory it has, whether the disk is full, whether it is online.',
+      parameters: { type: 'object', properties: {}, required: [] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_gpu_info',
+      description: 'The NVIDIA GPU — model, VRAM used and total, utilisation percent, temperature. Use it when they ask about VRAM, GPU usage, or why the machine is slow at graphics or inference.',
+      parameters: { type: 'object', properties: {}, required: [] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_processes',
+      description: 'The processes using the most CPU right now, with their CPU percent and memory. Use it for "what is eating my CPU/RAM" questions.',
+      parameters: {
+        type: 'object',
+        properties: { limit: { type: 'number', description: 'How many processes to list. Default 10, max 50.' } },
+        required: [],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_docker_status',
+      description: 'The Docker daemon and its containers — which are running, their health, restart counts, CPU and memory. Use it when they ask whether Docker or a specific container is working.',
+      parameters: { type: 'object', properties: {}, required: [] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_service_status',
+      description: 'The status of a named service — the user services she runs under (haru, gpt-sovits, obsidian, xvfb, x11vnc, haru-asr, haru-discord-bot) and the system ollama service. Use it when they ask whether something is running.',
+      parameters: {
+        type: 'object',
+        properties: { name: { type: 'string', description: 'The service name, e.g. "haru" or "ollama". Leave out to check them all.' } },
+        required: [],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'diagnose_system',
+      description: 'A concise diagnosis of one part of the machine, combining the relevant metrics into a verdict rather than raw numbers: "gpu", "memory", "disk", "docker", "network", "haru", or "all". Use it when they ask "is anything wrong" or "how is the machine doing", or to check on a specific part.',
+      parameters: {
+        type: 'object',
+        properties: { target: { type: 'string', enum: ['gpu', 'memory', 'disk', 'docker', 'network', 'haru', 'all'], description: 'What to diagnose.' } },
+        required: ['target'],
+      },
+    },
+  },
+];
+
+/**
+ * The level-2 half: actions that change something. Each one is gated by the
+ * permission level and allowlist in system.config, and each one requires an
+ * explicit in-conversation confirmation — the model must say the action is
+ * wanted before the handler will run it. Nothing here ever takes a shell
+ * command; arguments are validated against enumerated names.
+ */
+const SYSTEM_ACTION_TOOLS: ChatTool[] = [
+  {
+    type: 'function',
+    function: {
+      name: 'restart_docker_container',
+      description: 'Restart a Docker container by name (e.g. sonarr, jellyfin, haru-redis). Disruptive — requires explicit confirmation before it will act.',
+      parameters: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', description: 'The container name.' },
+          confirm: { type: 'boolean', description: 'Must be true, and only after they have explicitly said to go ahead.' },
+        },
+        required: ['name', 'confirm'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'start_service',
+      description: 'Start a named user service (haru, gpt-sovits, obsidian, xvfb, x11vnc, haru-asr, haru-discord-bot). Disruptive — requires explicit confirmation.',
+      parameters: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', description: 'The service name.' },
+          confirm: { type: 'boolean', description: 'Must be true, and only after they have explicitly said to go ahead.' },
+        },
+        required: ['name', 'confirm'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'stop_service',
+      description: 'Stop a named user service (haru, gpt-sovits, obsidian, xvfb, x11vnc, haru-asr, haru-discord-bot). Disruptive — requires explicit confirmation.',
+      parameters: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', description: 'The service name.' },
+          confirm: { type: 'boolean', description: 'Must be true, and only after they have explicitly said to go ahead.' },
+        },
+        required: ['name', 'confirm'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'restart_haru',
+      description: 'Restart Haru herself. She drops the connection for a moment and comes back. Disruptive — requires explicit confirmation.',
+      parameters: {
+        type: 'object',
+        properties: { confirm: { type: 'boolean', description: 'Must be true, and only after they have explicitly said to go ahead.' } },
+        required: ['confirm'],
+      },
+    },
+  },
+];
 
 const READ_PAGE_TOOL: ChatTool = {
   type: 'function',
@@ -3410,6 +3551,11 @@ function chatTools() {
     if (search.readPages) tools.push(READ_PAGE_TOOL);
   }
   if (getKnowledgeConfig().enabled) tools.push(KNOWLEDGE_TOOL);
+  const systemConfig = readSystemConfig();
+  if (systemConfig.enabled) {
+    tools.push(...SYSTEM_TOOLS);
+    if (systemConfig.level >= 2) tools.push(...SYSTEM_ACTION_TOOLS);
+  }
   tools.push(CONVERT_TOOL);
   if (handsAllowed && desktop.launch) tools.push(LAUNCH_TOOL, CLOSE_TOOL);
   if (handsAllowed && desktop.power) tools.push(POWER_TOOL);
@@ -3664,15 +3810,142 @@ async function reindexKnowledge(source?: string) {
   return reindexed;
 }
 
+type SystemConfig = { enabled: boolean; level: 1 | 2; allowlist: string[] };
+const DEFAULT_SYSTEM_CONFIG: SystemConfig = { enabled: true, level: 2, allowlist: ['restart_docker_container', 'start_service', 'stop_service', 'restart_haru'] };
+
+function readSystemConfig(): SystemConfig {
+  const saved = store.get('system.config') as Partial<SystemConfig> | undefined;
+  if (!saved || typeof saved !== 'object') return DEFAULT_SYSTEM_CONFIG;
+  const level = saved.level === 2 ? 2 : saved.level === 1 ? 1 : DEFAULT_SYSTEM_CONFIG.level;
+  return {
+    enabled: saved.enabled === true,
+    level,
+    allowlist: Array.isArray(saved.allowlist) ? saved.allowlist.filter((name): name is string => typeof name === 'string') : DEFAULT_SYSTEM_CONFIG.allowlist,
+  };
+}
+
+function readSystemEvents(): { enabled: boolean; sampleSeconds: number; minGapMinutes: number; thresholds: EventThresholds } {
+  const saved = store.get('system.events') as Partial<{ enabled: boolean; sampleSeconds: number; minGapMinutes: number; thresholds: EventThresholds }> | undefined;
+  const sampleSeconds = typeof saved?.sampleSeconds === 'number' ? Math.max(10, Math.min(300, Math.round(saved.sampleSeconds))) : 30;
+  const minGapMinutes = typeof saved?.minGapMinutes === 'number' ? Math.max(1, Math.min(240, Math.round(saved.minGapMinutes))) : 15;
+  return {
+    enabled: saved?.enabled !== false,
+    sampleSeconds,
+    minGapMinutes,
+    thresholds: saved?.thresholds ?? {
+      gpu_percent: { value: 90, seconds: 60 },
+      ram_percent: { value: 90, seconds: 60 },
+      disk_percent: { value: 90, seconds: 60 },
+      gpu_temp_c: { value: 85, seconds: 60 },
+      network_down: { seconds: 30 },
+      docker_crash: true,
+    },
+  };
+}
+
+let systemSamples: SystemSample[] = [];
+const systemLastFired: Record<string, number> = {};
+let systemCollecting = false;
+let pendingHaruRestart = false;
+
+async function sampleSystem() {
+  if (systemCollecting) return;
+  systemCollecting = true;
+  try {
+    if (!readSystemConfig().enabled || !readSystemEvents().enabled) return;
+    const [light, gpu, docker] = await Promise.all([
+      collectSystem(),
+      collectGpu(),
+      collectDockerLight(),
+    ]);
+    const sample = sampleFromCollectors({ ...light, gpu, docker, processes: [], services: [] }, new Date());
+    systemSamples.push(sample);
+    if (systemSamples.length > 8) systemSamples = systemSamples.slice(-8);
+    const events = readSystemEvents();
+    const fired = checkEvents(systemSamples, events.thresholds, new Date(), events.minGapMinutes * 60_000, systemLastFired);
+    for (const event of fired) {
+      console.log(`[system] event ${event.kind}: ${event.message}`);
+      interject(event.message, { source: 'system' });
+    }
+  } catch (error) {
+    console.warn('[system] sample failed:', error instanceof Error ? error.message : String(error));
+  } finally {
+    systemCollecting = false;
+  }
+}
+
+async function runSystemCommand(file: string, args: string[]): Promise<{ ok: boolean; error?: string }> {
+  return new Promise(resolve => {
+    execFile(file, args, { timeout: 30_000 }, (error, _stdout, stderr) => {
+      if (error) resolve({ ok: false, error: String(stderr || error.message || '').slice(0, 300) });
+      else resolve({ ok: true });
+    });
+  });
+}
+
+/**
+ * A compact, current line about the machine, injected only when the message is
+ * plainly asking about it. The 7B model is offered the system tools but rarely
+ * calls them inside a long conversation, and a wrong guess about her own box is
+ * the one answer she should never give — so the obvious machine questions are
+ * answered from collected facts instead, the same way the agenda is put in the
+ * prompt rather than left behind a tool. The tools stay for follow-ups.
+ */
+async function systemContextFor(message: string): Promise<string> {
+  if (!readSystemConfig().enabled || !message) return '';
+  const text = message.toLowerCase();
+  const gpu = /(vram|gpu|graphic|video memory)/.test(text);
+  const ram = /(ram|memory)/.test(text);
+  const disk = /(disk|storage|drive|full|space left)/.test(text);
+  const cpu = /(cpu|processor|core)/.test(text);
+  const docker = /(docker|container)/.test(text);
+  const services = /(service|uptime|is .* (running|up|down)|running properly)/i.test(text);
+  const machine = /(server|machine|this box|what (linux|os|hardware|distro))/i.test(text);
+  if (!(gpu || ram || disk || cpu || docker || services || machine)) return '';
+
+  const [light, gpuData, dockerData, servicesData, processes] = await Promise.all([
+    gpu || ram || cpu || disk || machine ? collectSystem() : null,
+    gpu ? collectGpu() : null,
+    docker ? collectDocker() : null,
+    services ? collectServices() : null,
+    ram || cpu ? collectProcesses(5) : null,
+  ]);
+  const bits: string[] = [];
+  if (gpuData?.length) bits.push(`GPU: ${gpuData[0].name}, ${gpuData[0].vram_used_gb}/${gpuData[0].vram_total_gb} GiB VRAM used, ${gpuData[0].utilization_percent}% utilisation, ${gpuData[0].temperature_c}°C`);
+  if (light?.system) bits.push(`machine: ${light.system.os} on ${light.system.hostname}, up ${light.system.uptime}`);
+  if (light?.cpu) bits.push(`CPU: ${light.cpu.cores} cores at ${light.cpu.usage_percent}%`);
+  if (light?.memory) bits.push(`RAM: ${light.memory.usage_percent}% used (${light.memory.used_gb}/${light.memory.total_gb} GiB)`);
+  if (light?.disk) {
+    const root = light.disk.find(mount => mount.mount === '/');
+    if (root) bits.push(`disk: ${root.usage_percent}% full (${root.used_gb}/${root.total_gb} GB)`);
+  }
+  if (processes?.length) bits.push(`top processes: ${processes.map(process => `${process.name} ${process.cpu_percent}%`).join(', ')}`);
+  if (dockerData) bits.push(`Docker: daemon ${dockerData.daemon}, ${dockerData.containers.filter(container => container.state === 'running').length}/${dockerData.containers.length} running${dockerData.containers.some(container => container.health === 'unhealthy') ? ', one unhealthy' : ''}`);
+  if (servicesData?.length) bits.push(`services: ${servicesData.filter(service => service.state === 'active').map(service => service.name).join(', ') || 'none active'}`);
+  if (!bits.length) return '';
+  const note = `Right now, the machine: ${bits.join(' | ')}. Answer from these facts, not from assumptions about what you run on.`;
+  console.log(`[system] context note for "${message.slice(0, 50)}" (${bits.length} facts)`);
+  return note;
+}
+
 // Assembled per message: identity-shaping records always, everything else only
 // when it relates to what was just said.
-function profileSummary(message: string) {
+//
+// `recentContext` widens what counts as "related to what was just said" beyond
+// the one message: "how did we fix it?" carries no keywords of its own, and
+// only reads as being about Docker because of what came two messages earlier.
+// The recall check stays on `message` alone, though — a wider window would
+// catch a stray "remember" from three turns ago and needlessly deepen every
+// reply after it.
+function profileSummary(message: string, recentContext = '') {
   const profile = getProfile();
   const lines: string[] = [];
   if (profile.nickname.trim()) lines.push(`They go by ${profile.nickname.trim()}.`);
   if (profile.occupation.trim()) lines.push(`Their work: ${profile.occupation.trim()}.`);
   if (profile.about.trim()) lines.push(profile.about.trim());
-  const memoryBlock = formatMemoryPrompt(selectMemories(getMemories(), message), getSessions());
+  const query = recentContext ? `${recentContext} ${message}` : message;
+  const limit = isExplicitRecall(message) ? DEEP_RECALL_LIMIT : undefined;
+  const memoryBlock = formatMemoryPrompt(selectMemories(getMemories(), query, limit), getSessions());
   if (memoryBlock) lines.push(memoryBlock);
   return lines.length ? `About the user: ${lines.join(' ')}` : '';
 }
@@ -3852,7 +4125,12 @@ function knowledgeInstruction() {
   return 'You also have a store of the user\'s own documents and notes — their files, projects, machine, setup, and things they have documented for you. For questions about their own world rather than the general one, call look_up_knowledge before answering or guessing: their machine, their projects, files they have given you, anything you were told to keep in writing. It comes back with its source and date; when sources conflict, prefer the most recently updated one, and when the store has nothing, say you do not have enough information rather than inventing an answer.';
 }
 
-function chatSystemPrompt({ irritation, ego, goodnight, shout, latestMessage, fresh, herRecentReplies = [] }: { irritation: number; ego: number; goodnight: 'said' | 'after' | 'none'; shout: ShoutState; latestMessage: string; fresh: FreshStart | null; herRecentReplies?: string[] }) {
+function systemInstruction() {
+  if (!readSystemConfig().enabled) return '';
+  return 'You can inspect the machine you are running on — the OS, CPU, GPU and VRAM, memory, disk, network, processes, Docker containers and services — with get_system_info, get_gpu_info, get_processes, get_docker_status, get_service_status and diagnose_system. When they ask about the server, the GPU, VRAM, what is eating memory or disk, whether Docker or a service is working, or how the machine is doing, call the relevant tool and answer from its results: your training knows nothing about this machine. You can also restart a container or a user service, or restart yourself, but only after they have explicitly said to — and then call the action once with confirm: true.';
+}
+
+function chatSystemPrompt({ irritation, ego, goodnight, shout, latestMessage, fresh, herRecentReplies = [], recentUserContext = '', machineNote = '' }: { irritation: number; ego: number; goodnight: 'said' | 'after' | 'none'; shout: ShoutState; latestMessage: string; fresh: FreshStart | null; herRecentReplies?: string[]; recentUserContext?: string; machineNote?: string }) {
   const now = zonedNow(CHAT_TIMEZONE);
   const weekday = new Intl.DateTimeFormat('en-US', { weekday: 'long' }).format(now);
   const character = getActiveCharacter();
@@ -3870,7 +4148,7 @@ function chatSystemPrompt({ irritation, ego, goodnight, shout, latestMessage, fr
     // can see the answer to. Telling it plainly not to costs nothing, and the
     // clock on their own screen was never the thing they were short of.
     `It is ${formatTimeOfDay(now.getHours(), now.getMinutes())} on ${weekday} ${localDateKey(now)}, in the user's timezone (${CHAT_TIMEZONE}). That is background, so you know when things are due and how long it has been. Use it if they ask what the time or the date is, and otherwise never state it — they can see their own clock.`,
-    profileSummary(latestMessage),
+    profileSummary(latestMessage, recentUserContext),
     // Beside the profile rather than behind the lookup tool, for the reason the
     // agenda is: asked what they are in the middle of, a model that would have
     // to choose to check simply answers instead.
@@ -3929,6 +4207,10 @@ function chatSystemPrompt({ irritation, ego, goodnight, shout, latestMessage, fr
     // local model reads once and does not act on.
     lookItUpInstruction(latestMessage, readSearchConfig(store.get('search')).enabled),
     knowledgeInstruction(),
+    systemInstruction(),
+    // Beside the tool instructions, so a machine question reads the facts at
+    // the same moment it is told the tools exist.
+    ...(machineNote ? [machineNote] : []),
     // Kept last so the tone instruction is the final thing read before replying,
     // which is what the drawer promises. Mood comes after it, since a bad mood
     // has to be able to override the usual warmth.
@@ -4409,6 +4691,10 @@ async function runChatTool(call: ToolCall, latestUserMessage: string): Promise<s
       kind = 'fact';
     }
     const subject = typeof args.subject === 'string' && args.subject.trim() ? args.subject.trim() : undefined;
+    // Found before the save, against what is active right now — searching after
+    // would risk the new record matching its own hint back to itself.
+    const replaces = typeof args.replaces === 'string' && args.replaces.trim() ? args.replaces.trim() : undefined;
+    const outdated = replaces ? findSuperseded(getMemories(), replaces) : null;
     const saved = addMemory(fact, kind, subject);
     if (!saved) return JSON.stringify({ error: 'fact is required.' });
     if (!saved.record) {
@@ -4418,6 +4704,10 @@ async function runChatTool(call: ToolCall, latestUserMessage: string): Promise<s
         saved: false,
         reason: 'That is not worth writing down — it is either about this moment only, or true of anyone. Keep things that would still matter to them in a month. Do not tell them you have remembered it.',
       });
+    }
+    if (outdated && outdated.id !== saved.record.id) {
+      setMemories(supersede(getMemories(), outdated.id, saved.record.id));
+      console.log(`[memory] "${outdated.text}" superseded by "${fact}"`);
     }
     console.log(`[ai] ${saved.created ? 'remembered' : `heard again (${saved.record.mentions}x)`} [${kind}]: "${fact}"`);
     // Being told it is already known is useful to the model — it stops it
@@ -4468,6 +4758,70 @@ async function runChatTool(call: ToolCall, latestUserMessage: string): Promise<s
     console.log(`[ai] updated ${match.kind}: "${match.title}" -> ${JSON.stringify(changes)}`);
     return JSON.stringify({ saved: true, title: updated?.title, date: updated?.date, time: updated?.time ?? null, kind: match.kind });
   }
+  if (name && ['get_system_info', 'get_gpu_info', 'get_processes', 'get_docker_status', 'get_service_status', 'diagnose_system', 'restart_docker_container', 'start_service', 'stop_service', 'restart_haru'].includes(name) && !readSystemConfig().enabled) {
+    return JSON.stringify({ error: 'The system tools are switched off.' });
+  }
+  if (name === 'get_system_info') {
+    const started = Date.now();
+    const collected = await collectSystem();
+    console.log(`[system] get_system_info in ${Date.now() - started}ms`);
+    return JSON.stringify(collected);
+  }
+  if (name === 'get_gpu_info') {
+    const gpu = await collectGpu();
+    return JSON.stringify(gpu?.length ? gpu : { error: 'nvidia-smi did not answer — is this an NVIDIA machine?' });
+  }
+  if (name === 'get_processes') {
+    const limit = typeof args.limit === 'number' ? Math.max(1, Math.min(50, Math.round(args.limit))) : 10;
+    const processes = await collectProcesses(limit);
+    return JSON.stringify({ processes });
+  }
+  if (name === 'get_docker_status') {
+    const docker = await collectDocker();
+    return JSON.stringify(docker ?? { error: 'The Docker daemon did not answer.' });
+  }
+  if (name === 'get_service_status') {
+    const wanted = typeof args.name === 'string' && args.name.trim() ? args.name.trim() : undefined;
+    if (wanted && !KNOWN_SERVICES.includes(wanted)) return JSON.stringify({ error: `Unknown service "${wanted}". Known: ${KNOWN_SERVICES.join(', ')}.` });
+    const services = await collectServices(wanted);
+    return JSON.stringify({ services });
+  }
+  if (name === 'diagnose_system') {
+    const target = typeof args.target === 'string' && ['gpu', 'memory', 'disk', 'docker', 'network', 'haru', 'all'].includes(args.target) ? args.target : 'all';
+    const collected = await collectAll();
+    return JSON.stringify(diagnose(target, collected));
+  }
+  if (name === 'restart_docker_container' || name === 'start_service' || name === 'stop_service' || name === 'restart_haru') {
+    const systemConfig = readSystemConfig();
+    if (systemConfig.level < 2) return JSON.stringify({ error: 'System actions are not permitted at the current permission level.' });
+    if (!systemConfig.allowlist.includes(name)) return JSON.stringify({ error: 'That action is not on the allowlist.' });
+    if (name === 'restart_docker_container') {
+      const container = typeof args.name === 'string' ? args.name.trim() : '';
+      if (!container) return JSON.stringify({ error: 'name is required.' });
+      if (args.confirm !== true) return JSON.stringify({ confirm: true, note: 'Do not act yet. Ask them to say the word to restart it, then call this again with confirm: true.' });
+      const docker = await collectDocker();
+      const names = (docker?.containers ?? []).map(item => item.name);
+      if (!names.includes(container)) return JSON.stringify({ error: `There is no container called "${container}". Known: ${names.join(', ') || 'none'}.` });
+      const result = await runSystemCommand('docker', ['restart', container]);
+      console.log(`[system] restart_docker_container "${container}" -> ${result.ok ? 'ok' : result.error}`);
+      return JSON.stringify({ restarted: container, ok: result.ok, ...(result.ok ? {} : { error: result.error }) });
+    }
+    if (name === 'start_service' || name === 'stop_service') {
+      const service = typeof args.name === 'string' ? args.name.trim() : '';
+      if (!service) return JSON.stringify({ error: 'name is required.' });
+      if (!USER_SERVICES.includes(service)) return JSON.stringify({ error: `"${service}" is not a service I am permitted to control. Permitted: ${USER_SERVICES.join(', ')}.` });
+      if (args.confirm !== true) return JSON.stringify({ confirm: true, note: 'Do not act yet. Ask them to say the word, then call this again with confirm: true.' });
+      const action = name === 'start_service' ? 'start' : 'stop';
+      const result = await runSystemCommand('systemctl', ['--user', action, service]);
+      console.log(`[system] ${name} "${service}" -> ${result.ok ? 'ok' : result.error}`);
+      return JSON.stringify({ [name === 'start_service' ? 'started' : 'stopped']: service, ok: result.ok, ...(result.ok ? {} : { error: result.error }) });
+    }
+    if (args.confirm !== true) return JSON.stringify({ confirm: true, note: 'Do not act yet. Ask them to say the word, then call this again with confirm: true.' });
+    console.log('[system] restart_haru confirmed — will restart after the reply is delivered');
+    pendingHaruRestart = true;
+    return JSON.stringify({ restarting: true, note: 'Tell them you are restarting and will be right back.' });
+  }
+
   if (name === 'look_up_knowledge') {
     const query = typeof args.query === 'string' ? args.query.trim() : '';
     if (!query) return JSON.stringify({ error: 'query is required.' });
@@ -4859,13 +5213,15 @@ async function sendToProvider(conversation: OllamaMessage[], config: ProviderCon
   // this file and none of them should know which provider is answering.
   if (isOpenAIShaped(config.provider)) return openAIPost(conversation, config, { tools, temperature, format, maxTokens, onChunk });
   const send = async (withTools: boolean, streaming: boolean) => {
+    const offered = withTools ? chatTools() : [];
+    if (offered.length) console.log(`[ai] offering ${offered.length} tools to ${config.model}`);
     try {
       return await net.fetch(`${trimEndpoint(config.endpoint)}/api/chat`, {
         method: 'POST',
         headers: modelHeaders(config.endpoint),
         body: JSON.stringify({
           model: config.model, messages: conversation,
-          ...(withTools ? { tools: chatTools() } : {}),
+          ...(offered.length ? { tools: offered } : {}),
           ...(format ? { format } : {}),
           stream: streaming,
           options: { temperature, num_ctx: CHAT_NUM_CTX, keep_alive: OLLAMA_KEEP_ALIVE, ...(maxTokens ? { num_predict: maxTokens } : {}) },
@@ -5796,7 +6152,15 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // of her repeating herself, and feeding the whole exchange back would be the
   // thing asides.ts found makes replies worse.
   const herRecentReplies = messages.filter(message => message.role === 'assistant').map(message => message.content).filter(Boolean);
-  const system = chatSystemPrompt({ ...mood, latestMessage: latest, fresh, herRecentReplies });
+  // What they said just before this, so a memory search on "how did we fix
+  // it?" has something to go on besides a pronoun. Their words only — folding
+  // her replies in too would just as often paper over a message with no
+  // keywords of its own with ones that were never theirs.
+  const recentUserContext = messages.filter(message => message.role === 'user').map(message => message.content).filter(Boolean).slice(0, -1).slice(-3).join(' ');
+  // Collected before the prompt so a machine question is answered from facts,
+  // not from the model's assumptions about what it runs on.
+  const machineNote = await systemContextFor(latest);
+  const system = chatSystemPrompt({ ...mood, latestMessage: latest, fresh, herRecentReplies, recentUserContext, machineNote });
   // What she can still see. Not only this message: a picture has to ride along
   // again on the next turn or "what is in week three" cannot be answered, and
   // attachmentsInPlay is where the bound on doing that lives.
@@ -5869,8 +6233,13 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
     // so that loosening one does not silently loosen the other.
     if (pageWasRead) handsAllowed = false;
     roundStreamed = '';
+    // The last round has its tools withdrawn too: without this, a turn that
+    // spends every round calling tools — retrying a save that keeps failing,
+    // say — hits the cap still mid tool-call, with the result thrown away and
+    // nothing said, even on a round whose tool call actually succeeded. Forcing
+    // words here means whatever just happened gets reported instead of lost.
     const toolsWanted: PostOptions = {
-      tools: !pageWasRead && !emptyRetried,
+      tools: !pageWasRead && !emptyRetried && round < MAX_TOOL_ROUNDS - 1,
       // A message from outside the desk — a phone, Discord — gets a short leash.
       // The reader is watching a chat app, a long reply is a long wait, and
       // away-turns were found to run long: the cap keeps her concise without
@@ -6003,6 +6372,13 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
     const mood = classifyEmotion(content, config);
     void speak(content, mood);
     void tieToPlace(latest, content, config);
+    // Restarting herself kills the process she is answering from, so the
+    // restart waits until this reply is built and on its way — the words leave
+    // first, the restart follows a few seconds behind.
+    if (pendingHaruRestart) {
+      pendingHaruRestart = false;
+      setTimeout(() => { void runSystemCommand('systemctl', ['--user', 'restart', 'haru']); }, 5000);
+    }
     return { content, ignored: false, irritation, ego };
   }
   throw new Error('Haru kept calling tools without settling on a reply.');
@@ -6331,6 +6707,14 @@ function saveDiscordConfig(config: DiscordConfig) {
   store.set('discord', config);
 }
 
+/** Where she DMs the user, opening the channel the first time it is needed. */
+async function discordDmChannel(config: DiscordConfig): Promise<string> {
+  if (config.dmChannelId) return config.dmChannelId;
+  const channel = await discord!.dmChannel();
+  saveDiscordConfig({ ...config, dmChannelId: channel });
+  return channel;
+}
+
 /**
  * The bot token, kept the way every other credential here is: encrypted by the
  * OS, never handed back to the renderer, never written to a log.
@@ -6612,28 +6996,130 @@ async function reactedOnDiscord(emoji: string, custom: boolean, herLine: string)
 }
 
 /**
+ * What she would say first, unprompted and about nothing in particular, over
+ * Discord — the away counterpart to considerPipingUp.
+ *
+ * considerPipingUp gates on machineIdleSeconds, which is right for a desk she
+ * might or might not be sitting at. Over Discord there is no desk: being
+ * pestered on the phone is itself the "someone's there" signal, the same way
+ * nudgeForPhone treats it for reminders. So this shares the angle-picking and
+ * the character prompt with considerPipingUp, just without asking whether the
+ * machine has been touched recently.
+ */
+async function spontaneousDiscordNudge(): Promise<string | null> {
+  const config = store.get('ai.config') as ProviderConfig | undefined;
+  if (!config?.model) return null;
+  const mood = getMood();
+  // Stonewalling means stonewalling here too.
+  if (isIgnoring(mood.irritation)) return null;
+  try {
+    const now = zonedNow(CHAT_TIMEZONE);
+    const todayKey = localDateKey(now);
+    const items = getKept();
+    const statuses = items.map(item => itemStatus(item, now, todayKey));
+    const angle = pickAngle(openingAngles({
+      hour: now.getHours(),
+      irritation: mood.irritation,
+      ego: mood.ego,
+      overdue: chaseableOverdue(items, now, todayKey),
+      dueToday: items.filter((item, index) => item.date === todayKey && (statuses[index] === 'upcoming' || statuses[index] === 'now')).length,
+      doneToday: items.filter((item, index) => statuses[index] === 'done' && item.date === todayKey).length,
+      hasHistory: getSessions().length > 0,
+      knowsThings: getMemories().length > 0,
+      kind: 'return',
+      interrupting: true,
+    }));
+    const character = getActiveCharacter();
+    const system = [
+      character.identity,
+      `It is ${formatTimeOfDay(now.getHours(), now.getMinutes())} on ${new Intl.DateTimeFormat('en-US', { weekday: 'long' }).format(now)} ${todayKey}.`,
+      profileSummary(''),
+      keptSummary(now),
+      character.style,
+      moodInstruction(mood.irritation),
+      egoInstruction(mood.ego),
+      'They are away from their desk, reachable only on their phone over Discord. You are messaging them first — nothing they said prompted this.',
+      NO_NON_SEQUITURS,
+      NO_INVENTED_HISTORY,
+      unpromptedContext(),
+      'One or two short lines. No quotation marks, no stage directions. Do not greet them and do not ask if they are there.',
+      angle ? `Open on this in particular: ${angle.instruction}` : '',
+    ].filter(Boolean).join(' ');
+    return await ollamaQuip(system, 'Say something.', config);
+  } catch (error) {
+    console.warn('[discord] could not compose a spontaneous nudge:', error instanceof Error ? error.message : error);
+    return null;
+  }
+}
+
+// Rolled once per pester tick, only when there was no reminder to send instead
+// — so a random nudge never crowds out something she was actually asked to
+// chase. Not every tick producing a message is the point: a message every
+// pesterHours on the dot would read as a scheduler, not a companion.
+const SPONTANEOUS_NUDGE_CHANCE = 0.4;
+
+/**
  * The pestering, on the long interval this channel deserves.
  *
  * Discord makes a noise on a phone, which is the whole point and also the whole
  * risk: the same nudge that is welcome three times a day is an app that gets
  * muted at twenty. It shares the chase ladder with the desk and the web, so
- * being chased in one place still counts as being chased.
+ * being chased in one place still counts as being chased. When there is
+ * nothing to chase, she sometimes says something anyway — see
+ * spontaneousDiscordNudge — the same way she would pipe up unprompted at a
+ * desk, just without a desk to be idle at.
  */
 async function pesterOnDiscord() {
   const config = getDiscordConfig();
   if (!config.enabled || !discord || !config.ownerId) return;
   const said = await nudgeForPhone();
-  if (!said) return;
-  try {
-    let channel = config.dmChannelId;
-    if (!channel) {
-      channel = await discord.dmChannel();
-      saveDiscordConfig({ ...config, dmChannelId: channel });
+  if (said) {
+    try {
+      const channel = await discordDmChannel(config);
+      await discord.send(channel, said.line);
+      console.log('[discord] pestered about "' + said.about + '"');
+    } catch (error) {
+      console.warn('[discord] could not pester:', error instanceof Error ? error.message : error);
     }
-    await discord.send(channel, said.line);
-    console.log('[discord] pestered about "' + said.about + '"');
+    return;
+  }
+  // Same gates nudgeForPhone opens with — it may have returned null because of
+  // these rather than because there was nothing to chase, and either way a
+  // spontaneous line should not fire where a reminder would have been refused.
+  if (chasing || Date.now() - lastRemindedAt < REMINDER_SPACING_MS) return;
+  if (isSilenced(store.get('pushback') as Pushback | undefined, Date.now())) return;
+  if (Math.random() >= SPONTANEOUS_NUDGE_CHANCE) return;
+  const line = await spontaneousDiscordNudge();
+  if (!line) return;
+  lastRemindedAt = Date.now();
+  // interject() writes it to the aside log and forwards it to Discord itself
+  // — see noteAside / DISCORD_WORTHY_ASIDES — so there is no separate send here.
+  if (interject(line, { source: 'idle' })) console.log('[discord] sent a spontaneous nudge');
+}
+
+/**
+ * Which asides are worth a Discord DM, versus staying in her own log.
+ *
+ * Most of what she says off her own back is narrating the screen back to
+ * itself — nobody needs a phone buzz for a jab about a tab. These three are the
+ * ones actually meant to reach the user rather than just record what she
+ * noticed: a reminder chasing something overdue, the daily journal ask, and a
+ * line said to break a long silence. All three already went nowhere if nobody
+ * was at the machine or the phone page to see them — which was the bug: she
+ * "said" them, and they were gone.
+ */
+const DISCORD_WORTHY_ASIDES: ReadonlySet<AsideSource> = new Set(['reminder', 'journal', 'idle', 'system']);
+
+/** Forwards an aside to Discord, when it is one of the ones worth a DM for. */
+async function forwardAsideToDiscord(aside: Aside) {
+  if (!DISCORD_WORTHY_ASIDES.has(aside.source)) return;
+  const config = getDiscordConfig();
+  if (!config.enabled || !discord || !config.ownerId) return;
+  try {
+    const channel = await discordDmChannel(config);
+    await discord.send(channel, aside.text);
   } catch (error) {
-    console.warn('[discord] could not pester:', error instanceof Error ? error.message : error);
+    console.warn('[discord] could not forward an aside:', error instanceof Error ? error.message : error);
   }
 }
 
@@ -7086,6 +7572,13 @@ app.whenReady().then(() => {
   // waits on or blocks a conversation.
   setTimeout(() => { void autoSyncVault(); }, 60_000);
   setInterval(() => { void autoSyncVault(); }, 60 * 60_000);
+  // The system sampler. Lightweight and self-contained, so a slow sample can
+  // never hold up a conversation; events it fires go through interject, the
+  // same channel her other unprompted lines use.
+  const systemEvents = readSystemEvents();
+  console.log(`[system] sampler armed (every ${systemEvents.sampleSeconds}s, level ${readSystemConfig().level})`);
+  setTimeout(() => { void sampleSystem(); }, 10_000);
+  setInterval(() => { void sampleSystem(); }, systemEvents.sampleSeconds * 1000);
   protocol.handle('haru-model', async request => {
     const url = new URL(request.url);
     const segments = url.pathname.split('/').filter(Boolean);
