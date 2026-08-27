@@ -453,7 +453,14 @@ const BLOUB = `
     return clamp(k * 2);
   }
   const STATES = {
-    idle: { id: 'idle', morph: 0.45, blinkIn: false, baseFace: true, baseBody: true, duration: 2.4, minDuration: undefined, pose: () => base() },
+    idle: { id: 'idle', morph: 0.45, blinkIn: false, baseFace: true, baseBody: true, duration: 3.2, minDuration: undefined, pose: (t) => {
+      // A gentle rotating idle: the resting blob slowly turns through a faint
+      // egg so the rotation reads, on top of the usual breathing and blinking.
+      const spin = (t * TAU) / 12;
+      const radii = new Array(N);
+      for (let i = 0; i < N; i++) radii[i] = lerp(1, radiusAtAngle(PROFILES.egg, (i / N) * TAU - spin), 0.32);
+      return base({ sil: { radii: radii, rot: 0, cx: 0, cy: 0, sx: 1, sy: 1 } });
+    } },
     thinking: { id: 'thinking', morph: 0.4, blinkIn: true, baseFace: false, baseBody: false, duration: 2.6, minDuration: undefined, pose: (t) => {
       const mid = dotPulse(t, 1);
       const emerge = 0.3 + 0.7 * easings.easeOutCubic(clamp(t / 0.3));
@@ -543,13 +550,15 @@ const BLOUB = `
       });
     } }
   };
-  const SEQUENCE = ['idle', 'thinking', 'wink', 'wide', 'alert', 'notify', 'exclaim', 'sleep', 'egg', 'hexagon', 'play', 'orbit', 'burst', 'comet'];
-  const MIN_BLOCK = Math.max.apply(null, SEQUENCE.map((s) => STATES[s].morph));
+  const MIN_BLOCK = Math.max.apply(null, ['idle', 'wink', 'wide', 'notify'].map((s) => STATES[s].morph));
   function makeBlock(state) {
     const d = Math.max(MIN_BLOCK, STATES[state].minDuration || MIN_BLOCK);
     return { state: state, duration: Math.round(Math.max(d, STATES[state].duration) * 100) / 100 };
   }
-  const CYCLE = SEQUENCE.map(makeBlock);
+  // The resting loop: the subtle idle animations only. The dramatic states
+  // (thinking, alert, play, orbit, burst, ...) are reactions — played once when
+  // her mood calls for them, then she settles back into the resting loop.
+  const REST_CYCLE = ['idle', 'wink', 'wide', 'notify'].map(makeBlock);
 
   // Clock-free engine: sample(t) is a pure function of time.
   function BotEngine() {
@@ -760,18 +769,29 @@ const BLOUB = `
 
   const engine = new BotEngine();
   let block = 0, nextAt = Infinity, clock = 0, last = 0, blockStart = 0;
-  function apply(i, from) {
-    from = from === undefined ? 0 : from;
-    const b = CYCLE[i];
-    blockStart = clock - from;
-    engine.setState(b.state, clock);
-    nextAt = blockStart + b.duration;
+  let reacting = false;
+  function restDuration(state) {
+    const d = STATES[state];
+    return Math.round(Math.max(d.duration, d.minDuration || 0) * 100) / 100;
+  }
+  function applyRest(i) {
+    reacting = false;
+    block = i;
+    blockStart = clock;
+    engine.setState(REST_CYCLE[i].state, clock);
+    nextAt = blockStart + REST_CYCLE[i].duration;
+  }
+  function playReaction(state) {
+    reacting = true;
+    blockStart = clock;
+    engine.setState(state, clock);
+    nextAt = blockStart + restDuration(state);
   }
   function flashState(state) {
-    const i = CYCLE.findIndex((b) => b.state === state);
-    if (i < 0) return;
-    block = i;
-    apply(i);
+    if (state === 'idle') { applyRest(0); return; }
+    const i = REST_CYCLE.findIndex((b) => b.state === state);
+    if (i >= 0) applyRest(i);
+    else playReaction(state);
   }
   // Haru's mood engine has twelve emotions; each drives a bloub state (her
   // animation for that mood) and a resting expression (the face idle carries
@@ -793,14 +813,16 @@ const BLOUB = `
   window.bloub = {
     // The pastille pops: called when she is talking.
     notify: () => flashState('notify'),
-    // Map Haru's mood to a bloub state + resting face. The state jumps in (her
-    // animation for that mood), the expression stays so idle carries the face.
+    // Map Haru's mood to a bloub state + resting face. The state plays once as
+    // a reaction, then she settles back into the resting loop with that face.
     express: (emotion) => {
       const M = EMOTION_STATES[emotion] || EMOTION_STATES['neutral'];
       const expr = EXPRESSION_BY_ID.get(M.expr);
       engine.setExpression(expr, clock);
       if (M.state !== 'idle') flashState(M.state);
-    }
+    },
+    // Read-only: what she is doing right now, for the page to know.
+    state: () => ({ cur: engine.cur, expr: engine.expr ? engine.expr.id : 'neutre' })
   };
   function dotAttrs(dot) {
     const fill = dot.color || (dot.depth === undefined ? INK : mixHex(PAPER, INK, dot.depth));
@@ -895,14 +917,14 @@ const BLOUB = `
     last = ms;
     clock += dt;
     if (clock >= nextAt) {
-      block = (block + 1) % CYCLE.length;
-      apply(block);
+      if (reacting) applyRest(0);
+      else applyRest((block + 1) % REST_CYCLE.length);
     }
     if (finePointer) aim();
     draw(engine.sample(clock));
     requestAnimationFrame(tick);
   }
-  apply(0);
+  applyRest(0);
   requestAnimationFrame(tick);
 })();
 `;
