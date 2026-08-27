@@ -2496,6 +2496,11 @@ function gameIsRunning() {
  * for itself — measured earlier as her taking minutes to answer, then Ollama
  * hanging outright. An 8B is about 5GB and leaves room for both.
  */
+/** Whether the swap below has been said out loud yet. Logged on the transition
+ *  rather than per request — modelForNow runs on every call, quips and emotion
+ *  classification included, and a line per request would drown the log. */
+let gamingSwapAnnounced = false;
+
 function modelForNow(config: ProviderConfig): ProviderConfig {
   // Only ever applies to a model running on this machine. The whole point is to
   // free VRAM the game wants, and a model on someone else's servers uses none of
@@ -2509,8 +2514,19 @@ function modelForNow(config: ProviderConfig): ProviderConfig {
   // conversation.
   if (isOpenAIShaped(config.provider)) return config;
   const gaming = readGamingConfig(store.get('gaming'));
-  if (!gaming.enabled || !gaming.model || !gameIsRunning()) return config;
-  if (gaming.model === config.model) return config;
+  const swapping = gaming.enabled && Boolean(gaming.model) && gameIsRunning() && gaming.model !== config.model;
+  // Said out loud both ways, because silence here cost an evening of archaeology:
+  // the swap fired on a fullscreen video, an 8B answered a whole conversation in
+  // beige assistant-speak, and the transcript then taught the 14B to carry on
+  // that way after the video closed. Nothing anywhere said the model had changed.
+  if (swapping && !gamingSwapAnnounced) {
+    console.log(`[ai] gaming swap: ${config.model} -> ${gaming.model} — something has the screen`);
+    gamingSwapAnnounced = true;
+  } else if (!swapping && gamingSwapAnnounced) {
+    console.log(`[ai] gaming swap released — back to ${config.model}`);
+    gamingSwapAnnounced = false;
+  }
+  if (!swapping) return config;
   return { ...config, model: gaming.model };
 }
 
