@@ -22,3 +22,7 @@ appdata/
 haru-live2d/
 haru-voice/
 haru-personality.json
+
+# Rendered prompt dumps, written while working out what she was being told.
+# They carry real conversation text, so they are not something to commit.
+familiar-block*.txt
