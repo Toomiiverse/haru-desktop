@@ -4153,22 +4153,30 @@ async function streamOllama(response: Response, onChunk: (text: string) => void)
   const decoder = new TextDecoder();
   let content = '';
   let toolCalls: NonNullable<OllamaMessage['tool_calls']> | undefined;
+  // One JSON object per line, but the network does not deliver lines: a read
+  // ends wherever it ends, and a line cut in two parsed as nothing and was
+  // dropped — its words with it. Ollama sends the first token or two in a
+  // line of their own, which is where the opening of a reply lives.
+  let buffered = '';
+  const take = (line: string) => {
+    if (!line.trim()) return;
+    let payload: { message?: OllamaMessage };
+    try { payload = JSON.parse(line) as typeof payload; } catch { console.warn(`[ai] dropped an unreadable stream line (${line.length} chars)`); return; }
+    const piece = payload.message;
+    if (!piece) return;
+    if (piece.content) { content += piece.content; onChunk(piece.content); }
+    if (piece.tool_calls?.length) toolCalls = toolCalls ?? piece.tool_calls;
+  };
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
-    for (const line of decoder.decode(value, { stream: true }).split('\n')) {
-      if (!line.trim()) continue;
-      let payload: { message?: OllamaMessage };
-      try { payload = JSON.parse(line) as typeof payload; } catch { continue; }
-      const piece = payload.message;
-      if (!piece) continue;
-      // The final line carries done:true with the tail of the message, so it is
-      // forwarded like any other — sequential streaming means nothing is sent
-      // twice.
-      if (piece.content) { content += piece.content; onChunk(piece.content); }
-      if (piece.tool_calls?.length) toolCalls = toolCalls ?? piece.tool_calls;
-    }
+    buffered += decoder.decode(value, { stream: true });
+    const lines = buffered.split('\n');
+    buffered = lines.pop() ?? '';
+    for (const line of lines) take(line);
   }
+  buffered += decoder.decode();
+  take(buffered);
   const message: OllamaMessage = { role: 'assistant', content };
   if (toolCalls?.length) message.tool_calls = toolCalls;
   return message;
