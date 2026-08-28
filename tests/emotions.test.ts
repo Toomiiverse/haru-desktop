@@ -38,3 +38,13 @@ test('only a face’s name reaches the disk', () => {
   assert.equal(emotionFile(''), null);
   assert.ok(DEFAULT_TRANSITION_MS >= 150 && DEFAULT_TRANSITION_MS <= 250);
 });
+
+test('every face knows how she moves while wearing it, within reason', () => {
+  for (const face of HARU_EMOTIONS) {
+    const idle = emotionConfig[face].idle;
+    assert.ok(idle.periodMs >= 1500 && idle.periodMs <= 8000, `${face} period`);
+    assert.ok(idle.bobPx >= 0 && idle.bobPx <= 10 && idle.swayDeg >= 0 && idle.swayDeg <= 4 && idle.breath >= 0 && idle.breath <= 0.05, `${face} motion is subtle`);
+  }
+  assert.ok(emotionConfig.excited.idle.periodMs < emotionConfig.sleepy.idle.periodMs, 'excited moves faster than sleepy');
+  assert.ok(emotionConfig.sad.idle.bobPx < emotionConfig.happy.idle.bobPx, 'sad barely moves');
+});

@@ -76,20 +76,28 @@ const SHELL = `
 // which face is leaving, how far along, and the opacity of each — so it can be
 // tested with numbers and frozen at an instant. A change of face that arrives
 // mid-fade starts from what is visible: the outgoing face keeps the opacity it
-// had, the incoming one starts from nothing, and nothing jumps.
+// had, the incoming one starts from nothing, and nothing jumps. idle(t) is the
+// same idea for how she moves while wearing a face: a float, a sway and a
+// breath on the face's own period, from the catalogue.
 //
-// The renderer decides HOW: two stacked images, opacity, a CSS transition with
-// the engine's own easing. Nothing runs between changes — a face at rest is a
-// static image — and a reduced-motion setting switches at once. The API the
-// rest of the page speaks (express / think / notify / poke / state) is the one
-// the old avatar had, so nothing else on the page changed hands.
+// The renderer decides HOW. Each face is the SVG itself, fetched once and put
+// into the page as markup rather than shown through an <img>: the files ship a
+// black square behind her — a full-canvas path, first in every file — and only
+// inline can that one element be hidden at render time, on the page, without
+// touching the file. Two layers, opacity, a CSS transition with the engine's
+// own easing; the idle float and the little settle on a change of face are
+// CSS animations driven by the same numbers. A reduced-motion setting stops
+// all of it. The API the rest of the page speaks — express / think / notify /
+// poke / state — is the one the old avatar had.
 const AVATAR = `
 (() => {
   const EMOTIONS = ${JSON.stringify(HARU_EMOTIONS)};
   const LABELS = ${JSON.stringify(Object.fromEntries(HARU_EMOTIONS.map(name => [name, emotionConfig[name].label])))};
   const TRANSITIONS = ${JSON.stringify(Object.fromEntries(HARU_EMOTIONS.map(name => [name, emotionConfig[name].transition])))};
+  const IDLE = ${JSON.stringify(Object.fromEntries(HARU_EMOTIONS.map(name => [name, emotionConfig[name].idle])))};
   const ADAPT = ${JSON.stringify(MOOD_TO_EMOTION)};
   const EASE_CSS = ${JSON.stringify(EASE_OUT_CSS)};
+  const TAU = Math.PI * 2;
   const clamp = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
   // Cubic ease-out: deterministic, no overshoot, the same curve as EASE_CSS.
   const easeOut = (p) => 1 - Math.pow(1 - p, 3);
@@ -110,6 +118,12 @@ const AVATAR = `
         const previousOpacity = previous === null ? 0 : leavingFrom * (1 - p);
         return { emotion: emotion, previousEmotion: previous, transitionProgress: p, opacity: opacity, previousOpacity: previousOpacity, transitioning: p < 1 };
       },
+      /** How she is moving at time t, wearing this face: offsets a renderer or a test can use. */
+      idle(t) {
+        const m = IDLE[emotion] || IDLE.neutral;
+        const phase = (t / m.periodMs) * TAU;
+        return { bob: Math.sin(phase) * m.bobPx, sway: Math.sin(phase * 0.5 + 1.3) * m.swayDeg, breath: 1 + (1 - Math.cos(phase)) / 2 * m.breath, periodMs: m.periodMs };
+      },
       /** A new face at time t. Returns whether anything changed. */
       set(next, t) {
         if (EMOTIONS.indexOf(next) < 0) next = 'neutral';
@@ -127,22 +141,55 @@ const AVATAR = `
   }
   window.HaruEmotionEngine = createEmotionEngine;
 
-  // ---- the renderer: two images and an opacity -------------------------
+  // ---- the renderer: two layers of inline SVG and an opacity ------------
   const host = document.getElementById('stage');
   if (!host) return;
   const data = host.dataset || {};
   const reduced = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
   let fade = Number(data.transition) || ${DEFAULT_TRANSITION_MS};
   if (data.size) host.style.setProperty('--avatar-size', data.size + 'px');
-  host.innerHTML = '<div id=avatar role=img aria-label="' + LABELS.neutral + '">'
-    + '<img class=face alt="" draggable=false decoding=async>'
-    + '<img class=face alt="" draggable=false decoding=async></div>';
+  host.innerHTML = '<div id=avatar role=img aria-label="' + LABELS.neutral + '"><div class=face></div><div class=face></div></div>';
   const box = document.getElementById('avatar');
-  const faces = box.querySelectorAll('img');
+  const faces = box.querySelectorAll('.face');
   const engine = createEmotionEngine({ duration: () => (reduced ? 0 : fade) });
   const clock = () => (typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now());
-  let front = 0, resting = 'neutral', timer = null, frozenAt = null;
+  let front = 0, resting = 'neutral', timer = null, frozenAt = null, request = 0;
+  const cache = {};
 
+  // The file, once. The route caches it for a week and so does the browser;
+  // after the first sight of a face this is a lookup, not a request.
+  function load(name) {
+    if (cache[name]) return Promise.resolve(cache[name]);
+    return fetch('/emotions/' + name + '.svg').then((r) => { if (!r.ok) throw new Error('face ' + r.status); return r.text(); }).then((text) => { cache[name] = text; return text; });
+  }
+  // A path or rect that covers the whole canvas is a backdrop, not her.
+  function coversCanvas(el, x, y, w, h) {
+    if (el.nodeName.toLowerCase() === 'rect') {
+      return Number(el.getAttribute('x') || 0) <= x && Number(el.getAttribute('y') || 0) <= y && Number(el.getAttribute('width')) >= w && Number(el.getAttribute('height')) >= h;
+    }
+    const numbers = (el.getAttribute('d') || '').match(/-?\\d+(?:\\.\\d+)?/g);
+    if (!numbers || numbers.length > 12) return false;
+    const pts = []; for (let i = 0; i + 1 < numbers.length; i += 2) pts.push([Number(numbers[i]), Number(numbers[i + 1])]);
+    const has = (px, py) => pts.some((p) => Math.abs(p[0] - px) < 1 && Math.abs(p[1] - py) < 1);
+    return has(x, y) && has(x + w, y) && has(x + w, y + h) && has(x, y + h);
+  }
+  // The SVG into a layer, as itself: its own viewBox, scaled to the box,
+  // never stretched, with the backdrop marked so the page can hide it.
+  function mount(layer, text) {
+    const svg = new DOMParser().parseFromString(text, 'image/svg+xml').documentElement;
+    if (!svg || svg.nodeName.toLowerCase() !== 'svg') throw new Error('not a face');
+    svg.removeAttribute('width'); svg.removeAttribute('height');
+    svg.setAttribute('preserveAspectRatio', 'xMidYMid meet'); svg.setAttribute('aria-hidden', 'true'); svg.setAttribute('focusable', 'false');
+    const vb = (svg.getAttribute('viewBox') || '').trim().split(/[\\s,]+/).map(Number);
+    if (vb.length === 4) for (const el of svg.querySelectorAll('path, rect')) if (coversCanvas(el, vb[0], vb[1], vb[2], vb[3])) el.setAttribute('class', 'backdrop');
+    layer.replaceChildren(document.adoptNode ? document.adoptNode(svg) : svg);
+  }
+  // How she moves while wearing this face, handed to the CSS that moves her.
+  function idleFor(name) {
+    const m = IDLE[name] || IDLE.neutral;
+    box.style.setProperty('--idle-period', m.periodMs + 'ms'); box.style.setProperty('--idle-bob', m.bobPx + 'px');
+    box.style.setProperty('--idle-sway', m.swayDeg + 'deg'); box.style.setProperty('--idle-breath', String(1 + m.breath));
+  }
   // What the DOM shows for a frame. With a duration the browser eases the two
   // opacities from wherever they are, which is the engine's rule made of CSS;
   // frozen, or reduced, the frame's own numbers are written and nothing moves.
@@ -154,18 +201,27 @@ const AVATAR = `
     back.style.opacity = animate ? '0' : String(frame.previousOpacity);
     fore.classList.add('on'); back.classList.remove('on');
   }
+  function settle() {
+    if (reduced || frozenAt !== null) return;
+    box.classList.remove('changed'); if (typeof box.offsetWidth === 'number') void box.offsetWidth; box.classList.add('changed');
+  }
   function show(name, t) {
     if (!engine.set(name, t)) return;
     const frame = engine.sample(t);
+    const mine = ++request;
     box.setAttribute('aria-label', LABELS[frame.emotion] || ('Haru feeling ' + frame.emotion));
     const incoming = faces[1 - front];
-    incoming.classList.remove('missing');
-    incoming.onerror = () => { incoming.classList.add('missing'); };
-    incoming.onload = () => { front = 1 - front; paint(frozenAt === null ? frame : engine.sample(frozenAt), frozenAt === null); };
-    incoming.removeAttribute('src');
-    incoming.src = '/emotions/' + frame.emotion + '.svg';
+    load(frame.emotion).then((text) => {
+      if (mine !== request) return; // a newer face is on its way
+      incoming.classList.remove('missing');
+      mount(incoming, text);
+      front = 1 - front;
+      idleFor(frame.emotion);
+      paint(frozenAt === null ? frame : engine.sample(frozenAt), frozenAt === null);
+      settle();
+    }).catch(() => { if (mine === request) { incoming.replaceChildren(); incoming.classList.add('missing'); } });
   }
-  function settle(ms) { clearTimeout(timer); timer = setTimeout(() => show(resting, clock()), ms); }
+  function settleBack(ms) { clearTimeout(timer); timer = setTimeout(() => show(resting, clock()), ms); }
   // What a prod does to her face, and for how long, before she settles back.
   const POKES = { exclaim: ['angry', 2000], burst: ['surprised', 1600], orbit: ['excited', 1600], comet: ['surprised', 1600], play: ['happy', 1600] };
 
@@ -173,19 +229,21 @@ const AVATAR = `
     // Her mood for a line: the resting face, until the next one.
     express: (emotion) => { resting = ADAPT[emotion] || (EMOTIONS.indexOf(emotion) >= 0 ? emotion : 'neutral'); clearTimeout(timer); show(resting, clock()); },
     // They sent something: she thinks until the reply's mood lands, or for a long while.
-    think: () => { clearTimeout(timer); show('thinking', clock()); settle(20000); },
+    think: () => { clearTimeout(timer); show('thinking', clock()); settleBack(20000); },
     // She is starting to talk: a small pop, not a change of face.
-    notify: () => { if (frozenAt !== null) return; box.classList.remove('pop'); if (typeof box.offsetWidth === 'number') void box.offsetWidth; box.classList.add('pop'); },
-    poke: (what) => { const hit = POKES[what]; if (!hit) return; clearTimeout(timer); show(hit[0], clock()); settle(hit[1]); },
+    notify: () => { if (frozenAt !== null || reduced) return; box.classList.remove('pop'); if (typeof box.offsetWidth === 'number') void box.offsetWidth; box.classList.add('pop'); },
+    poke: (what) => { const hit = POKES[what]; if (!hit) return; clearTimeout(timer); show(hit[0], clock()); settleBack(hit[1]); },
     // The frame at a time, from the engine: what a test, a thumbnail or a
     // future editor would ask for. Playback stopped, that is what is drawn.
     sample: (t) => engine.sample(t === undefined ? clock() : t),
-    freeze: (t) => { frozenAt = t === undefined ? clock() : t; paint(engine.sample(frozenAt), false); },
-    play: () => { frozenAt = null; paint(engine.sample(clock()), false); },
+    idle: (t) => engine.idle(t === undefined ? clock() : t),
+    freeze: (t) => { frozenAt = t === undefined ? clock() : t; box.classList.add('frozen'); paint(engine.sample(frozenAt), false); },
+    play: () => { frozenAt = null; box.classList.remove('frozen'); paint(engine.sample(clock()), false); },
     state: () => { const f = engine.sample(frozenAt === null ? clock() : frozenAt); return { emotion: f.emotion, previousEmotion: f.previousEmotion, transitionProgress: f.transitionProgress, resting: resting, frozen: frozenAt !== null }; },
     setSize: (px) => host.style.setProperty('--avatar-size', px + 'px'),
     setTransition: (ms) => { fade = Math.max(0, Number(ms) || 0); }
   };
+  idleFor('neutral');
   show('neutral', clock());
   if (data.frozenAt !== undefined) window.haruAvatar.freeze(Number(data.frozenAt) || 0);
 })();
@@ -312,16 +370,29 @@ export function appPage(): string {
   .chip span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .chip button { background:none; border:0; color:var(--ink-dim); padding:0 .25rem; font-size:1rem; line-height:1; font-weight:400; }
 
-  /* Her, on stage: the supplied Haru artwork, one SVG per emotion, served from
-     her own server and crossfaded. Square, sized by --avatar-size, never
-     stretched; no background of its own, so it sits on light and dark alike. */
+  /* Her, on stage: the supplied Haru artwork, one SVG per emotion, put into the
+     page as itself and crossfaded. Square, sized by --avatar-size, never
+     stretched; the black square the files ship behind her is hidden here, so
+     she sits on whatever the page is, light or dark. She floats, sways and
+     breathes on her face's own period, and settles when the face changes. */
   #stage { flex:0 0 auto; display:flex; justify-content:center; align-items:center; padding:.35rem 1rem 0; cursor:pointer; --avatar-size:min(31vw, 136px); }
-  #avatar { position:relative; width:var(--avatar-size); height:var(--avatar-size); }
-  #avatar .face { position:absolute; inset:0; width:100%; height:100%; object-fit:contain; opacity:0; user-select:none; -webkit-user-drag:none; }
+  #avatar { position:relative; width:var(--avatar-size); height:var(--avatar-size); transform-origin:50% 62%;
+    --idle-period:4000ms; --idle-bob:4px; --idle-sway:1.2deg; --idle-breath:1.015;
+    animation:float var(--idle-period) ease-in-out infinite; }
+  #avatar .face { position:absolute; inset:0; opacity:0; }
+  #avatar .face svg { display:block; width:100%; height:100%; }
+  #avatar .face .backdrop { display:none; }
   #avatar .face.missing { visibility:hidden; }
-  #avatar.pop { animation:pop .5s ease; }
-  @keyframes pop { 30% { transform:scale(1.06); } }
-  @media (prefers-reduced-motion: reduce) { #avatar .face { transition:none !important; } #avatar.pop { animation:none; } }
+  #avatar.changed { animation:float var(--idle-period) ease-in-out infinite, settle .45s cubic-bezier(0.33, 1, 0.68, 1); }
+  #avatar.pop { animation:float var(--idle-period) ease-in-out infinite, pop .5s cubic-bezier(0.33, 1, 0.68, 1); }
+  #avatar.frozen { animation-play-state:paused; }
+  @keyframes float {
+    0%, 100% { transform:translateY(calc(var(--idle-bob) * -1)) rotate(calc(var(--idle-sway) * -1)) scale(1); }
+    50% { transform:translateY(var(--idle-bob)) rotate(var(--idle-sway)) scale(var(--idle-breath)); }
+  }
+  @keyframes settle { 0% { scale:.94; } 55% { scale:1.04; } 100% { scale:1; } }
+  @keyframes pop { 30% { scale:1.06; } }
+  @media (prefers-reduced-motion: reduce) { #avatar, #avatar.changed, #avatar.pop { animation:none !important; } #avatar .face { transition:none !important; } }
 
   /* A wide window is not a big phone. Stretched across a desktop browser the
      bubbles ran the full 1700px and the text became unreadable at about six
