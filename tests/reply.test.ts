@@ -11,7 +11,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { claimsDesktopAction, claimsTickOff, dropInventedContact, dropInventedScreenTalk, dropRepeatedAgendaMentions, dropRepeatedParagraphs, dropRoleHeader, dropStageDirections, dropTackedOnParagraphs, readsLikeAssistant, dropRepeatedOpener, dropEchoOpener } from '../electron/reply';
+import { claimsDesktopAction, claimsTickOff, dropInventedContact, dropInventedScreenTalk, dropRepeatedAgendaMentions, dropRepeatedParagraphs, dropRoleHeader, dropStageDirections, dropTackedOnParagraphs, readsLikeAssistant, dropRepeatedOpener, dropEchoOpener, dropRepeatedSentences } from '../electron/reply';
 
 // -- claiming to have touched the machine -------------------------------------
 
@@ -353,4 +353,18 @@ test('a question of her own, a long first sentence, or nothing after it is left 
   assert.equal(dropEchoOpener('Did you pick up Scarlett’s present yet? Or are you stuck in limbo?', 'You didn’t even ask a question though'), 'Did you pick up Scarlett’s present yet? Or are you stuck in limbo?');
   assert.equal(dropEchoOpener('A keyboard?', 'What about a keyboard?'), 'A keyboard?');
   assert.equal(dropEchoOpener('Fine. A keyboard is a waste unless it is a good one.', 'What about a keyboard?'), 'Fine. A keyboard is a waste unless it is a good one.');
+});
+
+test('a sentence said in either of her last two replies is cut from this one, and the rest stands', () => {
+  const previous = ['Fine. You want seeds? Seeds in hand, cash ready. You’re the one who’s been late on everything else.', 'They’re tiny embryos. You’re the one who’s been late on everything else.'];
+  assert.equal(
+    dropRepeatedSentences('Right. Seeds are the actual plants. You’re the one who’s been late on everything else. Get your cash ready.', previous),
+    'Right. Seeds are the actual plants. Get your cash ready.',
+  );
+});
+
+test('short sentences, a sentence that is the whole reply, and a fresh reply are left alone', () => {
+  assert.equal(dropRepeatedSentences('Fine. Go now.', ['Fine. Go now.']), 'Fine. Go now.');
+  assert.equal(dropRepeatedSentences('You’re the one who’s been late on everything else.', ['You’re the one who’s been late on everything else.']), 'You’re the one who’s been late on everything else.');
+  assert.equal(dropRepeatedSentences('Something new entirely, said for the first time here.', ['Nothing like it before.']), 'Something new entirely, said for the first time here.');
 });

@@ -511,3 +511,30 @@ export function dropEchoOpener(reply: string, theirMessage: string): string {
   if (!rest.trim()) return reply;
   return rest.charAt(0).toUpperCase() + rest.slice(1);
 }
+
+/**
+ * A sentence she said last time, or the time before, said again: cut.
+ *
+ * The paragraph filter above never sees this one — "you're the one who's been
+ * late on everything else" arrived three replies running, each time inside a
+ * different paragraph. Whole sentences of six words or more, compared after
+ * normalising, against her last two replies; the rest of the paragraph stands.
+ * A reply is never emptied, and a sentence that is the whole reply is left —
+ * she may mean it twice.
+ */
+const MIN_REPEAT_WORDS = 6;
+
+export function dropRepeatedSentences(reply: string, previousReplies: string[]): string {
+  const sentences = (text: string) => text.match(/[^.!?\n]+[.!?…]+|[^.!?\n]+$/gu) ?? [];
+  const seen = new Set(previousReplies.slice(-2).flatMap(sentences).map(normalise).filter(key => key.split(' ').length >= MIN_REPEAT_WORDS));
+  if (!seen.size) return reply;
+  const paragraphs = reply.split(/\n{2,}/);
+  const out = paragraphs.map(paragraph => {
+    const parts = paragraph.match(/[^.!?\n]+[.!?…]+\s*|[^.!?\n]+$/gu) ?? [paragraph];
+    if (parts.length < 2) return paragraph;
+    const kept = parts.filter(part => !(seen.has(normalise(part)) && normalise(part).split(' ').length >= MIN_REPEAT_WORDS));
+    return kept.length ? kept.join('').trim() : paragraph;
+  }).filter(Boolean);
+  const result = out.join('\n\n').trim();
+  return result || reply;
+}
