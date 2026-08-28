@@ -72,3 +72,10 @@ test('every face says how she holds herself, within reason; sleepy and sad droop
   assert.ok(emotionConfig.sleepy.pose.leanDeg > 0 && emotionConfig.sad.pose.leanDeg > 0, 'sleepy and sad droop');
   assert.ok(emotionConfig.excited.pose.roam > emotionConfig.sad.pose.roam, 'excited roams, sad stays put');
 });
+
+test('thinking is still: less float than neutral, no roaming, a slight tilt at most', () => {
+  const t = emotionConfig.thinking, n = emotionConfig.neutral;
+  assert.ok(t.idle.bobPx < n.idle.bobPx / 2 && t.idle.swayDeg < n.idle.swayDeg / 2, 'a faint float');
+  assert.equal(t.pose.roam, 0, 'no roaming while thinking');
+  assert.ok(t.pose.tiltDeg <= 4, 'a slight tilt at most');
+});

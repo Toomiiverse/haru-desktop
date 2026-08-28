@@ -68,7 +68,9 @@ export const emotionConfig: Record<HaruEmotion, EmotionEntry> = {
   curious:     { file: 'curious.svg',     label: 'Haru feeling curious', transition: 'fade', idle: { periodMs: 3200, bobPx: 4, swayDeg: 2.4, breath: 0.018 }, gaze: 1, blink: true, pose: { tiltDeg: 12, roam: 0.08, leanDeg: 0 } },
   embarrassed: { file: 'embarrassed.svg', label: 'Haru feeling embarrassed', transition: 'fade', idle: { periodMs: 3800, bobPx: 3, swayDeg: 1.0, breath: 0.014 }, gaze: 0.6, blink: true, pose: { tiltDeg: 6, roam: 0.05, leanDeg: 2 } },
   sleepy:      { file: 'sleepy.svg',      label: 'Haru feeling sleepy', transition: 'fade', idle: { periodMs: 6500, bobPx: 5, swayDeg: 1.0, breath: 0.02 }, gaze: 0.15, blink: false, pose: { tiltDeg: 5, roam: 0.03, leanDeg: 5 } },
-  thinking:    { file: 'thinking.svg',    label: 'Haru thinking', transition: 'fade', idle: { periodMs: 4200, bobPx: 3, swayDeg: 1.4, breath: 0.015 }, gaze: 1, blink: true, pose: { tiltDeg: 9, roam: 0.05, leanDeg: 0 } },
+  // Thinking is still: a faint float, no sway to speak of, no roaming, a slight
+  // held tilt — absorbed, not bobbing about. Her gaze is up and away meanwhile.
+  thinking:    { file: 'thinking.svg',    label: 'Haru thinking', transition: 'fade', idle: { periodMs: 5200, bobPx: 1.5, swayDeg: 0.4, breath: 0.01 }, gaze: 1, blink: true, pose: { tiltDeg: 4, roam: 0, leanDeg: 0 } },
   smug:        { file: 'smug.svg',        label: 'Haru feeling smug', transition: 'fade', idle: { periodMs: 3800, bobPx: 3, swayDeg: 1.5, breath: 0.015 }, gaze: 0.8, blink: true, pose: { tiltDeg: 7, roam: 0.06, leanDeg: -2 } },
   love:        { file: 'love.svg',        label: 'Haru feeling loved up', transition: 'fade', idle: { periodMs: 3400, bobPx: 5, swayDeg: 1.6, breath: 0.022 }, gaze: 0.6, blink: false, pose: { tiltDeg: 8, roam: 0.07, leanDeg: 1 } },
 };
