@@ -7,7 +7,7 @@
 // she used kept out of the draw so a long silence does not get the same jab
 // four times.
 
-export type Remembered = { id: string; text: string; kind?: string; status?: string };
+export type Remembered = { id: string; text: string; kind?: string; status?: string; importance?: number };
 export type Day = { day: string; summary: string };
 export type Something = { id: string; text: string; from: 'memory' | 'day' };
 
@@ -18,16 +18,32 @@ export const REMEMBERED_PICKS = 6;
 
 const dayDistance = (a: string, b: string) => Math.round((Date.parse(b) - Date.parse(a)) / 86_400_000);
 
+/**
+ * A memory that is about her, or about nothing — "they are thanking you",
+ * "nothing notable", "Discord opened and closed" — is no material for a jab
+ * at their life. The store keeps these; this draw does not.
+ */
+const NOTHING_TO_SAY = /\b(haru|you are|you're|helpful|thank(s|ing|ed)?|noted|nothing notable|opened and closed|no issues|not shared)\b/i;
+const MIN_WORDS = 4;
+/** Memories with no score are taken as middling; a day's summary sits above most of them. */
+const DEFAULT_IMPORTANCE = 0.5, DAY_IMPORTANCE = 0.6;
+
 export function pickToBringUp(memories: Remembered[], days: Day[], recent: string[], todayKey: string, random: () => number = Math.random): Something | null {
-  const facts: Something[] = memories
-    .filter(m => m.text && m.text.trim().length >= 12 && (m.status === undefined || m.status === 'active') && m.kind !== 'preference')
-    .map(m => ({ id: m.id, text: m.text.trim(), from: 'memory' as const }));
-  const recentDays: Something[] = days
-    .filter(d => d.summary && d.day && d.day < todayKey && dayDistance(d.day, todayKey) <= DAYS_WORTH_RAISING)
-    .map(d => ({ id: `day:${d.day}`, text: d.summary.trim(), from: 'day' as const }));
-  const all = [...facts, ...recentDays];
+  const worth = (text: string) => text.trim().split(/\s+/).length >= MIN_WORDS && !NOTHING_TO_SAY.test(text);
+  const facts = memories
+    .filter(m => m.text && worth(m.text) && (m.status === undefined || m.status === 'active') && m.kind !== 'preference')
+    .map(m => ({ thing: { id: m.id, text: m.text.trim(), from: 'memory' as const }, weight: m.importance ?? DEFAULT_IMPORTANCE }));
+  const recentDays = days
+    .filter(d => d.summary && d.day && d.day < todayKey && dayDistance(d.day, todayKey) <= DAYS_WORTH_RAISING && worth(d.summary))
+    .map(d => ({ thing: { id: `day:${d.day}`, text: d.summary.trim(), from: 'day' as const }, weight: DAY_IMPORTANCE }));
+  const all = [...facts, ...recentDays].filter(entry => entry.weight > 0);
   if (!all.length) return null;
-  const fresh = all.filter(s => !recent.includes(s.id));
+  const fresh = all.filter(entry => !recent.includes(entry.thing.id));
   const pool = fresh.length ? fresh : all;
-  return pool[Math.min(pool.length - 1, Math.floor(random() * pool.length))];
+  // Weighted by how much it matters: what she has to say about their
+  // girlfriend or their company should come up more than the HDMI cable.
+  const total = pool.reduce((sum, entry) => sum + entry.weight, 0);
+  let roll = random() * total;
+  for (const entry of pool) { roll -= entry.weight; if (roll < 0) return entry.thing; }
+  return pool[pool.length - 1].thing;
 }
