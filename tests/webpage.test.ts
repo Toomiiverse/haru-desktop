@@ -229,7 +229,7 @@ test('how she floats and where she looks are pure functions of time: bounded, re
   const rest = engine.gaze(1); assert.ok(Math.abs(rest.x) < 0.1 && Math.abs(rest.y) < 0.1 || rest.looking, 'a resting beat sits near centre');
 });
 
-test('her eyes are found by geometry — the dark mirrored pair in the eye band, not the blush, not the backdrop', async () => {
+test('her eyes are found by shape alone — the larger mirrored pair in the eye band, not the blush below it, not the backdrop', async () => {
   const { avatar, shown, flush } = drive();
   avatar.express('happy'); await flush();
   const svg = shown()?.children[0];

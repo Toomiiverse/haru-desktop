@@ -82,8 +82,9 @@ const SHELL = `
 // into the page as markup, because the files ship a black square behind her
 // and only inline can that one element be hidden without touching the file —
 // and because only inline are her eyes reachable. They are found by geometry
-// at mount (the files carry no ids): a mirrored pair of small dark shapes in
-// the band where her eyes are, not pink, not the backdrop. Those two paths get
+// at mount (the files carry no ids): a mirrored pair of small shapes in the
+// band where her eyes are — by shape alone, because in this artwork her eyes
+// are the same pink as her mouth. Those two paths get
 // a class and a CSS transform, and her attention — the wander, or them typing,
 // or her talking, or a pointer — becomes two variables the transform reads.
 // The float lives on the outer element and never restarts; the settle on a
@@ -178,20 +179,20 @@ const AVATAR = `
     }
     return n ? { x0: x0, y0: y0, x1: x1, y1: y1, w: x1 - x0, h: y1 - y0, cx: (x0 + x1) / 2, cy: (y0 + y1) / 2 } : null;
   }
-  // The fill a path actually has: its own, or the nearest group's.
-  function fillOf(el) { for (let n = el; n && n.getAttribute; n = n.parentNode) { const f = n.getAttribute('fill'); if (f) return f.toLowerCase(); } return ''; }
-  const pinkish = (fill) => { const m = /^#([0-9a-f]{6})$/.exec(fill); if (!m) return false; const v = parseInt(m[1], 16); const r = v >> 16, g = (v >> 8) & 255, b = v & 255; return r > 200 && b > 140 && g < 215 && r - g > 40; };
   // A path or rect that covers the whole canvas is a backdrop, not her.
   function coversCanvas(el, box, x, y, w, h) {
     if (el.nodeName.toLowerCase() === 'rect') return Number(el.getAttribute('x') || 0) <= x && Number(el.getAttribute('y') || 0) <= y && Number(el.getAttribute('width')) >= w && Number(el.getAttribute('height')) >= h;
     return !!box && box.x0 <= x + 1 && box.y0 <= y + 1 && box.x1 >= x + w - 1 && box.y1 >= y + h - 1 && (el.getAttribute('d') || '').length < 200;
   }
-  // Her eyes: two small dark shapes, one each side of the middle, level with
-  // each other, in the band where her eyes are. Sizes may differ — confused
-  // has one eye wide and one narrow — but not wildly. The largest such pair
-  // wins, which tells eyes from the blush beneath them.
+  // Her eyes: two small shapes, one each side of the middle, level with each
+  // other, in the band where her eyes are. By shape alone — in this artwork
+  // her face is the dark silhouette and her eyes are the pink, the same pink
+  // as her mouth, so colour says nothing. Sizes may differ — confused has one
+  // eye wide and one narrow — but not wildly. The mouth is one shape in the
+  // middle and cannot pair; the blush beneath the eyes pairs, but the largest
+  // pair wins, and the eyes are larger.
   function findEyes(paths, W, H) {
-    const band = paths.filter((p) => p.box && p.box.w < W * 0.16 && p.box.h < H * 0.16 && p.box.cy > H * 0.58 && p.box.cy < H * 0.74 && !pinkish(p.fill) && p.fill !== '#000000');
+    const band = paths.filter((p) => p.box && p.box.w < W * 0.16 && p.box.h < H * 0.16 && p.box.cy > H * 0.58 && p.box.cy < H * 0.74);
     const left = band.filter((p) => p.box.cx > W * 0.32 && p.box.cx < W * 0.46), right = band.filter((p) => p.box.cx > W * 0.54 && p.box.cx < W * 0.68);
     let best = null, score = 0;
     for (const a of left) for (const b of right) {
@@ -238,7 +239,7 @@ const AVATAR = `
       for (const el of svg.querySelectorAll('path, rect')) {
         const box = el.nodeName.toLowerCase() === 'path' ? pathBox(el.getAttribute('d') || '') : null;
         if (coversCanvas(el, box, vb[0], vb[1], vb[2], vb[3])) { el.setAttribute('class', 'backdrop'); continue; }
-        paths.push({ el: el, box: box, fill: fillOf(el) });
+        paths.push({ el: el, box: box });
       }
       found = findEyes(paths, vb[2], vb[3]);
       if (found) for (const eye of found) eye.setAttribute('class', 'eye');
