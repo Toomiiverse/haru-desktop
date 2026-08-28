@@ -4801,11 +4801,20 @@ function noteTheyAccounted(said: string) {
 type Brain = { config: ProviderConfig; escalated: boolean; because: string; sees: boolean };
 
 /**
- * `pictures` forces the question out to the hosted model, whatever decide() says.
+ * `pictures` and `files` force the question out to the hosted model, whatever
+ * decide() says.
  *
  * Not a preference — the local default cannot see at all. qwen2.5 handed an
  * image has nothing to answer from, so a picture that stays home is a picture
- * nobody looks at, which is the whole complaint this change exists to fix.
+ * nobody looks at, which is the whole complaint this change exists to fix. Any
+ * other attached file goes out on the same terms: the user's rule is that the
+ * hosted model is for what they hand her, and nothing else.
+ *
+ * A message from the phone or Discord used to be a third forcing reason, on the
+ * theory that a wait in a chat app reads as broken. Withdrawn: the user wants
+ * their words answered by the local model wherever they are said from, and the
+ * hosted one kept for uploads. That is a rule about cost and about where a
+ * conversation lives, and it is theirs to set.
  *
  * `sees` on the way back is what tells the caller whether to send the image or
  * to have it read into words first. It is returned rather than inferred, because
@@ -4816,25 +4825,21 @@ function brainFor(
   message: string,
   local: ProviderConfig,
   conversation: { role: string; content: string }[] = [],
-  { pictures = false, away = '' } = {},
+  { pictures = false, files = false } = {},
 ): Brain {
   const setting = readEscalateConfig(store.get('escalate'));
   const hosted = store.get('escalate.provider') as ProviderConfig | undefined;
   // The key is part of being usable, not a detail discovered on the way out.
   const usable = Boolean(hosted?.model && isOpenAIShaped(hosted.provider) && hasKeyFor(hosted.endpoint));
-  // Two things override the word count, and they override the setting with it.
-  //
+  // An attachment overrides the word count, and overrides the setting with it.
   // Escalation being switched off is a preference about cost on an ordinary
-  // question asked at the desk. Neither of these is that. A picture has no local
-  // answer to fall back to, only a worse one; and a message from somewhere she
-  // is not — Discord, the phone — is one where the wait is the whole experience,
-  // because nobody watching a chat app knows the difference between thinking and
-  // broken. `away` carries its own reason so the log says which it was.
-  const forced = pictures || Boolean(away);
+  // question asked at the desk; a file has no local answer to fall back to,
+  // only a worse one.
+  const forced = pictures || files;
   if (!usable || (!setting.enabled && !forced)) return { config: local, escalated: false, because: 'no second model set up', sees: false };
 
   const verdict = pictures ? { escalate: true, because: 'there is a picture in it' }
-    : away ? { escalate: true, because: away }
+    : files ? { escalate: true, because: 'there is a file in it' }
     : decide(message, setting);
   if (!verdict.escalate) return { config: local, escalated: false, because: verdict.because, sees: false };
 
@@ -4854,30 +4859,12 @@ function brainFor(
   return { config: { ...hosted!, temperature: local.temperature }, escalated: true, because: verdict.because, sees: true };
 }
 
-/**
- * The hosted model for the one-shot composers, where waiting is the whole problem.
- *
- * ollamaQuip carries no conversation and no tools, so there is no brainFor to
- * route it — it takes a config and uses it. On a machine whose local model is a
- * serverless pod that is the difference between a reply and a cold start, and a
- * cold start on a chat app reads as her being broken rather than as her thinking.
- *
- * Falls back rather than fails: no second model, or no key for it, and this
- * returns exactly what it was given, which is what happened before it existed.
- */
-function fastBrain(local: ProviderConfig, text: string): ProviderConfig {
-  const hosted = store.get('escalate.provider') as ProviderConfig | undefined;
-  if (!hosted?.model || !isOpenAIShaped(hosted.provider) || !hasKeyFor(hosted.endpoint)) return local;
-  // The same scan the routed path gets. This one carries a single line rather
-  // than a transcript, but a check-in is exactly the kind of thing somebody
-  // types a password into by accident.
-  const allowed = mayLeaveTheMachine(text);
-  if (!allowed.safe) {
-    console.log(`[router] keeping this one local — ${allowed.because}`);
-    return local;
-  }
-  return { ...hosted, temperature: local.temperature };
-}
+// There used to be a fastBrain() here that sent the one-shot composers — the
+// phone's nudges, Discord's check-in and reaction replies, the phone's read of
+// her expression — to the hosted model, on the theory that a cold start on a
+// chat app reads as her being broken. Withdrawn with the away-forcing in
+// brainFor above, for the same reason: the hosted model is for uploads and
+// nothing else. They take the local config directly now.
 
 /**
  * The attachments folded into the messages that carry them.
@@ -5025,7 +5012,7 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // Chosen once for the whole turn, tool rounds included: swapping models
   // half-way through a tool loop would hand one model's call to another to
   // answer, and the two do not agree on how a call is even identified.
-  const brain = brainFor(latest, config, messages, { pictures, away });
+  const brain = brainFor(latest, config, messages, { pictures, files: carried.length > 0 });
   if (brain.escalated) console.log(`[ai] sent out to ${brain.config.model} — ${brain.because}`);
   config = brain.config;
   const vision = readVisionConfig(store.get('vision'));
@@ -5440,11 +5427,7 @@ async function nudgeForPhone(): Promise<{ line: string; about: string } | null> 
       reminderInstruction(tier, target.item.title, when, evening),
       'They are on their phone, away from their desk. One or two short lines. No quotation marks, no stage directions.',
     ].join(' ');
-    // Out with the rest of what she says away from the desk. Both callers of
-    // this are remote — the phone asking, and the Discord pestering — so there
-    // is nobody sitting in front of her to read a delay as thinking. Scanned on
-    // the title, because that is the part of this that leaves the machine.
-    const line = await ollamaQuip(system, 'Remind them.', fastBrain(config, target.item.title));
+    const line = await ollamaQuip(system, 'Remind them.', config);
     console.log(`[web] nudged about "${target.item.title}" (attempt ${attempts + 1}, ${tier})`);
     return { line, about: target.item.title };
   } catch (error) {
@@ -5608,7 +5591,7 @@ async function answerOnDiscord(text: string, channelId = '') {
       'Answer in one short line. Take it seriously without making a fuss of it, and do not ask them to elaborate unless it sounds bad.',
     ].filter(Boolean).join(' ');
     try {
-      const line = await ollamaQuip(system, `They wrote: "${text.slice(0, 500)}"`, fastBrain(config, text));
+      const line = await ollamaQuip(system, `They wrote: "${text.slice(0, 500)}"`, config);
       return { reply: line, ignored: false };
     } catch {
       // The note is what matters and it is already saved. Silence beats an error.
@@ -5759,10 +5742,7 @@ async function reactedOnDiscord(emoji: string, custom: boolean, herLine: string)
     egoInstruction(mood.ego),
   ].filter(Boolean).join(' ');
   try {
-    // The hosted model, for the reason every other Discord path uses it: this is
-    // a chat app, and a cold start here reads as her ignoring you — which is
-    // precisely the wrong answer to somebody putting a heart on something.
-    const line = await ollamaQuip(system, reactedPrompt(reading, herLine), fastBrain(config, herLine));
+    const line = await ollamaQuip(system, reactedPrompt(reading, herLine), config);
     console.log(`[discord] reacted to ${custom ? 'a custom emoji' : emoji} — taken as ${reading.taken}`);
     return { reply: line, ignored: false };
   } catch (error) {
@@ -6200,7 +6180,7 @@ function webDeps(): WebDeps {
       if (!config?.model) return { emotion: null, expression: null };
       try {
         const started = Date.now();
-        const felt = await classifyEmotion(text, fastBrain(config, text));
+        const felt = await classifyEmotion(text, config);
         if (!felt) return { emotion: null, expression: null };
         const expression = faceForEmotion(felt.emotion, modelExpressions());
         console.log(`[web] face for that: ${felt.emotion}${expression ? ` (${expression})` : ' — no face for it'} in ${Date.now() - started}ms`);
