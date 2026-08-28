@@ -428,11 +428,28 @@ const BLOUB = `
     };
   }
 
-  // The shapes idle may drift into. The morph is a pure function of time: each
-// 9s beat picks a pseudo-random target (sometimes the same one, so change is a
-// chance, not a rule), and the profile eases into it over the first part of the
-// beat while the whole thing keeps rotating.
-  const IDLE_SHAPES = [new Array(N).fill(1), PROFILES.egg, PROFILES.hexagon, PROFILES.triangle];
+  // The shapes idle may drift into, and how often. The morph is a pure function
+  // of time: each 9s beat picks a target by a weighted roll of the beat's own
+  // hash — sometimes the same one, so change is a chance, not a rule — and the
+  // profile eases into it over the first part of the beat while the whole thing
+  // keeps rotating. The circle is where she lives; the pebble and the capsule
+  // are where she goes most; the rest are equal and rare. Every shape is about
+  // the ball's size, so a morph reads as a change of shape, not of scale.
+  const IDLE_SHAPES = [
+    { name: 'circle',   weight: 10, radii: new Array(N).fill(1) },
+    { name: 'pebble',   weight: 4,  radii: PROFILES.egg },
+    { name: 'capsule',  weight: 2.5, radii: profileFromPolygon(hullOfCircles(0, -0.42, 0.58, 0, 0.42, 0.58), 0, 0) },
+    { name: 'hexagon',  weight: 1,  radii: PROFILES.hexagon },
+    { name: 'triangle', weight: 1,  radii: PROFILES.triangle },
+    { name: 'pill',     weight: 1,  radii: profileFromPolygon(hullOfCircles(-0.5, -0.32, 0.5, 0.5, 0.32, 0.5), 0, 0) }
+  ];
+  const IDLE_TOTAL = IDLE_SHAPES.reduce((sum, shape) => sum + shape.weight, 0);
+  const hashN = (n) => { const x = Math.sin(n * 12.9898) * 43758.5453; return x - Math.floor(x); };
+  function idleShape(epoch) {
+    let roll = hashN(epoch) * IDLE_TOTAL;
+    for (const shape of IDLE_SHAPES) { roll -= shape.weight; if (roll < 0) return shape.radii; }
+    return IDLE_SHAPES[0].radii;
+  }
 
   // The states: each is a pose(t) plus the shape-change rules the video showed.
   function base(over) {
@@ -470,11 +487,8 @@ const BLOUB = `
       const MORPH_FRAC = 0.42;
       const epoch = Math.floor(time / PERIOD);
       const phase = (time - epoch * PERIOD) / PERIOD;
-      const hashN = (n) => { const x = Math.sin(n * 12.9898) * 43758.5453; return x - Math.floor(x); };
-      const target = Math.floor(hashN(epoch) * IDLE_SHAPES.length);
-      const prev = Math.floor(hashN(epoch - 1) * IDLE_SHAPES.length);
       const k = easings.easeInOutCubic(clamp(phase / MORPH_FRAC));
-      const from = IDLE_SHAPES[prev], to = IDLE_SHAPES[target];
+      const from = idleShape(epoch - 1), to = idleShape(epoch);
       const baseArr = new Array(N);
       for (let i = 0; i < N; i++) baseArr[i] = lerp(from[i], to[i], k);
       const radii = new Array(N);
