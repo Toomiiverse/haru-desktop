@@ -77,3 +77,25 @@ export function forOllama<T extends Turn>(conversation: T[]): T[] {
   if (!out.some(message => message.role === 'user')) out.push({ role: 'user', content: '' } as T);
   return out;
 }
+
+/**
+ * The same conversation with its oldest half gone, for a prompt that did not fit.
+ *
+ * The runner behind some models refuses a prompt longer than its window rather
+ * than truncating it as Ollama's own runner does, and nothing upstream bounds
+ * the day's history, so a long day arrives whole. The leading system messages
+ * stay; of the rest, the older half is dropped — and then whatever follows up
+ * to the next user turn, so the history never opens on a tool result whose
+ * call is gone, or on her answering nobody. Returns the input unchanged when
+ * there is nothing left worth dropping, which the caller reads as "give up".
+ */
+export function withoutOldest<T extends Turn>(conversation: T[], fraction = 0.5): T[] {
+  let lead = 0;
+  while (lead < conversation.length && conversation[lead].role === 'system') lead++;
+  const rest = conversation.slice(lead);
+  if (rest.length < 2) return conversation;
+  let from = Math.max(1, Math.floor(rest.length * fraction));
+  while (from < rest.length && rest[from].role !== 'user') from++;
+  if (from >= rest.length) return conversation;
+  return [...conversation.slice(0, lead), ...rest.slice(from)];
+}

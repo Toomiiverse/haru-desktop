@@ -61,7 +61,7 @@ import { conversationMayLeave, mayLeaveTheMachine } from './sensitivity';
 import { addCheckIn, checkInInstruction, checkInsOn, readCheckIns, type CheckIn } from './checkins';
 import { addAside, alreadySaidRecently, asideContext, asidesOn, pruneAsides, readAsides, type Aside, type AsideSource } from './asides';
 import { attachmentsInPlay, describeAttached, READ_IT_ALL_PROMPT, readAttachments, type Attachment, type Opened } from './attachments';
-import { forOllama } from './ollamaturns';
+import { forOllama, withoutOldest } from './ollamaturns';
 import { describePull, isTailnetAddress, mergeCheckIns, readCheckInSource } from './checkinsource';
 import { DiscordLink, looksLikeUserId, readDiscordConfig, useOfChannel, type DiscordConfig } from './discord';
 import { reactedPrompt, readReaction, REACTION_COOLDOWN_MS } from './reacted';
@@ -3137,7 +3137,18 @@ type OllamaMessage = { role: string; content?: string; tool_calls?: ToolCall[]; 
 // partly onto the CPU on a 16GB card — measured at 10 tok/s vs 54 tok/s once it
 // fits entirely in VRAM. Chat is wiped daily, so a day's history never needs the
 // larger window.
-const CHAT_NUM_CTX = 8192;
+/**
+ * The window the local model is asked to keep, in tokens. From config
+ * (`ai.numCtx`) so a machine with the room can be given it: 8192 was sized for
+ * a 6GB card, and a day's chat with two dozen tool schemas and a search result
+ * or two ran past it — which qwen2.5's runner truncated in silence and
+ * Qwen3.5's refuses outright. Measured on Qwen3.5-9B Q4_K_M: 32768 costs 7.8GB
+ * of VRAM, 65536 costs 8.9GB, both fully on a 12GB card.
+ */
+function chatNumCtx(): number {
+  const wanted = store.get('ai.numCtx');
+  return typeof wanted === 'number' && Number.isFinite(wanted) && wanted >= 2048 ? Math.min(Math.round(wanted), 262144) : 8192;
+}
 // How long the local model is kept resident after a request. Without this, an
 // idle machine's model is evicted and the next phone message pays a cold start
 // on top of everything else — which is exactly the wait this whole change is
@@ -3699,6 +3710,8 @@ function toolDeps(): ToolDeps {
  * wasted round trip happens once rather than on every reply.
  */
 const toolless = new Set<string>();
+/** llama-server's refusal of a prompt longer than its window, as Ollama relays it. */
+const TOO_LONG = /exceeds? the available context|exceed_context_size/i;
 
 /**
  * True when an endpoint is somewhere other than this machine — which is the only
@@ -4055,7 +4068,7 @@ async function sendToProvider(conversation: OllamaMessage[], config: ProviderCon
           // up per model; `quiet` is only false on the retry below.
           ...(quiet ? { think: false } : {}),
           stream: streaming,
-          options: { temperature, num_ctx: CHAT_NUM_CTX, keep_alive: OLLAMA_KEEP_ALIVE, ...(maxTokens ? { num_predict: maxTokens } : {}) },
+          options: { temperature, num_ctx: chatNumCtx(), keep_alive: OLLAMA_KEEP_ALIVE, ...(maxTokens ? { num_predict: maxTokens } : {}) },
         }),
       });
     } catch (error) {
@@ -4082,6 +4095,23 @@ async function sendToProvider(conversation: OllamaMessage[], config: ProviderCon
       // not, so it goes without, and a thinking model there will think.
       console.warn(`[ai] ${trimEndpoint(config.endpoint)} refused the think field — retrying without it`);
       response = await send(wanted, Boolean(onChunk), false);
+    } else if (TOO_LONG.test(body)) {
+      // The runner behind this model refuses a prompt that does not fit rather
+      // than truncating it, as Ollama's own runner does, and nothing upstream
+      // bounds the day's history. Dropping the oldest half and asking again
+      // keeps the reply hers: the hosted model's answer to the same question
+      // is not the same answer, which is exactly what was noticed the first
+      // time this spilled — "no personality".
+      let complaint = body;
+      for (let tries = 0; tries < 3 && !response.ok && TOO_LONG.test(complaint); tries++) {
+        const shorter = withoutOldest(conversation);
+        if (shorter.length === conversation.length) break;
+        console.warn(`[ai] the prompt did not fit ${config.model}'s window — dropping the oldest ${conversation.length - shorter.length} messages and asking again`);
+        conversation = shorter;
+        response = await send(wanted, Boolean(onChunk));
+        complaint = response.ok ? '' : await response.text().catch(() => '');
+      }
+      if (!response.ok) throw new Error(`Ollama returned ${response.status}: ${complaint || response.statusText}`);
     } else {
       throw new Error(`Ollama returned 400: ${body || response.statusText}`);
     }
@@ -5102,7 +5132,14 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
       try {
         return await ollamaPost(sending, config, { ...roundOptions, tools });
       } catch (error) {
-        const spill = capacitySpill(config);
+        // Only when nothing answered at all — a refused connection, a pod that
+        // is off. A 400 or a 500 with a complaint in it is the local model
+        // answering, and the fix for that is in the request, not in asking
+        // somebody else: twice in one day a template refusal and an oversized
+        // prompt were answered by the hosted model instead, and what the user
+        // noticed was her personality gone, not an error. The rule is that the
+        // hosted model is for uploads; an outage is the one exception it keeps.
+        const spill = isAbsent(error) ? capacitySpill(config) : null;
         if (!spill) throw error;
         console.warn(`[ai] ${config.model} did not answer (${error instanceof Error ? error.message : String(error)}) — spilling this reply to ${spill.model}`);
         return sendToProvider(sending, spill, { ...roundOptions, tools });

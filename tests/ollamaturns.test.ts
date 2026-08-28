@@ -7,7 +7,29 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { forOllama } from '../electron/ollamaturns';
+import { forOllama, withoutOldest } from '../electron/ollamaturns';
+
+const turns = (roles: string[]) => roles.map((role, index) => ({ role, content: `${role}${index}` }));
+
+test('a prompt that did not fit loses its oldest half, keeps the system message, and resumes on a user turn', () => {
+  const out = withoutOldest(turns(['system', 'user', 'assistant', 'user', 'assistant', 'user', 'assistant', 'user']));
+  assert.deepEqual(out.map(m => m.content), ['system0', 'user5', 'assistant6', 'user7']);
+});
+
+test('dropping never leaves a tool result without its call', () => {
+  const out = withoutOldest(turns(['system', 'user', 'assistant', 'user', 'assistant', 'tool', 'assistant', 'user', 'assistant']));
+  // The halfway point lands on the assistant that made the call; the cut
+  // moves forward past its tool result to the next thing they said.
+  assert.deepEqual(out.map(m => m.role), ['system', 'user', 'assistant']);
+  assert.equal(out[1].content, 'user7');
+});
+
+test('with nothing left to drop the conversation comes back unchanged, which means give up', () => {
+  const tiny = turns(['system', 'user']);
+  assert.equal(withoutOldest(tiny), tiny);
+  const noUserAfter = turns(['system', 'user', 'assistant', 'assistant']);
+  assert.equal(withoutOldest(noUserAfter), noUserAfter);
+});
 
 const gap = '[Time passed here — what follows was said 20 minutes later.]';
 
