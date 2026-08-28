@@ -157,6 +157,8 @@ export type PromptState = {
   pushback: Pushback | undefined;
   /** Where their phone says they are, already put into words (whereabouts.ts), or nothing. */
   whereabouts?: string;
+  /** The weather where they are, already in words (weather.ts), or nothing. */
+  weather?: string;
   /** The way somewhere, when they asked for it: what was found and what the app will attach (directions.ts). */
   directionsNote?: string;
 };
@@ -183,6 +185,7 @@ export function chatSystemPrompt(state: PromptState): string {
     // Where they are, by a name they gave the place. Beside the clock because it
     // is the same kind of fact: background she may use, never a thing to recite.
     state.whereabouts ?? '',
+    state.weather ?? '',
     state.profile,
     // Beside the profile rather than behind the lookup tool, for the reason the
     // agenda is: asked what they are in the middle of, a model that would have

@@ -33,6 +33,9 @@ export type AsideSource =
   | 'poke'        // being prodded in the companion window
   | 'kept'        // remarking on something ticked off
   | 'system'      // a threshold on the machine she runs on
+  | 'hanging'     // being left mid-conversation
+  | 'weather'     // the weather turning where they are
+  | 'upcoming'    // something on the calendar, an hour or a quarter of an hour out
   | 'other';
 
 export type Aside = {

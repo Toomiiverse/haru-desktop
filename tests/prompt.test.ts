@@ -251,3 +251,9 @@ test('the way somewhere sits beside the machine facts, when they asked for it', 
   const asked = chatSystemPrompt(state({ directionsNote: 'They asked the way to "Coles". Found: Coles, Wembley. It is about 6.1 km from where they are. The app is attaching a button under your words.' }));
   assert.match(asked, /Found: Coles, Wembley/);
 });
+
+test('the weather where they are sits with their whereabouts, when she has a reading', () => {
+  assert.doesNotMatch(chatSystemPrompt(state()), /actual weather/);
+  const read = chatSystemPrompt(state({ weather: "Where they are it is 17°C and clear; today's range 10°C to 19°C. That is the actual weather, from a forecast service, as of a few minutes ago — use it rather than guessing, and do not say you cannot check." }));
+  assert.match(read, /17°C and clear/);
+});

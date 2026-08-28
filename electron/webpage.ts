@@ -1361,11 +1361,12 @@ async function drawBell(){
     row('pr','Her own thoughts',p.random)+
     row('pe','Reminders and the journal',p.events)+
     row('ps','The machine she runs on',p.system)+
+    row('pw','The weather where you are',p.weather)+
     '<div class=prow>Quiet from <input type=time id=pf value="'+p.quietFrom+'"> to <input type=time id=pt value="'+p.quietTo+'"></div>'+
     '<button id=ptry>Send a test</button>'+
     '<button id=poff class=off>Stop notifying this phone</button>';
-  const save=()=>post('/api/push/prefs',{random:$('pr').checked,events:$('pe').checked,system:$('ps').checked,quietFrom:$('pf').value,quietTo:$('pt').value}).catch(()=>{});
-  for(const id of ['pr','pe','ps','pf','pt']) $(id).onchange=save;
+  const save=()=>post('/api/push/prefs',{random:$('pr').checked,events:$('pe').checked,system:$('ps').checked,weather:$('pw').checked,quietFrom:$('pf').value,quietTo:$('pt').value}).catch(()=>{});
+  for(const id of ['pr','pe','ps','pw','pf','pt']) $(id).onchange=save;
   $('ptry').onclick=async()=>{
     $('ptry').disabled=true;
     try{ const r=await post('/api/push/test'); $('ptry').textContent=r.delivered?'Sent — check the lock screen':'Nothing went out'; }

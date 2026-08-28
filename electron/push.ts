@@ -39,6 +39,8 @@ export type PushPrefs = {
   events: boolean;
   /** Thresholds on the machine she runs on. */
   system: boolean;
+  /** The weather turning where they are. */
+  weather: boolean;
   /** "HH:MM" pair; equal means no quiet hours. Spans midnight when from > to. */
   quietFrom: string;
   quietTo: string;
@@ -70,6 +72,7 @@ export function readPushPrefs(saved: unknown): PushPrefs {
     random: flag(record.random, true),
     events: flag(record.events, true),
     system: flag(record.system, true),
+    weather: flag(record.weather, true),
     // Overnight by default. A companion that buzzes a nightstand at 3am is a
     // companion whose permission gets revoked, which is the quieter failure.
     quietFrom: time(record.quietFrom, '23:00'),

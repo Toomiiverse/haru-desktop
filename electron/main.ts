@@ -37,6 +37,9 @@ import { correct, noteUsed, readHearing, remember } from './hearing';
 import { assumeItIsTheirs, identifyWork, noteWork, readFollowing, recogniseNow, summariseFollowing } from './following';
 import { lookUpPlace, readWindowsLocation, searchPlaces, type FoundPlace } from './location';
 import { INTERRUPTED_ASIDE, wakeAck } from './wake';
+import { describeWeather, readForecast, weatherEvents, weatherUrl, WEATHER_POLL_MS, type WeatherSample } from './weather';
+import { leftHanging } from './hanging';
+import { markMentioned, upcomingToMention } from './upcoming';
 import { directionsAsk, directionsNote, matchNamedPlace, startingPoint, withDirections, type DirectionsAsk } from './directions';
 import { absorb, describeWhereabouts, distanceM, forgetPlace, namePlace, placeAt, readSpot, readWhereabouts, whereForPage, type Whereabouts } from './whereabouts';
 import { convertImage, normaliseFormat, FORMATS } from './convert';
@@ -1032,7 +1035,7 @@ function unpromptedContext(): string {
   // not repeat at one in the morning is what she said at half eleven.
   // Where their phone says they are rides along too: a nudge that knows they
   // are at the shops has something to needle with.
-  const parts = [summariseFollowing(getFollowing(), Date.now()), todaySoFar(), alreadySaidRecently(asides, CHAT_TIMEZONE, Date.now()), stillWaiting(), describeWhereabouts(getWhereabouts())].filter(Boolean);
+  const parts = [summariseFollowing(getFollowing(), Date.now()), todaySoFar(), alreadySaidRecently(asides, CHAT_TIMEZONE, Date.now()), stillWaiting(), describeWhereabouts(getWhereabouts()), describeWeather(getWeather().last, weatherWhere())].filter(Boolean);
   if (!parts.length) return '';
   // "Do not repeat a point you have already made" was read as "change the
   // subject": once a thread was answered and settled she abandoned the day
@@ -5142,6 +5145,7 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
     movedJustNow,
     pushback: store.get('pushback') as Pushback | undefined,
     whereabouts: describeWhereabouts(getWhereabouts()),
+    weather: describeWeather(getWeather().last, weatherWhere()),
     directionsNote: directions?.note,
   });
   // What she can still see. Not only this message: a picture has to ride along
@@ -6202,7 +6206,7 @@ const PUSH_TITLE = 'Haru 🌸';
  * refusal is logged and left alone, because a transient failure is not consent
  * to forget a phone.
  */
-async function pushToPhone(kind: 'random' | 'events' | 'system', text: string, url = '/', force = false): Promise<boolean> {
+async function pushToPhone(kind: 'random' | 'events' | 'system' | 'weather', text: string, url = '/', force = false): Promise<boolean> {
   const { devices, prefs } = getPush();
   if (!devices.length) return false;
   // force is the sheet's proof button: being asked to prove itself is the one
@@ -6239,8 +6243,11 @@ async function pushToPhone(kind: 'random' | 'events' | 'system', text: string, u
  * DISCORD_WORTHY_ASIDES makes, split by kind so the preferences can refuse
  * one sort of interruption without silencing the rest.
  */
-const PUSH_KIND: Partial<Record<AsideSource, 'random' | 'events' | 'system'>> = {
+const PUSH_KIND: Partial<Record<AsideSource, 'random' | 'events' | 'system' | 'weather'>> = {
   reminder: 'events',
+  upcoming: 'events',
+  hanging: 'random',
+  weather: 'weather',
   journal: 'events',
   idle: 'random',
   system: 'system',
@@ -6341,6 +6348,136 @@ async function pesterOnPush() {
   if (!line) return;
   lastRemindedAt = Date.now();
   if (interject(line, { source: 'idle' })) console.log('[push] sent a bored nudge');
+}
+
+// ---- Speaking up on her own: left hanging, the weather, what is coming up ----
+//
+// A five-minute beat of its own, apart from the random one above and from the
+// desktop's life loop (which gates on the machine being idle, which a headless
+// box never meaningfully is). Each check composes a line in her voice and
+// hands it to interject(), so it is an aside she remembers making and the
+// phone gets it by the aside's kind — random, events, weather — under the
+// same preferences and quiet hours as everything else.
+
+const PROACTIVE_TICK_MS = 5 * 60_000;
+let proactiveTimer: NodeJS.Timeout | null = null;
+let lastWeatherPollAt = 0;
+
+type WeatherState = { last: WeatherSample | null; notified: Record<string, number>; where: string };
+function getWeather(): WeatherState {
+  const saved = (store.get('weather') ?? {}) as Partial<WeatherState>;
+  return { last: saved.last ?? null, notified: saved.notified ?? {}, where: saved.where ?? '' };
+}
+function saveWeather(next: WeatherState) { store.set('weather', next); }
+/** "where they are" when the phone's fix is fresh, "at home" when that is all she has. */
+function weatherWhere(): string { return getWeather().where || 'Where they are'; }
+
+/** The spot to ask the weather for: the phone's fresh fix, else home, else nowhere. */
+function weatherPlace(): { lat: number; lon: number; where: string } | null {
+  const from = startingPoint(getWhereabouts());
+  if (!from) return null;
+  return { lat: from.lat, lon: from.lon, where: from.known === 'here' ? 'Where they are' : 'At home' };
+}
+
+async function pollWeather(): Promise<{ previous: WeatherSample | null; current: WeatherSample } | null> {
+  const place = weatherPlace();
+  if (!place) return null;
+  if (Date.now() - lastWeatherPollAt < WEATHER_POLL_MS - 30_000) return null;
+  lastWeatherPollAt = Date.now();
+  try {
+    const response = await fetch(weatherUrl(place.lat, place.lon), { signal: AbortSignal.timeout(12_000) });
+    if (!response.ok) throw new Error(`the forecast service returned ${response.status}`);
+    const current = readForecast(await response.json());
+    if (!current) throw new Error('the forecast had no current conditions');
+    const state = getWeather();
+    saveWeather({ ...state, last: current, where: place.where });
+    return { previous: state.last, current };
+  } catch (error) {
+    console.warn(`[weather] ${(error as Error).message}`);
+    return null;
+  }
+}
+
+function proactiveSystem(...facts: string[]): string {
+  const character = getActiveCharacter();
+  const now = zonedNow(CHAT_TIMEZONE);
+  return [
+    character.identity, character.style,
+    `It is ${formatTimeOfDay(now.getHours(), now.getMinutes())}, in their timezone.`,
+    ...facts,
+    'They are away from their desk; this arrives as a notification on their phone. One or two short lines, in your voice. No quotation marks, no stage directions, no greeting.',
+    NO_INVENTED_HISTORY, EXPRESSIVE, unpromptedContext(),
+  ].filter(Boolean).join('\n\n');
+}
+
+async function checkHanging(config: ProviderConfig) {
+  const history = (store.get('chat.messages') as { id?: string; role: string; content: string; at?: string }[] | undefined) ?? [];
+  const hanging = leftHanging(history);
+  if (!hanging) return;
+  const nudged = (store.get('hanging.nudgedFor') as string | undefined) ?? '';
+  if (nudged === hanging.key) return;
+  if (isSilenced(store.get('pushback') as Pushback | undefined, Date.now())) return;
+  store.set('hanging.nudgedFor', hanging.key);
+  const system = proactiveSystem(
+    `They were mid-conversation with you and then went silent ${hanging.quietMin} minutes ago. Their last message: ${hanging.theirLast.content.slice(0, 300)}`,
+    `Your reply, which they left unanswered: ${hanging.herLast.content.slice(0, 300)}${hanging.sheAsked ? ' — you asked them something and got nothing back.' : ''}`,
+    'Call them out for leaving you hanging and get them back to finish the conversation. Needle; do not plead. Never say you miss them, never ask whether they are there.',
+  );
+  const line = await ollamaQuip(system, 'Say it.', config);
+  if (line && interject(line, { source: 'hanging' })) console.log(`[push] chased them for leaving her hanging ${hanging.quietMin} min ago`);
+}
+
+async function checkUpcoming(config: ProviderConfig) {
+  const now = zonedNow(CHAT_TIMEZONE);
+  const todayKey = localDateKey(now);
+  const marked = (store.get('upcoming.marked') as Record<string, number[]> | undefined) ?? {};
+  const kept = getKept();
+  const next = upcomingToMention(kept, now, todayKey, marked);
+  if (!next) return;
+  store.set('upcoming.marked', markMentioned(marked, next.item.id, next.lead, kept.filter(item => item.date >= todayKey).map(item => item.id)));
+  const what = next.item.kind === 'event' ? 'an event' : 'a task';
+  const system = proactiveSystem(
+    `They have ${what} coming up: "${next.item.title}" at ${next.item.time}, which is in about ${next.inMinutes} minutes. Remind them, in your way — the name and how long they have must survive.`,
+  );
+  const line = await ollamaQuip(system, 'Remind them.', config);
+  if (line && interject(line, { source: 'upcoming' })) console.log(`[push] gave a ${next.lead}-minute heads up about "${next.item.title}"`);
+}
+
+async function checkWeather(config: ProviderConfig, prefs: PushPrefs) {
+  const polled = await pollWeather();
+  if (!polled || !prefs.weather) return;
+  const state = getWeather();
+  const events = weatherEvents(polled.previous, polled.current, state.notified);
+  if (!events.length) return;
+  const event = events[0];
+  saveWeather({ ...state, notified: { ...state.notified, [event.kind]: Date.now() } });
+  const system = proactiveSystem(
+    `${event.text} Tell them, in your way — what and when must survive; the attitude is yours.`,
+  );
+  const line = await ollamaQuip(system, 'Tell them.', config);
+  if (line && interject(line, { source: 'weather' })) console.log(`[push] said the weather turned (${event.kind})`);
+}
+
+async function proactiveTick() {
+  const config = store.get('ai.config') as ProviderConfig | undefined;
+  if (!config?.model) return;
+  const { devices, prefs } = getPush();
+  // The weather is read even with no phone to buzz: it is in her prompt.
+  if (!devices.length) { await pollWeather(); return; }
+  if (inQuietHours(prefs, zonedNow(CHAT_TIMEZONE))) { await pollWeather(); return; }
+  try {
+    if (prefs.random) await checkHanging(config);
+    if (prefs.events) await checkUpcoming(config);
+    await checkWeather(config, prefs);
+  } catch (error) {
+    console.warn(`[push] proactive check failed: ${(error as Error).message}`);
+  }
+}
+
+function startProactive() {
+  if (proactiveTimer) return;
+  proactiveTimer = setInterval(() => { void proactiveTick(); }, PROACTIVE_TICK_MS);
+  setTimeout(() => { void proactiveTick(); }, 20_000);
 }
 
 /** The next beat: a random while off, never in the quiet hours. One timer, rebooked after each. */
@@ -6866,6 +7003,7 @@ async function startWebDoor() {
     // Started once and left running: each tick re-checks the door and the
     // subscriptions itself, so closing the door silences it with no bookkeeping.
     if (!pushPesterTimer) scheduleNextPush();
+    startProactive();
   } catch (error) {
     const why = error instanceof Error ? error.message : String(error);
     // "Check the log" was useless advice twice over: there was no log, and the
