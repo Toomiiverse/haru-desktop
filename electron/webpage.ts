@@ -1108,7 +1108,7 @@ export function appPage(): string {
   /* Her, on stage: a pink bloub (Grok-style blob) that rotates and morphs
      through the full bloub catalogue, and wears her mood. Pure SVG — no Live2D
      runtime on the phone, nothing fetched from anywhere. */
-  #stage { flex:0 0 auto; display:flex; justify-content:center; align-items:center; padding:.35rem 1rem 0; }
+  #stage { flex:0 0 auto; display:flex; justify-content:center; align-items:center; padding:.35rem 1rem 0; cursor:pointer; }
   #bloub { width:min(31vw, 136px); height:min(31vw, 136px); display:block;
     filter:drop-shadow(0 12px 26px rgba(0,0,0,.45)); }
 
@@ -1199,12 +1199,16 @@ const ci=$('ci');
 // inside the tap (see the submit handler below) carries that privilege forward
 // to the later play() on the same element, which Safari does allow.
 const player=new Audio();
+// Counts the lines she has been asked to say, so a tap on her can drop one that
+// is still being fetched as well as stop one already playing.
+let speaking=0;
 function primeVoice(){ player.play().catch(()=>{}); player.pause(); }
 async function speak(text){
+  const mine=++speaking;
   try{
     player.pause();
     const r=await fetch('/api/speak',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({text})});
-    if(!r.ok) return;
+    if(!r.ok||mine!==speaking) return;
     const url=URL.createObjectURL(await r.blob());
     const previous=player.src;
     player.src=url;
@@ -1212,6 +1216,16 @@ async function speak(text){
     await player.play();
   }catch(e){ console.warn('[voice] '+(e&&e.message||e)); }
 }
+// A tap on her is a hand over her mouth: whatever she is saying stops, and
+// whatever she was about to say is dropped. She takes it the way she takes
+// being interrupted.
+function hush(){
+  const talking=!player.paused&&!player.ended;
+  speaking++;
+  player.pause();
+  if(talking&&window.bloub) window.bloub.express('annoyed');
+}
+$('stage').addEventListener('click',hush);
 
 // ---- Her ears -------------------------------------------------------------
 //
