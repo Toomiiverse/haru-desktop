@@ -172,6 +172,7 @@ function drive({ reduced = false, transition, frozenAt, missing = [] as string[]
   const faces = [element('div'), element('div')];
   const box: Stub = element('div'); box.offsetWidth = 1; box.querySelectorAll = () => faces;
   const body: Stub = element('div'); body.offsetWidth = 1;
+  const poseEl: Stub = element('div'); poseEl.style = { vars: {} as Record<string, string>, setProperty(k: string, v: string) { this.vars[k] = v; } };
   const dataset: Record<string, string> = {}; if (transition !== undefined) dataset.transition = transition; if (frozenAt !== undefined) dataset.frozenAt = frozenAt;
   const host: Stub = { dataset, style: { vars: {} as Record<string, string>, setProperty(k: string, v: string) { this.vars[k] = v; } }, innerHTML: '' };
   box.style = { vars: {} as Record<string, string>, setProperty(k: string, v: string) { this.vars[k] = v; } };
@@ -181,7 +182,7 @@ function drive({ reduced = false, transition, frozenAt, missing = [] as string[]
   let now = 1000;
   const win: Stub = {
     Math, JSON, Number, Array, Object, String, Boolean, Map, Set, Promise, Error, Infinity,
-    document: { getElementById: (id: string) => (id === 'stage' ? host : id === 'avatar' ? box : id === 'avatar-body' ? body : null), adoptNode: (n: Stub) => n, addEventListener() {} },
+    document: { getElementById: (id: string) => (id === 'stage' ? host : id === 'avatar' ? box : id === 'avatar-body' ? body : id === 'avatar-pose' ? poseEl : null), adoptNode: (n: Stub) => n, addEventListener() {} },
     DOMParser: function () { return { parseFromString: () => ({ documentElement: faceTree() }) }; },
     fetch: (url: string) => { const name = url.replace('/emotions/', '').replace('.svg', ''); return Promise.resolve({ ok: !missing.includes(name), status: missing.includes(name) ? 404 : 200, text: () => Promise.resolve('<svg/>') }); },
     matchMedia: () => ({ matches: reduced }),
@@ -194,7 +195,7 @@ function drive({ reduced = false, transition, frozenAt, missing = [] as string[]
   vm.runInContext(source, vm.createContext(win), { filename: 'avatar.js' });
   const shown = () => faces.find(face => face.classList.contains('on'));
   const flush = async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); };
-  return { avatar: win.haruAvatar, Engine: win.HaruEmotionEngine, box, body, faces, host, shown, flush, tick: (ms: number) => { now += ms; }, fire: () => { const due = [...timers.values()]; timers.clear(); for (const cb of due) cb(); }, pending: () => timers.size };
+  return { avatar: win.haruAvatar, Engine: win.HaruEmotionEngine, box, body, poseEl, faces, host, shown, flush, tick: (ms: number) => { now += ms; }, fire: () => { const due = [...timers.values()]; timers.clear(); for (const cb of due) cb(); }, pending: () => timers.size };
 }
 const plain = (v: unknown) => JSON.parse(JSON.stringify(v));
 
@@ -367,4 +368,36 @@ test('a glance is a real distance at the phone’s size', async () => {
   avatar.express('neutral'); await flush();
   avatar.attend('typing', 1500);
   assert.ok(parseFloat(box.style.vars['--gaze-y']) >= 12, `at least a couple of screen pixels at 136px: ${box.style.vars['--gaze-y']}`);
+});
+
+test('how she holds herself is a pure function of time and face: a cock of the head held then released, a small roam, a droop that stays', () => {
+  const { Engine } = drive();
+  const engine = Engine({ duration: () => 200 });
+  let posed = 0, rested = 0, maxTilt = 0, maxRoam = 0;
+  for (let t = 0; t < 5200 * 150; t += 260) {
+    const p = engine.pose(t); assert.deepEqual(plain(p), plain(engine.pose(t)));
+    maxTilt = Math.max(maxTilt, Math.abs(p.tilt)); maxRoam = Math.max(maxRoam, Math.hypot(p.dx, p.dy));
+    if (p.posed) posed++; else rested++;
+  }
+  assert.ok(posed > 0 && rested > posed, `a tilt is a gesture, not a lean (${posed} posed, ${rested} rested)`);
+  assert.ok(maxTilt <= 7 && maxTilt > 3, `neutral cocks her head up to seven degrees (${maxTilt})`);
+  assert.ok(maxRoam <= 0.06 && maxRoam > 0.02, `and roams within six percent of her size (${maxRoam})`);
+  engine.set('sleepy', 0);
+  const droop = engine.pose(5200 * 0.8); assert.equal(droop.posed, false); assert.equal(droop.tilt, 5, 'sleepy droops even at rest');
+  engine.set('curious', 0);
+  let cocked = 0; for (let t = 0; t < 5200 * 150; t += 260) cocked = Math.max(cocked, Math.abs(engine.pose(t).tilt));
+  assert.ok(cocked > 9, `curious cocks her head further (${cocked})`);
+});
+
+test('the pose is handed to its own wrapper, so neither the float nor the settle is disturbed, and stays put when still', async () => {
+  const { avatar, poseEl, box, body, flush } = drive();
+  avatar.express('sleepy'); await flush();
+  assert.match(poseEl.style.vars['--tilt'], /deg$/);
+  assert.ok(parseFloat(poseEl.style.vars['--tilt']) >= 5, 'the lean is carried');
+  assert.match(poseEl.style.vars['--drift-x'], /^-?[0-9.]+$/);
+  assert.equal(box.style.vars['--tilt'], undefined); assert.equal(body.style['--tilt'], undefined);
+  const still = drive({ reduced: true }); still.avatar.express('curious'); await still.flush();
+  assert.equal(still.poseEl.style.vars['--tilt'], '0.00deg'); assert.equal(still.poseEl.style.vars['--drift-x'], '0.000');
+  const html = appPage();
+  assert.ok(html.includes('id=avatar-pose') && html.includes('calc(var(--avatar-size) * var(--drift-x))'), 'the roam is a fraction of her size');
 });

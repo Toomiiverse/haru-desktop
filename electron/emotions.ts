@@ -48,23 +48,29 @@ export type EmotionEntry = {
   gaze: GazeRange;
   /** Whether her eyes blink wearing this face: not with no eyes to close, not with them already closed, not with hearts for eyes. */
   blink: boolean;
+  /**
+   * How she holds herself: the most she cocks her head (degrees), how far she
+   * roams from home (a fraction of her own size), and a lean she carries all
+   * the while — sleepy and sad droop, the rest sit straight.
+   */
+  pose: { tiltDeg: number; roam: number; leanDeg: number };
 };
 
 export const emotionConfig: Record<HaruEmotion, EmotionEntry> = {
-  neutral:     { file: 'neutral.svg',     label: 'Haru feeling neutral', transition: 'fade', idle: { periodMs: 4000, bobPx: 4, swayDeg: 1.2, breath: 0.015 }, gaze: 1, blink: true },
-  happy:       { file: 'happy.svg',       label: 'Haru feeling happy', transition: 'fade', idle: { periodMs: 3000, bobPx: 5, swayDeg: 1.6, breath: 0.02 }, gaze: 0.8, blink: true },
-  excited:     { file: 'excited.svg',     label: 'Haru feeling excited', transition: 'fade', idle: { periodMs: 2200, bobPx: 6, swayDeg: 2.2, breath: 0.03 }, gaze: 1, blink: true },
-  sad:         { file: 'sad.svg',         label: 'Haru feeling sad', transition: 'fade', idle: { periodMs: 5500, bobPx: 2, swayDeg: 0.6, breath: 0.01 }, gaze: 0.5, blink: true },
-  angry:       { file: 'angry.svg',       label: 'Haru feeling angry', transition: 'fade', idle: { periodMs: 2600, bobPx: 2, swayDeg: 1.8, breath: 0.02 }, gaze: 0.7, blink: true },
-  annoyed:     { file: 'annoyed.svg',     label: 'Haru feeling annoyed', transition: 'fade', idle: { periodMs: 3400, bobPx: 2, swayDeg: 0.9, breath: 0.012 }, gaze: 0.9, blink: true },
-  surprised:   { file: 'surprised.svg',   label: 'Haru feeling surprised', transition: 'fade', idle: { periodMs: 2400, bobPx: 5, swayDeg: 1.2, breath: 0.025 }, gaze: 0, blink: false },
-  confused:    { file: 'confused.svg',    label: 'Haru feeling confused', transition: 'fade', idle: { periodMs: 3600, bobPx: 3, swayDeg: 2.6, breath: 0.015 }, gaze: 1, blink: true },
-  curious:     { file: 'curious.svg',     label: 'Haru feeling curious', transition: 'fade', idle: { periodMs: 3200, bobPx: 4, swayDeg: 2.4, breath: 0.018 }, gaze: 1, blink: true },
-  embarrassed: { file: 'embarrassed.svg', label: 'Haru feeling embarrassed', transition: 'fade', idle: { periodMs: 3800, bobPx: 3, swayDeg: 1.0, breath: 0.014 }, gaze: 0.6, blink: true },
-  sleepy:      { file: 'sleepy.svg',      label: 'Haru feeling sleepy', transition: 'fade', idle: { periodMs: 6500, bobPx: 5, swayDeg: 1.0, breath: 0.02 }, gaze: 0.15, blink: false },
-  thinking:    { file: 'thinking.svg',    label: 'Haru thinking', transition: 'fade', idle: { periodMs: 4200, bobPx: 3, swayDeg: 1.4, breath: 0.015 }, gaze: 1, blink: true },
-  smug:        { file: 'smug.svg',        label: 'Haru feeling smug', transition: 'fade', idle: { periodMs: 3800, bobPx: 3, swayDeg: 1.5, breath: 0.015 }, gaze: 0.8, blink: true },
-  love:        { file: 'love.svg',        label: 'Haru feeling loved up', transition: 'fade', idle: { periodMs: 3400, bobPx: 5, swayDeg: 1.6, breath: 0.022 }, gaze: 0.6, blink: false },
+  neutral:     { file: 'neutral.svg',     label: 'Haru feeling neutral', transition: 'fade', idle: { periodMs: 4000, bobPx: 4, swayDeg: 1.2, breath: 0.015 }, gaze: 1, blink: true, pose: { tiltDeg: 7, roam: 0.06, leanDeg: 0 } },
+  happy:       { file: 'happy.svg',       label: 'Haru feeling happy', transition: 'fade', idle: { periodMs: 3000, bobPx: 5, swayDeg: 1.6, breath: 0.02 }, gaze: 0.8, blink: true, pose: { tiltDeg: 8, roam: 0.08, leanDeg: 0 } },
+  excited:     { file: 'excited.svg',     label: 'Haru feeling excited', transition: 'fade', idle: { periodMs: 2200, bobPx: 6, swayDeg: 2.2, breath: 0.03 }, gaze: 1, blink: true, pose: { tiltDeg: 10, roam: 0.12, leanDeg: 0 } },
+  sad:         { file: 'sad.svg',         label: 'Haru feeling sad', transition: 'fade', idle: { periodMs: 5500, bobPx: 2, swayDeg: 0.6, breath: 0.01 }, gaze: 0.5, blink: true, pose: { tiltDeg: 4, roam: 0.03, leanDeg: 3 } },
+  angry:       { file: 'angry.svg',       label: 'Haru feeling angry', transition: 'fade', idle: { periodMs: 2600, bobPx: 2, swayDeg: 1.8, breath: 0.02 }, gaze: 0.7, blink: true, pose: { tiltDeg: 6, roam: 0.05, leanDeg: -1 } },
+  annoyed:     { file: 'annoyed.svg',     label: 'Haru feeling annoyed', transition: 'fade', idle: { periodMs: 3400, bobPx: 2, swayDeg: 0.9, breath: 0.012 }, gaze: 0.9, blink: true, pose: { tiltDeg: 6, roam: 0.04, leanDeg: 0 } },
+  surprised:   { file: 'surprised.svg',   label: 'Haru feeling surprised', transition: 'fade', idle: { periodMs: 2400, bobPx: 5, swayDeg: 1.2, breath: 0.025 }, gaze: 0, blink: false, pose: { tiltDeg: 5, roam: 0.05, leanDeg: 0 } },
+  confused:    { file: 'confused.svg',    label: 'Haru feeling confused', transition: 'fade', idle: { periodMs: 3600, bobPx: 3, swayDeg: 2.6, breath: 0.015 }, gaze: 1, blink: true, pose: { tiltDeg: 12, roam: 0.06, leanDeg: 0 } },
+  curious:     { file: 'curious.svg',     label: 'Haru feeling curious', transition: 'fade', idle: { periodMs: 3200, bobPx: 4, swayDeg: 2.4, breath: 0.018 }, gaze: 1, blink: true, pose: { tiltDeg: 12, roam: 0.08, leanDeg: 0 } },
+  embarrassed: { file: 'embarrassed.svg', label: 'Haru feeling embarrassed', transition: 'fade', idle: { periodMs: 3800, bobPx: 3, swayDeg: 1.0, breath: 0.014 }, gaze: 0.6, blink: true, pose: { tiltDeg: 6, roam: 0.05, leanDeg: 2 } },
+  sleepy:      { file: 'sleepy.svg',      label: 'Haru feeling sleepy', transition: 'fade', idle: { periodMs: 6500, bobPx: 5, swayDeg: 1.0, breath: 0.02 }, gaze: 0.15, blink: false, pose: { tiltDeg: 5, roam: 0.03, leanDeg: 5 } },
+  thinking:    { file: 'thinking.svg',    label: 'Haru thinking', transition: 'fade', idle: { periodMs: 4200, bobPx: 3, swayDeg: 1.4, breath: 0.015 }, gaze: 1, blink: true, pose: { tiltDeg: 9, roam: 0.05, leanDeg: 0 } },
+  smug:        { file: 'smug.svg',        label: 'Haru feeling smug', transition: 'fade', idle: { periodMs: 3800, bobPx: 3, swayDeg: 1.5, breath: 0.015 }, gaze: 0.8, blink: true, pose: { tiltDeg: 7, roam: 0.06, leanDeg: -2 } },
+  love:        { file: 'love.svg',        label: 'Haru feeling loved up', transition: 'fade', idle: { periodMs: 3400, bobPx: 5, swayDeg: 1.6, breath: 0.022 }, gaze: 0.6, blink: false, pose: { tiltDeg: 8, roam: 0.07, leanDeg: 1 } },
 };
 
 /**

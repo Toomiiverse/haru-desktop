@@ -87,10 +87,12 @@ const SHELL = `
 // are the same pink as her mouth. Those two paths get
 // a class and a CSS transform, and her attention — the wander, or them typing,
 // or her talking, or a pointer — becomes two variables the transform reads.
-// The float lives on the outer element and never restarts; the settle on a
-// change of face, and the pop when she talks, live on a body inside it, so
-// nothing about a change of face moves her from where the float had her. A
-// reduced-motion setting stops all of it.
+// The float lives on the outer element and never restarts; how she holds
+// herself — a cock of the head, a small roam from home, on the engine's
+// pose(t) — on a wrapper inside it; the settle on a change of face, and the
+// pop when she talks, on a body inside that, so nothing about a change of
+// face moves her from where the float and the pose had her. A reduced-motion
+// setting stops all of it.
 const AVATAR = `
 (() => {
   const EMOTIONS = ${JSON.stringify(HARU_EMOTIONS)};
@@ -99,6 +101,7 @@ const AVATAR = `
   const IDLE = ${JSON.stringify(Object.fromEntries(HARU_EMOTIONS.map(name => [name, emotionConfig[name].idle])))};
   const GAZE = ${JSON.stringify(Object.fromEntries(HARU_EMOTIONS.map(name => [name, emotionConfig[name].gaze])))};
   const BLINKS = ${JSON.stringify(Object.fromEntries(HARU_EMOTIONS.map(name => [name, emotionConfig[name].blink])))};
+  const POSES = ${JSON.stringify(Object.fromEntries(HARU_EMOTIONS.map(name => [name, emotionConfig[name].pose])))};
   const ADAPT = ${JSON.stringify(MOOD_TO_EMOTION)};
   const EASE_CSS = ${JSON.stringify(EASE_OUT_CSS)};
   const TAU = Math.PI * 2;
@@ -165,6 +168,23 @@ const AVATAR = `
         return Math.min(lid(at), second);
       },
       blinks: () => !!BLINKS[emotion],
+      // How she holds herself at t: a cock of the head and a spot near home,
+      // on beats of five seconds or so — held for the first part of the beat,
+      // released for the rest, so a tilt is a gesture and not a lean — scaled
+      // by the face, with the face's own lean carried throughout.
+      pose(t) {
+        const m = POSES[emotion] || POSES.neutral;
+        const beat = Math.floor(t / 5200), phase = (t - beat * 5200) / 5200;
+        const r = hashN(beat + 3000), posed = r > 0.4 && phase < 0.62;
+        const sign = hashN(beat + 4000) < 0.5 ? -1 : 1, amount = 0.4 + hashN(beat + 5000) * 0.6;
+        const a = hashN(beat + 6000) * TAU, d = hashN(beat + 7000);
+        return {
+          tilt: m.leanDeg + (posed ? sign * amount * m.tiltDeg : 0),
+          dx: posed ? Math.cos(a) * d * m.roam : 0,
+          dy: posed ? Math.sin(a) * d * m.roam * 0.6 : 0,
+          posed: posed, beat: beat
+        };
+      },
       set(next, t) {
         if (EMOTIONS.indexOf(next) < 0) next = 'neutral';
         if (next === emotion) return false;
@@ -237,9 +257,10 @@ const AVATAR = `
   const finePointer = !!(window.matchMedia && window.matchMedia('(pointer: fine)').matches);
   let fade = Number(data.transition) || ${DEFAULT_TRANSITION_MS};
   if (data.size) host.style.setProperty('--avatar-size', data.size + 'px');
-  host.innerHTML = '<div id=avatar role=img aria-label="' + LABELS.neutral + '"><div id=avatar-body><div class=face></div><div class=face></div></div></div>';
+  host.innerHTML = '<div id=avatar role=img aria-label="' + LABELS.neutral + '"><div id=avatar-pose><div id=avatar-body><div class=face></div><div class=face></div></div></div></div>';
   const box = document.getElementById('avatar');
   const body = document.getElementById('avatar-body');
+  const poseEl = document.getElementById('avatar-pose');
   const faces = box.querySelectorAll('.face');
   const engine = createEmotionEngine({ duration: () => (reduced ? 0 : fade) });
   const clock = () => (typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now());
@@ -328,10 +349,18 @@ const AVATAR = `
     return { x: g.x * strength, y: g.y * strength, why: g.looking ? 'looking' : 'resting' };
   }
   function look() {
-    if (frozenAt !== null || reduced) { box.style.setProperty('--gaze-x', '0px'); box.style.setProperty('--gaze-y', '0px'); return; }
-    const at = target(clock());
+    if (frozenAt !== null || reduced) {
+      box.style.setProperty('--gaze-x', '0px'); box.style.setProperty('--gaze-y', '0px');
+      const still = frozenAt === null ? { tilt: 0, dx: 0, dy: 0 } : engine.pose(frozenAt);
+      poseEl.style.setProperty('--tilt', still.tilt.toFixed(2) + 'deg'); poseEl.style.setProperty('--drift-x', still.dx.toFixed(3)); poseEl.style.setProperty('--drift-y', still.dy.toFixed(3));
+      return;
+    }
+    const t = clock(), at = target(t), p = engine.pose(t);
     box.style.setProperty('--gaze-x', (at.x * RANGE_X).toFixed(1) + 'px');
     box.style.setProperty('--gaze-y', (at.y * RANGE_Y).toFixed(1) + 'px');
+    // The pose too: a target now and then, and the CSS carries her there.
+    poseEl.style.setProperty('--tilt', p.tilt.toFixed(2) + 'deg');
+    poseEl.style.setProperty('--drift-x', p.dx.toFixed(3)); poseEl.style.setProperty('--drift-y', p.dy.toFixed(3));
   }
   // Sampled, not animated: the CSS transition on the eyes carries each new
   // target smoothly, so four looks a second is plenty and costs nothing.
@@ -375,6 +404,7 @@ const AVATAR = `
     freeze: (t) => { frozenAt = t === undefined ? clock() : t; box.classList.add('frozen'); paint(engine.sample(frozenAt), false); look(); scheduleBlink(); box.style.setProperty('--lid', String(engine.blink(frozenAt))); },
     play: () => { frozenAt = null; box.classList.remove('frozen'); paint(engine.sample(clock()), false); look(); scheduleBlink(); },
     blink: (t) => engine.blink(t === undefined ? clock() : t),
+    pose: (t) => engine.pose(t === undefined ? clock() : t),
     nextBlink: (t) => engine.nextBlink(t === undefined ? clock() : t),
     state: () => { const f = engine.sample(frozenAt === null ? clock() : frozenAt); return { emotion: f.emotion, previousEmotion: f.previousEmotion, transitionProgress: f.transitionProgress, resting: resting, frozen: frozenAt !== null }; },
     setSize: (px) => host.style.setProperty('--avatar-size', px + 'px'),
@@ -522,11 +552,20 @@ export function appPage(): string {
   @property --gaze-x { syntax:'<length>'; inherits:true; initial-value:0px; }
   @property --gaze-y { syntax:'<length>'; inherits:true; initial-value:0px; }
   @property --lid { syntax:'<number>'; inherits:true; initial-value:1; }
+  @property --tilt { syntax:'<angle>'; inherits:false; initial-value:0deg; }
+  @property --drift-x { syntax:'<number>'; inherits:false; initial-value:0; }
+  @property --drift-y { syntax:'<number>'; inherits:false; initial-value:0; }
   #stage { flex:0 0 auto; display:flex; justify-content:center; align-items:center; padding:.35rem 1rem 0; cursor:pointer; --avatar-size:min(31vw, 136px); }
   #avatar { position:relative; width:var(--avatar-size); height:var(--avatar-size); transform-origin:50% 62%;
     --idle-bob:4px; --idle-sway:1.2deg; --idle-breath:1.015; --gaze-x:0px; --gaze-y:0px; --lid:1;
     transition:--idle-bob .8s ease, --idle-sway .8s ease, --idle-breath .8s ease, --gaze-x .38s cubic-bezier(0.33, 1, 0.68, 1), --gaze-y .38s cubic-bezier(0.33, 1, 0.68, 1), --lid 70ms ease-in;
     animation:float 3800ms ease-in-out infinite; }
+  /* How she holds herself: a cock of the head and a small roam from home,
+     eased over a second and a half so a new pose is a movement, not a jump.
+     The roam is a fraction of her own size, so it scales with her. */
+  #avatar-pose { position:absolute; inset:0; transform-origin:50% 68%; --tilt:0deg; --drift-x:0; --drift-y:0;
+    transform:translate(calc(var(--avatar-size) * var(--drift-x)), calc(var(--avatar-size) * var(--drift-y))) rotate(var(--tilt));
+    transition:--tilt 1.5s cubic-bezier(0.4, 0, 0.2, 1), --drift-x 1.8s cubic-bezier(0.4, 0, 0.2, 1), --drift-y 1.8s cubic-bezier(0.4, 0, 0.2, 1); }
   #avatar-body { position:absolute; inset:0; transform-origin:50% 60%; }
   #avatar .face { position:absolute; inset:0; opacity:0; }
   #avatar .face svg { display:block; width:100%; height:100%; }
@@ -544,7 +583,7 @@ export function appPage(): string {
   }
   @keyframes settle { 0% { scale:.94; } 55% { scale:1.04; } 100% { scale:1; } }
   @keyframes pop { 30% { scale:1.06; } }
-  @media (prefers-reduced-motion: reduce) { #avatar, #avatar-body { animation:none !important; transition:none !important; } #avatar .face { transition:none !important; } }
+  @media (prefers-reduced-motion: reduce) { #avatar, #avatar-pose, #avatar-body { animation:none !important; transition:none !important; } #avatar .face { transition:none !important; } }
 
   /* A wide window is not a big phone. Stretched across a desktop browser the
      bubbles ran the full 1700px and the text became unreadable at about six

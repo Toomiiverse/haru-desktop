@@ -62,3 +62,13 @@ test('she blinks on every face that has eyes to close', () => {
   assert.equal(emotionConfig.love.blink, false, 'hearts');
   assert.equal(HARU_EMOTIONS.filter(face => emotionConfig[face].blink).length, 11);
 });
+
+test('every face says how she holds herself, within reason; sleepy and sad droop', () => {
+  for (const face of HARU_EMOTIONS) {
+    const pose = emotionConfig[face].pose;
+    assert.ok(pose.tiltDeg >= 0 && pose.tiltDeg <= 15 && pose.roam >= 0 && pose.roam <= 0.15 && Math.abs(pose.leanDeg) <= 6, `${face} holds herself within reason`);
+  }
+  assert.ok(emotionConfig.curious.pose.tiltDeg > emotionConfig.neutral.pose.tiltDeg, 'curious cocks her head');
+  assert.ok(emotionConfig.sleepy.pose.leanDeg > 0 && emotionConfig.sad.pose.leanDeg > 0, 'sleepy and sad droop');
+  assert.ok(emotionConfig.excited.pose.roam > emotionConfig.sad.pose.roam, 'excited roams, sad stays put');
+});
