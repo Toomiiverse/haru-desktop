@@ -40,7 +40,7 @@ import { convertImage, normaliseFormat, FORMATS } from './convert';
 import { cancelPower, closeApp, findApps, isCancellable, launch, listRunning, matchApp, matchRunning, normalisePower, POWER_DELAY_S, readDesktopConfig, runPower, type DesktopConfig } from './desktop';
 import { looksLikeScreenshot, maySpeak, readScreenshotConfig, screenshotPrompt, SETTLE_MS, SETTLE_TRIES, type ScreenshotConfig } from './screenshots';
 import { look, photoName, readVisionConfig, whileLooking, type VisionConfig } from './vision';
-import { EXPRESSIVE, NO_INVENTED_HISTORY, NO_NON_SEQUITURS, readsAsRough, roomInstruction } from './room';
+import { EXPRESSIVE, LAST_WORD, NO_INVENTED_HISTORY, NO_NON_SEQUITURS, readsAsRough, roomInstruction } from './room';
 import { journalStance } from './journal';
 import { haruNote, rangeStats, type HaruNote, type RangeName, type RangeStats } from './journal';
 import { describeRating, entryFor, journalPrompt, readEntries, readJournalConfig, readRating, recentTrend, shouldAsk, upsertEntry, SCALE_MAX, type JournalConfig, type JournalEntry } from './journal';
@@ -5142,6 +5142,12 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   const withFiles = await withAttachments(vetted, inPlay, brain.sees, vision, config);
   if (carried.length) console.log(`[attach] ${carried.length} in play — ${carried.map(file => `${file.name}${file.kind === 'image' && brain.sees ? ' (sent)' : ' (read)'}`).join(', ')}`);
   const conversation: OllamaMessage[] = [{ role: 'system', content: brief ? `${system} ${BREVITY}` : system }, ...markTimeGaps(withoutStaleDenials(withFiles, hasItems))];
+  // The last thing she reads before she speaks — see LAST_WORD for the
+  // measurement. A system message just before their last turn: the Ollama
+  // shaper folds it into that turn, an OpenAI-shaped endpoint takes it as it
+  // is, and either way it is nearer than anything in the system prompt.
+  const lastUser = conversation.map(message => message.role).lastIndexOf('user');
+  if (lastUser > 0) conversation.splice(lastUser, 0, { role: 'system', content: LAST_WORD });
   // For tuning, when the environment asks for it: the prompt exactly as sent.
   // A rule that works on its own and fails in place can only be bisected by
   // replaying what she was actually told, and nothing else shows that.
