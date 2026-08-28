@@ -61,6 +61,7 @@ import { conversationMayLeave, mayLeaveTheMachine } from './sensitivity';
 import { addCheckIn, checkInInstruction, checkInsOn, readCheckIns, type CheckIn } from './checkins';
 import { addAside, alreadySaidRecently, asideContext, asidesOn, pruneAsides, readAsides, type Aside, type AsideSource } from './asides';
 import { attachmentsInPlay, describeAttached, READ_IT_ALL_PROMPT, readAttachments, type Attachment, type Opened } from './attachments';
+import { forOllama } from './ollamaturns';
 import { describePull, isTailnetAddress, mergeCheckIns, readCheckInSource } from './checkinsource';
 import { DiscordLink, looksLikeUserId, readDiscordConfig, useOfChannel, type DiscordConfig } from './discord';
 import { reactedPrompt, readReaction, REACTION_COOLDOWN_MS } from './reacted';
@@ -4039,15 +4040,9 @@ async function sendToProvider(conversation: OllamaMessage[], config: ProviderCon
         headers: modelHeaders(config.endpoint),
         body: JSON.stringify({
           model: config.model,
-          // Somebody for her to be answering. When she speaks first — the
-          // opening, piping up, a Discord nudge — the conversation is a system
-          // message and nothing else, and Qwen3.5's chat template refuses that
-          // outright ("No user query found in messages", a 500 from Ollama)
-          // rather than rendering it. An empty user turn satisfies it and
-          // changes nothing about what she says: measured, the openings came
-          // back in character and no longer. Done here, for every model, so
-          // the three composers that speak first do not each learn this.
-          messages: conversation.some(message => message.role === 'user') ? conversation : [...conversation, { role: 'user', content: '' }],
+          // In the shape the model's own template will render — see ollamaturns
+          // for the three things Qwen3.5's refuses that the app produces.
+          messages: forOllama(conversation),
           ...(offered.length ? { tools: offered } : {}),
           ...(format ? { format } : {}),
           // Reasoning off. A thinking model left to itself spends its time
