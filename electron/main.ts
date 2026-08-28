@@ -62,6 +62,7 @@ import { addCheckIn, checkInInstruction, checkInsOn, readCheckIns, type CheckIn 
 import { addAside, alreadySaidRecently, asideContext, asidesOn, pruneAsides, readAsides, type Aside, type AsideSource } from './asides';
 import { attachmentsInPlay, describeAttached, READ_IT_ALL_PROMPT, readAttachments, type Attachment, type Opened } from './attachments';
 import { forOllama, withoutOldest } from './ollamaturns';
+import { seedEmoji } from './seed';
 import { feedbackEntry, recordFeedback } from './feedback';
 import { describePull, isTailnetAddress, mergeCheckIns, readCheckInSource } from './checkinsource';
 import { DiscordLink, looksLikeUserId, readDiscordConfig, useOfChannel, type DiscordConfig } from './discord';
@@ -4239,7 +4240,7 @@ async function inHerVoice(answer: string, recent: { role: string; content: strin
     const started = Date.now();
     const message = await ollamaPost(
       // The last few turns, as themselves. Six is enough to know what "it" is.
-      [{ role: 'system', content: system }, ...recent.filter(turn => turn.role === 'user' || turn.role === 'assistant').slice(-6).map(turn => ({ role: turn.role, content: turn.content.slice(0, 600) }))],
+      [{ role: 'system', content: system }, ...seedEmoji(recent.filter(turn => turn.role === 'user' || turn.role === 'assistant').slice(-6).map(turn => ({ role: turn.role, content: turn.content.slice(0, 600) })))],
       local,
       // A little room over the hosted cap: her version of a list is rarely
       // shorter than the list.
@@ -5154,7 +5155,9 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // it a second time.
   const withFiles = await withAttachments(vetted, inPlay, brain.sees, vision, config);
   if (carried.length) console.log(`[attach] ${carried.length} in play — ${carried.map(file => `${file.name}${file.kind === 'image' && brain.sees ? ' (sent)' : ' (read)'}`).join(', ')}`);
-  const conversation: OllamaMessage[] = [{ role: 'system', content: brief ? `${system} ${BREVITY}` : system }, ...markTimeGaps(withoutStaleDenials(withFiles, hasItems))];
+  // Her recent replies as she should believe she said them — see seed.ts for
+  // the measurement. The stored transcript is not touched; only what is sent.
+  const conversation: OllamaMessage[] = [{ role: 'system', content: brief ? `${system} ${BREVITY}` : system }, ...seedEmoji(markTimeGaps(withoutStaleDenials(withFiles, hasItems)))];
   // The last thing she reads before she speaks — see LAST_WORD for the
   // measurement. A system message just before their last turn: the Ollama
   // shaper folds it into that turn, an OpenAI-shaped endpoint takes it as it
