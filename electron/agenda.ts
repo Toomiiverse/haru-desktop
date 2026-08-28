@@ -10,7 +10,9 @@ import { localDateKey, parseTimeOfDay, resolveDate } from './dates';
 // it". An event especially is never ticked off — the party happened whether or
 // not anyone marks it — so being told about it is the only thing that can ever
 // settle it, and without somewhere to record that she asks again forever.
-export type AgendaItem = { title: string; date: string; time?: string; done: boolean; completedAt?: string; heardAbout?: string };
+export type AgendaItem = { title: string; date: string; time?: string; done: boolean; completedAt?: string; heardAbout?: string;
+  /** 'event' or 'task', when the caller knows; an event is history once it is past. */
+  kind?: string };
 export type ItemStatus = 'done' | 'overdue' | 'now' | 'upcoming';
 
 /** Anything unfinished from within this window is still worth chasing. */
@@ -74,8 +76,14 @@ function timeRank(item: AgendaItem) {
  */
 export function relevantItems<T extends AgendaItem>(items: T[], todayKey: string): T[] {
   const earliest = shiftDays(todayKey, -OVERDUE_WINDOW_DAYS);
+  // An event, once it is more than a couple of days gone, is history: it cannot
+  // be done later the way a task can, and listed as "long past, leave it" a
+  // small model led with it anyway — "did you sleep through Ammie's party",
+  // three weeks on. Not there is the only wording that works.
+  const lastEvent = shiftDays(todayKey, -CHASE_WINDOW_DAYS);
   return items
     .filter(item => !item.done && (item.date >= todayKey || item.date >= earliest))
+    .filter(item => item.kind !== 'event' || item.date >= lastEvent)
     .sort((a, b) => a.date.localeCompare(b.date) || timeRank(a) - timeRank(b));
 }
 
@@ -667,4 +675,24 @@ export function formatAgenda(items: AgendaItem[], now: Date, todayKey: string, l
     parts.push('Anything marked as long past you have already chased more than once. Do not open with it, do not ask again whether it happened, and do not work it into a reply about something else. If they raise it, deal with it then.');
   }
   return parts.join(' ');
+}
+
+/**
+ * The stale thing an unprompted line names, if it names one.
+ *
+ * Twenty days after Ammie's party she announced it was tomorrow, and by the
+ * afternoon she was asking whether they had slept through it. No block in the
+ * prompt names an item that old — the agenda list stops at a week, an event
+ * leaves it after two days — and she named it anyway; a small model has its
+ * own sources. So the line itself is checked, by the same word-matching that
+ * closes an item out of a sentence: a line that names something done, or an
+ * event more than a couple of days gone, is a line she does not get to say
+ * off her own back. Only unprompted lines — if they bring the party up, she
+ * may answer.
+ */
+export function staleItemNamed(line: string, items: AgendaItem[], todayKey: string): AgendaItem | null {
+  const lastEvent = shiftDays(todayKey, -CHASE_WINDOW_DAYS);
+  const stale = items.filter(item => item.done || (item.kind === 'event' && item.date < lastEvent));
+  if (!stale.length) return null;
+  return findItem(stale, line) ?? null;
 }

@@ -14,7 +14,7 @@ import { nextPokeCount, pokeEmotion, pokeInstruction, pokeIrritation, pokeTier, 
 import { applyEvent, chooseIdleAction, DEFAULT_VITALS, driftVitals, nextTickDelayMs, type Environment, type Vitals } from './vitals';
 import { classificationPrompt, emotionToVitals, EMOTION_SCHEMA, NEUTRAL_EMOTION, parseEmotion, type Emotion , faceForEmotion } from './emotion';
 import { withDiscoveredExpressions } from './expressions';
-import { chaseableOverdue, findItem, formatAgenda, itemStatus, missedInstruction, putOffInstruction, putOffUntil, relevantItems, readsAsAnswerToHer, readsAsBareReport, tickOffInstruction, readsAsDone, doneClause, readsAsNotDone, relativeDay } from './agenda';
+import { chaseableOverdue, findItem, formatAgenda, itemStatus, missedInstruction, putOffInstruction, putOffUntil, relevantItems, readsAsAnswerToHer, readsAsBareReport, tickOffInstruction, readsAsDone, doneClause, readsAsNotDone, relativeDay, staleItemNamed } from './agenda';
 import { openingAngles, pickAngle, shouldPipeUp } from './opening';
 import { allDayDueMinutes, isEveningCheck, reminderInstruction, reminderTier, reminderVolume, shouldRemind, type ReminderState } from './reminders';
 import { isHeated, readTone, sharpen, toneGesture, tonePose } from './tone';
@@ -46,7 +46,7 @@ import { haruNote, rangeStats, type HaruNote, type RangeName, type RangeStats } 
 import { describeRating, entryFor, journalPrompt, readEntries, readJournalConfig, readRating, recentTrend, shouldAsk, upsertEntry, SCALE_MAX, type JournalConfig, type JournalEntry } from './journal';
 import { formatList, formatMedia, formatMissing, lookUp, readAniListConfig, userList, type AniListConfig, type ListEntry, type MediaKind } from './anilist';
 import { createDesktopShortcut, desktopShortcutPath, isAutoStartEnabled, setAutoStart, startedHidden } from './startup';
-import { dropRoleHeader, dropTackedOnParagraphs, dropInventedContact, dropInventedScreenTalk, dropRepeatedAgendaMentions, dropRepeatedParagraphs, dropStageDirections, dropRepeatedOpener, dropEchoOpener, dropRepeatedSentences } from './reply';
+import { dropRoleHeader, dropTackedOnParagraphs, dropInventedContact, dropInventedScreenTalk, dropRepeatedAgendaMentions, dropRepeatedParagraphs, dropStageDirections, dropRepeatedOpener, dropEchoOpener, dropRepeatedSentences, fixStatedClock } from './reply';
 import { runToolLoop } from './toolloop';
 import { chatTools, coerceKnowledgeCategory, runChatTool, type ToolAvailability, type ToolDeps } from './tools';
 import { createMemoryStore } from './memorystore';
@@ -1099,6 +1099,15 @@ function interject(line: string, { aboutTheGame = false, source = 'other' as Asi
   const refusal = whyNotInterject({ aboutTheGame });
   if (refusal) {
     console.log(`[interject] dropped — ${refusal}`);
+    return false;
+  }
+  // A line off her own back that names something done, or an event long gone,
+  // is not said: twenty days after Ammie's party she announced it was tomorrow,
+  // and no block in the prompt had named it. Checked on the line, not the
+  // prompt — see staleItemNamed.
+  const stale = staleItemNamed(line, getKept(), localDateKey(zonedNow(CHAT_TIMEZONE)));
+  if (stale) {
+    console.log(`[interject] dropped — it named "${stale.title}", which is ${stale.done ? 'done' : 'long past'}`);
     return false;
   }
   lastInterjectionAt = now;
@@ -3562,7 +3571,10 @@ async function composeOpening(): Promise<string | null> {
     hour: now.getHours(),
     irritation: mood.irritation,
     ego: mood.ego,
-    overdue: statuses.filter(status => status === 'overdue').length,
+    // Only the ones she is still entitled to ask about — the same count the
+    // idle line and the Discord nudge use, so no angle opens on a thing the
+    // agenda block has already said to leave.
+    overdue: chaseableOverdue(items, now, todayKey),
     dueToday: items.filter((item, index) => item.date === todayKey && (statuses[index] === 'upcoming' || statuses[index] === 'now')).length,
     doneToday: items.filter((item, index) => statuses[index] === 'done' && item.date === todayKey).length,
     hasHistory: getSessions().length > 0,
@@ -3602,8 +3614,12 @@ async function composeOpening(): Promise<string | null> {
     // No tools: an opening line has nothing to save, and offering the schema
     // only invites a stray call before she has been told anything.
     const message = await ollamaPost([{ role: 'system', content: system }], config, { tools: false, temperature: 0.9, maxTokens: 160 });
-    const line = dropStageDirections(dropRoleHeader(message.content ?? '')).replace(/^["'“”]+|["'“”]+$/g, '').trim();
+    const line = fixStatedClock(dropStageDirections(dropRoleHeader(message.content ?? '')).replace(/^["'“”]+|["'“”]+$/g, '').trim(), now.getHours(), now.getMinutes());
     if (!line) return null;
+    // The same check every unprompted line gets in interject; the opening
+    // does not pass through there, and it is where the party came up.
+    const stale = staleItemNamed(line, items, todayKey);
+    if (stale) { console.log(`[chat] opening dropped — it named "${stale.title}", which is ${stale.done ? 'done' : 'long past'}`); return null; }
     store.set('chat.lastOpeningAt', new Date().toISOString());
     // Cleared here as well as after a reply: she has now spoken into the fresh
     // conversation, so the note has done its job and must not colour the first
@@ -5276,7 +5292,8 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // only a signature against what she said last time.
   // The echo first, then the signature: with "A keyboard?" gone, "Fine," is
   // the opener, and it is that which may have been used last time too.
-  const content = dropRepeatedOpener(dropEchoOpener(dropRepeatedSentences(dropTackedOnParagraphs(trimmed, brain.escalated || ran.has('search_web') || ran.has('read_web_page')), recent), latest), recent);
+  const clock = zonedNow(CHAT_TIMEZONE);
+  const content = fixStatedClock(dropRepeatedOpener(dropEchoOpener(dropRepeatedSentences(dropTackedOnParagraphs(trimmed, brain.escalated || ran.has('search_web') || ran.has('read_web_page')), recent), latest), recent), clock.getHours(), clock.getMinutes());
   if (content !== said) console.log(`[ai] dropped ${said.length - content.length} chars she had already said`);
   console.log(`[ai] chat reply in ${Date.now() - started}ms, ${content.length} chars`);
   // Cleared only once a reply actually exists, so a failed or unreachable turn

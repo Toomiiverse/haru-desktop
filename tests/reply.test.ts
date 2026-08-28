@@ -11,7 +11,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { claimsDesktopAction, claimsTickOff, dropInventedContact, dropInventedScreenTalk, dropRepeatedAgendaMentions, dropRepeatedParagraphs, dropRoleHeader, dropStageDirections, dropTackedOnParagraphs, readsLikeAssistant, dropRepeatedOpener, dropEchoOpener, dropRepeatedSentences } from '../electron/reply';
+import { claimsDesktopAction, claimsTickOff, dropInventedContact, dropInventedScreenTalk, dropRepeatedAgendaMentions, dropRepeatedParagraphs, dropRoleHeader, dropStageDirections, dropTackedOnParagraphs, readsLikeAssistant, dropRepeatedOpener, dropEchoOpener, dropRepeatedSentences, fixStatedClock } from '../electron/reply';
 
 // -- claiming to have touched the machine -------------------------------------
 
@@ -372,4 +372,16 @@ test('short sentences, a sentence that is the whole reply, and a fresh reply are
 test('a word or two on its own may be said back — that is her asking what they meant', () => {
   assert.equal(dropEchoOpener('Belong? What about it? 🙄', 'Belong'), 'Belong? What about it? 🙄');
   assert.equal(dropEchoOpener('Seeds? Seeds for what?', 'Seeds'), 'Seeds? Seeds for what?');
+});
+
+test('a wrong "it’s X o’clock" is corrected to the clock; an appointment is not', () => {
+  assert.equal(fixStatedClock('It’s 12:14 PM and you’ve just walked in like a zombie.', 13, 43), 'It’s 1:43 PM and you’ve just walked in like a zombie.');
+  assert.equal(fixStatedClock('it is 12:14 and you are still here', 13, 43), 'it is 1:43 PM and you are still here');
+  assert.equal(fixStatedClock('Your appointment is at 8:00 PM. Do not be late.', 13, 43), 'Your appointment is at 8:00 PM. Do not be late.');
+});
+
+test('a stated time that is right, or nearly, is left as she said it', () => {
+  assert.equal(fixStatedClock('It’s 1:45 PM. Move.', 13, 43), 'It’s 1:45 PM. Move.');
+  assert.equal(fixStatedClock('It’s 1:43 PM. Move.', 13, 43), 'It’s 1:43 PM. Move.');
+  assert.equal(fixStatedClock('No clock in this one.', 13, 43), 'No clock in this one.');
 });

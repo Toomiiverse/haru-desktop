@@ -626,7 +626,16 @@ function describe(memory: MemoryRecord) {
  * undifferentiated list reads as trivia, whereas "how they like to be spoken to"
  * is an instruction.
  */
+/** How far back "earlier conversations" reaches in the prompt, in days. */
+export const RECENT_SESSION_DAYS = 7;
+
+/** Whole days between two YYYY-MM-DD keys, never negative. */
+function dayDistance(a: string, b: string): number {
+  return Math.abs(Math.round((Date.parse(b) - Date.parse(a)) / 86_400_000));
+}
+
 export function formatMemoryPrompt(memories: MemoryRecord[], sessions: SessionSummary[]): string {
+  const newestDay = sessions.map(session => session.day).filter(Boolean).sort().at(-1);
   const parts: string[] = [];
   const byKind = (kind: MemoryKind) => memories.filter(memory => memory.kind === kind);
 
@@ -639,8 +648,17 @@ export function formatMemoryPrompt(memories: MemoryRecord[], sessions: SessionSu
   const facts = byKind('fact');
   if (facts.length) parts.push(`Other things you know about them: ${facts.map(describe).join('; ')}.`);
 
-  if (sessions.length) {
-    const recent = sessions.slice(-4).map(session => `${session.day}: ${session.summary}`).join(' | ');
+  // The last few days, by date. The array is not in date order — days are
+  // summarised as they are archived and backfilled later — so the last four
+  // by position once held a summary three weeks old, and she opened on a party
+  // from it. And a week is as far back as "earlier conversations" should
+  // reach unprompted; anything older is for memories, not for small talk.
+  const recentDays = [...sessions]
+    .filter(session => !session.day || !newestDay || dayDistance(session.day, newestDay) <= RECENT_SESSION_DAYS)
+    .sort((a, b) => a.day.localeCompare(b.day))
+    .slice(-4);
+  if (recentDays.length) {
+    const recent = recentDays.map(session => `${session.day}: ${session.summary}`).join(' | ');
     parts.push(`Earlier conversations — ${recent}.`);
     parts.push('Refer back to those naturally when they are relevant, the way someone would who was there. Do not list them back or announce that you remember.');
   }

@@ -542,3 +542,29 @@ export function dropRepeatedSentences(reply: string, previousReplies: string[]):
   const result = out.join('\n\n').trim();
   return result || reply;
 }
+
+/**
+ * The time she says it is, corrected to the time it is.
+ *
+ * Given "It is 1:43 PM" she opened with "It's 12:14 PM" — a specific number
+ * she was never shown, and a small model produces those freely. Only a stated
+ * present time is touched: "it's 12:14 PM", "it is 12:14", never an appointment
+ * ("at 8:00 PM") or a plan. And only when it is wrong by more than a few
+ * minutes, so a reply written a moment ago is not rewritten for the moment.
+ */
+const STATED_NOW = /\b(it[’']?s|it is|already|now)\s+(\d{1,2}):(\d{2})(?:\s?(am|pm))?\b/giu;
+const CLOCK_SLACK_MINUTES = 5;
+
+export function fixStatedClock(reply: string, hour: number, minute: number): string {
+  const actual = hour * 60 + minute;
+  const shown = `${hour % 12 === 0 ? 12 : hour % 12}:${String(minute).padStart(2, '0')} ${hour < 12 ? 'AM' : 'PM'}`;
+  return reply.replace(STATED_NOW, (whole, lead: string, h: string, m: string, meridiem?: string) => {
+    let hours = Number(h); const minutes = Number(m);
+    if (hours > 12 || minutes > 59) return whole;
+    if (meridiem) hours = (hours % 12) + (meridiem.toLowerCase() === 'pm' ? 12 : 0);
+    else if (hours < 12 && Math.abs(hours * 60 + minutes - actual) > Math.abs((hours + 12) * 60 + minutes - actual)) hours += 12;
+    const said = hours * 60 + minutes;
+    if (Math.abs(said - actual) <= CLOCK_SLACK_MINUTES) return whole;
+    return `${lead} ${shown}`;
+  });
+}

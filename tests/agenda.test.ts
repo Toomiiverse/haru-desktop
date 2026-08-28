@@ -15,9 +15,24 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  chaseableOverdue, doneClause, findItem, formatAgenda, itemStatus, missedInstruction,
-  putOffUntil, readsAsAnswerToHer, readsAsBareReport, readsAsDone, readsAsNotDone, whenMismatchInstruction,
-  relativeDay, relevantItems, tickOffInstruction, type AgendaItem,
+  chaseableOverdue,
+  doneClause,
+  findItem,
+  formatAgenda,
+  itemStatus,
+  missedInstruction,
+  putOffUntil,
+  readsAsAnswerToHer,
+  readsAsBareReport,
+  readsAsDone,
+  readsAsNotDone,
+  whenMismatchInstruction,
+  relativeDay,
+  relevantItems,
+  tickOffInstruction,
+  type AgendaItem,
+  CHASE_WINDOW_DAYS,
+  staleItemNamed,
 } from '../electron/agenda';
 
 const TODAY = '2026-08-20';
@@ -470,4 +485,28 @@ test('a when she cannot place on a day says nothing', () => {
 test('a finished item is nobody’s disagreement', () => {
   const items = [item({ title: 'Scarlett Birthday Party', date: '2026-08-21', done: true })];
   assert.equal(whenMismatchInstruction('the party is tonight', items, at(12), TODAY), '');
+});
+
+test('an event more than a couple of days gone is not on the list at all; a task still is', () => {
+  const items = [
+    { title: 'Ammie’s Birthday Party', date: '2026-08-08', time: '8:00 PM', kind: 'event', done: false },
+    { title: 'Verge collection', date: '2026-08-27', kind: 'event', done: false },
+    { title: 'Buy the mailboxes', date: '2026-08-24', kind: 'task', done: false },
+  ];
+  const listed = relevantItems(items, '2026-08-28').map(item => item.title);
+  assert.ok(!listed.includes('Ammie’s Birthday Party'), 'a three-week-old party is history');
+  assert.ok(listed.includes('Verge collection'), `an event ${CHASE_WINDOW_DAYS} day(s) back is still worth asking about`);
+  assert.ok(listed.includes('Buy the mailboxes'), 'a task can still be done, days later');
+});
+
+test('an unprompted line that names a party three weeks gone, or a thing already done, is caught', () => {
+  const items = [
+    { title: 'Ammie’s Birthday Party', date: '2026-08-08', time: '8:00 PM', kind: 'event', done: false },
+    { title: 'Store cleaning', date: '2026-08-25', kind: 'task', done: true },
+    { title: 'Get Scarlett a birthday present', date: '2026-08-29', kind: 'task', done: false },
+  ];
+  assert.equal(staleItemNamed('Did you sleep through Ammie’s party, or are you just slow?', items, '2026-08-28')?.title, 'Ammie’s Birthday Party');
+  assert.equal(staleItemNamed('The store cleaning is still waiting on you.', items, '2026-08-28')?.title, 'Store cleaning');
+  assert.equal(staleItemNamed('Scarlett’s present. Still nothing?', items, '2026-08-28'), null, 'a live item may be chased');
+  assert.equal(staleItemNamed('It is 1:43 PM and you look like a zombie.', items, '2026-08-28'), null, 'a line that names nothing passes');
 });
