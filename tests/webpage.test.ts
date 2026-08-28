@@ -518,3 +518,85 @@ test('only her two map hosts become links; anything else in her words stays text
   assert.equal(md('[x](https://maps.apple.com.evil.example/?daddr=1,2)'), '[x](https://maps.apple.com.evil.example/?daddr=1,2)');
   assert.equal(md('**bold** and *soft*'), '<b>bold</b> and <i>soft</i>');
 });
+
+// -- her ears kept open: voice activity, the conversation, the wave file -----------
+
+function voice() {
+  const app = appPage();
+  const start = app.indexOf('(() => {\n  // ---- Voice activity');
+  assert.ok(start > 0, 'the voice block is no longer where this test can find it');
+  const end = app.indexOf('})();', start);
+  const win: Stub = { Object, Math, RegExp, Float32Array, Int16Array, ArrayBuffer, DataView, JSON };
+  win.window = win;
+  vm.runInContext(app.slice(start, end + 5), vm.createContext(win), { filename: 'voice.js' });
+  return { Vad: win.HaruVad, Talk: win.HaruTalk, wake: win.haruWake, wav: win.haruWav };
+}
+
+test('speech is a level well above the room held for a beat, and ends after a stretch of quiet', () => {
+  const { Vad } = voice();
+  const vad = Vad();
+  const events: unknown[] = [];
+  let t = 0;
+  const feed = (level: number, ms: number, ratio?: number) => { for (let i = 0; i < ms / 30; i++) { t += 30; const ev = vad.feed(level, t, ratio); if (ev) events.push(plain(ev)); } };
+  feed(0.002, 3000);
+  assert.ok(vad.floor() < 0.003, 'the floor settles on the room');
+  feed(0.02, 60); feed(0.002, 300);
+  assert.deepEqual(events, [], 'a blip too short to start');
+  feed(0.03, 500);
+  assert.equal((events[0] as { type: string }).type, 'start');
+  assert.equal(vad.speaking(), true);
+  feed(0.002, 800);
+  const end = events[1] as { type: string; from: number; to: number; ms: number };
+  assert.equal(end.type, 'end');
+  assert.ok(end.ms >= 400 && end.ms <= 600 && end.from < end.to, `an utterance of ${end.ms}ms`);
+  assert.equal(vad.speaking(), false);
+  feed(0.03, 200); feed(0.002, 800);
+  assert.equal((events[3] as { type: string }).type, 'drop', 'too short to have been words');
+  feed(0.03, 16000);
+  const cut = events.filter(e => (e as { type: string }).type === 'end').at(-1) as unknown as { ms: number };
+  assert.ok(cut.ms >= 14900 && cut.ms <= 15100, `a monologue is cut at the limit, not ${cut.ms}ms`);
+  const quiet = Vad(); let tt = 0; for (let i = 0; i < 100; i++) { tt += 30; quiet.feed(0.002, tt); }
+  assert.equal(quiet.feed(0.012, tt + 30, 7), null, 'with the ratio raised for her turn, that is not loud enough');
+});
+
+test('the conversation: her name wakes her, what follows is said, speaking over her cuts her off, silence puts her back to sleep', () => {
+  const { Talk, wake } = voice();
+  const talk = Talk({ wake, awakeMs: 25000 });
+  assert.equal(talk.state(), 'off');
+  assert.deepEqual(plain(talk.heard('hey haru', 0)), [], 'off is off');
+  talk.start(0);
+  assert.equal(talk.state(), 'asleep');
+  assert.deepEqual(plain(talk.heard('so anyway, as I was saying', 100)), [], 'not for her');
+  assert.deepEqual(plain(talk.heard('Hey Haru', 200)), [{ type: 'ack' }]);
+  assert.equal(talk.state(), 'speaking');
+  talk.spokeEnd(1200);
+  assert.equal(talk.state(), 'awake');
+  assert.deepEqual(plain(talk.heard('what is the weather like', 2000)), [{ type: 'say', text: 'what is the weather like', interrupted: false }]);
+  assert.equal(talk.state(), 'thinking');
+  assert.deepEqual(plain(talk.heard('and another thing', 2500)), [], 'not while she is thinking');
+  assert.deepEqual(plain(talk.replied(4000, true)), [{ type: 'speaking' }]);
+  assert.deepEqual(plain(talk.voiceStarted(5000)), [{ type: 'interrupt' }]);
+  assert.equal(talk.state(), 'awake');
+  assert.deepEqual(plain(talk.heard('no, stop, the other thing', 6000)), [{ type: 'say', text: 'no, stop, the other thing', interrupted: true }]);
+  assert.deepEqual(plain(talk.replied(7000, false)), [{ type: 'awake' }]);
+  assert.deepEqual(plain(talk.tick(20000)), []);
+  assert.deepEqual(plain(talk.tick(7000 + 25000)), [{ type: 'asleep' }]);
+  assert.deepEqual(plain(talk.heard('Haru, are you there', 40000)), [{ type: 'say', text: 'are you there', interrupted: false }], 'her name and the message in one breath');
+  assert.deepEqual(plain(talk.stop()), [{ type: 'off' }]);
+});
+
+test('the wave file: 16 kHz mono 16-bit with a proper header, boxed down from the microphone rate', () => {
+  const { wav } = voice();
+  const frame = new Float32Array(4800); for (let i = 0; i < frame.length; i++) frame[i] = Math.sin(i / 10) * 0.5;
+  const buf = wav([frame, frame], 48000, 16000) as ArrayBuffer;
+  const dv = new DataView(buf);
+  const tag = (at: number) => String.fromCharCode(dv.getUint8(at), dv.getUint8(at + 1), dv.getUint8(at + 2), dv.getUint8(at + 3));
+  assert.equal(tag(0), 'RIFF'); assert.equal(tag(8), 'WAVE'); assert.equal(tag(36), 'data');
+  assert.equal(dv.getUint32(24, true), 16000);
+  assert.equal(dv.getUint16(22, true), 1);
+  assert.equal(dv.getUint16(34, true), 16);
+  assert.equal(buf.byteLength, 44 + 3200 * 2);
+  assert.equal(dv.getUint32(40, true), 3200 * 2);
+  const samples = new Int16Array(buf, 44);
+  assert.ok(Math.max(...Array.from(samples).map(Math.abs)) > 10000, 'the signal survived');
+});

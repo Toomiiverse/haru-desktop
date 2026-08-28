@@ -18,6 +18,7 @@
 // on a companion you glance at all day would be a fidget rather than a feature.
 
 import { DEFAULT_TRANSITION_MS, EASE_OUT_CSS, emotionConfig, HARU_EMOTIONS, MOOD_TO_EMOTION } from './emotions';
+import { WAKE_PATTERN } from './wake';
 
 /** One number to move the whole palette. 350 is Haru's pink; 150 would be AIRI's green. */
 const HUE = 350;
@@ -152,6 +153,143 @@ const PHONE = `
   window.addEventListener('offline', () => become('off'));
   window.haruKeep = keep;
   window.haruNet = net;
+})();
+`;
+
+// Her ears kept open: voice activity, the shape of a spoken conversation, and
+// the wave file each utterance becomes. Clock-free and DOM-free like the avatar
+// engine, so a test can drive it with numbers.
+const VOICE = `
+(() => {
+  // ---- Voice activity -------------------------------------------------------
+  //
+  // Energy against a floor that follows the room. Speech is a level well above
+  // the floor held for a beat; it ends after a stretch of quiet; the floor only
+  // learns while nobody is speaking, drops quickly and climbs slowly. The
+  // caller can raise the ratio while she is talking, so her own voice through
+  // the speaker is not taken for theirs.
+  function Vad(opts) {
+    const o = Object.assign({ startAfterMs: 90, endAfterMs: 700, minMs: 350, maxMs: 15000, prerollMs: 300, ratio: 3.5, floorMin: 0.004, floorStart: 0.01 }, opts || {});
+    let floor = o.floorStart, state = 'quiet', since = 0, startedAt = 0, lastLoud = 0;
+    const threshold = ratio => Math.max(o.floorMin, floor * (ratio || o.ratio));
+    return {
+      feed(level, t, ratio) {
+        const loud = level > threshold(ratio);
+        if (state === 'quiet') {
+          floor = level < floor ? floor * 0.7 + level * 0.3 : floor + (level - floor) * 0.02;
+          if (loud) { state = 'maybe'; since = t; }
+          return null;
+        }
+        if (state === 'maybe') {
+          if (!loud) { state = 'quiet'; return null; }
+          if (t - since >= o.startAfterMs) { state = 'speech'; startedAt = since; lastLoud = t; return { type: 'start', t: Math.max(0, since - o.prerollMs) }; }
+          return null;
+        }
+        if (loud) lastLoud = t;
+        const over = t - startedAt >= o.maxMs;
+        if ((!loud && t - lastLoud >= o.endAfterMs) || over) {
+          state = 'quiet';
+          const to = over ? t : lastLoud;
+          if (to - startedAt < o.minMs) return { type: 'drop' };
+          return { type: 'end', from: Math.max(0, startedAt - o.prerollMs), to: to + 100, ms: to - startedAt };
+        }
+        return null;
+      },
+      speaking: () => state === 'speech',
+      floor: () => floor,
+      threshold,
+      reset() { state = 'quiet'; },
+    };
+  }
+
+  // ---- The conversation -----------------------------------------------------
+  //
+  // off → asleep (her name wakes her) → awake (whatever is said is for her) →
+  // thinking → speaking → awake again for a while → asleep. Speaking over her
+  // cuts her off and counts as awake; what is said in the same breath as her
+  // name is the message. Everything here is a list of things for the page to
+  // do, and the page does them.
+  function Talk(opts) {
+    const o = Object.assign({ awakeMs: 25000, speakingMaxMs: 90000, wake: null }, opts || {});
+    let state = 'off', until = 0, interrupted = false;
+    const go = (next, t, ms) => { state = next; until = ms ? t + ms : 0; };
+    const wake = said => (o.wake ? o.wake(said) : { woke: false, rest: said });
+    return {
+      state: () => state,
+      awakeUntil: () => until,
+      start(t) { go('asleep', t); interrupted = false; return [{ type: 'asleep' }]; },
+      stop() { go('off', 0); interrupted = false; return [{ type: 'off' }]; },
+      heard(text, t) {
+        const said = (text || '').trim();
+        if (!said || state === 'off' || state === 'thinking') return [];
+        const w = wake(said);
+        if (state === 'asleep') {
+          if (!w.woke) return [];
+          if (w.rest) { go('thinking', t); return [{ type: 'say', text: w.rest, interrupted: false }]; }
+          go('speaking', t, o.speakingMaxMs);
+          return [{ type: 'ack' }];
+        }
+        const message = w.woke ? w.rest : said;
+        if (!message) { go('awake', t, o.awakeMs); return []; }
+        const was = interrupted; interrupted = false;
+        go('thinking', t);
+        return [{ type: 'say', text: message, interrupted: was }];
+      },
+      voiceStarted(t) {
+        if (state !== 'speaking') return [];
+        interrupted = true; go('awake', t, o.awakeMs);
+        return [{ type: 'interrupt' }];
+      },
+      replied(t, willSpeak) {
+        if (state !== 'thinking') return [];
+        if (willSpeak) { go('speaking', t, o.speakingMaxMs); return [{ type: 'speaking' }]; }
+        go('awake', t, o.awakeMs); return [{ type: 'awake' }];
+      },
+      spokeEnd(t) { if (state !== 'speaking') return []; go('awake', t, o.awakeMs); return [{ type: 'awake' }]; },
+      tick(t) {
+        if ((state === 'awake' || state === 'speaking') && until && t >= until) { go('asleep', t); interrupted = false; return [{ type: 'asleep' }]; }
+        return [];
+      },
+    };
+  }
+
+  const WAKE = new RegExp(${JSON.stringify(WAKE_PATTERN.source)}, 'i');
+  function wakePhraseIn(text) {
+    const said = (text || '').trim();
+    const m = said.match(WAKE);
+    return m ? { woke: true, rest: (m[1] || '').trim() } : { woke: false, rest: said };
+  }
+
+  // ---- The wave file --------------------------------------------------------
+  //
+  // Frames of float samples at the microphone's rate, boxed down to 16 kHz
+  // (averaging, so the higher frequencies fold into hiss rather than words)
+  // and written as 16-bit PCM with a 44-byte header. Whisper wants nothing more.
+  function toWav(frames, fromRate, toRate) {
+    let n = 0; for (const f of frames) n += f.length;
+    const all = new Float32Array(n); let at = 0; for (const f of frames) { all.set(f, at); at += f.length; }
+    const ratio = fromRate / toRate, outN = Math.floor(all.length / ratio);
+    const out = new Int16Array(outN);
+    for (let i = 0; i < outN; i++) {
+      const a = Math.floor(i * ratio), b = Math.max(a + 1, Math.floor((i + 1) * ratio));
+      let sum = 0; for (let k = a; k < b && k < all.length; k++) sum += all[k];
+      const v = sum / (Math.min(b, all.length) - a);
+      out[i] = Math.max(-32768, Math.min(32767, Math.round(v * 32767)));
+    }
+    const buf = new ArrayBuffer(44 + out.length * 2), dv = new DataView(buf);
+    const str = (p, s) => { for (let i = 0; i < s.length; i++) dv.setUint8(p + i, s.charCodeAt(i)); };
+    str(0, 'RIFF'); dv.setUint32(4, 36 + out.length * 2, true); str(8, 'WAVE'); str(12, 'fmt ');
+    dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, 1, true); dv.setUint32(24, toRate, true);
+    dv.setUint32(28, toRate * 2, true); dv.setUint16(32, 2, true); dv.setUint16(34, 16, true);
+    str(36, 'data'); dv.setUint32(40, out.length * 2, true);
+    new Int16Array(buf, 44).set(out);
+    return buf;
+  }
+
+  window.HaruVad = Vad;
+  window.HaruTalk = Talk;
+  window.haruWake = wakePhraseIn;
+  window.haruWav = toWav;
 })();
 `;
 
@@ -553,6 +691,7 @@ export function appPage(): string {
   .topbar .name { font-weight:700; letter-spacing:-.01em; }
   .dot { width:8px; height:8px; border-radius:50%; background:var(--accent); box-shadow:0 0 12px var(--accent); }
   .topbar.off .dot { background:var(--ink-dim); box-shadow:none; }
+  #talk { font-size:.72rem; padding:.1rem .55rem; border-radius:1rem; background:var(--glass); border:1px solid var(--accent); color:var(--ink); }
   #net { font-size:.72rem; padding:.1rem .55rem; border-radius:1rem; background:var(--glass); border:1px solid var(--edge); color:var(--ink-dim); }
   #out { background:var(--glass); color:var(--ink-dim); border:1px solid var(--edge); padding:.4rem .9rem; font-size:.82rem; font-weight:500; backdrop-filter:blur(12px); }
   #bell { margin-left:auto; background:var(--glass); color:var(--ink); border:1px solid var(--edge); padding:.35rem .7rem; font-size:.95rem; line-height:1; backdrop-filter:blur(12px); }
@@ -601,6 +740,7 @@ export function appPage(): string {
   form.compose .icon { background:var(--glass); border:1px solid var(--edge); padding:.7rem .85rem; font-size:1.05rem; line-height:1; backdrop-filter:blur(12px); }
   /* Held down, it should look held down. Recording with no sign of recording is
      how you end up sending thirty seconds of a room. */
+  form.compose .icon.on { box-shadow:0 0 0 2px var(--accent) inset; }
   form.compose .icon.hot { background:var(--accent); border-color:var(--accent); animation:pulse 1.1s ease-in-out infinite; }
   @keyframes pulse { 50% { box-shadow:0 0 0 .55rem oklch(78% 0.13 var(--hue) / 0.18); } }
 
@@ -670,12 +810,12 @@ export function appPage(): string {
     .msg { max-width:min(82%, 46rem); }
   }
 </style>
-<div class=topbar><span class=dot></span><span class=name>Haru</span><span id=net hidden>Offline</span><button id=bell title="Notifications">🔔</button><button id=out>Sign out</button></div>
+<div class=topbar><span class=dot></span><span class=name>Haru</span><span id=net hidden>Offline</span><span id=talk hidden></span><button id=bell title="Notifications">🔔</button><button id=out>Sign out</button></div>
 <div id=psheet hidden><div id=pushpart></div><div id=wherepart></div></div>
 <section id=stage></section>
 <section id=chat></section>
 <div id=chips></div>
-<form class=compose id=cf><button type=button id=att class=icon title="Attach a file">📎</button><button type=button id=mic class=icon title="Hold to talk">🎙</button><textarea id=ci rows=1 placeholder="Say something…"></textarea><button id=cb>Send</button></form>
+<form class=compose id=cf><button type=button id=att class=icon title="Attach a file">📎</button><button type=button id=mic class=icon title="Hold to talk">🎙</button><button type=button id=ear class=icon title="Keep listening — say “Hey Haru”">👂</button><textarea id=ci rows=1 placeholder="Say something…"></textarea><button id=cb>Send</button></form>
 <input type=file id=af multiple hidden>
 <script>
 const $=id=>document.getElementById(id);
@@ -695,6 +835,7 @@ function mapsHref(u){
 }
 const md=s=>s.replace(/\\[([^\\]\\n]+)\\]\\((https:\\/\\/(?:maps\\.apple\\.com|www\\.google\\.com\\/maps)\\/[^)\\s]*)\\)/g,(m,t,u)=>'<a class=maps href="'+mapsHref(u)+'" target=_blank rel="noopener">🗺️ '+t+'</a>').replace(/\\*\\*\\s*([^*]+?)\\s*\\*\\*/g,'<b>$1</b>').replace(/\`([^\`\\n]+?)\`/g,'<code>$1</code>').replace(/\\*([^*\\s][^*\\n]*?)\\*/g,'<i>$1</i>');
 ${PHONE}
+${VOICE}
 const get=u=>window.haruNet.fetch(u).then(r=>r.ok?r.json():Promise.reject(r));
 const post=(u,b)=>window.haruNet.fetch(u,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(b||{})}).then(r=>r.ok?r.json():Promise.reject(r));
 
@@ -804,18 +945,21 @@ const player=new Audio();
 // is still being fetched as well as stop one already playing.
 let speaking=0;
 function primeVoice(){ player.play().catch(()=>{}); player.pause(); }
-async function speak(text){
+// With the mood the line was said in, when known: the voice side picks the
+// clip for it. Resolves to whether she actually started to say it.
+async function speak(text,emotion){
   const mine=++speaking;
   try{
     player.pause();
-    const r=await fetch('/api/speak',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({text})});
-    if(!r.ok||mine!==speaking) return;
+    const r=await fetch('/api/speak',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(emotion?{text,emotion}:{text})});
+    if(!r.ok||mine!==speaking) return false;
     const url=URL.createObjectURL(await r.blob());
     const previous=player.src;
     player.src=url;
     player.onended=player.onerror=()=>{ URL.revokeObjectURL(url); if(previous) URL.revokeObjectURL(previous); };
     await player.play();
-  }catch(e){ console.warn('[voice] '+(e&&e.message||e)); }
+    return true;
+  }catch(e){ console.warn('[voice] '+(e&&e.message||e)); return false; }
 }
 // A tap on her. Mid-sentence it is a hand over her mouth: whatever she is
 // saying stops, whatever she was about to say is dropped, and she pulls the
@@ -825,6 +969,7 @@ function hush(){
   const talking=!player.paused&&!player.ended;
   speaking++;
   player.pause();
+  if(talking&&talk) act(talk.spokeEnd(now()));
   if(!window.haruAvatar) return;
   if(talking) window.haruAvatar.poke('exclaim');
   else window.haruAvatar.poke(Math.random()<0.5?'burst':'orbit');
@@ -899,20 +1044,10 @@ async function readStream(r,show){
   return {reply,ignored,error};
 }
 
-$('cf').addEventListener('submit',async ev=>{
-  ev.preventDefault();
-  const text=ci.value.trim(); if(!text&&!staged.length)return;
-  // Nothing leaves an offline phone; the words stay in the box (and in the
-  // draft) rather than turning into a bubble that then fails.
-  if(!window.haruNet.online()){
-    $('chat').insertAdjacentHTML('beforeend','<div class="msg sys">You are '+(window.haruNet.state()==='off'?'offline':'out of her reach')+'. It is kept in the box until you are back.</div>');
-    $('chat').scrollTop=$('chat').scrollHeight; return;
-  }
-  primeVoice();
-  // Taken off the shelf now, so a file picked while she is answering belongs to
-  // the next message, not this one. Put back if the send never got through.
-  const sent=staged; staged=[]; drawChips();
-  ci.value=''; ci.style.height='auto'; $('cb').disabled=true; window.haruKeep.drop('draft');
+// What a message becomes once it is sent, whether typed or spoken: the
+// bubbles, the stream, her face, her voice, and the conversation told where
+// things stand. "interrupted" says they spoke over her to say it.
+async function deliver(text,sent,{interrupted=false}={}){
   // The waiting bubble used to be id="wait", a fixed string, and was taken back
   // out with a bare document.getElementById('wait').remove().
   //
@@ -940,7 +1075,7 @@ $('cf').addEventListener('submit',async ev=>{
   // markup, and the model is not a source we escape from, it is the source.
   const show=t=>{const bubble=document.getElementById(id); if(!bubble) return false; bubble.textContent=t; $('chat').scrollTop=$('chat').scrollHeight; return true;};
   try{
-    const r=await window.haruNet.fetch('/api/chat/stream',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(sent.length?{text,attachments:sent}:{text})});
+    const r=await window.haruNet.fetch('/api/chat/stream',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(Object.assign(sent.length?{text,attachments:sent}:{text},interrupted?{interrupted:true}:{}))});
     if(!r.ok) throw r;
     const {reply,ignored,error}=await readStream(r,show);
     if(error) throw new Error(error);
@@ -949,6 +1084,7 @@ $('cf').addEventListener('submit',async ev=>{
       // takes its place, and nothing is spoken.
       stopWaiting();
       $('chat').insertAdjacentHTML('beforeend','<div class="msg sys">She is not answering that.</div>');
+      if(talk) act(talk.replied(now(),false));
     } else {
       // The processed reply is the one that counts — the stream can carry words
       // she later trims as repetition — so it replaces what was shown.
@@ -956,16 +1092,18 @@ $('cf').addEventListener('submit',async ev=>{
       if(reply){
         // Started here and not waited on: the words are already on screen, and
         // her voice can catch up in its own time.
-        if(window.haruAvatar){
-          window.haruAvatar.notify();
-          // Her mood for that line drives the avatar's state and face.
-          post('/api/expression',{text:reply}).then(r=>window.haruAvatar.express(r.emotion)).catch(()=>{});
-        }
-        void speak(reply);
+        // Her mood for the line first — it drives her face, and then her voice
+        // is cloned from the clip for that mood, so the two agree. The
+        // conversation, if one is on, waits for the voice to finish.
+        if(window.haruAvatar) window.haruAvatar.notify();
+        if(talk) act(talk.replied(now(),true));
+        const mood=post('/api/expression',{text:reply}).then(r=>{ if(window.haruAvatar) window.haruAvatar.express(r.emotion); return r.emotion; }).catch(()=>null);
+        mood.then(emotion=>speak(reply,emotion)).then(started=>{ if(!started&&talk) act(talk.spokeEnd(now())); });
       }
     }
   }catch(r){
     stopWaiting();
+    if(talk) act(talk.replied(now(),false));
     if(r&&r.status===401){location.reload();return;}
     // The files never left: back on the shelf so pressing Send again works.
     if(sent.length){ staged=sent.concat(staged); drawChips(); }
@@ -978,6 +1116,23 @@ $('cf').addEventListener('submit',async ev=>{
     // the bubble gets its row.
     setTimeout(load,1000);
   }
+}
+
+$('cf').addEventListener('submit',async ev=>{
+  ev.preventDefault();
+  const text=ci.value.trim(); if(!text&&!staged.length)return;
+  // Nothing leaves an offline phone; the words stay in the box (and in the
+  // draft) rather than turning into a bubble that then fails.
+  if(!window.haruNet.online()){
+    $('chat').insertAdjacentHTML('beforeend','<div class="msg sys">You are '+(window.haruNet.state()==='off'?'offline':'out of her reach')+'. It is kept in the box until you are back.</div>');
+    $('chat').scrollTop=$('chat').scrollHeight; return;
+  }
+  primeVoice();
+  // Taken off the shelf now, so a file picked while she is answering belongs to
+  // the next message, not this one. Put back if the send never got through.
+  const sent=staged; staged=[]; drawChips();
+  ci.value=''; ci.style.height='auto'; $('cb').disabled=true; window.haruKeep.drop('draft');
+  await deliver(text,sent,{});
 });
 // The saved day first, so the page is never blank while the real one loads.
 showSaved(false);
@@ -1222,6 +1377,101 @@ async function drawBell(){
     void drawBell();
   };
 }
+
+// ---- Conversation mode ------------------------------------------------------
+//
+// The ear button keeps the microphone open: raw samples in, a level per frame
+// to the voice detector, each utterance boxed into a wave file and sent to be
+// heard. Asleep, only her name gets through; awake, everything does; speaking
+// over her cuts her off. The pill in the top bar says which. Opened inside the
+// tap, as iOS insists for both microphone and audio.
+const ear=$('ear'), talkPill=$('talk');
+let vad=null, talk=null, ctx=null, earStream=null, earNode=null, ring=[], ringMs=0, ticker=null;
+const now=()=>performance.now();
+function showTalk(){
+  const s=talk?talk.state():'off';
+  talkPill.hidden=s==='off'; ear.classList.toggle('on',s!=='off');
+  talkPill.textContent=s==='asleep'?'Say “Hey Haru”':s==='awake'?'Listening…':s==='thinking'?'Thinking…':s==='speaking'?'Speaking…':'';
+}
+async function openEar(){
+  earStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}});
+  ctx=new (window.AudioContext||window.webkitAudioContext)();
+  await ctx.resume();
+  const src=ctx.createMediaStreamSource(earStream);
+  earNode=ctx.createScriptProcessor(2048,1,1);
+  // The processor only runs when it leads somewhere; a silent gain keeps the
+  // microphone out of the speaker.
+  const mute=ctx.createGain(); mute.gain.value=0;
+  earNode.onaudioprocess=e=>{
+    const d=e.inputBuffer.getChannelData(0), t=now();
+    let sum=0; for(let i=0;i<d.length;i++) sum+=d[i]*d[i];
+    const level=Math.sqrt(sum/d.length), ms=d.length/ctx.sampleRate*1000;
+    ring.push({t,data:Float32Array.from(d)}); ringMs+=ms;
+    while(ringMs>20000&&ring.length){ ringMs-=ring[0].data.length/ctx.sampleRate*1000; ring.shift(); }
+    const herTurn=!player.paused&&!player.ended;
+    onVad(vad.feed(level,t,herTurn?7:undefined),t);
+  };
+  src.connect(earNode); earNode.connect(mute); mute.connect(ctx.destination);
+}
+function closeEar(){
+  if(earNode){ earNode.disconnect(); earNode.onaudioprocess=null; earNode=null; }
+  if(earStream){ earStream.getTracks().forEach(t=>t.stop()); earStream=null; }
+  if(ctx){ ctx.close().catch(()=>{}); ctx=null; }
+  ring=[]; ringMs=0;
+}
+function onVad(ev,t){
+  if(!ev||!talk) return;
+  if(ev.type==='start'){
+    act(talk.voiceStarted(t));
+    if(window.haruAvatar&&talk.state()!=='asleep') window.haruAvatar.attend('typing',1500);
+  } else if(ev.type==='end'){
+    void hearFrames(ring.filter(f=>f.t>=ev.from&&f.t<=ev.to).map(f=>f.data));
+  }
+}
+async function hearFrames(frames){
+  if(!frames.length||!ctx||!talk) return;
+  const wav=window.haruWav(frames,ctx.sampleRate,16000);
+  try{
+    const r=await window.haruNet.fetch('/api/listen',{method:'POST',headers:{'content-type':'audio/wav'},body:wav});
+    if(!r.ok) return;
+    const {text}=await r.json();
+    if(text&&talk) act(talk.heard(text,now()));
+  }catch(e){ console.warn('[ears] '+(e&&e.message||e)); }
+}
+function act(actions){
+  for(const a of actions){
+    if(a.type==='say') void deliver(a.text,[],{interrupted:a.interrupted});
+    else if(a.type==='ack') void acknowledge();
+    else if(a.type==='interrupt'){ speaking++; player.pause(); if(window.haruAvatar) window.haruAvatar.poke('exclaim'); }
+  }
+  showTalk();
+}
+// Her name and nothing else: a word from her, in a mood, and an open ear.
+async function acknowledge(){
+  try{
+    const {line,emotion}=await post('/api/wake');
+    $('chat').insertAdjacentHTML('beforeend','<div class="msg them">'+esc(line)+'</div>'); $('chat').scrollTop=$('chat').scrollHeight;
+    if(window.haruAvatar){ window.haruAvatar.express(emotion); window.haruAvatar.notify(); }
+    const started=await speak(line,emotion);
+    if(!started&&talk) act(talk.spokeEnd(now()));
+  }catch{ if(talk) act(talk.spokeEnd(now())); }
+}
+ear.onclick=async()=>{
+  if(talk){ act(talk.stop()); talk=null; vad=null; closeEar(); clearInterval(ticker); return; }
+  if(!navigator.mediaDevices||!(window.AudioContext||window.webkitAudioContext)){ ear.title='This phone cannot keep listening.'; return; }
+  try{
+    primeVoice();
+    vad=window.HaruVad(); talk=window.HaruTalk({wake:window.haruWake});
+    await openEar();
+    act(talk.start(now()));
+    ticker=setInterval(()=>{ if(talk) act(talk.tick(now())); },1000);
+  }catch(e){
+    console.warn('[ears] '+(e&&e.message||e));
+    talk=null; vad=null; closeEar(); ear.title='No microphone: '+(e&&e.message||e); showTalk();
+  }
+};
+player.addEventListener('ended',()=>{ if(talk) act(talk.spokeEnd(now())); });
+document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='hidden'&&talk){ act(talk.stop()); talk=null; vad=null; closeEar(); clearInterval(ticker); } });
 
 // ---- Where they are ---------------------------------------------------------
 //

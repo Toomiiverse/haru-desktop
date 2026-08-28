@@ -53,6 +53,7 @@ function deps(overrides: Partial<WebDeps> = {}): WebDeps {
       stage: (name: string, bytes: Buffer) => ({ id: 'staged', kind: 'image', name, saved: 'X:\\pictures\\' + name, url: '', bytes: bytes.length }),
       discard: () => {},
     },
+    wake: () => ({ line: 'What.', emotion: 'annoyed' }),
     where: {
       get: () => ({ enabled: whereOn, at: whereAt, fresh: whereAt !== null, net: null, places: whereAt ? [whereAt] : [] }),
       enable(on) { whereOn = on; if (!on) whereAt = null; },
@@ -606,5 +607,31 @@ test('the where routes, like the rest, are for the signed-in only', async () => 
       const refused = await web.call(path, { method: 'POST', body: '{}' });
       assert.equal(refused.status, 401, path);
     }
+  } finally { await web.stop(); }
+});
+
+// -- her ears kept open --------------------------------------------------------
+
+test('her name alone gets a word back; a line is spoken in its mood; a message said over her says so', async () => {
+  const spoken: { text: string; emotion?: string | null }[] = [];
+  const asides: unknown[] = [];
+  const web = await door({
+    speak: async (text, emotion) => { spoken.push({ text, emotion }); return { audio: new Uint8Array([1, 2, 3]), mime: 'audio/wav' }; },
+    sayStream: async (_text, onChunk, _files, options) => { asides.push(options); onChunk('What.'); return { reply: 'What.' }; },
+  });
+  try {
+    await web.signIn();
+    const woke = await web.call('/api/wake', { method: 'POST', body: '{}' });
+    assert.deepEqual(await woke.json(), { line: 'What.', emotion: 'annoyed' });
+
+    const clip = await web.call('/api/speak', { method: 'POST', body: JSON.stringify({ text: 'Fine.', emotion: 'smug' }) });
+    assert.equal(clip.status, 200);
+    assert.deepEqual(spoken, [{ text: 'Fine.', emotion: 'smug' }]);
+
+    const cut = await web.call('/api/chat/stream', { method: 'POST', body: JSON.stringify({ text: 'wait', interrupted: true }) });
+    assert.equal(cut.status, 200); await cut.text();
+    const plain = await web.call('/api/chat/stream', { method: 'POST', body: JSON.stringify({ text: 'go on', interrupted: 'yes' }) });
+    await plain.text();
+    assert.deepEqual(asides, [{ interrupted: true }, { interrupted: false }]);
   } finally { await web.stop(); }
 });

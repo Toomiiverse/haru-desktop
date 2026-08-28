@@ -12,7 +12,7 @@ import { connectGoogle, disconnectGoogle, googleStatus, pullEvents, pullTasks, p
 import { afterCooldown, afterEgoCooldown, afterPoke, egoInstruction, goodnightInstruction, IGNORE_THRESHOLD, isGoodnight, isIgnoring, isLowEffort, isRedo, leverageInstruction, moodInstruction, nextEgo, nextIrritation, notTwiceInstruction, shoutInstruction, shoutState, type ShoutState } from './mood';
 import { nextPokeCount, pokeEmotion, pokeInstruction, pokeIrritation, pokeTier, type PokeKind } from './poke';
 import { applyEvent, chooseIdleAction, DEFAULT_VITALS, driftVitals, nextTickDelayMs, type Environment, type Vitals } from './vitals';
-import { classificationPrompt, emotionToVitals, EMOTION_SCHEMA, NEUTRAL_EMOTION, parseEmotion, type Emotion , faceForEmotion } from './emotion';
+import { classificationPrompt, emotionToVitals, EMOTION_SCHEMA, EMOTIONS, NEUTRAL_EMOTION, parseEmotion, type Emotion, type EmotionName, faceForEmotion } from './emotion';
 import { withDiscoveredExpressions } from './expressions';
 import { chaseableOverdue, findItem, formatAgenda, itemStatus, missedInstruction, putOffInstruction, putOffUntil, relevantItems, readsAsAnswerToHer, readsAsBareReport, tickOffInstruction, readsAsDone, doneClause, readsAsNotDone, relativeDay, staleItemNamed } from './agenda';
 import { openingAngles, pickAngle, shouldPipeUp } from './opening';
@@ -36,6 +36,7 @@ import { markTimeGaps, sinceLast } from './history';
 import { correct, noteUsed, readHearing, remember } from './hearing';
 import { assumeItIsTheirs, identifyWork, noteWork, readFollowing, recogniseNow, summariseFollowing } from './following';
 import { lookUpPlace, readWindowsLocation, searchPlaces, type FoundPlace } from './location';
+import { INTERRUPTED_ASIDE, wakeAck } from './wake';
 import { directionsAsk, directionsNote, matchNamedPlace, startingPoint, withDirections, type DirectionsAsk } from './directions';
 import { absorb, describeWhereabouts, distanceM, forgetPlace, namePlace, placeAt, readSpot, readWhereabouts, whereForPage, type Whereabouts } from './whereabouts';
 import { convertImage, normaliseFormat, FORMATS } from './convert';
@@ -5049,7 +5050,7 @@ async function withAttachments<T extends { role: string; content: string; at?: s
   return out;
 }
 
-async function ollamaChat(messages: { role: string; content: string; at?: string; attachments?: Attachment[] }[], config: ProviderConfig, { hands = true, web = false, brief = false, choices = false, away = '', onChunk, onChunkReset, traceId }: { hands?: boolean; web?: boolean; brief?: boolean; choices?: boolean; away?: string; onChunk?: (text: string) => void; onChunkReset?: () => void; traceId?: string } = {}) {
+async function ollamaChat(messages: { role: string; content: string; at?: string; attachments?: Attachment[] }[], config: ProviderConfig, { hands = true, web = false, brief = false, choices = false, away = '', aside = '', onChunk, onChunkReset, traceId }: { hands?: boolean; web?: boolean; brief?: boolean; choices?: boolean; away?: string; aside?: string; onChunk?: (text: string) => void; onChunkReset?: () => void; traceId?: string } = {}) {
   const latest = messages.at(-1)?.content ?? '';
   // They are talking to her, so the silence she was waiting out is over.
   noteUserSpoke();
@@ -5190,7 +5191,9 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // shaper folds it into that turn, an OpenAI-shaped endpoint takes it as it
   // is, and either way it is nearer than anything in the system prompt.
   const lastUser = conversation.map(message => message.role).lastIndexOf('user');
-  if (lastUser > 0) conversation.splice(lastUser, 0, { role: 'system', content: LAST_WORD });
+  // An aside about this turn — they spoke over her — goes in the same place,
+  // read just before LAST_WORD; the Ollama shaper folds both into their turn.
+  if (lastUser > 0) conversation.splice(lastUser, 0, ...[aside, LAST_WORD].filter(Boolean).map(content => ({ role: 'system', content })));
   // For tuning, when the environment asks for it: the prompt exactly as sent.
   // A rule that works on its own and fails in place can only be bisected by
   // replaying what she was actually told, and nothing else shows that.
@@ -6462,7 +6465,7 @@ function webDeps(): WebDeps {
       trace.done('web', { tier: 'llm', chars: reply.length });
       return { reply, ignored: answer.ignored };
     },
-    async sayStream(text, onChunk, attachments) {
+    async sayStream(text, onChunk, attachments, options) {
       const config = store.get('ai.config') as ProviderConfig | undefined;
       if (!config?.model) throw new Error('no model is set up');
       const history = (store.get('chat.messages') as { role: string; content: string; at?: string }[] ?? []);
@@ -6482,6 +6485,7 @@ function webDeps(): WebDeps {
         hands: false,
         web: true,
         away: 'it came in from the phone',
+        ...(options?.interrupted ? { aside: INTERRUPTED_ASIDE } : {}),
         traceId: trace.id,
         onChunk: chunk => { trace.mark('first'); onChunk(chunk); },
         // The reader sees only what survives, but a round that ends in a tool
@@ -6693,7 +6697,8 @@ function webDeps(): WebDeps {
       const folder = [path.join(app.getAppPath(), 'build', 'emotions'), path.join(process.resourcesPath ?? '', 'build', 'emotions')].find(existsSync);
       return folder ?? null;
     },
-    async speak(text) {
+    wake: () => wakeAck(),
+    async speak(text, emotion) {
       // The same voice, the same reference clip, the same server the desktop
       // speaks through. Nothing about her sounds different for being far away.
       const voice = readVoiceConfig(store.get('voice'));
@@ -6701,7 +6706,11 @@ function webDeps(): WebDeps {
       // silent — voice.webEnabled off — and hand the phone canned voice lines
       // instead, so a reply is not held hostage to an 8-17s synthesis round trip.
       if (voice.engine === 'off' || voice.engine === 'windows' || !voice.webEnabled) return null;
-      return synthesise(spokenCase(speakableText(text)), voice, referenceFor(voice), remoteAuth(voice.endpoint));
+      // The clip for the mood the line was said in, as the desktop chooses it —
+      // and her angry clip for a line she is shouting, which is where the volume
+      // actually comes from. A mood she has no clip for is her usual voice.
+      const reference = referenceFor(voice, emotion && (EMOTIONS as readonly string[]).includes(emotion) ? emotion as EmotionName : null);
+      return synthesise(spokenCase(speakableText(text)), voice, hasShout(text) ? shoutReference(voice, reference) : reference, remoteAuth(voice.endpoint));
     },
     async hear(audio, mime) {
       const listen = readListenConfig(store.get('listen'));

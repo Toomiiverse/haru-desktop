@@ -41,7 +41,7 @@ export type WebDeps = {
    * (a tool call was coming, a retry was pressed) signals itself by handing a
    * single U+FFFD — the reader clears what it has and waits for the next chunk.
    */
-  sayStream(text: string, onChunk: (chunk: string) => void, attachments?: unknown[]): Promise<{ reply: string; ignored?: boolean }>;
+  sayStream(text: string, onChunk: (chunk: string) => void, attachments?: unknown[], options?: { interrupted?: boolean }): Promise<{ reply: string; ignored?: boolean }>;
   /**
    * Her last reply, done again. The message that prompted it is asked once
    * more with that reply left out of the history, and the new one takes its
@@ -120,8 +120,10 @@ export type WebDeps = {
   libFolder(): string | null;
   /** Where her faces are kept — the supplied Haru emotion SVGs, one per emotion. */
   emotionsFolder(): string | null;
-  /** Her voice for a line, or nothing if she has none set up. */
-  speak(text: string): Promise<{ audio: Uint8Array; mime: string } | null>;
+  /** Her voice for a line — in the mood it was said in, when told — or nothing if she has none set up. */
+  speak(text: string, emotion?: string | null): Promise<{ audio: Uint8Array; mime: string } | null>;
+  /** Her word when they only said her name. */
+  wake(): { line: string; emotion: string };
   /** What they just said, through the same ears and the same corrections as the desktop. */
   hear(audio: Uint8Array, mime: string): Promise<string>;
   knowledge: {
@@ -522,8 +524,10 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
   // "she is answering". Kept as a separate route so the plain /api/chat above
   // stays for the terminal client, which has nothing to gain from a stream.
   if (req.method === 'POST' && path === '/api/chat/stream') {
-    const body = await readBody(req) as { text?: unknown; attachments?: unknown };
+    const body = await readBody(req) as { text?: unknown; attachments?: unknown; interrupted?: unknown };
     const text = typeof body.text === 'string' ? body.text.trim() : '';
+    // Said over her, while she was still speaking: she is told so.
+    const interrupted = body.interrupted === true;
     // A file with nothing typed is still a message — the desktop lets a picture
     // be the whole of what is said, and she reacts to it.
     const files = Array.isArray(body.attachments) ? body.attachments.slice(0, MAX_FILES) : [];
@@ -535,7 +539,7 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
     });
     const emit = (value: unknown) => { if (!res.destroyed) res.write(`data: ${JSON.stringify(value)}\n\n`); };
     try {
-      const answer = await deps.sayStream(text, chunk => emit({ text: chunk }), files);
+      const answer = await deps.sayStream(text, chunk => emit({ text: chunk }), files, { interrupted });
       emit({ done: true, reply: answer.reply, ignored: Boolean(answer.ignored) });
     } catch (error) {
       console.error('[web] ' + (error instanceof Error ? error.message : String(error)));
@@ -593,11 +597,18 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
   // Her voice. Asked for separately rather than returned with the reply,
   // because the words should be on screen while the audio is still being made —
   // a sentence that waits for its own recording arrives late and reads as lag.
+  // Her name, and nothing else: a word back, in a mood, for the phone to say.
+  if (req.method === 'POST' && path === '/api/wake') {
+    return json(res, 200, deps.wake());
+  }
+
   if (req.method === 'POST' && path === '/api/speak') {
-    const body = await readBody(req) as { text?: unknown };
+    const body = await readBody(req) as { text?: unknown; emotion?: unknown };
     const text = typeof body.text === 'string' ? body.text.trim() : '';
     if (!text) return json(res, 400, { error: 'Nothing to say.' });
-    const clip = await deps.speak(text.slice(0, 2000));
+    // The mood is a word off the wire; the voice side only honours one it has a clip for.
+    const emotion = typeof body.emotion === 'string' ? body.emotion.slice(0, 30) : null;
+    const clip = await deps.speak(text.slice(0, 2000), emotion);
     if (!clip) return json(res, 503, { error: 'Her voice is not set up.' });
     res.writeHead(200, {
       'Content-Type': clip.mime || 'audio/wav',
