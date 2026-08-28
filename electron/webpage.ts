@@ -1095,8 +1095,14 @@ export function appPage(): string {
   .them { background:var(--glass); border:1px solid var(--edge); border-bottom-left-radius:7px; backdrop-filter:blur(12px); }
   .me { background:var(--mine); border:1px solid var(--edge); margin-left:auto; border-bottom-right-radius:7px; }
   .sys { color:var(--ink-dim); font-size:.84rem; text-align:center; max-width:100%; background:none; border:0; }
-  /* Under each of her bubbles: what they thought of it, and asking again. */
-  .acts { display:flex; flex-wrap:wrap; align-items:center; gap:.35rem; margin:-.2rem 0 .7rem .25rem; max-width:82%; }
+  /* Under each of her bubbles: a small arrow, and behind it what they thought
+     of the reply and asking again. Folded by default — a row of buttons under
+     every message was a dock, not a conversation. */
+  .acts { display:flex; flex-wrap:wrap; align-items:center; gap:.35rem; margin:-.3rem 0 .6rem .25rem; max-width:82%; }
+  .acts .dock { display:contents; }
+  .acts .dock[hidden] { display:none; }
+  .acts .more { padding:.05rem .5rem; font-size:.8rem; opacity:.7; }
+  .acts .more.open { opacity:1; }
   .acts button { background:none; border:1px solid var(--edge); color:var(--ink-dim); border-radius:999px; padding:.15rem .55rem; font-size:.85rem; line-height:1.4; font-weight:500; }
   .acts button.on { background:var(--accent); color:var(--accent-ink); border-color:var(--accent); }
   .acts input { flex:1 1 10rem; font-size:.82rem; padding:.3rem .7rem; border-radius:999px; }
@@ -1187,13 +1193,19 @@ function bubbles(list){
 // quoting it. A note already given is shown; otherwise there is a pen.
 function acts(m,isLast){
   const on=r=>m.reaction===r?' class=on':'';
+  // What is already on the reply stays in view beside the arrow — a thumb, an
+  // emoji — so the state is not hidden with the buttons.
+  const worn=(m.reaction==='up'?'<span class=reacted title="Marked good">👍</span>':m.reaction==='down'?'<span class=reacted title="Marked poor">👎</span>':'')
+    +(m.emoji?'<span class=reacted>'+esc(m.emoji)+'</span>':'');
   return '<div class=acts data-id="'+esc(m.id)+'">'
+    +'<button type=button class=more data-act=more title="Rate, react, ask again">▾</button>'+worn
+    +'<span class=dock hidden>'
     +'<button type=button data-act=up'+on('up')+' title="Good">👍</button>'
     +'<button type=button data-act=down'+on('down')+' title="Poor">👎</button>'
     +(m.note?'<span class=said>'+esc(m.note)+'</span>':'<button type=button data-act=note title="Tell her why">✎</button>')
-    +(m.emoji?'<span class=reacted>'+esc(m.emoji)+'</span>':'<button type=button data-act=emoji title="React">☺</button>')
+    +(m.emoji?'':'<button type=button data-act=emoji title="React">☺</button>')
     +(isLast?'<button type=button data-act=again title="Ask her again">↻</button>':'')
-    +'</div>';
+    +'</span></div>';
 }
 
 async function load(){
@@ -1437,6 +1449,13 @@ async function askAgain(){
 $('chat').addEventListener('click',async ev=>{
   const b=ev.target.closest('button[data-act]'); if(!b) return;
   const row=b.closest('.acts'); const id=row.dataset.id; const act=b.dataset.act;
+  if(act==='more'){
+    // One open at a time: the arrow is a drawer, not a setting.
+    const dock=row.querySelector('.dock'); const opening=dock.hidden;
+    for(const other of $('chat').querySelectorAll('.acts')){ const d=other.querySelector('.dock'); if(d){ d.hidden=true; } const a=other.querySelector('.more'); if(a){ a.classList.remove('open'); a.textContent='▾'; } }
+    if(opening){ dock.hidden=false; b.classList.add('open'); b.textContent='▴'; }
+    return;
+  }
   if(act==='again') return askAgain();
   if(act==='note'){
     const input=document.createElement('input'); input.placeholder='Tell her why…'; input.maxLength=1000; input.enterKeyHint='send';
