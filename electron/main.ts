@@ -5032,11 +5032,20 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   const vetted = messages.map(message => (message.attachments?.length ? { ...message, attachments: ourFiles(message.attachments) } : message));
   const inPlay = attachmentsInPlay(vetted, Date.now());
   const carried = [...inPlay.values()].flat();
-  const pictures = carried.some(file => file.kind === 'image');
+  // Only what arrived with this message decides where it is answered. A
+  // picture stays in play for half an hour so a follow-up can still refer to
+  // it — but that is a question of what she can see, not of which model
+  // answers. Deciding the route on everything in play meant one photo sent the
+  // next thirty minutes of plain text out to the hosted model, four messages
+  // of "I'm trying to calm down" included, against the rule that it is for
+  // uploads and nothing else. A follow-up goes to the local model, which reads
+  // the picture through her own eyes (vision.model) rather than being shown it.
+  const arrived = vetted.at(-1)?.attachments ?? [];
+  const pictures = arrived.some(file => file.kind === 'image');
   // Chosen once for the whole turn, tool rounds included: swapping models
   // half-way through a tool loop would hand one model's call to another to
   // answer, and the two do not agree on how a call is even identified.
-  const brain = brainFor(latest, config, messages, { pictures, files: carried.length > 0 });
+  const brain = brainFor(latest, config, messages, { pictures, files: arrived.length > 0 });
   if (brain.escalated) console.log(`[ai] sent out to ${brain.config.model} — ${brain.because}`);
   config = brain.config;
   const vision = readVisionConfig(store.get('vision'));
