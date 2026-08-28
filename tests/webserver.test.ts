@@ -38,6 +38,7 @@ function deps(overrides: Partial<WebDeps> = {}): WebDeps {
     sayStream: async (_text, onChunk) => { onChunk('Fine.'); return { reply: 'Fine.' }; },
     retryStream: async (onChunk) => { onChunk('Again.'); return { reply: 'Again.' }; },
     rate: async (id) => (id === 'hers' ? { line: 'Finally, some taste.' } : null),
+    react: async (id, emoji) => (id === 'hers' ? { line: emoji === '🙄' ? 'Roll them back.' : null } : null),
     expression: async () => ({ emotion: null, expression: null }),
     history: () => [],
     agenda: () => [],
@@ -531,5 +532,20 @@ test('a reply of hers can be rated, and the page gets her comeback', async () =>
     assert.equal((await web.call('/api/chat/rate', { method: 'POST', body: JSON.stringify({ reaction: 'down' }) })).status, 400);
     assert.equal((await web.call('/api/chat/rate', { method: 'POST', body: JSON.stringify({ id: 'hers' }) })).status, 400);
     assert.equal((await web.call('/api/chat/rate', { method: 'POST', body: JSON.stringify({ id: 'hers', reaction: 'meh' }) })).status, 400);
+  } finally { await web.stop(); }
+});
+
+test('an emoji on a reply of hers is taken, and a word is not an emoji', async () => {
+  const web = await door();
+  try {
+    await web.signIn();
+    const eye = await web.call('/api/chat/react', { method: 'POST', body: JSON.stringify({ id: 'hers', emoji: '🙄' }) });
+    assert.equal(eye.status, 200);
+    assert.deepEqual(await eye.json(), { ok: true, line: 'Roll them back.' });
+    const heart = await web.call('/api/chat/react', { method: 'POST', body: JSON.stringify({ id: 'hers', emoji: '❤️' }) });
+    assert.deepEqual(await heart.json(), { ok: true, line: null });
+    assert.equal((await web.call('/api/chat/react', { method: 'POST', body: JSON.stringify({ id: 'theirs', emoji: '🙄' }) })).status, 404);
+    assert.equal((await web.call('/api/chat/react', { method: 'POST', body: JSON.stringify({ id: 'hers', emoji: 'lol' }) })).status, 400);
+    assert.equal((await web.call('/api/chat/react', { method: 'POST', body: JSON.stringify({ id: 'hers', emoji: '' }) })).status, 400);
   } finally { await web.stop(); }
 });

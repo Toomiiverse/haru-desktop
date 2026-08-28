@@ -29,7 +29,9 @@ export interface Message { id: string; role: Role; content: string; time: string
    *  text that was misheard rather than against whatever was edited afterwards. */
   heard?: string; reaction?: Reaction;
   /** What they said about this reply, in their own words, alongside the thumb. */
-  note?: string; ignored?: boolean; replyTo?: { id: string; excerpt: string }; }
+  note?: string;
+  /** An emoji they put on this reply, read the way a Discord reaction is. */
+  emoji?: string; ignored?: boolean; replyTo?: { id: string; excerpt: string }; }
 /**
  * Something she said without being spoken to — a remark about the screen, a
  * nudge about the list, a jab about a tab.

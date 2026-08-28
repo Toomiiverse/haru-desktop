@@ -73,6 +73,12 @@ export type WebDeps = {
    * not a reply of hers.
    */
   rate(id: string, reaction: 'up' | 'down' | null, note?: string): Promise<{ line: string | null } | null>;
+  /**
+   * An emoji on a reply of hers, read the way a Discord reaction is. `line`
+   * is her comeback, or null — she answers at most one reaction a minute or
+   * so, and takes the rest quietly. Null altogether when the id is not hers.
+   */
+  react(id: string, emoji: string): Promise<{ line: string | null } | null>;
   /** date is a bare YYYY-MM-DD; daysAway is its offset from today so the page can bucket into daily/weekly/monthly without redoing timezone-aware date math client-side. */
   agenda(): { id: string; title: string; date: string; time: string | null; kind: string; done?: boolean; daysAway: number }[];
   tickOff(id: string): Promise<void> | void;
@@ -529,6 +535,20 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
     const rated = await deps.rate(id, reaction, note);
     if (!rated) return json(res, 404, { error: 'No such reply of hers.' });
     return json(res, 200, { ok: true, line: rated.line });
+  }
+
+  // An emoji on a reply. One emoji, a handful of code points at most — a
+  // reaction is a glyph, not a message, and the reader on the other side only
+  // knows the glyphs it knows.
+  if (req.method === 'POST' && path === '/api/chat/react') {
+    const body = await readBody(req) as { id?: unknown; emoji?: unknown };
+    const id = typeof body.id === 'string' ? body.id.trim().slice(0, 80) : '';
+    const emoji = typeof body.emoji === 'string' ? body.emoji.trim() : '';
+    if (!id) return json(res, 400, { error: 'Which reply?' });
+    if (!emoji || [...emoji].length > 4 || /[\s\p{L}\p{N}]/u.test(emoji)) return json(res, 400, { error: 'That is not an emoji.' });
+    const reacted = await deps.react(id, emoji);
+    if (!reacted) return json(res, 404, { error: 'No such reply of hers.' });
+    return json(res, 200, { ok: true, line: reacted.line });
   }
 
   // Her last reply, done again. Same stream as above; the page swaps the bubble

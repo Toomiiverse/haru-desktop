@@ -17,7 +17,7 @@ const about = { source: 'phone' as const, model: 'qwen', at: '2026-08-28T04:00:0
 
 test('an entry carries the reply, the message it answered, and what they said about it', () => {
   const entry = feedbackEntry(history, { ...about, id: 'a1', reaction: 'up', note: '  too   nice ' });
-  assert.deepEqual(entry, { at: about.at, source: 'phone', id: 'a1', reaction: 'up', note: 'too nice', prompt: 'How good is hy3', reply: 'Strong for its size.', model: 'qwen' });
+  assert.deepEqual(entry, { at: about.at, source: 'phone', id: 'a1', reaction: 'up', note: 'too nice', emoji: null, prompt: 'How good is hy3', reply: 'Strong for its size.', model: 'qwen' });
 });
 
 test('a reply she volunteered answers nothing, and says so', () => {
@@ -49,4 +49,10 @@ test('entries append as one line each', () => {
     const lines = readFileSync(file, 'utf8').trim().split('\n').map(line => JSON.parse(line) as { reaction: string });
     assert.deepEqual(lines.map(line => line.reaction), ['up', 'down']);
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('an emoji put on a reply is written down as itself, beside the thumb it did not replace', () => {
+  const entry = feedbackEntry(history, { ...about, id: 'a1', emoji: ' 🙄 ' });
+  assert.equal(entry?.emoji, '🙄');
+  assert.equal(entry?.reaction, 'down');
 });

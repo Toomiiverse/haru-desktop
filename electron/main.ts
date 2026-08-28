@@ -5842,11 +5842,12 @@ let reactedAt = 0;
  * having only one of them count would make her mood depend on where you were
  * standing.
  */
-async function reactedOnDiscord(emoji: string, custom: boolean, herLine: string) {
+async function reactedOnDiscord(emoji: string, custom: boolean, herLine: string, where = 'discord') {
+  const tag = `[${where}]`;
   const now = Date.now();
   // Reacting is cheap and people do it in handfuls. The first one gets the line.
   if (now - reactedAt < REACTION_COOLDOWN_MS) {
-    console.log('[discord] reaction noted, no reply — she answered one a moment ago');
+    console.log(tag + ' reaction noted, no reply — she answered one a moment ago');
     return { reply: '', ignored: true };
   }
   const config = store.get('ai.config') as ProviderConfig | undefined;
@@ -5879,10 +5880,10 @@ async function reactedOnDiscord(emoji: string, custom: boolean, herLine: string)
   ].filter(Boolean).join(' ');
   try {
     const line = await ollamaQuip(system, reactedPrompt(reading, herLine), config);
-    console.log(`[discord] reacted to ${custom ? 'a custom emoji' : emoji} — taken as ${reading.taken}`);
+    console.log(`${tag} reacted to ${custom ? 'a custom emoji' : emoji} — taken as ${reading.taken}`);
     return { reply: line, ignored: false };
   } catch (error) {
-    console.warn('[discord] could not answer a reaction:', error instanceof Error ? error.message : error);
+    console.warn(tag + ' could not answer a reaction:', error instanceof Error ? error.message : error);
     return { reply: '', ignored: true };
   }
 }
@@ -6259,6 +6260,24 @@ function webDeps(): WebDeps {
         return { line: null };
       }
     },
+    /**
+     * An emoji on a reply of hers, from the phone. Read the way a Discord
+     * reaction is read — a heart is adored, a side-eye is doubted — through
+     * the same code, so it moves her mood the same way and earns the same
+     * kind of comeback, on the same ninety-second cooldown. The emoji lands on
+     * the message through the desk, and the rating is written down.
+     */
+    async react(id, emoji) {
+      const history = (store.get('chat.messages') as { id?: string; role: string; content: string }[] | undefined) ?? [];
+      const target = history.find(message => message.id === id && message.role === 'assistant');
+      if (!target) return null;
+      sendToWindows('chat:ratedFromPhone', { id, emoji });
+      appendFeedback({ id, emoji, source: 'phone' });
+      const answer = await reactedOnDiscord(emoji, false, target.content, 'web');
+      const line = answer.ignored || !answer.reply ? null : answer.reply;
+      if (line) sendToWindows('chat:interject', line);
+      return { line };
+    },
     async say(text, attachments) {
       const config = store.get('ai.config') as ProviderConfig | undefined;
       if (!config?.model) throw new Error('no model is set up');
@@ -6628,7 +6647,7 @@ function feedbackFile(): string {
  * One rating written down for later, from whichever side it came. Never
  * throws: a full disk must not cost them the thumb.
  */
-function appendFeedback(about: { id: string; reaction?: 'up' | 'down' | null; note?: unknown; source: 'phone' | 'desktop' }): void {
+function appendFeedback(about: { id: string; reaction?: 'up' | 'down' | null; note?: unknown; emoji?: string; source: 'phone' | 'desktop' }): void {
   const history = (store.get('chat.messages') as { id?: string; role: string; content?: string; reaction?: string }[] | undefined) ?? [];
   const entry = feedbackEntry(history, { ...about, model: (store.get('ai.config') as ProviderConfig | undefined)?.model ?? '', at: new Date().toISOString() });
   if (!entry) return;

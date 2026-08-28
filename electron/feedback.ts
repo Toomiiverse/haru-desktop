@@ -19,6 +19,8 @@ export type FeedbackEntry = {
   id: string;
   reaction: Reaction | null;
   note: string | null;
+  /** An emoji put on the reply, when that is what the rating was. */
+  emoji: string | null;
   /** What they said that she was answering, or null when she spoke first. */
   prompt: string | null;
   reply: string;
@@ -47,7 +49,7 @@ export function cleanNote(note: unknown): string | null {
  */
 export function feedbackEntry(
   history: Stored[],
-  about: { id: string; reaction?: Reaction | null; note?: unknown; source: 'phone' | 'desktop'; model: string; at: string },
+  about: { id: string; reaction?: Reaction | null; note?: unknown; emoji?: string; source: 'phone' | 'desktop'; model: string; at: string },
 ): FeedbackEntry | null {
   const index = history.findIndex(message => message.id === about.id);
   if (index < 0 || history[index].role !== 'assistant') return null;
@@ -59,6 +61,7 @@ export function feedbackEntry(
     id: about.id,
     reaction: given,
     note: cleanNote(about.note),
+    emoji: typeof about.emoji === 'string' && about.emoji.trim() ? about.emoji.trim().slice(0, 16) : null,
     prompt: before?.content ?? null,
     reply: history[index].content ?? '',
     model: about.model,
