@@ -38,7 +38,6 @@ function deps(overrides: Partial<WebDeps> = {}): WebDeps {
     sayStream: async (_text, onChunk) => { onChunk('Fine.'); return { reply: 'Fine.' }; },
     retryStream: async (onChunk) => { onChunk('Again.'); return { reply: 'Again.' }; },
     rate: async (id) => (id === 'hers' ? { line: 'Finally, some taste.' } : null),
-    react: async (id, emoji) => (id === 'hers' ? { line: emoji === '🙄' ? 'Roll them back.' : null } : null),
     expression: async () => ({ emotion: null, expression: null }),
     history: () => [],
     agenda: () => [],
@@ -79,13 +78,16 @@ function deps(overrides: Partial<WebDeps> = {}): WebDeps {
 }
 
 /** A server on a free loopback port, plus a fetch that keeps its cookies. */
+let doors = 0;
 async function door(overrides: Partial<WebDeps> = {}) {
   const running = await startWebServer(0, deps(overrides));
   const base = `http://127.0.0.1:${running.port}`;
   let jar = '';
   // Each harness gets its own address so the failure counter, which is keyed by
   // caller and outlives a single server, cannot leak a lockout between tests.
-  const from = `10.0.0.${Math.floor(running.port % 250) + 1}`;
+  // Its own address, never shared: the attempts map is module-wide, and two
+  // servers whose ports agreed modulo 250 handed one test the other's lockout.
+  const from = `10.${Math.floor(++doors / 250) % 250}.${doors % 250}.7`;
   const call = (path: string, init: RequestInit & { anonymous?: boolean } = {}) => {
     const headers = new Headers(init.headers);
     headers.set('cf-connecting-ip', from);
@@ -532,20 +534,5 @@ test('a reply of hers can be rated, and the page gets her comeback', async () =>
     assert.equal((await web.call('/api/chat/rate', { method: 'POST', body: JSON.stringify({ reaction: 'down' }) })).status, 400);
     assert.equal((await web.call('/api/chat/rate', { method: 'POST', body: JSON.stringify({ id: 'hers' }) })).status, 400);
     assert.equal((await web.call('/api/chat/rate', { method: 'POST', body: JSON.stringify({ id: 'hers', reaction: 'meh' }) })).status, 400);
-  } finally { await web.stop(); }
-});
-
-test('an emoji on a reply of hers is taken, and a word is not an emoji', async () => {
-  const web = await door();
-  try {
-    await web.signIn();
-    const eye = await web.call('/api/chat/react', { method: 'POST', body: JSON.stringify({ id: 'hers', emoji: '🙄' }) });
-    assert.equal(eye.status, 200);
-    assert.deepEqual(await eye.json(), { ok: true, line: 'Roll them back.' });
-    const heart = await web.call('/api/chat/react', { method: 'POST', body: JSON.stringify({ id: 'hers', emoji: '❤️' }) });
-    assert.deepEqual(await heart.json(), { ok: true, line: null });
-    assert.equal((await web.call('/api/chat/react', { method: 'POST', body: JSON.stringify({ id: 'theirs', emoji: '🙄' }) })).status, 404);
-    assert.equal((await web.call('/api/chat/react', { method: 'POST', body: JSON.stringify({ id: 'hers', emoji: 'lol' }) })).status, 400);
-    assert.equal((await web.call('/api/chat/react', { method: 'POST', body: JSON.stringify({ id: 'hers', emoji: '' }) })).status, 400);
   } finally { await web.stop(); }
 });

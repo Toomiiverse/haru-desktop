@@ -229,8 +229,8 @@ contextBridge.exposeInMainWorld('haru', {
     },
     // Rated from a phone. The thumb and the note land on the message here,
     // where the conversation lives; her comeback arrives as an interjection.
-    onRatedFromPhone: (callback: (turn: { id: string; reaction?: 'up' | 'down'; note?: string; emoji?: string }) => void) => {
-      const listener = (_event: Electron.IpcRendererEvent, turn: { id: string; reaction?: 'up' | 'down'; note?: string; emoji?: string }) => callback(turn);
+    onRatedFromPhone: (callback: (turn: { id: string; reaction?: 'up' | 'down'; note?: string }) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, turn: { id: string; reaction?: 'up' | 'down'; note?: string }) => callback(turn);
       ipcRenderer.on('chat:ratedFromPhone', listener);
       return () => ipcRenderer.removeListener('chat:ratedFromPhone', listener);
     },

@@ -1107,8 +1107,7 @@ export function appPage(): string {
   .acts button.on { background:var(--accent); color:var(--accent-ink); border-color:var(--accent); }
   .acts input { flex:1 1 10rem; font-size:.82rem; padding:.3rem .7rem; border-radius:999px; }
   .acts .said { font-size:.8rem; color:var(--ink-dim); font-style:italic; overflow-wrap:anywhere; }
-  .acts .strip { display:flex; flex-wrap:wrap; gap:.15rem; }
-  .acts .strip button, .acts .reacted { font-size:1.05rem; padding:.05rem .3rem; line-height:1.4; }
+  .acts .reacted { font-size:.95rem; line-height:1.4; }
   .acts .reacted { border:1px solid var(--edge); border-radius:999px; padding:.05rem .45rem; }
 
   form.compose { display:flex; gap:.5rem; padding:.6rem .9rem calc(.6rem + env(safe-area-inset-bottom)); align-items:flex-end; }
@@ -1195,15 +1194,13 @@ function acts(m,isLast){
   const on=r=>m.reaction===r?' class=on':'';
   // What is already on the reply stays in view beside the arrow — a thumb, an
   // emoji — so the state is not hidden with the buttons.
-  const worn=(m.reaction==='up'?'<span class=reacted title="Marked good">👍</span>':m.reaction==='down'?'<span class=reacted title="Marked poor">👎</span>':'')
-    +(m.emoji?'<span class=reacted>'+esc(m.emoji)+'</span>':'');
+  const worn=(m.reaction==='up'?'<span class=reacted title="Marked good">👍</span>':m.reaction==='down'?'<span class=reacted title="Marked poor">👎</span>':'');
   return '<div class=acts data-id="'+esc(m.id)+'">'
     +'<button type=button class=more data-act=more title="Rate, react, ask again">▾</button>'+worn
     +'<span class=dock hidden>'
     +'<button type=button data-act=up'+on('up')+' title="Good">👍</button>'
     +'<button type=button data-act=down'+on('down')+' title="Poor">👎</button>'
     +(m.note?'<span class=said>'+esc(m.note)+'</span>':'<button type=button data-act=note title="Tell her why">✎</button>')
-    +(m.emoji?'':'<button type=button data-act=emoji title="React">☺</button>')
     +(isLast?'<button type=button data-act=again title="Ask her again">↻</button>':'')
     +'</span></div>';
 }
@@ -1467,30 +1464,6 @@ $('chat').addEventListener('click',async ev=>{
       try{ await post('/api/chat/rate',{id,note}); const said=document.createElement('span'); said.className='said'; said.textContent=note; input.replaceWith(said); }
       catch(r){ if(r&&r.status===401){location.reload();return;} input.disabled=false; }
     });
-    return;
-  }
-  // An emoji is read the way a Discord reaction is — a heart is adored, a
-  // side-eye is doubted — so the strip offers only the ones she knows how to
-  // read. She answers at most one a minute or so and takes the rest quietly.
-  if(act==='emoji'){
-    const strip=document.createElement('span'); strip.className='strip';
-    for(const e of ['❤️','😂','😊','🔥','🙏','😢','😡','🙄','😮','👀']){ const x=document.createElement('button'); x.type='button'; x.dataset.act='react'; x.dataset.emoji=e; x.textContent=e; strip.appendChild(x); }
-    b.replaceWith(strip); return;
-  }
-  if(act==='react'){
-    const e=b.dataset.emoji; const strip=b.closest('.strip');
-    for(const x of strip.querySelectorAll('button')) x.disabled=true;
-    try{
-      const {line}=await post('/api/chat/react',{id,emoji:e});
-      const badge=document.createElement('span'); badge.className='reacted'; badge.textContent=e; strip.replaceWith(badge);
-      if(line){
-        $('chat').insertAdjacentHTML('beforeend','<div class="msg them">'+esc(line)+'</div>');
-        $('chat').scrollTop=$('chat').scrollHeight;
-        if(window.bloub){ window.bloub.notify(); post('/api/expression',{text:line}).then(x=>window.bloub.express(x.emotion)).catch(()=>{}); }
-        void speak(line);
-        setTimeout(load,1200);
-      }
-    }catch(r){ if(r&&r.status===401){location.reload();return;} for(const x of strip.querySelectorAll('button')) x.disabled=false; }
     return;
   }
   if(act==='up'||act==='down'){

@@ -61,7 +61,7 @@ export default function App() {
   // comeback, when there is one, arrives separately as an interjection.
   useEffect(() => window.haru?.chat.onRatedFromPhone(turn => {
     setMessages(current => current.map(message => message.id === turn.id
-      ? { ...message, ...(turn.reaction ? { reaction: turn.reaction } : {}), ...(turn.note !== undefined ? { note: turn.note } : {}), ...(turn.emoji ? { emoji: turn.emoji } : {}) }
+      ? { ...message, ...(turn.reaction ? { reaction: turn.reaction } : {}), ...(turn.note !== undefined ? { note: turn.note } : {}) }
       : message));
   }), []);
   // What is left on this channel is only the handful of lines that belong to an

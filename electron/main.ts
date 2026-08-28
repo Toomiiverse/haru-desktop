@@ -6289,24 +6289,6 @@ function webDeps(): WebDeps {
         return { line: null };
       }
     },
-    /**
-     * An emoji on a reply of hers, from the phone. Read the way a Discord
-     * reaction is read — a heart is adored, a side-eye is doubted — through
-     * the same code, so it moves her mood the same way and earns the same
-     * kind of comeback, on the same ninety-second cooldown. The emoji lands on
-     * the message through the desk, and the rating is written down.
-     */
-    async react(id, emoji) {
-      const history = (store.get('chat.messages') as { id?: string; role: string; content: string }[] | undefined) ?? [];
-      const target = history.find(message => message.id === id && message.role === 'assistant');
-      if (!target) return null;
-      sendToWindows('chat:ratedFromPhone', { id, emoji });
-      appendFeedback({ id, emoji, source: 'phone' });
-      const answer = await reactedOnDiscord(emoji, false, target.content, 'web');
-      const line = answer.ignored || !answer.reply ? null : answer.reply;
-      if (line) sendToWindows('chat:interject', line);
-      return { line };
-    },
     async say(text, attachments) {
       const config = store.get('ai.config') as ProviderConfig | undefined;
       if (!config?.model) throw new Error('no model is set up');
@@ -6678,7 +6660,7 @@ function feedbackFile(): string {
  * One rating written down for later, from whichever side it came. Never
  * throws: a full disk must not cost them the thumb.
  */
-function appendFeedback(about: { id: string; reaction?: 'up' | 'down' | null; note?: unknown; emoji?: string; source: 'phone' | 'desktop' }): void {
+function appendFeedback(about: { id: string; reaction?: 'up' | 'down' | null; note?: unknown; source: 'phone' | 'desktop' }): void {
   const history = (store.get('chat.messages') as { id?: string; role: string; content?: string; reaction?: string }[] | undefined) ?? [];
   const entry = feedbackEntry(history, { ...about, model: (store.get('ai.config') as ProviderConfig | undefined)?.model ?? '', at: new Date().toISOString() });
   if (!entry) return;
