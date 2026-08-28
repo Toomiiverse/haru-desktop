@@ -25,7 +25,7 @@ import { findItem, formatAgenda, missedInstruction, putOffInstruction, tickOffIn
 import { pushbackInstruction, type Pushback } from './pushback';
 import { lookItUpInstruction, type SearchConfig } from './search';
 import { summariseFollowing, type Following } from './following';
-import { NO_INVENTED_HISTORY, NO_NON_SEQUITURS, readsAsRough, roomInstruction } from './room';
+import { CONTINUITY, NO_INVENTED_HISTORY, NO_NON_SEQUITURS, readsAsRough, roomInstruction } from './room';
 import { journalPrompt, journalStance, type JournalConfig, type JournalEntry } from './journal';
 import { familiarity, type Haunt } from './familiar';
 import { formatTimeOfDay, localDateKey } from './dates';
@@ -252,6 +252,9 @@ export function chatSystemPrompt(state: PromptState): string {
     NO_NON_SEQUITURS,
     NO_INVENTED_HISTORY,
     summariseFollowing(state.following, nowMs),
+    // After the persona, so a small model still has it; before the length
+    // rule, which it qualifies — the one thought has to be the right thought.
+    CONTINUITY,
     'Answer what they said and stop. One thought — usually a short paragraph, two if it genuinely needs it. Do not make your point again in different words, do not sweep in a topic they did not raise, and do not finish with a parting flourish or a send-off. Trailing off mid-thought is better than padding.',
     moodInstruction(state.irritation),
     egoInstruction(state.ego),

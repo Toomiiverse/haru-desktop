@@ -218,3 +218,12 @@ test('a day the list disagrees with becomes the subject, and outranks the put-of
   assert.ok(prompt.includes('ask which is right'), 'the disagreement instruction never made it in');
   assert.ok(!prompt.includes('will not get to something'), 'the put-off reading should stand down');
 });
+
+test('a short follow-up is read as continuing the thread, and never echoed back as an opener', () => {
+  const prompt = chatSystemPrompt(state());
+  const continuity = prompt.indexOf('Read the last few turns before answering');
+  assert.notEqual(continuity, -1, 'the continuity rule never made it into the prompt');
+  assert.ok(prompt.includes('an echo cannot'));
+  assert.ok(continuity > prompt.indexOf(IDENTITY), 'it must come after the persona, or a small model forgets it');
+  assert.ok(continuity < prompt.indexOf('Answer what they said and stop'), 'it qualifies the length rule, so it is read first');
+});

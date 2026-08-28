@@ -4205,7 +4205,7 @@ const GLOAT_EXAMPLES = [
  *
  * `onChunk` streams her version to the reader; the hosted one was not shown.
  */
-async function inHerVoice(answer: string, options: { maxTokens?: number; onChunk?: (text: string) => void } = {}): Promise<string> {
+async function inHerVoice(answer: string, recent: { role: string; content: string }[], options: { maxTokens?: number; onChunk?: (text: string) => void } = {}): Promise<string> {
   const local = store.get('ai.config') as ProviderConfig | undefined;
   if (!local?.model || !answer.trim()) return answer;
   const mood = getMood();
@@ -4215,12 +4215,17 @@ async function inHerVoice(answer: string, options: { maxTokens?: number; onChunk
     character.style,
     moodInstruction(mood.irritation),
     egoInstruction(mood.ego),
-    'What follows is what you know about this, and all of it is true. Say it to them as yourself. Do not talk about it — do not call it research, do not say it is correct, do not say where it came from; just say it. Every fact, number, name, price and recommendation in it stays exactly as given and in the same order — a list of seven things is still a list of the same seven things, none dropped, none added — you change only how it is said, and you add nothing you were not given. Keep it about the same length or shorter, and keep a list a list if there is one, in your words. No preamble about having looked anything up, no quotation marks, no stage directions.',
+    // The answer goes in here, as what she knows, and the conversation goes
+    // below as itself — so she is replying to the last thing they said, with
+    // this in hand, rather than to a block of text somebody pasted at her.
+    // Given only the answer she opened every reply by naming the subject.
+    `What you know, to answer the last thing they said — all of it true. Every fact, number, name, price and recommendation in it stays exactly as given and in the same order: a list of seven things is still a list of the same seven things, none dropped, none added. You change only how it is said, and you add nothing you were not given.\n\n${answer}\n\nSay it to them as yourself, continuing the conversation from where it is. Do not open by repeating their words back at them. Do not call it research, do not say it is correct, do not say where it came from — just say it. About the same length or shorter; a list stays a list, in your words. No quotation marks, no stage directions.`,
   ].filter(Boolean).join(' ');
   try {
     const started = Date.now();
     const message = await ollamaPost(
-      [{ role: 'system', content: system }, { role: 'user', content: answer }],
+      // The last few turns, as themselves. Six is enough to know what "it" is.
+      [{ role: 'system', content: system }, ...recent.filter(turn => turn.role === 'user' || turn.role === 'assistant').slice(-6).map(turn => ({ role: turn.role, content: turn.content.slice(0, 600) }))],
       local,
       // A little room over the hosted cap: her version of a list is rarely
       // shorter than the list.
@@ -5216,7 +5221,7 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // is nobody's: a tidy bulleted list with none of her in it, which is exactly
   // what was noticed. Her own model says it again as herself, same facts, her
   // mouth, and that is what the reader watches arrive.
-  const said = brain.escalated ? await inHerVoice(spoken, { ...(away ? { maxTokens: AWAY_MAX_TOKENS } : {}), ...(forwardChunk ? { onChunk: forwardChunk } : {}) }) : spoken;
+  const said = brain.escalated ? await inHerVoice(spoken, messages, { ...(away ? { maxTokens: AWAY_MAX_TOKENS } : {}), ...(forwardChunk ? { onChunk: forwardChunk } : {}) }) : spoken;
   const recent = messages.filter(entry => entry.role === 'assistant').slice(-2).map(entry => entry.content);
   // What she was legitimately given: their message, and whatever is actually
   // on screen. Anything she names beyond that in a closing line was invented.
