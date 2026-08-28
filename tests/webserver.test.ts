@@ -36,6 +36,7 @@ function deps(overrides: Partial<WebDeps> = {}): WebDeps {
     saveAccess: (next) => { stored = next; },
     say: async () => ({ reply: 'Fine.' }),
     sayStream: async (_text, onChunk) => { onChunk('Fine.'); return { reply: 'Fine.' }; },
+    retryStream: async (onChunk) => { onChunk('Again.'); return { reply: 'Again.' }; },
     expression: async () => ({ emotion: null, expression: null }),
     history: () => [],
     agenda: () => [],
@@ -489,5 +490,29 @@ test('an unknown route is a plain 404, not a stack trace', async () => {
     assert.equal(response.status, 404);
     const body = await response.text();
     assert.ok(!body.includes('at '), 'a stack trace reached the phone');
+  } finally { await web.stop(); }
+});
+
+test('her last reply can be asked for again, and only by someone signed in', async () => {
+  const web = await door();
+  try {
+    assert.equal((await web.call('/api/chat/retry', { method: 'POST', body: '{}', anonymous: true })).status, 401);
+    await web.signIn();
+    const again = await web.call('/api/chat/retry', { method: 'POST', body: '{}' });
+    assert.equal(again.status, 200);
+    assert.match(again.headers.get('content-type') ?? '', /text\/event-stream/);
+    const body = await again.text();
+    assert.ok(body.includes('data: {"text":"Again."}'), body);
+    assert.ok(body.includes('data: {"done":true,"reply":"Again.","ignored":false}'), body);
+  } finally { await web.stop(); }
+});
+
+test('nothing of hers to do again is said as much, not as a crash', async () => {
+  const web = await door({ retryStream: async () => null });
+  try {
+    await web.signIn();
+    const again = await web.call('/api/chat/retry', { method: 'POST', body: '{}' });
+    assert.equal(again.status, 200);
+    assert.ok((await again.text()).includes('"error":"There is nothing of hers to do again."'));
   } finally { await web.stop(); }
 });

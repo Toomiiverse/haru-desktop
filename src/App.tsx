@@ -40,13 +40,22 @@ export default function App() {
   // too — otherwise coming back to the desk means finding her half of an
   // exchange missing, and her remembering things that were never said on screen.
   useEffect(() => window.haru?.chat.onFromPhone(turn => {
-    setMessages(current => [
-      ...current,
-      // A file sent from the phone keeps riding here too, so the follow-up
-      // asked at the desk still has the picture in front of her.
-      { id: crypto.randomUUID(), role: 'user' as const, content: turn.text, time: 'now', at: new Date().toISOString(), ...(turn.attachments?.length ? { attachments: turn.attachments } : {}) },
-      ...(turn.ignored ? [] : [{ id: crypto.randomUUID(), role: 'assistant' as const, content: turn.reply, time: 'now', at: new Date().toISOString() }]),
-    ]);
+    setMessages(current => {
+      // Done again from the phone: her last reply is replaced, not joined by a
+      // second one. Only when the last thing here really is hers — otherwise
+      // the desk has moved on and the retry is filed as an ordinary exchange.
+      if (turn.retry && current.at(-1)?.role === 'assistant') {
+        const kept = current.slice(0, -1);
+        return turn.ignored ? kept : [...kept, { id: crypto.randomUUID(), role: 'assistant' as const, content: turn.reply, time: 'now', at: new Date().toISOString() }];
+      }
+      return [
+        ...current,
+        // A file sent from the phone keeps riding here too, so the follow-up
+        // asked at the desk still has the picture in front of her.
+        { id: crypto.randomUUID(), role: 'user' as const, content: turn.text, time: 'now', at: new Date().toISOString(), ...(turn.attachments?.length ? { attachments: turn.attachments } : {}) },
+        ...(turn.ignored ? [] : [{ id: crypto.randomUUID(), role: 'assistant' as const, content: turn.reply, time: 'now', at: new Date().toISOString() }]),
+      ];
+    });
   }), []);
   // What is left on this channel is only the handful of lines that belong to an
   // exchange the user started — "hold on, I'm looking at it" while she opens an

@@ -41,6 +41,13 @@ export type WebDeps = {
    * single U+FFFD — the reader clears what it has and waits for the next chunk.
    */
   sayStream(text: string, onChunk: (chunk: string) => void, attachments?: unknown[]): Promise<{ reply: string; ignored?: boolean }>;
+  /**
+   * Her last reply, done again. The message that prompted it is asked once
+   * more with that reply left out of the history, and the new one takes its
+   * place — on the phone and on the desktop, which owns the conversation.
+   * Same stream contract as sayStream. Null when she has nothing to redo.
+   */
+  retryStream(onChunk: (chunk: string) => void): Promise<{ reply: string; ignored?: boolean } | null>;
   /** Files that ride the next message, staged the way a desktop paste is. */
   attach: {
     /** Copies the bytes into her keeping; returns the staged record the page
@@ -494,6 +501,26 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
     try {
       const answer = await deps.sayStream(text, chunk => emit({ text: chunk }), files);
       emit({ done: true, reply: answer.reply, ignored: Boolean(answer.ignored) });
+    } catch (error) {
+      console.error('[web] ' + (error instanceof Error ? error.message : String(error)));
+      emit({ error: error instanceof Error ? error.message : String(error) });
+    }
+    return res.end();
+  }
+
+  // Her last reply, done again. Same stream as above; the page swaps the bubble
+  // rather than adding one. A reply she never gave cannot be given again.
+  if (req.method === 'POST' && path === '/api/chat/retry') {
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'Cache-Control': 'no-store',
+      'Connection': 'keep-alive',
+    });
+    const emit = (value: unknown) => { if (!res.destroyed) res.write(`data: ${JSON.stringify(value)}\n\n`); };
+    try {
+      const answer = await deps.retryStream(chunk => emit({ text: chunk }));
+      if (!answer) emit({ error: 'There is nothing of hers to do again.' });
+      else emit({ done: true, reply: answer.reply, ignored: Boolean(answer.ignored) });
     } catch (error) {
       console.error('[web] ' + (error instanceof Error ? error.message : String(error)));
       emit({ error: error instanceof Error ? error.message : String(error) });

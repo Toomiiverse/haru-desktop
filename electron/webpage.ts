@@ -1120,7 +1120,7 @@ export function appPage(): string {
 <section id=stage></section>
 <section id=chat></section>
 <div id=chips></div>
-<form class=compose id=cf><button type=button id=att class=icon title="Attach a file">📎</button><button type=button id=mic class=icon title="Hold to talk">🎙</button><textarea id=ci rows=1 placeholder="Say something…"></textarea><button id=cb>Send</button></form>
+<form class=compose id=cf><button type=button id=att class=icon title="Attach a file">📎</button><button type=button id=mic class=icon title="Hold to talk">🎙</button><button type=button id=again class=icon title="Ask her again" disabled>↻</button><textarea id=ci rows=1 placeholder="Say something…"></textarea><button id=cb>Send</button></form>
 <input type=file id=af multiple hidden>
 <script>
 const $=id=>document.getElementById(id);
@@ -1233,6 +1233,33 @@ for(const done of ['pointerup','pointerleave','pointercancel']) mic.addEventList
 ci.addEventListener('input',()=>{ci.style.height='auto';ci.style.height=Math.min(ci.scrollHeight,112)+'px';});
 // Counts sends, only so each waiting bubble can be told from the last one.
 let waiting=0;
+// One reader for both ways a reply arrives — a send and a retry. Words land
+// through show() as the stream delivers them; a U+FFFD means the round was
+// thrown away and the bubble goes back to waiting.
+async function readStream(r,show){
+  const reader=r.body.getReader(); const dec=new TextDecoder();
+  let buf='',said='',reply=null,ignored=false,error=null;
+  while(true){
+    const {done,value}=await reader.read();
+    if(done)break;
+    buf+=dec.decode(value,{stream:true});
+    let at;
+    while((at=buf.indexOf('\\n'))>=0){
+      const line=buf.slice(0,at).trim(); buf=buf.slice(at+1);
+      if(!line.startsWith('data:'))continue;
+      let ev; try{ev=JSON.parse(line.slice(5));}catch{continue;}
+      if(ev.error) error=ev.error;
+      else if(ev.text==='\uFFFD'){ said=''; show('…'); }
+      else if(ev.text){ said+=ev.text; show(said); }
+      else if(ev.done){ reply=ev.reply; ignored=Boolean(ev.ignored); }
+    }
+  }
+  return {reply,ignored,error};
+}
+// Whether there is a reply of hers to do again: the last bubble in the chat is
+// one of hers. Checked after every change to the chat, not on tap, so the
+// button reads as a state and not as a guess.
+function armAgain(){ const last=$('chat').lastElementChild; $('again').disabled=!(last&&last.classList.contains('them')); }
 $('cf').addEventListener('submit',async ev=>{
   ev.preventDefault();
   const text=ci.value.trim(); if(!text&&!staged.length)return;
@@ -1270,23 +1297,7 @@ $('cf').addEventListener('submit',async ev=>{
   try{
     const r=await fetch('/api/chat/stream',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(sent.length?{text,attachments:sent}:{text})});
     if(!r.ok) throw r;
-    const reader=r.body.getReader(); const dec=new TextDecoder();
-    let buf='',said='',reply=null,ignored=false,error=null;
-    while(true){
-      const {done,value}=await reader.read();
-      if(done)break;
-      buf+=dec.decode(value,{stream:true});
-      let at;
-      while((at=buf.indexOf('\\n'))>=0){
-        const line=buf.slice(0,at).trim(); buf=buf.slice(at+1);
-        if(!line.startsWith('data:'))continue;
-        let ev; try{ev=JSON.parse(line.slice(5));}catch{continue;}
-        if(ev.error) error=ev.error;
-        else if(ev.text==='\uFFFD'){ said=''; show('…'); }
-        else if(ev.text){ said+=ev.text; show(said); }
-        else if(ev.done){ reply=ev.reply; ignored=Boolean(ev.ignored); }
-      }
-    }
+    const {reply,ignored,error}=await readStream(r,show);
     if(error) throw new Error(error);
     if(ignored){
       // Whatever she was about to say does not exist: the bubble goes, the note
@@ -1315,10 +1326,50 @@ $('cf').addEventListener('submit',async ev=>{
     if(sent.length){ staged=sent.concat(staged); drawChips(); }
     $('chat').insertAdjacentHTML('beforeend','<div class="msg sys">That did not get through.</div>');
   }finally{
-    $('cb').disabled=false; $('chat').scrollTop=$('chat').scrollHeight;
+    $('cb').disabled=false; $('chat').scrollTop=$('chat').scrollHeight; armAgain();
   }
 });
-load();
+load().then(armAgain);
+
+// ---- Her last reply, done again --------------------------------------------
+//
+// A reply that got cut off, or that was not her, is asked for again: same
+// message, her last answer left out, and the new one lands in the same bubble.
+// The old words stay on screen until the new ones start arriving, and come
+// back if nothing does.
+$('again').onclick=async()=>{
+  const last=$('chat').lastElementChild;
+  if(!last||!last.classList.contains('them')||$('cb').disabled) return;
+  const before=last.textContent;
+  const id='wait'+(++waiting); last.id=id;
+  $('cb').disabled=true; $('again').disabled=true;
+  primeVoice();
+  if(window.bloub) window.bloub.think();
+  const show=t=>{const bubble=document.getElementById(id); if(!bubble) return false; bubble.textContent=t; $('chat').scrollTop=$('chat').scrollHeight; return true;};
+  show('…');
+  try{
+    const r=await fetch('/api/chat/retry',{method:'POST',headers:{'content-type':'application/json'},body:'{}'});
+    if(!r.ok) throw r;
+    const {reply,ignored,error}=await readStream(r,show);
+    if(error) throw new Error(error);
+    if(ignored){
+      const bubble=document.getElementById(id); if(bubble) bubble.remove();
+      $('chat').insertAdjacentHTML('beforeend','<div class="msg sys">She is not answering that.</div>');
+    } else if(reply!==null){
+      show(reply);
+      if(reply){
+        if(window.bloub){ window.bloub.notify(); post('/api/expression',{text:reply}).then(x=>window.bloub.express(x.emotion)).catch(()=>{}); }
+        void speak(reply);
+      }
+    }
+  }catch(r){
+    if(r&&r.status===401){location.reload();return;}
+    show(before);
+    $('chat').insertAdjacentHTML('beforeend','<div class="msg sys">That did not get through.</div>');
+  }finally{
+    $('cb').disabled=false; armAgain();
+  }
+};
 
 // ---- Files that ride the next message --------------------------------------
 //

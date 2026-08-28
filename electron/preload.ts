@@ -222,8 +222,8 @@ contextBridge.exposeInMainWorld('haru', {
     },
     // Said from a phone. The renderer owns the conversation and writes it to
     // disk, so both halves are handed to it rather than saved behind its back.
-    onFromPhone: (callback: (turn: { text: string; reply: string; ignored: boolean; attachments?: Attachment[] }) => void) => {
-      const listener = (_event: Electron.IpcRendererEvent, turn: { text: string; reply: string; ignored: boolean; attachments?: Attachment[] }) => callback(turn);
+    onFromPhone: (callback: (turn: { text: string; reply: string; ignored: boolean; retry?: boolean; attachments?: Attachment[] }) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, turn: { text: string; reply: string; ignored: boolean; retry?: boolean; attachments?: Attachment[] }) => callback(turn);
       ipcRenderer.on('chat:fromPhone', listener);
       return () => ipcRenderer.removeListener('chat:fromPhone', listener);
     },

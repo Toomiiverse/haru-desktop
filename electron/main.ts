@@ -4214,7 +4214,7 @@ async function inHerVoice(answer: string, options: { maxTokens?: number; onChunk
     character.style,
     moodInstruction(mood.irritation),
     egoInstruction(mood.ego),
-    'What follows is the substance of what you are about to say — the research is done and it is correct. Say it as yourself, to them. Every fact, number, name, price and recommendation in it stays exactly as given and in the same order — a list of seven things is still a list of the same seven things, none dropped, none added — you change only how it is said, and you add nothing you were not given. Keep it about the same length or shorter, and keep a list a list if there is one, in your words. No preamble about having looked anything up, no quotation marks, no stage directions.',
+    'What follows is what you know about this, and all of it is true. Say it to them as yourself. Do not talk about it — do not call it research, do not say it is correct, do not say where it came from; just say it. Every fact, number, name, price and recommendation in it stays exactly as given and in the same order — a list of seven things is still a list of the same seven things, none dropped, none added — you change only how it is said, and you add nothing you were not given. Keep it about the same length or shorter, and keep a list a list if there is one, in your words. No preamble about having looked anything up, no quotation marks, no stage directions.',
   ].filter(Boolean).join(' ');
   try {
     const started = Date.now();
@@ -5229,8 +5229,14 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // that survive everything else rather than the ones about to be dropped.
   // "ran" is what she actually reached for this turn, which is a fact about
   // the reply rather than a guess from its text.
-  const trimmed = dropRoleHeader(dropInventedContact(dropStageDirections(dropInventedScreenTalk(dropRepeatedParagraphs(deduped, recent), grounded))));
-  const content = dropTackedOnParagraphs(trimmed, ran.has('search_web') || ran.has('read_web_page'));
+  // The repeat and padding filters catch the local model's tics — saying last
+  // reply's paragraph over again, tacking a third topic on — and a research
+  // answer said in her voice has neither. A comparison of two models repeats
+  // their names from the list she gave ten minutes earlier because that is the
+  // answer, and its length is the world's. Asked to compare Qwen and Gemma she
+  // came back with 930 characters and these two left 107 — the opening dig.
+  const trimmed = dropRoleHeader(dropInventedContact(dropStageDirections(dropInventedScreenTalk(brain.escalated ? deduped : dropRepeatedParagraphs(deduped, recent), grounded))));
+  const content = dropTackedOnParagraphs(trimmed, brain.escalated || ran.has('search_web') || ran.has('read_web_page'));
   if (content !== said) console.log(`[ai] dropped ${said.length - content.length} chars she had already said`);
   console.log(`[ai] chat reply in ${Date.now() - started}ms, ${content.length} chars`);
   // Cleared only once a reply actually exists, so a failed or unreachable turn
@@ -6284,6 +6290,38 @@ function webDeps(): WebDeps {
       trace.mark('reply');
       sendToWindows('chat:fromPhone', { text, reply, ignored: Boolean(answer.ignored), ...(files.length ? { attachments: files } : {}) });
       console.log(`[web] streamed ${text.length} chars in ${Date.now() - started}ms, ${reply.length} chars (${messages.length} messages of history${files.length ? `, ${files.length} file(s)` : ''})`);
+      trace.done('web', { tier: 'llm', chars: reply.length });
+      return { reply, ignored: answer.ignored };
+    },
+    /**
+     * Her last reply, done again.
+     *
+     * The history is read back to the message that prompted it — their words,
+     * their files — that reply is left out, and she is asked once more. The
+     * desktop is told to swap the reply rather than add a turn, because it
+     * owns the conversation. Asked for when a reply was cut short, or was not
+     * her.
+     */
+    async retryStream(onChunk) {
+      const config = store.get('ai.config') as ProviderConfig | undefined;
+      if (!config?.model) throw new Error('no model is set up');
+      const history = (store.get('chat.messages') as { role: string; content: string; at?: string; attachments?: Attachment[] }[] ?? []);
+      const last = history.at(-1);
+      const prompt = history.at(-2);
+      if (!last || last.role !== 'assistant' || !prompt || prompt.role !== 'user') return null;
+      const trace = newTrace();
+      const started = Date.now();
+      const answer = await ollamaChat(history.slice(0, -1), config, {
+        hands: false,
+        away: 'the phone asked for it again',
+        traceId: trace.id,
+        onChunk: chunk => { trace.mark('first'); onChunk(chunk); },
+        onChunkReset: () => { trace.unmark('first'); onChunk('\uFFFD'); },
+      });
+      const reply = answer.content ?? '';
+      trace.mark('reply');
+      sendToWindows('chat:fromPhone', { text: prompt.content, reply, ignored: Boolean(answer.ignored), retry: true, ...(prompt.attachments?.length ? { attachments: prompt.attachments } : {}) });
+      console.log(`[web] said it again in ${Date.now() - started}ms, ${reply.length} chars`);
       trace.done('web', { tier: 'llm', chars: reply.length });
       return { reply, ignored: answer.ignored };
     },
