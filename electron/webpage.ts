@@ -71,36 +71,40 @@ const SHELL = `
 // kept; the geometry is not, because these files do not share a path topology
 // and are not ours to redraw.
 //
-// The engine decides WHAT is shown: it is pure and clock-free, takes a time
-// with every call, and sample(t) returns the frame for that time — which face,
-// which face is leaving, how far along, and the opacity of each — so it can be
-// tested with numbers and frozen at an instant. A change of face that arrives
-// mid-fade starts from what is visible: the outgoing face keeps the opacity it
-// had, the incoming one starts from nothing, and nothing jumps. idle(t) is the
-// same idea for how she moves while wearing a face: a float, a sway and a
-// breath on the face's own period, from the catalogue.
+// The engine decides WHAT is shown and where she is looking. It is pure and
+// clock-free: sample(t) is the frame for a time — which face, which face is
+// leaving, how far along, the opacity of each; idle(t) how she floats wearing
+// it; gaze(t) where her eyes rest, a wander of short looks and long rests on
+// a beat hashed from the time, so it never repeats on a schedule and never
+// depends on a clock. All three can be tested with numbers.
 //
 // The renderer decides HOW. Each face is the SVG itself, fetched once and put
-// into the page as markup rather than shown through an <img>: the files ship a
-// black square behind her — a full-canvas path, first in every file — and only
-// inline can that one element be hidden at render time, on the page, without
-// touching the file. Two layers, opacity, a CSS transition with the engine's
-// own easing; the idle float and the little settle on a change of face are
-// CSS animations driven by the same numbers. A reduced-motion setting stops
-// all of it. The API the rest of the page speaks — express / think / notify /
-// poke / state — is the one the old avatar had.
+// into the page as markup, because the files ship a black square behind her
+// and only inline can that one element be hidden without touching the file —
+// and because only inline are her eyes reachable. They are found by geometry
+// at mount (the files carry no ids): a mirrored pair of small dark shapes in
+// the band where her eyes are, not pink, not the backdrop. Those two paths get
+// a class and a CSS transform, and her attention — the wander, or them typing,
+// or her talking, or a pointer — becomes two variables the transform reads.
+// The float lives on the outer element and never restarts; the settle on a
+// change of face, and the pop when she talks, live on a body inside it, so
+// nothing about a change of face moves her from where the float had her. A
+// reduced-motion setting stops all of it.
 const AVATAR = `
 (() => {
   const EMOTIONS = ${JSON.stringify(HARU_EMOTIONS)};
   const LABELS = ${JSON.stringify(Object.fromEntries(HARU_EMOTIONS.map(name => [name, emotionConfig[name].label])))};
   const TRANSITIONS = ${JSON.stringify(Object.fromEntries(HARU_EMOTIONS.map(name => [name, emotionConfig[name].transition])))};
   const IDLE = ${JSON.stringify(Object.fromEntries(HARU_EMOTIONS.map(name => [name, emotionConfig[name].idle])))};
+  const GAZE = ${JSON.stringify(Object.fromEntries(HARU_EMOTIONS.map(name => [name, emotionConfig[name].gaze])))};
   const ADAPT = ${JSON.stringify(MOOD_TO_EMOTION)};
   const EASE_CSS = ${JSON.stringify(EASE_OUT_CSS)};
   const TAU = Math.PI * 2;
-  const clamp = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
+  const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
   // Cubic ease-out: deterministic, no overshoot, the same curve as EASE_CSS.
   const easeOut = (p) => 1 - Math.pow(1 - p, 3);
+  // A number in [0,1) for an integer, the same every time: the beat of the wander.
+  const hashN = (n) => { const x = Math.sin(n * 12.9898 + 78.233) * 43758.5453; return x - Math.floor(x); };
 
   // ---- the engine: pure, clock-free ------------------------------------
   function createEmotionEngine(options) {
@@ -108,29 +112,37 @@ const AVATAR = `
     let emotion = 'neutral', previous = null, startedAt = -Infinity, leavingFrom = 0, arrivingFrom = 1;
     const progress = (t) => {
       const d = previous === null ? 0 : (TRANSITIONS[emotion] === 'cut' ? 0 : duration());
-      return d <= 0 ? 1 : clamp((t - startedAt) / d);
+      return d <= 0 ? 1 : clamp((t - startedAt) / d, 0, 1);
     };
     const engine = {
-      /** The frame at time t. */
       sample(t) {
         const p = easeOut(progress(t));
         const opacity = arrivingFrom + (1 - arrivingFrom) * p;
         const previousOpacity = previous === null ? 0 : leavingFrom * (1 - p);
         return { emotion: emotion, previousEmotion: previous, transitionProgress: p, opacity: opacity, previousOpacity: previousOpacity, transitioning: p < 1 };
       },
-      /** How she is moving at time t, wearing this face: offsets a renderer or a test can use. */
       idle(t) {
         const m = IDLE[emotion] || IDLE.neutral;
         const phase = (t / m.periodMs) * TAU;
         return { bob: Math.sin(phase) * m.bobPx, sway: Math.sin(phase * 0.5 + 1.3) * m.swayDeg, breath: 1 + (1 - Math.cos(phase)) / 2 * m.breath, periodMs: m.periodMs };
       },
-      /** A new face at time t. Returns whether anything changed. */
+      // Where her eyes rest at t, in [-1,1] each way, before anyone claims her
+      // attention. Beats of about three seconds; on most beats she looks back
+      // to centre and rests, on the others she looks somewhere and holds it,
+      // with a little drift throughout so a rest is never a freeze.
+      gaze(t) {
+        const beat = Math.floor(t / 3000);
+        const r = hashN(beat), a = hashN(beat + 1000) * TAU, d = 0.35 + hashN(beat + 2000) * 0.65;
+        const looking = r > 0.55;
+        const x = (looking ? Math.cos(a) * d : 0) + Math.sin(t / 2300) * 0.06;
+        const y = (looking ? Math.sin(a) * d * 0.6 : 0) + Math.sin(t / 3100 + 1) * 0.04;
+        return { x: clamp(x, -1, 1), y: clamp(y, -1, 1), looking: looking, beat: beat };
+      },
       set(next, t) {
         if (EMOTIONS.indexOf(next) < 0) next = 'neutral';
         if (next === emotion) return false;
         const now = engine.sample(t);
         previous = emotion; emotion = next; startedAt = t;
-        // From what is visible: the face now leaving keeps the opacity it had.
         leavingFrom = now.opacity; arrivingFrom = 0;
         return true;
       },
@@ -141,58 +153,106 @@ const AVATAR = `
   }
   window.HaruEmotionEngine = createEmotionEngine;
 
-  // ---- the renderer: two layers of inline SVG and an opacity ------------
+  // ---- finding her eyes in a file that names nothing -------------------
+  // The bounding box of a path, walking its commands, relative ones included.
+  function pathBox(d) {
+    const tokens = d.match(/[MmLlHhVvCcSsQqTtAaZz]|-?\\d*\\.?\\d+(?:e-?\\d+)?/g) || [];
+    let i = 0, cmd = null, x = 0, y = 0, sx = 0, sy = 0, x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity, n = 0;
+    const mark = (px, py) => { if (px < x0) x0 = px; if (py < y0) y0 = py; if (px > x1) x1 = px; if (py > y1) y1 = py; n++; };
+    const num = () => Number(tokens[i++]);
+    while (i < tokens.length) {
+      const t = tokens[i];
+      if (/[A-Za-z]/.test(t)) { cmd = t; i++; continue; }
+      if (!cmd) { i++; continue; }
+      const rel = cmd === cmd.toLowerCase(), C = cmd.toUpperCase();
+      if (C === 'M') { const px = num(), py = num(); x = rel ? x + px : px; y = rel ? y + py : py; sx = x; sy = y; mark(x, y); cmd = rel ? 'l' : 'L'; }
+      else if (C === 'L') { const px = num(), py = num(); x = rel ? x + px : px; y = rel ? y + py : py; mark(x, y); }
+      else if (C === 'H') { const px = num(); x = rel ? x + px : px; mark(x, y); }
+      else if (C === 'V') { const py = num(); y = rel ? y + py : py; mark(x, y); }
+      else if (C === 'C') { const ox = rel ? x : 0, oy = rel ? y : 0; mark(ox + num(), oy + num()); mark(ox + num(), oy + num()); x = ox + num(); y = oy + num(); mark(x, y); }
+      else if (C === 'S' || C === 'Q') { const ox = rel ? x : 0, oy = rel ? y : 0; mark(ox + num(), oy + num()); x = ox + num(); y = oy + num(); mark(x, y); }
+      else if (C === 'T') { const ox = rel ? x : 0, oy = rel ? y : 0; x = ox + num(); y = oy + num(); mark(x, y); }
+      else if (C === 'A') { const ox = rel ? x : 0, oy = rel ? y : 0; i += 5; x = ox + num(); y = oy + num(); mark(x, y); }
+      else if (C === 'Z') { x = sx; y = sy; }
+      else { i++; }
+    }
+    return n ? { x0: x0, y0: y0, x1: x1, y1: y1, w: x1 - x0, h: y1 - y0, cx: (x0 + x1) / 2, cy: (y0 + y1) / 2 } : null;
+  }
+  // The fill a path actually has: its own, or the nearest group's.
+  function fillOf(el) { for (let n = el; n && n.getAttribute; n = n.parentNode) { const f = n.getAttribute('fill'); if (f) return f.toLowerCase(); } return ''; }
+  const pinkish = (fill) => { const m = /^#([0-9a-f]{6})$/.exec(fill); if (!m) return false; const v = parseInt(m[1], 16); const r = v >> 16, g = (v >> 8) & 255, b = v & 255; return r > 200 && b > 140 && g < 215 && r - g > 40; };
+  // A path or rect that covers the whole canvas is a backdrop, not her.
+  function coversCanvas(el, box, x, y, w, h) {
+    if (el.nodeName.toLowerCase() === 'rect') return Number(el.getAttribute('x') || 0) <= x && Number(el.getAttribute('y') || 0) <= y && Number(el.getAttribute('width')) >= w && Number(el.getAttribute('height')) >= h;
+    return !!box && box.x0 <= x + 1 && box.y0 <= y + 1 && box.x1 >= x + w - 1 && box.y1 >= y + h - 1 && (el.getAttribute('d') || '').length < 200;
+  }
+  // Her eyes: two small dark shapes, one each side of the middle, level with
+  // each other, in the band where her eyes are. Sizes may differ — confused
+  // has one eye wide and one narrow — but not wildly. The largest such pair
+  // wins, which tells eyes from the blush beneath them.
+  function findEyes(paths, W, H) {
+    const band = paths.filter((p) => p.box && p.box.w < W * 0.16 && p.box.h < H * 0.16 && p.box.cy > H * 0.58 && p.box.cy < H * 0.74 && !pinkish(p.fill) && p.fill !== '#000000');
+    const left = band.filter((p) => p.box.cx > W * 0.32 && p.box.cx < W * 0.46), right = band.filter((p) => p.box.cx > W * 0.54 && p.box.cx < W * 0.68);
+    let best = null, score = 0;
+    for (const a of left) for (const b of right) {
+      if (Math.abs(a.box.cy - b.box.cy) > H * 0.04 || Math.abs(a.box.w - b.box.w) > W * 0.06 || Math.abs(a.box.h - b.box.h) > H * 0.06) continue;
+      const area = a.box.w * a.box.h + b.box.w * b.box.h;
+      if (area > score) { score = area; best = [a.el, b.el]; }
+    }
+    return best;
+  }
+
+  // ---- the renderer ------------------------------------------------------
   const host = document.getElementById('stage');
   if (!host) return;
   const data = host.dataset || {};
   const reduced = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  const finePointer = !!(window.matchMedia && window.matchMedia('(pointer: fine)').matches);
   let fade = Number(data.transition) || ${DEFAULT_TRANSITION_MS};
   if (data.size) host.style.setProperty('--avatar-size', data.size + 'px');
-  host.innerHTML = '<div id=avatar role=img aria-label="' + LABELS.neutral + '"><div class=face></div><div class=face></div></div>';
+  host.innerHTML = '<div id=avatar role=img aria-label="' + LABELS.neutral + '"><div id=avatar-body><div class=face></div><div class=face></div></div></div>';
   const box = document.getElementById('avatar');
+  const body = document.getElementById('avatar-body');
   const faces = box.querySelectorAll('.face');
   const engine = createEmotionEngine({ duration: () => (reduced ? 0 : fade) });
   const clock = () => (typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now());
-  let front = 0, resting = 'neutral', timer = null, frozenAt = null, request = 0;
+  let front = 0, resting = 'neutral', timer = null, frozenAt = null, request = 0, eyes = null;
   const cache = {};
 
-  // The file, once. The route caches it for a week and so does the browser;
-  // after the first sight of a face this is a lookup, not a request.
   function load(name) {
     if (cache[name]) return Promise.resolve(cache[name]);
     return fetch('/emotions/' + name + '.svg').then((r) => { if (!r.ok) throw new Error('face ' + r.status); return r.text(); }).then((text) => { cache[name] = text; return text; });
   }
-  // A path or rect that covers the whole canvas is a backdrop, not her.
-  function coversCanvas(el, x, y, w, h) {
-    if (el.nodeName.toLowerCase() === 'rect') {
-      return Number(el.getAttribute('x') || 0) <= x && Number(el.getAttribute('y') || 0) <= y && Number(el.getAttribute('width')) >= w && Number(el.getAttribute('height')) >= h;
-    }
-    const numbers = (el.getAttribute('d') || '').match(/-?\\d+(?:\\.\\d+)?/g);
-    if (!numbers || numbers.length > 12) return false;
-    const pts = []; for (let i = 0; i + 1 < numbers.length; i += 2) pts.push([Number(numbers[i]), Number(numbers[i + 1])]);
-    const has = (px, py) => pts.some((p) => Math.abs(p[0] - px) < 1 && Math.abs(p[1] - py) < 1);
-    return has(x, y) && has(x + w, y) && has(x + w, y + h) && has(x, y + h);
-  }
-  // The SVG into a layer, as itself: its own viewBox, scaled to the box,
-  // never stretched, with the backdrop marked so the page can hide it.
+  // The SVG into a layer, as itself: its own viewBox, scaled to the box, never
+  // stretched; the backdrop marked so the page can hide it; the eyes marked
+  // so the page can move them.
   function mount(layer, text) {
     const svg = new DOMParser().parseFromString(text, 'image/svg+xml').documentElement;
     if (!svg || svg.nodeName.toLowerCase() !== 'svg') throw new Error('not a face');
     svg.removeAttribute('width'); svg.removeAttribute('height');
     svg.setAttribute('preserveAspectRatio', 'xMidYMid meet'); svg.setAttribute('aria-hidden', 'true'); svg.setAttribute('focusable', 'false');
     const vb = (svg.getAttribute('viewBox') || '').trim().split(/[\\s,]+/).map(Number);
-    if (vb.length === 4) for (const el of svg.querySelectorAll('path, rect')) if (coversCanvas(el, vb[0], vb[1], vb[2], vb[3])) el.setAttribute('class', 'backdrop');
+    let found = null;
+    if (vb.length === 4) {
+      const paths = [];
+      for (const el of svg.querySelectorAll('path, rect')) {
+        const box = el.nodeName.toLowerCase() === 'path' ? pathBox(el.getAttribute('d') || '') : null;
+        if (coversCanvas(el, box, vb[0], vb[1], vb[2], vb[3])) { el.setAttribute('class', 'backdrop'); continue; }
+        paths.push({ el: el, box: box, fill: fillOf(el) });
+      }
+      found = findEyes(paths, vb[2], vb[3]);
+      if (found) for (const eye of found) eye.setAttribute('class', 'eye');
+    }
     layer.replaceChildren(document.adoptNode ? document.adoptNode(svg) : svg);
+    return found;
   }
   // How she moves while wearing this face, handed to the CSS that moves her.
+  // The period is the engine's; the float's own period stays put, because a
+  // running animation given a new duration jumps.
   function idleFor(name) {
     const m = IDLE[name] || IDLE.neutral;
-    box.style.setProperty('--idle-period', m.periodMs + 'ms'); box.style.setProperty('--idle-bob', m.bobPx + 'px');
-    box.style.setProperty('--idle-sway', m.swayDeg + 'deg'); box.style.setProperty('--idle-breath', String(1 + m.breath));
+    box.style.setProperty('--idle-bob', m.bobPx + 'px'); box.style.setProperty('--idle-sway', m.swayDeg + 'deg'); box.style.setProperty('--idle-breath', String(1 + m.breath));
   }
-  // What the DOM shows for a frame. With a duration the browser eases the two
-  // opacities from wherever they are, which is the engine's rule made of CSS;
-  // frozen, or reduced, the frame's own numbers are written and nothing moves.
   function paint(frame, animate) {
     const fore = faces[front], back = faces[1 - front];
     const ease = animate && !reduced && engine.duration() > 0 ? 'opacity ' + engine.duration() + 'ms ' + EASE_CSS : 'none';
@@ -201,10 +261,7 @@ const AVATAR = `
     back.style.opacity = animate ? '0' : String(frame.previousOpacity);
     fore.classList.add('on'); back.classList.remove('on');
   }
-  function settle() {
-    if (reduced || frozenAt !== null) return;
-    box.classList.remove('changed'); if (typeof box.offsetWidth === 'number') void box.offsetWidth; box.classList.add('changed');
-  }
+  function replay(el, cls) { el.classList.remove(cls); if (typeof el.offsetWidth === 'number') void el.offsetWidth; el.classList.add(cls); }
   function show(name, t) {
     if (!engine.set(name, t)) return;
     const frame = engine.sample(t);
@@ -212,36 +269,72 @@ const AVATAR = `
     box.setAttribute('aria-label', LABELS[frame.emotion] || ('Haru feeling ' + frame.emotion));
     const incoming = faces[1 - front];
     load(frame.emotion).then((text) => {
-      if (mine !== request) return; // a newer face is on its way
+      if (mine !== request) return;
       incoming.classList.remove('missing');
-      mount(incoming, text);
+      eyes = mount(incoming, text);
       front = 1 - front;
       idleFor(frame.emotion);
       paint(frozenAt === null ? frame : engine.sample(frozenAt), frozenAt === null);
-      settle();
+      if (!reduced && frozenAt === null) replay(body, 'changed');
+      look();
     }).catch(() => { if (mine === request) { incoming.replaceChildren(); incoming.classList.add('missing'); } });
   }
   function settleBack(ms) { clearTimeout(timer); timer = setTimeout(() => show(resting, clock()), ms); }
-  // What a prod does to her face, and for how long, before she settles back.
   const POKES = { exclaim: ['angry', 2000], burst: ['surprised', 1600], orbit: ['excited', 1600], comet: ['surprised', 1600], play: ['happy', 1600] };
 
+  // ---- attention: where the eyes go, and why ----------------------------
+  // The wander is the engine's. Over it, in order: a pointer she can see, them
+  // typing (down, at the box), her talking (at them), her thinking (up and
+  // away). Each claim expires, so silence hands her back to the wander.
+  const RANGE_X = 16, RANGE_Y = 9; // user units of the artwork, at any size
+  let claim = null, claimUntil = 0, pointer = null, pointerAt = 0;
+  function target(t) {
+    const strength = GAZE[engine.emotion()] === undefined ? 1 : GAZE[engine.emotion()];
+    if (!strength) return { x: 0, y: 0, why: 'fixed' };
+    if (pointer && t - pointerAt < 4000) return { x: pointer.x, y: pointer.y, why: 'pointer' };
+    if (claim && t < claimUntil) return claim.why === 'typing' ? { x: 0.15, y: 0.9, why: 'typing' } : claim.why === 'talking' ? { x: 0, y: 0.15, why: 'talking' } : { x: 0, y: 0, why: claim.why };
+    if (engine.emotion() === 'thinking') return { x: -0.7, y: -0.8, why: 'thinking' };
+    const g = engine.gaze(t);
+    return { x: g.x * strength, y: g.y * strength, why: g.looking ? 'looking' : 'resting' };
+  }
+  function look() {
+    if (frozenAt !== null || reduced) { box.style.setProperty('--gaze-x', '0px'); box.style.setProperty('--gaze-y', '0px'); return; }
+    const at = target(clock());
+    box.style.setProperty('--gaze-x', (at.x * RANGE_X).toFixed(1) + 'px');
+    box.style.setProperty('--gaze-y', (at.y * RANGE_Y).toFixed(1) + 'px');
+  }
+  // Sampled, not animated: the CSS transition on the eyes carries each new
+  // target smoothly, so four looks a second is plenty and costs nothing.
+  const gazeTimer = setInterval(look, 250);
+  if (finePointer) {
+    window.addEventListener('pointermove', (e) => {
+      if (e.pointerType === 'touch') return;
+      const r = box.getBoundingClientRect ? box.getBoundingClientRect() : null; if (!r || !r.width) return;
+      const hw = Math.max(1, window.innerWidth / 2), hh = Math.max(1, window.innerHeight / 2);
+      pointer = { x: clamp((e.clientX - (r.left + r.width / 2)) / hw, -1, 1), y: clamp((e.clientY - (r.top + r.height / 2)) / hh, -1, 1) }; pointerAt = clock();
+    });
+    document.addEventListener('pointerleave', () => { pointer = null; });
+  }
+
   window.haruAvatar = {
-    // Her mood for a line: the resting face, until the next one.
     express: (emotion) => { resting = ADAPT[emotion] || (EMOTIONS.indexOf(emotion) >= 0 ? emotion : 'neutral'); clearTimeout(timer); show(resting, clock()); },
-    // They sent something: she thinks until the reply's mood lands, or for a long while.
     think: () => { clearTimeout(timer); show('thinking', clock()); settleBack(20000); },
-    // She is starting to talk: a small pop, not a change of face.
-    notify: () => { if (frozenAt !== null || reduced) return; box.classList.remove('pop'); if (typeof box.offsetWidth === 'number') void box.offsetWidth; box.classList.add('pop'); },
+    // She is starting to talk: a small pop, and she looks at them.
+    notify: () => { if (frozenAt !== null || reduced) return; replay(body, 'pop'); window.haruAvatar.attend('talking', 2500); },
     poke: (what) => { const hit = POKES[what]; if (!hit) return; clearTimeout(timer); show(hit[0], clock()); settleBack(hit[1]); },
-    // The frame at a time, from the engine: what a test, a thumbnail or a
-    // future editor would ask for. Playback stopped, that is what is drawn.
+    // Something has her attention for a while: 'typing', 'talking', or 'here'
+    // (at them). Nothing, or a spent claim, and the wander has her back.
+    attend: (why, ms) => { claim = why ? { why: why } : null; claimUntil = clock() + (ms === undefined ? 1500 : ms); look(); },
     sample: (t) => engine.sample(t === undefined ? clock() : t),
     idle: (t) => engine.idle(t === undefined ? clock() : t),
-    freeze: (t) => { frozenAt = t === undefined ? clock() : t; box.classList.add('frozen'); paint(engine.sample(frozenAt), false); },
-    play: () => { frozenAt = null; box.classList.remove('frozen'); paint(engine.sample(clock()), false); },
+    gaze: (t) => target(t === undefined ? clock() : t),
+    eyes: () => (eyes ? eyes.length : 0),
+    freeze: (t) => { frozenAt = t === undefined ? clock() : t; box.classList.add('frozen'); paint(engine.sample(frozenAt), false); look(); },
+    play: () => { frozenAt = null; box.classList.remove('frozen'); paint(engine.sample(clock()), false); look(); },
     state: () => { const f = engine.sample(frozenAt === null ? clock() : frozenAt); return { emotion: f.emotion, previousEmotion: f.previousEmotion, transitionProgress: f.transitionProgress, resting: resting, frozen: frozenAt !== null }; },
     setSize: (px) => host.style.setProperty('--avatar-size', px + 'px'),
-    setTransition: (ms) => { fade = Math.max(0, Number(ms) || 0); }
+    setTransition: (ms) => { fade = Math.max(0, Number(ms) || 0); },
+    stop: () => clearInterval(gazeTimer)
   };
   idleFor('neutral');
   show('neutral', clock());
@@ -373,26 +466,36 @@ export function appPage(): string {
   /* Her, on stage: the supplied Haru artwork, one SVG per emotion, put into the
      page as itself and crossfaded. Square, sized by --avatar-size, never
      stretched; the black square the files ship behind her is hidden here, so
-     she sits on whatever the page is, light or dark. She floats, sways and
-     breathes on her face's own period, and settles when the face changes. */
+     she sits on whatever the page is, light or dark. The float lives on the
+     outer element and never restarts; the settle on a change of face and the
+     pop when she talks live on the body inside it. Her eyes carry a transform
+     that two variables move, eased, wherever her attention is. */
+  @property --idle-bob { syntax:'<length>'; inherits:false; initial-value:4px; }
+  @property --idle-sway { syntax:'<angle>'; inherits:false; initial-value:1.2deg; }
+  @property --idle-breath { syntax:'<number>'; inherits:false; initial-value:1.015; }
+  @property --gaze-x { syntax:'<length>'; inherits:true; initial-value:0px; }
+  @property --gaze-y { syntax:'<length>'; inherits:true; initial-value:0px; }
   #stage { flex:0 0 auto; display:flex; justify-content:center; align-items:center; padding:.35rem 1rem 0; cursor:pointer; --avatar-size:min(31vw, 136px); }
   #avatar { position:relative; width:var(--avatar-size); height:var(--avatar-size); transform-origin:50% 62%;
-    --idle-period:4000ms; --idle-bob:4px; --idle-sway:1.2deg; --idle-breath:1.015;
-    animation:float var(--idle-period) ease-in-out infinite; }
+    --idle-bob:4px; --idle-sway:1.2deg; --idle-breath:1.015; --gaze-x:0px; --gaze-y:0px;
+    transition:--idle-bob .8s ease, --idle-sway .8s ease, --idle-breath .8s ease, --gaze-x .38s cubic-bezier(0.33, 1, 0.68, 1), --gaze-y .38s cubic-bezier(0.33, 1, 0.68, 1);
+    animation:float 3800ms ease-in-out infinite; }
+  #avatar-body { position:absolute; inset:0; transform-origin:50% 60%; }
   #avatar .face { position:absolute; inset:0; opacity:0; }
   #avatar .face svg { display:block; width:100%; height:100%; }
   #avatar .face .backdrop { display:none; }
+  #avatar .face .eye { transform:translate(var(--gaze-x), var(--gaze-y)); transform-box:fill-box; transform-origin:center; }
   #avatar .face.missing { visibility:hidden; }
-  #avatar.changed { animation:float var(--idle-period) ease-in-out infinite, settle .45s cubic-bezier(0.33, 1, 0.68, 1); }
-  #avatar.pop { animation:float var(--idle-period) ease-in-out infinite, pop .5s cubic-bezier(0.33, 1, 0.68, 1); }
-  #avatar.frozen { animation-play-state:paused; }
+  #avatar-body.changed { animation:settle .45s cubic-bezier(0.33, 1, 0.68, 1); }
+  #avatar-body.pop { animation:pop .5s cubic-bezier(0.33, 1, 0.68, 1); }
+  #avatar.frozen, #avatar.frozen #avatar-body { animation-play-state:paused; }
   @keyframes float {
     0%, 100% { transform:translateY(calc(var(--idle-bob) * -1)) rotate(calc(var(--idle-sway) * -1)) scale(1); }
     50% { transform:translateY(var(--idle-bob)) rotate(var(--idle-sway)) scale(var(--idle-breath)); }
   }
   @keyframes settle { 0% { scale:.94; } 55% { scale:1.04; } 100% { scale:1; } }
   @keyframes pop { 30% { scale:1.06; } }
-  @media (prefers-reduced-motion: reduce) { #avatar, #avatar.changed, #avatar.pop { animation:none !important; } #avatar .face { transition:none !important; } }
+  @media (prefers-reduced-motion: reduce) { #avatar, #avatar-body { animation:none !important; transition:none !important; } #avatar .face { transition:none !important; } }
 
   /* A wide window is not a big phone. Stretched across a desktop browser the
      bubbles ran the full 1700px and the text became unreadable at about six
@@ -556,7 +659,9 @@ function stopHearing(){ if(recorder&&recorder.state!=='inactive') recorder.stop(
 mic.addEventListener('pointerdown',e=>{e.preventDefault();startHearing();});
 for(const done of ['pointerup','pointerleave','pointercancel']) mic.addEventListener(done,stopHearing);
 
-ci.addEventListener('input',()=>{ci.style.height='auto';ci.style.height=Math.min(ci.scrollHeight,112)+'px';});
+ci.addEventListener('input',()=>{ci.style.height='auto';ci.style.height=Math.min(ci.scrollHeight,112)+'px'; if(window.haruAvatar) window.haruAvatar.attend('typing',1800);});
+// A finger in the box is her cue as much as a word in it.
+ci.addEventListener('focus',()=>{ if(window.haruAvatar) window.haruAvatar.attend('typing',1800); });
 // Counts sends, only so each waiting bubble can be told from the last one.
 let waiting=0;
 // One reader for both ways a reply arrives — a send and a retry. Words land

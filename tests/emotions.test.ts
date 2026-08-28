@@ -48,3 +48,9 @@ test('every face knows how she moves while wearing it, within reason', () => {
   assert.ok(emotionConfig.excited.idle.periodMs < emotionConfig.sleepy.idle.periodMs, 'excited moves faster than sleepy');
   assert.ok(emotionConfig.sad.idle.bobPx < emotionConfig.happy.idle.bobPx, 'sad barely moves');
 });
+
+test('every face says how far her eyes may go; surprised has none to move, sleepy barely', () => {
+  for (const face of HARU_EMOTIONS) assert.ok(emotionConfig[face].gaze >= 0 && emotionConfig[face].gaze <= 1, face);
+  assert.equal(emotionConfig.surprised.gaze, 0);
+  assert.ok(emotionConfig.sleepy.gaze < 0.3 && emotionConfig.neutral.gaze === 1);
+});
