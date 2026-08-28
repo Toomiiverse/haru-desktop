@@ -245,8 +245,6 @@ export function chatSystemPrompt(state: PromptState): string {
     // forgets, and her being Haru is a tone instruction above all.
     state.character.identity,
     state.character.style,
-    // Part of her voice, so it sits with the persona rather than with the rules.
-    EXPRESSIVE,
     // Her unprompted lines have always been told how long to be; her actual
     // replies never were, and it shows. A typical answer came back as four
     // paragraphs: the real reply, the same point again in other words, an
@@ -261,6 +259,9 @@ export function chatSystemPrompt(state: PromptState): string {
     moodInstruction(state.irritation),
     egoInstruction(state.ego),
     leverageInstruction(state.ego),
+    // After the mood and the ego, which say "no cheerful helper energy" — read
+    // before that, a small model took the emoji for cheer and dropped them.
+    EXPRESSIVE,
     // Immediately after the three lines that cause it, and for the same reason
     // freshStartInstruction sits where it does: being told she is fed up is what
     // produces the stock sentence, so the correction has to be read second or it

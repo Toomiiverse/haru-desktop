@@ -11,11 +11,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {
-  claimsDesktopAction, claimsTickOff, dropInventedContact, dropInventedScreenTalk,
-  dropRepeatedAgendaMentions, dropRepeatedParagraphs, dropRoleHeader,
-  dropStageDirections, dropTackedOnParagraphs, readsLikeAssistant,
-} from '../electron/reply';
+import { claimsDesktopAction, claimsTickOff, dropInventedContact, dropInventedScreenTalk, dropRepeatedAgendaMentions, dropRepeatedParagraphs, dropRoleHeader, dropStageDirections, dropTackedOnParagraphs, readsLikeAssistant, dropRepeatedOpener } from '../electron/reply';
 
 // -- claiming to have touched the machine -------------------------------------
 
@@ -330,4 +326,20 @@ test('her own voice is never the register of a help desk', () => {
   ]) {
     assert.equal(readsLikeAssistant(hers), false, `false alarm: ${hers.slice(0, 50)}`);
   }
+});
+
+test('a stock opener she just used is cut, and what follows stands on its own', () => {
+  assert.equal(dropRepeatedOpener("Fine. You're right—it's not a deluge.", ['Fine, you want the odds.']), "You're right—it's not a deluge.");
+  assert.equal(dropRepeatedOpener('Fine, you want the odds instead of the weather. Here they are.', ['Fine, you wanted the weather.']), 'You want the odds instead of the weather. Here they are.');
+  // Two replies back counts too: the signature is the pattern, not the pair.
+  assert.equal(dropRepeatedOpener('Fine. Go.', ['Fine. Sit.', 'Good enough.']), 'Go.');
+});
+
+test('a fresh opener, a word that is not stock, or a reply of one word is left alone', () => {
+  assert.equal(dropRepeatedOpener('Fine. Go.', ['Good enough.']), 'Fine. Go.');
+  assert.equal(dropRepeatedOpener('No. Do it.', ['No.']), 'No. Do it.');
+  assert.equal(dropRepeatedOpener('I told you.', ['I said so.']), 'I told you.');
+  assert.equal(dropRepeatedOpener('Fine.', ['Fine.']), 'Fine.');
+  assert.equal(dropRepeatedOpener('Fine—do it.', ['Fine.']), 'Fine—do it.');
+  assert.equal(dropRepeatedOpener('Fine. Go.', []), 'Fine. Go.');
 });

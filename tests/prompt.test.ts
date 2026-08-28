@@ -233,6 +233,6 @@ test('her emoji are named, as hers, beside the persona', () => {
   const expressive = prompt.indexOf('the eye-roll, the huff, the smirk');
   assert.notEqual(expressive, -1, 'the emoji rule never made it into the prompt');
   assert.ok(expressive > prompt.indexOf(STYLE), 'it is part of her voice, so it follows her style');
-  assert.ok(expressive < prompt.indexOf('thoroughly fed up'), 'and comes before the mood, which may sharpen it');
+  assert.ok(expressive > prompt.indexOf('thoroughly fed up'), 'and after the mood and ego, which read as "no cheer" — before them the emoji were dropped as cheer');
   assert.ok(prompt.includes('not a signature'), 'the opener-variety rule rides with continuity');
 });

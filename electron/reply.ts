@@ -456,3 +456,31 @@ export function dropTackedOnParagraphs(reply: string, lookedSomethingUp: boolean
   if (paragraphs.some(paragraph => ENUMERATED.test(paragraph))) return reply;
   return paragraphs.slice(0, TACKED_ON_CEILING).join('\n\n').trim();
 }
+
+/**
+ * The same stock word opening two replies running, cut.
+ *
+ * "Fine." began eight replies in ten, and told not to she did it three more
+ * times in four: a way in becomes a signature becomes a tic, and the model
+ * cannot see the pattern it is making. So the pattern is cut where it shows.
+ * Only the stock interjections count — a reply that opens "No." twice may
+ * mean no both times, and "I" is not a signature — and only when the last
+ * reply or the one before opened the same way. A one-word sentence goes
+ * whole ("Fine. You're right" → "You're right"); a word with a comma goes
+ * with its comma ("Fine, you want the odds" → "You want the odds"). Anything
+ * else is left alone, and a reply is never emptied.
+ */
+const STOCK_OPENERS = /^(fine|okay|ok|alright|right|good|great|well|ugh|look|listen|oh|honestly|sure|obviously|whatever)$/i;
+
+export function dropRepeatedOpener(reply: string, previousReplies: string[]): string {
+  const opener = (text: string) => (text.trimStart().match(/^[\p{L}']+/u)?.[0] ?? '').toLowerCase();
+  const mine = opener(reply);
+  if (!mine || !STOCK_OPENERS.test(mine)) return reply;
+  if (!previousReplies.slice(-2).some(previous => opener(previous) === mine)) return reply;
+  const text = reply.trimStart();
+  const cut = text.match(/^[\p{L}']+(?:[.!…]+|,)\s*/u);
+  if (!cut) return reply;
+  const rest = text.slice(cut[0].length);
+  if (!rest.trim()) return reply;
+  return rest.charAt(0).toUpperCase() + rest.slice(1);
+}
