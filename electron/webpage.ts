@@ -93,6 +93,68 @@ const SHELL = `
 // pop when she talks, on a body inside that, so nothing about a change of
 // face moves her from where the float and the pose had her. A reduced-motion
 // setting stops all of it.
+// What this phone keeps for itself, and whether she can be reached from it.
+// Clock-free and DOM-free, like the avatar engine, so a test can run it in a
+// bare window.
+const PHONE = `
+(() => {
+  // ---- What this phone keeps for itself -------------------------------------
+  //
+  // A draft, today's chat, the sharing switch: small things that make the page
+  // come back as it was left. localStorage can be missing (a private tab), full,
+  // or throwing (a preview), so every touch is guarded and a miss is a default.
+  const PREFIX = 'haru.';
+  const keep = {
+    get(key, fallback) {
+      try { const raw = window.localStorage.getItem(PREFIX + key); return raw === null ? fallback : JSON.parse(raw); }
+      catch { return fallback; }
+    },
+    set(key, value) {
+      try {
+        if (value === undefined || value === null) window.localStorage.removeItem(PREFIX + key);
+        else window.localStorage.setItem(PREFIX + key, JSON.stringify(value));
+        return true;
+      } catch { return false; }
+    },
+    drop(key) { return keep.set(key, null); },
+  };
+
+  // ---- Whether she can be reached -------------------------------------------
+  //
+  // Three states, not two: the phone can say it is offline ('off'), and it can
+  // believe it is online while nothing gets through ('lost') — a lift, a dead
+  // spot, her machine down. Requests report back, so the page's word is only
+  // ever as old as its last request.
+  const listeners = new Set();
+  const phoneOffline = () => !!window.navigator && window.navigator.onLine === false;
+  let state = phoneOffline() ? 'off' : 'on';
+  function become(next) { if (next === state) return; state = next; for (const fn of listeners) fn(state); }
+  const net = {
+    state: () => state,
+    online: () => state === 'on',
+    onChange(fn) { listeners.add(fn); fn(state); return () => listeners.delete(fn); },
+    reached() { become('on'); },
+    lost() { become(phoneOffline() ? 'off' : 'lost'); },
+    // What the phone is on, as far as a browser will say. iOS says nothing, and
+    // 'unknown' is the honest word for that.
+    kind() {
+      const c = window.navigator && (window.navigator.connection || window.navigator.mozConnection || window.navigator.webkitConnection);
+      const t = c && c.type;
+      if (t === 'wifi' || t === 'cellular' || t === 'ethernet') return t;
+      if (t === 'wimax') return 'wifi';
+      return 'unknown';
+    },
+    // fetch, with the state kept honest: any answer at all means she was
+    // reached; no answer means she was not. Same promise as fetch.
+    fetch(url, init) { return window.fetch(url, init).then(r => { become('on'); return r; }, e => { net.lost(); throw e; }); },
+  };
+  window.addEventListener('online', () => become('on'));
+  window.addEventListener('offline', () => become('off'));
+  window.haruKeep = keep;
+  window.haruNet = net;
+})();
+`;
+
 const AVATAR = `
 (() => {
   const EMOTIONS = ${JSON.stringify(HARU_EMOTIONS)};
@@ -490,6 +552,8 @@ export function appPage(): string {
   .topbar { display:flex; align-items:center; gap:.6rem; padding:calc(.7rem + env(safe-area-inset-top)) 1rem .7rem; flex:0 0 auto; }
   .topbar .name { font-weight:700; letter-spacing:-.01em; }
   .dot { width:8px; height:8px; border-radius:50%; background:var(--accent); box-shadow:0 0 12px var(--accent); }
+  .topbar.off .dot { background:var(--ink-dim); box-shadow:none; }
+  #net { font-size:.72rem; padding:.1rem .55rem; border-radius:1rem; background:var(--glass); border:1px solid var(--edge); color:var(--ink-dim); }
   #out { background:var(--glass); color:var(--ink-dim); border:1px solid var(--edge); padding:.4rem .9rem; font-size:.82rem; font-weight:500; backdrop-filter:blur(12px); }
   #bell { margin-left:auto; background:var(--glass); color:var(--ink); border:1px solid var(--edge); padding:.35rem .7rem; font-size:.95rem; line-height:1; backdrop-filter:blur(12px); }
 
@@ -502,6 +566,9 @@ export function appPage(): string {
   #psheet .off { background:var(--glass); color:var(--ink); border:1px solid var(--edge); }
   .prow { display:flex; align-items:center; gap:.5rem; margin:.4rem 0; font-size:.95rem; }
   .prow input[type=checkbox] { width:auto; accent-color:var(--accent); }
+  #psheet .prow input:not([type=checkbox]) { flex:1; min-width:0; }
+  #psheet .prow button { width:auto; margin-top:0; flex:0 0 auto; }
+  #psheet hr { border:0; border-top:1px solid var(--edge); margin:.7rem 0 .4rem; }
   .prow input[type=time] { width:auto; padding:.3rem .5rem; }
 
   #chat { flex:1; overflow-y:auto; padding:1rem .9rem 1.2rem; -webkit-overflow-scrolling:touch; }
@@ -602,8 +669,8 @@ export function appPage(): string {
     .msg { max-width:min(82%, 46rem); }
   }
 </style>
-<div class=topbar><span class=dot></span><span class=name>Haru</span><button id=bell title="Notifications">🔔</button><button id=out>Sign out</button></div>
-<div id=psheet hidden></div>
+<div class=topbar><span class=dot></span><span class=name>Haru</span><span id=net hidden>Offline</span><button id=bell title="Notifications">🔔</button><button id=out>Sign out</button></div>
+<div id=psheet hidden><div id=pushpart></div><div id=wherepart></div></div>
 <section id=stage></section>
 <section id=chat></section>
 <div id=chips></div>
@@ -616,8 +683,9 @@ const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&
 // already been escaped — so the only tags that can ever reach the page are the
 // three put there here.
 const md=s=>s.replace(/\\*\\*\\s*([^*]+?)\\s*\\*\\*/g,'<b>$1</b>').replace(/\`([^\`\\n]+?)\`/g,'<code>$1</code>').replace(/\\*([^*\\s][^*\\n]*?)\\*/g,'<i>$1</i>');
-const get=u=>fetch(u).then(r=>r.ok?r.json():Promise.reject(r));
-const post=(u,b)=>fetch(u,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(b||{})}).then(r=>r.ok?r.json():Promise.reject(r));
+${PHONE}
+const get=u=>window.haruNet.fetch(u).then(r=>r.ok?r.json():Promise.reject(r));
+const post=(u,b)=>window.haruNet.fetch(u,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(b||{})}).then(r=>r.ok?r.json():Promise.reject(r));
 
 $('out').onclick=()=>post('/api/logout').then(()=>location.reload());
 
@@ -663,11 +731,47 @@ function acts(m,isLast){
 
 async function load(){
   try{
-    bubbles((await get('/api/chat')).messages);
-  }catch(r){ if(r&&r.status===401) location.reload(); }
+    const {messages}=await get('/api/chat');
+    bubbles(messages); showingSaved=false;
+    // Today, as last seen: painted at once next time, and read when she is out of reach.
+    window.haruKeep.set('today',{savedAt:Date.now(),messages});
+  }catch(r){
+    if(r&&r.status===401){ location.reload(); return; }
+    // Nothing live on screen yet: the saved day, with a note saying so. What is
+    // already on screen is newer than anything saved and stays.
+    if(showingSaved||!$('chat').querySelector('.msg')) showSaved(true);
+  }
+}
+// The day as this phone last saw it. Returns whether there was one to show.
+let showingSaved=false;
+function showSaved(note){
+  const saved=window.haruKeep.get('today',null);
+  if(!saved||!Array.isArray(saved.messages)||!saved.messages.length) return false;
+  bubbles(saved.messages); showingSaved=true;
+  if(note){
+    const when=new Date(saved.savedAt), today=new Date().toDateString()===when.toDateString();
+    const stamp=today?when.toLocaleTimeString([],{hour:'numeric',minute:'2-digit'}):when.toLocaleString([],{weekday:'short',hour:'numeric',minute:'2-digit'});
+    $('chat').insertAdjacentHTML('beforeend','<div class="msg sys">As saved on this phone, '+stamp+'. She is out of reach.</div>');
+    $('chat').scrollTop=$('chat').scrollHeight;
+  }
+  return true;
 }
 
 const ci=$('ci');
+// Whatever was being typed when the page went away is there when it comes back.
+ci.value=window.haruKeep.get('draft','')||'';
+if(ci.value){ ci.style.height='auto'; ci.style.height=Math.min(ci.scrollHeight,112)+'px'; }
+
+// The dot dims and a pill says so when she cannot be reached; when she can be
+// again, the day is re-read so nothing sent from elsewhere is missed.
+let wasOut=false;
+window.haruNet.onChange(s=>{
+  $('net').hidden=s==='on';
+  $('net').textContent=s==='off'?'Offline':'Out of reach';
+  document.querySelector('.topbar').classList.toggle('off',s!=='on');
+  if(s==='on'&&wasOut) void load();
+  wasOut=s!=='on';
+});
 
 // ---- Her voice ------------------------------------------------------------
 //
@@ -755,7 +859,7 @@ function stopHearing(){ if(recorder&&recorder.state!=='inactive') recorder.stop(
 mic.addEventListener('pointerdown',e=>{e.preventDefault();startHearing();});
 for(const done of ['pointerup','pointerleave','pointercancel']) mic.addEventListener(done,stopHearing);
 
-ci.addEventListener('input',()=>{ci.style.height='auto';ci.style.height=Math.min(ci.scrollHeight,112)+'px'; if(window.haruAvatar) window.haruAvatar.attend('typing',1800);});
+ci.addEventListener('input',()=>{ci.style.height='auto';ci.style.height=Math.min(ci.scrollHeight,112)+'px'; window.haruKeep.set('draft',ci.value||null); if(window.haruAvatar) window.haruAvatar.attend('typing',1800);});
 // A finger in the box is her cue as much as a word in it.
 ci.addEventListener('focus',()=>{ if(window.haruAvatar) window.haruAvatar.attend('typing',1800); });
 // Counts sends, only so each waiting bubble can be told from the last one.
@@ -787,11 +891,17 @@ async function readStream(r,show){
 $('cf').addEventListener('submit',async ev=>{
   ev.preventDefault();
   const text=ci.value.trim(); if(!text&&!staged.length)return;
+  // Nothing leaves an offline phone; the words stay in the box (and in the
+  // draft) rather than turning into a bubble that then fails.
+  if(!window.haruNet.online()){
+    $('chat').insertAdjacentHTML('beforeend','<div class="msg sys">You are '+(window.haruNet.state()==='off'?'offline':'out of her reach')+'. It is kept in the box until you are back.</div>');
+    $('chat').scrollTop=$('chat').scrollHeight; return;
+  }
   primeVoice();
   // Taken off the shelf now, so a file picked while she is answering belongs to
   // the next message, not this one. Put back if the send never got through.
   const sent=staged; staged=[]; drawChips();
-  ci.value=''; ci.style.height='auto'; $('cb').disabled=true;
+  ci.value=''; ci.style.height='auto'; $('cb').disabled=true; window.haruKeep.drop('draft');
   // The waiting bubble used to be id="wait", a fixed string, and was taken back
   // out with a bare document.getElementById('wait').remove().
   //
@@ -819,7 +929,7 @@ $('cf').addEventListener('submit',async ev=>{
   // markup, and the model is not a source we escape from, it is the source.
   const show=t=>{const bubble=document.getElementById(id); if(!bubble) return false; bubble.textContent=t; $('chat').scrollTop=$('chat').scrollHeight; return true;};
   try{
-    const r=await fetch('/api/chat/stream',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(sent.length?{text,attachments:sent}:{text})});
+    const r=await window.haruNet.fetch('/api/chat/stream',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(sent.length?{text,attachments:sent}:{text})});
     if(!r.ok) throw r;
     const {reply,ignored,error}=await readStream(r,show);
     if(error) throw new Error(error);
@@ -848,7 +958,9 @@ $('cf').addEventListener('submit',async ev=>{
     if(r&&r.status===401){location.reload();return;}
     // The files never left: back on the shelf so pressing Send again works.
     if(sent.length){ staged=sent.concat(staged); drawChips(); }
-    $('chat').insertAdjacentHTML('beforeend','<div class="msg sys">That did not get through.</div>');
+    // Nor did the words, when it was the network: back in the box, and kept.
+    if(!(r&&r.status)&&text&&!ci.value){ ci.value=text; window.haruKeep.set('draft',text); }
+    $('chat').insertAdjacentHTML('beforeend','<div class="msg sys">'+(window.haruNet.online()?'That did not get through.':'She is out of reach. Your words are back in the box.')+'</div>');
   }finally{
     $('cb').disabled=false; $('chat').scrollTop=$('chat').scrollHeight;
     // The desk files the reply and hands it an id a moment later; re-read so
@@ -856,6 +968,8 @@ $('cf').addEventListener('submit',async ev=>{
     setTimeout(load,1000);
   }
 });
+// The saved day first, so the page is never blank while the real one loads.
+showSaved(false);
 load();
 
 // ---- Under her bubbles: thumbs, a note, and asking again --------------------
@@ -1050,33 +1164,34 @@ const sheet=$('psheet');
 $('bell').onclick=()=>{ if(sheet.hidden) void drawBell(); else sheet.hidden=true; };
 async function drawBell(){
   sheet.hidden=false;
+  void drawWhere();
   if(!sw||!('PushManager' in window)){
-    sheet.innerHTML='<p>Notifications need her installed first: open the Share menu, Add to Home Screen, then open her from there.</p>';
+    $('pushpart').innerHTML='<p>Notifications need her installed first: open the Share menu, Add to Home Screen, then open her from there.</p>';
     return;
   }
   if(Notification.permission==='denied'){
-    sheet.innerHTML='<p>Notifications for her are switched off in the phone settings.</p>';
+    $('pushpart').innerHTML='<p>Notifications for her are switched off in the phone settings.</p>';
     return;
   }
   let server;
   try{ server=await get('/api/push'); }
-  catch(r){ if(r&&r.status===401){location.reload();return;} sheet.innerHTML='<p>Could not reach her.</p>'; return; }
+  catch(r){ if(r&&r.status===401){location.reload();return;} $('pushpart').innerHTML='<p>Could not reach her.</p>'; return; }
   const sub=await sw.pushManager.getSubscription().catch(()=>null);
   if(!sub){
-    sheet.innerHTML='<button id=pon>Let her reach this phone</button><p>She will only speak up when she has something: a reminder, or a thought of her own. Quiet overnight.</p>';
+    $('pushpart').innerHTML='<button id=pon>Let her reach this phone</button><p>She will only speak up when she has something: a reminder, or a thought of her own. Quiet overnight.</p>';
     $('pon').onclick=async()=>{
       try{
-        if(await Notification.requestPermission()!=='granted'){ sheet.innerHTML='<p>She was not allowed to.</p>'; return; }
+        if(await Notification.requestPermission()!=='granted'){ $('pushpart').innerHTML='<p>She was not allowed to.</p>'; return; }
         const fresh=await sw.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:rawKey(server.key)});
         await post('/api/push/subscribe',keysOf(fresh));
         void drawBell();
-      }catch(e){ console.warn('[push] '+(e&&e.message||e)); sheet.innerHTML='<p>That did not work.</p>'; }
+      }catch(e){ console.warn('[push] '+(e&&e.message||e)); $('pushpart').innerHTML='<p>That did not work.</p>'; }
     };
     return;
   }
   const p=server.prefs;
   const row=(id,label,on)=>'<label class=prow><input type=checkbox id='+id+(on?' checked':'')+'> '+label+'</label>';
-  sheet.innerHTML=
+  $('pushpart').innerHTML=
     row('pr','Her own thoughts',p.random)+
     row('pe','Reminders and the journal',p.events)+
     row('ps','The machine she runs on',p.system)+
@@ -1096,6 +1211,70 @@ async function drawBell(){
     void drawBell();
   };
 }
+
+// ---- Where they are ---------------------------------------------------------
+//
+// Off until they say otherwise. Once on, the phone watches its own position and
+// sends her machine a fix now and then; the names are theirs — stand somewhere
+// and call it "home" — and she is told the name, never the numbers. Switching
+// it off stops the watching here and forgets the last fix there. The phone's
+// own permission prompt comes from the switch, inside the tap, as iOS insists.
+const wpart=$('wherepart');
+let watching=null, lastSent=null;
+function whereOn(){ return window.haruKeep.get('where',false)===true; }
+async function sendFix(pos){
+  const c=pos.coords;
+  const fix={lat:c.latitude,lon:c.longitude,accuracy:Math.round(c.accuracy||500),net:window.haruNet.kind()};
+  // A phone at rest reports every few seconds. Her machine hears of a move of
+  // any real size or a change of network at once, and otherwise every five minutes.
+  if(lastSent&&Date.now()-lastSent.at<300000&&Math.abs(fix.lat-lastSent.lat)<0.0003&&Math.abs(fix.lon-lastSent.lon)<0.0003&&fix.net===lastSent.net) return;
+  try{ const w=await post('/api/where',fix); lastSent={...fix,at:Date.now()}; paintAt(w); }
+  catch(r){ if(r&&r.status===409){ window.haruKeep.set('where',false); stopWhere(); } }
+}
+function startWhere(){
+  if(watching!==null||!('geolocation' in navigator)) return;
+  watching=navigator.geolocation.watchPosition(sendFix,err=>{
+    // Refused at the phone: the switch goes back off, so the sheet tells the truth.
+    if(err&&err.code===1){ window.haruKeep.set('where',false); stopWhere(); post('/api/where/prefs',{enabled:false}).catch(()=>{}); if(!sheet.hidden) void drawWhere(); }
+  },{enableHighAccuracy:false,maximumAge:120000,timeout:30000});
+}
+function stopWhere(){ if(watching!==null){ navigator.geolocation.clearWatch(watching); watching=null; } lastSent=null; }
+function paintAt(w){ const el=$('wat'); if(!el) return; el.textContent=w.at?'At '+w.at+'.':w.fresh?'Somewhere she has no name for.':'Waiting for the phone…'; }
+async function drawWhere(){
+  if(!('geolocation' in navigator)){ wpart.innerHTML='<hr><p>This phone cannot say where it is.</p>'; return; }
+  let w; try{ w=await get('/api/where'); }catch{ wpart.innerHTML=''; return; }
+  window.haruKeep.set('where',w.enabled);
+  const row=(id,label,on)=>'<label class=prow><input type=checkbox id='+id+(on?' checked':'')+'> '+label+'</label>';
+  wpart.innerHTML='<hr>'+row('wl','Let her know where you are',w.enabled)+(w.enabled
+    ? '<p id=wat></p>'+
+      '<div class=prow><input id=wn placeholder="Call this place…" maxlength=40 autocapitalize=none><button id=wsave>Keep</button></div>'+
+      (w.places.length?'<p>Places she knows: '+w.places.map(esc).join(', ')+'.</p>':'<p>She knows no places yet. Stand somewhere and name it; "home" lets her tell how far you have wandered.</p>')+
+      '<button id=wlook class=off>Ask what this place is called</button>'+
+      '<p>Stays on her machine. Asking what a place is called sends a blurred spot to OpenStreetMap, once.</p>'
+    : '<p>Off. Her machine keeps nothing about where you are until you switch this on.</p>');
+  if(w.enabled){ paintAt(w); startWhere(); } else stopWhere();
+  $('wl').onchange=async()=>{
+    const on=$('wl').checked;
+    try{ await post('/api/where/prefs',{enabled:on}); }catch{}
+    window.haruKeep.set('where',on);
+    if(on){ lastSent=null; startWhere(); } else stopWhere();
+    void drawWhere();
+  };
+  if(!w.enabled) return;
+  $('wsave').onclick=async()=>{
+    const name=$('wn').value.trim(); if(!name) return;
+    try{ await post('/api/where/name',{name}); lastSent=null; void drawWhere(); }
+    catch(r){ $('wat').textContent=r&&r.status===409?'The phone has not said where it is yet.':'That did not work.'; }
+  };
+  $('wlook').onclick=async()=>{
+    $('wlook').disabled=true;
+    try{ const r=await post('/api/where/lookup'); $('wn').value=r.name; $('wlook').textContent='Keep it if that is right'; }
+    catch{ $('wlook').textContent='No answer from the map'; }
+  };
+}
+if(whereOn()) startWhere();
+// Back on screen after a while away: the next fix goes through whatever it says.
+document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible'&&whereOn()) lastSent=null; });
 ${AVATAR}
 </script>`;
 }

@@ -237,3 +237,11 @@ test('her emoji are named, as hers, beside the persona', () => {
   assert.ok(expressive > prompt.indexOf('not being spoken to like that'), 'last of all: recency is the lever against a history with none');
   assert.ok(prompt.includes('not a signature'), 'the opener-variety rule rides with continuity');
 });
+
+test('where their phone says they are sits beside the clock, as words, and only when there is a word', () => {
+  const bare = chatSystemPrompt(state());
+  assert.doesNotMatch(bare, /Their phone/);
+  const placed = chatSystemPrompt(state({ whereabouts: 'Their phone says they are at the store, on mobile data, as of 7 minutes ago. Background: use it when it is relevant, and it is fair game for needling, but she has no coordinates and never quotes any.' }));
+  assert.match(placed, /Their phone says they are at the store/);
+  assert.ok(placed.indexOf('Their phone says') > placed.indexOf("in the user's timezone"), 'after the clock');
+});

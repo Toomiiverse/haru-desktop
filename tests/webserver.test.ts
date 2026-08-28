@@ -31,6 +31,7 @@ function access(overrides: Partial<WebAccess> = {}): WebAccess {
 
 function deps(overrides: Partial<WebDeps> = {}): WebDeps {
   let stored = access();
+  let whereOn = false, whereAt: string | null = null; const reported: unknown[] = [];
   return {
     readAccess: () => stored,
     saveAccess: (next) => { stored = next; },
@@ -51,6 +52,14 @@ function deps(overrides: Partial<WebDeps> = {}): WebDeps {
     attach: {
       stage: (name: string, bytes: Buffer) => ({ id: 'staged', kind: 'image', name, saved: 'X:\\pictures\\' + name, url: '', bytes: bytes.length }),
       discard: () => {},
+    },
+    where: {
+      get: () => ({ enabled: whereOn, at: whereAt, fresh: whereAt !== null, net: null, places: whereAt ? [whereAt] : [] }),
+      enable(on) { whereOn = on; if (!on) whereAt = null; },
+      report(spot) { const s = spot as { lat?: unknown }; if (typeof s.lat !== 'number') return false; reported.push(spot); return true; },
+      name(name) { if (!reported.length) return false; whereAt = name; return true; },
+      forget() { whereAt = null; },
+      lookUp: async () => 'Wembley, Perth, Western Australia',
     },
     push: {
       key: () => 'B'.repeat(87),
@@ -121,7 +130,7 @@ test('a stranger gets the sign-in page and nothing else', async () => {
     assert.equal(front.status, 200);
     assert.ok((await front.text()).includes('Sign in to reach her'));
 
-    for (const path of ['/api/chat', '/api/agenda', '/api/memory', '/api/journal', '/api/checkins', '/api/knowledge/stats', '/api/model', '/api/push', '/api/attach']) {
+    for (const path of ['/api/chat', '/api/agenda', '/api/memory', '/api/journal', '/api/checkins', '/api/knowledge/stats', '/api/model', '/api/push', '/api/attach', '/api/where']) {
       const refused = await web.call(path);
       assert.equal(refused.status, 401, `${path} answered a stranger`);
     }
@@ -553,4 +562,49 @@ test('her faces are served from her own folder, by name only, and only to someon
     assert.equal((await web.call('/emotions/sad.svg')).status, 404, 'a face without a file is a 404, not a crash');
     assert.equal((await web.call('/emotions/..%2Fportrait')).status, 404);
   } finally { await web.stop(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+// -- where the phone is ------------------------------------------------------------
+
+test('a fix is refused while sharing is off, taken once it is on, and a name needs a fix to stand on', async () => {
+  const web = await door();
+  try {
+    await web.signIn();
+    const off = await web.call('/api/where');
+    assert.deepEqual(await off.json(), { enabled: false, at: null, fresh: false, net: null, places: [] });
+
+    const refused = await web.call('/api/where', { method: 'POST', body: JSON.stringify({ lat: -31.95, lon: 115.86, accuracy: 40 }) });
+    assert.equal(refused.status, 409);
+    const early = await web.call('/api/where/name', { method: 'POST', body: JSON.stringify({ name: 'home' }) });
+    assert.equal(early.status, 409, 'nothing to name yet');
+
+    const on = await web.call('/api/where/prefs', { method: 'POST', body: JSON.stringify({ enabled: true }) });
+    assert.equal((await on.json()).enabled, true);
+    const junk = await web.call('/api/where', { method: 'POST', body: JSON.stringify({ lat: 'here' }) });
+    assert.equal(junk.status, 400);
+    const taken = await web.call('/api/where', { method: 'POST', body: JSON.stringify({ lat: -31.95, lon: 115.86, accuracy: 40, net: 'wifi' }) });
+    assert.equal(taken.status, 200);
+
+    const unnamed = await web.call('/api/where/name', { method: 'POST', body: JSON.stringify({ name: '   ' }) });
+    assert.equal(unnamed.status, 400);
+    const named = await web.call('/api/where/name', { method: 'POST', body: JSON.stringify({ name: 'home' }) });
+    assert.equal((await named.json()).at, 'home');
+    const looked = await web.call('/api/where/lookup', { method: 'POST', body: '{}' });
+    assert.equal((await looked.json()).name, 'Wembley, Perth, Western Australia');
+
+    const forgot = await web.call('/api/where/forget', { method: 'POST', body: JSON.stringify({ name: 'home' }) });
+    assert.equal((await forgot.json()).at, null);
+    const back = await web.call('/api/where/prefs', { method: 'POST', body: JSON.stringify({ enabled: false }) });
+    assert.equal((await back.json()).enabled, false);
+  } finally { await web.stop(); }
+});
+
+test('the where routes, like the rest, are for the signed-in only', async () => {
+  const web = await door();
+  try {
+    for (const path of ['/api/where', '/api/where/prefs', '/api/where/name', '/api/where/lookup']) {
+      const refused = await web.call(path, { method: 'POST', body: '{}' });
+      assert.equal(refused.status, 401, path);
+    }
+  } finally { await web.stop(); }
 });

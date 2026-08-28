@@ -155,6 +155,8 @@ export type PromptState = {
    *  admission from being asked to move it. */
   movedJustNow: { title: string; to: string } | null;
   pushback: Pushback | undefined;
+  /** Where their phone says they are, already put into words (whereabouts.ts), or nothing. */
+  whereabouts?: string;
 };
 
 export function chatSystemPrompt(state: PromptState): string {
@@ -176,6 +178,9 @@ export function chatSystemPrompt(state: PromptState): string {
     // can see the answer to. Telling it plainly not to costs nothing, and the
     // clock on their own screen was never the thing they were short of.
     `It is ${formatTimeOfDay(now.getHours(), now.getMinutes())} on ${weekday} ${today}, in the user's timezone (${state.timezone}). That is background, so you know when things are due and how long it has been. Use it if they ask what the time or the date is, and otherwise never state it — they can see their own clock.`,
+    // Where they are, by a name they gave the place. Beside the clock because it
+    // is the same kind of fact: background she may use, never a thing to recite.
+    state.whereabouts ?? '',
     state.profile,
     // Beside the profile rather than behind the lookup tool, for the reason the
     // agenda is: asked what they are in the middle of, a model that would have

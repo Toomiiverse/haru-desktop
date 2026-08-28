@@ -36,6 +36,7 @@ import { markTimeGaps, sinceLast } from './history';
 import { correct, noteUsed, readHearing, remember } from './hearing';
 import { assumeItIsTheirs, identifyWork, noteWork, readFollowing, recogniseNow, summariseFollowing } from './following';
 import { lookUpPlace, readWindowsLocation } from './location';
+import { absorb, describeWhereabouts, forgetPlace, namePlace, placeAt, readSpot, readWhereabouts, whereForPage, type Whereabouts } from './whereabouts';
 import { convertImage, normaliseFormat, FORMATS } from './convert';
 import { cancelPower, closeApp, findApps, isCancellable, launch, listRunning, matchApp, matchRunning, normalisePower, POWER_DELAY_S, readDesktopConfig, runPower, type DesktopConfig } from './desktop';
 import { looksLikeScreenshot, maySpeak, readScreenshotConfig, screenshotPrompt, SETTLE_MS, SETTLE_TRIES, type ScreenshotConfig } from './screenshots';
@@ -1027,7 +1028,9 @@ function unpromptedContext(): string {
   //
   // On the clock rather than on the day, unlike the check below: what she must
   // not repeat at one in the morning is what she said at half eleven.
-  const parts = [summariseFollowing(getFollowing(), Date.now()), todaySoFar(), alreadySaidRecently(asides, CHAT_TIMEZONE, Date.now()), stillWaiting()].filter(Boolean);
+  // Where their phone says they are rides along too: a nudge that knows they
+  // are at the shops has something to needle with.
+  const parts = [summariseFollowing(getFollowing(), Date.now()), todaySoFar(), alreadySaidRecently(asides, CHAT_TIMEZONE, Date.now()), stillWaiting(), describeWhereabouts(getWhereabouts())].filter(Boolean);
   if (!parts.length) return '';
   // "Do not repeat a point you have already made" was read as "change the
   // subject": once a thread was answered and settled she abandoned the day
@@ -5134,6 +5137,7 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
     herRecentReplies,
     movedJustNow,
     pushback: store.get('pushback') as Pushback | undefined,
+    whereabouts: describeWhereabouts(getWhereabouts()),
   });
   // What she can still see. Not only this message: a picture has to ride along
   // again on the next turn or "what is in week three" cannot be answered, and
@@ -6100,6 +6104,14 @@ function stopDiscord() {
 
 /** Where the phone subscriptions, their preferences and the signing pair live.
  *  Top-level, for the dot-path reason above. */
+function getWhereabouts(): Whereabouts {
+  return readWhereabouts(store.get('whereabouts'));
+}
+
+function saveWhereabouts(next: Whereabouts) {
+  store.set('whereabouts', next);
+}
+
 function getPush(): { devices: PushDevice[]; prefs: PushPrefs } {
   const saved = (store.get('push') ?? {}) as Record<string, unknown>;
   return { devices: readPushDevices(saved.devices), prefs: readPushPrefs(saved.prefs) };
@@ -6540,6 +6552,46 @@ function webDeps(): WebDeps {
       return checkInsOn(getCheckIns(), localDateKey(now));
     },
     nudge: () => nudgeForPhone(),
+    where: {
+      get: () => whereForPage(getWhereabouts()),
+      enable(on) {
+        const state = getWhereabouts();
+        if (state.enabled === on) return;
+        // Switching off forgets the last fix as well as the switch: off means
+        // she stops knowing, not that she stops being told.
+        saveWhereabouts({ ...state, enabled: on, last: on ? state.last : null });
+        console.log(`[where] the phone ${on ? 'now says' : 'no longer says'} where it is`);
+      },
+      report(body) {
+        const spot = readSpot(body);
+        if (!spot) return false;
+        const state = getWhereabouts();
+        if (!state.enabled) return false;
+        const before = state.last ? placeAt(state.places, state.last)?.name ?? null : null;
+        const after = placeAt(state.places, spot)?.name ?? null;
+        saveWhereabouts(absorb(state, spot));
+        // Logged on arriving somewhere, not on every fix: a phone at rest still
+        // reports every few minutes and that is nobody's news.
+        if (before !== after || !state.last) console.log(`[where] the phone is ${after ? `at ${after}` : 'somewhere unnamed'} (±${spot.accuracy}m, ${spot.net})`);
+        return true;
+      },
+      name(name) {
+        const state = getWhereabouts();
+        if (!state.last) return false;
+        saveWhereabouts(namePlace(state, name));
+        console.log(`[where] the phone's spot is now called "${name}"`);
+        return true;
+      },
+      forget(name) { saveWhereabouts(forgetPlace(getWhereabouts(), name)); },
+      async lookUp() {
+        const state = getWhereabouts();
+        if (!state.enabled || !state.last) throw new Error('The phone has not said where it is yet.');
+        // The same blurred, once-when-asked lookup the desktop's search place
+        // uses (location.ts): a name for this spot, from OpenStreetMap, and no
+        // record of it here beyond what they choose to call it.
+        return lookUpPlace({ latitude: state.last.lat, longitude: state.last.lon, accuracy: state.last.accuracy }, (url, init) => fetch(url, init));
+      },
+    },
     push: {
       key: () => vapidKeys().publicKey,
       subscribe(device, name) {

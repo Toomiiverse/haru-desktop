@@ -98,6 +98,18 @@ export type WebDeps = {
     /** One real push, now, preferences ignored. True if a push service took it. */
     test(): Promise<boolean>;
   };
+  /** Where their phone says they are — kept here, named by them, told to her in words. */
+  where: {
+    get(): { enabled: boolean; at: string | null; fresh: boolean; net: string | null; places: string[] };
+    enable(on: boolean): void;
+    /** The phone's latest fix. Refused (false) while sharing is off. */
+    report(spot: unknown): boolean;
+    /** Calls wherever the phone last was by this name. False with no fix to stand on. */
+    name(name: string): boolean;
+    forget(name: string): void;
+    /** What the last fix's surroundings are called, asked once of the map service. Throws when there is nothing to ask about or no answer. */
+    lookUp(): Promise<string>;
+  };
   /** Her picture, or nothing if this build has none. */
   portrait(): Buffer | null;
   /** The Live2D model to stand on the stage: the folder it lives in and its entry file. */
@@ -668,6 +680,45 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
   // Being told about her when nothing of hers is open. What is stored is the
   // phone's own endpoint and public keys — revealing nothing — and what goes
   // out later is sealed to that phone, so the push service ferries it unread.
+  // Where they are. The page holds the coordinates; this side holds names and
+  // a yes or no. Nothing is taken while sharing is off, so a phone that kept
+  // watching after the switch was thrown here changes nothing.
+  if (req.method === 'GET' && path === '/api/where') {
+    return json(res, 200, deps.where.get());
+  }
+
+  if (req.method === 'POST' && path === '/api/where/prefs') {
+    const body = await readBody(req) as { enabled?: unknown };
+    deps.where.enable(body.enabled === true);
+    return json(res, 200, deps.where.get());
+  }
+
+  if (req.method === 'POST' && path === '/api/where') {
+    if (!deps.where.get().enabled) return json(res, 409, { error: 'Sharing is off.' });
+    if (!deps.where.report(await readBody(req))) return json(res, 400, { error: 'That is not a place on Earth.' });
+    return json(res, 200, deps.where.get());
+  }
+
+  if (req.method === 'POST' && path === '/api/where/name') {
+    const body = await readBody(req) as { name?: unknown };
+    const name = typeof body.name === 'string' ? body.name.trim().slice(0, 40) : '';
+    if (!name) return json(res, 400, { error: 'Call it something.' });
+    if (!deps.where.name(name)) return json(res, 409, { error: 'The phone has not said where it is yet.' });
+    return json(res, 200, deps.where.get());
+  }
+
+  if (req.method === 'POST' && path === '/api/where/forget') {
+    const body = await readBody(req) as { name?: unknown };
+    if (typeof body.name !== 'string' || !body.name.trim()) return json(res, 400, { error: 'Which place?' });
+    deps.where.forget(body.name);
+    return json(res, 200, deps.where.get());
+  }
+
+  if (req.method === 'POST' && path === '/api/where/lookup') {
+    try { return json(res, 200, { name: await deps.where.lookUp() }); }
+    catch (error) { return json(res, 502, { error: (error as Error).message }); }
+  }
+
   if (req.method === 'GET' && path === '/api/push') {
     return json(res, 200, { key: deps.push.key(), prefs: deps.push.prefs() });
   }

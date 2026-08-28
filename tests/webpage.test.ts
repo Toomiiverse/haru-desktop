@@ -409,3 +409,82 @@ test('the pose is handed to its own wrapper, so neither the float nor the settle
   const html = appPage();
   assert.ok(html.includes('id=avatar-pose') && html.includes('calc(var(--avatar-size) * var(--drift-x))'), 'the roam is a fraction of her size');
 });
+
+// -- what the phone keeps, and whether she can be reached ----------------------------
+
+function phone({ storage = 'ok', onLine = true, connection }: { storage?: 'ok' | 'none' | 'throws'; onLine?: boolean; connection?: { type?: string } } = {}) {
+  const app = appPage();
+  const start = app.indexOf('(() => {\n  // ---- What this phone keeps for itself');
+  assert.ok(start > 0, 'the phone block is no longer where this test can find it');
+  const end = app.indexOf('})();', start);
+  const source = app.slice(start, end + 5);
+  const store = new Map<string, string>();
+  const localStorage = storage === 'throws'
+    ? { getItem() { throw new Error('SecurityError'); }, setItem() { throw new Error('QuotaExceededError'); }, removeItem() { throw new Error('SecurityError'); } }
+    : { getItem: (k: string) => (store.has(k) ? store.get(k)! : null), setItem: (k: string, v: string) => { store.set(k, v); }, removeItem: (k: string) => { store.delete(k); } };
+  const events: Record<string, () => void> = {};
+  let fetchOutcome: 'ok' | 'down' = 'ok';
+  const win: Stub = {
+    JSON, Set, Error, Promise,
+    navigator: { onLine, connection },
+    fetch: () => (fetchOutcome === 'ok' ? Promise.resolve({ ok: true, status: 200 }) : Promise.reject(new TypeError('Load failed'))),
+    addEventListener: (name: string, fn: () => void) => { events[name] = fn; },
+  };
+  if (storage !== 'none') win.localStorage = localStorage;
+  win.window = win;
+  vm.runInContext(source, vm.createContext(win), { filename: 'phone.js' });
+  return { keep: win.haruKeep, net: win.haruNet, store, events, down: () => { fetchOutcome = 'down'; }, up: () => { fetchOutcome = 'ok'; }, goOffline: () => { win.navigator.onLine = false; events.offline(); }, goOnline: () => { win.navigator.onLine = true; events.online(); } };
+}
+
+test('what the phone keeps comes back as it went, under her own prefix, and a null drops it', () => {
+  const { keep, store } = phone();
+  assert.equal(keep.get('draft', ''), '');
+  assert.equal(keep.set('draft', 'fine, go'), true);
+  assert.equal(store.get('haru.draft'), '"fine, go"');
+  assert.equal(keep.get('draft', ''), 'fine, go');
+  keep.set('today', { savedAt: 5, messages: [{ role: 'user', content: 'hi' }] });
+  assert.deepEqual(plain(keep.get('today', null)), { savedAt: 5, messages: [{ role: 'user', content: 'hi' }] });
+  keep.set('draft', null);
+  assert.equal(store.has('haru.draft'), false);
+  keep.set('where', true); keep.drop('where');
+  assert.equal(keep.get('where', false), false);
+});
+
+test('a phone with no storage, or one that throws, gets the defaults and no error', () => {
+  for (const storage of ['none', 'throws'] as const) {
+    const { keep } = phone({ storage });
+    assert.equal(keep.get('draft', 'nothing'), 'nothing', storage);
+    assert.equal(keep.set('draft', 'x'), false, storage);
+    assert.equal(keep.get('draft', 'nothing'), 'nothing', storage);
+  }
+});
+
+test('reachability: the phone says off, a request that never arrives says lost, an answer says on', async () => {
+  const { net, down, up, goOffline, goOnline } = phone();
+  const seen: string[] = [];
+  net.onChange((s: string) => seen.push(s));
+  assert.equal(net.state(), 'on');
+  down();
+  await assert.rejects(net.fetch('/api/chat'));
+  assert.equal(net.state(), 'lost');
+  assert.equal(net.online(), false);
+  up();
+  await net.fetch('/api/chat');
+  assert.equal(net.state(), 'on');
+  goOffline();
+  assert.equal(net.state(), 'off');
+  down();
+  await assert.rejects(net.fetch('/api/chat'));
+  assert.equal(net.state(), 'off', 'offline stays offline, not lost');
+  goOnline();
+  assert.equal(net.state(), 'on');
+  assert.deepEqual(seen, ['on', 'lost', 'on', 'off', 'on']);
+  assert.equal(phone({ onLine: false }).net.state(), 'off', 'born offline');
+});
+
+test('the kind of network is what the browser will say, and unknown where it says nothing', () => {
+  assert.equal(phone().net.kind(), 'unknown', 'iOS has no connection object');
+  assert.equal(phone({ connection: { type: 'cellular' } }).net.kind(), 'cellular');
+  assert.equal(phone({ connection: { type: 'wifi' } }).net.kind(), 'wifi');
+  assert.equal(phone({ connection: { type: 'bluetooth' } }).net.kind(), 'unknown');
+});
