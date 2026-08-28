@@ -6535,6 +6535,13 @@ function webDeps(): WebDeps {
       const folder = [path.join(app.getAppPath(), 'build', 'lib'), path.join(process.resourcesPath ?? '', 'build', 'lib')].find(existsSync);
       return folder ?? null;
     },
+    // The supplied Haru emotion SVGs, beside the Live2D libs and shipped the
+    // same way. Nothing is drawn or fallen back to: a face whose file is
+    // missing is a 404, and the page shows nothing for it.
+    emotionsFolder: () => {
+      const folder = [path.join(app.getAppPath(), 'build', 'emotions'), path.join(process.resourcesPath ?? '', 'build', 'emotions')].find(existsSync);
+      return folder ?? null;
+    },
     async speak(text) {
       // The same voice, the same reference clip, the same server the desktop
       // speaks through. Nothing about her sounds different for being far away.

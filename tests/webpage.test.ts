@@ -130,120 +130,105 @@ test('the two pages are the same shell, so a change lands on both', () => {
   assert.ok(login.includes('color-scheme: dark') && app.includes('color-scheme: dark'));
 });
 
-// The bloub, driven.
+// Her face, driven.
 //
-// Everything above treats webpage.ts as the static asset it mostly is. The one
-// part that is not static is the bloub block: ~700 lines of geometry that ship
-// as a string, so nothing type-checks it and nothing has ever run it. It is
-// however written to be runnable — sample(t) is a pure function of time, with no
-// clock of its own — so it can be lifted out of the page, given a stub DOM and
-// stepped by hand.
-//
-// What is pinned here is continuity, because that is the failure this shape can
-// have without anything throwing. blend() normalises a rotation delta to the
-// shortest arc, which is right for two still poses and wrong for a rotation that
-// keeps winding: orbit's did, and the frame its delta crossed π the blend
-// reversed and the whole body jumped. No error, no log — she just twitched.
-// Lift the block out of the page, give it somewhere to draw, and hand back a
-// step() that advances it one frame at 60fps.
-function drive() {
+// The avatar block is the one part of the page that is not static markup: it
+// takes the mood engine's word, finds the face for it, and crossfades. Driven
+// here in a vm with a document of stubs, so what is checked is what the script
+// does with a name — not what a browser does with an image.
+function drive({ reduced = false, transition }: { reduced?: boolean; transition?: string } = {}) {
   const app = appPage();
-  const anchor = app.indexOf('const TAU = Math.PI * 2;');
+  const anchor = app.indexOf('window.haruAvatar = {');
   const start = anchor < 0 ? -1 : app.lastIndexOf('(() => {', anchor);
-  assert.ok(start > 0, 'the bloub block is no longer where this test can find it');
-  const source = app.slice(start, app.lastIndexOf('</script>'));
-
-  // Just enough DOM for the block to install itself and draw into.
-  const nodes = new Map<string, any>();
-  const node = (id: string) => {
-    if (!nodes.has(id)) nodes.set(id, { id, attrs: {} as Record<string, string>, style: {}, innerHTML: '',
-      setAttribute(k: string, v: string) { this.attrs[k] = v; },
-      getAttribute(k: string) { return this.attrs[k] ?? null; } });
-    return nodes.get(id);
+  assert.ok(start > 0, 'the avatar block is no longer where this test can find it');
+  const end = app.indexOf('})();', anchor);
+  const source = app.slice(start, end + 5);
+  const classes = () => { const set = new Set<string>(); return { add: (c: string) => { set.add(c); }, remove: (c: string) => { set.delete(c); }, contains: (c: string) => set.has(c) }; };
+  const img = () => {
+    const el: any = { classList: classes(), style: {} as Record<string, string>, onload: null as null | (() => void), onerror: null as null | (() => void), removeAttribute() {}, current: '' };
+    Object.defineProperty(el, 'src', { get: () => el.current, set: (value: string) => { el.current = value; if (el.onload) el.onload(); } });
+    return el;
   };
-  let tick: ((ms: number) => void) | null = null;
+  const faces = [img(), img()];
+  const box: any = { attrs: {} as Record<string, string>, classList: classes(), offsetWidth: 1, setAttribute(k: string, v: string) { this.attrs[k] = v; }, getAttribute(k: string) { return this.attrs[k] ?? null; }, querySelectorAll: () => faces };
+  const host: any = { dataset: transition === undefined ? {} : { transition }, style: { vars: {} as Record<string, string>, setProperty(k: string, v: string) { this.vars[k] = v; } }, innerHTML: '' };
+  const timers: (() => void)[] = [];
   const win: any = {
-    Math, JSON, Number, Array, Object, String, Boolean, Map, Set, Infinity, NaN,
-    document: { getElementById: node, addEventListener() {} },
-    requestAnimationFrame: (cb: (ms: number) => void) => { tick = cb; return 1; },
-    // No fine pointer, so the gaze-follow branch stays out of the way.
-    matchMedia: () => ({ matches: false }),
-    addEventListener() {}
+    Math, JSON, Number, Array, Object, String, Boolean, Map, Set,
+    document: { getElementById: (id: string) => (id === 'stage' ? host : id === 'avatar' ? box : null) },
+    matchMedia: () => ({ matches: reduced }),
+    setTimeout: (cb: () => void) => { timers.push(cb); return timers.length; },
+    clearTimeout: () => { timers.length = 0; },
   };
   win.window = win;
-  vm.runInContext(source, vm.createContext(win), { filename: 'bloub.js' });
-  assert.ok(tick, 'the block never asked for a frame');
-
-  let frame = 0;
-  const step = () => (tick as (ms: number) => void)((++frame / 60) * 1000);
-  return { bloub: win.bloub, node, step, at: () => frame / 60 };
+  vm.runInContext(source, vm.createContext(win), { filename: 'avatar.js' });
+  const shown = () => faces.find(face => face.classList.contains('on'));
+  return { avatar: win.haruAvatar, box, faces, host, shown, fire: () => { for (const cb of timers.splice(0)) cb(); } };
 }
 
-test("she never jumps: the body moves a body's worth per frame, not a screen's", () => {
-  const { bloub, node, step } = drive();
-
-  // determined is the mood that puts her in orbit — the one state whose rotation
-  // winds far enough to reach the wrap. Going through express() rather than
-  // poking the engine also pins that mapping.
-  bloub.express('determined');
-  assert.equal(bloub.state().cur, 'orbit', 'determined no longer reaches orbit');
-
-  // The body is drawn at radius 100 in a 316-wide viewBox, and orbit turns at
-  // 1.25 revolutions a second, so at 60fps a point on the rim travels about 14
-  // units between frames. The wrap moved it 130 — a third of the frame, in 16ms.
-  // 40 is clear of honest motion and nowhere near a reversal.
-  const coords = (d: string) => (d.match(/-?\d+(?:\.\d+)?/g) ?? []).map(Number);
-  let previous: number[] | null = null;
-  let worst = 0;
-  let worstAt = 0;
-  for (let frame = 1; frame <= 90; frame++) {
-    step();
-    const d = node('bBody').getAttribute('d');
-    assert.ok(d && !d.includes('NaN'), `frame ${frame} drew nothing usable: ${d}`);
-    const now = coords(d);
-    if (previous && previous.length === now.length) {
-      for (let i = 0; i < now.length; i++) {
-        const moved = Math.abs(now[i] - previous[i]);
-        if (moved > worst) { worst = moved; worstAt = frame / 60; }
-      }
-    }
-    previous = now;
-  }
-  assert.ok(worst < 40, `the body jumped ${worst.toFixed(1)} units in one frame at ${worstAt.toFixed(2)}s`);
+test('the mood engine’s word becomes the face for it, said out loud, from her own server', () => {
+  const { avatar, box, shown } = drive();
+  assert.equal(avatar.state().emotion, 'neutral');
+  avatar.express('determined');
+  assert.equal(avatar.state().emotion, 'excited');
+  assert.equal(box.getAttribute('aria-label'), 'Haru feeling excited');
+  assert.equal(shown()?.src, '/emotions/excited.svg');
+  avatar.express('affectionate');
+  assert.equal(shown()?.src, '/emotions/love.svg');
+  avatar.express('no such mood');
+  assert.equal(avatar.state().emotion, 'neutral');
 });
 
-// What she does when nobody is talking to her, which is nearly all of the time.
-//
-// idle is the state she rests in; wink and wide are gestures. Held as resting
-// states in their own right — three to six seconds each, either free to follow
-// the other — they took up half her idle time and ran sequences like wink, wide,
-// wink, wide. Nothing was broken and nothing threw. She just read as twitchy,
-// and a wink held for four seconds is not a wink.
-//
-// So: a gesture lasts as long as the catalogue says the gesture lasts, and is
-// bracketed by idle on both sides. This pins the shape of that, not the numbers
-// - the thresholds are wide enough that only a real change in kind trips them.
-test('at rest she is mostly still, and a gesture stays a gesture', () => {
-  const { bloub, step } = drive();
+test('thinking holds until the mood lands, and otherwise settles back on its own', () => {
+  const { avatar, fire } = drive();
+  avatar.express('happy');
+  avatar.think();
+  assert.equal(avatar.state().emotion, 'thinking');
+  fire();
+  assert.equal(avatar.state().emotion, 'happy', 'left thinking too long, she goes back to how she was');
+  avatar.think();
+  avatar.express('smug');
+  assert.equal(avatar.state().emotion, 'smug', 'the reply’s mood ends the thinking');
+});
 
-  const held: Record<string, number> = {};
-  const order: string[] = [];
-  let last = '';
-  for (let i = 0; i < 5 * 60 * 60; i++) {    // five minutes at 60fps
-    step();
-    const cur = bloub.state().cur as string;
-    held[cur] = (held[cur] ?? 0) + 1 / 60;
-    if (cur !== last) { order.push(cur); last = cur; }
-  }
+test('a poke is a face for a moment, then back to how she was', () => {
+  const { avatar, fire } = drive();
+  avatar.express('curious');
+  avatar.poke('exclaim');
+  assert.equal(avatar.state().emotion, 'angry');
+  fire();
+  assert.equal(avatar.state().emotion, 'curious');
+  avatar.poke('not a thing');
+  assert.equal(avatar.state().emotion, 'curious');
+});
 
-  const total = Object.values(held).reduce((a, b) => a + b, 0);
-  const idle = (held['idle'] ?? 0) / total;
-  assert.ok(idle > 0.8, `she rests in idle only ${(idle * 100).toFixed(0)}% of the time`);
+test('the crossfade runs for the configured time, and not at all when motion is reduced', () => {
+  const timed = drive({ transition: '150' });
+  timed.avatar.express('happy');
+  assert.equal(timed.shown()?.style.transition, 'opacity 150ms ease');
+  const still = drive({ reduced: true });
+  still.avatar.express('happy');
+  assert.equal(still.shown()?.style.transition, 'none');
+  const dialled = drive();
+  dialled.avatar.setTransition(0);
+  dialled.avatar.express('sad');
+  assert.equal(dialled.shown()?.style.transition, 'none');
+  dialled.avatar.setSize(320);
+  assert.equal(dialled.host.style.vars['--avatar-size'], '320px');
+});
 
-  // Two gestures in a row is the tic this is here to prevent.
-  const runOn = order.filter((s, i) => i > 0 && s !== 'idle' && order[i - 1] !== 'idle');
-  assert.deepEqual(runOn, [], `a gesture followed another with no idle between: ${runOn.join(', ')}`);
+test('a face whose file is missing shows nothing, not a broken image', () => {
+  const { avatar, faces } = drive();
+  avatar.express('sad');
+  const face = faces.find(f => f.src === '/emotions/sad.svg')!;
+  face.onerror?.();
+  assert.ok(face.classList.contains('missing'));
+});
 
-  // And she does still do them - stillness that never breaks is its own problem.
-  assert.ok(order.length > 10, `only ${order.length} changes in five minutes; she has gone static`);
+test('the old engine is gone from the page, and the faces come from her own server', () => {
+  const html = appPage();
+  assert.ok(!/bloub/i.test(html), 'a bloub reference survives on the page');
+  assert.ok(html.includes("'/emotions/'"));
+  assert.ok(html.includes('prefers-reduced-motion'));
+  assert.ok(html.includes('role=img'));
 });

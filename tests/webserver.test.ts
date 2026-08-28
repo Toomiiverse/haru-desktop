@@ -62,6 +62,7 @@ function deps(overrides: Partial<WebDeps> = {}): WebDeps {
     },
     portrait: () => Buffer.from('not really a png'),
     model: () => null,
+    emotionsFolder: () => null,
     libFolder: () => null,
     speak: async () => null,
     hear: async () => '',
@@ -535,4 +536,21 @@ test('a reply of hers can be rated, and the page gets her comeback', async () =>
     assert.equal((await web.call('/api/chat/rate', { method: 'POST', body: JSON.stringify({ id: 'hers' }) })).status, 400);
     assert.equal((await web.call('/api/chat/rate', { method: 'POST', body: JSON.stringify({ id: 'hers', reaction: 'meh' }) })).status, 400);
   } finally { await web.stop(); }
+});
+
+test('her faces are served from her own folder, by name only, and only to someone signed in', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'haru-faces-'));
+  writeFileSync(join(dir, 'happy.svg'), '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"/>');
+  writeFileSync(join(dir, 'secret.svg'), '<svg/>');
+  const web = await door({ emotionsFolder: () => dir });
+  try {
+    assert.equal((await web.call('/emotions/happy.svg', { anonymous: true })).status, 401);
+    await web.signIn();
+    const face = await web.call('/emotions/happy.svg');
+    assert.equal(face.status, 200);
+    assert.match(face.headers.get('content-type') ?? '', /image\/svg\+xml/);
+    assert.equal((await web.call('/emotions/secret.svg')).status, 404, 'a file that is not a face is not served, even from the folder');
+    assert.equal((await web.call('/emotions/sad.svg')).status, 404, 'a face without a file is a 404, not a crash');
+    assert.equal((await web.call('/emotions/..%2Fportrait')).status, 404);
+  } finally { await web.stop(); rmSync(dir, { recursive: true, force: true }); }
 });

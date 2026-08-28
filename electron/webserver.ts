@@ -21,6 +21,7 @@ import {
 } from './web';
 import { loginPage, appPage, serviceWorker } from './webpage';
 import { readPushPrefs, type PushPrefs } from './push';
+import { emotionFile } from './emotions';
 import type { CheckIn } from './checkins';
 
 export type WebDeps = {
@@ -105,6 +106,8 @@ export type WebDeps = {
   pose?(): Record<string, number>;
   /** Where the vendored pixi and Live2D plugin are kept. */
   libFolder(): string | null;
+  /** Where her faces are kept — the supplied Haru emotion SVGs, one per emotion. */
+  emotionsFolder(): string | null;
   /** Her voice for a line, or nothing if she has none set up. */
   speak(text: string): Promise<{ audio: Uint8Array; mime: string } | null>;
   /** What they just said, through the same ears and the same corrections as the desktop. */
@@ -441,6 +444,18 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
     const file = folder && fileAt(folder, LIB_FILES[path]);
     if (!file) return json(res, 404, { error: 'The Live2D runtime is not in this build.' });
     return sendFile(res, file, 'text/javascript; charset=utf-8');
+  }
+
+  // Her face, one SVG per emotion, served as it is. By name off an allowlist —
+  // the folder holds nothing else, but the route must not rely on that — and
+  // behind the login like the model: it is her artwork.
+  if (req.method === 'GET' && path.startsWith('/emotions/')) {
+    const name = decodeURIComponent(path.slice('/emotions/'.length)).replace(/\.svg$/, '');
+    const wanted = emotionFile(name);
+    const folder = deps.emotionsFolder();
+    const file = wanted && folder ? fileAt(folder, wanted) : null;
+    if (!file) return json(res, 404, { error: 'No such face.' });
+    return sendFile(res, file, 'image/svg+xml; charset=utf-8');
   }
 
   if (req.method === 'GET' && path.startsWith('/model/')) {

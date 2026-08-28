@@ -74,6 +74,7 @@ module.exports = {
     'package.json',
     'build/icon.ico',
     'build/lib/**',
+    'build/emotions/**',
     'build/icon.png',
   ],
   win: {
