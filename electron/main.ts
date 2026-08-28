@@ -2930,8 +2930,6 @@ async function considerPipingUp(environment: Environment) {
       hasHistory: getSessions().length > 0,
       knowsThings: getMemories().length > 0,
       kind: 'return',
-      // She is cutting in, not opening — no stray facts. See OpeningContext.
-      interrupting: true,
     }));
     const character = getActiveCharacter();
     const system = [
@@ -5803,7 +5801,6 @@ async function spontaneousDiscordNudge(): Promise<string | null> {
       hasHistory: getSessions().length > 0,
       knowsThings: getMemories().length > 0,
       kind: 'return',
-      interrupting: true,
     }));
     const character = getActiveCharacter();
     const system = [
