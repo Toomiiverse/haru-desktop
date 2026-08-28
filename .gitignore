@@ -26,3 +26,7 @@ haru-personality.json
 # Rendered prompt dumps, written while working out what she was being told.
 # They carry real conversation text, so they are not something to commit.
 familiar-block*.txt
+
+# graphify's generated knowledge graph (graph.json, graph.html, report, cache).
+# Rebuilt from source with `graphify update .`; several MB of derived output.
+graphify-out/
