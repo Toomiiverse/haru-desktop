@@ -14,6 +14,8 @@ const memories = [
   { id: 'm7', text: 'Nothing notable', kind: 'event', importance: 0.45 },
   { id: 'm8', text: 'Wants Haru to be less nice when corrected.', kind: 'fact', importance: 0.6 },
   { id: 'm9', text: 'Purchased a 10m HDMI cable for the TV', kind: 'event', importance: 0.45 },
+  { id: 'm10', text: 'Does not want therapy-style advice when trying to calm down.', kind: 'fact', importance: 0.4 },
+  { id: 'm11', text: 'Wants 6 mailboxes total for The PC Project.', kind: 'fact', importance: 0.8 },
 ];
 const days = [
   { day: '2026-08-27', summary: 'Argued about mailboxes, then bought a keyboard for Scarlett.' },
@@ -24,7 +26,7 @@ const days = [
 test('she reaches for a real fact or a recent day, never a preference, a forgotten thing, a scrap, an old day, or today', () => {
   const seen = new Set<string>();
   for (let i = 0; i < 200; i++) seen.add(pickToBringUp(memories, days, [], '2026-08-28', () => i / 200)!.id);
-  assert.deepEqual([...seen].sort(), ['day:2026-08-27', 'm1', 'm2', 'm9'], 'nothing about herself, nothing about nothing');
+  assert.deepEqual([...seen].sort(), ['day:2026-08-27', 'm1', 'm11', 'm2', 'm9'], 'nothing about herself, nothing about nothing, nothing about how to treat them');
 });
 
 test('what matters comes up more: the girlfriend and the company outdraw the HDMI cable', () => {
@@ -34,8 +36,8 @@ test('what matters comes up more: the girlfriend and the company outdraw the HDM
 });
 
 test('what she brought up last is kept out of the draw, until there is nothing else', () => {
-  assert.equal(pickToBringUp(memories, days, ['m1', 'm2', 'm9'], '2026-08-28', () => 0)!.id, 'day:2026-08-27');
-  assert.equal(pickToBringUp(memories, days, ['m1', 'm2', 'm9', 'day:2026-08-27'], '2026-08-28', () => 0)!.id, 'm1', 'everything used: the draw opens again');
+  assert.equal(pickToBringUp(memories, days, ['m1', 'm2', 'm9', 'm11'], '2026-08-28', () => 0)!.id, 'day:2026-08-27');
+  assert.equal(pickToBringUp(memories, days, ['m1', 'm2', 'm9', 'm11', 'day:2026-08-27'], '2026-08-28', () => 0)!.id, 'm1', 'everything used: the draw opens again');
   assert.ok(REMEMBERED_PICKS >= 3);
 });
 

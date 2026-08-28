@@ -24,12 +24,14 @@ const dayDistance = (a: string, b: string) => Math.round((Date.parse(b) - Date.p
  * at their life. The store keeps these; this draw does not.
  */
 const NOTHING_TO_SAY = /\b(haru|you are|you're|helpful|thank(s|ing|ed)?|noted|nothing notable|opened and closed|no issues|not shared)\b/i;
+/** A preference wearing a fact's clothes — how they like to be treated is not a thing about their life either. */
+const HOW_TO_TREAT_THEM = /\b(does not (want|like)|doesn'?t (want|like)|prefers? not|wants? (haru|you|to be)|likes? to be|corrected|reminded of tasks)\b/i;
 const MIN_WORDS = 4;
 /** Memories with no score are taken as middling; a day's summary sits above most of them. */
 const DEFAULT_IMPORTANCE = 0.5, DAY_IMPORTANCE = 0.6;
 
 export function pickToBringUp(memories: Remembered[], days: Day[], recent: string[], todayKey: string, random: () => number = Math.random): Something | null {
-  const worth = (text: string) => text.trim().split(/\s+/).length >= MIN_WORDS && !NOTHING_TO_SAY.test(text);
+  const worth = (text: string) => text.trim().split(/\s+/).length >= MIN_WORDS && !NOTHING_TO_SAY.test(text) && !HOW_TO_TREAT_THEM.test(text);
   const facts = memories
     .filter(m => m.text && worth(m.text) && (m.status === undefined || m.status === 'active') && m.kind !== 'preference')
     .map(m => ({ thing: { id: m.id, text: m.text.trim(), from: 'memory' as const }, weight: m.importance ?? DEFAULT_IMPORTANCE }));
