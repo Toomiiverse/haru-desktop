@@ -135,3 +135,35 @@ export async function lookUpPlace(fix: Fix, fetchImpl: Fetcher): Promise<string>
   if (!name) throw new Error('nowhere recognisable at those coordinates');
   return name;
 }
+
+export type FoundPlace = { name: string; lat: number; lon: number };
+
+/**
+ * Places by name, through the same service, biased to where they are.
+ *
+ * Nominatim ranks by importance, not distance, so "Coles" alone would answer
+ * with the most famous Coles on Earth. A viewbox around them (about 25 km
+ * across, unbounded so a real place just outside still counts) turns that into
+ * the ones nearby, and the caller picks the nearest of the few that come back.
+ * With nowhere to bias from, a configured search place is added to the words.
+ */
+export async function searchPlaces(query: string, fetchImpl: Fetcher, near: { lat: number; lon: number } | null, fallbackPlace = ''): Promise<FoundPlace[]> {
+  const q = near || !fallbackPlace ? query : `${query}, ${fallbackPlace}`;
+  const box = near ? `&viewbox=${(near.lon - 0.12).toFixed(3)},${(near.lat + 0.12).toFixed(3)},${(near.lon + 0.12).toFixed(3)},${(near.lat - 0.12).toFixed(3)}&bounded=0` : '';
+  const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&q=${encodeURIComponent(q)}&limit=5&addressdetails=1${box}`;
+  const response = await fetchImpl(url, {
+    headers: { 'User-Agent': 'haru-desktop (personal desktop companion)', 'Accept': 'application/json' },
+    signal: AbortSignal.timeout(12_000),
+  });
+  if (!response.ok) throw new Error(`the place search returned ${response.status}`);
+  const payload = await response.json() as { name?: string; display_name?: string; lat?: string; lon?: string; address?: Address }[];
+  const found: FoundPlace[] = [];
+  for (const hit of Array.isArray(payload) ? payload : []) {
+    const lat = Number(hit.lat), lon = Number(hit.lon);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+    const head = (hit.name || (hit.display_name ?? '').split(',')[0] || '').trim();
+    const area = nameFrom(hit.address ?? {}).split(', ')[0];
+    found.push({ name: [...new Set([head, area].filter(Boolean))].join(', ') || q, lat, lon });
+  }
+  return found;
+}

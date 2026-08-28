@@ -579,6 +579,7 @@ export function appPage(): string {
   .them { background:var(--glass); border:1px solid var(--edge); border-bottom-left-radius:7px; backdrop-filter:blur(12px); }
   .me { background:var(--mine); border:1px solid var(--edge); margin-left:auto; border-bottom-right-radius:7px; }
   .sys { color:var(--ink-dim); font-size:.84rem; text-align:center; max-width:100%; background:none; border:0; }
+  .msg a.maps { display:inline-block; margin-top:.5rem; padding:.5rem .85rem; border-radius:.9rem; background:var(--glass); border:1px solid var(--accent); color:var(--ink); text-decoration:none; font-weight:600; }
   /* Under each of her bubbles: a small arrow, and behind it what they thought
      of the reply and asking again. Folded by default — a row of buttons under
      every message was a dock, not a conversation. */
@@ -682,7 +683,17 @@ const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&
 // The same handful of marks she writes on the desktop, applied to text that has
 // already been escaped — so the only tags that can ever reach the page are the
 // three put there here.
-const md=s=>s.replace(/\\*\\*\\s*([^*]+?)\\s*\\*\\*/g,'<b>$1</b>').replace(/\`([^\`\\n]+?)\`/g,'<code>$1</code>').replace(/\\*([^*\\s][^*\\n]*?)\\*/g,'<i>$1</i>');
+// A directions link she attached (directions.ts) becomes a button that opens
+// the phone's own maps: the link is Apple Maps, which an iPhone opens as the
+// app; anything else is sent to Google Maps with the same destination. Only
+// those two hosts are ever made clickable — her words are text, not markup.
+function mapsHref(u){
+  const raw=u.replace(/&amp;/g,'&');
+  const m=raw.match(/^https:\\/\\/maps\\.apple\\.com\\/\\?daddr=(-?\\d+(?:\\.\\d+)?),(-?\\d+(?:\\.\\d+)?)/);
+  const href=m&&!/iPhone|iPad|iPod|Macintosh/.test(navigator.userAgent)?'https://www.google.com/maps/dir/?api=1&destination='+m[1]+','+m[2]:raw;
+  return href.replace(/&/g,'&amp;');
+}
+const md=s=>s.replace(/\\[([^\\]\\n]+)\\]\\((https:\\/\\/(?:maps\\.apple\\.com|www\\.google\\.com\\/maps)\\/[^)\\s]*)\\)/g,(m,t,u)=>'<a class=maps href="'+mapsHref(u)+'" target=_blank rel="noopener">🗺️ '+t+'</a>').replace(/\\*\\*\\s*([^*]+?)\\s*\\*\\*/g,'<b>$1</b>').replace(/\`([^\`\\n]+?)\`/g,'<code>$1</code>').replace(/\\*([^*\\s][^*\\n]*?)\\*/g,'<i>$1</i>');
 ${PHONE}
 const get=u=>window.haruNet.fetch(u).then(r=>r.ok?r.json():Promise.reject(r));
 const post=(u,b)=>window.haruNet.fetch(u,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(b||{})}).then(r=>r.ok?r.json():Promise.reject(r));

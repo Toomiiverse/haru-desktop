@@ -35,8 +35,9 @@ import { classify, discard, extractAudio, extractFrames, findFfmpeg, OPENABLE, r
 import { markTimeGaps, sinceLast } from './history';
 import { correct, noteUsed, readHearing, remember } from './hearing';
 import { assumeItIsTheirs, identifyWork, noteWork, readFollowing, recogniseNow, summariseFollowing } from './following';
-import { lookUpPlace, readWindowsLocation } from './location';
-import { absorb, describeWhereabouts, forgetPlace, namePlace, placeAt, readSpot, readWhereabouts, whereForPage, type Whereabouts } from './whereabouts';
+import { lookUpPlace, readWindowsLocation, searchPlaces, type FoundPlace } from './location';
+import { directionsAsk, directionsNote, matchNamedPlace, startingPoint, withDirections, type DirectionsAsk } from './directions';
+import { absorb, describeWhereabouts, distanceM, forgetPlace, namePlace, placeAt, readSpot, readWhereabouts, whereForPage, type Whereabouts } from './whereabouts';
 import { convertImage, normaliseFormat, FORMATS } from './convert';
 import { cancelPower, closeApp, findApps, isCancellable, launch, listRunning, matchApp, matchRunning, normalisePower, POWER_DELAY_S, readDesktopConfig, runPower, type DesktopConfig } from './desktop';
 import { looksLikeScreenshot, maySpeak, readScreenshotConfig, screenshotPrompt, SETTLE_MS, SETTLE_TRIES, type ScreenshotConfig } from './screenshots';
@@ -5101,6 +5102,8 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // Collected before the prompt so a machine question is answered from facts,
   // not from the model's assumptions about what it runs on.
   const machineNote = await systemContextFor(latest);
+  // Likewise the way somewhere: found first, spoken about second, linked last.
+  const directions = await directionsFor(latest);
   // Semantic retrieval: embed this turn's query (cached) and fold the memory
   // similarities into what she gets told, so "the thing we did to the server"
   // can find the memory even with no words in common.
@@ -5138,6 +5141,7 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
     movedJustNow,
     pushback: store.get('pushback') as Pushback | undefined,
     whereabouts: describeWhereabouts(getWhereabouts()),
+    directionsNote: directions?.note,
   });
   // What she can still see. Not only this message: a picture has to ride along
   // again on the next turn or "what is in week three" cannot be answered, and
@@ -5158,7 +5162,9 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // Chosen once for the whole turn, tool rounds included: swapping models
   // half-way through a tool loop would hand one model's call to another to
   // answer, and the two do not agree on how a call is even identified.
-  const brain = brainFor(latest, config, messages, { pictures, files: arrived.length > 0 });
+  // A directions ask is answered here: the facts are already in the prompt,
+  // and a second model would only have a longer way of not being a map.
+  const brain: Brain = directions ? { config, escalated: false, because: 'the way somewhere is answered at home', sees: false } : brainFor(latest, config, messages, { pictures, files: arrived.length > 0 });
   if (brain.escalated) console.log(`[ai] sent out to ${brain.config.model} — ${brain.because}`);
   config = brain.config;
   const vision = readVisionConfig(store.get('vision'));
@@ -5298,17 +5304,20 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // The echo first, then the signature: with "A keyboard?" gone, "Fine," is
   // the opener, and it is that which may have been used last time too.
   const clock = zonedNow(CHAT_TIMEZONE);
-  const content = fixStatedClock(dropRepeatedOpener(dropEchoOpener(dropRepeatedSentences(dropTackedOnParagraphs(trimmed, brain.escalated || ran.has('search_web') || ran.has('read_web_page')), recent), latest), recent), clock.getHours(), clock.getMinutes());
-  if (content !== said) console.log(`[ai] dropped ${said.length - content.length} chars she had already said`);
+  const herLine = fixStatedClock(dropRepeatedOpener(dropEchoOpener(dropRepeatedSentences(dropTackedOnParagraphs(trimmed, brain.escalated || ran.has('search_web') || ran.has('read_web_page')), recent), latest), recent), clock.getHours(), clock.getMinutes());
+  // The maps button goes under her words, not into her mouth: what is herLine
+  // and what her mood is read from is the line she said.
+  const content = directions?.found ? withDirections(herLine, directions.found) : herLine;
+  if (herLine !== said) console.log(`[ai] dropped ${said.length - content.length} chars she had already said`);
   console.log(`[ai] chat reply in ${Date.now() - started}ms, ${content.length} chars`);
   // Cleared only once a reply actually exists, so a failed or unreachable turn
   // leaves the note in place for the retry rather than losing it.
   if (fresh) store.delete('chat.freshStart');
   // Shared: the expression system consumes it through the broadcast inside,
   // and the voice awaits it to choose a clip matching how this line was said.
-  const saidMood = classifyEmotion(content, config);
-  void speak(content, saidMood);
-  void tieToPlace(latest, content, config);
+  const saidMood = classifyEmotion(herLine, config);
+  void speak(herLine, saidMood);
+  void tieToPlace(latest, herLine, config);
   // Restarting herself kills the process she is answering from, so the
   // restart waits until this reply is built and on its way — the words leave
   // first, the restart follows a few seconds behind.
@@ -6104,6 +6113,35 @@ function stopDiscord() {
 
 /** Where the phone subscriptions, their preferences and the signing pair live.
  *  Top-level, for the dot-path reason above. */
+/**
+ * The way somewhere, when the message asks for it: a place she knows by name,
+ * else the map service's nearest match around them. Looked up before the
+ * prompt so she speaks from what was found, and the link is attached after she
+ * has spoken (withDirections) rather than asked of her.
+ */
+async function directionsFor(latest: string): Promise<{ ask: DirectionsAsk; found: FoundPlace | null; note: string } | null> {
+  const ask = directionsAsk(latest);
+  if (!ask) return null;
+  const where = getWhereabouts();
+  let found: FoundPlace | null = null;
+  const named = matchNamedPlace(ask.destination, where.places);
+  if (named) {
+    found = { name: named.name, lat: named.lat, lon: named.lon };
+  } else {
+    const from = startingPoint(where);
+    try {
+      const hits = await searchPlaces(ask.destination, (url, init) => fetch(url, init), from, readSearchConfig(store.get('search')).place);
+      // The nearest of what came back when she knows where they are; else the
+      // service's own first choice.
+      found = from ? hits.map(hit => ({ hit, d: distanceM(from, hit) })).sort((a, b) => a.d - b.d)[0]?.hit ?? null : hits[0] ?? null;
+    } catch (error) {
+      console.warn(`[maps] the search for "${ask.destination}" failed: ${(error as Error).message}`);
+    }
+  }
+  console.log(`[maps] the way to "${ask.destination}": ${found ? found.name : 'not found'}`);
+  return { ask, found, note: directionsNote(ask, found, where) };
+}
+
 function getWhereabouts(): Whereabouts {
   return readWhereabouts(store.get('whereabouts'));
 }

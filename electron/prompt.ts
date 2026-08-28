@@ -157,6 +157,8 @@ export type PromptState = {
   pushback: Pushback | undefined;
   /** Where their phone says they are, already put into words (whereabouts.ts), or nothing. */
   whereabouts?: string;
+  /** The way somewhere, when they asked for it: what was found and what the app will attach (directions.ts). */
+  directionsNote?: string;
 };
 
 export function chatSystemPrompt(state: PromptState): string {
@@ -244,6 +246,7 @@ export function chatSystemPrompt(state: PromptState): string {
     // Beside the tool instructions, so a machine question reads the facts at
     // the same moment it is told the tools exist.
     state.machineNote,
+    state.directionsNote ?? '',
     // Kept last so the tone instruction is the final thing read before replying,
     // which is what the drawer promises. The persona sits with it for the same
     // reason: a long prompt makes the opening lines the ones a small model

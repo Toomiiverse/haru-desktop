@@ -26,7 +26,9 @@ for (const [name, html] of PAGES) {
     // from us; so is everything else.
     const absolute = html.match(/https?:\/\/[^\s"'`)]+|(?<![:\w])\/\/[a-z0-9-]+\.[a-z]/gi) ?? [];
     // A namespace declaration is not a fetch — nothing is retrieved from it.
-    const fetched = absolute.filter(url => !url.includes('www.w3.org'));
+    // Nor is a maps link: the phone's own maps app opens it, when they tap the
+    // button she attached to a directions answer. Nothing is fetched from either.
+    const fetched = absolute.filter(url => !url.includes('www.w3.org') && !/^https:\/\/(?:maps\.apple\.com|www\.google\.com\/maps)\//.test(url));
     assert.deepEqual(fetched, [], `${name} would try to load: ${fetched.join(', ')}`);
     assert.ok(!html.includes('@import'), 'an @import is an outside origin by another name');
   });
@@ -487,4 +489,32 @@ test('the kind of network is what the browser will say, and unknown where it say
   assert.equal(phone({ connection: { type: 'cellular' } }).net.kind(), 'cellular');
   assert.equal(phone({ connection: { type: 'wifi' } }).net.kind(), 'wifi');
   assert.equal(phone({ connection: { type: 'bluetooth' } }).net.kind(), 'unknown');
+});
+
+// -- her maps link, as a button --------------------------------------------------------
+
+function markdown(userAgent: string) {
+  const app = appPage();
+  const start = app.indexOf('function mapsHref(u){');
+  const end = app.indexOf('\n', app.indexOf('const md=', start));
+  assert.ok(start > 0 && end > start, 'the markdown helpers are no longer where this test can find them');
+  const win: Stub = { navigator: { userAgent } };
+  win.window = win;
+  vm.runInContext(app.slice(start, end) + '\nwindow.md = md;', vm.createContext(win), { filename: 'md.js' });
+  return win.md as (s: string) => string;
+}
+
+test('a directions link she attached becomes a button that opens Apple Maps on an iPhone and Google Maps elsewhere', () => {
+  const text = 'Fine.\n\n[Directions to Coles](https://maps.apple.com/?daddr=-31.93300,115.79900&amp;dirflg=d)';
+  const iphone = markdown('Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X)')(text);
+  assert.equal(iphone, 'Fine.\n\n<a class=maps href="https://maps.apple.com/?daddr=-31.93300,115.79900&amp;dirflg=d" target=_blank rel="noopener">🗺️ Directions to Coles</a>');
+  const android = markdown('Mozilla/5.0 (Linux; Android 16; Pixel 9)')(text);
+  assert.equal(android, 'Fine.\n\n<a class=maps href="https://www.google.com/maps/dir/?api=1&amp;destination=-31.93300,115.79900" target=_blank rel="noopener">🗺️ Directions to Coles</a>');
+});
+
+test('only her two map hosts become links; anything else in her words stays text', () => {
+  const md = markdown('iPhone');
+  assert.equal(md('[click](https://evil.example/x)'), '[click](https://evil.example/x)');
+  assert.equal(md('[x](https://maps.apple.com.evil.example/?daddr=1,2)'), '[x](https://maps.apple.com.evil.example/?daddr=1,2)');
+  assert.equal(md('**bold** and *soft*'), '<b>bold</b> and <i>soft</i>');
 });

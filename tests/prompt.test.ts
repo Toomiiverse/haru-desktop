@@ -245,3 +245,9 @@ test('where their phone says they are sits beside the clock, as words, and only 
   assert.match(placed, /Their phone says they are at the store/);
   assert.ok(placed.indexOf('Their phone says') > placed.indexOf("in the user's timezone"), 'after the clock');
 });
+
+test('the way somewhere sits beside the machine facts, when they asked for it', () => {
+  assert.doesNotMatch(chatSystemPrompt(state()), /They asked the way/);
+  const asked = chatSystemPrompt(state({ directionsNote: 'They asked the way to "Coles". Found: Coles, Wembley. It is about 6.1 km from where they are. The app is attaching a button under your words.' }));
+  assert.match(asked, /Found: Coles, Wembley/);
+});
