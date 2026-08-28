@@ -46,7 +46,7 @@ import { haruNote, rangeStats, type HaruNote, type RangeName, type RangeStats } 
 import { describeRating, entryFor, journalPrompt, readEntries, readJournalConfig, readRating, recentTrend, shouldAsk, upsertEntry, SCALE_MAX, type JournalConfig, type JournalEntry } from './journal';
 import { formatList, formatMedia, formatMissing, lookUp, readAniListConfig, userList, type AniListConfig, type ListEntry, type MediaKind } from './anilist';
 import { createDesktopShortcut, desktopShortcutPath, isAutoStartEnabled, setAutoStart, startedHidden } from './startup';
-import { dropRoleHeader, dropTackedOnParagraphs, dropInventedContact, dropInventedScreenTalk, dropRepeatedAgendaMentions, dropRepeatedParagraphs, dropStageDirections, dropRepeatedOpener } from './reply';
+import { dropRoleHeader, dropTackedOnParagraphs, dropInventedContact, dropInventedScreenTalk, dropRepeatedAgendaMentions, dropRepeatedParagraphs, dropStageDirections, dropRepeatedOpener, dropEchoOpener } from './reply';
 import { runToolLoop } from './toolloop';
 import { chatTools, coerceKnowledgeCategory, runChatTool, type ToolAvailability, type ToolDeps } from './tools';
 import { createMemoryStore } from './memorystore';
@@ -5245,7 +5245,9 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   const trimmed = dropRoleHeader(dropInventedContact(dropStageDirections(dropInventedScreenTalk(brain.escalated ? deduped : dropRepeatedParagraphs(deduped, recent), grounded))));
   // Last, on the reply that survives everything else: a signature opener is
   // only a signature against what she said last time.
-  const content = dropRepeatedOpener(dropTackedOnParagraphs(trimmed, brain.escalated || ran.has('search_web') || ran.has('read_web_page')), recent);
+  // The echo first, then the signature: with "A keyboard?" gone, "Fine," is
+  // the opener, and it is that which may have been used last time too.
+  const content = dropRepeatedOpener(dropEchoOpener(dropTackedOnParagraphs(trimmed, brain.escalated || ran.has('search_web') || ran.has('read_web_page')), latest), recent);
   if (content !== said) console.log(`[ai] dropped ${said.length - content.length} chars she had already said`);
   console.log(`[ai] chat reply in ${Date.now() - started}ms, ${content.length} chars`);
   // Cleared only once a reply actually exists, so a failed or unreachable turn
@@ -6243,7 +6245,8 @@ function webDeps(): WebDeps {
       sendToWindows('chat:ratedFromPhone', { id, ...(reaction ? { reaction } : {}), ...(note !== undefined ? { note } : {}) });
       appendFeedback({ id, reaction, note, source: 'phone' });
       if (!reaction || target.reaction === reaction) return { line: null };
-      takeThumb(reaction);
+      const { comeback } = takeThumb(reaction);
+      if (!comeback) { console.log(`[web] rated ${reaction} from the phone — she let it pass`); return { line: null }; }
       const config = store.get('ai.config') as ProviderConfig | undefined;
       if (!config?.model) return { line: null };
       try {
@@ -6573,11 +6576,21 @@ function webDeps(): WebDeps {
 let webTrouble = '';
 
 /**
+ * How often a thumb gets a line back. Every thumb answered was a tell —
+ * press, get a gloat, press, get a retort, like a vending machine — and it
+ * made rating a reply feel like starting a conversation. Half the time she
+ * takes it and says nothing, which is what a person does with a thumb.
+ */
+const COMEBACK_ODDS = 0.5;
+
+/**
  * A thumb, taken: the quiet period starts, her mood moves, her face lands.
  * Shared by the desk and the phone, so a rating means the same thing from
- * either — the mood engine has no idea which one it was.
+ * either — the mood engine has no idea which one it was. `comeback` is the
+ * coin for whether she answers it out loud, tossed here so both sides toss
+ * the same one.
  */
-function takeThumb(reaction: 'up' | 'down'): Mood {
+function takeThumb(reaction: 'up' | 'down'): { mood: Mood; comeback: boolean } {
   // A thumb is them addressing her, so it starts the quiet period the same way
   // a message does. This is the one the screenshot caught: thumbs up, and a
   // remark about something else arrives on top of her own reply.
@@ -6603,7 +6616,7 @@ function takeThumb(reaction: 'up' | 'down'): Mood {
       'nod',
     );
   }
-  return next;
+  return { mood: next, comeback: Math.random() < COMEBACK_ODDS };
 }
 
 /** Where the ratings go: beside config.json, but a file of its own — appended to, never rewritten. */
@@ -7402,10 +7415,11 @@ app.whenReady().then(() => {
   // Rating a reply moves her mood too — being told she got it wrong stings more
   // than a lazy question, and praise buys back some patience.
   ipcMain.handle('mood:react', (_e, reaction: 'up' | 'down', id?: string) => {
-    const next = takeThumb(reaction);
+    const taken = takeThumb(reaction);
     // Written down for later, when the desk says which reply it was.
     if (id) appendFeedback({ id, reaction, source: 'desktop' });
-    return next;
+    // The desk answers back only when the coin says so.
+    return { ...taken.mood, comeback: taken.comeback };
   });
   ipcMain.handle('mood:get', () => getMood());
   ipcMain.handle('live2d:import', async () => {

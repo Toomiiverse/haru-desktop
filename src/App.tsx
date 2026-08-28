@@ -124,7 +124,9 @@ export default function App() {
     setMessages(current => current.map(message => message.id === id ? { ...message, reaction } : message));
     // The mood shifts before the quip is written, so a thumbs-up that tips her
     // into coasting is already reflected in what she says about it.
-    void window.haru?.mood.react(reaction, id).then(() => answerBack(reaction, target.content));
+    // She answers a thumb only when main's coin says so — half the time she
+    // just takes it, which is what a person does with a thumb.
+    void window.haru?.mood.react(reaction, id).then(mood => { if (mood.comeback) answerBack(reaction, target.content); });
     if (!window.haru) answerBack(reaction, target.content);
   }
 

@@ -11,7 +11,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { claimsDesktopAction, claimsTickOff, dropInventedContact, dropInventedScreenTalk, dropRepeatedAgendaMentions, dropRepeatedParagraphs, dropRoleHeader, dropStageDirections, dropTackedOnParagraphs, readsLikeAssistant, dropRepeatedOpener } from '../electron/reply';
+import { claimsDesktopAction, claimsTickOff, dropInventedContact, dropInventedScreenTalk, dropRepeatedAgendaMentions, dropRepeatedParagraphs, dropRoleHeader, dropStageDirections, dropTackedOnParagraphs, readsLikeAssistant, dropRepeatedOpener, dropEchoOpener } from '../electron/reply';
 
 // -- claiming to have touched the machine -------------------------------------
 
@@ -342,4 +342,15 @@ test('a fresh opener, a word that is not stock, or a reply of one word is left a
   assert.equal(dropRepeatedOpener('Fine.', ['Fine.']), 'Fine.');
   assert.equal(dropRepeatedOpener('Fine—do it.', ['Fine.']), 'Fine—do it.');
   assert.equal(dropRepeatedOpener('Fine. Go.', []), 'Fine. Go.');
+});
+
+test('their subject said back as a question before the answer is cut', () => {
+  assert.equal(dropEchoOpener('A keyboard? Fine, but don’t expect me to care.', 'What do you think about a keyboard?'), 'Fine, but don’t expect me to care.');
+  assert.equal(dropEchoOpener('A pre-order for GTA 6? Fine, but don’t pretend that’s thoughtful.', 'I reckon I’ll pre-order GTA 6 for her'), 'Fine, but don’t pretend that’s thoughtful.');
+});
+
+test('a question of her own, a long first sentence, or nothing after it is left alone', () => {
+  assert.equal(dropEchoOpener('Did you pick up Scarlett’s present yet? Or are you stuck in limbo?', 'You didn’t even ask a question though'), 'Did you pick up Scarlett’s present yet? Or are you stuck in limbo?');
+  assert.equal(dropEchoOpener('A keyboard?', 'What about a keyboard?'), 'A keyboard?');
+  assert.equal(dropEchoOpener('Fine. A keyboard is a waste unless it is a good one.', 'What about a keyboard?'), 'Fine. A keyboard is a waste unless it is a good one.');
 });

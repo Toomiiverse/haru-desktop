@@ -484,3 +484,30 @@ export function dropRepeatedOpener(reply: string, previousReplies: string[]): st
   if (!rest.trim()) return reply;
   return rest.charAt(0).toUpperCase() + rest.slice(1);
 }
+
+/**
+ * The question said back before the answer, cut.
+ *
+ * "A keyboard? Fine, but…", "A pre-order for GTA 6? Fine, but…" — the subject
+ * of their message, repeated as a question, then the reply. Told not to, she
+ * did it anyway; a small model reaches for the echo to have something to
+ * start from. It is an echo when the first sentence is short, ends in a
+ * question mark, and shares a real word with what they just said — a
+ * question of her own ("Did you pick it up yet?") shares nothing, and is not
+ * short in that way. Cut, and what follows is the reply.
+ */
+const ECHO_STOPWORDS = new Set(['your', 'yours', 'that', 'this', 'with', 'what', 'about', 'there', 'they', 'them', 'have', 'just', 'like', 'want', 'will', 'were', 'then', 'than', 'from', 'into', 'does', 'dont', 'didn', 'even', 'though', 'still', 'really', 'think', 'know', 'some', 'more', 'when', 'where', 'which', 'would', 'could', 'should', 'going', 'been', 'being', 'also', 'much', 'many', 'very', 'right', 'okay', 'fine', 'sure', 'well', 'good', 'thing', 'things', 'something', 'anything', 'nothing', 'maybe', 'reckon']);
+
+export function dropEchoOpener(reply: string, theirMessage: string): string {
+  const text = reply.trimStart();
+  const first = text.match(/^([^.!?\n]{1,60}\?)\s+/u);
+  if (!first) return reply;
+  // Real words only: "you" is in every question of hers and every message of
+  // theirs, and would make "Did you pick it up yet?" an echo of anything.
+  const words = (value: string) => new Set((value.toLowerCase().match(/[\p{L}\p{N}]{4,}/gu) ?? []).filter(word => !ECHO_STOPWORDS.has(word)));
+  const shared = [...words(first[1])].filter(word => words(theirMessage).has(word));
+  if (!shared.length) return reply;
+  const rest = text.slice(first[0].length);
+  if (!rest.trim()) return reply;
+  return rest.charAt(0).toUpperCase() + rest.slice(1);
+}

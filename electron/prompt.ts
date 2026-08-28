@@ -259,9 +259,6 @@ export function chatSystemPrompt(state: PromptState): string {
     moodInstruction(state.irritation),
     egoInstruction(state.ego),
     leverageInstruction(state.ego),
-    // After the mood and the ego, which say "no cheerful helper energy" — read
-    // before that, a small model took the emoji for cheer and dropped them.
-    EXPRESSIVE,
     // Immediately after the three lines that cause it, and for the same reason
     // freshStartInstruction sits where it does: being told she is fed up is what
     // produces the stock sentence, so the correction has to be read second or it
@@ -296,5 +293,9 @@ export function chatSystemPrompt(state: PromptState): string {
     // anything until it is settled.
     goodnightInstruction(state.goodnight),
     shoutInstruction(state.shout),
+    // Last of all. Read before the mood and the ego ("no cheerful helper
+    // energy") a small model took the emoji for cheer; read anywhere but last,
+    // it copied the emoji-less replies in the history over the rule. See room.ts.
+    EXPRESSIVE,
   ].filter(Boolean).join(' ');
 }

@@ -59,7 +59,9 @@ export interface UpdateReport {
 }
 
 export interface ChatResult { content: string; ignored: boolean; irritation: number; ego: number; }
-export interface Mood { irritation: number; ego: number; }
+export interface Mood { irritation: number; ego: number;
+  /** On the mood a thumb hands back: whether she answers it out loud this time. Main's coin. */
+  comeback?: boolean; }
 export interface Vitals { energy: number; happiness: number; curiosity: number; affection: number; sleepiness: number; stress: number; focus: number; }
 export interface LifeTick { vitals: Vitals; action: string | null; night: boolean; }
 export type EmotionName = 'neutral' | 'happy' | 'curious' | 'smug' | 'annoyed' | 'bored' | 'sleepy' | 'surprised' | 'affectionate' | 'embarrassed' | 'determined' | 'worried';
