@@ -4191,6 +4191,52 @@ const GLOAT_EXAMPLES = [
 
 // Deliberately run without tools: these are one-line quips, and offering the
 // tool schema only invites a stray reminder and slows the round trip.
+/**
+ * A hosted answer, said again as herself.
+ *
+ * The hosted model is better at the research and worse at being her: handed
+ * the persona it still answers a comparison like a search engine, and a
+ * reply in nobody's voice reads as her being switched off. So the research is
+ * treated as the substance of what she is about to say, and her own model —
+ * which is the one that knows how she talks — says it. The facts are the
+ * hosted model's and must survive untouched; the instruction is built around
+ * that, and the pass falls back to the hosted words rather than to nothing.
+ *
+ * `onChunk` streams her version to the reader; the hosted one was not shown.
+ */
+async function inHerVoice(answer: string, options: { maxTokens?: number; onChunk?: (text: string) => void } = {}): Promise<string> {
+  const local = store.get('ai.config') as ProviderConfig | undefined;
+  if (!local?.model || !answer.trim()) return answer;
+  const mood = getMood();
+  const character = getActiveCharacter();
+  const system = [
+    character.identity,
+    character.style,
+    moodInstruction(mood.irritation),
+    egoInstruction(mood.ego),
+    'What follows is the substance of what you are about to say — the research is done and it is correct. Say it as yourself, to them. Every fact, number, name, price and recommendation in it stays exactly as given and in the same order — a list of seven things is still a list of the same seven things, none dropped, none added — you change only how it is said, and you add nothing you were not given. Keep it about the same length or shorter, and keep a list a list if there is one, in your words. No preamble about having looked anything up, no quotation marks, no stage directions.',
+  ].filter(Boolean).join(' ');
+  try {
+    const started = Date.now();
+    const message = await ollamaPost(
+      [{ role: 'system', content: system }, { role: 'user', content: answer }],
+      local,
+      // A little room over the hosted cap: her version of a list is rarely
+      // shorter than the list.
+      // Cool: at 0.8 one sample in two dropped half the list and invented
+      // colour; the persona comes from the prompt, not from the heat.
+      { tools: false, temperature: 0.5, ...(options.maxTokens ? { maxTokens: Math.round(options.maxTokens * 1.5) } : {}), ...(options.onChunk ? { onChunk: options.onChunk } : {}) },
+    );
+    const hers = (message.content ?? '').trim();
+    if (!hers) throw new Error('nothing came back');
+    console.log(`[ai] said the hosted answer as herself in ${Date.now() - started}ms (${answer.length} -> ${hers.length} chars)`);
+    return hers;
+  } catch (error) {
+    console.warn('[ai] could not say the hosted answer as herself — sending it as it came:', error instanceof Error ? error.message : error);
+    return answer;
+  }
+}
+
 async function ollamaQuip(system: string, user: string, config: ProviderConfig) {
   const message = await ollamaPost(
     [{ role: 'system', content: system }, { role: 'user', content: user }],
@@ -4984,7 +5030,7 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // The category only, never the title — a log outlives the moment, and a
   // browsing history written to disk is a different thing from her reading a
   // window title and forgetting it.
-  console.log(`[ai] chat request: model=${config.model} messages=${messages.length} irritation=${irritation} ego=${ego} goodnight=${mood.goodnight} screen=${currentActivity ? currentActivity.kind : 'none'}${traceId ? ` trace=${traceId}` : ''}`);
+  console.log(`[ai] chat request: model=${config.model} ctx=${chatNumCtx()} messages=${messages.length} irritation=${irritation} ego=${ego} goodnight=${mood.goodnight} screen=${currentActivity ? currentActivity.kind : 'none'}${traceId ? ` trace=${traceId}` : ''}`);
   // Past the threshold she does not answer at all. Returned rather than thrown:
   // the renderer marks the turn as ignored instead of showing an error.
   if (isIgnoring(irritation)) {
@@ -5125,7 +5171,9 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
     // away-turns were found to run long: the cap keeps her concise without
     // touching the desk, where a full answer is the point of the window.
     ...(away ? { maxTokens: AWAY_MAX_TOKENS } : {}),
-    ...(forwardChunk ? { onChunk: forwardChunk } : {}),
+    // A hosted reply is not shown as it arrives: it is the research, not the
+    // answer, and it is said again as herself below — that is what streams.
+    ...(forwardChunk && !brain.escalated ? { onChunk: forwardChunk } : {}),
   };
   const { content: spoken, ran } = await runToolLoop(conversation, {
     ask: async (sending, { tools }) => {
@@ -5162,6 +5210,12 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // further would start dropping a legitimate restatement — asked what is on
   // today twice in a conversation, she has to be free to say it twice. Two
   // covers the case where a retort or gloat sits between the two replies.
+  // OpenAI thinks, she speaks. A hosted reply is the research — the facts, the
+  // numbers, the comparison — and it arrives in the hosted model's voice, which
+  // is nobody's: a tidy bulleted list with none of her in it, which is exactly
+  // what was noticed. Her own model says it again as herself, same facts, her
+  // mouth, and that is what the reader watches arrive.
+  const said = brain.escalated ? await inHerVoice(spoken, { ...(away ? { maxTokens: AWAY_MAX_TOKENS } : {}), ...(forwardChunk ? { onChunk: forwardChunk } : {}) }) : spoken;
   const recent = messages.filter(entry => entry.role === 'assistant').slice(-2).map(entry => entry.content);
   // What she was legitimately given: their message, and whatever is actually
   // on screen. Anything she names beyond that in a closing line was invented.
@@ -5170,14 +5224,14 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // subject is, so it should get its say before the blunter filters start
   // counting words.
   const onList = getKept().map(item => item.title);
-  const deduped = dropRepeatedAgendaMentions(spoken, recent, onList, latest);
+  const deduped = dropRepeatedAgendaMentions(said, recent, onList, latest);
   // Outermost on purpose: it counts paragraphs, so it has to see the ones
   // that survive everything else rather than the ones about to be dropped.
   // "ran" is what she actually reached for this turn, which is a fact about
   // the reply rather than a guess from its text.
   const trimmed = dropRoleHeader(dropInventedContact(dropStageDirections(dropInventedScreenTalk(dropRepeatedParagraphs(deduped, recent), grounded))));
   const content = dropTackedOnParagraphs(trimmed, ran.has('search_web') || ran.has('read_web_page'));
-  if (content !== spoken) console.log(`[ai] dropped ${spoken.length - content.length} chars she had already said`);
+  if (content !== said) console.log(`[ai] dropped ${said.length - content.length} chars she had already said`);
   console.log(`[ai] chat reply in ${Date.now() - started}ms, ${content.length} chars`);
   // Cleared only once a reply actually exists, so a failed or unreachable turn
   // leaves the note in place for the retry rather than losing it.

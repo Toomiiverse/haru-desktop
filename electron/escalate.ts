@@ -31,7 +31,18 @@ export function readEscalateConfig(saved: unknown): EscalateConfig {
  * of money and an unnecessary export of your calendar. Checked first: a short
  * errand stays home however it is phrased.
  */
-const HOUSEKEEPING = /^\s*(remind me|add |put |set (a |an )?(reminder|alarm)|tick|cross|mark |done|finished|i (did|took|got|finished|sorted)|what('s| is| have i)|whats|anything (on|today|tomorrow)|cancel|delete|move |reschedule|thanks|thank you|cheers|ok|okay|yeah|yep|nope|no |hi|hey|hello|morning|night|goodnight)\b/i;
+const HOUSEKEEPING = /^\s*(remind me|add |put |set (a |an )?(reminder|alarm)|tick|cross|mark |done|finished|i (did|took|got|finished|sorted)|what have i|anything (on|today|tomorrow)|cancel|delete|move |reschedule|thanks|thank you|cheers|ok|okay|yeah|yep|nope|no |hi|hey|hello|morning|night|goodnight)\b/i;
+
+/**
+ * A question about the world rather than about their day: what something is,
+ * how good it is, what it costs, what else there is. The local model answers
+ * these like a search engine — accurate, bulleted, and in nobody's voice — and
+ * a 9B has no better answer in it. The hosted model does the research; what
+ * comes back is then said again as herself (see inHerVoice). "What is" used to
+ * count as housekeeping, for "what is on today"; that stays local anyway as
+ * short and ordinary, and it was keeping "what is the best GPU" home too.
+ */
+const RESEARCH = /\b(how (good|well|fast|big|strong|reliable)|any good|worth (it|buying|getting|using|the money)|alternatives?|vs\.?|versus|compar(e|ed|ison)|benchmarks?|pricing|price of|prices|how much (does|do|is|are|would|will)|recommend|which (is|are|one is|one's) (better|best|faster|cheaper)|best (model|models|gpu|cpu|option|options|way|tool|tools|laptop|phone|monitor|value)|specs?|reviews?|tell me about|what do you know about|look (up|into)|research)\b/i;
 
 /**
  * Asking for thinking rather than for a fact or an errand. These are the shapes
@@ -60,6 +71,8 @@ export function decide(message: string, config: EscalateConfig): Decision {
   if (!text) return { escalate: false, because: 'nothing said' };
 
   if (HOUSEKEEPING.test(text)) return { escalate: false, because: 'an errand or a pleasantry' };
+
+  if (RESEARCH.test(text)) return { escalate: true, because: 'it is a research question' };
 
   if (LOOKS_LIKE_CODE.test(text)) return { escalate: true, because: 'there is code in it' };
   if (WANTS_THINKING.test(text)) return { escalate: true, because: 'it asks for reasoning' };
