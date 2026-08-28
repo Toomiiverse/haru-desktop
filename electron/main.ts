@@ -46,7 +46,7 @@ import { haruNote, rangeStats, type HaruNote, type RangeName, type RangeStats } 
 import { describeRating, entryFor, journalPrompt, readEntries, readJournalConfig, readRating, recentTrend, shouldAsk, upsertEntry, SCALE_MAX, type JournalConfig, type JournalEntry } from './journal';
 import { formatList, formatMedia, formatMissing, lookUp, readAniListConfig, userList, type AniListConfig, type ListEntry, type MediaKind } from './anilist';
 import { createDesktopShortcut, desktopShortcutPath, isAutoStartEnabled, setAutoStart, startedHidden } from './startup';
-import { dropRoleHeader, dropTackedOnParagraphs, dropInventedContact, dropInventedScreenTalk, dropRepeatedAgendaMentions, dropRepeatedParagraphs, dropStageDirections, dropRepeatedOpener, dropEchoOpener } from './reply';
+import { dropRoleHeader, dropTackedOnParagraphs, dropInventedContact, dropInventedScreenTalk, dropRepeatedAgendaMentions, dropRepeatedParagraphs, dropStageDirections, dropRepeatedOpener, dropEchoOpener, dropRepeatedSentences } from './reply';
 import { runToolLoop } from './toolloop';
 import { chatTools, coerceKnowledgeCategory, runChatTool, type ToolAvailability, type ToolDeps } from './tools';
 import { createMemoryStore } from './memorystore';
@@ -5276,7 +5276,7 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // only a signature against what she said last time.
   // The echo first, then the signature: with "A keyboard?" gone, "Fine," is
   // the opener, and it is that which may have been used last time too.
-  const content = dropRepeatedOpener(dropEchoOpener(dropTackedOnParagraphs(trimmed, brain.escalated || ran.has('search_web') || ran.has('read_web_page')), latest), recent);
+  const content = dropRepeatedOpener(dropEchoOpener(dropRepeatedSentences(dropTackedOnParagraphs(trimmed, brain.escalated || ran.has('search_web') || ran.has('read_web_page')), recent), latest), recent);
   if (content !== said) console.log(`[ai] dropped ${said.length - content.length} chars she had already said`);
   console.log(`[ai] chat reply in ${Date.now() - started}ms, ${content.length} chars`);
   // Cleared only once a reply actually exists, so a failed or unreachable turn
