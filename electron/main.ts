@@ -6168,6 +6168,10 @@ async function pushToPhone(kind: 'random' | 'events' | 'system', text: string, u
         console.warn(`[push] the push service refused for "${device.name}": ${response.status}`);
       } else {
         delivered = true;
+        // Said, because a push that lands is otherwise indistinguishable in the
+        // log from one that was never attempted — which is exactly the question
+        // asked when a phone stays quiet.
+        console.log(`[push] delivered a ${kind} push to "${device.name.slice(0, 40)}" (${response.status})`);
       }
     } catch (error) {
       console.warn('[push] could not send:', error instanceof Error ? error.message : error);
