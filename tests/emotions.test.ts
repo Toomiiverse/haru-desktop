@@ -54,3 +54,11 @@ test('every face says how far her eyes may go; surprised has none to move, sleep
   assert.equal(emotionConfig.surprised.gaze, 0);
   assert.ok(emotionConfig.sleepy.gaze < 0.3 && emotionConfig.neutral.gaze === 1);
 });
+
+test('she blinks on every face that has eyes to close', () => {
+  for (const face of HARU_EMOTIONS) assert.equal(typeof emotionConfig[face].blink, 'boolean', face);
+  assert.equal(emotionConfig.surprised.blink, false, 'no separable eyes');
+  assert.equal(emotionConfig.sleepy.blink, false, 'already closed');
+  assert.equal(emotionConfig.love.blink, false, 'hearts');
+  assert.equal(HARU_EMOTIONS.filter(face => emotionConfig[face].blink).length, 11);
+});

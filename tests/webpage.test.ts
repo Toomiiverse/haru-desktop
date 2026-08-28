@@ -175,7 +175,9 @@ function drive({ reduced = false, transition, frozenAt, missing = [] as string[]
   const dataset: Record<string, string> = {}; if (transition !== undefined) dataset.transition = transition; if (frozenAt !== undefined) dataset.frozenAt = frozenAt;
   const host: Stub = { dataset, style: { vars: {} as Record<string, string>, setProperty(k: string, v: string) { this.vars[k] = v; } }, innerHTML: '' };
   box.style = { vars: {} as Record<string, string>, setProperty(k: string, v: string) { this.vars[k] = v; } };
-  const timers: (() => void)[] = [];
+  // Fake timers with ids, so clearing one leaves the others — a face change
+  // clears its settle timer, not the blink that is booked.
+  const timers = new Map<number, () => void>(); let nextTimer = 1;
   let now = 1000;
   const win: Stub = {
     Math, JSON, Number, Array, Object, String, Boolean, Map, Set, Promise, Error, Infinity,
@@ -184,15 +186,15 @@ function drive({ reduced = false, transition, frozenAt, missing = [] as string[]
     fetch: (url: string) => { const name = url.replace('/emotions/', '').replace('.svg', ''); return Promise.resolve({ ok: !missing.includes(name), status: missing.includes(name) ? 404 : 200, text: () => Promise.resolve('<svg/>') }); },
     matchMedia: () => ({ matches: reduced }),
     performance: { now: () => now },
-    setTimeout: (cb: () => void) => { timers.push(cb); return timers.length; },
-    clearTimeout: () => { timers.length = 0; },
+    setTimeout: (cb: () => void) => { const id = nextTimer++; timers.set(id, cb); return id; },
+    clearTimeout: (id: number) => { timers.delete(id); },
     setInterval: () => 1, clearInterval() {}, addEventListener() {},
   };
   win.window = win;
   vm.runInContext(source, vm.createContext(win), { filename: 'avatar.js' });
   const shown = () => faces.find(face => face.classList.contains('on'));
   const flush = async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); };
-  return { avatar: win.haruAvatar, Engine: win.HaruEmotionEngine, box, body, faces, host, shown, flush, tick: (ms: number) => { now += ms; }, fire: () => { for (const cb of timers.splice(0)) cb(); } };
+  return { avatar: win.haruAvatar, Engine: win.HaruEmotionEngine, box, body, faces, host, shown, flush, tick: (ms: number) => { now += ms; }, fire: () => { const due = [...timers.values()]; timers.clear(); for (const cb of due) cb(); }, pending: () => timers.size };
 }
 const plain = (v: unknown) => JSON.parse(JSON.stringify(v));
 
@@ -217,15 +219,15 @@ test('a face that changes mid-fade starts from what is visible — nothing jumps
   for (const face of ['sad', 'excited', 'neutral', 'happy']) { t += 30; engine.set(face, t); const f = engine.sample(t + 10); assert.ok(f.opacity >= 0 && f.opacity <= 1 && f.previousOpacity >= 0 && f.previousOpacity <= 1, face); }
 });
 
-test('how she floats and where she looks are pure functions of time: bounded, repeatable, and mostly at rest', () => {
+test('how she floats and where she looks are pure functions of time: bounded, repeatable, looking about with rests between', () => {
   const { Engine } = drive();
   const engine = Engine({ duration: () => 200 });
   const a = engine.idle(1234); assert.deepEqual(plain(a), plain(engine.idle(1234)));
   assert.ok(Math.abs(engine.idle(0).bob - engine.idle(a.periodMs).bob) < 1e-9);
   let looking = 0, resting = 0;
-  for (let t = 0; t < 3000 * 200; t += 3000) { const g = engine.gaze(t + 1); assert.ok(g.x >= -1 && g.x <= 1 && g.y >= -1 && g.y <= 1); assert.deepEqual(plain(g), plain(engine.gaze(t + 1))); if (g.looking) looking++; else resting++; }
-  assert.ok(resting > looking, `she rests more than she looks (${resting} vs ${looking})`);
-  assert.ok(looking > 30, 'but she does look around');
+  for (let t = 0; t < 2400 * 200; t += 2400) { const g = engine.gaze(t + 1); assert.ok(g.x >= -1 && g.x <= 1 && g.y >= -1 && g.y <= 1); assert.deepEqual(plain(g), plain(engine.gaze(t + 1))); if (g.looking) looking++; else resting++; }
+  assert.ok(looking > resting, `idle, she looks about more than she rests (${looking} vs ${resting})`);
+  assert.ok(resting > 40, 'but she does rest, so a look reads as a look');
   const rest = engine.gaze(1); assert.ok(Math.abs(rest.x) < 0.1 && Math.abs(rest.y) < 0.1 || rest.looking, 'a resting beat sits near centre');
 });
 
@@ -325,4 +327,44 @@ test('the old engine is gone from the page, and the faces come from her own serv
   assert.ok(html.includes("'/emotions/'") && html.includes('prefers-reduced-motion') && html.includes('role=img'));
   assert.ok(html.includes('.backdrop { display:none; }'));
   assert.ok(html.includes("attend('typing'"), 'typing in the box is her cue');
+});
+
+test('she blinks on a calendar that never repeats on a schedule, with the odd double blink, and not on a face that cannot', () => {
+  const { Engine } = drive();
+  const engine = Engine({ duration: () => 200 });
+  const blinks: number[] = []; let t = 0;
+  for (let i = 0; i < 60; i++) { const at = engine.nextBlink(t); blinks.push(at); t = at + 1; }
+  const gaps = blinks.slice(1).map((b, i) => b - blinks[i]);
+  assert.ok(gaps.every(g => (g >= 1900 && g <= 4600) || g === 240), `gaps out of range: ${gaps.filter(g => !((g >= 1900 && g <= 4600) || g === 240))}`);
+  assert.ok(gaps.some(g => g === 240), 'now and then a double blink');
+  assert.ok(new Set(gaps.map(g => Math.round(g / 100))).size > 8, 'not on a schedule');
+  assert.equal(engine.nextBlink(t), engine.nextBlink(t), 'the same calendar every time');
+  const first = engine.nextBlink(0);
+  assert.equal(engine.blink(first - 1), 1, 'open before'); assert.ok(engine.blink(first + 70) < 0.15, 'shut at the bottom'); assert.equal(engine.blink(first + 181), 1, 'open after');
+  engine.set('surprised', 0); assert.equal(engine.blinks(), false); assert.equal(engine.blink(first + 70), 1, 'no eyes to close');
+  engine.set('sleepy', 0); assert.equal(engine.blinks(), false);
+  engine.set('happy', 0); assert.equal(engine.blinks(), true);
+});
+
+test('a blink is a squash of the eyes, booked from the calendar, and none while frozen or still', async () => {
+  const { avatar, box, fire, pending, flush } = drive();
+  avatar.express('happy'); await flush();
+  assert.ok(pending() > 0, 'a blink is booked');
+  fire();
+  assert.equal(box.style.vars['--lid'], '0.1', 'the lid comes down');
+  fire();
+  assert.equal(box.style.vars['--lid'], '1', 'and up again, with the next blink booked');
+  assert.ok(pending() > 0);
+  avatar.freeze(); assert.equal(pending(), 0, 'frozen, nothing is booked');
+  const still = drive({ reduced: true }); still.avatar.express('happy'); await still.flush();
+  assert.equal(still.pending(), 0, 'reduced motion: no blink is booked');
+  const html = appPage();
+  assert.ok(html.includes('scaleY(var(--lid))'), 'the squash is in the eye transform');
+});
+
+test('a glance is a real distance at the phone’s size', async () => {
+  const { avatar, box, flush } = drive();
+  avatar.express('neutral'); await flush();
+  avatar.attend('typing', 1500);
+  assert.ok(parseFloat(box.style.vars['--gaze-y']) >= 12, `at least a couple of screen pixels at 136px: ${box.style.vars['--gaze-y']}`);
 });

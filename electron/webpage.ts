@@ -98,6 +98,7 @@ const AVATAR = `
   const TRANSITIONS = ${JSON.stringify(Object.fromEntries(HARU_EMOTIONS.map(name => [name, emotionConfig[name].transition])))};
   const IDLE = ${JSON.stringify(Object.fromEntries(HARU_EMOTIONS.map(name => [name, emotionConfig[name].idle])))};
   const GAZE = ${JSON.stringify(Object.fromEntries(HARU_EMOTIONS.map(name => [name, emotionConfig[name].gaze])))};
+  const BLINKS = ${JSON.stringify(Object.fromEntries(HARU_EMOTIONS.map(name => [name, emotionConfig[name].blink])))};
   const ADAPT = ${JSON.stringify(MOOD_TO_EMOTION)};
   const EASE_CSS = ${JSON.stringify(EASE_OUT_CSS)};
   const TAU = Math.PI * 2;
@@ -132,13 +133,38 @@ const AVATAR = `
       // to centre and rests, on the others she looks somewhere and holds it,
       // with a little drift throughout so a rest is never a freeze.
       gaze(t) {
-        const beat = Math.floor(t / 3000);
+        const beat = Math.floor(t / 2400);
         const r = hashN(beat), a = hashN(beat + 1000) * TAU, d = 0.35 + hashN(beat + 2000) * 0.65;
-        const looking = r > 0.55;
+        const looking = r > 0.45;
         const x = (looking ? Math.cos(a) * d : 0) + Math.sin(t / 2300) * 0.06;
         const y = (looking ? Math.sin(a) * d * 0.6 : 0) + Math.sin(t / 3100 + 1) * 0.04;
         return { x: clamp(x, -1, 1), y: clamp(y, -1, 1), looking: looking, beat: beat };
       },
+      // A blink calendar, the same every time: gaps of 1.9 to 4.6 seconds,
+      // now and then a second blink a quarter-second after the first. Walked
+      // from the start rather than solved, because the gaps are irregular;
+      // it is a few thousand additions at most, once per blink.
+      nextBlink(t) {
+        let at = 1400, k = 0;
+        while (k < 100000) {
+          if (at >= t) return at;
+          const double = hashN(k + 5000) < 0.18;
+          if (double && at + 240 >= t) return at + 240;
+          at += 1900 + hashN(k) * 2700 + (double ? 240 : 0); k++;
+        }
+        return at;
+      },
+      // How open her eyes are at t: 1 open, down to 0.1 at the bottom of a
+      // blink, closing faster than they open, as eyes do.
+      blink(t) {
+        if (!BLINKS[emotion]) return 1;
+        let at = 1400, k = 0;
+        while (k < 100000 && at + 400 < t) { const double = hashN(k + 5000) < 0.18; at += 1900 + hashN(k) * 2700 + (double ? 240 : 0); k++; }
+        const lid = (start) => { const u = t - start; if (u < 0 || u > 180) return 1; return u < 70 ? 1 - (u / 70) * 0.9 : 0.1 + ((u - 70) / 110) * 0.9; };
+        const second = hashN(k + 5000) < 0.18 ? lid(at + 240) : 1;
+        return Math.min(lid(at), second);
+      },
+      blinks: () => !!BLINKS[emotion],
       set(next, t) {
         if (EMOTIONS.indexOf(next) < 0) next = 'neutral';
         if (next === emotion) return false;
@@ -277,7 +303,7 @@ const AVATAR = `
       idleFor(frame.emotion);
       paint(frozenAt === null ? frame : engine.sample(frozenAt), frozenAt === null);
       if (!reduced && frozenAt === null) replay(body, 'changed');
-      look();
+      look(); scheduleBlink();
     }).catch(() => { if (mine === request) { incoming.replaceChildren(); incoming.classList.add('missing'); } });
   }
   function settleBack(ms) { clearTimeout(timer); timer = setTimeout(() => show(resting, clock()), ms); }
@@ -287,7 +313,10 @@ const AVATAR = `
   // The wander is the engine's. Over it, in order: a pointer she can see, them
   // typing (down, at the box), her talking (at them), her thinking (up and
   // away). Each claim expires, so silence hands her back to the wander.
-  const RANGE_X = 16, RANGE_Y = 9; // user units of the artwork, at any size
+  // In the artwork's own units: her eyes are sixty to a hundred and forty wide,
+  // and at the phone's size a unit is a tenth of a pixel, so a glance has to
+  // be a real distance to be one.
+  const RANGE_X = 34, RANGE_Y = 18;
   let claim = null, claimUntil = 0, pointer = null, pointerAt = 0;
   function target(t) {
     const strength = GAZE[engine.emotion()] === undefined ? 1 : GAZE[engine.emotion()];
@@ -307,6 +336,19 @@ const AVATAR = `
   // Sampled, not animated: the CSS transition on the eyes carries each new
   // target smoothly, so four looks a second is plenty and costs nothing.
   const gazeTimer = setInterval(look, 250);
+  // Blinks are scheduled to the engine's calendar, one timer at a time: the
+  // lid closes, a beat, it opens, the next is booked. Nothing between blinks.
+  let blinkTimer = null;
+  function blinkNow() {
+    box.style.setProperty('--lid', '0.1');
+    blinkTimer = setTimeout(() => { box.style.setProperty('--lid', '1'); scheduleBlink(); }, 90);
+  }
+  function scheduleBlink() {
+    clearTimeout(blinkTimer); blinkTimer = null;
+    if (reduced || frozenAt !== null || !engine.blinks()) { box.style.setProperty('--lid', '1'); return; }
+    const now = clock();
+    blinkTimer = setTimeout(blinkNow, Math.max(50, engine.nextBlink(now + 50) - now));
+  }
   if (finePointer) {
     window.addEventListener('pointermove', (e) => {
       if (e.pointerType === 'touch') return;
@@ -330,15 +372,18 @@ const AVATAR = `
     idle: (t) => engine.idle(t === undefined ? clock() : t),
     gaze: (t) => target(t === undefined ? clock() : t),
     eyes: () => (eyes ? eyes.length : 0),
-    freeze: (t) => { frozenAt = t === undefined ? clock() : t; box.classList.add('frozen'); paint(engine.sample(frozenAt), false); look(); },
-    play: () => { frozenAt = null; box.classList.remove('frozen'); paint(engine.sample(clock()), false); look(); },
+    freeze: (t) => { frozenAt = t === undefined ? clock() : t; box.classList.add('frozen'); paint(engine.sample(frozenAt), false); look(); scheduleBlink(); box.style.setProperty('--lid', String(engine.blink(frozenAt))); },
+    play: () => { frozenAt = null; box.classList.remove('frozen'); paint(engine.sample(clock()), false); look(); scheduleBlink(); },
+    blink: (t) => engine.blink(t === undefined ? clock() : t),
+    nextBlink: (t) => engine.nextBlink(t === undefined ? clock() : t),
     state: () => { const f = engine.sample(frozenAt === null ? clock() : frozenAt); return { emotion: f.emotion, previousEmotion: f.previousEmotion, transitionProgress: f.transitionProgress, resting: resting, frozen: frozenAt !== null }; },
     setSize: (px) => host.style.setProperty('--avatar-size', px + 'px'),
     setTransition: (ms) => { fade = Math.max(0, Number(ms) || 0); },
-    stop: () => clearInterval(gazeTimer)
+    stop: () => { clearInterval(gazeTimer); clearTimeout(blinkTimer); }
   };
   idleFor('neutral');
   show('neutral', clock());
+  scheduleBlink();
   if (data.frozenAt !== undefined) window.haruAvatar.freeze(Number(data.frozenAt) || 0);
 })();
 `;
@@ -476,16 +521,19 @@ export function appPage(): string {
   @property --idle-breath { syntax:'<number>'; inherits:false; initial-value:1.015; }
   @property --gaze-x { syntax:'<length>'; inherits:true; initial-value:0px; }
   @property --gaze-y { syntax:'<length>'; inherits:true; initial-value:0px; }
+  @property --lid { syntax:'<number>'; inherits:true; initial-value:1; }
   #stage { flex:0 0 auto; display:flex; justify-content:center; align-items:center; padding:.35rem 1rem 0; cursor:pointer; --avatar-size:min(31vw, 136px); }
   #avatar { position:relative; width:var(--avatar-size); height:var(--avatar-size); transform-origin:50% 62%;
-    --idle-bob:4px; --idle-sway:1.2deg; --idle-breath:1.015; --gaze-x:0px; --gaze-y:0px;
-    transition:--idle-bob .8s ease, --idle-sway .8s ease, --idle-breath .8s ease, --gaze-x .38s cubic-bezier(0.33, 1, 0.68, 1), --gaze-y .38s cubic-bezier(0.33, 1, 0.68, 1);
+    --idle-bob:4px; --idle-sway:1.2deg; --idle-breath:1.015; --gaze-x:0px; --gaze-y:0px; --lid:1;
+    transition:--idle-bob .8s ease, --idle-sway .8s ease, --idle-breath .8s ease, --gaze-x .38s cubic-bezier(0.33, 1, 0.68, 1), --gaze-y .38s cubic-bezier(0.33, 1, 0.68, 1), --lid 70ms ease-in;
     animation:float 3800ms ease-in-out infinite; }
   #avatar-body { position:absolute; inset:0; transform-origin:50% 60%; }
   #avatar .face { position:absolute; inset:0; opacity:0; }
   #avatar .face svg { display:block; width:100%; height:100%; }
   #avatar .face .backdrop { display:none; }
-  #avatar .face .eye { transform:translate(var(--gaze-x), var(--gaze-y)); transform-box:fill-box; transform-origin:center; }
+  /* A glance is a translation; a blink is a squash toward the eye's own middle,
+     because the art has no lids to close. */
+  #avatar .face .eye { transform:translate(var(--gaze-x), var(--gaze-y)) scaleY(var(--lid)); transform-box:fill-box; transform-origin:center; }
   #avatar .face.missing { visibility:hidden; }
   #avatar-body.changed { animation:settle .45s cubic-bezier(0.33, 1, 0.68, 1); }
   #avatar-body.pop { animation:pop .5s cubic-bezier(0.33, 1, 0.68, 1); }
