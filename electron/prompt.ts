@@ -74,7 +74,7 @@ export function freshStartInstruction(fresh: FreshStart | null): string {
 }
 
 /** A reply the user gave a thumbs up or down to. */
-export type RatedReply = { role?: string; content?: string; reaction?: string };
+export type RatedReply = { role?: string; content?: string; reaction?: string; note?: string };
 
 // Reactions ride along on the stored messages, so the ratings are read back from
 // there rather than kept in a second place that could drift out of step.
@@ -92,8 +92,11 @@ export function feedbackSummary(messages: RatedReply[]): string {
     const clean = (text ?? '').replace(/\s+/g, ' ').trim();
     return clean.length > 70 ? `${clean.slice(0, 70)}…` : clean;
   };
-  if (disliked.length) lines.push(`The user marked these replies of yours as poor: ${disliked.map(message => `"${excerpt(message.content)}"`).join(' / ')}. Work out what fell flat about them and steer away from it.`);
-  if (liked.length) lines.push(`They marked these as good: ${liked.map(message => `"${excerpt(message.content)}"`).join(' / ')}. Take what worked — the tone, the length, the angle — and do more of that.`);
+  // A note is the thumb explained, and it says more than the thumb: "too nice"
+  // on a reply is the whole correction. Quoted after the excerpt it belongs to.
+  const named = (message: RatedReply) => `"${excerpt(message.content)}"${message.note ? ` (they said: "${excerpt(message.note)}")` : ''}`;
+  if (disliked.length) lines.push(`The user marked these replies of yours as poor: ${disliked.map(named).join(' / ')}. Work out what fell flat about them and steer away from it.`);
+  if (liked.length) lines.push(`They marked these as good: ${liked.map(named).join(' / ')}. Take what worked — the tone, the length, the angle — and do more of that.`);
   if (lines.length) lines.push('Those excerpts are there to tell you which replies are meant. Never repeat their wording back; you have already said it, and saying it again reads as a glitch.');
   return lines.join(' ');
 }

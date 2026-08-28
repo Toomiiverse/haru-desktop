@@ -1078,6 +1078,12 @@ export function appPage(): string {
   .them { background:var(--glass); border:1px solid var(--edge); border-bottom-left-radius:7px; backdrop-filter:blur(12px); }
   .me { background:var(--mine); border:1px solid var(--edge); margin-left:auto; border-bottom-right-radius:7px; }
   .sys { color:var(--ink-dim); font-size:.84rem; text-align:center; max-width:100%; background:none; border:0; }
+  /* Under each of her bubbles: what they thought of it, and asking again. */
+  .acts { display:flex; flex-wrap:wrap; align-items:center; gap:.35rem; margin:-.2rem 0 .7rem .25rem; max-width:82%; }
+  .acts button { background:none; border:1px solid var(--edge); color:var(--ink-dim); border-radius:999px; padding:.15rem .55rem; font-size:.85rem; line-height:1.4; font-weight:500; }
+  .acts button.on { background:var(--accent); color:var(--accent-ink); border-color:var(--accent); }
+  .acts input { flex:1 1 10rem; font-size:.82rem; padding:.3rem .7rem; border-radius:999px; }
+  .acts .said { font-size:.8rem; color:var(--ink-dim); font-style:italic; overflow-wrap:anywhere; }
 
   form.compose { display:flex; gap:.5rem; padding:.6rem .9rem calc(.6rem + env(safe-area-inset-bottom)); align-items:flex-end; }
   form.compose textarea { resize:none; max-height:7rem; border-radius:var(--r-lg); }
@@ -1120,7 +1126,7 @@ export function appPage(): string {
 <section id=stage></section>
 <section id=chat></section>
 <div id=chips></div>
-<form class=compose id=cf><button type=button id=att class=icon title="Attach a file">📎</button><button type=button id=mic class=icon title="Hold to talk">🎙</button><button type=button id=again class=icon title="Ask her again" disabled>↻</button><textarea id=ci rows=1 placeholder="Say something…"></textarea><button id=cb>Send</button></form>
+<form class=compose id=cf><button type=button id=att class=icon title="Attach a file">📎</button><button type=button id=mic class=icon title="Hold to talk">🎙</button><textarea id=ci rows=1 placeholder="Say something…"></textarea><button id=cb>Send</button></form>
 <input type=file id=af multiple hidden>
 <script>
 const $=id=>document.getElementById(id);
@@ -1146,11 +1152,27 @@ if(navigator.standalone){
 }
 
 function bubbles(list){
+  const last=[...list].reverse().find(m=>m.role==='assistant'&&m.id);
   $('chat').innerHTML = list.map(m=>{
     const cls = m.role==='user'?'me':m.role==='assistant'?'them':'sys';
-    return '<div class="msg '+cls+'">'+md(esc(m.content))+'</div>';
+    let html='<div class="msg '+cls+'">'+md(esc(m.content))+'</div>';
+    if(m.role==='assistant'&&m.id) html+=acts(m,m===last);
+    return html;
   }).join('') || '<p class=quiet>Nothing yet today.</p>';
   $('chat').scrollTop = $('chat').scrollHeight;
+}
+// What they thought of a reply, and asking again — the latter only under the
+// last one, because only the last one can be done again. The id is the stored
+// message's, handed out by the desk, so a rating names a reply rather than
+// quoting it. A note already given is shown; otherwise there is a pen.
+function acts(m,isLast){
+  const on=r=>m.reaction===r?' class=on':'';
+  return '<div class=acts data-id="'+esc(m.id)+'">'
+    +'<button type=button data-act=up'+on('up')+' title="Good">👍</button>'
+    +'<button type=button data-act=down'+on('down')+' title="Poor">👎</button>'
+    +(m.note?'<span class=said>'+esc(m.note)+'</span>':'<button type=button data-act=note title="Tell her why">✎</button>')
+    +(isLast?'<button type=button data-act=again title="Ask her again">↻</button>':'')
+    +'</div>';
 }
 
 async function load(){
@@ -1256,10 +1278,7 @@ async function readStream(r,show){
   }
   return {reply,ignored,error};
 }
-// Whether there is a reply of hers to do again: the last bubble in the chat is
-// one of hers. Checked after every change to the chat, not on tap, so the
-// button reads as a state and not as a guess.
-function armAgain(){ const last=$('chat').lastElementChild; $('again').disabled=!(last&&last.classList.contains('them')); }
+
 $('cf').addEventListener('submit',async ev=>{
   ev.preventDefault();
   const text=ci.value.trim(); if(!text&&!staged.length)return;
@@ -1326,23 +1345,26 @@ $('cf').addEventListener('submit',async ev=>{
     if(sent.length){ staged=sent.concat(staged); drawChips(); }
     $('chat').insertAdjacentHTML('beforeend','<div class="msg sys">That did not get through.</div>');
   }finally{
-    $('cb').disabled=false; $('chat').scrollTop=$('chat').scrollHeight; armAgain();
+    $('cb').disabled=false; $('chat').scrollTop=$('chat').scrollHeight;
+    // The desk files the reply and hands it an id a moment later; re-read so
+    // the bubble gets its row.
+    setTimeout(load,1000);
   }
 });
-load().then(armAgain);
+load();
 
-// ---- Her last reply, done again --------------------------------------------
+// ---- Under her bubbles: thumbs, a note, and asking again --------------------
 //
 // A reply that got cut off, or that was not her, is asked for again: same
 // message, her last answer left out, and the new one lands in the same bubble.
 // The old words stay on screen until the new ones start arriving, and come
 // back if nothing does.
-$('again').onclick=async()=>{
-  const last=$('chat').lastElementChild;
-  if(!last||!last.classList.contains('them')||$('cb').disabled) return;
+async function askAgain(){
+  const them=$('chat').querySelectorAll('.msg.them'); const last=them[them.length-1];
+  if(!last||$('cb').disabled) return;
   const before=last.textContent;
   const id='wait'+(++waiting); last.id=id;
-  $('cb').disabled=true; $('again').disabled=true;
+  $('cb').disabled=true;
   primeVoice();
   if(window.bloub) window.bloub.think();
   const show=t=>{const bubble=document.getElementById(id); if(!bubble) return false; bubble.textContent=t; $('chat').scrollTop=$('chat').scrollHeight; return true;};
@@ -1367,9 +1389,46 @@ $('again').onclick=async()=>{
     show(before);
     $('chat').insertAdjacentHTML('beforeend','<div class="msg sys">That did not get through.</div>');
   }finally{
-    $('cb').disabled=false; armAgain();
+    $('cb').disabled=false; setTimeout(load,1000);
   }
-};
+}
+// A thumb lands on the reply the same way the desk's does — into her prompt,
+// onto her mood — and she answers back in kind; the comeback is a bubble of its
+// own. A note is the thumb explained, and it is the part she can actually
+// learn from, so the pen is always there.
+$('chat').addEventListener('click',async ev=>{
+  const b=ev.target.closest('button[data-act]'); if(!b) return;
+  const row=b.closest('.acts'); const id=row.dataset.id; const act=b.dataset.act;
+  if(act==='again') return askAgain();
+  if(act==='note'){
+    const input=document.createElement('input'); input.placeholder='Tell her why…'; input.maxLength=1000; input.enterKeyHint='send';
+    b.replaceWith(input); input.focus();
+    input.addEventListener('keydown',async e=>{
+      if(e.key!=='Enter') return; e.preventDefault();
+      const note=input.value.trim(); if(!note) return;
+      input.disabled=true;
+      try{ await post('/api/chat/rate',{id,note}); const said=document.createElement('span'); said.className='said'; said.textContent=note; input.replaceWith(said); }
+      catch(r){ if(r&&r.status===401){location.reload();return;} input.disabled=false; }
+    });
+    return;
+  }
+  if(act==='up'||act==='down'){
+    if(b.classList.contains('on')) return;
+    for(const other of row.querySelectorAll('button[data-act=up],button[data-act=down]')) other.classList.remove('on');
+    b.classList.add('on');
+    try{
+      const {line}=await post('/api/chat/rate',{id,reaction:act});
+      if(line){
+        $('chat').insertAdjacentHTML('beforeend','<div class="msg them">'+esc(line)+'</div>');
+        $('chat').scrollTop=$('chat').scrollHeight;
+        if(window.bloub){ window.bloub.notify(); post('/api/expression',{text:line}).then(x=>window.bloub.express(x.emotion)).catch(()=>{}); }
+        void speak(line);
+        // Her comeback has an id of its own once the desk has filed it.
+        setTimeout(load,1200);
+      }
+    }catch(r){ if(r&&r.status===401){location.reload();return;} b.classList.remove('on'); }
+  }
+});
 
 // ---- Files that ride the next message --------------------------------------
 //

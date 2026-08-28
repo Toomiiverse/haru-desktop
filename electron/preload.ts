@@ -227,6 +227,13 @@ contextBridge.exposeInMainWorld('haru', {
       ipcRenderer.on('chat:fromPhone', listener);
       return () => ipcRenderer.removeListener('chat:fromPhone', listener);
     },
+    // Rated from a phone. The thumb and the note land on the message here,
+    // where the conversation lives; her comeback arrives as an interjection.
+    onRatedFromPhone: (callback: (turn: { id: string; reaction?: 'up' | 'down'; note?: string }) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, turn: { id: string; reaction?: 'up' | 'down'; note?: string }) => callback(turn);
+      ipcRenderer.on('chat:ratedFromPhone', listener);
+      return () => ipcRenderer.removeListener('chat:ratedFromPhone', listener);
+    },
     onInterject: (callback: (line: string) => void) => {
       const listener = (_event: Electron.IpcRendererEvent, line: string) => callback(line);
       ipcRenderer.on('chat:interject', listener);
@@ -334,7 +341,8 @@ contextBridge.exposeInMainWorld('haru', {
   },
   mood: {
     get: () => ipcRenderer.invoke('mood:get') as Promise<Mood>,
-    react: (reaction: 'up' | 'down') => ipcRenderer.invoke('mood:react', reaction) as Promise<Mood>,
+    // The id lets the rating be written down for later (see feedback.ts).
+    react: (reaction: 'up' | 'down', id?: string) => ipcRenderer.invoke('mood:react', reaction, id) as Promise<Mood>,
   },
   profile: {
     get: () => ipcRenderer.invoke('profile:get') as Promise<Profile>,

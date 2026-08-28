@@ -63,7 +63,16 @@ export type WebDeps = {
    * a reply that arrives late for no benefit the reader can see.
    */
   expression(text: string): Promise<{ emotion: string | null; expression: string | null }>;
-  history(): { role: string; content: string; at?: string }[];
+  /** The day so far, with ids so a reply can be rated, and any rating it already has. */
+  history(): { id?: string; role: string; content: string; at?: string; reaction?: string; note?: string }[];
+  /**
+   * What they thought of a reply of hers. A thumb lands on the message the
+   * same way the desktop's does — into her prompt, onto her mood — and she
+   * answers back in kind; `line` is that comeback, or null when she has none
+   * (a note alone, or the same thumb again). Null altogether when the id is
+   * not a reply of hers.
+   */
+  rate(id: string, reaction: 'up' | 'down' | null, note?: string): Promise<{ line: string | null } | null>;
   /** date is a bare YYYY-MM-DD; daysAway is its offset from today so the page can bucket into daily/weekly/monthly without redoing timezone-aware date math client-side. */
   agenda(): { id: string; title: string; date: string; time: string | null; kind: string; done?: boolean; daysAway: number }[];
   tickOff(id: string): Promise<void> | void;
@@ -506,6 +515,20 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
       emit({ error: error instanceof Error ? error.message : String(error) });
     }
     return res.end();
+  }
+
+  // What they thought of a reply. A thumb, a note, or both; the reply is named
+  // by the id the history handed out, so nothing here trusts the page's text.
+  if (req.method === 'POST' && path === '/api/chat/rate') {
+    const body = await readBody(req) as { id?: unknown; reaction?: unknown; note?: unknown };
+    const id = typeof body.id === 'string' ? body.id.trim().slice(0, 80) : '';
+    const reaction = body.reaction === 'up' || body.reaction === 'down' ? body.reaction : null;
+    const note = typeof body.note === 'string' ? body.note.trim().slice(0, 1000) : undefined;
+    if (!id) return json(res, 400, { error: 'Which reply?' });
+    if (!reaction && note === undefined) return json(res, 400, { error: 'A thumb or a note.' });
+    const rated = await deps.rate(id, reaction, note);
+    if (!rated) return json(res, 404, { error: 'No such reply of hers.' });
+    return json(res, 200, { ok: true, line: rated.line });
   }
 
   // Her last reply, done again. Same stream as above; the page swaps the bubble

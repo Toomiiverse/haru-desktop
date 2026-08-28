@@ -27,7 +27,9 @@ export interface Message { id: string; role: Role; content: string; time: string
   /** Set when this message arrived by voice, holding what the speech server
    *  actually returned. Kept so a correction can be taught against the exact
    *  text that was misheard rather than against whatever was edited afterwards. */
-  heard?: string; reaction?: Reaction; ignored?: boolean; replyTo?: { id: string; excerpt: string }; }
+  heard?: string; reaction?: Reaction;
+  /** What they said about this reply, in their own words, alongside the thumb. */
+  note?: string; ignored?: boolean; replyTo?: { id: string; excerpt: string }; }
 /**
  * Something she said without being spoken to — a remark about the screen, a
  * nudge about the list, a jab about a tab.

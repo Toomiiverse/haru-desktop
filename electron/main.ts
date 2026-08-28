@@ -62,6 +62,7 @@ import { addCheckIn, checkInInstruction, checkInsOn, readCheckIns, type CheckIn 
 import { addAside, alreadySaidRecently, asideContext, asidesOn, pruneAsides, readAsides, type Aside, type AsideSource } from './asides';
 import { attachmentsInPlay, describeAttached, READ_IT_ALL_PROMPT, readAttachments, type Attachment, type Opened } from './attachments';
 import { forOllama, withoutOldest } from './ollamaturns';
+import { feedbackEntry, recordFeedback } from './feedback';
 import { describePull, isTailnetAddress, mergeCheckIns, readCheckInSource } from './checkinsource';
 import { DiscordLink, looksLikeUserId, readDiscordConfig, useOfChannel, type DiscordConfig } from './discord';
 import { reactedPrompt, readReaction, REACTION_COOLDOWN_MS } from './reacted';
@@ -6217,7 +6218,36 @@ function webDeps(): WebDeps {
   return {
     readAccess: getWebAccess,
     saveAccess: saveWebAccess,
-    history: () => (store.get('chat.messages') as { role: string; content: string; at?: string }[] | undefined) ?? [],
+    history: () => (store.get('chat.messages') as { id?: string; role: string; content: string; at?: string; reaction?: string; note?: string }[] | undefined) ?? [],
+    /**
+     * What they thought of a reply. The thumb lands on the message through
+     * the desk, which owns the conversation; her mood and her face move the
+     * way a desk thumb moves them; and she answers back the way she does at
+     * the desk — the comeback goes to the page and into the conversation as
+     * an interjection. Every rating is also written down for later
+     * (feedback.ts). A note alone, or the same thumb twice, moves nothing and
+     * gets no comeback — the desk ignores a re-pick too.
+     */
+    async rate(id, reaction, note) {
+      const history = (store.get('chat.messages') as { id?: string; role: string; content: string; reaction?: string }[] | undefined) ?? [];
+      const target = history.find(message => message.id === id && message.role === 'assistant');
+      if (!target) return null;
+      sendToWindows('chat:ratedFromPhone', { id, ...(reaction ? { reaction } : {}), ...(note !== undefined ? { note } : {}) });
+      appendFeedback({ id, reaction, note, source: 'phone' });
+      if (!reaction || target.reaction === reaction) return { line: null };
+      takeThumb(reaction);
+      const config = store.get('ai.config') as ProviderConfig | undefined;
+      if (!config?.model) return { line: null };
+      try {
+        const line = reaction === 'down' ? await ollamaRetort(target.content, config) : await ollamaGloat(target.content, config, getMood().ego);
+        if (line) sendToWindows('chat:interject', line);
+        console.log(`[web] rated ${reaction} from the phone — she ${reaction === 'down' ? 'retorted' : 'gloated'} in ${line.length} chars`);
+        return { line: line || null };
+      } catch (error) {
+        console.warn('[web] could not answer a rating back:', error instanceof Error ? error.message : error);
+        return { line: null };
+      }
+    },
     async say(text, attachments) {
       const config = store.get('ai.config') as ProviderConfig | undefined;
       if (!config?.model) throw new Error('no model is set up');
@@ -6533,6 +6563,56 @@ function webDeps(): WebDeps {
 
 /** Why the door is shut, in words, for the panel that has to explain it. */
 let webTrouble = '';
+
+/**
+ * A thumb, taken: the quiet period starts, her mood moves, her face lands.
+ * Shared by the desk and the phone, so a rating means the same thing from
+ * either — the mood engine has no idea which one it was.
+ */
+function takeThumb(reaction: 'up' | 'down'): Mood {
+  // A thumb is them addressing her, so it starts the quiet period the same way
+  // a message does. This is the one the screenshot caught: thumbs up, and a
+  // remark about something else arrives on top of her own reply.
+  noteUserSpoke();
+  const mood = getMood();
+  const event = reaction === 'down' ? 'disliked' : 'liked';
+  // Approval both settles her and swells her head; disapproval does the
+  // reverse on both counts.
+  const next = { ...mood, irritation: nextIrritation(mood.irritation, event), ego: nextEgo(mood.ego, event) };
+  setMood(next);
+  nudgeVitals(reaction === 'down' ? 'criticised' : 'praised');
+  // Sent straight out rather than waiting on a classification: the reaction
+  // already says exactly how she should take it, and the face should land with
+  // the click rather than a second later.
+  if (reaction === 'down') {
+    broadcastBeat({ emotion: 'annoyed', confidence: 0.95, energy: 0.45, intent: 'dismiss', focus: 'user' }, 'stare');
+  } else {
+    lastPraiseWasSmug = !lastPraiseWasSmug;
+    broadcastBeat(
+      lastPraiseWasSmug
+        ? { emotion: 'smug', confidence: 0.95, energy: 0.65, intent: 'tease', focus: 'user' }
+        : { emotion: 'happy', confidence: 0.95, energy: 0.8, intent: 'celebrate', focus: 'user' },
+      'nod',
+    );
+  }
+  return next;
+}
+
+/** Where the ratings go: beside config.json, but a file of its own — appended to, never rewritten. */
+function feedbackFile(): string {
+  return path.join(app.getPath('userData'), 'feedback.jsonl');
+}
+
+/**
+ * One rating written down for later, from whichever side it came. Never
+ * throws: a full disk must not cost them the thumb.
+ */
+function appendFeedback(about: { id: string; reaction?: 'up' | 'down' | null; note?: unknown; source: 'phone' | 'desktop' }): void {
+  const history = (store.get('chat.messages') as { id?: string; role: string; content?: string; reaction?: string }[] | undefined) ?? [];
+  const entry = feedbackEntry(history, { ...about, model: (store.get('ai.config') as ProviderConfig | undefined)?.model ?? '', at: new Date().toISOString() });
+  if (!entry) return;
+  try { recordFeedback(feedbackFile(), entry); } catch (error) { console.warn('[feedback] could not write it down:', error instanceof Error ? error.message : error); }
+}
 
 async function startWebDoor() {
   const access = getWebAccess();
@@ -7313,32 +7393,10 @@ app.whenReady().then(() => {
   });
   // Rating a reply moves her mood too — being told she got it wrong stings more
   // than a lazy question, and praise buys back some patience.
-  ipcMain.handle('mood:react', (_e, reaction: 'up' | 'down') => {
-    // A thumb is them addressing her, so it starts the quiet period the same way
-    // a message does. This is the one the screenshot caught: thumbs up, and a
-    // remark about something else arrives on top of her own reply.
-    noteUserSpoke();
-    const mood = getMood();
-    const event = reaction === 'down' ? 'disliked' : 'liked';
-    // Approval both settles her and swells her head; disapproval does the
-    // reverse on both counts.
-    const next = { ...mood, irritation: nextIrritation(mood.irritation, event), ego: nextEgo(mood.ego, event) };
-    setMood(next);
-    nudgeVitals(reaction === 'down' ? 'criticised' : 'praised');
-    // Sent straight out rather than waiting on a classification: the reaction
-    // already says exactly how she should take it, and the face should land with
-    // the click rather than a second later.
-    if (reaction === 'down') {
-      broadcastBeat({ emotion: 'annoyed', confidence: 0.95, energy: 0.45, intent: 'dismiss', focus: 'user' }, 'stare');
-    } else {
-      lastPraiseWasSmug = !lastPraiseWasSmug;
-      broadcastBeat(
-        lastPraiseWasSmug
-          ? { emotion: 'smug', confidence: 0.95, energy: 0.65, intent: 'tease', focus: 'user' }
-          : { emotion: 'happy', confidence: 0.95, energy: 0.8, intent: 'celebrate', focus: 'user' },
-        'nod',
-      );
-    }
+  ipcMain.handle('mood:react', (_e, reaction: 'up' | 'down', id?: string) => {
+    const next = takeThumb(reaction);
+    // Written down for later, when the desk says which reply it was.
+    if (id) appendFeedback({ id, reaction, source: 'desktop' });
     return next;
   });
   ipcMain.handle('mood:get', () => getMood());

@@ -37,6 +37,7 @@ function deps(overrides: Partial<WebDeps> = {}): WebDeps {
     say: async () => ({ reply: 'Fine.' }),
     sayStream: async (_text, onChunk) => { onChunk('Fine.'); return { reply: 'Fine.' }; },
     retryStream: async (onChunk) => { onChunk('Again.'); return { reply: 'Again.' }; },
+    rate: async (id) => (id === 'hers' ? { line: 'Finally, some taste.' } : null),
     expression: async () => ({ emotion: null, expression: null }),
     history: () => [],
     agenda: () => [],
@@ -514,5 +515,21 @@ test('nothing of hers to do again is said as much, not as a crash', async () => 
     const again = await web.call('/api/chat/retry', { method: 'POST', body: '{}' });
     assert.equal(again.status, 200);
     assert.ok((await again.text()).includes('"error":"There is nothing of hers to do again."'));
+  } finally { await web.stop(); }
+});
+
+test('a reply of hers can be rated, and the page gets her comeback', async () => {
+  const web = await door();
+  try {
+    assert.equal((await web.call('/api/chat/rate', { method: 'POST', body: JSON.stringify({ id: 'hers', reaction: 'up' }), anonymous: true })).status, 401);
+    await web.signIn();
+    const rated = await web.call('/api/chat/rate', { method: 'POST', body: JSON.stringify({ id: 'hers', reaction: 'up' }) });
+    assert.equal(rated.status, 200);
+    assert.deepEqual(await rated.json(), { ok: true, line: 'Finally, some taste.' });
+    assert.equal((await web.call('/api/chat/rate', { method: 'POST', body: JSON.stringify({ id: 'hers', note: 'too nice' }) })).status, 200);
+    assert.equal((await web.call('/api/chat/rate', { method: 'POST', body: JSON.stringify({ id: 'theirs', reaction: 'down' }) })).status, 404);
+    assert.equal((await web.call('/api/chat/rate', { method: 'POST', body: JSON.stringify({ reaction: 'down' }) })).status, 400);
+    assert.equal((await web.call('/api/chat/rate', { method: 'POST', body: JSON.stringify({ id: 'hers' }) })).status, 400);
+    assert.equal((await web.call('/api/chat/rate', { method: 'POST', body: JSON.stringify({ id: 'hers', reaction: 'meh' }) })).status, 400);
   } finally { await web.stop(); }
 });

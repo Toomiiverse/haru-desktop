@@ -57,6 +57,13 @@ export default function App() {
       ];
     });
   }), []);
+  // A thumb or a note from the phone lands on the message it names. Her
+  // comeback, when there is one, arrives separately as an interjection.
+  useEffect(() => window.haru?.chat.onRatedFromPhone(turn => {
+    setMessages(current => current.map(message => message.id === turn.id
+      ? { ...message, ...(turn.reaction ? { reaction: turn.reaction } : {}), ...(turn.note !== undefined ? { note: turn.note } : {}) }
+      : message));
+  }), []);
   // What is left on this channel is only the handful of lines that belong to an
   // exchange the user started — "hold on, I'm looking at it" while she opens an
   // attachment they asked about. Everything she says off her own back goes to
@@ -117,7 +124,7 @@ export default function App() {
     setMessages(current => current.map(message => message.id === id ? { ...message, reaction } : message));
     // The mood shifts before the quip is written, so a thumbs-up that tips her
     // into coasting is already reflected in what she says about it.
-    void window.haru?.mood.react(reaction).then(() => answerBack(reaction, target.content));
+    void window.haru?.mood.react(reaction, id).then(() => answerBack(reaction, target.content));
     if (!window.haru) answerBack(reaction, target.content);
   }
 
