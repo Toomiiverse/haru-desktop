@@ -5713,6 +5713,7 @@ function quickHit(text: string, history: { role?: string; content?: string }[]) 
     checkInsToday: checkInsOn(getCheckIns(), todayKey).length,
     irritation: mood.irritation,
     ignoring: isIgnoring(mood.irritation),
+    lastOfHers: [...history].reverse().find(turn => turn.role === 'assistant')?.content,
   });
   if (!hit) return null;
   // The same turn-keeping the full path does, so a quick answer is not a

@@ -27,6 +27,8 @@ export type QuickData = {
   checkInsToday: number;
   irritation: number;
   ignoring: boolean;
+  /** The last thing she said, if anything: a lone word may be answering it. */
+  lastOfHers?: string;
 };
 
 export type QuickHit = { reply: string; tier: 1 | 2 | 3 };
@@ -47,7 +49,41 @@ export function quickAnswer(text: string, data: QuickData): QuickHit | null {
   const looked = lookedUp(said, data);
   if (looked) return { reply: looked, tier: 3 };
 
+  const stray = strayWord(text, data);
+  if (stray) return { reply: stray, tier: 2 };
+
   return null;
+}
+
+/**
+ * A word on its own, out of nowhere: asked about, by script.
+ *
+ * "Seeds", "Belong", "Mountain" — a mistype, a mishearing, a thumb slip — and
+ * the model welded each to the nearest thing on their list and then defended
+ * it. Told not to, three ways, it did it again. So a lone word that answers
+ * nothing is not put to the model at all: she asks what they meant, in her
+ * voice, and nothing is invented. Not when she has just asked something — the
+ * word may be the answer — and not the words that are whole replies on their
+ * own, which the canned tier has already had first go at.
+ */
+const WHOLE_REPLIES = new Set(['yes', 'no', 'yep', 'nope', 'yeah', 'nah', 'ok', 'okay', 'fine', 'sure', 'thanks', 'thank', 'cheers', 'done', 'finished', 'good', 'great', 'cool', 'nice', 'wow', 'lol', 'haha', 'hi', 'hey', 'hello', 'bye', 'night', 'goodnight', 'morning', 'what', 'why', 'how', 'when', 'where', 'who', 'help', 'stop', 'wait', 'test', 'testing', 'again', 'retry', 'more', 'please', 'sorry', 'right', 'true', 'false', 'maybe', 'never', 'always', 'later', 'now', 'today', 'tomorrow', 'yesterday', 'same', 'nothing', 'nope', 'ready', 'go', 'gone', 'back', 'here', 'there', 'home', 'work', 'busy', 'tired', 'bored', 'sleepy', 'hungry', 'sick', 'well', 'better', 'worse', 'alive', 'dead', 'love', 'hate']);
+
+function strayWord(text: string, data: QuickData): string | null {
+  const word = text.trim();
+  if (!/^[\p{L}][\p{L}'’-]{1,24}$/u.test(word)) return null;
+  if (WHOLE_REPLIES.has(word.toLowerCase().replace(/[’']/g, "'"))) return null;
+  if ((data.lastOfHers ?? '').trim().endsWith('?')) return null;
+  const lines = [
+    `“${word}.” That is a word, not a message. What about it? 🙄`,
+    `${word}? Try that again with a verb in it. 😒`,
+    `You sent me “${word}” and nothing else. What am I meant to do with that? 👀`,
+    `“${word}.” Riveting. Finish the thought. 😤`,
+    `${word}. Is that a question, an order, or your thumb slipping? Pick one. 🙄`,
+  ];
+  // Deterministic per word, so the same slip does not get a different line
+  // each time and read as her searching for one.
+  let hash = 0; for (const char of word.toLowerCase()) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+  return lines[hash % lines.length];
 }
 
 /** Lowercase, one space runs, trailing punctuation gone, hyphens gone so

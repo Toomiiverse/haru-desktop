@@ -368,3 +368,8 @@ test('short sentences, a sentence that is the whole reply, and a fresh reply are
   assert.equal(dropRepeatedSentences('You’re the one who’s been late on everything else.', ['You’re the one who’s been late on everything else.']), 'You’re the one who’s been late on everything else.');
   assert.equal(dropRepeatedSentences('Something new entirely, said for the first time here.', ['Nothing like it before.']), 'Something new entirely, said for the first time here.');
 });
+
+test('a word or two on its own may be said back — that is her asking what they meant', () => {
+  assert.equal(dropEchoOpener('Belong? What about it? 🙄', 'Belong'), 'Belong? What about it? 🙄');
+  assert.equal(dropEchoOpener('Seeds? Seeds for what?', 'Seeds'), 'Seeds? Seeds for what?');
+});

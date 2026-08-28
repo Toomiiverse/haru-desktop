@@ -499,6 +499,10 @@ export function dropRepeatedOpener(reply: string, previousReplies: string[]): st
 const ECHO_STOPWORDS = new Set(['your', 'yours', 'that', 'this', 'with', 'what', 'about', 'there', 'they', 'them', 'have', 'just', 'like', 'want', 'will', 'were', 'then', 'than', 'from', 'into', 'does', 'dont', 'didn', 'even', 'though', 'still', 'really', 'think', 'know', 'some', 'more', 'when', 'where', 'which', 'would', 'could', 'should', 'going', 'been', 'being', 'also', 'much', 'many', 'very', 'right', 'okay', 'fine', 'sure', 'well', 'good', 'thing', 'things', 'something', 'anything', 'nothing', 'maybe', 'reckon']);
 
 export function dropEchoOpener(reply: string, theirMessage: string): string {
+  // A word or two on its own — "Seeds", "Belong" — is the one message she is
+  // right to say back: "Belong? What about it?" is her asking what they meant,
+  // which is exactly what she is told to do with a stray word. Left alone.
+  if ((theirMessage.trim().match(/\S+/g) ?? []).length <= 2) return reply;
   const text = reply.trimStart();
   const first = text.match(/^([^.!?\n]{1,60}\?)\s+/u);
   if (!first) return reply;
