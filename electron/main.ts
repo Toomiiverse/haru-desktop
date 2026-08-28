@@ -4030,7 +4030,7 @@ async function sendToProvider(conversation: OllamaMessage[], config: ProviderCon
   // Routed here rather than at every call site: there are a dozen composers in
   // this file and none of them should know which provider is answering.
   if (isOpenAIShaped(config.provider)) return openAIPost(conversation, config, { tools, temperature, format, maxTokens, onChunk });
-  const send = async (withTools: boolean, streaming: boolean) => {
+  const send = async (withTools: boolean, streaming: boolean, quiet = true) => {
     const offered = withTools ? chatTools(availableTools()) : [];
     if (offered.length) console.log(`[ai] offering ${offered.length} tools to ${config.model}`);
     try {
@@ -4038,9 +4038,27 @@ async function sendToProvider(conversation: OllamaMessage[], config: ProviderCon
         method: 'POST',
         headers: modelHeaders(config.endpoint),
         body: JSON.stringify({
-          model: config.model, messages: conversation,
+          model: config.model,
+          // Somebody for her to be answering. When she speaks first — the
+          // opening, piping up, a Discord nudge — the conversation is a system
+          // message and nothing else, and Qwen3.5's chat template refuses that
+          // outright ("No user query found in messages", a 500 from Ollama)
+          // rather than rendering it. An empty user turn satisfies it and
+          // changes nothing about what she says: measured, the openings came
+          // back in character and no longer. Done here, for every model, so
+          // the three composers that speak first do not each learn this.
+          messages: conversation.some(message => message.role === 'user') ? conversation : [...conversation, { role: 'user', content: '' }],
           ...(offered.length ? { tools: offered } : {}),
           ...(format ? { format } : {}),
+          // Reasoning off. A thinking model left to itself spends its time
+          // before it speaks: measured on Qwen3.5-9B, the same one-line
+          // question cost 12 tokens with thinking off and 1,318 with it on —
+          // 0.2s against 29s — for a reply no better. She is a companion, not
+          // a proof; a reply that arrives half a minute late reads as her
+          // ignoring you. Ollama accepts the field on models that cannot
+          // think at all, so it is sent for every model rather than looked
+          // up per model; `quiet` is only false on the retry below.
+          ...(quiet ? { think: false } : {}),
           stream: streaming,
           options: { temperature, num_ctx: CHAT_NUM_CTX, keep_alive: OLLAMA_KEEP_ALIVE, ...(maxTokens ? { num_predict: maxTokens } : {}) },
         }),
@@ -4055,14 +4073,20 @@ async function sendToProvider(conversation: OllamaMessage[], config: ProviderCon
 
   const wanted = tools && !toolless.has(config.model);
   let response = await send(wanted, Boolean(onChunk));
-  if (!response.ok && wanted && response.status === 400) {
+  if (!response.ok && response.status === 400) {
     const body = await response.text().catch(() => '');
-    if (/does not support tools/i.test(body)) {
+    if (wanted && /does not support tools/i.test(body)) {
       // She keeps her voice and her opinions on such a model; what she loses is
       // the ability to write anything down, so this is said out loud once.
       toolless.add(config.model);
       console.warn(`[ai] ${config.model} does not support tools — retrying without them. She cannot save reminders or tick things off on this model.`);
       response = await send(false, Boolean(onChunk));
+    } else if (/think/i.test(body)) {
+      // An Ollama old enough not to know the field — a pod image that has not
+      // been rebuilt, say. Current builds take it on any model; this one does
+      // not, so it goes without, and a thinking model there will think.
+      console.warn(`[ai] ${trimEndpoint(config.endpoint)} refused the think field — retrying without it`);
+      response = await send(wanted, Boolean(onChunk), false);
     } else {
       throw new Error(`Ollama returned 400: ${body || response.statusText}`);
     }
