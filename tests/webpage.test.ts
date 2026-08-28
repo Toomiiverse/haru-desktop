@@ -600,3 +600,14 @@ test('the wave file: 16 kHz mono 16-bit with a proper header, boxed down from th
   const samples = new Int16Array(buf, 44);
   assert.ok(Math.max(...Array.from(samples).map(Math.abs)) > 10000, 'the signal survived');
 });
+
+test('opened by a tap, the ear starts awake — a tap is already her name — and drops to her name after the silence', () => {
+  const { Talk, wake } = voice();
+  const talk = Talk({ wake, awakeMs: 25000 });
+  assert.deepEqual(plain(talk.start(0, true)), [{ type: 'awake' }]);
+  assert.deepEqual(plain(talk.heard('what time is it', 1000)), [{ type: 'say', text: 'what time is it', interrupted: false }]);
+  talk.replied(2000, false);
+  assert.deepEqual(plain(talk.tick(2000 + 25000)), [{ type: 'asleep' }]);
+  assert.deepEqual(plain(talk.heard('and the date', 30000)), [], 'asleep now: her name first');
+  assert.deepEqual(plain(talk.heard('haru, and the date', 31000)), [{ type: 'say', text: 'and the date', interrupted: false }]);
+});

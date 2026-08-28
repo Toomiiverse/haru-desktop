@@ -217,7 +217,9 @@ const VOICE = `
     return {
       state: () => state,
       awakeUntil: () => until,
-      start(t) { go('asleep', t); interrupted = false; return [{ type: 'asleep' }]; },
+      // Awake from the start when they opened the ear themselves: a tap is
+      // already her name.
+      start(t, awake) { interrupted = false; if (awake) { go('awake', t, o.awakeMs); return [{ type: 'awake' }]; } go('asleep', t); return [{ type: 'asleep' }]; },
       stop() { go('off', 0); interrupted = false; return [{ type: 'off' }]; },
       heard(text, t) {
         const said = (text || '').trim();
@@ -815,7 +817,7 @@ export function appPage(): string {
 <section id=stage></section>
 <section id=chat></section>
 <div id=chips></div>
-<form class=compose id=cf><button type=button id=att class=icon title="Attach a file">📎</button><button type=button id=mic class=icon title="Hold to talk">🎙</button><button type=button id=ear class=icon title="Keep listening — say “Hey Haru”">👂</button><textarea id=ci rows=1 placeholder="Say something…"></textarea><button id=cb>Send</button></form>
+<form class=compose id=cf><button type=button id=att class=icon title="Attach a file">📎</button><button type=button id=mic class=icon title="Tap to talk with her; tap again to stop">🎙</button><textarea id=ci rows=1 placeholder="Say something…"></textarea><button id=cb>Send</button></form>
 <input type=file id=af multiple hidden>
 <script>
 const $=id=>document.getElementById(id);
@@ -976,44 +978,6 @@ function hush(){
 }
 $('stage').addEventListener('click',hush);
 
-// ---- Her ears -------------------------------------------------------------
-//
-// Held rather than toggled. A toggle leaves a microphone open in a pocket, and
-// on a phone that is the difference between a feature and a liability.
-const mic=$('mic');
-let recorder=null,chunks=[];
-async function startHearing(){
-  if(recorder) return;
-  try{
-    const stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true}});
-    recorder=new MediaRecorder(stream);
-    chunks=[];
-    recorder.ondataavailable=e=>{ if(e.data.size) chunks.push(e.data); };
-    recorder.onstop=async()=>{
-      stream.getTracks().forEach(t=>t.stop());
-      const blob=new Blob(chunks,{type:recorder.mimeType||'audio/webm'});
-      recorder=null; mic.classList.remove('hot');
-      if(blob.size<1200) return;
-      mic.disabled=true;
-      try{
-        const r=await fetch('/api/listen',{method:'POST',headers:{'content-type':blob.type.split(';')[0]},body:blob});
-        const {text}=await r.json();
-        // Put into the box rather than sent: a transcript is a guess, and one
-        // you cannot see before it is sent is one you cannot correct.
-        if(text){ ci.value=(ci.value?ci.value+' ':'')+text; ci.focus(); ci.dispatchEvent(new Event('input')); }
-      }catch(e){ console.warn('[ears] '+(e&&e.message||e)); }
-      mic.disabled=false;
-    };
-    recorder.start();
-    mic.classList.add('hot');
-  }catch(e){
-    console.warn('[ears] '+(e&&e.message||e));
-    mic.title='No microphone: '+(e&&e.message||e);
-  }
-}
-function stopHearing(){ if(recorder&&recorder.state!=='inactive') recorder.stop(); }
-mic.addEventListener('pointerdown',e=>{e.preventDefault();startHearing();});
-for(const done of ['pointerup','pointerleave','pointercancel']) mic.addEventListener(done,stopHearing);
 
 ci.addEventListener('input',()=>{ci.style.height='auto';ci.style.height=Math.min(ci.scrollHeight,112)+'px'; window.haruKeep.set('draft',ci.value||null); if(window.haruAvatar) window.haruAvatar.attend('typing',1800);});
 // A finger in the box is her cue as much as a word in it.
@@ -1379,19 +1343,22 @@ async function drawBell(){
   };
 }
 
-// ---- Conversation mode ------------------------------------------------------
+// ---- Her ears ---------------------------------------------------------------
 //
-// The ear button keeps the microphone open: raw samples in, a level per frame
-// to the voice detector, each utterance boxed into a wave file and sent to be
-// heard. Asleep, only her name gets through; awake, everything does; speaking
-// over her cuts her off. The pill in the top bar says which. Opened inside the
-// tap, as iOS insists for both microphone and audio.
-const ear=$('ear'), talkPill=$('talk');
+// One tap on the microphone opens it and keeps it open: raw samples in, a
+// level per frame to the voice detector, each utterance boxed into a wave file
+// and sent to be heard, and what was heard sent to her as a message. It starts
+// awake — they tapped, so they mean to talk — and stays awake for a while after
+// each thing she says, so they can answer her back; after that only her name
+// gets through, until the next tap closes it. Speaking over her cuts her off.
+// The pill in the top bar says which. Opened inside the tap, as iOS insists
+// for both microphone and audio.
+const mic=$('mic'), talkPill=$('talk');
 let vad=null, talk=null, ctx=null, earStream=null, earNode=null, ring=[], ringMs=0, ticker=null;
 const now=()=>performance.now();
 function showTalk(){
   const s=talk?talk.state():'off';
-  talkPill.hidden=s==='off'; ear.classList.toggle('on',s!=='off');
+  talkPill.hidden=s==='off'; mic.classList.toggle('on',s!=='off'); mic.classList.toggle('hot',s==='awake');
   talkPill.textContent=s==='asleep'?'Say “Hey Haru”':s==='awake'?'Listening…':s==='thinking'?'Thinking…':s==='speaking'?'Speaking…':'';
 }
 async function openEar(){
@@ -1457,18 +1424,18 @@ async function acknowledge(){
     if(!started&&talk) act(talk.spokeEnd(now()));
   }catch{ if(talk) act(talk.spokeEnd(now())); }
 }
-ear.onclick=async()=>{
+mic.onclick=async()=>{
   if(talk){ act(talk.stop()); talk=null; vad=null; closeEar(); clearInterval(ticker); return; }
-  if(!navigator.mediaDevices||!(window.AudioContext||window.webkitAudioContext)){ ear.title='This phone cannot keep listening.'; return; }
+  if(!navigator.mediaDevices||!(window.AudioContext||window.webkitAudioContext)){ mic.title='This phone cannot listen.'; return; }
   try{
     primeVoice();
     vad=window.HaruVad(); talk=window.HaruTalk({wake:window.haruWake});
     await openEar();
-    act(talk.start(now()));
+    act(talk.start(now(),true));
     ticker=setInterval(()=>{ if(talk) act(talk.tick(now())); },1000);
   }catch(e){
     console.warn('[ears] '+(e&&e.message||e));
-    talk=null; vad=null; closeEar(); ear.title='No microphone: '+(e&&e.message||e); showTalk();
+    talk=null; vad=null; closeEar(); mic.title='No microphone: '+(e&&e.message||e); showTalk();
   }
 };
 player.addEventListener('ended',()=>{ if(talk) act(talk.spokeEnd(now())); });
