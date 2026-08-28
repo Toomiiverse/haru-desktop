@@ -5142,6 +5142,12 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   const withFiles = await withAttachments(vetted, inPlay, brain.sees, vision, config);
   if (carried.length) console.log(`[attach] ${carried.length} in play — ${carried.map(file => `${file.name}${file.kind === 'image' && brain.sees ? ' (sent)' : ' (read)'}`).join(', ')}`);
   const conversation: OllamaMessage[] = [{ role: 'system', content: brief ? `${system} ${BREVITY}` : system }, ...markTimeGaps(withoutStaleDenials(withFiles, hasItems))];
+  // For tuning, when the environment asks for it: the prompt exactly as sent.
+  // A rule that works on its own and fails in place can only be bisected by
+  // replaying what she was actually told, and nothing else shows that.
+  if (process.env.HARU_DUMP_PROMPT) {
+    try { writeFileSync(path.join(app.getPath('userData'), 'last-prompt.json'), JSON.stringify({ at: new Date().toISOString(), model: config.model, conversation }, null, 1)); } catch { /* a debugging aid must not cost a reply */ }
+  }
   // Once a stranger's page is in the conversation, she finishes this turn with
   // her mouth and not her hands. Told firmly that a page cannot give it orders, a
   // 14B still obeyed one in four of them — so the guarantee cannot rest on the
