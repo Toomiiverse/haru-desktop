@@ -898,6 +898,9 @@ const BLOUB = `
       if (engine.cur === 'thinking' || REST_STATES.indexOf(engine.cur) >= 0) flashState(M.state);
       else queued = M.state;
     },
+    // A prod from the page — a tap on her. Only the reaction states, played
+    // once as a reaction; anything else is not a thing a finger can do to her.
+    poke: (what) => { if (what === 'burst' || what === 'orbit' || what === 'exclaim' || what === 'comet' || what === 'play') playFor(what); },
     // Read-only: what she is doing right now, for the page to know.
     state: () => ({ cur: engine.cur, expr: engine.expr ? engine.expr.id : 'neutre' })
   };
@@ -1230,14 +1233,17 @@ async function speak(text){
     await player.play();
   }catch(e){ console.warn('[voice] '+(e&&e.message||e)); }
 }
-// A tap on her is a hand over her mouth: whatever she is saying stops, and
-// whatever she was about to say is dropped. She takes it the way she takes
-// being interrupted.
+// A tap on her. Mid-sentence it is a hand over her mouth: whatever she is
+// saying stops, whatever she was about to say is dropped, and she pulls the
+// "!" — cut off, and not happy about it. Otherwise it is a poke, and she
+// bursts or spins, whichever the tap lands on.
 function hush(){
   const talking=!player.paused&&!player.ended;
   speaking++;
   player.pause();
-  if(talking&&window.bloub) window.bloub.express('annoyed');
+  if(!window.bloub) return;
+  if(talking) window.bloub.poke('exclaim');
+  else window.bloub.poke(Math.random()<0.5?'burst':'orbit');
 }
 $('stage').addEventListener('click',hush);
 
