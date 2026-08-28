@@ -40,7 +40,7 @@ import { convertImage, normaliseFormat, FORMATS } from './convert';
 import { cancelPower, closeApp, findApps, isCancellable, launch, listRunning, matchApp, matchRunning, normalisePower, POWER_DELAY_S, readDesktopConfig, runPower, type DesktopConfig } from './desktop';
 import { looksLikeScreenshot, maySpeak, readScreenshotConfig, screenshotPrompt, SETTLE_MS, SETTLE_TRIES, type ScreenshotConfig } from './screenshots';
 import { look, photoName, readVisionConfig, whileLooking, type VisionConfig } from './vision';
-import { NO_INVENTED_HISTORY, NO_NON_SEQUITURS, readsAsRough, roomInstruction } from './room';
+import { EXPRESSIVE, NO_INVENTED_HISTORY, NO_NON_SEQUITURS, readsAsRough, roomInstruction } from './room';
 import { journalStance } from './journal';
 import { haruNote, rangeStats, type HaruNote, type RangeName, type RangeStats } from './journal';
 import { describeRating, entryFor, journalPrompt, readEntries, readJournalConfig, readRating, recentTrend, shouldAsk, upsertEntry, SCALE_MAX, type JournalConfig, type JournalEntry } from './journal';
@@ -4213,6 +4213,7 @@ async function inHerVoice(answer: string, recent: { role: string; content: strin
   const system = [
     character.identity,
     character.style,
+    EXPRESSIVE,
     moodInstruction(mood.irritation),
     egoInstruction(mood.ego),
     // The answer goes in here, as what she knows, and the conversation goes

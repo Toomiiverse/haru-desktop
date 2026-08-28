@@ -227,3 +227,12 @@ test('a short follow-up is read as continuing the thread, and never echoed back 
   assert.ok(continuity > prompt.indexOf(IDENTITY), 'it must come after the persona, or a small model forgets it');
   assert.ok(continuity < prompt.indexOf('Answer what they said and stop'), 'it qualifies the length rule, so it is read first');
 });
+
+test('her emoji are named, as hers, beside the persona', () => {
+  const prompt = chatSystemPrompt(state({ irritation: 5 }));
+  const expressive = prompt.indexOf('the eye-roll, the huff, the smirk');
+  assert.notEqual(expressive, -1, 'the emoji rule never made it into the prompt');
+  assert.ok(expressive > prompt.indexOf(STYLE), 'it is part of her voice, so it follows her style');
+  assert.ok(expressive < prompt.indexOf('thoroughly fed up'), 'and comes before the mood, which may sharpen it');
+  assert.ok(prompt.includes('not a signature'), 'the opener-variety rule rides with continuity');
+});

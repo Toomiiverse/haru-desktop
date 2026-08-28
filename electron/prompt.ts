@@ -25,7 +25,7 @@ import { findItem, formatAgenda, missedInstruction, putOffInstruction, tickOffIn
 import { pushbackInstruction, type Pushback } from './pushback';
 import { lookItUpInstruction, type SearchConfig } from './search';
 import { summariseFollowing, type Following } from './following';
-import { CONTINUITY, NO_INVENTED_HISTORY, NO_NON_SEQUITURS, readsAsRough, roomInstruction } from './room';
+import { CONTINUITY, EXPRESSIVE, NO_INVENTED_HISTORY, NO_NON_SEQUITURS, readsAsRough, roomInstruction } from './room';
 import { journalPrompt, journalStance, type JournalConfig, type JournalEntry } from './journal';
 import { familiarity, type Haunt } from './familiar';
 import { formatTimeOfDay, localDateKey } from './dates';
@@ -245,6 +245,8 @@ export function chatSystemPrompt(state: PromptState): string {
     // forgets, and her being Haru is a tone instruction above all.
     state.character.identity,
     state.character.style,
+    // Part of her voice, so it sits with the persona rather than with the rules.
+    EXPRESSIVE,
     // Her unprompted lines have always been told how long to be; her actual
     // replies never were, and it shows. A typical answer came back as four
     // paragraphs: the real reply, the same point again in other words, an
