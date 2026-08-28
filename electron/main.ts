@@ -40,7 +40,7 @@ import { INTERRUPTED_ASIDE, wakeAck } from './wake';
 import { describeWeather, readForecast, weatherEvents, weatherUrl, WEATHER_POLL_MS, type WeatherSample } from './weather';
 import { leftHanging } from './hanging';
 import { markMentioned, upcomingToMention } from './upcoming';
-import { directionsAsk, directionsNote, matchNamedPlace, startingPoint, withDirections, type DirectionsAsk } from './directions';
+import { directionsAsk, directionsNote, dropRouteTalk, matchNamedPlace, startingPoint, withDirections, type DirectionsAsk } from './directions';
 import { absorb, describeWhereabouts, distanceM, forgetPlace, namePlace, placeAt, readSpot, readWhereabouts, whereForPage, type Whereabouts } from './whereabouts';
 import { convertImage, normaliseFormat, FORMATS } from './convert';
 import { cancelPower, closeApp, findApps, isCancellable, launch, listRunning, matchApp, matchRunning, normalisePower, POWER_DELAY_S, readDesktopConfig, runPower, type DesktopConfig } from './desktop';
@@ -5314,7 +5314,7 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   const herLine = fixStatedClock(dropRepeatedOpener(dropEchoOpener(dropRepeatedSentences(dropTackedOnParagraphs(trimmed, brain.escalated || ran.has('search_web') || ran.has('read_web_page')), recent), latest), recent), clock.getHours(), clock.getMinutes());
   // The maps button goes under her words, not into her mouth: what is herLine
   // and what her mood is read from is the line she said.
-  const content = directions?.found ? withDirections(herLine, directions.found) : herLine;
+  const content = directions?.found ? withDirections(dropRouteTalk(herLine), directions.found) : herLine;
   if (herLine !== said) console.log(`[ai] dropped ${said.length - content.length} chars she had already said`);
   console.log(`[ai] chat reply in ${Date.now() - started}ms, ${content.length} chars`);
   // Cleared only once a reply actually exists, so a failed or unreachable turn
@@ -5322,9 +5322,10 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   if (fresh) store.delete('chat.freshStart');
   // Shared: the expression system consumes it through the broadcast inside,
   // and the voice awaits it to choose a clip matching how this line was said.
-  const saidMood = classifyEmotion(herLine, config);
-  void speak(herLine, saidMood);
-  void tieToPlace(latest, herLine, config);
+  const herWords = directions?.found ? dropRouteTalk(herLine) : herLine;
+  const saidMood = classifyEmotion(herWords, config);
+  void speak(herWords, saidMood);
+  void tieToPlace(latest, herWords, config);
   // Restarting herself kills the process she is answering from, so the
   // restart waits until this reply is built and on its way — the words leave
   // first, the restart follows a few seconds behind.
@@ -6137,7 +6138,7 @@ async function directionsFor(latest: string): Promise<{ ask: DirectionsAsk; foun
   } else {
     const from = startingPoint(where);
     try {
-      const hits = await searchPlaces(ask.destination, (url, init) => fetch(url, init), from, readSearchConfig(store.get('search')).place);
+      const hits = await searchPlaces(ask.destination, (url, init) => fetch(url, init), from, readSearchConfig(store.get('search')).place, { bounded: ask.nearest && from !== null });
       // The nearest of what came back when she knows where they are; else the
       // service's own first choice.
       found = from ? hits.map(hit => ({ hit, d: distanceM(from, hit) })).sort((a, b) => a.d - b.d)[0]?.hit ?? null : hits[0] ?? null;

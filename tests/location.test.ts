@@ -29,3 +29,12 @@ test('with nowhere to bias from, the configured place is added to the words; a r
   assert.doesNotMatch(asked[0], /viewbox/);
   await assert.rejects(searchPlaces('coles', async () => ({ ok: false, status: 429 } as unknown as Response), null), /429/);
 });
+
+test('"the nearest" bounds the search to the box; an ordinary ask only ranks by it', async () => {
+  const asked: string[] = [];
+  const fetchImpl = async (url: string) => { asked.push(url); return { ok: true, json: async () => [] } as unknown as Response; };
+  await searchPlaces('coles', fetchImpl, { lat: -31.95, lon: 115.86 }, '', { bounded: true });
+  await searchPlaces('coles', fetchImpl, { lat: -31.95, lon: 115.86 }, '');
+  assert.match(asked[0], /bounded=1/);
+  assert.match(asked[1], /bounded=0/);
+});

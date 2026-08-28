@@ -36,11 +36,38 @@ export function directionsAsk(text: string): DirectionsAsk | null {
   for (const { pattern, nearest } of ASKS) {
     const m = line.match(pattern);
     if (!m) continue;
-    const destination = cleanDestination(m[1]);
+    // "the nearest Coles" is a Coles, searched near them — the word itself
+    // means nothing to a map and everything to how the search is bounded.
+    const cleaned = cleanDestination(m[1]);
+    const near = /^(?:the )?(?:nearest|closest|nearby|near(?:by)? )\s*/i.exec(cleaned);
+    const destination = near ? cleanDestination(cleaned.slice(near[0].length)) : cleaned;
     if (destination.length < 2 || NOT_A_PLACE.test(destination)) return null;
-    return { destination, nearest: nearest === true };
+    return { destination, nearest: nearest === true || near !== null };
   }
   return null;
+}
+
+/**
+ * Her words about the way somewhere, without the way somewhere.
+ *
+ * Told plainly not to, a small model still writes "via Canning Hwy, bus 950,
+ * 15–20 mins" — roads it has never seen and buses that do not exist. The
+ * button under her words is the route; anything of hers that reads as one is
+ * cut, list items first, then any sentence that names roads, buses, turns or
+ * journey times. Her first sentence always survives, so she still said
+ * something.
+ */
+const ROUTE_TALK = /\b(?:via|hwy|highway|freeway|motorway|exit \d|turn (?:left|right)|(?:bus|train|tram|ferry|route)(?:es)? ?\d|(?:take|catch) the (?:bus|train|tram|ferry)|\d+\s*(?:-|–|to)?\s*\d*\s*(?:mins?|minutes|hrs?|hours)\b|parking|car ?park|campus lots?|head (?:north|south|east|west)|left onto|right onto|roundabout)/i;
+export function dropRouteTalk(reply: string): string {
+  const paragraphs = reply.split(/\n\s*\n/);
+  const kept = paragraphs.map(paragraph => {
+    if (/^\s*(?:[-*•]|\d+[.)])\s/.test(paragraph)) return '';
+    return paragraph.split(/(?<=[.!?])\s+/).filter(sentence => !ROUTE_TALK.test(sentence)).join(' ');
+  }).filter(p => p.trim());
+  const out = kept.join('\n\n').trim();
+  if (out) return out;
+  const first = reply.trim().match(/^[^.!?\n]*[.!?]?/);
+  return (first?.[0] ?? reply).trim();
 }
 
 /** A place she knows by that name — "home", "the store", "my place" for home. */
@@ -84,7 +111,7 @@ export function directionsNote(ask: DirectionsAsk, found: Found | null, where: W
   const at = from ? placeAt(where.places, { lat: found.lat, lon: found.lon, accuracy: 0 }) : null;
   const distance = from ? ` It is about ${km(distanceM(from, found))} from ${from.known === 'here' ? 'where they are' : 'home'}.` : '';
   const there = at && from && distanceM(from, found) < 200 ? ' They are already there, as far as the phone can tell.' : '';
-  return `They asked the way to "${ask.destination}". Found: ${found.name}.${distance}${there} The app is attaching a button under your words that opens their maps with the route, so do not write a link, an address, or turn-by-turn directions — one or two lines of yours, in your voice, is all that is wanted.`;
+  return `They asked the way to "${ask.destination}". Found: ${found.name}.${distance}${there} The app is attaching a button under your words that opens their maps with the route. You do not know the roads, buses or journey times there, so anything you say about the route would be made up and will be cut; one or two lines of yours, in your voice, about them going, is all that is wanted.`;
 }
 
 /** Her words with the button's link under them, as a markdown link the page and the desktop both render. */

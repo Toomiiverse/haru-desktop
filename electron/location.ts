@@ -147,9 +147,11 @@ export type FoundPlace = { name: string; lat: number; lon: number };
  * the ones nearby, and the caller picks the nearest of the few that come back.
  * With nowhere to bias from, a configured search place is added to the words.
  */
-export async function searchPlaces(query: string, fetchImpl: Fetcher, near: { lat: number; lon: number } | null, fallbackPlace = ''): Promise<FoundPlace[]> {
+export async function searchPlaces(query: string, fetchImpl: Fetcher, near: { lat: number; lon: number } | null, fallbackPlace = '', { bounded = false } = {}): Promise<FoundPlace[]> {
   const q = near || !fallbackPlace ? query : `${query}, ${fallbackPlace}`;
-  const box = near ? `&viewbox=${(near.lon - 0.12).toFixed(3)},${(near.lat + 0.12).toFixed(3)},${(near.lon + 0.12).toFixed(3)},${(near.lat - 0.12).toFixed(3)}&bounded=0` : '';
+  // Bounded for "the nearest": only what is inside the box counts, and the
+  // caller picks the closest of it. Otherwise the box merely ranks.
+  const box = near ? `&viewbox=${(near.lon - 0.12).toFixed(3)},${(near.lat + 0.12).toFixed(3)},${(near.lon + 0.12).toFixed(3)},${(near.lat - 0.12).toFixed(3)}&bounded=${bounded ? 1 : 0}` : '';
   const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&q=${encodeURIComponent(q)}&limit=5&addressdetails=1${box}`;
   const response = await fetchImpl(url, {
     headers: { 'User-Agent': 'haru-desktop (personal desktop companion)', 'Accept': 'application/json' },

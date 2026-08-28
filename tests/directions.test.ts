@@ -2,7 +2,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { cleanDestination, directionsAsk, directionsNote, googleMapsLink, mapsLink, matchNamedPlace, startingPoint, withDirections } from '../electron/directions';
+import { cleanDestination, directionsAsk, directionsNote, dropRouteTalk, googleMapsLink, mapsLink, matchNamedPlace, startingPoint, withDirections } from '../electron/directions';
 import { absorb, namePlace, readSpot, readWhereabouts, type Whereabouts } from '../electron/whereabouts';
 
 const NOW = new Date('2026-08-28T10:00:00Z');
@@ -65,7 +65,7 @@ test('what she is told: the place, how far, that a button is coming — or that 
   const ask = { destination: 'Coles Wembley', nearest: false };
   const note = directionsNote(ask, COLES, withHome(), NOW.getTime() + 60_000);
   assert.match(note, /Found: Coles, Wembley\. It is about 6\.1 km from where they are\./);
-  assert.match(note, /do not write a link, an address, or turn-by-turn/);
+  assert.match(note, /anything you say about the route would be made up and will be cut/);
   assert.doesNotMatch(note, /https?:/);
   const nothing = directionsNote(ask, null, withHome(), NOW.getTime());
   assert.match(nothing, /nothing was found by that name\. Say so/);
@@ -74,4 +74,18 @@ test('what she is told: the place, how far, that a button is coming — or that 
   assert.match(blind, /does not know where they are/);
   const here = directionsNote({ destination: 'home', nearest: false }, { name: 'home', ...HOME }, withHome(), NOW.getTime());
   assert.match(here, /already there/);
+});
+
+test('"the nearest Coles" is a Coles, searched near them', () => {
+  assert.deepEqual(directionsAsk('directions to the nearest coles'), { destination: 'coles', nearest: true });
+  assert.deepEqual(directionsAsk('how do I get to the closest petrol station?'), { destination: 'petrol station', nearest: true });
+  assert.deepEqual(directionsAsk('take me to Murdoch University'), { destination: 'Murdoch University', nearest: false });
+});
+
+test('roads, buses and journey times she made up are cut; her own words stay; her first sentence always survives', () => {
+  const said = '🙄 You’re at The PC Project. Murdoch University is ~14 km away.\n\n- Drive: ~15–20 mins via Canning Hwy or St Georges Terrace.\n- Bus: 950/951 from Fitzgerald St area (~30–40 mins).\n- Park: main campus lots fill fast; aim for early.\n\nDon’t wander around like a lost freshman.';
+  assert.equal(dropRouteTalk(said), '🙄 You’re at The PC Project. Murdoch University is ~14 km away.\n\nDon’t wander around like a lost freshman.');
+  assert.equal(dropRouteTalk('Take the freeway south, then turn left onto Murdoch Drive. Try not to get lost.'), 'Try not to get lost.');
+  assert.equal(dropRouteTalk('Head south on the freeway for 20 mins.'), 'Head south on the freeway for 20 mins.', 'nothing else to keep');
+  assert.equal(dropRouteTalk('Fine. Go. 🙄'), 'Fine. Go. 🙄');
 });
