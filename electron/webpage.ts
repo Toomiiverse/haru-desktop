@@ -391,8 +391,16 @@ const AVATAR = `
   window.haruAvatar = {
     express: (emotion) => { resting = ADAPT[emotion] || (EMOTIONS.indexOf(emotion) >= 0 ? emotion : 'neutral'); clearTimeout(timer); show(resting, clock()); },
     think: () => { clearTimeout(timer); show('thinking', clock()); settleBack(20000); },
-    // She is starting to talk: a small pop, and she looks at them.
-    notify: () => { if (frozenAt !== null || reduced) return; replay(body, 'pop'); window.haruAvatar.attend('talking', 2500); },
+    // She is starting to talk: the thinking is over, whatever the reply's
+    // mood turns out to be — that is a second round trip, and it lands after
+    // the words and the voice have begun. So she goes back to her resting face
+    // now, looks at them, and the mood crossfades in when it arrives. A small
+    // pop marks the start, when motion is allowed.
+    notify: () => {
+      if (engine.emotion() === 'thinking') { clearTimeout(timer); show(resting, clock()); }
+      if (frozenAt !== null || reduced) return;
+      replay(body, 'pop'); window.haruAvatar.attend('talking', 2500);
+    },
     poke: (what) => { const hit = POKES[what]; if (!hit) return; clearTimeout(timer); show(hit[0], clock()); settleBack(hit[1]); },
     // Something has her attention for a while: 'typing', 'talking', or 'here'
     // (at them). Nothing, or a spent claim, and the wander has her back.

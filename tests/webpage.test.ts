@@ -282,6 +282,14 @@ test('thinking holds until the mood lands, and otherwise settles back on its own
   avatar.express('happy'); avatar.think(); await flush(); assert.equal(avatar.state().emotion, 'thinking');
   fire(); await flush(); assert.equal(avatar.state().emotion, 'happy');
   avatar.think(); avatar.express('smug'); await flush(); assert.equal(avatar.state().emotion, 'smug');
+  // The voice starts before the mood is known: talking ends the thinking at
+  // once, on the resting face, and the mood lands on top when it arrives.
+  avatar.think(); await flush(); assert.equal(avatar.state().emotion, 'thinking');
+  avatar.notify(); await flush();
+  assert.equal(avatar.state().emotion, 'smug', 'starting to talk is the end of thinking');
+  avatar.express('happy'); await flush(); assert.equal(avatar.state().emotion, 'happy');
+  const still = drive({ reduced: true }); still.avatar.express('curious'); still.avatar.think(); await still.flush(); still.avatar.notify(); await still.flush();
+  assert.equal(still.avatar.state().emotion, 'curious', 'even with motion reduced, the face leaves thinking');
 });
 
 test('a poke is a face for a moment, then back to how she was', async () => {
