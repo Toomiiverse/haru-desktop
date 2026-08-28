@@ -129,6 +129,38 @@ function findCallId(conversation: ChatMessage[], from: number, name: string | un
   return undefined;
 }
 
+/**
+ * Where OpenAI's own newer models depart from the dialect named after them.
+ *
+ * Everything else that speaks this shape — xAI, Venice, Ollama's compatibility
+ * endpoint, OpenAI's gpt-4 line — takes `max_tokens` and a temperature and
+ * leaves it there. OpenAI's reasoning models do not: they refuse `max_tokens`
+ * in favour of `max_completion_tokens`, refuse any temperature but the default,
+ * and from gpt-5.1 on refuse function tools unless reasoning is switched off
+ * with `reasoning_effort: 'none'`. Off is also the right setting for her: a
+ * reply should arrive at the speed of a chat, not a proof, and it is only with
+ * reasoning off that the temperature she was set up with is honoured at all.
+ *
+ * Each row was confirmed against the live endpoint rather than the docs,
+ * because the docs describe a family and the refusals are per model: the
+ * original gpt-5 line goes no lower than 'minimal' and still refuses a
+ * temperature; the o-series accepts neither and is left to its default. Every
+ * model not named here gets exactly the body it always got. Before this, the
+ * phone's every message went out to gpt-5.6-terra as `max_tokens` and came
+ * back a 400 — "messages do not go through from phone" was this function.
+ */
+export function openAIQuirks(model: string): {
+  maxTokensKey: 'max_tokens' | 'max_completion_tokens';
+  reasoningEffort: 'none' | 'minimal' | null;
+  honoursTemperature: boolean;
+} {
+  const name = model.trim().toLowerCase();
+  if (/^gpt-5\.[1-9]/.test(name)) return { maxTokensKey: 'max_completion_tokens', reasoningEffort: 'none', honoursTemperature: true };
+  if (/^gpt-5(-|$)/.test(name)) return { maxTokensKey: 'max_completion_tokens', reasoningEffort: 'minimal', honoursTemperature: false };
+  if (/^o[1-9](-|$)/.test(name)) return { maxTokensKey: 'max_completion_tokens', reasoningEffort: null, honoursTemperature: false };
+  return { maxTokensKey: 'max_tokens', reasoningEffort: null, honoursTemperature: true };
+}
+
 /** The request body an OpenAI-compatible endpoint expects. */
 export function toOpenAIBody(options: {
   model: string;
@@ -139,14 +171,16 @@ export function toOpenAIBody(options: {
   json?: boolean;
   stream?: boolean;
 }) {
+  const quirks = openAIQuirks(options.model);
   return {
     model: options.model,
     messages: toOpenAIMessages(options.conversation),
     ...(options.tools?.length ? { tools: options.tools, tool_choice: 'auto' } : {}),
+    ...(quirks.reasoningEffort ? { reasoning_effort: quirks.reasoningEffort } : {}),
     // num_ctx has no counterpart: context length is a property of the deployment,
     // not something a caller may ask for.
-    temperature: options.temperature,
-    ...(options.maxTokens ? { max_tokens: options.maxTokens } : {}),
+    ...(quirks.honoursTemperature ? { temperature: options.temperature } : {}),
+    ...(options.maxTokens ? { [quirks.maxTokensKey]: options.maxTokens } : {}),
     ...(options.json ? { response_format: { type: 'json_object' } } : {}),
     stream: Boolean(options.stream),
   };

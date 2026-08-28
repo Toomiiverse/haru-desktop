@@ -5182,7 +5182,9 @@ async function verifyRemoteModel(endpoint: string, provider: Provider, model: st
   const response = await net.fetch(`${trimEndpoint(endpoint)}/chat/completions`, {
     method: 'POST',
     headers: modelHeaders(endpoint),
-    body: JSON.stringify({ model: model || 'grok-4', messages: [{ role: 'user', content: 'hi' }], max_tokens: 1, stream: false }),
+    // Through the same builder as a real request, so a model that wants
+    // max_completion_tokens is not failed by the one probe meant to vouch for it.
+    body: JSON.stringify(toOpenAIBody({ model: model || 'grok-4', conversation: [{ role: 'user', content: 'hi' }], temperature: 1, maxTokens: 1 })),
   });
   if (!response.ok) throw new Error(describeFailure(response.status, await response.text().catch(() => ''), provider));
   return { models: [], note: 'The key works. This provider will not list its models to it, which is a permission on the key rather than a problem.' };
