@@ -132,14 +132,14 @@ test('the two pages are the same shell, so a change lands on both', () => {
 
 // Her face, driven.
 //
-// The avatar block is the one part of the page that is not static markup: it
-// takes the mood engine's word, finds the face for it, and crossfades. Driven
-// here in a vm with a document of stubs, so what is checked is what the script
-// does with a name — not what a browser does with an image.
-function drive({ reduced = false, transition }: { reduced?: boolean; transition?: string } = {}) {
+// Two things are checked here. The engine, with numbers: it is pure and
+// clock-free, so a time goes in and a frame comes out, and what it does when a
+// face changes mid-fade can be asserted to the decimal. And the renderer, in a
+// vm with a document of stubs: what the page script does with a name.
+function drive({ reduced = false, transition, frozenAt }: { reduced?: boolean; transition?: string; frozenAt?: string } = {}) {
   const app = appPage();
   const anchor = app.indexOf('window.haruAvatar = {');
-  const start = anchor < 0 ? -1 : app.lastIndexOf('(() => {', anchor);
+  const start = anchor < 0 ? -1 : app.lastIndexOf('(() => {', app.indexOf('window.HaruEmotionEngine ='));
   assert.ok(start > 0, 'the avatar block is no longer where this test can find it');
   const end = app.indexOf('})();', anchor);
   const source = app.slice(start, end + 5);
@@ -151,20 +151,58 @@ function drive({ reduced = false, transition }: { reduced?: boolean; transition?
   };
   const faces = [img(), img()];
   const box: any = { attrs: {} as Record<string, string>, classList: classes(), offsetWidth: 1, setAttribute(k: string, v: string) { this.attrs[k] = v; }, getAttribute(k: string) { return this.attrs[k] ?? null; }, querySelectorAll: () => faces };
-  const host: any = { dataset: transition === undefined ? {} : { transition }, style: { vars: {} as Record<string, string>, setProperty(k: string, v: string) { this.vars[k] = v; } }, innerHTML: '' };
+  const dataset: Record<string, string> = {}; if (transition !== undefined) dataset.transition = transition; if (frozenAt !== undefined) dataset.frozenAt = frozenAt;
+  const host: any = { dataset, style: { vars: {} as Record<string, string>, setProperty(k: string, v: string) { this.vars[k] = v; } }, innerHTML: '' };
   const timers: (() => void)[] = [];
+  let now = 1000;
   const win: any = {
     Math, JSON, Number, Array, Object, String, Boolean, Map, Set,
     document: { getElementById: (id: string) => (id === 'stage' ? host : id === 'avatar' ? box : null) },
     matchMedia: () => ({ matches: reduced }),
+    performance: { now: () => now },
     setTimeout: (cb: () => void) => { timers.push(cb); return timers.length; },
     clearTimeout: () => { timers.length = 0; },
   };
   win.window = win;
   vm.runInContext(source, vm.createContext(win), { filename: 'avatar.js' });
   const shown = () => faces.find(face => face.classList.contains('on'));
-  return { avatar: win.haruAvatar, box, faces, host, shown, fire: () => { for (const cb of timers.splice(0)) cb(); } };
+  return { avatar: win.haruAvatar, Engine: win.HaruEmotionEngine, box, faces, host, shown, tick: (ms: number) => { now += ms; }, fire: () => { for (const cb of timers.splice(0)) cb(); } };
 }
+
+test('the engine is clock-free: a time in, a frame out, eased and never overshooting', () => {
+  const { Engine } = drive();
+  const engine = Engine({ duration: () => 200 });
+  // Frames are made inside the vm, so they are compared as values, not by prototype.
+  const plain = (frame: unknown) => JSON.parse(JSON.stringify(frame));
+  assert.deepEqual(plain(engine.sample(0)), { emotion: 'neutral', previousEmotion: null, transitionProgress: 1, opacity: 1, previousOpacity: 0, transitioning: false });
+  assert.equal(engine.set('happy', 1000), true);
+  assert.equal(engine.set('happy', 1000), false, 'the same face again is not a change');
+  const mid = engine.sample(1100);
+  assert.equal(mid.emotion, 'happy'); assert.equal(mid.previousEmotion, 'neutral'); assert.equal(mid.transitioning, true);
+  assert.ok(mid.opacity > 0.5 && mid.opacity < 1, `ease-out is past half way at half time (${mid.opacity})`);
+  assert.ok(Math.abs(mid.opacity + mid.previousOpacity - 1) < 1e-9, 'the two faces always add up to one');
+  const done = engine.sample(1200);
+  assert.equal(done.opacity, 1); assert.equal(done.previousOpacity, 0); assert.equal(done.transitioning, false);
+  assert.equal(engine.sample(5000).opacity, 1, 'never above one, however late');
+  // The same frame for the same time, every time.
+  assert.deepEqual(plain(engine.sample(1150)), plain(engine.sample(1150)));
+});
+
+test('a face that changes mid-fade starts from what is visible — nothing jumps', () => {
+  const { Engine } = drive();
+  const engine = Engine({ duration: () => 200 });
+  engine.set('happy', 1000);
+  const before = engine.sample(1050);
+  engine.set('angry', 1050);
+  const after = engine.sample(1050);
+  assert.equal(after.emotion, 'angry'); assert.equal(after.previousEmotion, 'happy');
+  assert.equal(after.previousOpacity, before.opacity, 'the leaving face keeps the opacity it had');
+  assert.equal(after.opacity, 0, 'the arriving face starts from nothing');
+  // The rapid sequence from the brief, no frame out of range.
+  let t = 1050;
+  for (const face of ['sad', 'excited', 'neutral', 'happy']) { t += 30; engine.set(face, t); const f = engine.sample(t + 10); assert.ok(f.opacity >= 0 && f.opacity <= 1 && f.previousOpacity >= 0 && f.previousOpacity <= 1, face); }
+  assert.equal(engine.sample(t + 1000).emotion, 'happy');
+});
 
 test('the mood engine’s word becomes the face for it, said out loud, from her own server', () => {
   const { avatar, box, shown } = drive();
@@ -202,19 +240,39 @@ test('a poke is a face for a moment, then back to how she was', () => {
   assert.equal(avatar.state().emotion, 'curious');
 });
 
-test('the crossfade runs for the configured time, and not at all when motion is reduced', () => {
+test('the crossfade runs for the configured time with the engine’s easing, and not at all when motion is reduced', () => {
   const timed = drive({ transition: '150' });
   timed.avatar.express('happy');
-  assert.equal(timed.shown()?.style.transition, 'opacity 150ms ease');
+  assert.equal(timed.shown()?.style.transition, 'opacity 150ms cubic-bezier(0.33, 1, 0.68, 1)');
   const still = drive({ reduced: true });
   still.avatar.express('happy');
   assert.equal(still.shown()?.style.transition, 'none');
+  assert.equal(still.avatar.state().transitionProgress, 1, 'reduced motion is a duration of zero: the change is complete at once');
   const dialled = drive();
   dialled.avatar.setTransition(0);
   dialled.avatar.express('sad');
   assert.equal(dialled.shown()?.style.transition, 'none');
   dialled.avatar.setSize(320);
   assert.equal(dialled.host.style.vars['--avatar-size'], '320px');
+});
+
+test('frozen, the exact frame for that instant is drawn and nothing moves', () => {
+  const { avatar, faces, tick, shown, box } = drive({ transition: '200' });
+  avatar.express('happy');
+  tick(100);
+  avatar.freeze();
+  const frame = avatar.sample();
+  assert.equal(avatar.state().frozen, true);
+  assert.ok(frame.transitioning, 'frozen half way through the fade');
+  assert.equal(shown()?.style.transition, 'none');
+  assert.equal(Number(shown()?.style.opacity).toFixed(4), frame.opacity.toFixed(4));
+  assert.equal(Number(faces.find(f => f !== shown())?.style.opacity).toFixed(4), frame.previousOpacity.toFixed(4));
+  avatar.notify();
+  assert.equal(box.classList.contains('pop'), false, 'a pop is playback, and playback is stopped');
+  avatar.play();
+  assert.equal(avatar.state().frozen, false);
+  const fromAttribute = drive({ frozenAt: '0' });
+  assert.equal(fromAttribute.avatar.state().frozen, true);
 });
 
 test('a face whose file is missing shows nothing, not a broken image', () => {

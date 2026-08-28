@@ -17,7 +17,7 @@
 // green, because she is not that character, and the hue does not animate, which
 // on a companion you glance at all day would be a fidget rather than a feature.
 
-import { DEFAULT_TRANSITION_MS, emotionConfig, HARU_EMOTIONS, MOOD_TO_EMOTION } from './emotions';
+import { DEFAULT_TRANSITION_MS, EASE_OUT_CSS, emotionConfig, HARU_EMOTIONS, MOOD_TO_EMOTION } from './emotions';
 
 /** One number to move the whole palette. 350 is Haru's pink; 150 would be AIRI's green. */
 const HUE = 350;
@@ -66,64 +66,128 @@ const SHELL = `
 `;
 
 // Her on stage: the supplied Haru artwork, one SVG per emotion, served by her
-// own server from /emotions/ and crossfaded on the page. No engine, no
-// geometry, no morphing — the files do not share a path topology and are not
-// ours to redraw — so a change of face is the old one fading out and the new
-// one fading in: two stacked images and an opacity. The duration is the page's
-// to set (data-transition on #stage, default from emotions.ts), a reduced-
-// motion setting switches at once instead, and a face whose file is missing
-// shows nothing rather than a broken image. The API the rest of the page
-// speaks — express / think / notify / poke / state — is the one the old avatar
-// had, so nothing else on the page changed hands.
+// own server from /emotions/ and crossfaded on the page. Two parts, on the
+// bloub's pattern of a clock-free engine under a thin renderer — the pattern is
+// kept; the geometry is not, because these files do not share a path topology
+// and are not ours to redraw.
+//
+// The engine decides WHAT is shown: it is pure and clock-free, takes a time
+// with every call, and sample(t) returns the frame for that time — which face,
+// which face is leaving, how far along, and the opacity of each — so it can be
+// tested with numbers and frozen at an instant. A change of face that arrives
+// mid-fade starts from what is visible: the outgoing face keeps the opacity it
+// had, the incoming one starts from nothing, and nothing jumps.
+//
+// The renderer decides HOW: two stacked images, opacity, a CSS transition with
+// the engine's own easing. Nothing runs between changes — a face at rest is a
+// static image — and a reduced-motion setting switches at once. The API the
+// rest of the page speaks (express / think / notify / poke / state) is the one
+// the old avatar had, so nothing else on the page changed hands.
 const AVATAR = `
 (() => {
   const EMOTIONS = ${JSON.stringify(HARU_EMOTIONS)};
   const LABELS = ${JSON.stringify(Object.fromEntries(HARU_EMOTIONS.map(name => [name, emotionConfig[name].label])))};
+  const TRANSITIONS = ${JSON.stringify(Object.fromEntries(HARU_EMOTIONS.map(name => [name, emotionConfig[name].transition])))};
   const ADAPT = ${JSON.stringify(MOOD_TO_EMOTION)};
-  // What a prod does to her face, and for how long, before she settles back.
-  const POKES = { exclaim: ['angry', 2000], burst: ['surprised', 1600], orbit: ['excited', 1600], comet: ['surprised', 1600], play: ['happy', 1600] };
+  const EASE_CSS = ${JSON.stringify(EASE_OUT_CSS)};
+  const clamp = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
+  // Cubic ease-out: deterministic, no overshoot, the same curve as EASE_CSS.
+  const easeOut = (p) => 1 - Math.pow(1 - p, 3);
+
+  // ---- the engine: pure, clock-free ------------------------------------
+  function createEmotionEngine(options) {
+    const duration = () => (options && typeof options.duration === 'function' ? options.duration() : ${DEFAULT_TRANSITION_MS});
+    let emotion = 'neutral', previous = null, startedAt = -Infinity, leavingFrom = 0, arrivingFrom = 1;
+    const progress = (t) => {
+      const d = previous === null ? 0 : (TRANSITIONS[emotion] === 'cut' ? 0 : duration());
+      return d <= 0 ? 1 : clamp((t - startedAt) / d);
+    };
+    const engine = {
+      /** The frame at time t. */
+      sample(t) {
+        const p = easeOut(progress(t));
+        const opacity = arrivingFrom + (1 - arrivingFrom) * p;
+        const previousOpacity = previous === null ? 0 : leavingFrom * (1 - p);
+        return { emotion: emotion, previousEmotion: previous, transitionProgress: p, opacity: opacity, previousOpacity: previousOpacity, transitioning: p < 1 };
+      },
+      /** A new face at time t. Returns whether anything changed. */
+      set(next, t) {
+        if (EMOTIONS.indexOf(next) < 0) next = 'neutral';
+        if (next === emotion) return false;
+        const now = engine.sample(t);
+        previous = emotion; emotion = next; startedAt = t;
+        // From what is visible: the face now leaving keeps the opacity it had.
+        leavingFrom = now.opacity; arrivingFrom = 0;
+        return true;
+      },
+      emotion: () => emotion,
+      duration: duration
+    };
+    return engine;
+  }
+  window.HaruEmotionEngine = createEmotionEngine;
+
+  // ---- the renderer: two images and an opacity -------------------------
   const host = document.getElementById('stage');
   if (!host) return;
+  const data = host.dataset || {};
   const reduced = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
-  let fade = Number(host.dataset && host.dataset.transition) || ${DEFAULT_TRANSITION_MS};
-  if (host.dataset && host.dataset.size) host.style.setProperty('--avatar-size', host.dataset.size + 'px');
+  let fade = Number(data.transition) || ${DEFAULT_TRANSITION_MS};
+  if (data.size) host.style.setProperty('--avatar-size', data.size + 'px');
   host.innerHTML = '<div id=avatar role=img aria-label="' + LABELS.neutral + '">'
     + '<img class=face alt="" draggable=false decoding=async>'
     + '<img class=face alt="" draggable=false decoding=async></div>';
   const box = document.getElementById('avatar');
   const faces = box.querySelectorAll('img');
-  let front = 0, current = null, resting = 'neutral', timer = null;
-  function show(name) {
-    if (EMOTIONS.indexOf(name) < 0) name = 'neutral';
-    if (name === current) return;
-    current = name;
-    box.setAttribute('aria-label', LABELS[name] || ('Haru feeling ' + name));
+  const engine = createEmotionEngine({ duration: () => (reduced ? 0 : fade) });
+  const clock = () => (typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now());
+  let front = 0, resting = 'neutral', timer = null, frozenAt = null;
+
+  // What the DOM shows for a frame. With a duration the browser eases the two
+  // opacities from wherever they are, which is the engine's rule made of CSS;
+  // frozen, or reduced, the frame's own numbers are written and nothing moves.
+  function paint(frame, animate) {
     const fore = faces[front], back = faces[1 - front];
-    back.classList.remove('missing');
-    back.onerror = () => { back.classList.add('missing'); };
-    back.onload = () => {
-      const ease = reduced || fade <= 0 ? 'none' : 'opacity ' + fade + 'ms ease';
-      back.style.transition = ease; fore.style.transition = ease;
-      back.classList.add('on'); fore.classList.remove('on');
-      front = 1 - front;
-    };
-    back.removeAttribute('src');
-    back.src = '/emotions/' + name + '.svg';
+    const ease = animate && !reduced && engine.duration() > 0 ? 'opacity ' + engine.duration() + 'ms ' + EASE_CSS : 'none';
+    fore.style.transition = ease; back.style.transition = ease;
+    fore.style.opacity = animate ? '1' : String(frame.opacity);
+    back.style.opacity = animate ? '0' : String(frame.previousOpacity);
+    fore.classList.add('on'); back.classList.remove('on');
   }
-  function settle(ms) { clearTimeout(timer); timer = setTimeout(() => show(resting), ms); }
+  function show(name, t) {
+    if (!engine.set(name, t)) return;
+    const frame = engine.sample(t);
+    box.setAttribute('aria-label', LABELS[frame.emotion] || ('Haru feeling ' + frame.emotion));
+    const incoming = faces[1 - front];
+    incoming.classList.remove('missing');
+    incoming.onerror = () => { incoming.classList.add('missing'); };
+    incoming.onload = () => { front = 1 - front; paint(frozenAt === null ? frame : engine.sample(frozenAt), frozenAt === null); };
+    incoming.removeAttribute('src');
+    incoming.src = '/emotions/' + frame.emotion + '.svg';
+  }
+  function settle(ms) { clearTimeout(timer); timer = setTimeout(() => show(resting, clock()), ms); }
+  // What a prod does to her face, and for how long, before she settles back.
+  const POKES = { exclaim: ['angry', 2000], burst: ['surprised', 1600], orbit: ['excited', 1600], comet: ['surprised', 1600], play: ['happy', 1600] };
+
   window.haruAvatar = {
     // Her mood for a line: the resting face, until the next one.
-    express: (emotion) => { resting = ADAPT[emotion] || (EMOTIONS.indexOf(emotion) >= 0 ? emotion : 'neutral'); clearTimeout(timer); show(resting); },
+    express: (emotion) => { resting = ADAPT[emotion] || (EMOTIONS.indexOf(emotion) >= 0 ? emotion : 'neutral'); clearTimeout(timer); show(resting, clock()); },
     // They sent something: she thinks until the reply's mood lands, or for a long while.
-    think: () => { clearTimeout(timer); show('thinking'); settle(20000); },
+    think: () => { clearTimeout(timer); show('thinking', clock()); settle(20000); },
     // She is starting to talk: a small pop, not a change of face.
-    notify: () => { box.classList.remove('pop'); if (typeof box.offsetWidth === 'number') void box.offsetWidth; box.classList.add('pop'); },
-    poke: (what) => { const hit = POKES[what]; if (!hit) return; clearTimeout(timer); show(hit[0]); settle(hit[1]); },
-    state: () => ({ emotion: current, resting: resting }),
+    notify: () => { if (frozenAt !== null) return; box.classList.remove('pop'); if (typeof box.offsetWidth === 'number') void box.offsetWidth; box.classList.add('pop'); },
+    poke: (what) => { const hit = POKES[what]; if (!hit) return; clearTimeout(timer); show(hit[0], clock()); settle(hit[1]); },
+    // The frame at a time, from the engine: what a test, a thumbnail or a
+    // future editor would ask for. Playback stopped, that is what is drawn.
+    sample: (t) => engine.sample(t === undefined ? clock() : t),
+    freeze: (t) => { frozenAt = t === undefined ? clock() : t; paint(engine.sample(frozenAt), false); },
+    play: () => { frozenAt = null; paint(engine.sample(clock()), false); },
+    state: () => { const f = engine.sample(frozenAt === null ? clock() : frozenAt); return { emotion: f.emotion, previousEmotion: f.previousEmotion, transitionProgress: f.transitionProgress, resting: resting, frozen: frozenAt !== null }; },
     setSize: (px) => host.style.setProperty('--avatar-size', px + 'px'),
     setTransition: (ms) => { fade = Math.max(0, Number(ms) || 0); }
   };
-  show('neutral');
+  show('neutral', clock());
+  if (data.frozenAt !== undefined) window.haruAvatar.freeze(Number(data.frozenAt) || 0);
 })();
 `;
 
@@ -254,7 +318,6 @@ export function appPage(): string {
   #stage { flex:0 0 auto; display:flex; justify-content:center; align-items:center; padding:.35rem 1rem 0; cursor:pointer; --avatar-size:min(31vw, 136px); }
   #avatar { position:relative; width:var(--avatar-size); height:var(--avatar-size); }
   #avatar .face { position:absolute; inset:0; width:100%; height:100%; object-fit:contain; opacity:0; user-select:none; -webkit-user-drag:none; }
-  #avatar .face.on { opacity:1; }
   #avatar .face.missing { visibility:hidden; }
   #avatar.pop { animation:pop .5s ease; }
   @keyframes pop { 30% { transform:scale(1.06); } }

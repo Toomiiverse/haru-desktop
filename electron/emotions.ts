@@ -20,28 +20,32 @@ export const HARU_EMOTIONS = [
 
 export type HaruEmotion = typeof HARU_EMOTIONS[number];
 
+/** How a face arrives. Only a fade exists today; the engine reads it, so a new kind is an entry here and a branch there. */
+export type EmotionTransition = 'fade' | 'cut';
+
 export type EmotionEntry = {
   /** The file under the emotions folder, served as-is. */
   file: string;
   /** What a screen reader says the avatar is. */
   label: string;
+  transition: EmotionTransition;
 };
 
 export const emotionConfig: Record<HaruEmotion, EmotionEntry> = {
-  neutral:     { file: 'neutral.svg',     label: 'Haru feeling neutral' },
-  happy:       { file: 'happy.svg',       label: 'Haru feeling happy' },
-  excited:     { file: 'excited.svg',     label: 'Haru feeling excited' },
-  sad:         { file: 'sad.svg',         label: 'Haru feeling sad' },
-  angry:       { file: 'angry.svg',       label: 'Haru feeling angry' },
-  annoyed:     { file: 'annoyed.svg',     label: 'Haru feeling annoyed' },
-  surprised:   { file: 'surprised.svg',   label: 'Haru feeling surprised' },
-  confused:    { file: 'confused.svg',    label: 'Haru feeling confused' },
-  curious:     { file: 'curious.svg',     label: 'Haru feeling curious' },
-  embarrassed: { file: 'embarrassed.svg', label: 'Haru feeling embarrassed' },
-  sleepy:      { file: 'sleepy.svg',      label: 'Haru feeling sleepy' },
-  thinking:    { file: 'thinking.svg',    label: 'Haru thinking' },
-  smug:        { file: 'smug.svg',        label: 'Haru feeling smug' },
-  love:        { file: 'love.svg',        label: 'Haru feeling loved up' },
+  neutral:     { file: 'neutral.svg',     label: 'Haru feeling neutral', transition: 'fade' },
+  happy:       { file: 'happy.svg',       label: 'Haru feeling happy', transition: 'fade' },
+  excited:     { file: 'excited.svg',     label: 'Haru feeling excited', transition: 'fade' },
+  sad:         { file: 'sad.svg',         label: 'Haru feeling sad', transition: 'fade' },
+  angry:       { file: 'angry.svg',       label: 'Haru feeling angry', transition: 'fade' },
+  annoyed:     { file: 'annoyed.svg',     label: 'Haru feeling annoyed', transition: 'fade' },
+  surprised:   { file: 'surprised.svg',   label: 'Haru feeling surprised', transition: 'fade' },
+  confused:    { file: 'confused.svg',    label: 'Haru feeling confused', transition: 'fade' },
+  curious:     { file: 'curious.svg',     label: 'Haru feeling curious', transition: 'fade' },
+  embarrassed: { file: 'embarrassed.svg', label: 'Haru feeling embarrassed', transition: 'fade' },
+  sleepy:      { file: 'sleepy.svg',      label: 'Haru feeling sleepy', transition: 'fade' },
+  thinking:    { file: 'thinking.svg',    label: 'Haru thinking', transition: 'fade' },
+  smug:        { file: 'smug.svg',        label: 'Haru feeling smug', transition: 'fade' },
+  love:        { file: 'love.svg',        label: 'Haru feeling loved up', transition: 'fade' },
 };
 
 /**
@@ -83,5 +87,12 @@ export function emotionFile(name: string): string | null {
   return isHaruEmotion(name) ? emotionConfig[name].file : null;
 }
 
-/** How long a face takes to become the next one, unless the page says otherwise. */
+/** How long a face takes to become the next one, unless the page says otherwise. 150–250ms reads as a change of face rather than a flicker or a dissolve. */
 export const DEFAULT_TRANSITION_MS = 200;
+
+/**
+ * The engine's easing: cubic ease-out. Deterministic, no overshoot, and the
+ * same curve the page hands CSS, so a frame the engine samples is the frame
+ * the browser would have drawn.
+ */
+export const EASE_OUT_CSS = 'cubic-bezier(0.33, 1, 0.68, 1)';

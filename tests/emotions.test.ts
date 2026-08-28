@@ -16,6 +16,7 @@ test('every face has a file named for it and a label a screen reader can say', (
   for (const face of HARU_EMOTIONS) {
     assert.equal(emotionConfig[face].file, `${face}.svg`);
     assert.match(emotionConfig[face].label, /^Haru /);
+    assert.equal(emotionConfig[face].transition, 'fade');
   }
   assert.equal(HARU_EMOTIONS.length, 14);
 });
