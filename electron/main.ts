@@ -3177,6 +3177,9 @@ const AWAY_MAX_TOKENS = 240;
  * able to make her behave.
  */
 let handsAllowed = false;
+/** True while she is answering someone on the web, which keeps the desk-only
+ *  tools — the wardrobe, the AniList lookup, the choice buttons — off the table. */
+let talkingOnWeb = false;
 
 // Listing what is saved directly rather than behind a read tool: asked "anything
 // tomorrow?", the model answered "nothing" outright instead of choosing to look,
@@ -3662,6 +3665,7 @@ function availableTools(): ToolAvailability {
     choices: offeringChoices,
     journal: readJournalConfig(store.get('journal.config')).enabled,
     anilist: readAniListConfig(store.get('anilist')).enabled,
+    web: talkingOnWeb,
     search: { enabled: search.enabled, readPages: search.readPages },
     knowledge: getKnowledgeConfig().enabled,
     system: { enabled: systemConfig.enabled, level: systemConfig.level },
@@ -3693,6 +3697,7 @@ function toolDeps(): ToolDeps {
     memoryVectors: memoryStore.vectors,
     touchChunks, getSearchKey,
     handsAllowed: () => handsAllowed,
+    onWeb: () => talkingOnWeb,
     markPageRead: () => { pageWasRead = true; },
     setPendingChoices: (choices) => { pendingChoices = choices as string[]; },
     requestRestart: () => { pendingHaruRestart = true; },
@@ -5022,7 +5027,7 @@ async function withAttachments<T extends { role: string; content: string; at?: s
   return out;
 }
 
-async function ollamaChat(messages: { role: string; content: string; at?: string; attachments?: Attachment[] }[], config: ProviderConfig, { hands = true, brief = false, choices = false, away = '', onChunk, onChunkReset, traceId }: { hands?: boolean; brief?: boolean; choices?: boolean; away?: string; onChunk?: (text: string) => void; onChunkReset?: () => void; traceId?: string } = {}) {
+async function ollamaChat(messages: { role: string; content: string; at?: string; attachments?: Attachment[] }[], config: ProviderConfig, { hands = true, web = false, brief = false, choices = false, away = '', onChunk, onChunkReset, traceId }: { hands?: boolean; web?: boolean; brief?: boolean; choices?: boolean; away?: string; onChunk?: (text: string) => void; onChunkReset?: () => void; traceId?: string } = {}) {
   const latest = messages.at(-1)?.content ?? '';
   // They are talking to her, so the silence she was waiting out is over.
   noteUserSpoke();
@@ -5182,6 +5187,7 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // Passed in rather than sniffed from the caller, so the one line that grants
   // this is still the only line that grants it.
   handsAllowed = hands;
+  talkingOnWeb = web;
   offeringChoices = choices;
   pendingChoices = [];
   // What the reader has been shown so far this round. The moment a round is
@@ -6324,7 +6330,7 @@ function webDeps(): WebDeps {
       // serverless pod the first message of a session pays a cold start. The
       // desk keeps the local one — that is what the GPU is for.
       const started = Date.now();
-      const answer = await ollamaChat(messages, config, { hands: false, away: 'it came in from the phone', traceId: trace.id });
+      const answer = await ollamaChat(messages, config, { hands: false, web: true, away: 'it came in from the phone', traceId: trace.id });
       const reply = answer.content ?? '';
       trace.mark('reply');
       sendToWindows('chat:fromPhone', { text, reply, ignored: Boolean(answer.ignored), ...(files.length ? { attachments: files } : {}) });
@@ -6356,6 +6362,7 @@ function webDeps(): WebDeps {
       const started = Date.now();
       const answer = await ollamaChat(messages, config, {
         hands: false,
+        web: true,
         away: 'it came in from the phone',
         traceId: trace.id,
         onChunk: chunk => { trace.mark('first'); onChunk(chunk); },
@@ -6393,6 +6400,7 @@ function webDeps(): WebDeps {
       const started = Date.now();
       const answer = await ollamaChat(history.slice(0, -1), config, {
         hands: false,
+        web: true,
         away: 'the phone asked for it again',
         traceId: trace.id,
         onChunk: chunk => { trace.mark('first'); onChunk(chunk); },

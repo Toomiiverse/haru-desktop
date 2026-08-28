@@ -94,6 +94,15 @@ export function coerceKnowledgeCategory(value: unknown): KnowledgeCategory | und
   return (KNOWLEDGE_CATEGORIES as readonly string[]).includes(value) ? value as KnowledgeCategory : undefined;
 }
 
+export const WARDROBE_TOOL: ChatTool = {
+  type: 'function',
+  function: {
+    name: 'show_wardrobe',
+    description: 'Open the wardrobe panel so the user can see and change how you look — outfit colours, hair, accessories. Call this whenever they ask you to change your outfit, your hair, what you are wearing, or how you look. Opening it only shows them the options; you are not choosing anything and nothing changes until they pick.',
+    parameters: { type: 'object', properties: {}, required: [] },
+  },
+};
+
 export const CHAT_TOOLS: ChatTool[] = [{
   type: 'function',
   function: {
@@ -155,13 +164,6 @@ export const CHAT_TOOLS: ChatTool[] = [{
       },
       required: ['title'],
     },
-  },
-}, {
-  type: 'function',
-  function: {
-    name: 'show_wardrobe',
-    description: 'Open the wardrobe panel so the user can see and change how you look — outfit colours, hair, accessories. Call this whenever they ask you to change your outfit, your hair, what you are wearing, or how you look. Opening it only shows them the options; you are not choosing anything and nothing changes until they pick.',
-    parameters: { type: 'object', properties: {}, required: [] },
   },
 }, {
   type: 'function',
@@ -579,6 +581,8 @@ export type ToolAvailability = {
   choices: boolean;
   journal: boolean;
   anilist: boolean;
+  /** True while she is answering someone on the web, where the desk tools are off the table. */
+  web: boolean;
   search: Pick<SearchConfig, 'enabled' | 'readPages'>;
   knowledge: boolean;
   system: { enabled: boolean; level: number };
@@ -589,15 +593,19 @@ export type ToolAvailability = {
 
 export function chatTools(available: ToolAvailability): ChatTool[] {
   const tools: ChatTool[] = [...CHAT_TOOLS];
+  // The wardrobe is a window on the desk. There is nothing for her to open on
+  // the phone, and a panel popping up on the desk mid-web-chat is a surprise
+  // nobody there asked for.
+  if (!available.web) tools.push(WARDROBE_TOOL);
   // Only where there is a box to draw them in. Offered at the desk she would
   // call it and nothing would appear, which is a worse failure than not having
   // it: she would think she had asked and be met with silence.
-  if (available.choices) tools.push(CHOICES_TOOL);
+  if (available.choices && !available.web) tools.push(CHOICES_TOOL);
   if (available.journal) tools.push(JOURNAL_TOOL);
   // Always offered, journal or not: a check-in is a note about a moment, and
   // the moments worth noting happen whether or not anyone keeps a diary.
   tools.push(CHECKIN_TOOL);
-  if (available.anilist) tools.push(ANILIST_TOOL);
+  if (available.anilist && !available.web) tools.push(ANILIST_TOOL);
   if (available.search.enabled) {
     tools.push(SEARCH_TOOL);
     if (available.search.readPages) tools.push(READ_PAGE_TOOL);
@@ -654,6 +662,8 @@ export type ToolDeps = {
   getSearchKey(): string;
   /** Whether the tools that touch the machine may run at all this turn. */
   handsAllowed(): boolean;
+  /** True while she is answering on the web; the desk-only tools refuse then. */
+  onWeb(): boolean;
   /** A stranger's page has entered the conversation; withdraw everything. */
   markPageRead(): void;
   setPendingChoices(choices: unknown[]): void;
@@ -693,10 +703,16 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
     setBlocks, blockSources, getWardrobeControls, sendToWindows, readSystemConfig, getKnowledgeConfig,
     getKnowledgeEmbedder, knowledgeStore, tryEmbedQuery, memoryVectors, touchChunks, getSearchKey,
     handsAllowed, markPageRead, setPendingChoices, requestRestart, lastResults, lastSearchQuery,
-    rememberSearch, runSystemCommand,
+    rememberSearch, runSystemCommand, onWeb,
   } = deps;
   const name = call.function?.name;
   const args = toolArguments(call);
+  // Re-checked here, not only where the table is laid. A model can name a tool
+  // it was never offered, and these three are the ones that open a window or a
+  // box nobody on the phone can see.
+  if (onWeb() && (name === 'show_wardrobe' || name === 'look_up_anime' || name === 'offer_choices')) {
+    return JSON.stringify({ error: 'Not on the phone — that is for the desk. Say you cannot do that here.' });
+  }
   if (name === 'note_check_in') {
     const note = typeof args.note === 'string' ? args.note.trim() : '';
     if (!note) return JSON.stringify({ error: 'There is nothing to note down yet.' });

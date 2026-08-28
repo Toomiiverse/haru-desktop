@@ -20,6 +20,7 @@ const EVERYTHING: ToolAvailability = {
   choices: true,
   journal: true,
   anilist: true,
+  web: false,
   search: { enabled: true, readPages: true },
   knowledge: true,
   system: { enabled: true, level: 2 },
@@ -31,6 +32,7 @@ const NOTHING: ToolAvailability = {
   choices: false,
   journal: false,
   anilist: false,
+  web: false,
   search: { enabled: false, readPages: false },
   knowledge: false,
   system: { enabled: false, level: 0 },
@@ -77,6 +79,7 @@ function deps(overrides: Partial<ToolDeps> = {}): ToolDeps {
     touchChunks: () => {},
     getSearchKey: () => '',
     handsAllowed: () => false,
+    onWeb: () => false,
     markPageRead: () => {},
     setPendingChoices: () => {},
     requestRestart: () => {},
@@ -167,6 +170,33 @@ test('no hands means no hands, whatever the desktop settings say', () => {
     ['open_app', 'close_app', 'power'].filter(name => hands.includes(name)),
     ['open_app', 'close_app', 'power'],
   );
+});
+
+test('the desk-only tools stay off the table on the web', () => {
+  const onWeb = offered({ ...EVERYTHING, web: true });
+  for (const name of ['show_wardrobe', 'look_up_anime', 'offer_choices']) {
+    assert.ok(!onWeb.includes(name), `${name} should not be offered to the phone`);
+  }
+  // Everything else she can do on the desk is still there for a web chat.
+  assert.ok(onWeb.includes('remember_about_user'));
+  assert.ok(onWeb.includes('search_web'));
+  assert.ok(onWeb.includes('convert_picture'));
+
+  const atDesk = offered({ ...EVERYTHING, web: false });
+  for (const name of ['show_wardrobe', 'look_up_anime', 'offer_choices']) {
+    assert.ok(atDesk.includes(name), `${name} should be offered at the desk`);
+  }
+});
+
+test('the desk-only tools are refused again where they actually run on the web', async () => {
+  // The table is not the guarantee: a model can name a tool it was never offered.
+  for (const name of ['show_wardrobe', 'look_up_anime', 'offer_choices']) {
+    const reply = await run(name, { title: 'spice and wolf', choices: ['a', 'b'] }, '', { onWeb: () => true });
+    assert.match(reply, /Not on the phone/, `${name} ran on the web`);
+  }
+  // And still answer at the desk.
+  const reply = await run('look_up_anime', { title: 'spice and wolf' }, '', { onWeb: () => false });
+  assert.ok(!reply.includes('Not on the phone'));
 });
 
 test('the hands check is enforced again where the tool actually runs', async () => {
