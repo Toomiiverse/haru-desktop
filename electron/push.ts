@@ -201,3 +201,26 @@ export function pushRequest(
     body,
   };
 }
+
+/** The gap between one unprompted push and the next: somewhere in here, never the same twice. */
+export const NUDGE_GAP_MS: [number, number] = [45 * 60_000, 150 * 60_000];
+
+/**
+ * How long until the next unprompted push.
+ *
+ * Random within the gap — a nudge on the hour every three hours is a
+ * scheduler, and reads as one. A nudge that would land in the quiet hours is
+ * pushed past them, plus a little, so the first of the morning is not on the
+ * dot of the quiet ending either. `now` is the user's own clock (zonedNow),
+ * the same clock inQuietHours reads.
+ */
+export function nextNudgeDelay(prefs: Pick<PushPrefs, 'quietFrom' | 'quietTo'>, now: Date, random: () => number = Math.random): number {
+  const delay = NUDGE_GAP_MS[0] + random() * (NUDGE_GAP_MS[1] - NUDGE_GAP_MS[0]);
+  const at = new Date(now.getTime() + delay);
+  if (!inQuietHours(prefs, at)) return delay;
+  const [hour, minute] = prefs.quietTo.split(':').map(Number);
+  const wake = new Date(at.getTime());
+  wake.setHours(hour, minute, 0, 0);
+  if (wake.getTime() <= at.getTime()) wake.setDate(wake.getDate() + 1);
+  return wake.getTime() - now.getTime() + (5 + random() * 35) * 60_000;
+}

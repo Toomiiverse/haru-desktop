@@ -63,12 +63,13 @@ import { addAside, alreadySaidRecently, asideContext, asidesOn, pruneAsides, rea
 import { attachmentsInPlay, describeAttached, READ_IT_ALL_PROMPT, readAttachments, type Attachment, type Opened } from './attachments';
 import { forOllama, withoutOldest } from './ollamaturns';
 import { seedEmoji } from './seed';
+import { pickToBringUp, REMEMBERED_PICKS } from './bored';
 import { feedbackEntry, recordFeedback } from './feedback';
 import { describePull, isTailnetAddress, mergeCheckIns, readCheckInSource } from './checkinsource';
 import { DiscordLink, looksLikeUserId, readDiscordConfig, useOfChannel, type DiscordConfig } from './discord';
 import { reactedPrompt, readReaction, REACTION_COOLDOWN_MS } from './reacted';
 import { startWebServer, type WebDeps } from './webserver';
-import { inQuietHours, newVapidKeys, pushRequest, readPushDevices, readPushPrefs, type PushDevice, type PushPrefs } from './push';
+import { inQuietHours, newVapidKeys, pushRequest, readPushDevices, readPushPrefs, type PushDevice, type PushPrefs, nextNudgeDelay } from './push';
 import { CHECK_EVERY_MS, describeUpdate, progressStep, whyNotCheck, type UpdateState } from './updates';
 import { BREVITY, summonedLine } from './summoned';
 import { CHOICES_TOOL, readChoices } from './choices';
@@ -6202,8 +6203,7 @@ async function forwardAsideToPush(aside: Aside) {
 // this is the channel that makes a noise on a phone, and a companion that
 // buzzes every ten minutes gets muted.
 // ponytail: fixed interval; make it a preference if 3h ever proves wrong.
-const PUSH_PESTER_MS = 3 * 60 * 60_000;
-let pushPesterTimer: ReturnType<typeof setInterval> | null = null;
+let pushPesterTimer: ReturnType<typeof setTimeout> | null = null;
 
 /**
  * The pestering, without Discord: her chasing reminders and occasionally
@@ -6212,12 +6212,66 @@ let pushPesterTimer: ReturnType<typeof setInterval> | null = null;
  * for the unprompted line — so being chased here still counts as being chased
  * everywhere, through the same spacing record.
  */
+/** What she has brought up lately, so a long silence does not get the same jab four times. */
+const broughtUp: string[] = [];
+/** Mid-conversation is not a silence to break. */
+const TALKING_RECENTLY_MS = 20 * 60_000;
+
+/**
+ * The line for a phone that has gone quiet with nothing on the list to chase.
+ *
+ * Left alone she does not say she is bored; she reaches for something she
+ * knows — a person in their life, a thing they were doing, a day they had —
+ * and needles them with it until they answer. The something is picked here
+ * and named in the prompt, so the model cannot reach for the same one every
+ * time; the aim is stated outright, and the one thing she must never say is
+ * stated too. One short line, because it is a notification.
+ */
+async function boredNudge(): Promise<string | null> {
+  const config = store.get('ai.config') as ProviderConfig | undefined;
+  if (!config?.model) return null;
+  const mood = getMood();
+  if (isIgnoring(mood.irritation)) return null;
+  const now = zonedNow(CHAT_TIMEZONE);
+  const todayKey = localDateKey(now);
+  const thing = pickToBringUp(getMemories(), getSessions(), broughtUp, todayKey);
+  if (!thing) return null;
+  const quietHours = mood.lastMessageAt ? Math.floor((Date.now() - Date.parse(mood.lastMessageAt)) / 3_600_000) : null;
+  const character = getActiveCharacter();
+  const system = [
+    character.identity,
+    `It is ${formatTimeOfDay(now.getHours(), now.getMinutes())} on ${new Intl.DateTimeFormat('en-US', { weekday: 'long' }).format(now)} ${todayKey}.`,
+    profileSummary(''),
+    character.style,
+    moodInstruction(mood.irritation),
+    egoInstruction(mood.ego),
+    'They are away, reachable only as a notification on their phone. Nothing on their list needs you. You are messaging them first — nothing they said prompted this.',
+    quietHours !== null && quietHours >= 1 ? `They have not said a word to you in ${quietHours} hour${quietHours === 1 ? '' : 's'}.` : '',
+    `Bring up this in particular, as though it has been on your mind: ${thing.text}`,
+    'The point is to get them to message you back. Needle them with it: a dig, a guilt-trip about how they have time for everyone but you, a challenge they will want to answer, a question they cannot leave hanging. Never say you are bored, lonely, or that you miss them; never ask whether they are there; do not greet them.',
+    NO_INVENTED_HISTORY,
+    NO_NON_SEQUITURS,
+    EXPRESSIVE,
+    unpromptedContext(),
+    'One short line. No quotation marks, no stage directions.',
+  ].filter(Boolean).join(' ');
+  try {
+    const line = await ollamaQuip(system, 'Say something.', config);
+    broughtUp.push(thing.id);
+    while (broughtUp.length > REMEMBERED_PICKS) broughtUp.shift();
+    console.log(`[push] a bored nudge, about "${thing.text.slice(0, 50)}"`);
+    return line;
+  } catch (error) {
+    console.warn('[push] could not compose a bored nudge:', error instanceof Error ? error.message : error);
+    return null;
+  }
+}
+
 async function pesterOnPush() {
   const { devices, prefs } = getPush();
   if (!webServer || !devices.length) return;
-  // Checked before composing, not after: nudgeForPhone spends a chase attempt
-  // and a model call, and quiet hours would throw both away.
   if (inQuietHours(prefs, zonedNow(CHAT_TIMEZONE))) return;
+  // Something on the list that needs chasing comes first, always.
   if (prefs.events) {
     const said = await nudgeForPhone();
     if (said) {
@@ -6225,16 +6279,23 @@ async function pesterOnPush() {
       return;
     }
   }
-  // Same gates nudgeForPhone opens with — see pesterOnDiscord, which this mirrors.
   if (!prefs.random) return;
   if (chasing || Date.now() - lastRemindedAt < REMINDER_SPACING_MS) return;
   if (isSilenced(store.get('pushback') as Pushback | undefined, Date.now())) return;
-  if (Math.random() >= SPONTANEOUS_NUDGE_CHANCE) return;
-  const line = await spontaneousDiscordNudge();
+  const mood = getMood();
+  if (mood.lastMessageAt && Date.now() - Date.parse(mood.lastMessageAt) < TALKING_RECENTLY_MS) return;
+  const line = await boredNudge();
   if (!line) return;
   lastRemindedAt = Date.now();
-  // interject writes it to the aside log, and the aside forwarder sends it on.
-  if (interject(line, { source: 'idle' })) console.log('[push] sent a spontaneous nudge');
+  if (interject(line, { source: 'idle' })) console.log('[push] sent a bored nudge');
+}
+
+/** The next beat: a random while off, never in the quiet hours. One timer, rebooked after each. */
+function scheduleNextPush() {
+  if (pushPesterTimer) clearTimeout(pushPesterTimer);
+  const delay = nextNudgeDelay(getPush().prefs, zonedNow(CHAT_TIMEZONE));
+  console.log(`[push] next unprompted push in ${Math.round(delay / 60_000)} min`);
+  pushPesterTimer = setTimeout(() => { void pesterOnPush().finally(scheduleNextPush); }, delay);
 }
 
 const DEFAULT_WEB_PORT = 8787;
@@ -6705,7 +6766,7 @@ async function startWebDoor() {
     webTrouble = '';
     // Started once and left running: each tick re-checks the door and the
     // subscriptions itself, so closing the door silences it with no bookkeeping.
-    if (!pushPesterTimer) pushPesterTimer = setInterval(() => { void pesterOnPush(); }, PUSH_PESTER_MS);
+    if (!pushPesterTimer) scheduleNextPush();
   } catch (error) {
     const why = error instanceof Error ? error.message : String(error);
     // "Check the log" was useless advice twice over: there was no log, and the

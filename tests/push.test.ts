@@ -9,7 +9,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createPublicKey, verify } from 'node:crypto';
-import { inQuietHours, newVapidKeys, pushRequest, readPushDevices, readPushPrefs, sealPayload, vapidToken } from '../electron/push';
+import { inQuietHours, newVapidKeys, pushRequest, readPushDevices, readPushPrefs, sealPayload, vapidToken, nextNudgeDelay, NUDGE_GAP_MS } from '../electron/push';
 
 // -- RFC 8291 Appendix A, verbatim -------------------------------------------
 
@@ -114,4 +114,22 @@ test('preferences read back sane from anything, and quiet hours span midnight', 
   const daytime = { quietFrom: '09:00', quietTo: '17:00' };
   assert.ok(inQuietHours(daytime, new Date(2026, 7, 28, 12, 0)), 'a same-day span should hold at noon');
   assert.ok(!inQuietHours(daytime, new Date(2026, 7, 28, 20, 0)), 'a same-day span should end');
+});
+
+test('the next nudge is a random while off, never in the quiet hours, and not on the dot of them ending', () => {
+  const prefs = { quietFrom: '23:00', quietTo: '06:00' };
+  const at = (h: number, m = 0) => { const d = new Date(2026, 7, 28, h, m, 0, 0); return d; };
+  const fixed = (v: number) => () => v;
+  // Midday, shortest and longest gaps.
+  assert.equal(nextNudgeDelay(prefs, at(12), fixed(0)), NUDGE_GAP_MS[0]);
+  assert.equal(nextNudgeDelay(prefs, at(12), fixed(1)), NUDGE_GAP_MS[1]);
+  // Late evening: the gap would land at half past midnight — pushed to after six, plus a little.
+  const late = nextNudgeDelay(prefs, at(22, 30), fixed(0.5));
+  const lands = new Date(at(22, 30).getTime() + late);
+  assert.ok(lands.getHours() >= 6 && lands.getHours() < 7, `lands after the quiet ends, not in it (${lands.getHours()}:${lands.getMinutes()})`);
+  assert.ok(lands.getMinutes() >= 5, 'and not on the dot');
+  // Small hours: same, and never a delay of nothing.
+  assert.ok(nextNudgeDelay(prefs, at(2), fixed(0)) > 3 * 60 * 60_000);
+  // No quiet hours at all: the plain gap.
+  assert.equal(nextNudgeDelay({ quietFrom: '08:00', quietTo: '08:00' }, at(2), fixed(0)), NUDGE_GAP_MS[0]);
 });
