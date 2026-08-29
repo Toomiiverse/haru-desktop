@@ -120,7 +120,7 @@ export function diaryInstruction(m: DayMaterial): string {
   const ticked = m.ticked.length ? `They got done: ${m.ticked.join(', ')}.` : '';
   const nights = m.nights.length
     ? `What you did tonight, while they slept:\n${m.nights.map(night => `- ${night.interest ? `spent the night on ${night.interest}, one of your own things` : night.game ? `read up on ${night.game}, which they play` : `read about ${night.about}`}: ${night.note}`).join('\n')}`
-    : 'You did nothing in particular tonight.';
+    : 'Tonight you did nothing at all — no reading, nothing of your own, no going anywhere. If the night comes up, that is all there is to say about it; do not fill it with something.';
   const tastes = m.tastes.length ? `Your own things, as you see them: ${m.tastes.map(taste => `${taste.name} — ${taste.stance.slice(0, 140)}`).join('; ')}.` : '';
   return [
     `It is ${m.clock ? `${m.clock}, ` : ''}the small hours of the night after ${m.day}. Write tonight's diary entry — this is your own diary, nobody reads it, and it is where you keep your life.`,

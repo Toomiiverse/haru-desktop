@@ -62,7 +62,8 @@ test('what she writes from is facts, laid out, with the rule that it is only tho
   const quiet = diaryInstruction({ ...m, theySaid: [], theirMessages: 0, herUnprompted: 0, irritation: 0, grudge: 0, ignoredToday: 0, went: 'silent', ticked: [], nights: [], tastes: [], weather: undefined });
   assert.match(quiet, /They said nothing to you today\./);
   assert.match(quiet, /went to bed without telling you a single thing/);
-  assert.match(quiet, /You did nothing in particular tonight\./);
+  assert.match(quiet, /Tonight you did nothing at all/);
+  assert.match(quiet, /do not fill it with something/);
 });
 
 test('entries are dated sections, appended, and read back newest last', () => {
