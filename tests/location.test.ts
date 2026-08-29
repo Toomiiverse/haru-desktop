@@ -2,7 +2,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { searchPlaces } from '../electron/location';
+import { readWindowsLocation, searchPlaces } from '../electron/location';
 
 const hits = [
   { name: 'Coles', display_name: 'Coles, Cambridge Street, Wembley, Perth, Western Australia', lat: '-31.9330', lon: '115.7990', address: { suburb: 'Wembley', city: 'Perth', state: 'Western Australia' } },
@@ -37,4 +37,14 @@ test('"the nearest" bounds the search to the box; an ordinary ask only ranks by 
   await searchPlaces('coles', fetchImpl, { lat: -31.95, lon: 115.86 }, '');
   assert.match(asked[0], /bounded=1/);
   assert.match(asked[1], /bounded=0/);
+});
+
+test('a location fix says it is Windows only rather than failing to spawn', async () => {
+  const platform = process.platform;
+  Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+  try {
+    await assert.rejects(readWindowsLocation(), /Windows only/);
+  } finally {
+    Object.defineProperty(process, 'platform', { value: platform, configurable: true });
+  }
 });

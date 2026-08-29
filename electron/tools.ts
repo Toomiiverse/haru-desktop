@@ -23,7 +23,7 @@ import { CHOICES_TOOL, readChoices } from './choices';
 import { readJournalConfig, SCALE_MAX, type JournalEntry } from './journal';
 import { formatMedia, formatMissing, lookUp, readAniListConfig, type MediaKind } from './anilist';
 import { convertImage, FORMATS, normaliseFormat } from './convert';
-import { cancelPower, closeApp, findApps, isCancellable, launch, listRunning, matchApp, matchRunning, normalisePower, POWER_DELAY_S, readDesktopConfig, runPower } from './desktop';
+import { cancelPower, closeApp, desktopSupported, findApps, isCancellable, launch, listRunning, matchApp, matchRunning, normalisePower, POWER_DELAY_S, readDesktopConfig, runPower } from './desktop';
 import { formatPage, formatResults, readSearchConfig, readWebPage, SearchBlocked, searchWeb, type SearchConfig, type SearchResult } from './search';
 import { findSuperseded, semanticSimilarities, supersede, MEMORY_KINDS, type MemoryKind, type MemoryRecord } from './memory';
 import { appendToBlockValue, canEditBlock, findBlock, replaceInBlockValue, resolveBlockValue, withEditedValue, type BlockSources, type MemoryBlock } from './blocks';
@@ -616,6 +616,10 @@ export function chatTools(available: ToolAvailability): ChatTool[] {
     if (available.system.level >= 2) tools.push(...SYSTEM_ACTION_TOOLS);
   }
   tools.push(CONVERT_TOOL);
+  // `available.desktop` is already the platform's answer as well as the user's
+  // — see supportedDesktop, applied where the availability is assembled. She is
+  // told emphatically in both descriptions that she really can do this and must
+  // never claim otherwise, which is right on Windows and a trap anywhere else.
   if (available.hands && available.desktop.launch) tools.push(LAUNCH_TOOL, CLOSE_TOOL);
   if (available.hands && available.desktop.power) tools.push(POWER_TOOL);
   return tools;
@@ -781,6 +785,7 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
     // Re-checked here, not only where the tools are assembled. A model can name
     // a tool it was never offered, and this is the one place that actually runs.
     if (!handsAllowed()) return JSON.stringify({ error: 'Not now — say it to me directly and I will.' });
+    if (!desktopSupported()) return JSON.stringify({ error: 'I cannot open programs on this machine — that only works on Windows. Say so plainly.' });
     if (!readDesktopConfig(store.get('desktop')).launch) return JSON.stringify({ error: 'Opening programs is switched off in Setup.' });
     const wanted = String(args.name ?? '').trim();
     const app = matchApp(wanted, findApps());
@@ -791,6 +796,7 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
   }
   if (name === 'close_app') {
     if (!handsAllowed()) return JSON.stringify({ error: 'Not now — say it to me directly and I will.' });
+    if (!desktopSupported()) return JSON.stringify({ error: 'I cannot close programs on this machine — that only works on Windows. Say so plainly.' });
     if (!readDesktopConfig(store.get('desktop')).launch) return JSON.stringify({ error: 'Closing programs is switched off in Setup.' });
     const wanted = String(args.name ?? '').trim();
     const app = matchRunning(wanted, await listRunning());
@@ -801,6 +807,7 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
   }
   if (name === 'power') {
     if (!handsAllowed()) return JSON.stringify({ error: 'Not now — say it to me directly and I will.' });
+    if (!desktopSupported()) return JSON.stringify({ error: 'I cannot power this machine — that only works on Windows. Say so plainly.' });
     if (!readDesktopConfig(store.get('desktop')).power) return JSON.stringify({ error: 'Shutting the machine down is switched off in Setup.' });
     const asked = String(args.action ?? '').trim().toLowerCase();
     if (asked === 'cancel') {

@@ -30,10 +30,33 @@ export type DesktopConfig = {
 
 export const DEFAULT_DESKTOP: DesktopConfig = { launch: false, power: false };
 
+/**
+ * Every action in this module speaks to Windows — cmd, taskkill, shutdown,
+ * PowerShell — so anywhere else it is not switched off, it is absent.
+ *
+ * Kept as a question rather than a scatter of `process.platform` checks so the
+ * startup report in capabilities.ts and the guards here can never disagree
+ * about what is available. Deliberately not folded into readDesktopConfig:
+ * that reads what the user saved and is written back, and a platform must not
+ * be able to turn off a setting on the machine where it works.
+ */
+export function desktopSupported(platform: NodeJS.Platform = process.platform): boolean {
+  return platform === 'win32';
+}
+
 export function readDesktopConfig(saved: unknown): DesktopConfig {
   if (!saved || typeof saved !== 'object') return DEFAULT_DESKTOP;
   const record = saved as Partial<DesktopConfig>;
   return { launch: record.launch === true, power: record.power === true };
+}
+
+/**
+ * The saved settings as the platform actually permits them. Applied where the
+ * tool list is assembled, never where the settings are read for editing: the
+ * user's Windows choices must survive being looked at from a Linux server.
+ */
+export function supportedDesktop(config: DesktopConfig, platform: NodeJS.Platform = process.platform): DesktopConfig {
+  return desktopSupported(platform) ? config : DEFAULT_DESKTOP;
 }
 
 // --- what she is allowed to open ------------------------------------------
@@ -105,6 +128,7 @@ export function matchApp(asked: string, apps: App[]): App | null {
  * that crosses this boundary is which entry of the allowlist to open.
  */
 export function launch(app: App): void {
+  if (!desktopSupported()) { console.warn(`[desktop] cannot open ${app.name} — that is Windows only`); return; }
   // start with an empty title argument, because start treats a first quoted
   // argument as the window title and would otherwise open a console instead.
   const child = spawn('cmd.exe', ['/c', 'start', '', app.target], { windowsHide: true, detached: true, stdio: 'ignore' });
@@ -135,6 +159,10 @@ export function parseRunning(output: string): Running[] {
 }
 
 export function listRunning(): Promise<Running[]> {
+  // An empty list here used to mean two different things — nothing is open, or
+  // this is not Windows — and the second one is not something to answer a
+  // question with. The startup report says it once; nothing else asks.
+  if (!desktopSupported()) return Promise.resolve([]);
   return new Promise(resolve => {
     const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
       "Get-Process | Where-Object { $_.MainWindowTitle } | ForEach-Object { \"$($_.ProcessName)`t$($_.MainWindowTitle)\" }"],
@@ -175,6 +203,7 @@ export function matchRunning(asked: string, running: Running[]): Running | null 
  * companion should be able to do to a document.
  */
 export function closeApp(app: Running): void {
+  if (!desktopSupported()) { console.warn(`[desktop] cannot close ${app.name} — that is Windows only`); return; }
   const child = spawn('taskkill.exe', ['/IM', `${app.name}.exe`], { windowsHide: true, detached: true, stdio: 'ignore' });
   child.unref();
 }
@@ -221,6 +250,7 @@ export function powerCommand(action: PowerAction): { file: string; args: string[
 }
 
 export function runPower(action: PowerAction): void {
+  if (!desktopSupported()) { console.warn(`[desktop] cannot ${action} — that is Windows only`); return; }
   const { file, args } = powerCommand(action);
   const child = spawn(file, args, { windowsHide: true, detached: true, stdio: 'ignore' });
   child.unref();
@@ -228,6 +258,7 @@ export function runPower(action: PowerAction): void {
 
 /** Calling off a shutdown or restart that has not happened yet. */
 export function cancelPower(): void {
+  if (!desktopSupported()) return;
   const child = spawn('shutdown.exe', ['/a'], { windowsHide: true, detached: true, stdio: 'ignore' });
   child.unref();
 }

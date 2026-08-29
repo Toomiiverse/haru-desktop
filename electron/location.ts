@@ -61,6 +61,11 @@ export function parseFix(line: string): Fix {
 }
 
 export function readWindowsLocation(): Promise<Fix> {
+  // Said plainly rather than surfacing as ENOENT from a spawn, which reads like
+  // a broken install rather than a platform that never had this.
+  if (process.platform !== 'win32') {
+    return Promise.reject(new Error('A location fix is Windows only — this machine cannot ask.'));
+  }
   return new Promise((resolve, reject) => {
     const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', SCRIPT], { windowsHide: true });
     let output = '';
