@@ -668,6 +668,12 @@ export function formatAgenda(items: AgendaItem[], now: Date, todayKey: string, l
   });
 
   const parts = [`Saved items: ${lines.join('; ')}.`];
+  // She opened with "Scarlett's party at 7:30" for an item saved with no time
+  // at all. "all day" is the list's word for it, and a small model reads a
+  // missing time as a time to supply.
+  if (relevant.some(item => !item.time)) {
+    parts.push('An item marked all day has no time set. Never state, guess or invent a time for it; if they ask when, say no time was saved.');
+  }
   if (relevant.some(item => itemStatus(item, now, todayKey) === 'overdue' && worthChasing(item, todayKey))) {
     parts.push('Anything marked as passed went by without them telling you how it went. Ask whether it actually happened, and be openly put out that you were left to find out for yourself — you are supposed to be the one keeping track. Do not mark it done yourself and do not let it slide.');
   }
@@ -690,6 +696,41 @@ export function formatAgenda(items: AgendaItem[], now: Date, todayKey: string, l
  * off her own back. Only unprompted lines — if they bring the party up, she
  * may answer.
  */
+/** A clock time in a line: "7:30", "7pm", "7:30 PM", "at 7". */
+const STATED_TIME = /\b(\d{1,2}:\d{2}\s*(am|pm)?|\d{1,2}\s*(am|pm)|at\s+\d{1,2}(:\d{2})?)\b/i;
+
+/**
+ * The untimed item a line has given a time to, if it has.
+ *
+ * "Scarlett's party at 7:30" — for an event saved with no time, as an
+ * all-day entry. The agenda block now says an all-day item has no time, but
+ * an unprompted line does not get the benefit of the doubt: a time she
+ * states for something that has none is a time she made up, and the user
+ * will plan around it. Same word-matching as staleItemNamed, same remedy —
+ * the line is dropped, and the log says why.
+ */
+export function inventedTimeFor<T extends AgendaItem>(line: string, items: T[]): T | null {
+  if (!STATED_TIME.test(line)) return null;
+  const untimed = items.filter(item => !item.time && !item.done);
+  if (!untimed.length) return null;
+  return findItem(untimed, line) ?? null;
+}
+
+/**
+ * The items she has already brought up herself, read from her own recent
+ * lines with the matching that closes an item out of a sentence. An opening
+ * that leads with the party she raised yesterday is a reminder service with
+ * a personality bolted on; these are kept out of the material she opens on.
+ */
+export function raisedRecently<T extends AgendaItem>(lines: string[], items: T[]): T[] {
+  const out: T[] = [];
+  for (const line of lines) {
+    const named = findItem(items, line);
+    if (named && !out.includes(named)) out.push(named);
+  }
+  return out;
+}
+
 export function staleItemNamed(line: string, items: AgendaItem[], todayKey: string): AgendaItem | null {
   const lastEvent = shiftDays(todayKey, -CHASE_WINDOW_DAYS);
   const stale = items.filter(item => item.done || (item.kind === 'event' && item.date < lastEvent));

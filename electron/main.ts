@@ -14,8 +14,8 @@ import { nextPokeCount, pokeEmotion, pokeInstruction, pokeIrritation, pokeTier, 
 import { applyEvent, chooseIdleAction, DEFAULT_VITALS, driftVitals, nextTickDelayMs, type Environment, type Vitals } from './vitals';
 import { classificationPrompt, emotionToVitals, EMOTION_SCHEMA, EMOTIONS, NEUTRAL_EMOTION, parseEmotion, type Emotion, type EmotionName, faceForEmotion } from './emotion';
 import { withDiscoveredExpressions } from './expressions';
-import { chaseableOverdue, findItem, formatAgenda, itemStatus, missedInstruction, putOffInstruction, putOffUntil, relevantItems, readsAsAnswerToHer, readsAsBareReport, tickOffInstruction, readsAsDone, doneClause, readsAsNotDone, relativeDay, staleItemNamed } from './agenda';
-import { openingAngles, pickAngle, shouldPipeUp } from './opening';
+import { chaseableOverdue, findItem, formatAgenda, itemStatus, missedInstruction, putOffInstruction, putOffUntil, relevantItems, readsAsAnswerToHer, readsAsBareReport, tickOffInstruction, readsAsDone, doneClause, readsAsNotDone, relativeDay, staleItemNamed, inventedTimeFor, raisedRecently, type ItemStatus } from './agenda';
+import { isRelaunchNotReturn, openingAngles, pickAngle, shouldPipeUp } from './opening';
 import { allDayDueMinutes, isEveningCheck, reminderInstruction, reminderTier, reminderVolume, shouldRemind, type ReminderState } from './reminders';
 import { isHeated, readTone, sharpen, toneGesture, tonePose } from './tone';
 import { isSilenced, nextPushback, PUSHBACK_LIMIT, pushbackInstruction, readsAsDropIt, type Pushback } from './pushback';
@@ -1129,6 +1129,8 @@ function interject(line: string, { aboutTheGame = false, source = 'other' as Asi
   // and no block in the prompt had named it. Checked on the line, not the
   // prompt — see staleItemNamed.
   const stale = staleItemNamed(line, getKept(), localDateKey(zonedNow(CHAT_TIMEZONE)));
+  const invented = inventedTimeFor(line, getKept());
+  if (invented) { console.log(`[interject] dropped — it gave "${invented.title}" a time, and it has none saved`); return false; }
   if (stale) {
     console.log(`[interject] dropped — it named "${stale.title}", which is ${stale.done ? 'done' : 'long past'}`);
     return false;
@@ -2969,7 +2971,7 @@ async function considerPipingUp(environment: Environment) {
       ego: mood.ego,
       // Only the ones she is still entitled to ask about — see chaseableOverdue.
       overdue: chaseableOverdue(items, now, todayKey),
-      dueToday: items.filter((item, index) => item.date === todayKey && (statuses[index] === 'upcoming' || statuses[index] === 'now')).length,
+      dueToday: dueTodayCount(items, statuses, todayKey, raisedRecently(herLinesLastDay(Date.now()), openItems(items, todayKey))),
       doneToday: items.filter((item, index) => statuses[index] === 'done' && item.date === todayKey).length,
       hasHistory: getSessions().length > 0,
       knowsThings: getMemories().length > 0,
@@ -3576,6 +3578,35 @@ const OPENING_MIN_GAP_MS = 20 * 60_000;
  * configured, one already offered recently, or a conversation still warm enough
  * that speaking up would be interrupting rather than opening.
  */
+/**
+ * Her own lines from the last day — today's replies, yesterday's, and what she
+ * said unprompted — so an opening can be told what she has already raised.
+ */
+function herLinesLastDay(nowMs: number): string[] {
+  const since = nowMs - 24 * 3_600_000;
+  type Line = { role?: string; content?: string; at?: string };
+  const hers = (entries: Line[]) => entries
+    .filter(entry => entry.role === 'assistant' && (!entry.at || Date.parse(entry.at) >= since))
+    .map(entry => String(entry.content ?? ''));
+  const messages = (store.get('chat.messages') as Line[] | undefined) ?? [];
+  const archive = (store.get('chat.archive') as Record<string, Line[]> | undefined) ?? {};
+  const yesterday = archive[localDateKey(new Date(nowMs - 86_400_000))] ?? [];
+  const asides = getAsides().filter(aside => Date.parse(aside.at) >= since).map(aside => aside.text);
+  return [...hers(yesterday), ...hers(messages), ...asides];
+}
+
+/** The items an opening could lead with: not done, not past. Done and past
+ *  ones are staleItemNamed's business, and matching against them only
+ *  lengthens the list of things she is told not to say. */
+function openItems(items: KeptItem[], todayKey: string): KeptItem[] {
+  return items.filter(item => !item.done && item.date >= todayKey);
+}
+
+/** What is due today that she has not already brought up herself. */
+function dueTodayCount(items: KeptItem[], statuses: ItemStatus[], todayKey: string, raised: KeptItem[]): number {
+  return items.filter((item, index) => item.date === todayKey && (statuses[index] === 'upcoming' || statuses[index] === 'now') && !raised.includes(item)).length;
+}
+
 async function composeOpening(): Promise<string | null> {
   const config = store.get('ai.config') as ProviderConfig | undefined;
   if (!config?.model) return null;
@@ -3595,6 +3626,13 @@ async function composeOpening(): Promise<string | null> {
   const invited = fresh?.reason === 'manual';
   const lastOpening = store.get('chat.lastOpeningAt') as string | undefined;
   if (!invited && lastOpening && Date.now() - Date.parse(lastOpening) < OPENING_MIN_GAP_MS) return null;
+  // A relaunch is not a return. The window mounts on every service start, and
+  // greeting someone who was here forty minutes ago as though they had been
+  // away reads as a scheduler, not a companion — see RETURN_AFTER_MINUTES.
+  if (kind === 'return' && !invited && isRelaunchNotReturn(messages as { role: string; at?: string }[], Date.now())) {
+    console.log('[chat] no opening — they were here less than two hours ago; a relaunch is not a return');
+    return null;
+  }
   const now = zonedNow(CHAT_TIMEZONE);
   const weekday = new Intl.DateTimeFormat('en-US', { weekday: 'long' }).format(now);
 
@@ -3604,6 +3642,9 @@ async function composeOpening(): Promise<string | null> {
   const todayKey = localDateKey(now);
   const items = getKept();
   const statuses = items.map(item => itemStatus(item, now, todayKey));
+  // What she has already brought up herself in the last day is not material
+  // for opening on again: they know, because she told them.
+  const raised = raisedRecently(herLinesLastDay(Date.now()), openItems(items, todayKey));
   const angle = pickAngle(openingAngles({
     hour: now.getHours(),
     irritation: mood.irritation,
@@ -3612,7 +3653,7 @@ async function composeOpening(): Promise<string | null> {
     // idle line and the Discord nudge use, so no angle opens on a thing the
     // agenda block has already said to leave.
     overdue: chaseableOverdue(items, now, todayKey),
-    dueToday: items.filter((item, index) => item.date === todayKey && (statuses[index] === 'upcoming' || statuses[index] === 'now')).length,
+    dueToday: dueTodayCount(items, statuses, todayKey, raised),
     doneToday: items.filter((item, index) => statuses[index] === 'done' && item.date === todayKey).length,
     hasHistory: getSessions().length > 0,
     knowsThings: getMemories().length > 0,
@@ -3639,6 +3680,7 @@ async function composeOpening(): Promise<string | null> {
     // The failure mode without this is a chirpy assistant greeting, which is the
     // one thing her character is defined against.
     NO_INVENTED_HISTORY,
+    raised.length ? `You have already brought up ${raised.map(item => `"${item.title}"`).join(' and ')} yourself in the last day. They know. Do not open on those again.` : '',
     summariseFollowing(getFollowing(), Date.now()),
     'You are speaking first — the user has not said anything yet. Write one or two short lines in your own voice to open. Do not say hello generically, do not ask how you can help, do not list what you can do, and do not ask what they have been up to.',
     unpromptedContext(),
@@ -3657,6 +3699,12 @@ async function composeOpening(): Promise<string | null> {
     // does not pass through there, and it is where the party came up.
     const stale = staleItemNamed(line, items, todayKey);
     if (stale) { console.log(`[chat] opening dropped — it named "${stale.title}", which is ${stale.done ? 'done' : 'long past'}`); return null; }
+    // The other two things an opening does not get to say off its own back: a
+    // time for something saved without one, and the thing she raised yesterday.
+    const invented = inventedTimeFor(line, items);
+    if (invented) { console.log(`[chat] opening dropped — it gave "${invented.title}" a time, and it has none saved`); return null; }
+    const again = findItem(raised, line);
+    if (again) { console.log(`[chat] opening dropped — it led with "${again.title}" again, which she already raised in the last day`); return null; }
     store.set('chat.lastOpeningAt', new Date().toISOString());
     // Cleared here as well as after a reply: she has now spoken into the fresh
     // conversation, so the note has done its job and must not colour the first
@@ -6065,7 +6113,7 @@ async function spontaneousDiscordNudge(): Promise<string | null> {
       irritation: mood.irritation,
       ego: mood.ego,
       overdue: chaseableOverdue(items, now, todayKey),
-      dueToday: items.filter((item, index) => item.date === todayKey && (statuses[index] === 'upcoming' || statuses[index] === 'now')).length,
+      dueToday: dueTodayCount(items, statuses, todayKey, raisedRecently(herLinesLastDay(Date.now()), openItems(items, todayKey))),
       doneToday: items.filter((item, index) => statuses[index] === 'done' && item.date === todayKey).length,
       hasHistory: getSessions().length > 0,
       knowsThings: getMemories().length > 0,

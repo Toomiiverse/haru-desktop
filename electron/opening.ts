@@ -12,6 +12,33 @@
 
 export type OpeningKind = 'fresh' | 'return';
 
+/**
+ * How long they have to have been gone before a relaunch counts as a return.
+ *
+ * On a headless server the window mounts when the service starts, and the
+ * service starts whenever it is deployed or crashes — eight times in one
+ * afternoon, once. Each mount asked for an opening; the twenty-minute gap
+ * between openings only stops them landing on top of each other. A return
+ * is the user coming back, and the only evidence of that is that they were
+ * away. Two hours, because a lunch break is a return and a redeploy is not.
+ */
+export const RETURN_AFTER_MINUTES = 120;
+
+/**
+ * Whether opening now would be greeting someone who never left. Judged from
+ * their last message: nothing dated means nothing to go on, and the opening
+ * proceeds as before.
+ */
+export function isRelaunchNotReturn(messages: { role: string; at?: string }[], nowMs: number): boolean {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role !== 'user' || !messages[i].at) continue;
+    const at = Date.parse(messages[i].at as string);
+    if (!Number.isFinite(at)) return false;
+    return nowMs - at < RETURN_AFTER_MINUTES * 60_000;
+  }
+  return false;
+}
+
 export type OpeningContext = {
   /** 0-23, in the user's timezone. */
   hour: number;

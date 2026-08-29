@@ -33,6 +33,8 @@ import {
   type AgendaItem,
   CHASE_WINDOW_DAYS,
   staleItemNamed,
+  inventedTimeFor,
+  raisedRecently,
 } from '../electron/agenda';
 
 const TODAY = '2026-08-20';
@@ -509,4 +511,38 @@ test('an unprompted line that names a party three weeks gone, or a thing already
   assert.equal(staleItemNamed('The store cleaning is still waiting on you.', items, '2026-08-28')?.title, 'Store cleaning');
   assert.equal(staleItemNamed('Scarlett’s present. Still nothing?', items, '2026-08-28'), null, 'a live item may be chased');
   assert.equal(staleItemNamed('It is 1:43 PM and you look like a zombie.', items, '2026-08-28'), null, 'a line that names nothing passes');
+});
+
+// ---- what an unprompted line may not do to the list ----
+
+test('inventedTimeFor catches a time stated for an item saved without one', () => {
+  const items = [item({ title: 'Scarlett Birthday Party', date: TODAY, kind: 'event' }), item({ title: 'Dentist', date: TODAY, time: '2:30 PM' })];
+  assert.equal(inventedTimeFor('Scarlett’s party at 7:30. You better have a present.', items)?.title, 'Scarlett Birthday Party');
+  assert.equal(inventedTimeFor('Scarlett’s party is 7pm, move it.', items)?.title, 'Scarlett Birthday Party');
+  // A time for an item that has one is not invented; a line with no time invents nothing.
+  assert.equal(inventedTimeFor('Dentist at 2:30, do not be late', items), null);
+  assert.equal(inventedTimeFor('Scarlett’s party is today. Present?', items), null);
+  // Nothing untimed to give a time to.
+  assert.equal(inventedTimeFor('Party at 7:30', [item({ title: 'Dentist', date: TODAY, time: '2:30 PM' })]), null);
+});
+
+test('raisedRecently reads the items she has already brought up out of her own lines', () => {
+  const party = item({ title: 'Scarlett Birthday Party', date: TODAY, kind: 'event' });
+  const present = item({ title: 'Get Scarlett a birthday present', date: TODAY });
+  const bins = item({ title: 'Bins', date: TODAY });
+  const raised = raisedRecently([
+    'Scarlett’s birthday party is today, and you still have no plan.',
+    'Nothing to do with the list at all.',
+    'Get Scarlett a present or do not bother turning up.',
+  ], [party, present, bins]);
+  assert.deepEqual(raised.map(entry => entry.title).sort(), ['Get Scarlett a birthday present', 'Scarlett Birthday Party']);
+  assert.deepEqual(raisedRecently([], [party]), []);
+});
+
+test('formatAgenda says an all-day item has no time, and only when there is one', () => {
+  const untimed = formatAgenda([item({ title: 'Scarlett Birthday Party', date: TODAY, kind: 'event' })], at(12), TODAY);
+  assert.match(untimed, /all day - Scarlett Birthday Party/);
+  assert.match(untimed, /Never state, guess or invent a time/);
+  const timed = formatAgenda([item({ title: 'Dentist', date: TODAY, time: '2:30 PM' })], at(12), TODAY);
+  assert.doesNotMatch(timed, /Never state, guess or invent a time/);
 });
