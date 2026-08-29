@@ -7585,7 +7585,8 @@ function webDeps(): WebDeps {
         lastMessageAt: mood.lastMessageAt,
         knownSince: days[0],
         daysTalked: new Set(days).size,
-        waiting: getKept().filter(item => !item.done).map(item => item.title),
+        kept: getKept().map(item => ({ id: item.id, title: item.title, date: item.date, time: item.time ?? null, done: item.done })),
+        weekday: new Intl.DateTimeFormat('en-AU', { weekday: 'long', timeZone: CHAT_TIMEZONE }),
         now: Date.now(),
         today,
       });

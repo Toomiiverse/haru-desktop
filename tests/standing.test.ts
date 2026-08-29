@@ -2,7 +2,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { bondFrom, BOND_LEVELS, daysApart, moodLine, patienceMeter, restingEmotion, standingFrom } from '../electron/standing';
+import { bondFrom, BOND_LEVELS, daysApart, moodLine, patienceMeter, restingEmotion, standingFrom, waitingFrom } from '../electron/standing';
 import { DEFAULT_VITALS, type Vitals } from '../electron/vitals';
 
 const vitals = (over: Partial<Vitals> = {}): Vitals => ({ ...DEFAULT_VITALS, ...over });
@@ -83,7 +83,14 @@ test('the whole screen holds together, and says what she is waiting for', () => 
     irritation: 2, ego: 1, grudge: 1, ignoredToday: 1,
     lastMessageAt: '2026-08-29T10:00:00.000Z',
     knownSince: '2026-08-01', daysTalked: 12,
-    waiting: ['Get Scarlett a birthday present', 'Rental Inspection', 'a', 'b', 'c', 'd'],
+    kept: [
+      { id: '1', title: 'Get Scarlett a birthday present', date: '2026-08-28' },
+      { id: '2', title: 'Scarlett Birthday Party', date: '2026-08-29' },
+      { id: '3', title: 'Rental Inspection', date: '2026-08-20' },
+      { id: '4', title: 'Verge collection', date: '2026-09-03' },
+      { id: '5', title: 'Already done', date: '2026-08-29', done: true },
+    ],
+    weekday: new Intl.DateTimeFormat('en-AU', { weekday: 'long', timeZone: 'UTC' }),
     now: Date.parse('2026-08-29T11:30:00.000Z'), today: '2026-08-29',
   });
   assert.equal(screen.emotion, 'affectionate');
@@ -94,16 +101,43 @@ test('the whole screen holds together, and says what she is waiting for', () => 
   assert.ok(screen.meters.every(meter => meter.value >= 0 && meter.value <= 100 && meter.note));
   assert.equal(screen.patience.value, Math.round(7 / 9 * 100));
   assert.match(screen.grudge.note, /1 of her messages left unanswered.*1 of them today/);
-  // Five is enough of a list on a phone.
-  assert.equal(screen.waiting.length, 5);
+  // Soonest first, nothing truncated, and the nine-day-old inspection is not
+  // presented as something she is still waiting for.
+  assert.deepEqual(screen.waiting.map(item => item.title), ['Get Scarlett a birthday present', 'Scarlett Birthday Party', 'Verge collection']);
+  assert.deepEqual(screen.waiting.map(item => item.when), ['yesterday', 'today', 'Thursday, 5 days from now']);
+  assert.deepEqual(screen.waiting.map(item => item.late), [true, false, false]);
+  assert.deepEqual(screen.stale.map(item => item.title), ['Rental Inspection']);
 });
 
 test('nothing known yet still renders', () => {
   const screen = standingFrom({
     vitals: DEFAULT_VITALS, irritation: 0, ego: 0, grudge: 0, ignoredToday: 0,
-    daysTalked: 0, waiting: [], now: Date.parse('2026-08-29T11:30:00.000Z'), today: '2026-08-29',
+    daysTalked: 0, kept: [], weekday: new Intl.DateTimeFormat('en-AU', { weekday: 'long', timeZone: 'UTC' }), now: Date.parse('2026-08-29T11:30:00.000Z'), today: '2026-08-29',
   });
   assert.equal(screen.knownDays, 0);
   assert.equal(screen.minutesSinceSpoke, null);
+  assert.deepEqual(screen.waiting, []);
+  assert.deepEqual(screen.stale, []);
   assert.match(screen.grudge.note, /Nothing held against you/);
+});
+
+test('the list she is waiting on agrees with the window she chases in', () => {
+  const weekday = new Intl.DateTimeFormat('en-AU', { weekday: 'long', timeZone: 'UTC' });
+  const items = [
+    { id: 'late', title: 'Two days gone', date: '2026-08-27' },
+    { id: 'stale', title: 'Three days gone', date: '2026-08-26' },
+    { id: 'today-late', title: 'Afternoon', date: '2026-08-29', time: '2:00 PM' },
+    { id: 'today-early', title: 'Morning', date: '2026-08-29', time: '9:00 AM' },
+    { id: 'untimed', title: 'Sometime today', date: '2026-08-29' },
+    { id: 'done', title: 'Finished', date: '2026-08-29', done: true },
+  ];
+  const { waiting, stale } = waitingFrom(items, '2026-08-29', weekday);
+  // CHASE_WINDOW_DAYS is 2: two days gone still counts, three does not.
+  assert.deepEqual(waiting.map(item => item.id), ['late', 'untimed', 'today-early', 'today-late']);
+  assert.deepEqual(stale.map(item => item.id), ['stale']);
+  // Untimed sorts before timed on the same day, and the times are in order.
+  assert.equal(waiting[0].when, 'last Thursday, 2 days ago');
+  assert.equal(waiting[1].when, 'today');
+  assert.equal(waiting[0].late, true);
+  assert.equal(waiting[2].late, false);
 });

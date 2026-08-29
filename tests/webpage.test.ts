@@ -654,7 +654,8 @@ function statusTab({ standing, fails = false }: { standing?: Record<string, unkn
   const made = new Map<string, Stub>();
   const el = (id: string): Stub => {
     if (!made.has(id)) made.set(id, { id, hidden: false, innerHTML: '', attrs: {} as Record<string, string>,
-      setAttribute(name: string, value: string) { (this as Stub).attrs[name] = value; } });
+      setAttribute(name: string, value: string) { (this as Stub).attrs[name] = value; },
+      addEventListener(name: string, fn: (e: Stub) => void) { (this as Stub).on = { ...(this as Stub).on, [name]: fn }; } });
     return made.get(id)!;
   };
   const screen = standing ?? {
@@ -664,15 +665,20 @@ function statusTab({ standing, fails = false }: { standing?: Record<string, unkn
              { key: 'stress', label: 'Stress', value: 80, note: 'Wound up.' }],
     patience: { key: 'patience', label: 'Patience', value: 100, note: 'Intact.' },
     grudge: { value: 3, of: 30, note: '3 unanswered.' },
-    knownDays: 28, daysTalked: 12, minutesSinceSpoke: 90, waiting: ['Get a present'],
+    knownDays: 28, daysTalked: 12, minutesSinceSpoke: 90,
+    waiting: [{ id: 'p', title: 'Get a present', when: 'yesterday', late: true },
+              { id: 'v', title: 'Verge collection', when: 'Thursday, 5 days from now', late: false }],
+    stale: [{ id: 'r', title: 'Rental Inspection', when: 'last Thursday, 9 days ago', late: true }],
   };
   const expressed: string[] = [];
   const timers: { every: number }[] = [];
+  const ticked: string[] = [];
   const win: Stub = {
     JSON, Math, Promise, Set, Error, Object,
     $: el,
     esc: (v: unknown) => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!)),
     get: () => (fails ? Promise.reject(new Error('down')) : Promise.resolve(JSON.parse(JSON.stringify(screen)))),
+    post: (url: string, body: { id: string }) => { ticked.push(url + ':' + body.id); return Promise.resolve({}); },
     setInterval: (_fn: () => void, every: number) => { timers.push({ every }); return timers.length; },
     clearInterval: () => {},
     document: { hidden: false, addEventListener: () => {} },
@@ -680,7 +686,7 @@ function statusTab({ standing, fails = false }: { standing?: Record<string, unkn
   };
   win.window = win;
   vm.runInContext(source, vm.createContext(win), { filename: 'status.js' });
-  return { el, win, expressed, timers, made };
+  return { el, win, expressed, timers, made, ticked };
 }
 
 test('the status tab draws her standing, and the face follows it', async () => {
@@ -693,6 +699,13 @@ test('the status tab draws her standing, and the face follows it', async () => {
   assert.match(html, /16 to go/);
   assert.match(html, /width:74%/);
   assert.match(html, /Get a present/);
+  // Every row says when, and a late one is marked as such.
+  assert.match(html, /<li class=late><span class=what>Get a present<span class=when>yesterday<\/span>/);
+  assert.match(html, /Verge collection<span class=when>Thursday, 5 days from now/);
+  // What she has given up asking about is kept apart, not mixed in and not hidden.
+  assert.match(html, /She has stopped asking/);
+  assert.match(html, /Rental Inspection/);
+  assert.ok(html.indexOf('Waiting on you') < html.indexOf('She has stopped asking'));
   assert.match(html, /Known you <b>28<\/b> days/);
   assert.match(html, /Last word <b>1 hour ago<\/b>/);
   // The grudge arrives as a count and is drawn as a share of its own maximum.
@@ -758,12 +771,30 @@ test('nothing on her list means no empty section', async () => {
     bond: { value: 10, level: 0, of: 5, title: 'Nodding terms', note: 'She answers.', toNext: 10 },
     meters: [], patience: { key: 'patience', label: 'Patience', value: 100, note: 'Intact.' },
     grudge: { value: 0, of: 30, note: 'Nothing held against you.' },
-    knownDays: 1, daysTalked: 1, minutesSinceSpoke: null, waiting: [],
+    knownDays: 1, daysTalked: 1, minutesSinceSpoke: null, waiting: [], stale: [],
   } });
   await win.loadStatus();
   const html = String(el('status').innerHTML);
   assert.equal(html.includes('Waiting on you'), false);
+  assert.equal(html.includes('She has stopped asking'), false);
   assert.match(html, /Known you <b>1<\/b> day[^s]/);
   assert.match(html, /Last word <b>not yet<\/b>/);
   assert.match(html, /As far as this goes|10 to go/);
+});
+
+test('ticking one off tells her, and redraws rather than guessing the new list', async () => {
+  const { el, win, ticked } = statusTab();
+  await win.loadStatus();
+  const status = el('status');
+  const pressed: string[] = [];
+  const button = { getAttribute: () => 'p', set disabled(v: boolean) { pressed.push('disabled=' + v); }, closest: () => button } as unknown as Stub;
+  await win.tickOff({ target: button });
+  assert.deepEqual(ticked, ['/api/agenda/done:p']);
+  assert.deepEqual(pressed, ['disabled=true']);
+  // Redrawn from what came back, so a list that changed underneath is right.
+  assert.match(String(status.innerHTML), /Get a present/);
+  // A click on the card, not on a tick, does nothing at all.
+  ticked.length = 0;
+  win.tickOff({ target: { closest: () => null } });
+  assert.deepEqual(ticked, []);
 });

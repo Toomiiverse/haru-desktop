@@ -742,8 +742,19 @@ export function appPage(): string {
   .bar.warm i { background:oklch(78% 0.140 25); }
   .bar.cool i { background:oklch(76% 0.090 var(--hue)); }
   .meter .why { color:var(--ink-dim); font-size:.8rem; margin:.2rem 0 0; }
-  #status ul { margin:.1rem 0 0; padding-left:1.1rem; }
-  #status li { margin:.15rem 0; }
+  .todo { list-style:none; margin:.1rem 0 0; padding:0; }
+  .todo li { display:flex; align-items:baseline; gap:.6rem; padding:.3rem 0; border-top:1px solid var(--edge); }
+  .todo li:first-child { border-top:0; }
+  .todo .what { flex:1; min-width:0; }
+  .todo .when { display:block; color:var(--ink-dim); font-size:.78rem; }
+  .todo li.late .when { color:oklch(78% 0.130 25); }
+  /* A tick, not a checkbox: this is the only place on the phone the list can be
+     cleared, and it wants to look like a button you meant to press. */
+  .todo .tick { flex:0 0 auto; background:var(--glass); border:1px solid var(--edge); color:var(--ink);
+    border-radius:1rem; padding:.2rem .6rem; font-size:.85rem; line-height:1.2; }
+  .todo .tick:disabled { opacity:.4; }
+  .card.stale h3 { color:var(--ink-dim); }
+  .card.stale .lead { color:var(--ink-dim); font-size:.82rem; margin:0 0 .35rem; }
   #status .facts { display:flex; flex-wrap:wrap; gap:.35rem .9rem; color:var(--ink-dim); font-size:.86rem; }
   #status .facts b { color:var(--ink); font-weight:600; font-variant-numeric:tabular-nums; }
   @media (prefers-reduced-motion: reduce) { .bar i { transition:none; } }
@@ -1364,11 +1375,34 @@ function drawStatus(s){
     +'<div class=card><h3>Right now</h3>'+meterRow(s.patience)+meterRow(s.grudgeMeter)+'</div>'
     +'<div class=card><h3>How she is</h3>'+s.meters.map(meterRow).join('')+'</div>';
   if(s.waiting.length){
-    html+='<div class=card><h3>Waiting on you</h3><ul>'+s.waiting.map(t=>'<li>'+esc(t)+'</li>').join('')+'</ul></div>';
+    html+='<div class=card><h3>Waiting on you</h3>'+todoList(s.waiting)+'</div>';
+  }
+  // Kept apart rather than dropped. She has stopped asking about these — the
+  // same window she uses to decide whether to chase — so listing them beside
+  // the live ones said she was still waiting when she was not, and hiding them
+  // outright is how three finished chores sat in the store for a week.
+  if(s.stale.length){
+    html+='<div class="card stale"><h3>She has stopped asking</h3>'
+      +'<p class=lead>Too long ago for her to bring up. Clear them out.</p>'+todoList(s.stale)+'</div>';
   }
   html+='<div class=card><h3>The two of you</h3><p class=facts>'+facts.join('<span></span>')+'</p></div>';
   $('status').innerHTML=html;
   if(window.haruAvatar) window.haruAvatar.express(s.emotion);
+}
+// Delegated, because the list is redrawn on every refresh and per-row handlers
+// would go with it.
+function tickOff(e){
+  const button=e.target&&e.target.closest?e.target.closest('.tick'):null;
+  if(!button) return;
+  button.disabled=true;
+  post('/api/agenda/done',{id:button.getAttribute('data-id')})
+    .then(()=>loadStatus())
+    .catch(()=>{ button.disabled=false; });
+}
+function todoList(items){
+  return '<ul class=todo>'+items.map(t=>'<li'+(t.late?' class=late':'')+'><span class=what>'+esc(t.title)
+    +'<span class=when>'+esc(t.when)+'</span></span>'
+    +'<button class=tick data-id="'+esc(t.id)+'">Done</button></li>').join('')+'</ul>';
 }
 function loadStatus(){
   return get('/api/status').then(s=>{
@@ -1391,6 +1425,7 @@ function showTab(which){
   if(statusTimer){ clearInterval(statusTimer); statusTimer=null; }
   if(her){ void loadStatus(); statusTimer=setInterval(()=>{ if(!document.hidden) void loadStatus(); },STATUS_EVERY); }
 }
+$('status').addEventListener('click',tickOff);
 $('tab-chat').onclick=()=>showTab('chat');
 $('tab-her').onclick=()=>showTab('her');
 document.addEventListener('visibilitychange',()=>{ if(!document.hidden&&!$('status').hidden) void loadStatus(); });

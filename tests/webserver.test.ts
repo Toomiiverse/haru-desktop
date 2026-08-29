@@ -58,7 +58,7 @@ function deps(overrides: Partial<WebDeps> = {}): WebDeps {
     memories: () => [],
     standing: () => standingFrom({
       vitals: DEFAULT_VITALS, irritation: 0, ego: 0, grudge: 0, ignoredToday: 0,
-      daysTalked: 0, waiting: [], now: Date.parse('2026-08-29T12:00:00.000Z'), today: '2026-08-29',
+      daysTalked: 0, kept: [], weekday: new Intl.DateTimeFormat('en-AU', { weekday: 'long', timeZone: 'UTC' }), now: Date.parse('2026-08-29T12:00:00.000Z'), today: '2026-08-29',
     }),
     memoryRecords: () => syncedMemories,
     activityLog: () => pushedActivity,

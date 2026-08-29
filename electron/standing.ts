@@ -12,6 +12,7 @@
 // you. Pure, because a status screen that could not be tested against a made-up
 // state would be tested by waiting three days for her mood to move.
 
+import { CHASE_WINDOW_DAYS, relativeDay, shiftDays } from './agenda';
 import type { EmotionName } from './emotion';
 import { MOOD_TO_EMOTION, type HaruEmotion } from './emotions';
 import { IGNORE_THRESHOLD, IRRITATION_MAX } from './mood';
@@ -41,6 +42,51 @@ export type Bond = {
   toNext: number;
 };
 
+export type WaitingItem = {
+  id: string;
+  title: string;
+  /** "today", "tomorrow", "Thursday, 3 days from now" — never a bare date. */
+  when: string;
+  /** Its day has been and gone. */
+  late: boolean;
+};
+
+/**
+ * What she is actually waiting on, and what she has given up asking about.
+ *
+ * The first version of this screen listed every open item with no date on it,
+ * which put a rental inspection nine days gone next to a collection a week
+ * away and made them look alike. Worse, it contradicted her: `worthChasing`
+ * stops her mentioning anything more than CHASE_WINDOW_DAYS past, so the tab
+ * was presenting as outstanding the very things she had decided to drop.
+ *
+ * Same window, so the screen and her mouth agree. What falls outside it is not
+ * hidden — that is how three finished chores sat there for a week with nothing
+ * surfacing them — it moves to `stale`, where the point is to clear it.
+ */
+export function waitingFrom(
+  items: { id: string; title: string; date: string; time?: string | null; done?: boolean }[],
+  todayKey: string,
+  weekday: Intl.DateTimeFormat,
+): { waiting: WaitingItem[]; stale: WaitingItem[] } {
+  const rank = (time?: string | null) => {
+    const match = /^(\d{1,2}):(\d{2})\s*(am|pm)?$/i.exec((time ?? '').trim());
+    if (!match) return -1;
+    let hour = Number(match[1]) % 12;
+    if (match[3] && match[3].toLowerCase() === 'pm') hour += 12;
+    return hour * 60 + Number(match[2]);
+  };
+  const cutoff = shiftDays(todayKey, -CHASE_WINDOW_DAYS);
+  const open = items
+    .filter(item => !item.done)
+    .sort((a, b) => a.date.localeCompare(b.date) || rank(a.time) - rank(b.time))
+    .map(item => ({ item, row: { id: item.id, title: item.title, when: relativeDay(item.date, todayKey, weekday), late: item.date < todayKey } }));
+  return {
+    waiting: open.filter(entry => entry.item.date >= cutoff).map(entry => entry.row),
+    stale: open.filter(entry => entry.item.date < cutoff).map(entry => entry.row),
+  };
+}
+
 export type Standing = {
   emotion: EmotionName;
   face: HaruEmotion;
@@ -52,7 +98,8 @@ export type Standing = {
   knownDays: number;
   daysTalked: number;
   minutesSinceSpoke: number | null;
-  waiting: string[];
+  waiting: WaitingItem[];
+  stale: WaitingItem[];
 };
 
 export type StandingInput = {
@@ -66,8 +113,10 @@ export type StandingInput = {
   knownSince?: string;
   /** Distinct days she has a summary for — days you actually turned up. */
   daysTalked: number;
-  /** Open items she is chasing, so the screen says what she wants from you. */
-  waiting: string[];
+  /** The list, whole — this decides for itself what is still worth showing. */
+  kept: { id: string; title: string; date: string; time?: string | null; done?: boolean }[];
+  /** For spelling out a date as a day. Supplied so this stays pure. */
+  weekday: Intl.DateTimeFormat;
   now: number;
   today: string;
 };
@@ -200,6 +249,8 @@ export function standingFrom(input: StandingInput): Standing {
     knownDays: input.knownSince ? daysApart(input.knownSince, input.today) : 0,
     daysTalked: input.daysTalked,
     minutesSinceSpoke: Number.isFinite(spoke) ? Math.max(0, Math.round((input.now - spoke) / 60_000)) : null,
-    waiting: input.waiting.slice(0, 5),
+    // Not truncated. Cutting the list at five is how "Get Scarlett a birthday
+    // present" stayed invisible while the four rows around it were read out.
+    ...waitingFrom(input.kept, input.today, input.weekday),
   };
 }

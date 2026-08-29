@@ -37,7 +37,7 @@ export function itemStatus(item: AgendaItem, now: Date, todayKey: string): ItemS
   return 'upcoming';
 }
 
-function shiftDays(dateKey: string, days: number) {
+export function shiftDays(dateKey: string, days: number) {
   const [year, month, day] = dateKey.split('-').map(Number);
   const shifted = new Date(year, month - 1, day + days);
   return `${shifted.getFullYear()}-${String(shifted.getMonth() + 1).padStart(2, '0')}-${String(shifted.getDate()).padStart(2, '0')}`;
