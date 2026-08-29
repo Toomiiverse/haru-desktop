@@ -16,8 +16,24 @@ export type Caption = {
   name: string;
   /** When she looked, not when the shot was taken. */
   at: string;
+  /** Empty when the look failed; `tries` then says how often. */
   text: string;
+  /** Failed attempts. A shot that cannot be described is not worth describing
+   *  for ever, and the cost of finding that out again is not free. */
+  tries?: number;
 };
+
+/**
+ * How many times a picture is worth failing on.
+ *
+ * Classifying the failure was the wrong instrument, and it took two goes to
+ * see it. A 400 for an oversized image was tagged as being about the image, so
+ * the pass skipped it and moved on — and then the same picture came back as a
+ * 120-second timeout instead, which is not tagged, so it broke the pass and the
+ * whole backlog behind it sat still. Counting does not care which way a shot
+ * fails, or which way the next one will.
+ */
+export const MAX_LOOK_TRIES = 2;
 
 /**
  * A transcription of a busy screen is longer than a caption, and this holds
@@ -54,7 +70,9 @@ const key = (day: string, name: string) => `${day}/${name}`;
  * sees follows the day as it happened rather than arriving shuffled.
  */
 export function unseenShots(held: Record<string, string[]>, captions: Caption[], limit = SHOTS_PER_PASS): { day: string; name: string }[] {
-  const done = new Set(captions.map(caption => key(caption.day, caption.name)));
+  const done = new Set(captions
+    .filter(caption => caption.text.trim() || (caption.tries ?? 0) >= MAX_LOOK_TRIES)
+    .map(caption => key(caption.day, caption.name)));
   const out: { day: string; name: string }[] = [];
   for (const day of Object.keys(held).sort()) {
     for (const name of [...(held[day] ?? [])].sort()) {
@@ -114,14 +132,23 @@ export function shotsNeedingALook(
   described: Record<string, string[]>,
   limit = SHOTS_PER_PASS,
 ): { day: string; name: string }[] {
+  // Stand-ins, never stored: they only have to look done to unseenShots, and
+  // "done" there means carrying words. An empty text is what a failed look
+  // leaves behind, which is the opposite of what these are.
   const theirs: Caption[] = Object.entries(described)
-    .flatMap(([day, names]) => names.map(name => ({ day, name, at: '', text: '' })));
+    .flatMap(([day, names]) => names.map(name => ({ day, name, at: '', text: 'described where it was taken' })));
   return unseenShots(held, [...captions, ...theirs], limit);
+}
+
+/** A look that came to nothing, so the next pass knows it has been here. */
+export function noteFailure(captions: Caption[], day: string, name: string, at: string): Caption[] {
+  const had = captions.find(caption => key(caption.day, caption.name) === key(day, name));
+  return noteCaption(captions, { day, name, at, text: '', tries: (had?.tries ?? 0) + 1 });
 }
 
 /** What she saw on one day, in the order she saw it. */
 export function captionsFor(captions: Caption[], day: string): Caption[] {
-  return captions.filter(caption => caption.day === day).sort((a, b) => a.name.localeCompare(b.name));
+  return captions.filter(caption => caption.day === day && caption.text.trim()).sort((a, b) => a.name.localeCompare(b.name));
 }
 
 /** Captions for days that no longer have shots — dropped alongside them so the

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { CAPTIONS_KEPT, captionsFor, describedShots, forgetCaptions, moreThanOnePass, noteCaption, readCaptions, shotsNeedingALook, unseenShots, type Caption } from '../electron/seen';
+import { CAPTIONS_KEPT, MAX_LOOK_TRIES, noteFailure, captionsFor, describedShots, forgetCaptions, moreThanOnePass, noteCaption, readCaptions, shotsNeedingALook, unseenShots, type Caption } from '../electron/seen';
 
 const caption = (day: string, name: string, text = 'a window'): Caption => ({ day, name, at: `${day}T09:00:00.000Z`, text });
 
@@ -91,4 +91,24 @@ test('the two ledgers agree — ours and theirs both count as done', () => {
 test('a log with no descriptions changes nothing', () => {
   assert.deepEqual(describedShots({}), {});
   assert.deepEqual(describedShots({ '2026-08-28': [{ shot: 'a.png' }] }), {});
+});
+
+test('a shot that keeps failing is left alone, however it fails', () => {
+  const held = { '2026-08-28': ['big.png', 'ok.png'] };
+  let captions = noteFailure([], '2026-08-28', 'big.png', '2026-08-29T00:00:00.000Z');
+  // Once is bad luck: still in the queue, and still ahead of the others.
+  assert.deepEqual(unseenShots(held, captions, 5).map(s => s.name), ['big.png', 'ok.png']);
+  captions = noteFailure(captions, '2026-08-28', 'big.png', '2026-08-29T00:05:00.000Z');
+  assert.equal(captions.find(c => c.name === 'big.png')?.tries, MAX_LOOK_TRIES);
+  // Twice is the picture. It stops being offered; nothing else is affected.
+  assert.deepEqual(unseenShots(held, captions, 5).map(s => s.name), ['ok.png']);
+});
+
+test('a failed look is not a caption', () => {
+  const captions = noteFailure([], '2026-08-28', 'big.png', '2026-08-29T00:00:00.000Z');
+  assert.deepEqual(captionsFor(captions, '2026-08-28'), []);
+  // And a later success replaces the failure rather than sitting beside it.
+  const after = noteCaption(captions, caption('2026-08-28', 'big.png', 'A spreadsheet.'));
+  assert.equal(after.length, 1);
+  assert.equal(captionsFor(after, '2026-08-28')[0].text, 'A spreadsheet.');
 });

@@ -48,7 +48,7 @@ import { convertImage, normaliseFormat, FORMATS } from './convert';
 import { cancelPower, closeApp, findApps, isCancellable, launch, listRunning, matchApp, matchRunning, normalisePower, POWER_DELAY_S, readDesktopConfig, runPower, supportedDesktop, type DesktopConfig } from './desktop';
 import { looksLikeScreenshot, maySpeak, readScreenshotConfig, screenshotPrompt, SETTLE_MS, SETTLE_TRIES, type ScreenshotConfig } from './screenshots';
 import { look, photoName, readVisionConfig, whileLooking, type VisionConfig } from './vision';
-import { CAPTION_MAX_CHARS, describedShots, forgetCaptions, moreThanOnePass, noteCaption, readCaptions, shotsNeedingALook } from './seen';
+import { CAPTION_MAX_CHARS, describedShots, forgetCaptions, moreThanOnePass, noteCaption, noteFailure, readCaptions, shotsNeedingALook } from './seen';
 import { EXPRESSIVE, LAST_WORD, NO_INVENTED_HISTORY, NO_NON_SEQUITURS, readsAsRough, roomInstruction } from './room';
 import { journalStance } from './journal';
 import { haruNote, rangeStats, type HaruNote, type RangeName, type RangeStats } from './journal';
@@ -235,6 +235,11 @@ async function lookAtSyncedShots() {
       // started on the same one and stopped there again. Anything else means
       // the model or the machine is unavailable and the rest would fail the
       // same way, so those still keep for the next pass.
+      // Counted rather than classified. Whether it was refused, timed out or
+      // came back malformed, a shot that fails MAX_LOOK_TRIES times is left
+      // alone and the queue moves on. A machine that is not answering fails
+      // every shot equally, so the pass still stops after the first one.
+      saved = noteFailure(saved, shot.day, shot.name, new Date().toISOString());
       if ((error as { aboutThisImage?: boolean })?.aboutThisImage) continue;
       break;
     }
