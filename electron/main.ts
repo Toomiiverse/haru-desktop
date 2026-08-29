@@ -82,6 +82,7 @@ import { gamesPlayedLately, GUIDE_ODDS, guideNoteInstruction, guideQuery, pickGa
 import { adopt, ADOPT_ODDS, adoptInstruction, deepen, deepenInstruction, isOneOfTheirs, MAX_INTERESTS, nightQuery, parseAdoption, parseDeepening, pickTonight, tastesInstruction, type Interest } from './tastes';
 import { readSteamWebConfig, recentlyPlayed } from './steamweb';
 import { appendDream, appendEntry, diaryContext, diaryDueFor, diaryInstruction, recentEntries, type Dream } from './diary';
+import { DIARY_VOICE, fragmentsInstruction, liftedFrom, NOT_THOSE_LINES } from './diaryvoice';
 import { fetchTranscript, formatTranscript, titleFrom, transcriptInstruction, transcriptsAvailable, videoIdFrom, watchUrl } from './transcripts';
 import { feedbackEntry, recordFeedback } from './feedback';
 import { describePull, isTailnetAddress, mergeCheckIns, readCheckInSource } from './checkinsource';
@@ -7489,6 +7490,14 @@ async function haveANight(config: ProviderConfig) {
   }
 }
 
+/** The example entries, for the lifted-sentence check only. Absent is fine: then there is nothing to lift. */
+function diaryExamples(): string[] {
+  const dir = path.join(app.getPath('userData'), 'diary-examples');
+  try {
+    return readdirSync(dir).filter(name => /\.(txt|md)$/i.test(name)).map(name => readFileSync(path.join(dir, name), 'utf8'));
+  } catch { return []; }
+}
+
 /**
  * Her diary: one entry a night, about the day with them and the night without.
  *
@@ -7522,8 +7531,20 @@ async function writeDiary(config: ProviderConfig) {
   });
   try {
     // Her identity and what she knows of them, but not her style: the style is
-    // how she talks *to* them, and a diary is the one place she is not.
-    const entry = await ollamaQuipLong([getActiveCharacter().identity, profileSummary(''), material].join(' '), 'Write tonight\'s entry.', config);
+    // how she talks *to* them, and a diary is the one place she is not. The
+    // diary has a voice of its own (diaryvoice.ts), from the examples.
+    const system = [getActiveCharacter().identity, profileSummary(''), DIARY_VOICE, fragmentsInstruction(), material].join(' ');
+    let entry = await ollamaQuipLong(system, 'Write tonight\'s entry.', config);
+    // The example entries are kept on disk for exactly this check, and never
+    // shown to her: a sentence lifted from one is an event from one.
+    const examples = diaryExamples();
+    const lifted = liftedFrom(entry, examples);
+    if (lifted) {
+      console.log(`[diary] she lifted "${lifted}…" from an example — asking again`);
+      entry = await ollamaQuipLong(`${system} ${NOT_THOSE_LINES}`, 'Write tonight\'s entry.', config);
+      const again = liftedFrom(entry, examples);
+      if (again) { console.warn(`[diary] still lifting ("${again}…") — not written tonight`); return; }
+    }
     if (entry.trim().length < 40) { console.log('[diary] nothing worth keeping came out — not written'); return; }
     appendEntry(app.getPath('home'), due, entry, new Intl.DateTimeFormat('en-AU', { weekday: 'long', timeZone: 'UTC' }));
     setMood({ ...getMood(), diaryDay: due });
