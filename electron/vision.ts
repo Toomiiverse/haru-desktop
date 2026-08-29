@@ -31,9 +31,20 @@ export type VisionConfig = {
   model: string;
   /** Where copies are kept. Empty means the default under Pictures. */
   folder: string;
+  /**
+   * Which Ollama answers, when it should not be the one the chat model uses.
+   *
+   * Ollama places a model on whichever card has room, so the only way to keep
+   * the eyes off the card the chat model lives on is a second instance that can
+   * see only the other one. Empty means "wherever the chat model is", which is
+   * what everyone had before. Still refused if it is not this machine — see
+   * visionEndpoint: the screen never leaves the box, and a config field is not
+   * allowed to be the exception.
+   */
+  endpoint?: string;
 };
 
-export const DEFAULT_VISION: VisionConfig = { enabled: false, model: 'gemma4:12b', folder: '' };
+export const DEFAULT_VISION: VisionConfig = { enabled: false, model: 'gemma4:12b', folder: '', endpoint: '' };
 
 export function readVisionConfig(saved: unknown): VisionConfig {
   if (!saved || typeof saved !== 'object') return DEFAULT_VISION;
@@ -42,6 +53,7 @@ export function readVisionConfig(saved: unknown): VisionConfig {
     enabled: record.enabled === true,
     model: typeof record.model === 'string' && record.model.trim() ? record.model.trim() : DEFAULT_VISION.model,
     folder: typeof record.folder === 'string' ? record.folder.trim() : '',
+    endpoint: typeof record.endpoint === 'string' ? record.endpoint.trim() : '',
   };
 }
 

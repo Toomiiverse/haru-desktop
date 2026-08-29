@@ -48,6 +48,7 @@ import { convertImage, normaliseFormat, FORMATS } from './convert';
 import { cancelPower, closeApp, findApps, isCancellable, launch, listRunning, matchApp, matchRunning, normalisePower, POWER_DELAY_S, readDesktopConfig, runPower, supportedDesktop, type DesktopConfig } from './desktop';
 import { looksLikeScreenshot, maySpeak, readScreenshotConfig, screenshotPrompt, SETTLE_MS, SETTLE_TRIES, type ScreenshotConfig } from './screenshots';
 import { look, photoName, readVisionConfig, whileLooking, type VisionConfig } from './vision';
+import { noteCaption, readCaptions, unseenShots } from './seen';
 import { EXPRESSIVE, LAST_WORD, NO_INVENTED_HISTORY, NO_NON_SEQUITURS, readsAsRough, roomInstruction } from './room';
 import { journalStance } from './journal';
 import { haruNote, rangeStats, type HaruNote, type RangeName, type RangeStats } from './journal';
@@ -79,7 +80,7 @@ import { feedbackEntry, recordFeedback } from './feedback';
 import { describePull, isTailnetAddress, mergeCheckIns, readCheckInSource } from './checkinsource';
 import { describeMerge } from './memorysync';
 import { isRedacted, mergeActivity, noteActivity, summariseDay } from './activitylog';
-import { heldShots, keepShot, localShots, missingFrom, pruneShots, MAX_SHOT_BYTES } from './shotstore';
+import { heldShots, keepShot, localShots, missingFrom, pruneShots, readShot, MAX_SHOT_BYTES } from './shotstore';
 import { DiscordLink, looksLikeUserId, readDiscordConfig, useOfChannel, type DiscordConfig } from './discord';
 import { reactedPrompt, readReaction, REACTION_COOLDOWN_MS } from './reacted';
 import { startWebServer, type WebDeps } from './webserver';
@@ -139,6 +140,62 @@ let companionWindow: BrowserWindow | null = null;
 /** Where screenshots pushed from a desk are kept. A folder per day under here,
  *  which is the folder the activity log is describing. */
 function shotStoreRoot(): string { return path.join(app.getPath('userData'), 'screenshots'); }
+
+/**
+ * What the desk was showing, read on this machine.
+ *
+ * The desk syncs the pictures into shotStoreRoot(); nothing here opened them,
+ * so the server held a folder of screenshots it could not see. This looks at a
+ * few each pass, oldest first, and keeps one plain description of each.
+ *
+ * It is the only thing that looks unasked. The screen watcher has no screen on
+ * a headless box and its own switch is off; a picture sent in conversation goes
+ * to the answering model, not here. So the eyes cost nothing until the desk
+ * sends something, and then they cost one small model on the other card for as
+ * long as the pass takes — see ollama-vision.service, which unloads it after.
+ */
+const SHOT_LOOK_TICK_MS = 5 * 60_000;
+const SHOT_LOOK_PROMPT = [
+  'This is a screenshot of the user\'s computer.',
+  'Say plainly which program is in front and what they are doing in it, in two sentences.',
+  'Quote any readable text that says what the work is — a filename, a heading, a search box.',
+  'No preamble, no "this image shows", no guessing at what they might be thinking.',
+].join(' ');
+
+async function lookAtSyncedShots() {
+  const vision = readVisionConfig(store.get('vision'));
+  if (!vision.enabled) return;
+  const root = shotStoreRoot();
+  if (!existsSync(root)) return;
+  const captions = readCaptions(store.get('shots.captions'));
+  const next = unseenShots(heldShots(root), captions);
+  if (!next.length) return;
+  const provider = store.get('ai.config') as ProviderConfig | undefined;
+  const endpoint = visionEndpoint(provider, vision);
+  let saved = captions;
+  for (const shot of next) {
+    const bytes = readShot(root, shot.day, shot.name);
+    if (!bytes) continue;
+    try {
+      const sighting = await look(bytes.toString('base64'), vision, endpoint, modelHeaders(endpoint), net.fetch, {
+        ask: SHOT_LOOK_PROMPT,
+        // Dropped as soon as the pass is done: the card it is on also holds her
+        // voice, which is the one thing here that cannot wait for VRAM.
+        keepAlive: '0',
+      });
+      const text = sighting.description.trim();
+      if (!text) continue;
+      saved = noteCaption(saved, { day: shot.day, name: shot.name, at: new Date().toISOString(), text });
+      console.log(`[shot] ${shot.day}/${shot.name}: ${text.slice(0, 90)}`);
+    } catch (error) {
+      // One failure means the model or the card is unavailable, and the rest of
+      // the pass would fail the same way. They keep for the next one.
+      console.warn(`[shot] could not look at ${shot.day}/${shot.name}:`, error instanceof Error ? error.message : error);
+      break;
+    }
+  }
+  if (saved !== captions) store.set('shots.captions', saved);
+}
 
 const knowledgeFile = process.env.HARU_KNOWLEDGE_FILE ? process.env.HARU_KNOWLEDGE_FILE : path.join(app.getPath('userData'), 'knowledge.json');
 
@@ -1349,7 +1406,14 @@ const LOCAL_MODELS = 'http://localhost:11434';
  * moment it is not. For anyone whose chat model is local — everyone, until now —
  * this changes nothing.
  */
-function visionEndpoint(provider: ProviderConfig | undefined): string {
+function visionEndpoint(provider: ProviderConfig | undefined, vision?: VisionConfig): string {
+  // Her own address first, when she has been given one — a second Ollama on
+  // another card, say. Held to the same rule as the chat model below it: a
+  // vision endpoint that is not this machine is refused, not obeyed, because
+  // the guarantee is about where the screen goes and not about which field
+  // asked for it.
+  const own = vision?.endpoint?.trim();
+  if (own && !isRemote(own)) return own;
   const chat = provider?.endpoint?.trim();
   return chat && !isRemote(chat) ? chat : LOCAL_MODELS;
 }
@@ -1431,7 +1495,7 @@ async function glanceAtScreen() {
     const character = getActiveCharacter();
     // One call: it looks and reacts together, and keeps its place in memory so
     // the next glance is not another model load. See glancePrompt.
-    const sighting = await look(encoded, vision, visionEndpoint(provider), modelHeaders(visionEndpoint(provider)), net.fetch, {
+    const sighting = await look(encoded, vision, visionEndpoint(provider, vision), modelHeaders(visionEndpoint(provider, vision)), net.fetch, {
       system: [
         character.identity,
         character.style,
@@ -1519,7 +1583,7 @@ async function remarkOnScreenshot() {
   try {
     const bytes = readFileSync(shot.path);
     // Always the local vision model, whatever the chat model is set to.
-    const sighting = await look(bytes.toString('base64'), vision, visionEndpoint(provider), modelHeaders(visionEndpoint(provider)), net.fetch);
+    const sighting = await look(bytes.toString('base64'), vision, visionEndpoint(provider, vision), modelHeaders(visionEndpoint(provider, vision)), net.fetch);
     console.log(`[shot] ${path.basename(shot.path)} (${(bytes.length / 1024 | 0)}KB) -> ${sighting.description.length} chars`);
     const character = getActiveCharacter();
     // A screenshot arrives as a description, never a title — so without this she
@@ -2597,7 +2661,7 @@ async function openFile(attachment: Attachment, vision: VisionConfig, provider: 
       // Only ever reached when she cannot be sent the picture itself — see
       // eyesFor. A far fuller read than the glance prompt, because this text is
       // now the only thing standing in for the image.
-      const sighting = await look(imageForSending(source), vision, visionEndpoint(provider), modelHeaders(visionEndpoint(provider)), net.fetch, { ask: READ_IT_ALL_PROMPT });
+      const sighting = await look(imageForSending(source), vision, visionEndpoint(provider, vision), modelHeaders(visionEndpoint(provider, vision)), net.fetch, { ask: READ_IT_ALL_PROMPT });
       console.log(`[attach] ${vision.model} read ${name} into ${sighting.description.length} chars`);
       return sighting.description;
     }
@@ -2620,7 +2684,7 @@ async function openFile(attachment: Attachment, vision: VisionConfig, provider: 
       // frames, which is a fact about the video that no single frame contains.
       const sighting = await look(
         frames.map(frame => readFileSync(frame).toString('base64')),
-        vision, visionEndpoint(provider), modelHeaders(visionEndpoint(provider)), net.fetch,
+        vision, visionEndpoint(provider, vision), modelHeaders(visionEndpoint(provider, vision)), net.fetch,
         { ask: `These are ${frames.length} frames taken at even intervals across one video, in order. Say plainly what the video shows and what happens across it, in two or three sentences. Describe it as one video, not as separate pictures.` },
       );
       parts.push(sighting.description);
@@ -7892,6 +7956,11 @@ app.whenReady().then(() => {
   // waits on or blocks a conversation.
   setTimeout(() => { void autoSyncVault(); }, 60_000);
   setInterval(() => { void autoSyncVault(); }, 60 * 60_000);
+  // A first pass shortly after boot so a backlog the desk sent overnight is
+  // already being worked through by the time anyone asks, then every five
+  // minutes. Both are no-ops until vision is switched on and shots exist.
+  setTimeout(() => { void lookAtSyncedShots(); }, 90_000);
+  setInterval(() => { void lookAtSyncedShots(); }, SHOT_LOOK_TICK_MS);
   // The system sampler. Lightweight and self-contained, so a slow sample can
   // never hold up a conversation; events it fires go through interject, the
   // same channel her other unprompted lines use.
