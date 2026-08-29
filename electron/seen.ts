@@ -115,6 +115,14 @@ export function moreThanOnePass(held: Record<string, string[]>, captions: Captio
  * shots that arrived with nothing said about them, which is the backlog synced
  * before the desk started writing descriptions, and anything taken while its
  * vision model was unavailable.
+ *
+ * The cost, stated so nobody has to rediscover it: a description that arrives
+ * is taken on trust and never improved on. A poor caption written on the desk
+ * is a poor caption here, permanently, because this will not look again at
+ * something that already has words. That is what not paying twice buys and it
+ * is the right trade — the alternative is a CPU inference to second-guess an
+ * answer another machine already has — but it is a real edge, and the fix if it
+ * ever bites is to improve the caption where it is written, not to look again.
  */
 export function describedShots(log: Record<string, { shot?: string; description?: string }[]>): Record<string, string[]> {
   const out: Record<string, string[]> = {};
