@@ -11,7 +11,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { claimsDesktopAction, claimsTickOff, dropInventedContact, dropInventedScreenTalk, dropRepeatedAgendaMentions, dropRepeatedParagraphs, dropRoleHeader, dropStageDirections, dropTackedOnParagraphs, readsLikeAssistant, dropRepeatedOpener, dropEchoOpener, dropRepeatedSentences, fixStatedClock, fixStatedReminderTime } from '../electron/reply';
+import { answersThePrompt, claimsDesktopAction, claimsTickOff, dropInventedContact, dropInventedScreenTalk, dropRepeatedAgendaMentions, dropRepeatedParagraphs, dropRoleHeader, dropStageDirections, dropTackedOnParagraphs, readsLikeAssistant, dropRepeatedOpener, dropEchoOpener, dropRepeatedSentences, fixStatedClock, fixStatedReminderTime } from '../electron/reply';
 
 // -- claiming to have touched the machine -------------------------------------
 
@@ -392,4 +392,17 @@ test('a reminder confirmed at the wrong time is corrected to the one saved', () 
   assert.equal(fixStatedReminderTime('Noon, 12:30pm, got it.', '12:00 PM'), 'Noon, 12:00 PM, got it.');
   assert.equal(fixStatedReminderTime('12:53 PM. Eat.', '12:53 PM'), '12:53 PM. Eat.');
   assert.equal(fixStatedReminderTime('No clock here.', '5:00 PM'), 'No clock here.');
+});
+
+test('a line that quotes the cue and argues with it is not a line to them', () => {
+  const ghost = '\u{1F644} \u201cSay something\u201d isn\u2019t a command \u2014 it\u2019s a ghost of a conversation you\u2019re too lazy to finish.';
+  assert.equal(answersThePrompt(ghost, 'Say something.'), true);
+  assert.equal(answersThePrompt(ghost.replace('Say something', 'Say it'), 'Say it.'), true);
+  assert.equal(answersThePrompt('"Remind them" is not how you ask for anything.', 'Remind them.'), true);
+  // Her own words, unquoted, are hers to say.
+  assert.equal(answersThePrompt('Say something before I forget you exist.', 'Say something.'), false);
+  assert.equal(answersThePrompt('The bins are still out there, you know.', 'Say something.'), false);
+  // A cue too short to be worth matching, and a real user turn.
+  assert.equal(answersThePrompt('"Go" is not a plan.', 'Go.'), false);
+  assert.equal(answersThePrompt('They said "hello" and left.', 'They wrote: "hello"'), false);
 });

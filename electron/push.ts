@@ -227,3 +227,33 @@ export function nextNudgeDelay(prefs: Pick<PushPrefs, 'quietFrom' | 'quietTo'>, 
   if (wake.getTime() <= at.getTime()) wake.setDate(wake.getDate() + 1);
   return wake.getTime() - now.getTime() + (5 + random() * 35) * 60_000;
 }
+
+/**
+ * The longest she may go without reaching them at all.
+ *
+ * NUDGE_GAP_MS above caps the gap between *attempts*, which is not the same
+ * thing and was mistaken for it: an attempt that gets refused — her line named
+ * a finished errand, they were mid-conversation, the app restarted before the
+ * timer fired — costs the whole cycle, and a morning of deploys cost eleven of
+ * them in a row. This is measured from when something of hers last actually
+ * landed, and it is checked on the five-minute beat rather than the random one,
+ * so nothing that cancels a booking can cancel this.
+ */
+export const NUDGE_FLOOR_MS = 2 * 60 * 60_000;
+
+/** After a composed line was thrown away before it could go out, try again in. */
+export const NUDGE_RETRY_MS = 6 * 60_000;
+
+/**
+ * Has it been too long since anything of hers reached them?
+ *
+ * `lastReachedAt` counts a delivered push or a message from them — a
+ * conversation is her reaching them too, and buzzing someone mid-reply is the
+ * noise this is supposed to prevent, not cause. Zero means nothing is known
+ * yet, which is not the same as overdue.
+ */
+export function nudgeOverdue(lastReachedAt: number, now: number, prefs: Pick<PushPrefs, 'quietFrom' | 'quietTo'>, nowLocal: Date): boolean {
+  if (!lastReachedAt) return false;
+  if (inQuietHours(prefs, nowLocal)) return false;
+  return now - lastReachedAt >= NUDGE_FLOOR_MS;
+}

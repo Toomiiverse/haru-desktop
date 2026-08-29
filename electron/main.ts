@@ -54,7 +54,7 @@ import { haruNote, rangeStats, type HaruNote, type RangeName, type RangeStats } 
 import { describeRating, entryFor, journalPrompt, readEntries, readJournalConfig, readRating, recentTrend, shouldAsk, upsertEntry, SCALE_MAX, type JournalConfig, type JournalEntry } from './journal';
 import { formatList, formatMedia, formatMissing, lookUp, readAniListConfig, userList, type AniListConfig, type ListEntry, type MediaKind } from './anilist';
 import { createDesktopShortcut, desktopShortcutPath, isAutoStartEnabled, setAutoStart, startedHidden } from './startup';
-import { dropRoleHeader, dropTackedOnParagraphs, dropInventedContact, dropInventedScreenTalk, dropRepeatedAgendaMentions, dropRepeatedParagraphs, dropStageDirections, dropRepeatedOpener, dropEchoOpener, dropRepeatedSentences, fixStatedClock, fixStatedReminderTime } from './reply';
+import { answersThePrompt, dropRoleHeader, dropTackedOnParagraphs, dropInventedContact, dropInventedScreenTalk, dropRepeatedAgendaMentions, dropRepeatedParagraphs, dropStageDirections, dropRepeatedOpener, dropEchoOpener, dropRepeatedSentences, fixStatedClock, fixStatedReminderTime } from './reply';
 import { runToolLoop } from './toolloop';
 import { chatTools, coerceKnowledgeCategory, runChatTool, type ToolAvailability, type ToolDeps } from './tools';
 import { createMemoryStore } from './memorystore';
@@ -80,7 +80,7 @@ import { describeMerge } from './memorysync';
 import { DiscordLink, looksLikeUserId, readDiscordConfig, useOfChannel, type DiscordConfig } from './discord';
 import { reactedPrompt, readReaction, REACTION_COOLDOWN_MS } from './reacted';
 import { startWebServer, type WebDeps } from './webserver';
-import { inQuietHours, newVapidKeys, pushRequest, readPushDevices, readPushPrefs, type PushDevice, type PushPrefs, nextNudgeDelay } from './push';
+import { inQuietHours, newVapidKeys, pushRequest, readPushDevices, readPushPrefs, type PushDevice, type PushPrefs, nextNudgeDelay, NUDGE_RETRY_MS, nudgeOverdue } from './push';
 import { CHECK_EVERY_MS, describeUpdate, progressStep, whyNotCheck, type UpdateState } from './updates';
 import { BREVITY, summonedLine } from './summoned';
 import { CHOICES_TOOL, readChoices } from './choices';
@@ -4389,16 +4389,27 @@ async function inHerVoice(answer: string, recent: { role: string; content: strin
 }
 
 async function ollamaQuip(system: string, user: string, config: ProviderConfig) {
-  const message = await ollamaPost(
-    [{ role: 'system', content: system }, { role: 'user', content: user }],
-    config,
-    // Hotter than normal chat so repeated reactions do not converge on the same
-    // phrasing, which is the whole complaint with canned lines.
-    { tools: false, temperature: 1 },
-  );
-  const line = (message.content ?? '').trim().split('\n').find(text => text.trim())?.trim() ?? '';
-  // Models like to wrap a one-liner in quotes despite being told not to.
-  const cleaned = line.replace(/^["'“”]+|["'“”]+$/g, '').trim();
+  const once = async (instruction: string) => {
+    const message = await ollamaPost(
+      [{ role: 'system', content: instruction }, { role: 'user', content: user }],
+      config,
+      // Hotter than normal chat so repeated reactions do not converge on the same
+      // phrasing, which is the whole complaint with canned lines.
+      { tools: false, temperature: 1 },
+    );
+    const line = (message.content ?? '').trim().split('\n').find(text => text.trim())?.trim() ?? '';
+    // Models like to wrap a one-liner in quotes despite being told not to.
+    return line.replace(/^["'“”]+|["'“”]+$/g, '').trim();
+  };
+  let cleaned = await once(system);
+  // The instruction is not something they said, and she has quoted it back at
+  // them on the phone twice. Told once, plainly, and asked again — see
+  // answersThePrompt.
+  if (cleaned && answersThePrompt(cleaned, user)) {
+    console.log(`[ai] she answered the stage direction ("${user}") instead of using it — asking again`);
+    cleaned = await once(`${system} The short line you are being handed is the cue to speak. It is not something they said — they have said nothing. Never quote it, and never reply to it.`);
+    if (answersThePrompt(cleaned, user)) throw new Error('Answered the cue instead of them.');
+  }
   if (!cleaned) throw new Error('No line returned.');
   return toLength(cleaned, 220);
 }
@@ -6391,16 +6402,34 @@ function saveWhereabouts(next: Whereabouts) {
   store.set('whereabouts', next);
 }
 
-function getPush(): { devices: PushDevice[]; prefs: PushPrefs } {
+function getPush(): { devices: PushDevice[]; prefs: PushPrefs; nextNudgeAt: number; lastReachedAt: number } {
   const saved = (store.get('push') ?? {}) as Record<string, unknown>;
-  return { devices: readPushDevices(saved.devices), prefs: readPushPrefs(saved.prefs) };
+  return {
+    devices: readPushDevices(saved.devices),
+    prefs: readPushPrefs(saved.prefs),
+    // Both on disk rather than in memory, because the thing that kept losing
+    // them was the process ending. See scheduleNextPush and nudgeOverdue.
+    nextNudgeAt: Number(saved.nextNudgeAt ?? 0) || 0,
+    lastReachedAt: Number(saved.lastReachedAt ?? 0) || 0,
+  };
 }
 
-function savePush(next: { devices?: PushDevice[]; prefs?: PushPrefs }) {
+function savePush(next: { devices?: PushDevice[]; prefs?: PushPrefs; nextNudgeAt?: number; lastReachedAt?: number }) {
   const merged = { ...((store.get('push') ?? {}) as Record<string, unknown>) };
   if (next.devices) merged.devices = next.devices;
   if (next.prefs) merged.prefs = next.prefs;
+  if (next.nextNudgeAt !== undefined) merged.nextNudgeAt = next.nextNudgeAt;
+  if (next.lastReachedAt !== undefined) merged.lastReachedAt = next.lastReachedAt;
   store.set('push', merged);
+}
+
+/**
+ * When something of hers last got through — a push that landed, or a message
+ * from them, whichever is later. What the two-hour floor is measured from.
+ */
+function lastReachedThem(): number {
+  const spoke = Date.parse(getMood().lastMessageAt ?? '');
+  return Math.max(getPush().lastReachedAt, Number.isFinite(spoke) ? spoke : 0);
 }
 
 /**
@@ -6464,6 +6493,9 @@ async function pushToPhone(kind: 'random' | 'events' | 'system' | 'weather', tex
         // log from one that was never attempted — which is exactly the question
         // asked when a phone stays quiet.
         console.log(`[push] delivered a ${kind} push to "${device.name.slice(0, 40)}" (${response.status})`);
+        // The clock the two-hour floor runs against. Written here, at the one
+        // point that knows a push actually left the building.
+        savePush({ lastReachedAt: Date.now() });
       }
     } catch (error) {
       console.warn('[push] could not send:', error instanceof Error ? error.message : error);
@@ -6566,10 +6598,31 @@ async function boredNudge(): Promise<string | null> {
   }
 }
 
-async function pesterOnPush() {
+/**
+ * How many lines she gets to compose before the beat is given up on.
+ *
+ * interject() throws away a line that names a finished errand, and the 9B
+ * free-associates onto old ones often enough that three of eight unprompted
+ * lines in one morning went in the bin. A refusal used to end the attempt and
+ * cost the whole 45-120 minutes; composing another costs seconds.
+ */
+const NUDGE_TRIES = 3;
+
+/** How long the floor waits after an attempt that was deliberately silent. */
+const FLOOR_BACKOFF_MS = 20 * 60_000;
+
+/**
+ * 'sent' — something of hers went out. 'refused' — she had a line and it was
+ * thrown away, so it is worth coming back soon. 'quiet' — deliberately nothing
+ * (asleep, mid-conversation, silenced, nothing to chase), which is not a
+ * failure and must not turn into a retry storm.
+ */
+type PesterResult = 'sent' | 'refused' | 'quiet';
+
+async function pesterOnPush(): Promise<PesterResult> {
   const { devices, prefs } = getPush();
-  if (!webServer || !devices.length) return;
-  if (inQuietHours(prefs, zonedNow(CHAT_TIMEZONE))) return;
+  if (!webServer || !devices.length) return 'quiet';
+  if (inQuietHours(prefs, zonedNow(CHAT_TIMEZONE))) return 'quiet';
   // Something on the list that needs chasing comes first, always.
   if (prefs.events) {
     const said = await nudgeForPhone();
@@ -6577,19 +6630,33 @@ async function pesterOnPush() {
       // Through the aside log rather than straight to the phone: written down,
       // it is on the page when they tap the notification, and the push goes
       // out from there by its kind like every other unprompted line.
-      if (noteAside(said.line, 'reminder')) console.log(`[push] pestered about "${said.about}"`);
-      return;
+      if (noteAside(said.line, 'reminder')) {
+        console.log(`[push] pestered about "${said.about}"`);
+        return 'sent';
+      }
+      return 'refused';
     }
   }
-  if (!prefs.random) return;
-  if (chasing || Date.now() - lastRemindedAt < REMINDER_SPACING_MS) return;
-  if (isSilenced(store.get('pushback') as Pushback | undefined, Date.now())) return;
+  if (!prefs.random) return 'quiet';
+  if (chasing || Date.now() - lastRemindedAt < REMINDER_SPACING_MS) return 'quiet';
+  if (isSilenced(store.get('pushback') as Pushback | undefined, Date.now())) return 'quiet';
   const mood = getMood();
-  if (mood.lastMessageAt && Date.now() - Date.parse(mood.lastMessageAt) < TALKING_RECENTLY_MS) return;
-  const line = await boredNudge();
-  if (!line) return;
-  lastRemindedAt = Date.now();
-  if (interject(line, { source: 'idle' })) console.log('[push] sent a bored nudge');
+  if (mood.lastMessageAt && Date.now() - Date.parse(mood.lastMessageAt) < TALKING_RECENTLY_MS) return 'quiet';
+  let composed = false;
+  for (let attempt = 1; attempt <= NUDGE_TRIES; attempt++) {
+    const line = await boredNudge();
+    if (!line) continue;
+    composed = true;
+    if (interject(line, { source: 'idle' })) {
+      // Only once something was actually said: this is the spacing every other
+      // unprompted path reads, and a line nobody saw has not used any of it up.
+      lastRemindedAt = Date.now();
+      console.log(`[push] sent a bored nudge${attempt > 1 ? ` (on try ${attempt})` : ''}`);
+      return 'sent';
+    }
+  }
+  if (composed) console.log(`[push] she had ${NUDGE_TRIES} goes and every one was refused — coming back in ${Math.round(NUDGE_RETRY_MS / 60_000)} min`);
+  return composed ? 'refused' : 'quiet';
 }
 
 // ---- Speaking up on her own: left hanging, the weather, what is coming up ----
@@ -6728,6 +6795,7 @@ async function proactiveTick() {
   const config = store.get('ai.config') as ProviderConfig | undefined;
   if (!config?.model) return;
   await tallyIgnored(config);
+  await checkNudgeFloor();
   const { devices, prefs } = getPush();
   // The weather is read even with no phone to buzz: it is in her prompt.
   if (!devices.length) { await pollWeather(); return; }
@@ -6783,12 +6851,77 @@ function startProactive() {
   setTimeout(() => { void proactiveTick(); }, 20_000);
 }
 
-/** The next beat: a random while off, never in the quiet hours. One timer, rebooked after each. */
-function scheduleNextPush() {
+/**
+ * The next beat: a random while off, never in the quiet hours. One timer,
+ * rebooked after each — and written down, because it used to die with the
+ * process.
+ *
+ * Every restart drew a fresh 45-120 minutes and threw away whatever was
+ * pending, so a morning of eleven deploys meant eleven cancelled bookings and
+ * not one nudge. `resume` picks the old booking back up; if it came due while
+ * she was down, she takes it shortly after coming back rather than pretending
+ * it never existed. A refused line comes back in minutes, not the full cycle.
+ */
+function scheduleNextPush(resume = false, after: PesterResult | null = null) {
   if (pushPesterTimer) clearTimeout(pushPesterTimer);
-  const delay = nextNudgeDelay(getPush().prefs, zonedNow(CHAT_TIMEZONE));
+  const now = Date.now();
+  const booked = resume ? getPush().nextNudgeAt : 0;
+  let delay: number;
+  if (after === 'refused') {
+    delay = NUDGE_RETRY_MS;
+  } else if (booked > now) {
+    delay = booked - now;
+    console.log(`[push] picking the booking back up where the restart left it: ${Math.round(delay / 60_000)} min`);
+  } else if (booked) {
+    // Due while she was off. Soon, with a little slack, so a crash loop cannot
+    // turn a missed nudge into a burst of them.
+    delay = (3 + Math.random() * 5) * 60_000;
+    console.log(`[push] the nudge booked for ${new Date(booked).toISOString()} came due while she was down — in ${Math.round(delay / 60_000)} min instead`);
+  } else {
+    delay = nextNudgeDelay(getPush().prefs, zonedNow(CHAT_TIMEZONE));
+  }
+  savePush({ nextNudgeAt: now + delay });
   console.log(`[push] next unprompted push in ${Math.round(delay / 60_000)} min`);
-  pushPesterTimer = setTimeout(() => { void pesterOnPush().finally(scheduleNextPush); }, delay);
+  pushPesterTimer = setTimeout(() => { void pesterOnPush().then(result => scheduleNextPush(false, result), () => scheduleNextPush()); }, delay);
+}
+
+/**
+ * The floor: two hours without a word from her and she says something,
+ * whatever the random beat is doing.
+ *
+ * On the five-minute proactive beat rather than its own timer, so that none of
+ * the things that swallow the random one — a restart, a refused line, a guard
+ * that returned early — can swallow this as well.
+ */
+/**
+ * Not before this, whatever the floor says.
+ *
+ * The floor rides the five-minute beat, and an attempt that comes to nothing
+ * leaves it overdue — so without this it would compose three lines every five
+ * minutes for as long as the cause lasted. A refused line is worth coming back
+ * to soon; a deliberate silence is not going to change in five minutes.
+ */
+let floorQuietUntil = 0;
+
+async function checkNudgeFloor() {
+  const { devices, prefs } = getPush();
+  if (!webServer || !devices.length || !prefs.random) return;
+  if (Date.now() < floorQuietUntil) return;
+  const reached = lastReachedThem();
+  if (!reached) {
+    // First run since this existed: start the clock now rather than treating an
+    // unknown as overdue and buzzing them the moment she boots.
+    savePush({ lastReachedAt: Date.now() });
+    return;
+  }
+  if (!nudgeOverdue(reached, Date.now(), prefs, zonedNow(CHAT_TIMEZONE))) return;
+  console.log(`[push] ${Math.round((Date.now() - reached) / 60_000)} min since anything of hers landed — going on the floor, not the beat`);
+  const result = await pesterOnPush();
+  // Rebook the random beat from here, so the floor and the beat do not end up
+  // firing on top of each other.
+  if (result === 'sent') return scheduleNextPush();
+  floorQuietUntil = Date.now() + (result === 'refused' ? NUDGE_RETRY_MS : FLOOR_BACKOFF_MS);
+  console.log(`[push] the floor came to nothing (${result}) — not trying again for ${Math.round((floorQuietUntil - Date.now()) / 60_000)} min`);
 }
 
 const DEFAULT_WEB_PORT = 8787;
@@ -7328,7 +7461,7 @@ async function startWebDoor() {
     webTrouble = '';
     // Started once and left running: each tick re-checks the door and the
     // subscriptions itself, so closing the door silences it with no bookkeeping.
-    if (!pushPesterTimer) scheduleNextPush();
+    if (!pushPesterTimer) scheduleNextPush(true);
     startProactive();
     startChasing();
   } catch (error) {

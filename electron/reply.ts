@@ -584,3 +584,24 @@ export function fixStatedReminderTime(reply: string, savedTime: string): string 
     return said === savedTime ? whole : savedTime;
   });
 }
+
+/**
+ * She answered the stage direction instead of using it.
+ *
+ * Every line she says unprompted is composed by handing the model a bare
+ * instruction as the user turn — "Say something.", "Say it.", "Remind them." —
+ * and twice in one day the same sentence came back and went to their phone as a
+ * notification: 'Say something' isn't a command, it's a ghost of a conversation
+ * you're too lazy to finish. To them that reads as her arguing with a message
+ * they never sent.
+ *
+ * Only a quotation counts. She is allowed to say "say something" in a sentence
+ * of her own; what she is not allowed to do is put the prompt in quotes and
+ * answer it, which is the shape every instance has taken.
+ */
+export function answersThePrompt(reply: string, priming: string): boolean {
+  const words = priming.replace(/[.!?\s]+$/, '').trim();
+  if (words.length < 4) return false;
+  const quoted = new RegExp(`["'\u201c\u201d\u2018\u2019]\\s*${words.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*["'\u201c\u201d\u2018\u2019]`, 'i');
+  return quoted.test(reply);
+}

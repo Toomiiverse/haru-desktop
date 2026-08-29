@@ -9,7 +9,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createPublicKey, verify } from 'node:crypto';
-import { inQuietHours, newVapidKeys, pushRequest, readPushDevices, readPushPrefs, sealPayload, vapidToken, nextNudgeDelay, NUDGE_GAP_MS } from '../electron/push';
+import { inQuietHours, newVapidKeys, pushRequest, readPushDevices, readPushPrefs, sealPayload, vapidToken, nextNudgeDelay, NUDGE_GAP_MS, NUDGE_FLOOR_MS, nudgeOverdue } from '../electron/push';
 
 // -- RFC 8291 Appendix A, verbatim -------------------------------------------
 
@@ -132,4 +132,19 @@ test('the next nudge is a random while off, never in the quiet hours, and not on
   assert.ok(nextNudgeDelay(prefs, at(2), fixed(0)) > 3 * 60 * 60_000);
   // No quiet hours at all: the plain gap.
   assert.equal(nextNudgeDelay({ quietFrom: '08:00', quietTo: '08:00' }, at(2), fixed(0)), NUDGE_GAP_MS[0]);
+});
+
+test('two hours without her landing anything is overdue, and the quiet hours are not', () => {
+  const prefs = { quietFrom: '23:00', quietTo: '06:00' };
+  const noon = new Date(2026, 7, 28, 12, 0, 0, 0);
+  const now = noon.getTime();
+  // Just under, and just over.
+  assert.equal(nudgeOverdue(now - NUDGE_FLOOR_MS + 60_000, now, prefs, noon), false);
+  assert.equal(nudgeOverdue(now - NUDGE_FLOOR_MS, now, prefs, noon), true);
+  assert.equal(nudgeOverdue(now - 5 * 60 * 60_000, now, prefs, noon), true);
+  // Asleep: a whole night overdue is still not a reason to buzz them at three.
+  const small = new Date(2026, 7, 28, 3, 0, 0, 0);
+  assert.equal(nudgeOverdue(small.getTime() - 6 * 60 * 60_000, small.getTime(), prefs, small), false);
+  // Nothing known yet is not the same as overdue.
+  assert.equal(nudgeOverdue(0, now, prefs, noon), false);
 });
