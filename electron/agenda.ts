@@ -585,6 +585,37 @@ export function putOffInstruction(latestMessage: string): string {
  * How many days between two date keys, counted on the calendar rather than the
  * clock, so daylight saving cannot make a day 23 hours long and lose one.
  */
+/**
+ * The caller's formatter, pinned to UTC.
+ *
+ * A date key is a calendar date and nothing else — 2026-09-03 is a Thursday
+ * everywhere, and asking which weekday it is somewhere is a category error. The
+ * old line made it one twice over: it built local midnight with `new Date(y, m,
+ * d)` and then handed that instant to whatever timeZone the caller's formatter
+ * carried. The two agree only when the formatter's zone is east of the machine's
+ * — which every caller happened to satisfy, until standing.ts passed a UTC
+ * formatter and the desk ran at UTC+8, where local midnight is 16:00 the day
+ * before and Thursday came back as Wednesday.
+ *
+ * So the instant is built with Date.UTC, the way daysBetween above already
+ * builds its own, and read back in UTC. The caller's locale is kept, since that
+ * is a real choice about wording; its timeZone is not, since there is no instant
+ * here for a zone to apply to.
+ *
+ * Cached because agendaBlock calls this once per item and building an
+ * Intl.DateTimeFormat is the expensive part of it.
+ */
+const calendarWeekday = new Map<string, Intl.DateTimeFormat>();
+
+function asCalendarDate(weekday: Intl.DateTimeFormat): Intl.DateTimeFormat {
+  const { locale } = weekday.resolvedOptions();
+  const held = calendarWeekday.get(locale);
+  if (held) return held;
+  const made = new Intl.DateTimeFormat(locale, { weekday: 'long', timeZone: 'UTC' });
+  calendarWeekday.set(locale, made);
+  return made;
+}
+
 function daysBetween(fromKey: string, toKey: string) {
   const at = (key: string) => { const [y, m, d] = key.split('-').map(Number); return Date.UTC(y, m - 1, d); };
   return Math.round((at(toKey) - at(fromKey)) / 86_400_000);
@@ -605,8 +636,8 @@ export function relativeDay(dateKey: string, todayKey: string, weekday: Intl.Dat
   if (dateKey === shiftDays(todayKey, 1)) return 'tomorrow';
   if (dateKey === shiftDays(todayKey, -1)) return 'yesterday';
   const [year, month, day] = dateKey.split('-').map(Number);
-  const when = new Date(year, month - 1, day);
-  const name = weekday.format(when);
+  const when = new Date(Date.UTC(year, month - 1, day));
+  const name = asCalendarDate(weekday).format(when);
   const away = daysBetween(todayKey, dateKey);
   if (away > 1 && away <= 14) return `${name}, ${away} days from now`;
   if (away < -1 && away >= -14) return `last ${name}, ${-away} days ago`;
