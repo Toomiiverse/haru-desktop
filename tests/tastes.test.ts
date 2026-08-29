@@ -102,7 +102,7 @@ test('her things reach the prompt as views to hold, and an unsettled one does no
   assert.match(said, /Things of your own — not theirs/);
   assert.match(said, /Hollow Knight \(game, yours for 2 nights\): Bleak and beautiful/);
   assert.match(said, /The one you rate: Hornet\./);
-  assert.match(said, /You want to: finish it\./);
+  assert.match(said, /You want to finish it\./);
   assert.match(said, /when they rate something you think is worse, say so and say why/);
   assert.match(said, /say you have only read about it/);
 });

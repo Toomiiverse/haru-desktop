@@ -175,7 +175,7 @@ export function tastesInstruction(interests: Interest[]): string {
     const bits = [`${interest.name} (${interest.kind}, yours for ${interest.nights} night${interest.nights === 1 ? '' : 's'}): ${interest.stance}`];
     const sentence = (text: string) => text.replace(/[.!?]+$/, '');
     if (interest.favourite) bits.push(`The one you rate: ${sentence(interest.favourite)}.`);
-    if (interest.wants) bits.push(`You want ${sentence(interest.wants).replace(/^to\s+/i, 'to ')}.`);
+    if (interest.wants) { const want = sentence(interest.wants); bits.push(`You want ${/^to\b/i.test(want) ? want : `to ${want}`}.`); }
     return `- ${bits.join(' ')}`;
   });
   return [
