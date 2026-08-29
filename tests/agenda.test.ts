@@ -521,6 +521,14 @@ test('an unprompted line that names a party three weeks gone, or a thing already
   assert.equal(staleItemNamed('Did you ever message Connor?', errands, '2026-08-28')?.title, 'Message Connor');
   // And a one-word title has only the one word to name, so it still counts.
   assert.equal(staleItemNamed('The bins are still out there.', errands, '2026-08-28')?.title, 'Bins');
+  // Two words of the title is not the same as two words of her line. "stop"
+  // matches "Stop by the store" twice on its own — exactly, and on the
+  // three-letter root of "store" — so it cleared a bar meant to need two, and
+  // every unprompted line with "stop" in it was thrown away.
+  const store = [item({ title: 'Stop by the store', done: true })];
+  assert.equal(staleItemNamed('Stop ignoring me.', store, '2026-08-28'), null);
+  assert.equal(staleItemNamed('Just stop.', store, '2026-08-28'), null);
+  assert.equal(staleItemNamed('Stop by the store on your way home.', store, '2026-08-28')?.title, 'Stop by the store');
 });
 
 // ---- what an unprompted line may not do to the list ----

@@ -152,19 +152,23 @@ function oneSlipApart(a: string, b: string): boolean {
  */
 type WordMatch = 'exact' | 'slip' | 'prefix' | null;
 
-function howItMatches(word: string, asked: Set<string>): WordMatch {
-  if (asked.has(word)) return 'exact';
+/**
+ * How a word of the title matches, and — which matters for `whole` below —
+ * which word of the phrase did the matching.
+ */
+function howItMatches(word: string, asked: Set<string>): { how: WordMatch; by: string | null } {
+  if (asked.has(word)) return { how: 'exact', by: word };
   const root = word.slice(0, 3);
-  let prefix = false;
+  let prefix: string | null = null;
   for (const spoken of asked) {
-    if (word.length >= LONG_ENOUGH_TO_MISTYPE && spoken.length >= LONG_ENOUGH_TO_MISTYPE && oneSlipApart(word, spoken)) return 'slip';
-    if (spoken.slice(0, 3) === root) prefix = true;
+    if (word.length >= LONG_ENOUGH_TO_MISTYPE && spoken.length >= LONG_ENOUGH_TO_MISTYPE && oneSlipApart(word, spoken)) return { how: 'slip', by: spoken };
+    if (spoken.slice(0, 3) === root && !prefix) prefix = spoken;
   }
-  return prefix ? 'prefix' : null;
+  return prefix ? { how: 'prefix', by: prefix } : { how: null, by: null };
 }
 
 function sharesRoot(word: string, asked: Set<string>) {
-  return howItMatches(word, asked) !== null;
+  return howItMatches(word, asked).how !== null;
 }
 
 /**
@@ -225,7 +229,7 @@ export function findItem<T extends AgendaItem>(items: T[], phrase: string, { who
     // to stop. A missed tick is chased again; a false one writes to their list,
     // so it stays at a half until there is real usage to tune against.
     // Covered as a known gap in tests/agenda.test.ts.
-    const weigh = (word: string) => { const how = howItMatches(word, asked); return how === null ? 0 : how === 'prefix' ? 0.5 : 1; };
+    const weigh = (word: string) => { const { how } = howItMatches(word, asked); return how === null ? 0 : how === 'prefix' ? 0.5 : 1; };
     const sharedWords = [...words].filter(word => sharesRoot(word, asked));
     const shared = sharedWords.length;
     if (!shared) continue;
@@ -240,7 +244,15 @@ export function findItem<T extends AgendaItem>(items: T[], phrase: string, { who
     // the title to be named properly — every significant word of it, up to two —
     // which still catches "Ammie's party is tomorrow" and stops an ordinary
     // English word colliding with somebody's errand.
-    if (whole && shared < Math.min(2, words.size)) continue;
+    //
+    // Counted by the words of *their line*, not of the title: "stop" alone
+    // matches "Stop by the store" twice over, exactly on "stop" and on the
+    // three-letter root of "store", so one ordinary word cleared a bar meant to
+    // need two. Every unprompted line containing "stop" was being thrown away.
+    if (whole) {
+      const named = new Set([...words].map(word => howItMatches(word, asked).by).filter((word): word is string => Boolean(word)));
+      if (named.size < Math.min(2, words.size)) continue;
+    }
     if (shared < 2 && !sharedWords.some(tellsThemApart)) continue;
     // Scored both ways round, best wins: against everything the title says, and
     // against just the part that names the thing.
@@ -257,7 +269,7 @@ export function findItem<T extends AgendaItem>(items: T[], phrase: string, { who
     const namesItOutright = sharedWords.some(word =>
       word.length >= LONG_ENOUGH_TO_MISTYPE
       && tellsThemApart(word)
-      && howItMatches(word, asked) !== 'prefix');
+      && howItMatches(word, asked).how !== 'prefix');
     const overlap = namesItOutright ? 1 : Math.max(weight / words.size, headOverlap);
     // The unfinished bonus only breaks ties between candidates; it must not lift
     // a weak match over the bar, which let "did you eat?" close out "Eat lunch
