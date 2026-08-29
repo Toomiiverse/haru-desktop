@@ -11,7 +11,7 @@ import { formatTimeOfDay, localDateKey, parseTimeOfDay, resolveDate, zonedNow } 
 import { connectGoogle, disconnectGoogle, googleStatus, pullEvents, pullTasks, pushItem, pushTask, removeItem, removeTask, saveCredentials } from './google';
 import { afterCooldown, afterEgoCooldown, afterPoke, egoInstruction, goodnightInstruction, IGNORE_THRESHOLD, IRRITATION_MAX, isGoodnight, isIgnoring, isLowEffort, isRedo, leverageInstruction, moodInstruction, nextEgo, nextIrritation, notTwiceInstruction, shoutInstruction, shoutState, type ShoutState } from './mood';
 import { nextPokeCount, pokeEmotion, pokeInstruction, pokeIrritation, pokeTier, type PokeKind } from './poke';
-import { applyEvent, chooseIdleAction, DEFAULT_VITALS, driftVitals, nextTickDelayMs, shouldPersistVitals, type Environment, type Vitals } from './vitals';
+import { applyEvent, chooseIdleAction, cueLog, DEFAULT_VITALS, driftVitals, nextTickDelayMs, shouldPersistVitals, type Environment, type Vitals } from './vitals';
 import { classificationPrompt, emotionToVitals, EMOTION_SCHEMA, EMOTIONS, NEUTRAL_EMOTION, parseEmotion, type Emotion, type EmotionName, faceForEmotion } from './emotion';
 import { withDiscoveredExpressions } from './expressions';
 import { reportCapabilities } from './capabilities';
@@ -61,7 +61,7 @@ import { createMemoryStore } from './memorystore';
 import { createKnowledgeStore } from './knowledgestore';
 import { chatSystemPrompt, freshStartInstruction, type FreshStart, type RatedReply } from './prompt';
 import { hasShout, readVoiceConfig, referenceFor, shoutReference, spokenCase, speakableText, splitForSpeech, synthesise, type SpeechClip, type VoiceConfig } from './voice';
-import { applyDecay, DEEP_RECALL_LIMIT, eventCandidates, eventsPrompt, findSuperseded, formatMemoryPrompt, isExplicitRecall, isWorthAnEvent, isWorthKeeping, isWorthRemembering, MEMORY_KINDS, migrateMemories, pruneMemories, readsAsSecondPerson, rememberInto, retrieveMemories, semanticSimilarities, summaryPrompt, supersede, THIRD_PERSON_AGAIN, vectorSimilarity, type ForgettingEntry, type MemoryKind, type MemoryRecord, type MemorySource, type RetrievalFactors, type ScoredMemory, type SessionSummary } from './memory';
+import { applyDecay, DEEP_RECALL_LIMIT, eventCandidates, eventsPrompt, findSuperseded, formatMemoryPrompt, isExplicitRecall, closeEvents, isWorthAnEvent, isWorthKeeping, isWorthRemembering, MEMORY_KINDS, migrateMemories, pruneMemories, readsAsSecondPerson, rememberInto, retrieveMemories, semanticSimilarities, summaryPrompt, supersede, THIRD_PERSON_AGAIN, vectorSimilarity, type ForgettingEntry, type MemoryKind, type MemoryRecord, type MemorySource, type RetrievalFactors, type ScoredMemory, type SessionSummary } from './memory';
 import { consolidateMemories, type ConsolidationChange } from './consolidation';
 import { appendToBlockValue, canEditBlock, findBlock, formatMemoryBlocks, replaceInBlockValue, resolveBlockValue, resetBlockToDerived, withEditedValue, type BlockSources, type MemoryBlock } from './blocks';
 import { forgetDevice, forgetEveryDevice, readWebAccess, setPassword, weakPassword, type WebAccess } from './web';
@@ -756,6 +756,15 @@ function toggleKept(id: string, force?: boolean) {
   const completedAt = done ? (target.done ? target.completedAt : new Date().toISOString()) : undefined;
   const updated = { ...target, done, completedAt };
   setKept(getKept().map(item => item.id === id ? updated : item));
+  // The memory of the thing, not just the line on the list. Nothing was
+  // listening for "it is finished" before this, so a finished event kept its
+  // place in the prompt until decay noticed it had gone quiet — six weeks after
+  // it stopped being news.
+  const closing = closeEvents(getMemories(), updated.title, new Date().toISOString(), done);
+  if (closing.changed.length) {
+    setMemories(closing.memories);
+    for (const memory of closing.changed) console.log(`[memory] "${memory.text.slice(0, 60)}" is ${done ? 'finished — she will stop bringing it up' : 'open again'}`);
+  }
   // Only tasks have a completion Google can hold. Pushing an event here would
   // rewrite the calendar entry for a state it cannot represent.
   if (updated.kind === 'task') void syncItemToGoogle(updated);
@@ -5573,6 +5582,10 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
     weather: describeWeather(getWeather().last, weatherWhere()),
     directionsNote: directions?.note,
   });
+  // Written down every reply so the eight thresholds in VITAL_CUES can be
+  // tuned from what actually fired rather than from what they were guessed to
+  // fire at. `grep '\[vitals\]' ~/haru.log | …` is the whole measurement.
+  console.log(`[vitals] ${cueLog(vitals, getMood().irritation)}`);
   // What she can still see. Not only this message: a picture has to ride along
   // again on the next turn or "what is in week three" cannot be answered, and
   // attachmentsInPlay is where the bound on doing that lives.

@@ -26,6 +26,8 @@ import {
   readsAsSecondPerson,
   migrateMemories,
   EVIDENCE_KINDS,
+  closesEvent,
+  closeEvents,
   summaryPrompt,
   eventsPrompt,
   isWorthAnEvent,
@@ -489,4 +491,54 @@ test('every kind the code can write survives a read from disk', () => {
   }], '2026-08-29T00:00:00.000Z');
   assert.deepEqual((record.evidence ?? []).map(entry => entry.kind), [...EVIDENCE_KINDS]);
   assert.equal(EVIDENCE_KINDS.includes('merge'), true);
+});
+
+test('ticking a thing off closes the memory of it', () => {
+  // The live pairs. The title carries the doing words and the memory carries
+  // what was done, so the match has to survive "Get … done" against "Set up …".
+  assert.equal(closesEvent('Rental inspection', 'Rental inspection went well, no issues found'), true);
+  assert.equal(closesEvent('Get the TV power connector done', 'Set up TV power connector, TV works fine now'), true);
+  assert.equal(closesEvent('Fan hub installation', 'Fan hub installation postponed'), true);
+});
+
+test('and closes nothing it is not sure about', () => {
+  assert.equal(closesEvent('Rental inspection', 'Picked up Hanya’s PC screen'), false);
+  assert.equal(closesEvent('Pick up the motherboard from Umart', 'Set up TV power connector'), false);
+  // Nothing left after the doing words: a title like this would otherwise match
+  // every event in the store.
+  assert.equal(closesEvent('Get it done', 'Rental inspection went well'), false);
+  assert.equal(closesEvent('', 'Rental inspection went well'), false);
+});
+
+test('a closed event goes dormant, with the reason written down', () => {
+  const now = '2026-08-29T12:00:00.000Z';
+  const memories: MemoryRecord[] = [
+    { id: 'e1', text: 'Rental inspection went well, no issues found', kind: 'event', createdAt: now, lastSeenAt: now, mentions: 1, status: 'active' },
+    { id: 'e2', text: 'Picked up Hanya’s PC screen', kind: 'event', createdAt: now, lastSeenAt: now, mentions: 1, status: 'active' },
+  ];
+  const { memories: after, changed } = closeEvents(memories, 'Rental inspection', now);
+  assert.deepEqual(changed.map(memory => memory.id), ['e1']);
+  assert.equal(after[0].status, 'dormant');
+  assert.equal(after[1].status, 'active');
+  const why = (after[0].evidence ?? []).find(entry => entry.kind === 'closed');
+  assert.match(why?.detail ?? '', /"Rental inspection" ticked off/);
+});
+
+test('un-ticking opens it again, and nothing else is ever touched', () => {
+  const now = '2026-08-29T12:00:00.000Z';
+  const memories: MemoryRecord[] = [
+    { id: 'e1', text: 'Store closed Monday to Tuesday for cleaning', kind: 'event', createdAt: now, lastSeenAt: now, mentions: 1, status: 'dormant' },
+    // Same words, but a standing instruction rather than a thing that happened.
+    { id: 'p1', text: 'Wants the store cleaning done without being asked twice', kind: 'preference', createdAt: now, lastSeenAt: now, mentions: 1, status: 'active' },
+    { id: 'e2', text: 'Store cleaning finished early', kind: 'event', createdAt: now, lastSeenAt: now, mentions: 1, status: 'active', supersededBy: 'e9' },
+  ];
+  const reopened = closeEvents(memories, 'Store cleaning', now, false);
+  assert.deepEqual(reopened.changed.map(memory => memory.id), ['e1']);
+  assert.equal(reopened.memories[0].status, 'active');
+  assert.equal(reopened.memories[1].status, 'active');
+  assert.equal(reopened.memories[2].status, 'active');
+  // Nothing matched, nothing rebuilt: the same array comes back.
+  const none = closeEvents(memories, 'Something else entirely', now);
+  assert.equal(none.memories, memories);
+  assert.deepEqual(none.changed, []);
 });

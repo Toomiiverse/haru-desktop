@@ -10,6 +10,8 @@ import {
   vitalsInstruction,
   VITAL_CUES_SPOKEN,
   shouldPersistVitals,
+  spokenCues,
+  cueLog,
   VITALS_SAVE_DELTA,
   VITALS_SAVE_INTERVAL_MS,
   type Vitals,
@@ -197,4 +199,31 @@ test('and so is a long quiet stretch, so the saved copy cannot drift far behind'
 
 test('with nothing saved yet, the first write always happens', () => {
   assert.equal(shouldPersistVitals(DEFAULT_VITALS, null, 0), true);
+});
+
+test('the log names which cues spoke, how strongly, and the state behind them', () => {
+  const sleepy = { ...DEFAULT_VITALS, sleepiness: 0.9, stress: 0.8 };
+  const line = cueLog(sleepy, 0);
+  assert.match(line, /drowsy 0\.\d\d/);
+  assert.match(line, /on edge 0\.\d\d/);
+  assert.match(line, /sleepiness 0\.90/);
+  // Every vital is in the line, or a threshold cannot be tuned from it.
+  for (const key of Object.keys(DEFAULT_VITALS)) assert.match(line, new RegExp(key));
+});
+
+test('the log says when the warm cues were held back, and when nothing spoke', () => {
+  const fond = { ...DEFAULT_VITALS, affection: 0.95 };
+  assert.match(cueLog(fond, 0), /^fond /);
+  const annoyed = cueLog(fond, 5);
+  assert.match(annoyed, /^none, warm cues withheld/);
+  assert.equal(cueLog(undefined), 'none — no vitals');
+});
+
+test('spokenCues and vitalsInstruction cannot drift apart', () => {
+  const state = { ...DEFAULT_VITALS, sleepiness: 0.8, happiness: 0.05, stress: 0.9 };
+  const spoke = spokenCues(state, 0);
+  assert.ok(spoke.length <= VITAL_CUES_SPOKEN);
+  assert.equal(vitalsInstruction(state, 0), spoke.map(entry => entry.cue.line).join(' '));
+  // Strongest first, so the log's order is the order she was told them in.
+  assert.deepEqual([...spoke].sort((a, b) => b.strength - a.strength), spoke);
 });

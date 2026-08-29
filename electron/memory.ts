@@ -35,7 +35,7 @@ export type MemoryType = typeof MEMORY_TYPES[number];
  * session next door, which had just fixed the same shape in asides.ts, where a
  * short SOURCES list rewrote three real sources to 'other' on every read.
  */
-export const EVIDENCE_KINDS = ['statement', 'repeat', 'confirmation', 'contradiction', 'inference', 'merge'] as const;
+export const EVIDENCE_KINDS = ['statement', 'repeat', 'confirmation', 'contradiction', 'inference', 'merge', 'closed'] as const;
 export type EvidenceKind = typeof EVIDENCE_KINDS[number];
 
 export const MEMORY_SOURCES = ['conversation', 'explicit', 'inferred', 'activity', 'import'] as const;
@@ -877,6 +877,66 @@ export function isWorthAnEvent(text: string): boolean {
   // quoted title — or be about something that matters long-term.
   if (IMPORTANT_TOPICS.test(clean) || namesSomething(clean)) return true;
   return false;
+}
+
+/**
+ * Words that say something was done rather than what was done. Stripped from a
+ * finished item's title before matching, because they are the half that never
+ * appears in the memory: "Get the TV power connector done" is remembered as
+ * "Set up TV power connector, TV works fine now".
+ */
+const TASK_VERBS = new Set(['get', 'got', 'getting', 'done', 'doing', 'finish', 'finished', 'complete', 'completed', 'pick', 'picked', 'picking', 'sort', 'sorted', 'make', 'made', 'take', 'taken', 'need', 'needs', 'must', 'should', 'today', 'tomorrow', 'tonight']);
+
+/**
+ * Whether ticking `title` off finishes what `text` remembers.
+ *
+ * Full coverage rather than a ratio, and the title's words rather than the
+ * record's: the title is the short side, and asking "is every real word of the
+ * finished thing in this memory" is a question with an obvious right answer,
+ * where a ratio is a threshold to argue about. It errs towards closing nothing
+ * — a memory left open is the state everything was already in, while closing
+ * the wrong one takes something true out of her prompt.
+ */
+export function closesEvent(title: string, text: string): boolean {
+  const wanted = [...keywords(title)].filter(word => !TASK_VERBS.has(word));
+  if (!wanted.length) return false;
+  const has = keywords(text);
+  return wanted.every(word => has.has(word));
+}
+
+/**
+ * A thing she was told is finished stops being volunteered.
+ *
+ * applyDecay retires a memory for going quiet, which is the wrong reason for an
+ * event that is simply over: "Rental inspection went well" and "Fan hub
+ * installation postponed" competed for room in every prompt until their 45-day
+ * clock ran out, six weeks after they stopped being news. Ticking the item off
+ * is the moment the answer is known, and nothing was listening for it — not one
+ * record in the live store had ever been closed.
+ *
+ * Dormant rather than archived: she still knows it happened and will say so if
+ * asked, she just stops bringing it up. Reversible, because a tick can be
+ * undone and then it was never finished at all.
+ */
+export function closeEvents(memories: MemoryRecord[], title: string, now: string, done = true): { memories: MemoryRecord[]; changed: MemoryRecord[] } {
+  const from: MemoryStatus = done ? 'active' : 'dormant';
+  const to: MemoryStatus = done ? 'dormant' : 'active';
+  const changed: MemoryRecord[] = [];
+  const out = memories.map(memory => {
+    if (memory.kind !== 'event' || (memory.status ?? 'active') !== from) return memory;
+    if (memory.supersededBy || !closesEvent(title, memory.text)) return memory;
+    const updated: MemoryRecord = {
+      ...memory,
+      status: to,
+      evidence: [...(memory.evidence ?? []), {
+        at: now, kind: 'closed' as const, source: memory.source ?? 'conversation',
+        detail: done ? `"${title}" ticked off` : `"${title}" un-ticked`,
+      }],
+    };
+    changed.push(updated);
+    return updated;
+  });
+  return { memories: changed.length ? out : memories, changed };
 }
 
 // Old flat records predate kinds and counters; they are read forward rather than

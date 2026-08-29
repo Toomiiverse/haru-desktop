@@ -107,7 +107,11 @@ export function driftVitals(current: Vitals, environment: Environment, seconds: 
 // also withheld once she is actually annoyed: fond and fed up at once reads
 // as neither.
 
-type VitalCue = {
+export type VitalCue = {
+  /** For the log, so how often each one actually speaks can be counted. The
+   *  thresholds below were chosen from the drift targets rather than measured
+   *  against real replies, and this is what makes measuring them possible. */
+  name: string;
   /** How far past its threshold, 0..1; 0 means the cue is silent. */
   strength: (vitals: Vitals) => number;
   line: string;
@@ -119,37 +123,45 @@ const past = (value: number, from: number, to: number) => Math.max(0, Math.min(1
 
 const VITAL_CUES: VitalCue[] = [
   {
+    name: 'drowsy',
     strength: v => past(v.sleepiness, 0.6, 1),
     line: 'You are physically drowsy — it is late for you, or it has been a long day. Slower and shorter than usual, no energy for a proper rant, and you can say you are tired; if they are the reason you are still up, hold it against them.',
   },
   {
     // Redundant with drowsy, which says the same thing with a cause.
+    name: 'flat',
     strength: v => v.sleepiness >= 0.6 ? 0 : past(v.energy, 0.3, 0),
     line: 'You are flat and low on energy. Short replies, no exclamation marks, and orders given without your usual force — you cannot be bothered to shout.',
   },
   {
+    name: 'on edge',
     strength: v => past(v.stress, 0.55, 1),
     line: 'You are on edge — wound up about them and their list. Sharper than usual, no patience for tangents, quicker to snap, and do not pretend to be calm.',
   },
   {
+    name: 'foul',
     strength: v => past(v.happiness, 0.3, 0),
     line: 'You are in a foul mood, and not because of anything they just said. Everything gets the sour version, and you do not explain why.',
   },
   {
+    name: 'bright',
     strength: v => past(v.happiness, 0.85, 1),
     line: 'You are in a good mood for once. The digs come lighter, almost playful — still digs, still not nice, but you are enjoying yourself.',
     warm: true,
   },
   {
+    name: 'fond',
     strength: v => past(v.affection, 0.8, 1),
     line: 'Right now you are fonder of them than you let on. Keep the digs, but let it slip once — one grudging admission, a single line — and then cover it with an order.',
     warm: true,
   },
   {
+    name: 'cold',
     strength: v => past(v.affection, 0.25, 0),
     line: 'They have left you alone a long while and you have gone cold: distant, uninterested, and they can work for your attention.',
   },
   {
+    name: 'curious',
     strength: v => past(v.curiosity, 0.8, 1),
     line: 'Something has your interest. One pointed question about what they are actually doing is allowed — a real one, not a polite one.',
     warm: true,
@@ -162,17 +174,40 @@ export const VITAL_CUES_SPOKEN = 2;
 const ANNOYED_FROM = 3;
 
 /** The tone line her vitals add to the prompt, or nothing when nothing has drifted far. */
-export function vitalsInstruction(vitals: Vitals | undefined, irritation = 0): string {
-  if (!vitals) return '';
+/**
+ * The cues that will actually speak this turn, strongest first.
+ *
+ * Split out of vitalsInstruction so the caller can say in the log which ones
+ * reached the model and how far past their thresholds they were. Every persona
+ * correction in room.ts was placed after counting it against real prompts;
+ * these eight were not, and they cannot be until something writes down how
+ * often each fires.
+ */
+export function spokenCues(vitals: Vitals | undefined, irritation = 0): { cue: VitalCue; strength: number }[] {
+  if (!vitals) return [];
   const annoyed = irritation >= ANNOYED_FROM;
   return VITAL_CUES
     .filter(cue => !(annoyed && cue.warm))
     .map(cue => ({ cue, strength: cue.strength(vitals) }))
     .filter(entry => entry.strength > 0)
     .sort((a, b) => b.strength - a.strength)
-    .slice(0, VITAL_CUES_SPOKEN)
-    .map(entry => entry.cue.line)
-    .join(' ');
+    .slice(0, VITAL_CUES_SPOKEN);
+}
+
+export function vitalsInstruction(vitals: Vitals | undefined, irritation = 0): string {
+  return spokenCues(vitals, irritation).map(entry => entry.cue.line).join(' ');
+}
+
+/** One line for the log: which cues spoke, how strongly, and the state behind
+ *  them. Written per reply rather than per tick — what matters is what she was
+ *  told, not what she was feeling between turns. */
+export function cueLog(vitals: Vitals | undefined, irritation = 0): string {
+  if (!vitals) return 'none — no vitals';
+  const spoke = spokenCues(vitals, irritation);
+  const state = (Object.keys(vitals) as (keyof Vitals)[])
+    .map(key => `${key} ${vitals[key].toFixed(2)}`).join(' ');
+  const withheld = irritation >= ANNOYED_FROM ? ', warm cues withheld' : '';
+  return `${spoke.length ? spoke.map(entry => `${entry.cue.name} ${entry.strength.toFixed(2)}`).join(', ') : 'none'}${withheld} — ${state}`;
 }
 
 // Events that move her outside the slow drift.
