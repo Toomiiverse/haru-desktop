@@ -14,7 +14,7 @@
 // configuration the user controls; the agent can never modify it through a
 // memory tool.
 
-import { retrieveMemories, type MemoryKind, type MemoryRecord, type SessionSummary } from './memory';
+import { keywords, retrieveMemories, type MemoryKind, type MemoryRecord, type SessionSummary } from './memory';
 
 export type MemoryBlock = {
   /** Stable per label — block-persona, block-human, … */
@@ -52,6 +52,11 @@ export type BlockSources = {
   /** The message being answered — makes the human block message-aware the
    *  same way the deterministic engine always was. */
   query?: string;
+  /** id → semantic similarity to `query`, from the same embedder retrieval
+   *  uses. Without it the human block was keyword-only while the inspector
+   *  showed a semantic selection — two answers to "what does she know right
+   *  now", and the prompt got the blunter one. */
+  semantic?: Map<string, number>;
   now?: Date;
 };
 
@@ -188,19 +193,65 @@ export function linesFromRecords(records: MemoryRecord[], width = 160): string {
   return records.map(record => `- ${wrap(record.text, width)}`).join('\n');
 }
 
-function selectedFor(query: string, sources: BlockSources, limit: number): MemoryRecord[] {
-  return retrieveMemories(sources.memories, query, { limit, now: sources.now ?? new Date() })
+function selectedFor(query: string, sources: BlockSources, limit: number, semantic?: Map<string, number>): MemoryRecord[] {
+  return retrieveMemories(sources.memories, query, { limit, now: sources.now ?? new Date(), semantic })
     .map(entry => entry.memory);
 }
 
 const PROJECT_QUERY = 'project work company business job';
 
+/** Kinds with a block of their own. The human block leaves them to it. */
+const OWN_BLOCK: MemoryKind[] = ['preference', 'relationship'];
+
+/**
+ * Share of a record's content words the profile has to contain before the
+ * record is saying what the profile already said. High, because a record
+ * that adds one detail — the Murdoch lodgings to "lives with Emma" — is
+ * worth its line; only a restatement is not.
+ */
+const PROFILE_COVERAGE = 0.8;
+
+/**
+ * Whether the profile paragraph already says this.
+ *
+ * The profile is in every prompt in full, and four of the records — the
+ * founder line, ADHD and the psychologist, Emma twice — were the same
+ * sentences again a few lines down, some 200 tokens a turn of her reading
+ * back what was just above. The records stay: they carry the mentions, the
+ * evidence and the retrieval score, and the profile can be edited away
+ * tomorrow. They are only not rendered while the profile covers them.
+ */
+export function coveredByProfile(record: MemoryRecord, profile: BlockSources['profile']): boolean {
+  const said = keywords(`${profile.about} ${profile.occupation} ${profile.nickname}`);
+  if (!said.size) return false;
+  const words = keywords(record.text);
+  if (!words.size) return false;
+  const shared = [...words].filter(word => said.has(word)).length;
+  return shared / words.size >= PROFILE_COVERAGE;
+}
+
+/** The records a block renders, after the two rules every block shares:
+ *  nothing the profile already says, and nothing a block above has shown. */
+function fresh(records: MemoryRecord[], sources: BlockSources, shown: Set<string>): MemoryRecord[] {
+  const out = records.filter(record => !shown.has(record.id) && !coveredByProfile(record, sources.profile));
+  for (const record of out) shown.add(record.id);
+  return out;
+}
+
 /**
  * Resolve what a block should show right now. Derived blocks are rebuilt from
  * the engine on every render, so they can never drift from the authoritative
  * records; blocks with an explicit governed value are shown as stored.
+ *
+ * `shown` is the ids already rendered by the blocks before this one, so each
+ * record appears once, in the most specific block that wants it. Rendered in
+ * default order that is: preferences and relationships in their own blocks
+ * (the human block leaves those kinds alone), anything else the message
+ * called for in human, and current_project gets what human did not take.
+ * Callers resolving a single block — the tools, the inspector — pass nothing
+ * and see the block whole.
  */
-export function resolveBlockValue(block: MemoryBlock, sources: BlockSources): string {
+export function resolveBlockValue(block: MemoryBlock, sources: BlockSources, shown: Set<string> = new Set()): string {
   if (block.edited && typeof block.value === 'string') return block.value;
   switch (block.label) {
     case 'persona': {
@@ -217,28 +268,30 @@ export function resolveBlockValue(block: MemoryBlock, sources: BlockSources): st
       if (sources.profile.nickname.trim()) lines.push(`- Goes by ${sources.profile.nickname.trim()}.`);
       if (sources.profile.occupation.trim()) lines.push(`- Work: ${sources.profile.occupation.trim()}.`);
       if (sources.profile.about.trim()) lines.push(`- ${wrap(sources.profile.about.trim(), 160)}`);
-      const selected = sources.query?.trim()
-        ? selectedFor(sources.query, sources, 12)
-        : selectedFor('', sources, 12);
-      if (selected.length) lines.push(linesFromRecords(selected));
+      const selected = selectedFor(sources.query?.trim() ?? '', sources, 12, sources.semantic)
+        .filter(memory => !OWN_BLOCK.includes(memory.kind));
+      const records = fresh(selected, sources, shown);
+      if (records.length) lines.push(linesFromRecords(records));
       return lines.join('\n');
     }
     case 'preferences': {
       const records = sources.memories
         .filter(memory => memory.kind === 'preference' && !memory.supersededBy && memory.status !== 'archived')
         .sort((a, b) => (b.importance ?? 0) - (a.importance ?? 0) || b.mentions - a.mentions);
-      return linesFromRecords(records);
+      return linesFromRecords(fresh(records, sources, shown));
     }
     case 'relationship': {
       const records = sources.memories
         .filter(memory => memory.kind === 'relationship' && !memory.supersededBy && memory.status !== 'archived')
         .sort((a, b) => (b.importance ?? 0) - (a.importance ?? 0));
-      return linesFromRecords(records);
+      return linesFromRecords(fresh(records, sources, shown));
     }
     case 'current_project': {
       const lines: string[] = [];
-      const projectRecords = selectedFor(PROJECT_QUERY, sources, 8)
-        .filter(memory => memory.kind === 'fact' || memory.kind === 'event');
+      // Against the fixed project query, so no semantic map: that one was
+      // computed for the message, not for these words.
+      const projectRecords = fresh(selectedFor(PROJECT_QUERY, sources, 8)
+        .filter(memory => memory.kind === 'fact' || memory.kind === 'event'), sources, shown);
       if (projectRecords.length) lines.push(linesFromRecords(projectRecords));
       for (const work of sources.following ?? []) {
         lines.push(`- ${work.title}${work.progress ? ` (${work.progress})` : ''}`);
@@ -413,9 +466,12 @@ export function formatMemoryBlocks(blocks: MemoryBlock[], sources: BlockSources,
   const parts: string[] = [];
   const cut: BlockRenderResult['cut'] = [];
   const omitted = new Set(options.omit ?? []);
+  // Threaded through the blocks in order, so a record shown by one is not
+  // shown again by the next.
+  const shown = new Set<string>();
   for (const block of blocks) {
     if (omitted.has(block.label)) continue;
-    const value = resolveBlockValue(block, sources);
+    const value = resolveBlockValue(block, sources, shown);
     if (!value.trim()) continue;
     const fitted = fitToLimit(value, block);
     if (fitted.cut) cut.push({ label: block.label, before: value.length, after: fitted.value.length });

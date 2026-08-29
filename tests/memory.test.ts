@@ -14,8 +14,75 @@ import {
   supersede,
   isExplicitRecall,
   DEEP_RECALL_LIMIT,
+  daysRaised,
+  isRecurring,
+  calibrateSimilarity,
+  semanticSimilarities,
+  retrieveMemories,
+  SEMANTIC_FLOOR,
   type MemoryRecord,
 } from '../electron/memory';
+
+const fixture = (overrides: Partial<MemoryRecord> & { id: string; text: string; kind: MemoryRecord['kind'] }): MemoryRecord => ({
+  createdAt: '2026-08-01T00:00:00.000Z', lastSeenAt: '2026-08-28T00:00:00.000Z', mentions: 1,
+  confidence: 0.8, importance: 0.5, source: 'conversation', status: 'active', memoryType: 'semantic',
+  ...overrides,
+});
+
+// ---- recurrence is counted in days, not mentions ----
+
+test('daysRaised counts distinct evidence days and falls back to mentions without a log', () => {
+  const sameDay = fixture({ id: 'a', text: 'Closing the store', kind: 'event', mentions: 8,
+    evidence: Array.from({ length: 8 }, (_, i) => ({ at: `2026-08-27T0${i}:00:00.000Z`, kind: 'repeat' as const, source: 'conversation' as const })) });
+  assert.equal(daysRaised(sameDay), 1);
+  const spread = fixture({ id: 'b', text: 'Working on the PC Project', kind: 'fact', mentions: 3,
+    evidence: ['2026-08-10', '2026-08-15', '2026-08-22'].map(day => ({ at: `${day}T10:00:00.000Z`, kind: 'statement' as const, source: 'conversation' as const })) });
+  assert.equal(daysRaised(spread), 3);
+  assert.equal(daysRaised(fixture({ id: 'c', text: 'legacy', kind: 'fact', mentions: 5 })), 5);
+});
+
+test('a merge-inflated one-day event is not recurring; three days is', () => {
+  const inflated = fixture({ id: 'a', text: 'Closing the store', kind: 'event', mentions: 8,
+    evidence: Array.from({ length: 8 }, (_, i) => ({ at: `2026-08-27T0${i}:00:00.000Z`, kind: 'repeat' as const, source: 'conversation' as const })) });
+  assert.equal(isRecurring(inflated), false);
+  const spread = fixture({ id: 'b', text: 'Working on the PC Project', kind: 'fact', mentions: 3,
+    evidence: ['2026-08-10', '2026-08-15', '2026-08-22'].map(day => ({ at: `${day}T10:00:00.000Z`, kind: 'statement' as const, source: 'conversation' as const })) });
+  assert.equal(isRecurring(spread), true);
+  assert.deepEqual(recurringMemories([inflated, spread]).map(m => m.id), ['b']);
+});
+
+// ---- semantic similarity is calibrated: unrelated is zero ----
+
+test('calibrateSimilarity floors the nomic baseline at zero and rescales above it', () => {
+  assert.equal(calibrateSimilarity(0.40), 0);
+  assert.equal(calibrateSimilarity(SEMANTIC_FLOOR), 0);
+  assert.equal(calibrateSimilarity(1), 1);
+  assert.ok(Math.abs(calibrateSimilarity(0.725) - 0.5) < 1e-9);
+});
+
+test('semanticSimilarities reports zero for a memory at the unrelated baseline', () => {
+  const memories = [fixture({ id: 'same', text: 'x', kind: 'fact' }), fixture({ id: 'baseline', text: 'y', kind: 'fact' }), fixture({ id: 'none', text: 'z', kind: 'fact' })];
+  const vectors = new Map<string, number[]>([
+    ['same', [1, 0]],
+    ['baseline', [0.40, Math.sqrt(1 - 0.16)]],   // cosine 0.40 against [1, 0]
+  ]);
+  const out = semanticSimilarities(memories, [1, 0], vectors);
+  assert.equal(out.get('same'), 1);
+  assert.equal(out.get('baseline'), 0);
+  assert.equal(out.has('none'), false);
+});
+
+// ---- only preferences and relationships are guaranteed a slot ----
+
+test('retrieveMemories offers a high-importance fact but does not let it displace what the message is about', () => {
+  const memories = [
+    fixture({ id: 'pref', text: 'Dislikes being nagged', kind: 'preference', importance: 0.85 }),
+    fixture({ id: 'founder', text: 'Founded a company that sells computers', kind: 'fact', importance: 0.8 }),
+    fixture({ id: 'closure', text: 'Closing the store for cleaning on Monday', kind: 'event', importance: 0.45 }),
+  ];
+  const picked = retrieveMemories(memories, 'what about the store cleaning', { limit: 2 }).map(entry => entry.memory.id);
+  assert.deepEqual(picked.sort(), ['closure', 'pref']);
+});
 
 // ---- isWorthRemembering: reject each category, accept concrete facts ----
 

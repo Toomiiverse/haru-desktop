@@ -208,7 +208,7 @@ export function createMemoryStore(deps: MemoryStoreDeps) {
   }
 
   /** Everything the block layer may draw on, straight from the live state. */
-  function blockSources(query: string): BlockSources {
+  function blockSources(query: string, semantic?: Map<string, number>): BlockSources {
     return {
       character: deps.character(),
       profile: deps.profile(),
@@ -217,6 +217,7 @@ export function createMemoryStore(deps: MemoryStoreDeps) {
       following: deps.following(),
       agenda: deps.agenda(),
       query,
+      semantic,
       now: new Date(),
     };
   }
@@ -244,7 +245,7 @@ export function createMemoryStore(deps: MemoryStoreDeps) {
     // the authoritative records. The persona block is left out here: the
     // prompt ends on the same text, and it was going in twice. Compact, for
     // the reason given on BlockRenderOptions.
-    const blocks = formatMemoryBlocks(store.getBlocks(), blockSources(query), { omit: ['persona'], compact: true });
+    const blocks = formatMemoryBlocks(store.getBlocks(), blockSources(query, semantic), { omit: ['persona'], compact: true });
     for (const entry of blocks.cut) {
       console.warn(`[blocks] ${entry.label} cut from ${entry.before} to ${entry.after} chars to fit its budget — selection was tighter than this; raise the block limit if it keeps happening`);
     }

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   appendToBlockValue, blockIdFor, blockLabelValid, canEditBlock, defaultMemoryBlocks,
-  findBlock, fitToLimit, formatMemoryBlocks, linesFromRecords, mergeBlockDefaults,
+  coveredByProfile, findBlock, fitToLimit, formatMemoryBlocks, linesFromRecords, mergeBlockDefaults,
   replaceInBlockValue, renderBlock, resolveBlockValue, blockMetadata,
   resetBlockToDerived, withEditedValue,
 } from '../electron/blocks';
@@ -79,11 +79,12 @@ test('resolveBlockValue derives the persona from the character config', () => {
   assert.ok(value.includes('Short, bossy, mean.'));
 });
 
-test('resolveBlockValue builds the human block from profile and always-included records', () => {
+test('resolveBlockValue builds the human block from the profile and the always-offered facts, leaving preferences and relationships to their own blocks', () => {
   const human = findBlock(defaultMemoryBlocks(), 'human')!;
   const memories: MemoryRecord[] = [
     record({ id: 'pref', text: 'Dislikes being nagged', kind: 'preference', importance: 0.85 }),
     record({ id: 'rel', text: 'Lives with Emma', kind: 'relationship', importance: 0.8 }),
+    record({ id: 'health', text: 'Is allergic to shellfish', kind: 'fact', importance: 0.8 }),
     record({ id: 'trivia', text: 'Watched a YouTube clip', kind: 'fact', importance: 0.2 }),
   ];
   const value = resolveBlockValue(human, {
@@ -95,8 +96,9 @@ test('resolveBlockValue builds the human block from profile and always-included 
   assert.ok(value.includes('Goes by Tommy'));
   assert.ok(value.includes('Student'));
   assert.ok(value.includes('Founder of the PC Project'));
-  assert.ok(value.includes('Dislikes being nagged'));
-  assert.ok(value.includes('Lives with Emma'));
+  assert.ok(value.includes('Is allergic to shellfish'));
+  assert.ok(!value.includes('Dislikes being nagged'));
+  assert.ok(!value.includes('Lives with Emma'));
   assert.ok(!value.includes('Watched a YouTube clip'));
 });
 
@@ -246,6 +248,50 @@ test('formatMemoryBlocks compact render is tag and value only, and still fits an
   assert.ok(text.includes('<human>\n- Goes by Tommy.\n'));
   assert.ok(text.includes('<preferences>'));
   assert.ok(cut.some(entry => entry.label === 'preferences'));
+});
+
+test('coveredByProfile is true for a restatement and false for a record that adds a detail', () => {
+  const profile = { nickname: 'Tommy', occupation: 'Student', about: 'I am in a relationship with Emma Wilson since 18th of June, 2024. I have been diagnosed with ADHD and see a psychologist named Sam.' };
+  assert.equal(coveredByProfile(record({ id: 'a', text: 'Is in a relationship with Emma Wilson since 18th of June, 2024', kind: 'relationship' }), profile), true);
+  assert.equal(coveredByProfile(record({ id: 'b', text: 'Lives with girlfriend Emma in the Murdoch University student lodgings', kind: 'relationship' }), profile), false);
+  assert.equal(coveredByProfile(record({ id: 'c', text: 'Wants 6 mailboxes for The PC Project', kind: 'fact' }), { nickname: '', occupation: '', about: '' }), false);
+});
+
+test('each record renders once, in its most specific block, and never when the profile already says it', () => {
+  const blocks = defaultMemoryBlocks();
+  const sources = {
+    character: { identity: '', style: '' },
+    profile: { nickname: 'Tommy', occupation: '', about: 'Founder of a company called The PC Project in Northbridge.' },
+    memories: [
+      record({ id: 'pref', text: 'Dislikes being nagged', kind: 'preference', importance: 0.85 }),
+      record({ id: 'rel', text: 'Emma is their girlfriend', kind: 'relationship', importance: 0.8 }),
+      record({ id: 'founder', text: 'Is the founder of a company called The PC Project in Northbridge', kind: 'fact', importance: 0.8 }),
+      record({ id: 'mail', text: 'Wants 6 mailboxes for the company project', kind: 'fact', importance: 0.8 }),
+    ],
+    sessions: [] as SessionSummary[],
+    query: 'how many mailboxes for the project',
+  };
+  const { text } = formatMemoryBlocks(blocks, sources, { omit: ['persona'], compact: true });
+  const section = (label: string) => text.match(new RegExp(`<${label}>[\\s\\S]*?</${label}>`))?.[0] ?? '';
+  assert.ok(section('preferences').includes('Dislikes being nagged'));
+  assert.ok(!section('human').includes('Dislikes being nagged'));
+  assert.ok(section('relationship').includes('Emma is their girlfriend'));
+  assert.ok(!section('human').includes('Emma is their girlfriend'));
+  assert.ok(section('human').includes('Wants 6 mailboxes'));
+  assert.ok(!section('current_project').includes('Wants 6 mailboxes'));
+  assert.ok(!text.includes('Is the founder of a company'));
+  // Resolved on its own, the block is whole — the tools and inspector see everything.
+  assert.ok(resolveBlockValue(findBlock(blocks, 'current_project')!, sources).includes('Wants 6 mailboxes'));
+});
+
+test('the human block uses the semantic map when one is supplied', () => {
+  const blocks = defaultMemoryBlocks();
+  const memories = [record({ id: 'gpu', text: 'Put an RTX 3060 in the server', kind: 'fact', importance: 0.4 })];
+  const base = { character: { identity: '', style: '' }, profile: { nickname: '', occupation: '', about: '' }, memories, sessions: [] as SessionSummary[], query: 'how is the graphics card doing' };
+  const without = formatMemoryBlocks(blocks, base, { omit: ['persona'], compact: true }).text;
+  assert.ok(!without.includes('RTX 3060'));
+  const withMap = formatMemoryBlocks(blocks, { ...base, semantic: new Map([['gpu', 0.6]]) }, { omit: ['persona'], compact: true }).text;
+  assert.ok(withMap.includes('RTX 3060'));
 });
 
 test('formatMemoryBlocks reports what was cut to fit budgets', () => {

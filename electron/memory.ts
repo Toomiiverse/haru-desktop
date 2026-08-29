@@ -78,8 +78,30 @@ export type SessionSummary = {
   createdAt: string;
 };
 
-/** Mentioned this many times or more and it is something they keep returning to. */
+/** Raised on this many separate days or more and it is something they keep returning to. */
 export const RECURRING_THRESHOLD = 3;
+
+/**
+ * How many separate days something has come up.
+ *
+ * `mentions` counts every repeat, and a merge adds the folded record's count
+ * on top — so one day that was summarised four times over (the 08-29 crash
+ * loop) left "closing the store" with eight mentions from a single
+ * conversation, and eight mentions made it "recurring": admitted to every
+ * prompt whatever the message, for as long as its half-life lasts. Something
+ * that keeps coming up is something raised on different days, so this counts
+ * days across the evidence log instead. Records with no evidence log — legacy
+ * ones, and fixtures — fall back to mentions, which is all they have.
+ */
+export function daysRaised(memory: MemoryRecord): number {
+  const evidence = memory.evidence ?? [];
+  if (!evidence.length) return memory.mentions;
+  return new Set(evidence.map(entry => entry.at.slice(0, 10))).size;
+}
+
+export function isRecurring(memory: MemoryRecord): boolean {
+  return daysRaised(memory) >= RECURRING_THRESHOLD;
+}
 
 // Anchored loosely rather than at the start: "so do you remember" and "wait,
 // what did I say about" both ask the same thing partway into a sentence.
@@ -378,8 +400,8 @@ export function applyDecay(memories: MemoryRecord[], now: Date): DecayResult {
 }
 
 export function recurringMemories(memories: MemoryRecord[]) {
-  return memories.filter(memory => memory.mentions >= RECURRING_THRESHOLD)
-    .sort((a, b) => b.mentions - a.mentions);
+  return memories.filter(isRecurring)
+    .sort((a, b) => daysRaised(b) - daysRaised(a));
 }
 
 /**
@@ -435,7 +457,7 @@ export function selectMemories(memories: MemoryRecord[], message: string, limit 
     })
     // Something mentioned repeatedly stays available even with nothing in common
     // with this message; a one-off needs to actually be relevant.
-    .filter(entry => entry.score >= 10 || entry.memory.mentions >= RECURRING_THRESHOLD)
+    .filter(entry => entry.score >= 10 || isRecurring(entry.memory))
     .sort((a, b) => b.score - a.score)
     .map(entry => entry.memory);
   return [...always, ...ranked].slice(0, limit);
@@ -561,7 +583,7 @@ export function retrieveMemories(memories: MemoryRecord[], message: string, opti
     // what was said — keyword or semantic overlap — or be something that keeps
     // coming back on its own.
     const keptAlive = memory.kind === 'preference' || memory.kind === 'relationship' || importance >= ALWAYS_IMPORTANT;
-    const related = Math.max(semantic, keyword) > 0 || memory.mentions >= RECURRING_THRESHOLD;
+    const related = Math.max(semantic, keyword) > 0 || isRecurring(memory);
     if (keptAlive) always.push(entry);
     else if (memory.status === 'dormant' ? Math.max(semantic, keyword) >= DORMANT_ADMISSION : related) scored.push(entry);
   }
@@ -575,10 +597,17 @@ export function retrieveMemories(memories: MemoryRecord[], message: string, opti
     out.push(entry);
   }
   // The always-included guarantee: if one of them was crowded out by the cut,
-  // it displaces the weakest non-always entry rather than vanishing.
-  const alwaysIds = new Set(always.map(entry => entry.memory.id));
+  // it displaces the weakest non-always entry rather than vanishing. The
+  // guarantee is narrower than the eligibility above: a high-importance fact
+  // may be offered without being on-topic, but only preferences and
+  // relationships — the records that shape how she talks — are promised a
+  // slot. With a user who runs a company, most facts score 0.8 (work, project,
+  // business are all "important" words), and guaranteeing every one of them
+  // left one slot in twelve for whatever the message was actually about.
+  const guaranteed = always.filter(entry => ALWAYS_INCLUDED.includes(entry.memory.kind));
+  const alwaysIds = new Set(guaranteed.map(entry => entry.memory.id));
   const present = new Set(out.map(entry => entry.memory.id));
-  for (const entry of always.sort((a, b) => b.score - a.score)) {
+  for (const entry of guaranteed.sort((a, b) => b.score - a.score)) {
     if (present.has(entry.memory.id)) continue;
     const weakest = [...out].reverse().find(candidate => !alwaysIds.has(candidate.memory.id));
     if (weakest) {
@@ -592,13 +621,33 @@ export function retrieveMemories(memories: MemoryRecord[], message: string, opti
   return out;
 }
 
-/** Precompute id → semantic similarity for every memory that has a vector,
- *  using the cosine distance to the query's own embedding. */
+/**
+ * The cosine below which a query and a memory are simply unrelated.
+ *
+ * Measured against the live store with nomic-embed-text (2026-08-29): pairs
+ * with nothing in common sat at 0.33–0.42, "2+2" against every memory topped
+ * out at 0.49, and the genuinely related pairs — the store cleaning to the
+ * closure, "how is emma" to the relationship, "what anime" to the favourites
+ * list — came in at 0.57–0.71. Raw cosine is never zero, so without a floor
+ * every record read as related and the relevance gate in retrieveMemories
+ * admitted all of them: the prompt was the top fourteen by importance, the
+ * same fourteen for "hey" as for anything else. Above the floor the score is
+ * rescaled to 0..1 so the weights in the relevance formula keep their meaning.
+ * Specific to the embedding model; re-measure if that changes.
+ */
+export const SEMANTIC_FLOOR = 0.45;
+
+export function calibrateSimilarity(cosine: number): number {
+  return Math.max(0, Math.min(1, (cosine - SEMANTIC_FLOOR) / (1 - SEMANTIC_FLOOR)));
+}
+
+/** Precompute id → semantic similarity for every memory that has a vector:
+ *  the cosine to the query's own embedding, calibrated so unrelated is zero. */
 export function semanticSimilarities(memories: MemoryRecord[], queryVector: number[], vectors: Map<string, number[]>): Map<string, number> {
   const out = new Map<string, number>();
   for (const memory of memories) {
     const vector = vectors.get(memory.id);
-    if (vector) out.set(memory.id, cosineSimilarity(vector, queryVector));
+    if (vector) out.set(memory.id, calibrateSimilarity(cosineSimilarity(vector, queryVector)));
   }
   return out;
 }
@@ -611,7 +660,7 @@ export function vectorSimilarity(a: number[] | undefined, b: number[] | undefine
 }
 
 function describe(memory: MemoryRecord) {
-  const recurring = memory.mentions >= RECURRING_THRESHOLD ? ` [comes up often, ${memory.mentions} times]` : '';
+  const recurring = isRecurring(memory) ? ` [comes up often, on ${daysRaised(memory)} separate days]` : '';
   const subject = memory.subject ? ` (${memory.subject})` : '';
   const important = (memory.importance ?? 0) >= 0.8 ? ' [important to them]' : '';
   // Uncertainty is worth naming; certainty is the default and stays silent so
