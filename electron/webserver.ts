@@ -65,7 +65,7 @@ export type WebDeps = {
    */
   expression(text: string): Promise<{ emotion: string | null; expression: string | null }>;
   /** The day so far, with ids so a reply can be rated, and any rating it already has. */
-  history(): { id?: string; role: string; content: string; at?: string; reaction?: string; note?: string }[];
+  history(): { id?: string; role: string; content: string; at?: string; reaction?: string; note?: string; aside?: string }[];
   /**
    * What they thought of a reply of hers. A thumb lands on the message the
    * same way the desktop's does — into her prompt, onto her mood — and she

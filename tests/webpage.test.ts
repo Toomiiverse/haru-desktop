@@ -611,3 +611,30 @@ test('opened by a tap, the ear starts awake — a tap is already her name — an
   assert.deepEqual(plain(talk.heard('and the date', 30000)), [], 'asleep now: her name first');
   assert.deepEqual(plain(talk.heard('haru, and the date', 31000)), [{ type: 'say', text: 'and the date', interrupted: false }]);
 });
+
+// What she said on her own reaches the page, and the page hears about it.
+//
+// Tapping a notification used to open a page without the line on it: her
+// unprompted lines are asides, not messages, and the page only drew messages.
+// Now they are drawn as hers, without the rating dock (nothing to rate or ask
+// again), and the worker tells an open page when a push lands or is tapped so
+// the day is re-read.
+
+test('an aside is drawn as hers, and never gets the rating dock', () => {
+  const app = appPage();
+  assert.ok(app.includes("(m.aside?'them aside':'them')"), 'asides are not marked');
+  assert.ok(app.includes("m.role==='assistant'&&m.id&&!m.aside) html+=acts("), 'an aside would get a rating dock');
+  assert.ok(app.includes(".them.aside {"), 'no style for an aside');
+});
+
+test('the worker tells the page when a push lands and when a notification is tapped', () => {
+  const { serviceWorker } = require('../electron/webpage') as typeof import('../electron/webpage');
+  const worker = serviceWorker();
+  new vm.Script(worker, { filename: 'sw.js' });
+  assert.ok(worker.includes("c.postMessage({type:'said'})"), 'a push does not reach an open page');
+  assert.ok(worker.includes("client.postMessage({type:'opened'})"), 'a tap does not reach the page it focuses');
+  const app = appPage();
+  assert.ok(app.includes("e.data.type==='said'||e.data.type==='opened')) refreshIfIdle()"), 'the page does not listen');
+  assert.ok(app.includes("if(!document.hidden){ refreshIfIdle();"), 'coming back does not re-read the day');
+  assert.ok(app.includes("function refreshIfIdle(){ if($('cb').disabled) return;"), 'a re-read would clobber a reply in flight');
+});

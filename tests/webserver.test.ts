@@ -635,3 +635,18 @@ test('her name alone gets a word back; a line is spoken in its mood; a message s
     assert.deepEqual(asides, [{ interrupted: true }, { interrupted: false }]);
   } finally { await web.stop(); }
 });
+
+test('the day handed to the page carries what she said on her own, marked as such', async () => {
+  const web = await door({ history: () => [
+    { id: 'u1', role: 'user', content: 'hi', at: '2026-08-29T01:00:00.000Z' },
+    { id: 'a1', role: 'assistant', content: 'What.', at: '2026-08-29T01:00:05.000Z' },
+    { id: 's1', role: 'assistant', content: 'You forgot the bins.', at: '2026-08-29T02:00:00.000Z', aside: 'reminder' },
+  ] });
+  try {
+    await web.signIn();
+    const { messages } = await (await web.call('/api/chat')).json() as { messages: { id: string; aside?: string }[] };
+    assert.deepEqual(messages.map(m => m.id), ['u1', 'a1', 's1']);
+    assert.equal(messages[2].aside, 'reminder');
+    assert.equal(messages[1].aside, undefined);
+  } finally { await web.stop(); }
+});

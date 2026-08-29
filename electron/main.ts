@@ -6358,7 +6358,10 @@ async function pesterOnPush() {
   if (prefs.events) {
     const said = await nudgeForPhone();
     if (said) {
-      if (await pushToPhone('events', said.line)) console.log(`[push] pestered about "${said.about}"`);
+      // Through the aside log rather than straight to the phone: written down,
+      // it is on the page when they tap the notification, and the push goes
+      // out from there by its kind like every other unprompted line.
+      if (noteAside(said.line, 'reminder')) console.log(`[push] pestered about "${said.about}"`);
       return;
     }
   }
@@ -6400,7 +6403,7 @@ async function chaseTick() {
   if (!webServer || !devices.length || !prefs.events) return;
   if (inQuietHours(prefs, zonedNow(CHAT_TIMEZONE))) return;
   const said = await nudgeForPhone();
-  if (said && await pushToPhone('events', said.line)) console.log(`[push] chased about "${said.about}"`);
+  if (said && noteAside(said.line, 'reminder')) console.log(`[push] chased about "${said.about}"`);
 }
 
 function startChasing() {
@@ -6578,7 +6581,23 @@ function webDeps(): WebDeps {
   return {
     readAccess: getWebAccess,
     saveAccess: saveWebAccess,
-    history: () => (store.get('chat.messages') as { id?: string; role: string; content: string; at?: string; reaction?: string; note?: string }[] | undefined) ?? [],
+    history: () => {
+      const messages = (store.get('chat.messages') as { id?: string; role: string; content: string; at?: string; reaction?: string; note?: string; aside?: string }[] | undefined) ?? [];
+      // What she said to the phone on her own — a chase, a nudge, the weather
+      // — is an aside, not a message, and the notification that carried it
+      // used to be the only place it existed: tap it, and the line was not
+      // there. The page shows the day as it was heard, so they go in beside
+      // the conversation, where they were said.
+      const day = (store.get('chat.dayKey') as string | undefined) ?? localDateKey(zonedNow(CHAT_TIMEZONE));
+      const said = asidesOn(getAsides(), day).map(aside => ({ id: aside.id, role: 'assistant', content: aside.text, at: aside.at, aside: aside.source as string }));
+      if (!said.length) return messages;
+      // A message without a stamp keeps its place after the last stamped one.
+      let seen = '';
+      const stamped = messages.map((message, index) => { seen = message.at ?? seen; return { message, at: seen, index }; });
+      const all = [...stamped, ...said.map((message, index) => ({ message, at: message.at, index: messages.length + index }))];
+      all.sort((a, b) => a.at.localeCompare(b.at) || a.index - b.index);
+      return all.map(entry => entry.message);
+    },
     /**
      * What they thought of a reply. The thumb lands on the message through
      * the desk, which owns the conversation; her mood and her face move the

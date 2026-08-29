@@ -718,6 +718,7 @@ export function appPage(): string {
   .msg b { font-weight:700; }
   .msg code { font-family:ui-monospace,monospace; font-size:.88em; background:rgba(255,255,255,.08); border-radius:.3rem; padding:.05rem .3rem; }
   .them { background:var(--glass); border:1px solid var(--edge); border-bottom-left-radius:7px; backdrop-filter:blur(12px); }
+  .them.aside { border-left:3px solid var(--accent); }
   .me { background:var(--mine); border:1px solid var(--edge); margin-left:auto; border-bottom-right-radius:7px; }
   .sys { color:var(--ink-dim); font-size:.84rem; text-align:center; max-width:100%; background:none; border:0; }
   .msg a.maps { display:inline-block; margin-top:.5rem; padding:.5rem .85rem; border-radius:.9rem; background:var(--glass); border:1px solid var(--accent); color:var(--ink); text-decoration:none; font-weight:600; }
@@ -855,11 +856,12 @@ if(navigator.standalone){
 }
 
 function bubbles(list){
-  const last=[...list].reverse().find(m=>m.role==='assistant'&&m.id);
+  const last=[...list].reverse().find(m=>m.role==='assistant'&&m.id&&!m.aside);
   $('chat').innerHTML = list.map(m=>{
-    const cls = m.role==='user'?'me':m.role==='assistant'?'them':'sys';
+    const cls = m.role==='user'?'me':m.role==='assistant'?(m.aside?'them aside':'them'):'sys';
     let html='<div class="msg '+cls+'">'+md(esc(m.content))+'</div>';
-    if(m.role==='assistant'&&m.id) html+=acts(m,m===last);
+    // A line she said on her own is not a reply: nothing to rate or ask again.
+    if(m.role==='assistant'&&m.id&&!m.aside) html+=acts(m,m===last);
     return html;
   }).join('') || '<p class=quiet>Nothing yet today.</p>';
   $('chat').scrollTop = $('chat').scrollHeight;
@@ -1268,7 +1270,11 @@ async function askIfSheHasSomethingToSay(){
   }catch(r){ if(r&&r.status===401) location.reload(); }
 }
 setTimeout(askIfSheHasSomethingToSay,1500);
-document.addEventListener('visibilitychange',()=>{ if(!document.hidden) askIfSheHasSomethingToSay(); });
+document.addEventListener('visibilitychange',()=>{ if(!document.hidden){ refreshIfIdle(); askIfSheHasSomethingToSay(); } });
+window.addEventListener('pageshow',e=>{ if(e.persisted) refreshIfIdle(); });
+// Re-read the day unless she is mid-answer, when the stream on screen is newer
+// than anything the server would hand back.
+function refreshIfIdle(){ if($('cb').disabled) return; void load(); }
 // Four minutes: she is being carried around, not watched. Anything faster reads
 // as pestering, and the spacing on her side would refuse it anyway.
 setInterval(askIfSheHasSomethingToSay,4*60_000);
@@ -1281,6 +1287,11 @@ setInterval(askIfSheHasSomethingToSay,4*60_000);
 // that needs a gesture waits behind the bell.
 let sw=null;
 if('serviceWorker' in navigator){
+  // The worker says when something arrived — a push while the page was open
+  // in the background, or the tap on a notification that brought it forward.
+  // Either way the day is re-read, so the line the notification carried is
+  // on screen and not only in the notification.
+  navigator.serviceWorker.addEventListener('message',e=>{ if(e.data&&(e.data.type==='said'||e.data.type==='opened')) refreshIfIdle(); });
   navigator.serviceWorker.register('/sw.js').then(async r=>{
     sw=r;
     // A subscription the server has forgotten — pruned as dead once, a restored
@@ -1523,17 +1534,20 @@ export function serviceWorker(): string {
 self.addEventListener('activate',e=>e.waitUntil(self.clients.claim()));
 self.addEventListener('push',e=>{
   let m={}; try{ m=e.data?e.data.json():{}; }catch{}
-  e.waitUntil(self.registration.showNotification(m.title||'Haru',{
-    body:m.body||'',
-    icon:'/portrait',
-    data:{url:typeof m.url==='string'&&m.url.startsWith('/')&&!m.url.startsWith('//')?m.url:'/'}
-  }));
+  e.waitUntil(Promise.all([
+    self.registration.showNotification(m.title||'Haru',{
+      body:m.body||'',
+      icon:'/portrait',
+      data:{url:typeof m.url==='string'&&m.url.startsWith('/')&&!m.url.startsWith('//')?m.url:'/'}
+    }),
+    self.clients.matchAll({type:'window',includeUncontrolled:true}).then(open=>{ for(const c of open) c.postMessage({type:'said'}); })
+  ]));
 });
 self.addEventListener('notificationclick',e=>{
   e.notification.close();
   const url=(e.notification.data&&e.notification.data.url)||'/';
   e.waitUntil(self.clients.matchAll({type:'window',includeUncontrolled:true}).then(open=>{
-    for(const client of open){ if('focus' in client){ client.focus(); return; } }
+    for(const client of open){ if('focus' in client){ client.postMessage({type:'opened'}); return client.focus(); } }
     return self.clients.openWindow(url);
   }));
 });
