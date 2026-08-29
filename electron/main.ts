@@ -3484,6 +3484,12 @@ function chatNumCtx(): number {
 // on top of everything else — which is exactly the wait this whole change is
 // about. Thirty minutes of VRAM is the price of a reply that starts talking.
 const OLLAMA_KEEP_ALIVE = 30 * 60;
+// What that costs, measured on this box: the model is 11 GB of the 3060's 12,
+// and loading it takes 9.8s against 0.4s warm. So the thirty minutes buys a
+// reply that starts talking, at the price of the card being unavailable for
+// anything else — which is the right trade here, where nothing else wants it.
+// A machine that shares the card should set it lower, and a headless one that
+// is only spoken to a few times a day may prefer the cold start.
 // A reply sent somewhere she is not — a phone, Discord — is read on a screen
 // that is not the desk, where every extra sentence is extra tokens before the
 // reader sees anything. Capped so a far-away turn stays a line or two; the desk
@@ -4477,7 +4483,15 @@ async function sendToProvider(conversation: OllamaMessage[], config: ProviderCon
           // up per model; `quiet` is only false on the retry below.
           ...(quiet ? { think: false } : {}),
           stream: streaming,
-          options: { temperature, num_ctx: chatNumCtx(), keep_alive: OLLAMA_KEEP_ALIVE, ...(maxTokens ? { num_predict: maxTokens } : {}) },
+          // Top level, not inside options. Ollama reads keep_alive as a field
+          // of the request and silently ignores an option by that name — sent
+          // there it did nothing at all, and the thirty minutes below was a
+          // number this file believed in and the server never saw. Proved by
+          // asking for sixty seconds in options and being given a thirty-minute
+          // expiry, then sixty seconds exactly when it moved out here.
+          // releaseModelForGame had it in the right place all along.
+          keep_alive: OLLAMA_KEEP_ALIVE,
+          options: { temperature, num_ctx: chatNumCtx(), ...(maxTokens ? { num_predict: maxTokens } : {}) },
         }),
       });
     } catch (error) {
