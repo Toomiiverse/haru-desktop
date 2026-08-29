@@ -48,7 +48,7 @@ import { convertImage, normaliseFormat, FORMATS } from './convert';
 import { cancelPower, closeApp, findApps, isCancellable, launch, listRunning, matchApp, matchRunning, normalisePower, POWER_DELAY_S, readDesktopConfig, runPower, supportedDesktop, type DesktopConfig } from './desktop';
 import { looksLikeScreenshot, maySpeak, readScreenshotConfig, screenshotPrompt, SETTLE_MS, SETTLE_TRIES, type ScreenshotConfig } from './screenshots';
 import { look, photoName, readVisionConfig, whileLooking, type VisionConfig } from './vision';
-import { moreThanOnePass, noteCaption, readCaptions, unseenShots } from './seen';
+import { CAPTION_MAX_CHARS, moreThanOnePass, noteCaption, readCaptions, unseenShots } from './seen';
 import { EXPRESSIVE, LAST_WORD, NO_INVENTED_HISTORY, NO_NON_SEQUITURS, readsAsRough, roomInstruction } from './room';
 import { journalStance } from './journal';
 import { haruNote, rangeStats, type HaruNote, type RangeName, type RangeStats } from './journal';
@@ -155,12 +155,35 @@ function shotStoreRoot(): string { return path.join(app.getPath('userData'), 'sc
  * long as the pass takes — see ollama-vision.service, which unloads it after.
  */
 const SHOT_LOOK_TICK_MS = 5 * 60_000;
+/**
+ * Read it out first, then say what it is.
+ *
+ * The first version of this asked for two plain sentences and forbade the
+ * failures — no preamble, no hedging, quote anything readable. A 3B model
+ * ignores all three: what came back for a screen full of his own search terms
+ * was "The user is using a search engine or a similar tool to analyze search
+ * results", which is true of the screenshot and useless to her.
+ *
+ * Transcribing first fixes it, on the same model, in the same time. Asked to
+ * read the screen before describing it, the same picture came back as
+ * "gaming cafe perth +57 | Total: 73 impressions" and four more like it — every
+ * query and every number, correct. The description is then written against what
+ * it just read rather than against the general shape of the image.
+ *
+ * Which is the day's recurring lesson from the other end: the summariser wrote
+ * in the second person because the transcript said You:, the tally quoted a
+ * timestamp because the sample carried one, and this hedged because nothing
+ * made it look properly. Shape the input; a rule in the prompt about what not
+ * to do is the weakest instrument here.
+ */
 const SHOT_LOOK_PROMPT = [
-  'This is a screenshot of the user\'s computer.',
-  'Say plainly which program is in front and what they are doing in it, in two sentences.',
-  'Quote any readable text that says what the work is — a filename, a heading, a search box.',
-  'No preamble, no "this image shows", no guessing at what they might be thinking.',
-].join(' ');
+  'Read this screenshot of a computer screen.',
+  'First read out every piece of text you can see: headings, list items, numbers, buttons.',
+  'Then say in one sentence which program it is and what is being done in it.',
+  'Answer exactly in this form, nothing else:',
+  'Text: <everything you read>',
+  'Doing: <one sentence>',
+].join('\n');
 
 async function lookAtSyncedShots() {
   const vision = readVisionConfig(store.get('vision'));
@@ -186,7 +209,7 @@ async function lookAtSyncedShots() {
         ask: SHOT_LOOK_PROMPT,
         keepAlive,
       });
-      const text = sighting.description.trim();
+      const text = sighting.description.trim().slice(0, CAPTION_MAX_CHARS);
       if (!text) continue;
       saved = noteCaption(saved, { day: shot.day, name: shot.name, at: new Date().toISOString(), text });
       console.log(`[shot] ${shot.day}/${shot.name}: ${text.slice(0, 90)}`);

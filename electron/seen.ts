@@ -19,6 +19,15 @@ export type Caption = {
   text: string;
 };
 
+/**
+ * A transcription of a busy screen is longer than a caption, and this holds
+ * four hundred of them. Cut rather than left to grow: what makes a shot worth
+ * remembering is in the first few lines — the headings, the filename, the
+ * search terms — and a screen full of body text is not made more useful by
+ * keeping all of it.
+ */
+export const CAPTION_MAX_CHARS = 700;
+
 /** Roughly a fortnight of a busy desk. Older captions fall off the end; the
  *  shots themselves have their own retention in shotstore.ts. */
 export const CAPTIONS_KEPT = 400;
