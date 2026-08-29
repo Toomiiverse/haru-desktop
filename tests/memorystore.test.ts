@@ -50,6 +50,7 @@ function harness(options: Partial<{
       getSessions: () => options.sessions ?? [],
       getBlocks: () => blocks,
       setBlocks: (next) => { blocks = next; },
+      getForgettingLog: () => forgotten,
       appendForgettingLog: (entries) => { forgotten.push(...entries); return entries; },
     },
     broadcast: (channel, payload) => { broadcasts.push({ channel, payload }); },

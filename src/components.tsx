@@ -454,6 +454,7 @@ export function ProfileDrawer({ onClose }: { onClose(): void }) {
         <select value={draftKind} onChange={event => setDraftKind(event.target.value as MemoryKind)}>{MEMORY_GROUPS.map(([kind, label]) => <option key={kind} value={kind}>{label}</option>)}</select>
         <button className="ghost" disabled={!draft.trim()} onClick={addMemory}>Add</button>
         <button className="ghost" title="Merge duplicates and flag contradictions now" onClick={async () => { await window.haru!.memory.consolidate(); setMemories(await window.haru!.memory.list()); }}>Tidy</button>
+        <button className="ghost" title="Trade memories with the server, both ways" onClick={async () => setMemories(await window.haru!.memory.sync())}>Sync</button>
       </div>
       <div className="field"><h2>What she forgot</h2>
         {forgetting.length === 0

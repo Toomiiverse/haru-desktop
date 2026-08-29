@@ -86,6 +86,7 @@ interface Window {
       forgetSessions(): Promise<import('./types').SessionSummary[]>;
       remove(id: string): Promise<import('./types').Memory[]>;
       consolidate(): Promise<unknown[]>;
+      sync(): Promise<Memory[]>;
       forgettingLog(): Promise<import('./types').ForgettingEntry[]>;
       lastRetrieval(): Promise<import('./types').LastRetrieval | null>;
       clear(): Promise<import('./types').Memory[]>;

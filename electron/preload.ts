@@ -355,6 +355,7 @@ contextBridge.exposeInMainWorld('haru', {
     forgetSessions: () => ipcRenderer.invoke('memory:forgetSessions') as Promise<SessionSummary[]>,
     remove: (id: string) => ipcRenderer.invoke('memory:remove', id) as Promise<Memory[]>,
     consolidate: () => ipcRenderer.invoke('memory:consolidate') as Promise<unknown[]>,
+    sync: () => ipcRenderer.invoke('memory:sync') as Promise<Memory[]>,
     forgettingLog: () => ipcRenderer.invoke('memory:forgettingLog') as Promise<ForgettingEntry[]>,
     lastRetrieval: () => ipcRenderer.invoke('memory:lastRetrieval') as Promise<LastRetrieval | null>,
     clear: () => ipcRenderer.invoke('memory:clear') as Promise<Memory[]>,

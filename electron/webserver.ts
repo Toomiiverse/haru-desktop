@@ -78,6 +78,12 @@ export type WebDeps = {
   agenda(): { id: string; title: string; date: string; time: string | null; kind: string; done?: boolean; daysAway: number }[];
   tickOff(id: string): Promise<void> | void;
   memories(): string[];
+  /** The whole records, for the other Haru of hers to merge against. The page
+   *  never asks for these — it shows the text and nothing else. */
+  memoryRecords(): unknown[];
+  /** Fold that machine's memories into this one's. Vetted on the way in, so
+   *  whatever arrives here is treated as a claim rather than a record. */
+  mergeMemories(theirs: unknown): { added: number; updated: number };
   journal(): { date: string; text: string; mood?: number; anxiety?: number }[];
   writeJournal(entry: { text: string; mood?: number; anxiety?: number }): Promise<void> | void;
   /** Today's little notes, oldest first. */
@@ -777,6 +783,22 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
   }
 
   if (req.method === 'GET' && path === '/api/memory') return json(res, 200, { memories: deps.memories() });
+
+  // The other half of her, kept level. Both machines write memories — one from
+  // the phone, one from the desk — and these two routes are how each finds out
+  // what the other learned. Behind the same login as everything else, and only
+  // ever reached over the tailnet: the desk refuses to dial anything that is
+  // not one (checkinsource.ts), and these notes are no less hers than that.
+  if (req.method === 'GET' && path === '/api/memory/records') {
+    return json(res, 200, { memories: deps.memoryRecords() });
+  }
+
+  if (req.method === 'POST' && path === '/api/memory/records') {
+    const body = await readBody(req) as { memories?: unknown };
+    if (!Array.isArray(body.memories)) return json(res, 400, { error: 'Send a list of memories.' });
+    const merged = deps.mergeMemories(body.memories);
+    return json(res, 200, { ...merged, memories: deps.memoryRecords() });
+  }
 
   // Little notes taken while the day happens. Separate from the journal on
   // purpose: one is written about a day, the other during it.

@@ -25,6 +25,7 @@ import {
   type RetrievalFactors, type SessionSummary,
 } from './memory';
 import { consolidateMemories, type ConsolidationChange } from './consolidation';
+import { mergeMemories, type MergeReport } from './memorysync';
 import { formatMemoryBlocks, type BlockSources, type MemoryBlock } from './blocks';
 import type { Embedder } from './embeddings';
 
@@ -48,6 +49,7 @@ export type MemoryStoreDeps = {
     getSessions(): SessionSummary[];
     getBlocks(): MemoryBlock[];
     setBlocks(blocks: MemoryBlock[]): void;
+    getForgettingLog(): ForgettingEntry[];
     appendForgettingLog(entries: ForgettingEntry[]): unknown;
   };
   /** Tell every window something changed, so the inspector never goes stale. */
@@ -120,6 +122,41 @@ export function createMemoryStore(deps: MemoryStoreDeps) {
     }
     setMemories(pruned.memories);
     return { created, record };
+  }
+
+  /**
+   * Another machine's memories, folded into these.
+   *
+   * `theirs` is unknown because it comes off the network; memorysync vets it.
+   *
+   * Anything already in the forgetting log is dropped rather than taken back.
+   * Without that, every sync re-adds what the cap evicted here, the prune
+   * evicts it again, and the log fills with the same memory forgotten forever.
+   * The log holds the last 200 evictions, so something forgotten longer ago
+   * than that can still return — rare, and cheaper than keeping every id ever
+   * dropped.
+   */
+  function mergeIn(theirs: unknown): MergeReport {
+    const mine = getMemories();
+    const held = new Set(mine.map(memory => memory.id));
+    const forgotten = new Set(
+      store.getForgettingLog().map(entry => entry.id).filter(id => !held.has(id)),
+    );
+    const report = mergeMemories(mine, theirs, new Date().toISOString());
+    const kept = forgotten.size
+      ? report.memories.filter(memory => !forgotten.has(memory.id))
+      : report.memories;
+    const added = report.added - (report.memories.length - kept.length);
+    if (!added && !report.updated) return { memories: mine, added: 0, updated: 0 };
+    const pruned = pruneMemories(kept, MAX_MEMORIES);
+    if (pruned.evicted.length) {
+      store.appendForgettingLog(pruned.evicted.map(memory => ({
+        id: memory.id, text: memory.text, at: new Date().toISOString(), reason: 'prune' as const,
+        detail: `evicted at the ${MAX_MEMORIES}-memory cap`,
+      })));
+    }
+    setMemories(pruned.memories);
+    return { memories: pruned.memories, added, updated: report.updated };
   }
 
   // -- semantic retrieval ------------------------------------------------------
@@ -258,7 +295,7 @@ export function createMemoryStore(deps: MemoryStoreDeps) {
   }
 
   return {
-    getMemories, setMemories, addMemory, getSessions,
+    getMemories, setMemories, addMemory, mergeIn, getSessions,
     refreshVectors, scheduleVectorRefresh, embedQuery,
     /** The vectors as they stand. A function because they are replaced wholesale. */
     vectors: () => vectors,

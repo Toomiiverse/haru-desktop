@@ -20,6 +20,8 @@ import { join } from 'node:path';
 import { startWebServer, type WebDeps } from '../electron/webserver';
 import { setPassword, type WebAccess } from '../electron/web';
 import { readPushPrefs } from '../electron/push';
+import { mergeMemories } from '../electron/memorysync';
+import type { MemoryRecord } from '../electron/memory';
 
 const USERNAME = 'tom';
 const PASSWORD = 'a-long-enough-password';
@@ -28,6 +30,10 @@ const SECRET = setPassword(PASSWORD);
 function access(overrides: Partial<WebAccess> = {}): WebAccess {
   return { enabled: true, username: USERNAME, salt: SECRET.salt, hash: SECRET.hash, devices: [], ...overrides };
 }
+
+/** The desk's copy, as the server would hold it. Module scope so a test can
+ *  post to the route and then read the same store back through it. */
+let syncedMemories: MemoryRecord[] = [];
 
 function deps(overrides: Partial<WebDeps> = {}): WebDeps {
   let stored = access();
@@ -44,6 +50,12 @@ function deps(overrides: Partial<WebDeps> = {}): WebDeps {
     agenda: () => [],
     tickOff: () => {},
     memories: () => [],
+    memoryRecords: () => syncedMemories,
+    mergeMemories: (theirs) => {
+      const merged = mergeMemories(syncedMemories, theirs, '2026-08-29T12:00:00.000Z');
+      syncedMemories = merged.memories;
+      return { added: merged.added, updated: merged.updated };
+    },
     journal: () => [],
     writeJournal: () => {},
     checkIns: () => [],
@@ -131,7 +143,7 @@ test('a stranger gets the sign-in page and nothing else', async () => {
     assert.equal(front.status, 200);
     assert.ok((await front.text()).includes('Sign in to reach her'));
 
-    for (const path of ['/api/chat', '/api/agenda', '/api/memory', '/api/journal', '/api/checkins', '/api/knowledge/stats', '/api/model', '/api/push', '/api/attach', '/api/where']) {
+    for (const path of ['/api/chat', '/api/agenda', '/api/memory', '/api/memory/records', '/api/journal', '/api/checkins', '/api/knowledge/stats', '/api/model', '/api/push', '/api/attach', '/api/where']) {
       const refused = await web.call(path);
       assert.equal(refused.status, 401, `${path} answered a stranger`);
     }
@@ -648,5 +660,39 @@ test('the day handed to the page carries what she said on her own, marked as suc
     assert.deepEqual(messages.map(m => m.id), ['u1', 'a1', 's1']);
     assert.equal(messages[2].aside, 'reminder');
     assert.equal(messages[1].aside, undefined);
+  } finally { await web.stop(); }
+});
+
+// -- the other half of her -------------------------------------------------------
+
+test('the desk trades memories with the server, and is not trusted while it does', async () => {
+  syncedMemories = [];
+  const web = await door();
+  try {
+    assert.equal((await web.signIn()).status, 200);
+
+    const sent = await web.call('/api/memory/records', {
+      method: 'POST',
+      body: JSON.stringify({ memories: [{ id: 'a', text: 'likes tea', kind: 'fact', mentions: 2 }] }),
+    });
+    assert.equal(sent.status, 200);
+    assert.equal((await sent.json()).added, 1);
+
+    const back = await web.call('/api/memory/records');
+    assert.equal(back.status, 200);
+    assert.deepEqual((await back.json()).memories.map((memory: { text: string }) => memory.text), ['likes tea']);
+
+    // Whatever arrives is a claim, not a record. A shape that is not a list is
+    // refused outright, and rubbish inside a list is dropped rather than stored.
+    for (const body of [{ memories: 'all of them' }, { memories: { id: 'a' } }, {}]) {
+      const refused = await web.call('/api/memory/records', { method: 'POST', body: JSON.stringify(body) });
+      assert.equal(refused.status, 400, `took ${JSON.stringify(body)}`);
+    }
+    const junk = await web.call('/api/memory/records', {
+      method: 'POST',
+      body: JSON.stringify({ memories: [null, 7, { text: '  ' }, { id: 'a', text: 'likes tea', mentions: 2 }] }),
+    });
+    assert.equal(junk.status, 200);
+    assert.equal((await junk.json()).memories.length, 1, 'only the real one survived');
   } finally { await web.stop(); }
 });

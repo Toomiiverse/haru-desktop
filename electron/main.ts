@@ -76,6 +76,7 @@ import { grudgeInstruction, irritationAfterTally, nextGrudge, tallyDue, tallyIns
 import { groundedInstruction, placeQuery } from './places';
 import { feedbackEntry, recordFeedback } from './feedback';
 import { describePull, isTailnetAddress, mergeCheckIns, readCheckInSource } from './checkinsource';
+import { describeMerge } from './memorysync';
 import { DiscordLink, looksLikeUserId, readDiscordConfig, useOfChannel, type DiscordConfig } from './discord';
 import { reactedPrompt, readReaction, REACTION_COOLDOWN_MS } from './reacted';
 import { startWebServer, type WebDeps } from './webserver';
@@ -3304,7 +3305,7 @@ const memoryStore = createMemoryStore({
   agenda: () => getKept().map(item => ({ title: item.title, kind: item.kind, done: item.done })),
 });
 
-const { getMemories, setMemories, addMemory, getSessions, blockSources, setBlocks, profileSummary } = memoryStore;
+const { getMemories, setMemories, addMemory, mergeIn, getSessions, blockSources, setBlocks, profileSummary } = memoryStore;
 const tryEmbedQuery = memoryStore.embedQuery;
 const refreshMemoryVectors = memoryStore.refreshVectors;
 const scheduleMemoryVectorRefresh = memoryStore.scheduleVectorRefresh;
@@ -4860,6 +4861,81 @@ async function pullCheckIns(): Promise<void> {
     console.warn('[checkins] could not reach the server:', error instanceof Error ? error.message : error);
   } finally {
     pullingCheckIns = false;
+  }
+}
+
+/**
+ * Both halves of her memory, made one.
+ *
+ * The same exchange as pullCheckIns and for the same reason, against the same
+ * machine with the same credentials — there is one server, and asking the user
+ * to configure it twice would only give them two ways to get it wrong. It runs
+ * straight after the check-in pull so one sign-in's worth of reasons to fail
+ * gets reported once.
+ *
+ * This one pushes as well as pulls, which the check-ins do not. A note jotted
+ * on the phone only needs to reach the desk, where the review happens; a memory
+ * has to travel both ways, or the phone keeps answering without knowing what
+ * was said here all evening. The push is not a second writer on that file: the
+ * server's own process handles the POST and merges it, exactly as it does when
+ * the phone adds a check-in.
+ *
+ * Consolidation stays here. Nothing exposes it over the web API, so supersede
+ * chains have one author and the merge never has to reconcile two of them.
+ */
+let syncingMemories = false;
+
+async function syncMemories(): Promise<void> {
+  if (syncingMemories) return;
+  const source = readCheckInSource(store.get('checkinSource'));
+  if (!source) return;
+  // Asked again rather than trusted, the same as the check-in pull: her memory
+  // goes out over this URL, and a mistyped host would send all of it in plain
+  // text to whoever answers.
+  if (!isTailnetAddress(source.url)) {
+    console.warn('[memory] refusing to sync — ' + source.url + ' is not a tailnet address');
+    return;
+  }
+  const password = decryptSecret(store.get('checkinSourcePassword') as string | undefined);
+  if (!password) return;
+
+  syncingMemories = true;
+  try {
+    const signIn = await net.fetch(source.url + '/api/login', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ username: source.username, password, remember: false }),
+    });
+    if (!signIn.ok) { console.warn('[memory] the server would not sign us in (' + signIn.status + ')'); return; }
+    const cookie = (signIn.headers.get('set-cookie') ?? '').split(',').map(part => part.split(';')[0].trim()).filter(Boolean).join('; ');
+    const headers: Record<string, string> = cookie ? { cookie } : {};
+
+    const got = await net.fetch(source.url + '/api/memory/records', { headers });
+    // An older server has the route this replaced and not this one. Say so once
+    // and plainly, rather than letting it read as the server being unreachable.
+    if (got.status === 404) { console.warn('[memory] that server is too old to sync memories'); return; }
+    if (!got.ok) { console.warn('[memory] could not read them (' + got.status + ')'); return; }
+    const body = await got.json() as { memories?: unknown };
+
+    const report = mergeIn(body.memories);
+    const what = describeMerge(report);
+    if (what) console.log('[memory] ' + what + ' from the server');
+
+    // Everything, not just what changed: the server has no idea which of these
+    // it is missing, and sixty records is a smaller thing to send than the
+    // bookkeeping that would work it out.
+    const sent = await net.fetch(source.url + '/api/memory/records', {
+      method: 'POST',
+      headers: { ...headers, 'content-type': 'application/json' },
+      body: JSON.stringify({ memories: getMemories() }),
+    });
+    if (!sent.ok) { console.warn('[memory] the server would not take ours (' + sent.status + ')'); return; }
+    const took = await sent.json() as { added?: number; updated?: number };
+    if (took.added || took.updated) console.log('[memory] the server took ' + (took.added ?? 0) + ' new, ' + (took.updated ?? 0) + ' updated');
+  } catch (error) {
+    console.warn('[memory] could not reach the server:', error instanceof Error ? error.message : error);
+  } finally {
+    syncingMemories = false;
   }
 }
 
@@ -7104,6 +7180,13 @@ function webDeps(): WebDeps {
       return fixed.text;
     },
     memories: () => getMemories().map(memory => memory.text),
+    memoryRecords: () => getMemories(),
+    mergeMemories(theirs) {
+      const report = mergeIn(theirs);
+      const what = describeMerge(report);
+      if (what) console.log('[memory] from the desk: ' + what);
+      return { added: report.added, updated: report.updated };
+    },
     journal: () => getJournal().map(entry => ({ date: entry.date, text: entry.text, mood: entry.mood, anxiety: entry.anxiety })),
     writeJournal(entry) {
       setJournal(upsertEntry(getJournal(), {
@@ -7349,8 +7432,8 @@ app.whenReady().then(() => {
   // Whatever was said to her elsewhere today. Once at startup, then quietly on
   // the hour — often enough that the evening review has it, rare enough that a
   // sleeping server is not being knocked on constantly.
-  void pullCheckIns();
-  setInterval(() => void pullCheckIns(), 15 * 60_000);
+  void pullCheckIns().then(syncMemories);
+  setInterval(() => void pullCheckIns().then(syncMemories), 15 * 60_000);
 
   if (!isPrimaryInstance) return;
   // After the single-instance gate: two copies racing to download the same
@@ -7642,10 +7725,11 @@ app.whenReady().then(() => {
     store.set('checkinSource', { url: trimmed, username: String(username ?? '').trim() });
     if (password) store.set('checkinSourcePassword', encryptSecret(password));
     console.log('[checkins] reading from ' + trimmed);
-    void pullCheckIns();
+    void pullCheckIns().then(syncMemories);
     return { url: trimmed, username: String(username ?? '').trim(), hasPassword: Boolean(password) || Boolean(decryptSecret(store.get('checkinSourcePassword') as string | undefined)) };
   });
   ipcMain.handle('checkinsource:pull', async () => { await pullCheckIns(); return getCheckIns().entries.length; });
+  ipcMain.handle('memory:sync', async () => { await syncMemories(); return getMemories(); });
   ipcMain.handle('search:get', () => ({ ...readSearchConfig(store.get('search')), hasKey: Boolean(getSearchKey()) }));
   ipcMain.handle('search:set', (_e, config: SearchConfig) => {
     const saved = readSearchConfig(config);
