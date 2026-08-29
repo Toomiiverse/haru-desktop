@@ -78,6 +78,8 @@ import { grudgeInstruction, irritationAfterTally, nextGrudge, tallyDue, tallyIns
 import { groundedInstruction, placeQuery } from './places';
 import { daySaid, DEFAULT_BEDTIME_MINUTES, howTheDayWent, nightfallDue, sulkGrudge, sulkInstruction, sulkStillStands, type DayVerdict } from './nightfall';
 import { keepNights, nightNoteInstruction, nightsInstruction, nightsOn, pickInstruction, tidyPick, timeForSomething, type Night } from './nightlife';
+import { gamesPlayedLately, GUIDE_ODDS, guideNoteInstruction, guideQuery, pickGame, withSteam, type Played } from './gamenight';
+import { readSteamWebConfig, recentlyPlayed } from './steamweb';
 import { fetchTranscript, formatTranscript, titleFrom, transcriptInstruction, transcriptsAvailable, videoIdFrom, watchUrl } from './transcripts';
 import { feedbackEntry, recordFeedback } from './feedback';
 import { describePull, isTailnetAddress, mergeCheckIns, readCheckInSource } from './checkinsource';
@@ -2285,6 +2287,11 @@ function saveSearchKey(apiKey: string) {
 
 function getSearchKey(): string {
   return decryptSecret(store.get('searchApiKey') as string | undefined);
+}
+
+/** Steam's Web API key — read-only, made by the account holder, never their login. See steamweb.ts. */
+function getSteamWebKey(): string {
+  return decryptSecret(store.get('steamWebApiKey') as string | undefined);
 }
 
 /**
@@ -7366,11 +7373,27 @@ async function haveANight(config: ProviderConfig) {
   if (!timeForSomething(tonight, lastNightThingAt, Date.now())) return;
   lastNightThingAt = Date.now();
   try {
+    // Some nights are spent on their game. Decided here, not by the model:
+    // asked to choose, a 9B chooses what it always chooses, and the point is
+    // that she turns up in the morning knowing something about what they are
+    // actually playing. The desk's record says what; Steam fills in what the
+    // desk never saw, when a key and an id have been given.
+    let game: Played | null = null;
+    let steamRecent: Awaited<ReturnType<typeof recentlyPlayed>> = [];
+    try {
+      steamRecent = await recentlyPlayed(getSteamWebKey(), readSteamWebConfig(store.get('steam')), url => net.fetch(url));
+    } catch (error) {
+      console.warn('[night] Steam would not say what they have been playing:', error instanceof Error ? error.message : error);
+    }
+    const played = withSteam(gamesPlayedLately(store.getActivityLog(), nightKey(now)), steamRecent);
+    if (played.length && Math.random() < GUIDE_ODDS) game = pickGame(played, getNights(), nightKey(now));
+
     const theirs = getMemories().map(memory => memory.text);
     const before = getNights().map(night => night.about);
-    const raw = await ollamaQuip([getActiveCharacter().identity, pickInstruction(theirs, before)].join(' '), 'What are you looking up?', config);
-    const about = tidyPick(raw);
-    if (!about) { console.log(`[night] she could not settle on anything ("${raw.slice(0, 60)}")`); return; }
+    const about = game
+      ? guideQuery(game, getNights())
+      : tidyPick(await ollamaQuip([getActiveCharacter().identity, pickInstruction(theirs, before)].join(' '), 'What are you looking up?', config));
+    if (!about) { console.log('[night] she could not settle on anything'); return; }
     const found = await searchWeb(about, { ...searchConfig, limit: Math.max(searchConfig.limit, 6) }, net.fetch, getSearchKey());
     if (!found.length) { console.log(`[night] "${about}" turned nothing up — nothing to say about it, so nothing is written`); return; }
     // Read one of them properly where she can, so the note is about something
@@ -7393,13 +7416,15 @@ async function haveANight(config: ProviderConfig) {
         }
       } catch { /* the blurbs are enough; a page that will not open is not a failure */ }
     }
-    const note = await ollamaQuip([getActiveCharacter().identity, getActiveCharacter().style, nightNoteInstruction(about, reading)].join(' '), 'Write it.', config);
+    const told = game ? guideNoteInstruction(game, about, reading) : nightNoteInstruction(about, reading);
+    const note = await ollamaQuip([getActiveCharacter().identity, getActiveCharacter().style, told].join(' '), 'Write it.', config);
     if (!note) return;
     store.set('nights', keepNights(getNights(), {
       day: nightKey(now), at: new Date().toISOString(), about, note,
       sources: found.slice(0, 3).map(result => result.url).filter(Boolean),
+      ...(game ? { game: game.name } : {}),
     }));
-    console.log(`[night] ${watched ? 'went through a video transcript' : 'read'} about "${about}" (${found.length} result(s)) -> ${note.length} chars`);
+    console.log(`[night] ${game ? `read a guide to ${game.name}` : watched ? 'went through a video transcript' : 'read'} — "${about}" (${found.length} result(s)) -> ${note.length} chars`);
   } catch (error) {
     console.warn('[night] her night came to nothing:', error instanceof Error ? error.message : error);
   }

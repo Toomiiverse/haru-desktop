@@ -27,6 +27,8 @@ export type Night = {
   note: string;
   /** Where it came from, so a follow-up can be traced rather than improvised. */
   sources: string[];
+  /** Set when the night was spent on a guide to a game they play (gamenight.ts). */
+  game?: string;
 };
 
 /** Nights kept, which is about a fortnight of things she can still refer back to. */
@@ -118,7 +120,7 @@ export function nightNoteInstruction(about: string, found: string): string {
  */
 export function nightsInstruction(nights: Night[]): string {
   if (!nights.length) return '';
-  const said = nights.slice(-MAX_PER_NIGHT).map(night => `- ${night.about}: ${night.note}`).join('\n');
+  const said = nights.slice(-MAX_PER_NIGHT).map(night => `- ${night.game ? `a guide to ${night.game}, which they have been playing` : night.about}: ${night.note}`).join('\n');
   return [
     'What you did in the small hours while they were asleep, and it did happen — you read about these:',
     said,
