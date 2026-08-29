@@ -166,13 +166,17 @@ test('a half-written forgetting entry is skipped rather than handed back', () =>
   // It is read straight out of a file somebody could have edited, and every
   // caller expects an id and a timestamp to be there.
   const { store } = makeStore();
-  store.set('memory.forgettingLog', [
-    { id: 'good', text: 'gone', at: '2026-08-20T00:00:00.000Z', reason: 'decay' },
-    { text: 'no id', at: '2026-08-20T00:00:00.000Z' },
-    { id: 'no timestamp', text: 'gone' },
-    null,
-    'not even an object',
-  ]);
+  store.writeMemoryFile({
+    memories: [],
+    sessions: [],
+    forgettingLog: [
+      { id: 'good', text: 'gone', at: '2026-08-20T00:00:00.000Z', reason: 'decay' },
+      { text: 'no id', at: '2026-08-20T00:00:00.000Z' },
+      { id: 'no timestamp', text: 'gone' },
+      null,
+      'not even an object',
+    ] as never,
+  });
   assert.deepEqual(store.getForgettingLog().map(entry => entry.id), ['good']);
 });
 
@@ -297,4 +301,96 @@ test('the archive is backed up and verified alongside the other store files', ()
   assert.equal(store.verify(), true);
   writeFileSync(path.join(dir, 'archive.json'), 'not json at all');
   assert.equal(store.verify(), false);
+});
+
+// -- memories.json ---------------------------------------------------------------
+
+test('migration v5 moves memories, sessions and the forgetting log out of config.json', () => {
+  const { store, dir } = makeStore();
+  store.set('memories', [{ id: 'm1', text: 'Allergic to shellfish', kind: 'fact', createdAt: '2026-07-01T00:00:00.000Z', mentions: 2 }]);
+  store.set('memory.sessions', [{ day: '2026-08-01', summary: 'a day', createdAt: '2026-08-01T00:00:00.000Z' }]);
+  store.set('memory.forgettingLog', [{ id: 'gone', text: 'forgotten', at: '2026-08-20T00:00:00.000Z', reason: 'decay' }]);
+  store.set('schema.version', 4);
+
+  const report = store.migrate();
+  assert.equal(report.to, SCHEMA_VERSION);
+  assert.ok(report.steps.some(step => step.includes('memories.json')));
+
+  for (const key of ['memories', 'memory.sessions', 'memory.forgettingLog']) {
+    assert.equal(store.has(key), false, `${key} was left behind in config.json`);
+  }
+  assert.equal(existsSync(path.join(dir, 'memories.json')), true);
+  assert.equal(store.getMemories()[0].text, 'Allergic to shellfish');
+  assert.equal(store.getSessions().length, 1);
+  assert.deepEqual(store.getForgettingLog().map(entry => entry.id), ['gone']);
+});
+
+test('a store coming up from before v2 is enriched on the way into its own file', () => {
+  // v2 derives confidence and importance, and it reads through getMemories -
+  // which points at a file v5 has not written yet. v5 runs the same derivation
+  // on what it moves, or a legacy record would land in memories.json raw.
+  const { store } = makeStore();
+  store.set('memories', [{ id: 'old1', text: 'Dislikes being nagged', createdAt: '2026-07-01T00:00:00.000Z', mentions: 3 }]);
+  store.migrate();
+  const [moved] = store.getMemories();
+  assert.equal(typeof moved.confidence, 'number');
+  assert.equal(typeof moved.importance, 'number');
+  assert.equal(moved.status, 'active');
+});
+
+test('migrating with nothing to move leaves an empty file and no keys', () => {
+  const { store } = makeStore();
+  store.set('schema.version', 4);
+  store.migrate();
+  assert.equal(store.has('memories'), false);
+  assert.deepEqual(store.getMemories(), []);
+  assert.deepEqual(store.getSessions(), []);
+});
+
+test('memories are backed up, verified and hardened alongside the other store files', () => {
+  const { store, dir } = makeStore();
+  store.setMemories([{ id: 'm1', text: 'Allergic to shellfish', kind: 'fact', createdAt: '2026-08-01T00:00:00.000Z', lastSeenAt: '2026-08-01T00:00:00.000Z', mentions: 1 }]);
+  const made = store.backup('a-reason');
+  assert.equal(made.some(file => file.includes('memories.json.before-a-reason-')), true);
+  assert.equal(store.verify(), true);
+  writeFileSync(path.join(dir, 'memories.json'), 'not json at all');
+  assert.equal(store.verify(), false);
+});
+
+test('a memories file that is missing, corrupt or the wrong shape is empty, not a crash', () => {
+  const { store, dir } = makeStore();
+  assert.deepEqual(store.getMemories(), []);
+  for (const written of ['{not json', '[1,2,3]', '"a string"', '{"memories":"not a list"}']) {
+    const fresh = new HaruStore({ cwd: dir, configName: `c-${written.length}-${written.charCodeAt(1)}`, knowledgeFile: path.join(dir, 'k.json'), memoriesFile: path.join(dir, 'broken.json') });
+    writeFileSync(path.join(dir, 'broken.json'), written);
+    assert.deepEqual(fresh.getMemories(), [], `${written} should read as no memories`);
+    assert.deepEqual(fresh.getSessions(), []);
+  }
+});
+
+test('a transaction that throws rolls the memories back, not just the config', () => {
+  // replace_in_block supersedes a memory and edits a block as one unit. The
+  // memories used to live inside electron-store, so restoring its snapshot
+  // covered both; now they do not, and a rollback that forgot them would leave
+  // the supersede applied and the block edit undone.
+  const { store } = makeStore();
+  const before = [{ id: 'm1', text: 'lives in Manchester', kind: 'fact' as const, createdAt: '2026-08-01T00:00:00.000Z', lastSeenAt: '2026-08-01T00:00:00.000Z', mentions: 1 }];
+  store.setMemories(before);
+  store.set('a.block', 'before');
+
+  assert.throws(() => store.transaction(() => {
+    store.setMemories([...before, { id: 'm2', text: 'lives in Sheffield', kind: 'fact', createdAt: '2026-08-02T00:00:00.000Z', lastSeenAt: '2026-08-02T00:00:00.000Z', mentions: 1 }]);
+    store.set('a.block', 'after');
+    throw new Error('half way through');
+  }), /half way through/);
+
+  assert.deepEqual(store.getMemories(), before, 'the memory written inside the transaction survived the rollback');
+  assert.equal(store.get('a.block'), 'before');
+});
+
+test('a transaction that succeeds keeps what it wrote', () => {
+  const { store } = makeStore();
+  const memories = [{ id: 'm1', text: 'Allergic to shellfish', kind: 'fact' as const, createdAt: '2026-08-01T00:00:00.000Z', lastSeenAt: '2026-08-01T00:00:00.000Z', mentions: 1 }];
+  store.transaction(() => { store.setMemories(memories); });
+  assert.deepEqual(store.getMemories(), memories);
 });

@@ -7787,7 +7787,7 @@ app.whenReady().then(() => {
   ipcMain.handle('memory:list', () => getMemories());
   ipcMain.handle('memory:add', (_e, text: string, kind: MemoryKind = 'fact') => { addMemory(text, kind, undefined, { source: 'explicit' }); return getMemories(); });
   ipcMain.handle('memory:sessions', () => getSessions());
-  ipcMain.handle('memory:forgetSessions', () => { store.set('memory.sessions', []); return []; });
+  ipcMain.handle('memory:forgetSessions', () => { store.setSessions([]); return []; });
   ipcMain.handle('memory:remove', (_e, id: string) => { setMemories(getMemories().filter(memory => memory.id !== id)); return getMemories(); });
   ipcMain.handle('memory:consolidate', () => runMemoryConsolidation());
   ipcMain.handle('memory:forgettingLog', () => store.getForgettingLog());

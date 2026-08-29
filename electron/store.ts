@@ -1,12 +1,19 @@
 // Haru's persistence layer — the only module that reads or writes the on-disk
 // store files: config.json for application/configuration state, knowledge.json
-// for structured memory, archive.json for the day-by-day transcripts.
+// for structured memory, archive.json for the day-by-day transcripts,
+// memories.json for what she actually remembers.
 //
-// Three files rather than two since v4, and the split is not filing tidiness.
+// Four files rather than one, and the split is not filing tidiness.
 // electron-store rewrites the whole of config.json on every set, and the life
 // loop sets one key every twenty seconds — so the transcripts, which change
 // twice a day, were being written to disk four thousand times a day along with
 // everything else. See archive.ts.
+//
+// The memories left for the same reason from the other end. They are not large
+// but they are written constantly — every remembered fact, every decay pass,
+// every sync with the server — and each of those writes was dragging the
+// persona and the API keys through a full serialise with it. Now the two things
+// that change often, the vitals and the memories, no longer share a file.
 //
 // What that buys is real and worth keeping. No other module imports
 // electron-store or knows where the files live, and this is the one place that
@@ -29,7 +36,7 @@
 
 import Store from 'electron-store';
 import { execFile } from 'node:child_process';
-import { copyFileSync, existsSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { emptyKnowledge, loadKnowledge, saveKnowledge, type KnowledgeStore } from './knowledge';
@@ -38,7 +45,7 @@ import { mergeBlockDefaults, type MemoryBlock } from './blocks';
 import { migrateMemories, type ForgettingEntry, type MemoryRecord, type SessionSummary } from './memory';
 
 /** The current schema version of the store. Bumped by each schema migration. */
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 export type MigrationStep = {
   /** The schema version this step produces. Steps run in ascending order. */
@@ -66,7 +73,13 @@ export const MIGRATIONS: MigrationStep[] = [
       // migrateMemories derives the v2 fields on read; this step makes that
       // derivation permanent so the file carries the new schema, not just the
       // in-memory view.
-      haruStore.setMemories(migrateMemories(haruStore.getMemories(), new Date().toISOString()));
+      // Only reaches anything for a store already past v5; before that the
+      // records are still in config.json and getMemories reads the file that
+      // v5 has not written yet. The v5 step below runs the same derivation on
+      // what it moves, which is what covers a store coming up from v0 or v1 —
+      // and migrateMemories is idempotent, so both running costs nothing.
+      const held = haruStore.getMemories();
+      if (held.length) haruStore.setMemories(migrateMemories(held, new Date().toISOString()));
     },
   },
   {
@@ -92,7 +105,61 @@ export const MIGRATIONS: MigrationStep[] = [
       haruStore.delete('chat.archive');
     },
   },
+  {
+    version: 5,
+    label: 'the memories, sessions and forgetting log move out of config.json into memories.json',
+    run: (haruStore) => {
+      // Written before the keys are dropped, and dropped only once the write
+      // has returned — the same order archive.ts moved in, for the same reason.
+      const memories = haruStore.get('memories');
+      const sessions = haruStore.get('memory.sessions');
+      const forgettingLog = haruStore.get('memory.forgettingLog');
+      const moved = {
+        // Enriched on the way across rather than moved raw: see the v2 step.
+        memories: migrateMemories(memories, new Date().toISOString()),
+        sessions: Array.isArray(sessions) ? sessions as SessionSummary[] : [],
+        forgettingLog: Array.isArray(forgettingLog) ? forgettingLog as ForgettingEntry[] : [],
+      };
+      if (moved.memories.length || moved.sessions.length || moved.forgettingLog.length) {
+        const held = haruStore.readMemoryFile();
+        haruStore.writeMemoryFile({
+          memories: moved.memories.length ? moved.memories : held.memories,
+          sessions: moved.sessions.length ? moved.sessions : held.sessions,
+          forgettingLog: moved.forgettingLog.length ? moved.forgettingLog : held.forgettingLog,
+        });
+        console.log(`[store] moved ${moved.memories.length} memor(ies) out of config.json`);
+      }
+      haruStore.delete('memories');
+      haruStore.delete('memory.sessions');
+      haruStore.delete('memory.forgettingLog');
+    },
+  },
 ];
+
+/** What memories.json holds. The blocks stay in config.json: they are the
+ *  layout of the prompt rather than anything she remembers, and they are
+ *  written when somebody edits one, not when she learns something. */
+export type MemoryFile = {
+  memories: MemoryRecord[];
+  sessions: SessionSummary[];
+  forgettingLog: ForgettingEntry[];
+};
+
+const EMPTY_MEMORY_FILE: MemoryFile = { memories: [], sessions: [], forgettingLog: [] };
+
+/** Arrays where arrays belong and nothing else. A file somebody has edited by
+ *  hand, or half-written by a machine that lost power, comes back usable rather
+ *  than throwing at startup — the same bargain loadArchive makes. */
+export function normalizeMemoryFile(value: unknown): MemoryFile {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return { ...EMPTY_MEMORY_FILE };
+  const held = value as Partial<Record<keyof MemoryFile, unknown>>;
+  const list = <T>(candidate: unknown): T[] => (Array.isArray(candidate) ? candidate as T[] : []);
+  return {
+    memories: list<MemoryRecord>(held.memories),
+    sessions: list<SessionSummary>(held.sessions),
+    forgettingLog: list<ForgettingEntry>(held.forgettingLog),
+  };
+}
 
 export type HaruStoreOptions = {
   /** Where knowledge.json lives. */
@@ -101,6 +168,8 @@ export type HaruStoreOptions = {
    *  is where it belongs — it is the same user's data, just the part that does
    *  not need rewriting every twenty seconds. */
   archiveFile?: string;
+  /** Where memories.json lives. Beside config.json by the same reasoning. */
+  memoriesFile?: string;
   /** Only used in tests — overrides where the config file lives. */
   cwd?: string;
   configName?: string;
@@ -126,11 +195,15 @@ export class HaruStore {
   private readonly electron: Store<Record<string, unknown>>;
   private readonly knowledgeFile: string;
   private readonly archiveFile: string;
+  private readonly memoriesFile: string;
   private readonly maxBackups: number;
   /** Read once, then kept. This process is the only writer, so the copy in
    *  memory cannot go stale, and the alternative is parsing half a megabyte of
    *  transcript several times per reply. */
   private archiveCache: Archive | null = null;
+  /** Read once, then kept, for archiveCache's reasons — and one more: retrieval
+   *  reads the memories several times per reply. */
+  private memoryCache: MemoryFile | null = null;
 
   constructor(options: HaruStoreOptions) {
     this.knowledgeFile = options.knowledgeFile;
@@ -140,6 +213,7 @@ export class HaruStore {
     if (options.configName) storeOptions.name = options.configName;
     this.electron = new Store<Record<string, unknown>>(storeOptions);
     this.archiveFile = options.archiveFile ?? path.join(path.dirname(this.electron.path), 'archive.json');
+    this.memoriesFile = options.memoriesFile ?? path.join(path.dirname(this.electron.path), 'memories.json');
   }
 
   // -- generic access. Same surface as electron-store so existing callers and
@@ -173,34 +247,65 @@ export class HaruStore {
     return this.electron.has(key);
   }
 
-  // -- typed accessors for the memory subsystem. Later phases extend these as
-  //    the record schema grows; no subsystem ever touches the raw keys.
+  // -- typed accessors for the memory subsystem. Its own file since v5; no
+  //    subsystem ever touched the raw keys, which is what made the move a
+  //    change to this file alone.
+
+  /** The file as it stands, straight off disk. Public only so the v5 migration
+   *  can reach it before the cache is trusted; everything else goes through the
+   *  accessors below. */
+  readMemoryFile(): MemoryFile {
+    try {
+      if (!existsSync(this.memoriesFile)) return { ...EMPTY_MEMORY_FILE };
+      return normalizeMemoryFile(JSON.parse(readFileSync(this.memoriesFile, 'utf8')));
+    } catch (error) {
+      // Losing her memories is bad; refusing to start is worse, and the backup
+      // taken before every migration is the way back to them.
+      console.warn(`[store] could not read ${this.memoriesFile}:`, error instanceof Error ? error.message : error);
+      return { ...EMPTY_MEMORY_FILE };
+    }
+  }
+
+  /** Temp file then rename, so a crash mid-write cannot leave half a memory
+   *  file behind — the same write knowledge.json and archive.json get. */
+  writeMemoryFile(file: MemoryFile): void {
+    this.memoryCache = file;
+    mkdirSync(path.dirname(this.memoriesFile), { recursive: true });
+    const tmp = `${this.memoriesFile}.tmp-${process.pid}-${Date.now().toString(36)}`;
+    writeFileSync(tmp, JSON.stringify(file));
+    renameSync(tmp, this.memoriesFile);
+  }
+
+  private memories(): MemoryFile {
+    if (!this.memoryCache) this.memoryCache = this.readMemoryFile();
+    return this.memoryCache;
+  }
 
   getMemories(): MemoryRecord[] {
-    return (this.get('memories') as MemoryRecord[] | undefined) ?? [];
+    return this.memories().memories;
   }
 
   setMemories(items: MemoryRecord[]): void {
-    this.set('memories', items);
+    this.writeMemoryFile({ ...this.memories(), memories: items });
   }
 
   getSessions(): SessionSummary[] {
-    return (this.get('memory.sessions') as SessionSummary[] | undefined) ?? [];
+    return this.memories().sessions;
   }
 
   setSessions(items: SessionSummary[]): void {
-    this.set('memory.sessions', items);
+    this.writeMemoryFile({ ...this.memories(), sessions: items });
   }
 
   /** The trail of what she forgot and why — bounded so the log itself cannot
    *  grow forever. */
   getForgettingLog(): ForgettingEntry[] {
-    const saved = (this.get('memory.forgettingLog') as ForgettingEntry[] | undefined) ?? [];
-    return saved.filter(entry => entry && typeof entry.id === 'string' && typeof entry.at === 'string');
+    return this.memories().forgettingLog
+      .filter(entry => entry && typeof entry.id === 'string' && typeof entry.at === 'string');
   }
 
   setForgettingLog(entries: ForgettingEntry[]): void {
-    this.set('memory.forgettingLog', entries.slice(-200));
+    this.writeMemoryFile({ ...this.memories(), forgettingLog: entries.slice(-200) });
   }
 
   appendForgettingLog(entries: ForgettingEntry[]): ForgettingEntry[] {
@@ -261,21 +366,30 @@ export class HaruStore {
    */
   transaction<T>(fn: () => T): T {
     const snapshot = JSON.parse(JSON.stringify(this.electron.store)) as Record<string, unknown>;
+    // The memories are no longer inside electron-store, so restoring its
+    // snapshot alone would roll back half of what the block tools do in here:
+    // replace_in_block supersedes a memory and edits a block as one unit, and a
+    // throw between them used to be safe. Snapshotted whether or not the body
+    // touches them, because the body is the thing that decides that.
+    const memories = JSON.parse(JSON.stringify(this.memories())) as MemoryFile;
     try {
       return fn();
     } catch (error) {
       this.electron.store = snapshot;
+      // Written back only if something actually moved, so a transaction that
+      // threw without touching a memory does not rewrite the file for nothing.
+      if (JSON.stringify(this.memories()) !== JSON.stringify(memories)) this.writeMemoryFile(memories);
       throw error;
     }
   }
 
   /**
-   * Copy both store files to timestamped backups, then drop the oldest so at
+   * Copy every store file to timestamped backups, then drop the oldest so at
    * most `maxBackups` survive per reason. Returns the backup paths created.
    */
   backup(reason: string): string[] {
     const made: string[] = [];
-    for (const file of [this.electron.path, this.knowledgeFile, this.archiveFile]) {
+    for (const file of [this.electron.path, this.knowledgeFile, this.archiveFile, this.memoriesFile]) {
       if (!existsSync(file)) continue;
       const target = `${file}.before-${reason}-${backupStamp()}`;
       try {
@@ -311,7 +425,7 @@ export class HaruStore {
     return { from, to: SCHEMA_VERSION, steps };
   }
 
-  /** Whether both store files parse as JSON right now. */
+  /** Whether every store file parses as JSON right now. */
   verify(): boolean {
     const ok = (file: string) => {
       if (!existsSync(file)) return true;
@@ -322,7 +436,7 @@ export class HaruStore {
         return false;
       }
     };
-    return ok(this.electron.path) && ok(this.knowledgeFile) && ok(this.archiveFile);
+    return ok(this.electron.path) && ok(this.knowledgeFile) && ok(this.archiveFile) && ok(this.memoriesFile);
   }
 
   /**
@@ -332,7 +446,7 @@ export class HaruStore {
    */
   static recoverBackups(options: HaruStoreOptions): boolean {
     let restored = false;
-    for (const file of [path.join(options.cwd ?? '', options.configName ? `${options.configName}.json` : 'config.json'), options.knowledgeFile, options.archiveFile ?? path.join(options.cwd ?? '', 'archive.json')]) {
+    for (const file of [path.join(options.cwd ?? '', options.configName ? `${options.configName}.json` : 'config.json'), options.knowledgeFile, options.archiveFile ?? path.join(options.cwd ?? '', 'archive.json'), options.memoriesFile ?? path.join(options.cwd ?? '', 'memories.json')]) {
       if (!existsSync(file)) continue;
       const newest = this.newestBackup(file);
       if (!newest) continue;
@@ -354,7 +468,10 @@ export class HaruStore {
    */
   hardenPermissions(): void {
     if (process.platform !== 'win32') return;
-    const targets = [this.electron.path, this.knowledgeFile].filter(existsSync);
+    // Every store file, not just the two that existed when this was written:
+    // archive.json is ninety days of what was said and memories.json is what
+    // she knows about them, and neither is less private than config.json.
+    const targets = [this.electron.path, this.knowledgeFile, this.archiveFile, this.memoriesFile].filter(existsSync);
     if (!targets.length) return;
     const user = os.userInfo().username;
     const args = (file: string) => [file, '/inheritance:r', '/grant:r', `${user}:(F)`, 'SYSTEM:(F)', 'Administrators:(F)'];
