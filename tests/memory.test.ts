@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   isWorthRemembering,
+  isAboutTheConversation,
   bansATopic,
   isSameMemory,
   rememberInto,
@@ -113,6 +114,46 @@ test('isWorthRemembering rejects TRANSIENT statements with nothing named', () =>
 test('isWorthRemembering keeps a TRANSIENT statement that names something (escape hatch)', () => {
   // This is the exact example the code's own comment cites for namesSomething().
   assert.equal(isWorthRemembering('Currently reading Oyasumi Punpun Ch. 1'), true);
+});
+
+test('isWorthRemembering rejects records about the conversation or about her, not about them', () => {
+  // The fourteen that were in the store on 2026-08-29 and had to be deleted by hand.
+  const junk = [
+    'The PC Project comes up often, 3 times.',
+    'they are thanking you',
+    'They occasionally say you are helpful, and sometimes it brings up a good mood.',
+    'Might be low, but they can talk',
+    'Nothing notable',
+    'Discord opened and closed',
+    'Procrastination noted',
+    'Don\u2019t be late for the motherboard pickup',
+    'Make sure to pick up the motherboard from Umart',
+    'Pick up the motherboard from Umart in Belmont',
+    'Details not shared',
+  ];
+  for (const line of junk) assert.equal(isWorthRemembering(line), false, line);
+  assert.equal(isAboutTheConversation('Nothing notable'), true);
+});
+
+test('isWorthRemembering still keeps the real records, including the ones that name her', () => {
+  const kept = [
+    'Wants Haru to be less nice and more in-character when tested or corrected on personality.',
+    'Does not like Haru repeating the line \u201cUgh this is getting boring as hell already!\u201d.',
+    'does not like to be corrected on tasks or reminders without being told how to improve',
+    'Prefer not to be constantly nagged and reminded of tasks when not asked',
+    'Does not want therapy-style advice when trying to calm down.',
+    'Rental inspection went well, no issues found',
+    'Rental inspection went well, no issues found Also: Rental inspection completed. Also: Rental inspection completed, but details not shared.',
+    'Calls his mother every Sunday',
+    // A shrug folded onto an event keeps the event: the pattern is anchored
+    // so only "details not shared" as the whole record is refused.
+    'Rental inspection completed, but details not shared.',
+    'Wants 6 mailboxes total for The PC Project.',
+    'Decided to buy MacBook Air M2 instead of Pro',
+    'Picked up Hanya\u2019s PC screen',
+    'Has a dog called Miso',
+  ];
+  for (const line of kept) assert.equal(isWorthRemembering(line), true, line);
 });
 
 test('isWorthRemembering accepts short but concrete facts', () => {

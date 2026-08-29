@@ -189,6 +189,56 @@ const TRANSIENT = /\b(today|right now|currently|at the moment|just (now|finished
  * what someone reads outlives the chapter they are on. Without a name, a
  * sentence about right now is only about right now.
  */
+/**
+ * About the conversation, or about her, rather than about them.
+ *
+ * The fourth class, found by reading the store after three weeks: of
+ * thirty-four records, fourteen were not about the user's life at all. "The
+ * PC Project comes up often, 3 times" is a note about her own memory — and
+ * because it contains the word "project" it scored importance 0.8 and would
+ * never have decayed. "They are thanking you", "They occasionally say you are
+ * helpful" are about her. "Nothing notable", "Discord opened and closed",
+ * "Procrastination noted", "details not shared" are a summariser with nothing
+ * to say, saying so. "Don't be late for the motherboard pickup" is her own
+ * nagging written down as if it were a fact. None of the other three gates
+ * caught any of them, because each is a well-formed sentence that names
+ * something.
+ *
+ * Patterned on those records, not on a theory of junk: eight of the
+ * fourteen are refused here (the other six were stale or already on the
+ * agenda, which is not this gate's business), and none of the twenty that
+ * were kept is touched — tests/memory.test.ts holds both lists.
+ */
+const ABOUT_THE_CONVERSATION = new RegExp([
+  // Her, as the subject: thanked, praised, found helpful.
+  String.raw`\bthank(s|ing|ed)? you\b`,
+  String.raw`\b(say|says|said|find|finds|found|think|thinks|thought) (that )?(you|haru) (are|is|were|was)\b`,
+  String.raw`\byou('re| are) (helpful|useful|right|great|funny|annoying)\b`,
+  // Her own memory, as the subject: how often something has come up.
+  String.raw`\bcomes? up (often|a lot|again|repeatedly)\b`,
+  String.raw`\b(mentioned|raised|came up|brought up) (\d+|several|many|multiple|a few) times\b`,
+  String.raw`\b\d+ times\b`,
+  // A summariser with nothing to say.
+  String.raw`^\s*nothing (notable|eventful|new|much|specific|in particular|happened)\b`,
+  String.raw`\bopened and closed\b`,
+  String.raw`\bnoted\.?\s*$`,
+  // Anchored to the start with no clause break allowed, so "details not
+  // shared" as the whole record is refused while "Rental inspection
+  // completed, but details not shared" — an event with a summariser's
+  // shrug folded onto it — keeps its event.
+  String.raw`^[^.,;:]{0,40}\b(details|specifics|nothing) (were |was )?not (shared|given|provided|mentioned)\b`,
+  String.raw`^[^.,;:]{0,40}\bno (details|specifics) (shared|given|provided)\b`,
+  // A guess at their state this minute.
+  String.raw`\b(might|may) be (low|down|tired|busy|fine|ok|okay)\b`,
+  String.raw`\bbrings? (up|about) a (good|bad) mood\b`,
+  // Her own nagging, written down as a fact about them.
+  String.raw`^\s*(don['’]?t|do not|never|remember to|make sure|be sure|hurry|get on with|go and|pick up|call|buy|finish)\b`,
+].join('|'), 'i');
+
+export function isAboutTheConversation(text: string): boolean {
+  return ABOUT_THE_CONVERSATION.test((text ?? '').trim());
+}
+
 function namesSomething(text: string): boolean {
   // A capital that is not simply the start of the sentence.
   if (/\S\s+[A-Z][a-z]{2,}/.test(text)) return true;
@@ -228,6 +278,7 @@ export function isWorthRemembering(text: string): boolean {
   // and the vague entries are caught by what they say rather than by size.
   if (keywords(clean).size < 1) return false;
   if (bansATopic(clean)) return false;
+  if (isAboutTheConversation(clean)) return false;
   if (UNIVERSAL.test(clean) || NOWHERE_IN_PARTICULAR.test(clean)) return false;
   if (TRANSIENT.test(clean) && !namesSomething(clean)) return false;
   return true;
