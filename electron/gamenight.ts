@@ -70,14 +70,27 @@ export function gamesPlayedLately(log: ActivityLog, todayKey: string, days = PLA
 
 export type SteamRecent = { name: string; minutesLastFortnight: number };
 
+/**
+ * Things on a Steam account that are not games. A night spent on "Wallpaper
+ * Engine beginner guide tips" is a night wasted, and Steam counts the hours all
+ * the same.
+ */
+const NOT_GAMES = /^(wallpaper engine|steamvr|steam link|blender|aseprite|source sdk|proton|steamworks|obs studio|vtube studio|3dmark|unity|unreal)\b/i;
+
+/** "Overwatch®" is not what anyone types into a search box. */
+export function plainName(name: string): string {
+  return name.replace(/[®™©]/g, '').replace(/\s+/g, ' ').trim();
+}
+
 /** The desk's record and Steam's, as one list. Steam fills in what the desk never saw. */
 export function withSteam(played: Played[], steam: SteamRecent[]): Played[] {
-  const out = played.map(entry => ({ ...entry }));
+  const out = played.map(entry => ({ ...entry, name: plainName(entry.name) }));
   for (const recent of steam) {
-    if (!recent.name?.trim() || recent.minutesLastFortnight < 30) continue;
-    const known = out.find(entry => entry.name.toLowerCase() === recent.name.toLowerCase());
+    const name = plainName(recent.name ?? '');
+    if (!name || recent.minutesLastFortnight < 30 || NOT_GAMES.test(name)) continue;
+    const known = out.find(entry => entry.name.toLowerCase() === name.toLowerCase());
     if (known) known.steamMinutes = recent.minutesLastFortnight;
-    else out.push({ name: recent.name, minutes: 0, steamMinutes: recent.minutesLastFortnight, seen: [] });
+    else out.push({ name, minutes: 0, steamMinutes: recent.minutesLastFortnight, seen: [] });
   }
   // Three days of the desk's record against a fortnight of Steam's: compared
   // as minutes a day, so a game they are in every evening outranks one they

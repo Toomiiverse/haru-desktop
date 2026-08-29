@@ -2,7 +2,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { gamesPlayedLately, guideNoteInstruction, guideQuery, pickGame, specificThing, withSteam, type Played } from '../electron/gamenight';
+import { gamesPlayedLately, guideNoteInstruction, guideQuery, pickGame, plainName, specificThing, withSteam, type Played } from '../electron/gamenight';
 import type { ActivityLog } from '../electron/activitylog';
 import type { Night } from '../electron/nightlife';
 
@@ -78,4 +78,16 @@ test('what she is told: read a guide, did not play, knows only the guide', () =>
   assert.match(note, /do not say you played it/);
   assert.match(note, /something they are doing wrong/);
   assert.match(guideNoteInstruction({ name: 'X', minutes: 0, steamMinutes: 600, seen: [] }, 'q', 'f'), /10 hours in the last fortnight/);
+});
+
+test('trademark marks come off, and a tool on the account is not a game', () => {
+  assert.equal(plainName('Overwatch\u00ae'), 'Overwatch');
+  assert.equal(plainName('NieR:Automata\u2122'), 'NieR:Automata');
+  const played = withSteam([], [
+    { name: 'Wallpaper Engine', minutesLastFortnight: 600 },
+    { name: 'Overwatch\u00ae', minutesLastFortnight: 80 },
+    { name: 'SteamVR', minutesLastFortnight: 90 },
+  ]);
+  assert.deepEqual(played.map(p => p.name), ['Overwatch']);
+  assert.equal(guideQuery(played[0], []), 'Overwatch beginner guide tips');
 });
