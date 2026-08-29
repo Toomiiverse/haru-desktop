@@ -7521,7 +7521,9 @@ async function writeDiary(config: ProviderConfig) {
     clock: `about ${formatTimeOfDay(now.getHours(), now.getMinutes())}`,
   });
   try {
-    const entry = await ollamaQuipLong([getActiveCharacter().identity, profileSummary(''), getActiveCharacter().style, material].join(' '), 'Write tonight\'s entry.', config);
+    // Her identity and what she knows of them, but not her style: the style is
+    // how she talks *to* them, and a diary is the one place she is not.
+    const entry = await ollamaQuipLong([getActiveCharacter().identity, profileSummary(''), material].join(' '), 'Write tonight\'s entry.', config);
     if (entry.trim().length < 40) { console.log('[diary] nothing worth keeping came out — not written'); return; }
     appendEntry(app.getPath('home'), due, entry, new Intl.DateTimeFormat('en-AU', { weekday: 'long', timeZone: 'UTC' }));
     setMood({ ...getMood(), diaryDay: due });

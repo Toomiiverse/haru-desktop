@@ -54,7 +54,9 @@ test('what she writes from is facts, laid out, with the rule that it is only tho
   assert.match(note, /They got done: Rental Inspection\./);
   assert.match(note, /spent the night on Elden Ring, one of your own things: brilliant and cruel/);
   assert.match(note, /Elden Ring — A masterpiece that hates you\./);
-  assert.match(note, /Use their name\./);
+  assert.match(note, /Write about them in the third person, by name/);
+  assert.match(note, /never "you"/);
+  assert.match(note, /no sign-off aimed at them/);
   assert.match(note, /Do not invent an event/);
   // A day of nothing says so rather than leaving a gap to fill.
   const quiet = diaryInstruction({ ...m, theySaid: [], theirMessages: 0, herUnprompted: 0, irritation: 0, grudge: 0, ignoredToday: 0, went: 'silent', ticked: [], nights: [], tastes: [], weather: undefined });
