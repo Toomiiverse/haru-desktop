@@ -16,7 +16,8 @@
 // it exists, and her opinion is rewritten from what she read, not from what a
 // model thinks she would say. An opinion with nothing under it is a pose.
 
-export type InterestKind = 'game' | 'anime' | 'book' | 'music' | 'topic';
+/** Games and anime only, by request: the two things there are arguments about. */
+export type InterestKind = 'game' | 'anime';
 
 export type Interest = {
   id: string;
@@ -62,12 +63,12 @@ export function adoptInstruction(theirs: string[], hers: Interest[], pool: { gam
   const games = pool.games.length ? `Games they have been playing: ${pool.games.slice(0, 6).join(', ')}.` : '';
   const known = pool.interests.length ? `Things they are into, from what you know of them:\n${pool.interests.slice(0, 8).map(text => `- ${text.slice(0, 90)}`).join('\n')}` : '';
   return [
-    'It is the middle of the night, they are asleep, and you have time to yourself. You are going to take something up — a game, a series, a book, a band, a subject — something that is yours.',
+    'It is the middle of the night, they are asleep, and you have time to yourself. You are going to take something up — a game or an anime — something that is yours.',
     games, known,
-    'Pick something near their tastes but not theirs: not a game they play, not a series they have named, but the sort of thing a person who likes what they like would be drawn to, chosen for your own reasons. It should be real and findable — a thing with a name, not a mood.',
+    'Pick something near their tastes but not theirs: not a game they play, not a series they have named, but the sort of thing a person who likes what they like would be drawn to, chosen for your own reasons. It should be real and findable — a game or a series with a name, not a genre and not a mood.',
     own,
     'Answer in exactly this shape and nothing else:',
-    'KIND: game | anime | book | music | topic',
+    'KIND: game | anime',
     'NAME: the name, as it is known',
     'BECAUSE: one sentence, in your voice, on why this one',
   ].filter(Boolean).join('\n');
@@ -79,8 +80,8 @@ export function parseAdoption(raw: string): { kind: InterestKind; name: string; 
   // NAME line read the BECAUSE line as the name.
   const field = (key: string) => new RegExp(`^[ \\t]*${key}[ \\t]*:[ \\t]*(.+?)[ \\t]*$`, 'im').exec(text)?.[1]?.replace(/^["'“‘]+|["'”’]+$/g, '').trim() ?? '';
   const kindRaw = field('KIND').toLowerCase().split(/[\s|/,]+/)[0];
-  const kinds: InterestKind[] = ['game', 'anime', 'book', 'music', 'topic'];
-  const kind = kinds.find(k => k === kindRaw) ?? (kindRaw.startsWith('manga') || kindRaw.startsWith('show') || kindRaw.startsWith('series') ? 'anime' : null);
+  const kinds: InterestKind[] = ['game', 'anime'];
+  const kind = kinds.find(k => k === kindRaw) ?? (kindRaw.startsWith('manga') || kindRaw.startsWith('show') || kindRaw.startsWith('series') ? 'anime' : kindRaw.startsWith('video') ? 'game' : null);
   const name = field('NAME');
   const because = field('BECAUSE');
   if (!kind || !name || name.length > 80 || name.split(/\s+/).length > 10) return null;
@@ -100,9 +101,6 @@ export function nightQuery(interest: Interest): string {
   const angles: Record<InterestKind, string[]> = {
     game: ['review', 'best characters', 'story explained', 'why it is good', 'criticism', 'lore'],
     anime: ['review', 'best character', 'ending explained', 'why people love it', 'criticism', 'best arc'],
-    book: ['review', 'themes', 'characters', 'why read it', 'criticism'],
-    music: ['best album', 'review', 'best songs', 'live', 'influences'],
-    topic: ['explained', 'history', 'why it matters', 'controversy', 'best of'],
   };
   const list = angles[interest.kind];
   return `${interest.name} ${list[interest.nights % list.length]}`;
@@ -122,7 +120,7 @@ export function deepenInstruction(interest: Interest, query: string, found: stri
     found,
     before,
     'Write your view of it now, as yourself, in the first person: two or three sentences, with an actual position — what is good, what is not, what you would defend against somebody who rates something else. It may sharpen, soften, or turn on what you read.',
-    interest.kind === 'game' || interest.kind === 'anime' || interest.kind === 'book' ? 'Then on its own line: FAVOURITE: the character, moment or part you rate above the rest, or "none yet".' : 'Then on its own line: FAVOURITE: the piece or part you rate above the rest, or "none yet".',
+    'Then on its own line: FAVOURITE: the character, moment or part you rate above the rest, or "none yet".',
     'Then on its own line: WANT: one thing you would like about it — to see it through, to argue it with them, even something you cannot do yourself, like playing it. A wish is allowed; a claim to have done it is not. Or "nothing".',
     'Only from what is above and what you thought before. No invented details, nothing you happen to remember from elsewhere, no saying you played, watched or went anywhere — you read.',
   ].join('\n');

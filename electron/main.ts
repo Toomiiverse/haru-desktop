@@ -7417,7 +7417,7 @@ async function haveANight(config: ProviderConfig) {
     if (!adopting && !interest && played.length && Math.random() < GUIDE_ODDS) game = pickGame(played, getNights(), nightKey(now));
 
     const before = getNights().map(night => night.about);
-    const about = adopting ? `${adopting.name} ${adopting.kind === 'topic' ? 'explained' : 'review'}`
+    const about = adopting ? `${adopting.name} review`
       : interest ? nightQuery(interest)
       : game ? guideQuery(game, getNights())
       : tidyPick(await ollamaQuip([getActiveCharacter().identity, pickInstruction(theirs, before)].join(' '), 'What are you looking up?', config));

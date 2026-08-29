@@ -12,7 +12,8 @@ test('what she is told when picking something up keeps hers off theirs', () => {
   assert.match(note, /Tommy watches Angel Beats/);
   assert.match(note, /not a game they play, not a series they have named/);
   assert.match(note, /You already have: Hollow Knight \(game\)/);
-  assert.match(note, /KIND: game \| anime \| book \| music \| topic/);
+  assert.match(note, /KIND: game \| anime/);
+  assert.equal(note.includes('book'), false);
 });
 
 test("the model's answer is read in its fixed shape, and anything else is refused", () => {
@@ -21,6 +22,10 @@ test("the model's answer is read in its fixed shape, and anything else is refuse
   assert.equal(parseAdoption('Kind: Manga\nName: Berserk\nBecause: x')?.kind, 'anime');
   assert.equal(parseAdoption('I think I would like to try Hollow Knight because it looks fun'), null);
   assert.equal(parseAdoption('KIND: vibe\nNAME: sadness\nBECAUSE: x'), null);
+  // Only the two kinds there are arguments about.
+  assert.equal(parseAdoption('KIND: book\nNAME: Dune\nBECAUSE: x'), null);
+  assert.equal(parseAdoption('KIND: music\nNAME: Radiohead\nBECAUSE: x'), null);
+  assert.equal(parseAdoption('KIND: video game\nNAME: Celeste\nBECAUSE: x')?.kind, 'game');
   assert.equal(parseAdoption('KIND: game\nNAME: \nBECAUSE: x'), null);
   assert.equal(parseAdoption('KIND: game\nNAME: ' + 'a '.repeat(30) + '\nBECAUSE: x'), null);
 });
@@ -82,7 +87,7 @@ test('tonight goes to the one left longest, not to last night\'s', () => {
 
 test('adopting and deepening keep the list bounded and move the view', () => {
   let list: Interest[] = [];
-  for (let i = 0; i < MAX_INTERESTS + 2; i++) list = adopt(list, { kind: 'topic', name: `T${i}`, because: 'why not' }, '2026-08-29', '2026-08-29T18:00:00.000Z');
+  for (let i = 0; i < MAX_INTERESTS + 2; i++) list = adopt(list, { kind: 'game', name: `T${i}`, because: 'why not' }, '2026-08-29', '2026-08-29T18:00:00.000Z');
   assert.equal(list.length, MAX_INTERESTS);
   assert.equal(list[0].name, 'T2', 'the oldest fall off');
   const id = list[0].id;
