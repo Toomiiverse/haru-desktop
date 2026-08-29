@@ -2,7 +2,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { COOLDOWN_MS, describeWeather, readForecast, skyOf, weatherEvents, weatherUrl, WEATHER_STALE_MS, type WeatherSample } from '../electron/weather';
+import { mentionsWeather, weatherToDrawOn, WEATHER_RECENT_LINES, COOLDOWN_MS, describeWeather, readForecast, skyOf, weatherEvents, weatherUrl, WEATHER_STALE_MS, type WeatherSample } from '../electron/weather';
 
 // 16:30 in Perth (UTC+8) on 2026-08-28, as Open-Meteo stamps it.
 const NOW = Date.parse('2026-08-28T08:30:00Z');
@@ -71,4 +71,30 @@ test('the prompt gets one line, with the range and what is coming, and nothing o
   assert.match(describeWeather({ ...sample, turning: { inHours: 2, to: 'overcast' } }, 'At home', NOW), /turning overcast in about 2 hours/);
   assert.equal(describeWeather(sample, 'Where they are', NOW + WEATHER_STALE_MS + 1), '');
   assert.equal(describeWeather(null, 'Where they are', NOW), '');
+});
+
+test('weather talk in her own line is spotted however she phrases it', () => {
+  for (const line of ['You are home in 15°C', 'it is 15 degrees out', 'still raining on you', 'a bit muggy', 'windy and you are hiding', 'storming later', 'the forecast says so', 'cloudy air'])
+    assert.equal(mentionsWeather(line), true, line);
+  for (const line of ['You ghosted my last text.', 'Three messages and nothing back.', 'The bins are still out there.', ''])
+    assert.equal(mentionsWeather(line), false, line);
+});
+
+test('she is not handed the temperature again while it is still in her mouth', () => {
+  const at = new Date().toISOString();
+  const sample = { at, tempC: 15, sky: 'cloudy', raining: false, windKmh: 8, highC: 18, lowC: 11, rainSoonMin: null, turning: null } as never;
+  const fresh = weatherToDrawOn(sample, 'At home', ['You ghosted me.', 'Three messages, nothing back.']);
+  assert.match(fresh, /15/);
+  // And without the line that told her to use it — that one belongs to an answer.
+  assert.equal(fresh.includes('use it rather than guessing'), false);
+  assert.match(fresh, /Background only/);
+  // Having just said it, she is not given it again.
+  assert.equal(weatherToDrawOn(sample, 'At home', ['You are home in 15°C and hiding.']), '');
+  assert.equal(weatherToDrawOn(sample, 'At home', ['it is raining and you are still in bed']), '');
+  // Only the last few count, so it comes back once she has moved on.
+  const old = ['You are home in 15°C.', 'a', 'b', 'c', 'd'];
+  assert.equal(old.length > WEATHER_RECENT_LINES, true);
+  assert.match(weatherToDrawOn(sample, 'At home', old), /15/);
+  // Nothing to report is still nothing.
+  assert.equal(weatherToDrawOn(null, 'At home', []), '');
 });

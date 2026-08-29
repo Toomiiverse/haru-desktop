@@ -39,7 +39,7 @@ import { assumeItIsTheirs, identifyWork, noteWork, readFollowing, recogniseNow, 
 import { lookUpPlace, readWindowsLocation, searchPlaces, type FoundPlace } from './location';
 import { INTERRUPTED_ASIDE, wakeAck } from './wake';
 import { reminderAsk, reminderSavedAside } from './remindme';
-import { describeWeather, readForecast, weatherEvents, weatherUrl, WEATHER_POLL_MS, type WeatherSample } from './weather';
+import { describeWeather, readForecast, weatherEvents, weatherToDrawOn, weatherUrl, WEATHER_POLL_MS, type WeatherSample } from './weather';
 import { leftHanging } from './hanging';
 import { markMentioned, upcomingToMention } from './upcoming';
 import { directionsAsk, directionsNote, dropRouteTalk, matchNamedPlace, startingPoint, withDirections, type DirectionsAsk } from './directions';
@@ -1219,7 +1219,7 @@ function unpromptedContext(): string {
   // not repeat at one in the morning is what she said at half eleven.
   // Where their phone says they are rides along too: a nudge that knows they
   // are at the shops has something to needle with.
-  const parts = [summariseFollowing(getFollowing(), Date.now()), todaySoFar(), alreadySaidRecently(asides, CHAT_TIMEZONE, Date.now()), stillWaiting(), describeWhereabouts(getWhereabouts()), describeWeather(getWeather().last, weatherWhere())].filter(Boolean);
+  const parts = [summariseFollowing(getFollowing(), Date.now()), todaySoFar(), alreadySaidRecently(asides, CHAT_TIMEZONE, Date.now()), stillWaiting(), describeWhereabouts(getWhereabouts()), weatherToDrawOn(getWeather().last, weatherWhere(), asides.map(aside => aside.text))].filter(Boolean);
   if (!parts.length) return '';
   // "Do not repeat a point you have already made" was read as "change the
   // subject": once a thread was answered and settled she abandoned the day

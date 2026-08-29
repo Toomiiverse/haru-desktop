@@ -146,8 +146,45 @@ export function weatherEvents(previous: WeatherSample | null, current: WeatherSa
   return out;
 }
 
-/** The one line the prompt gets, or nothing when the reading is old. */
-export function describeWeather(sample: WeatherSample | null, where: string, nowMs = Date.now()): string {
+/**
+ * Weather talk in a line of hers, so she is not handed the temperature twice
+ * running. Deliberately broad — a degree sign, a sky, or the word itself.
+ */
+const WEATHER_TALK = /-?\d+\s*°|\bdegrees?\b|\brain(?:ing|y)?\b|\bsunny\b|\bclouds?\b|\bcloudy\b|\bovercast\b|\bhumid\b|\bmuggy\b|\bwind(?:y)?\b|\bstorm\w*\b|\bdrizzl\w*\b|\bchilly\b|\bfreezing\b|\bweather\b|\bforecast\b/i;
+
+export function mentionsWeather(line: string): boolean {
+  return WEATHER_TALK.test(line ?? '');
+}
+
+/** How many of her own recent unprompted lines are looked at before offering it again. */
+export const WEATHER_RECENT_LINES = 4;
+
+/**
+ * The weather for a line nobody asked for, which is not the same thing as the
+ * weather for an answer.
+ *
+ * describeWeather below ends by telling her to use it rather than guess — right
+ * when they have asked what it is like out, and quite wrong as standing context
+ * for every unprompted line, where it reads as an instruction to mention the
+ * temperature. She duly did: five of fourteen consecutive nudges opened with
+ * it, three of them with the same "you're home in 15°C" construction, and it
+ * became her stock way of starting a sentence.
+ *
+ * The lever is not a rule telling her to stop — she is copying the most
+ * concrete fact in front of her, and the fix is to stop putting it there. So it
+ * is withheld whenever she has mentioned the weather in her last few unprompted
+ * lines, and offered without the instruction to use it. Genuine turns in the
+ * weather have their own channel (weatherEvents, pushed as a `weather` aside)
+ * and do not depend on this.
+ */
+export function weatherToDrawOn(sample: WeatherSample | null, where: string, recentLines: string[], nowMs = Date.now()): string {
+  if (recentLines.slice(-WEATHER_RECENT_LINES).some(mentionsWeather)) return '';
+  const facts = weatherFacts(sample, where, nowMs);
+  return facts ? `${facts}. Background only: they have not asked, and it is not what this is about.` : '';
+}
+
+/** The readings themselves, with no instruction attached about what to do with them. */
+function weatherFacts(sample: WeatherSample | null, where: string, nowMs: number): string {
   if (!sample) return '';
   const age = nowMs - Date.parse(sample.at);
   if (!Number.isFinite(age) || age < 0 || age > WEATHER_STALE_MS) return '';
@@ -155,5 +192,11 @@ export function describeWeather(sample: WeatherSample | null, where: string, now
   if (sample.highC !== null && sample.lowC !== null) parts.push(`today's range ${deg(sample.lowC)} to ${deg(sample.highC)}`);
   if (sample.rainSoonMin !== null && sample.rainSoonMin <= 120) parts.push(`rain due in about ${sample.rainSoonMin <= 5 ? 'a few' : sample.rainSoonMin} minutes`);
   else if (sample.turning) parts.push(`turning ${sample.turning.to} in about ${sample.turning.inHours} hour${sample.turning.inHours === 1 ? '' : 's'}`);
-  return `${parts.join('; ')}. That is the actual weather, from a forecast service, as of a few minutes ago — use it rather than guessing, and do not say you cannot check.`;
+  return parts.join('; ');
+}
+
+/** The one line the prompt gets when they have asked, or nothing when the reading is old. */
+export function describeWeather(sample: WeatherSample | null, where: string, nowMs = Date.now()): string {
+  const facts = weatherFacts(sample, where, nowMs);
+  return facts ? `${facts}. That is the actual weather, from a forecast service, as of a few minutes ago — use it rather than guessing, and do not say you cannot check.` : '';
 }
