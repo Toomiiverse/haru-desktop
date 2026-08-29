@@ -29,7 +29,22 @@ const PLATFORM_FEATURES: { name: string; needs: string }[] = [
   { name: 'seeing which program you are in', needs: 'the Windows helper (PowerShell)' },
   { name: 'opening, closing and powering the machine', needs: 'Windows (cmd, taskkill, shutdown)' },
   { name: 'a location fix', needs: 'the Windows location service' },
+  { name: 'standing aside for a game', needs: 'the Windows helper (PowerShell)' },
 ];
+
+/**
+ * Whether this machine can see what is in front of *it*.
+ *
+ * The distinction matters now that the desk's activity log syncs here. A game
+ * running on the desk is a fact about the desk, and the only reason the server
+ * does not act on it is that nothing currently copies a synced entry into
+ * currentActivity. That is a property of today's plumbing rather than a
+ * decision, and the cost of it changing is that a headless box drops an 11 GB
+ * model out of VRAM because somebody started a game in another room.
+ */
+export function seesItsOwnScreen(platform: NodeJS.Platform = process.platform): boolean {
+  return platform === 'win32';
+}
 
 export function describeCapabilities(platform: NodeJS.Platform): Capability[] {
   const on = platform === 'win32';

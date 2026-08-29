@@ -14,7 +14,7 @@ import { nextPokeCount, pokeEmotion, pokeInstruction, pokeIrritation, pokeTier, 
 import { applyEvent, chooseIdleAction, cueLog, DEFAULT_VITALS, driftVitals, nextTickDelayMs, shouldPersistVitals, type Environment, type Vitals } from './vitals';
 import { classificationPrompt, emotionToVitals, EMOTION_SCHEMA, EMOTIONS, NEUTRAL_EMOTION, parseEmotion, type Emotion, type EmotionName, faceForEmotion } from './emotion';
 import { withDiscoveredExpressions } from './expressions';
-import { reportCapabilities } from './capabilities';
+import { reportCapabilities, seesItsOwnScreen } from './capabilities';
 import { chaseableOverdue, findItem, shiftDays, formatAgenda, itemStatus, missedInstruction, putOffInstruction, putOffUntil, relevantItems, readsAsAnswerToHer, readsAsBareReport, tickOffInstruction, readsAsDone, doneClause, readsAsNotDone, relativeDay, staleItemNamed, inventedTimeFor, raisedRecently, type ItemStatus } from './agenda';
 import { isRelaunchNotReturn, openingAngles, pickAngle, shouldPipeUp } from './opening';
 import { allDayDueMinutes, isEveningCheck, reminderInstruction, reminderTier, reminderVolume, shouldRemind, type ReminderState } from './reminders';
@@ -2810,6 +2810,11 @@ function readGamingConfig(saved: unknown): GamingConfig {
  *  gone fullscreen is still a game, and a fullscreen thing the process list does
  *  not recognise is still taking the GPU. */
 function gameIsRunning() {
+  // Only ever true where she is looking at her own screen. Both sources below
+  // are fed by the Windows helper, so this is already false anywhere else — but
+  // it is false on purpose now rather than by accident, because the desk's
+  // activity log syncs to the server and a game there is not a game here.
+  if (!seesItsOwnScreen()) return false;
   return currentActivity?.kind === 'gaming' || Boolean(watchingTitle);
 }
 
@@ -2865,6 +2870,10 @@ let evictedFor: string | null = null;
  * put one down immediately.
  */
 async function releaseModelForGame(config: ProviderConfig) {
+  // Guarded again here, where the eviction actually happens: this one throws
+  // 11 GB out of VRAM, and the settings that switch it on can arrive from the
+  // desk in a config sync without anybody deciding they should apply here.
+  if (!seesItsOwnScreen()) return;
   const gaming = readGamingConfig(store.get('gaming'));
   if (!gaming.enabled || !gaming.model || gaming.model === config.model) return;
   if (evictedFor === config.model) return;
@@ -7021,6 +7030,18 @@ async function pesterOnPush(): Promise<PesterResult> {
   if (mood.lastMessageAt && Date.now() - Date.parse(mood.lastMessageAt) < TALKING_RECENTLY_MS) return 'quiet';
   let composed = false;
   for (let attempt = 1; attempt <= NUDGE_TRIES; attempt++) {
+    // Asked before composing, and again before each retry. The tries exist for
+    // a line interject throws out on its content — one that named a finished
+    // errand — and composing another can fix that. They do nothing for a
+    // refusal about the moment: "they were talking to her 9s ago" is just as
+    // true twenty seconds later, and three of those cost three model calls and
+    // a minute of GPU to arrive at the same no. Come back when it has cleared,
+    // which for both windows is minutes rather than the whole cycle.
+    const wrongMoment = whyNotInterject();
+    if (wrongMoment) {
+      console.log(`[push] not the moment — ${wrongMoment}`);
+      return 'refused';
+    }
     const line = await boredNudge();
     if (!line) continue;
     composed = true;
