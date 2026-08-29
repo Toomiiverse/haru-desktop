@@ -192,7 +192,7 @@ function headOf(title: string): string | null {
   return significant(head).size >= 2 ? head : null;
 }
 
-export function findItem<T extends AgendaItem>(items: T[], phrase: string): T | null {
+export function findItem<T extends AgendaItem>(items: T[], phrase: string, { whole = false } = {}): T | null {
   const asked = significant(phrase);
   if (!asked.size) return null;
 
@@ -230,6 +230,17 @@ export function findItem<T extends AgendaItem>(items: T[], phrase: string): T | 
     const shared = sharedWords.length;
     if (!shared) continue;
     // One word is enough only when that word belongs to this task and no other.
+    //
+    // Except when the phrase is something she wrote rather than something they
+    // said. Asked "did they just tell me this is finished", a single distinctive
+    // word is good evidence. Asked "is this line of hers about a finished item",
+    // it is not: the evening tally is a complaint about being ignored, the word
+    // "message" belongs to exactly one old task ("Message Connor"), and every
+    // tally line she composed was thrown away for naming it. So `whole` asks for
+    // the title to be named properly — every significant word of it, up to two —
+    // which still catches "Ammie's party is tomorrow" and stops an ordinary
+    // English word colliding with somebody's errand.
+    if (whole && shared < Math.min(2, words.size)) continue;
     if (shared < 2 && !sharedWords.some(tellsThemApart)) continue;
     // Scored both ways round, best wins: against everything the title says, and
     // against just the part that names the thing.
@@ -735,5 +746,5 @@ export function staleItemNamed(line: string, items: AgendaItem[], todayKey: stri
   const lastEvent = shiftDays(todayKey, -CHASE_WINDOW_DAYS);
   const stale = items.filter(item => item.done || (item.kind === 'event' && item.date < lastEvent));
   if (!stale.length) return null;
-  return findItem(stale, line) ?? null;
+  return findItem(stale, line, { whole: true }) ?? null;
 }

@@ -511,6 +511,16 @@ test('an unprompted line that names a party three weeks gone, or a thing already
   assert.equal(staleItemNamed('The store cleaning is still waiting on you.', items, '2026-08-28')?.title, 'Store cleaning');
   assert.equal(staleItemNamed('Scarlett’s present. Still nothing?', items, '2026-08-28'), null, 'a live item may be chased');
   assert.equal(staleItemNamed('It is 1:43 PM and you look like a zombie.', items, '2026-08-28'), null, 'a line that names nothing passes');
+  // One ordinary word that happens to belong to somebody's old errand is not
+  // naming it. Every evening tally was dropped for "message", which is the
+  // whole subject of the tally and also the first word of "Message Connor".
+  const errands = [item({ title: 'Message Connor', done: true }), item({ title: 'Pick up Hanyas PC screen', done: true }), item({ title: 'Bins', done: true })];
+  assert.equal(staleItemNamed('Three of my messages today and not one answer.', errands, '2026-08-28'), null);
+  assert.equal(staleItemNamed('You were staring at a screen all evening.', errands, '2026-08-28'), null);
+  // Named properly, it is still caught.
+  assert.equal(staleItemNamed('Did you ever message Connor?', errands, '2026-08-28')?.title, 'Message Connor');
+  // And a one-word title has only the one word to name, so it still counts.
+  assert.equal(staleItemNamed('The bins are still out there.', errands, '2026-08-28')?.title, 'Bins');
 });
 
 // ---- what an unprompted line may not do to the list ----
