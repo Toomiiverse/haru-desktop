@@ -61,13 +61,13 @@ import { createMemoryStore } from './memorystore';
 import { createKnowledgeStore } from './knowledgestore';
 import { chatSystemPrompt, freshStartInstruction, type FreshStart, type RatedReply } from './prompt';
 import { hasShout, readVoiceConfig, referenceFor, shoutReference, spokenCase, speakableText, splitForSpeech, synthesise, type SpeechClip, type VoiceConfig } from './voice';
-import { applyDecay, DEEP_RECALL_LIMIT, eventCandidates, eventsPrompt, findSuperseded, formatMemoryPrompt, isExplicitRecall, isWorthAnEvent, isWorthKeeping, isWorthRemembering, MEMORY_KINDS, migrateMemories, pruneMemories, rememberInto, retrieveMemories, semanticSimilarities, summaryPrompt, supersede, vectorSimilarity, type ForgettingEntry, type MemoryKind, type MemoryRecord, type MemorySource, type RetrievalFactors, type ScoredMemory, type SessionSummary } from './memory';
+import { applyDecay, DEEP_RECALL_LIMIT, eventCandidates, eventsPrompt, findSuperseded, formatMemoryPrompt, isExplicitRecall, isWorthAnEvent, isWorthKeeping, isWorthRemembering, MEMORY_KINDS, migrateMemories, pruneMemories, readsAsSecondPerson, rememberInto, retrieveMemories, semanticSimilarities, summaryPrompt, supersede, THIRD_PERSON_AGAIN, vectorSimilarity, type ForgettingEntry, type MemoryKind, type MemoryRecord, type MemorySource, type RetrievalFactors, type ScoredMemory, type SessionSummary } from './memory';
 import { consolidateMemories, type ConsolidationChange } from './consolidation';
 import { appendToBlockValue, canEditBlock, findBlock, formatMemoryBlocks, replaceInBlockValue, resolveBlockValue, resetBlockToDerived, withEditedValue, type BlockSources, type MemoryBlock } from './blocks';
 import { forgetDevice, forgetEveryDevice, readWebAccess, setPassword, weakPassword, type WebAccess } from './web';
 import { conversationMayLeave, mayLeaveTheMachine } from './sensitivity';
 import { addCheckIn, checkInInstruction, checkInsOn, readCheckIns, type CheckIn } from './checkins';
-import { addAside, alreadySaidRecently, asideContext, asidesOn, pruneAsides, readAsides, type Aside, type AsideSource } from './asides';
+import { addAside, alreadySaidRecently, asideContext, asidesOn, markReached, pruneAsides, readAsides, type Aside, type AsideSource } from './asides';
 import { attachmentsInPlay, describeAttached, READ_IT_ALL_PROMPT, readAttachments, type Attachment, type Opened } from './attachments';
 import { forOllama, withoutOldest } from './ollamaturns';
 import { seedEmoji } from './seed';
@@ -386,7 +386,7 @@ function currentChatDayKey(): string {
 // Distilled as the day is archived, because the raw transcript is far too big to
 // carry forward and too dull to reread. One line per day is what lets her say
 // "you were dealing with that thing on Tuesday" months later.
-function summariseSession(messages: { role?: string; content?: string }[], day: string, { replace = false } = {}) {
+function summariseSession(messages: { role?: string; content?: string }[], day: string, { replace = false, attempt = 0 } = {}) {
   const config = store.get('ai.config') as ProviderConfig | undefined;
   if (!config?.model || messages.length < 4) return;
   // Skipping a day that already has a summary was right when a day produced one
@@ -397,16 +397,29 @@ function summariseSession(messages: { role?: string; content?: string }[], day: 
   if (!replace && getSessions().some(session => session.day === day)) return;
   const transcript = messages
     .filter(message => message.role === 'user' || message.role === 'assistant')
-    .map(message => `${message.role === 'user' ? 'Them' : 'You'}: ${String(message.content ?? '').slice(0, 300)}`)
+    // Labelled `They:` and `Haru:` rather than `Them:` and `You:`. The note the
+    // model is about to write goes into her own system prompt, where "you" is
+    // her — so the input must not contain a second person at all, and the word
+    // the note should use for the user is the word its lines already carry.
+    .map(message => `${message.role === 'user' ? 'They' : 'Haru'}: ${String(message.content ?? '').slice(0, 300)}`)
     .join('\n')
     .slice(0, 6000);
   ollamaPost(
-    [{ role: 'system', content: summaryPrompt() }, { role: 'user', content: transcript }],
+    [{ role: 'system', content: attempt ? `${summaryPrompt()} ${THIRD_PERSON_AGAIN}` : summaryPrompt() }, { role: 'user', content: transcript }],
     config,
     { tools: false, temperature: 0.2, maxTokens: 80 },
   ).then(message => {
     const summary = (message.content ?? '').trim().replace(/^["']|["']$/g, '');
     if (!isWorthKeeping(summary)) { console.log(`[memory] nothing worth keeping from ${day}`); return; }
+    // A note that says "you" is a note about the wrong person once it is in her
+    // prompt. Ask once more, and if it comes back addressed again, keep nothing
+    // — there will be another day, and a wrong one would be read every turn.
+    if (readsAsSecondPerson(summary)) {
+      if (attempt) { console.warn(`[memory] ${day} summary stayed in the second person, dropping it: ${summary}`); return; }
+      console.log(`[memory] ${day} summary came back addressed to somebody — asking again`);
+      summariseSession(messages, day, { replace, attempt: 1 });
+      return;
+    }
     // Only the recent stretch is kept; older days have already contributed
     // whatever mattered as long-term records.
     const kept = [...getSessions().filter(session => session.day !== day), { day, summary, createdAt: new Date().toISOString() }]
@@ -3463,12 +3476,21 @@ function getActiveCharacter() {
 // at 8am is a new day and she has forgotten about it.
 type Mood = { irritation: number; ego: number; lastMessageAt?: string; goodnightDay?: string; awaitingApology?: boolean;
   /** Being left on read, kept: see grudge.ts. */
-  grudge?: number; ignoredToday?: number; talliedDay?: string };
+  grudge?: number; ignoredToday?: number; talliedDay?: string;
+  /**
+   * talliedDay is the day the counting was banked, which must happen exactly
+   * once. toldDay is the day she actually got the line out, which is a separate
+   * question: interject refuses while they are mid-conversation, and the model
+   * can fail, and either one used to lose the whole evening silently because
+   * the day was already marked done. See tellThemTheTally.
+   */
+  toldDay?: string; ignoredSamples?: string[] };
 
 function getMood(): Mood {
   const saved = store.get('mood') as Partial<Mood> | undefined;
   return { irritation: Number(saved?.irritation ?? 0), ego: Number(saved?.ego ?? 0), lastMessageAt: saved?.lastMessageAt, goodnightDay: saved?.goodnightDay, awaitingApology: Boolean(saved?.awaitingApology),
-    grudge: Number(saved?.grudge ?? 0), ignoredToday: Number(saved?.ignoredToday ?? 0), talliedDay: saved?.talliedDay };
+    grudge: Number(saved?.grudge ?? 0), ignoredToday: Number(saved?.ignoredToday ?? 0), talliedDay: saved?.talliedDay,
+    toldDay: saved?.toldDay, ignoredSamples: Array.isArray(saved?.ignoredSamples) ? saved.ignoredSamples.map(String) : [] };
 }
 
 function setMood(mood: Mood) {
@@ -6522,7 +6544,13 @@ const PUSH_KIND: Partial<Record<AsideSource, 'random' | 'events' | 'system' | 'w
 /** Forwards an aside to the phones, when it is one of the ones worth a buzz. */
 async function forwardAsideToPush(aside: Aside) {
   const kind = PUSH_KIND[aside.source];
-  if (kind) await pushToPhone(kind, aside.text);
+  if (!kind) return;
+  // Recorded on the line itself, because the evening tally holds unanswered
+  // lines against them and a line that never left the building is not one of
+  // theirs to answer. Re-read rather than closed over: this runs after the
+  // await, and the log has moved on.
+  const reached = await pushToPhone(kind, aside.text);
+  store.set('chat.asides', markReached(getAsides(), aside.id, reached));
 }
 
 // The interval Discord defaults to, for the same reason it is floored there:
@@ -6819,30 +6847,65 @@ async function tallyIgnored(config: ProviderConfig) {
   const now = zonedNow(CHAT_TIMEZONE);
   const todayKey = localDateKey(now);
   const mood = getMood();
-  if (!tallyDue(now.getHours() * 60 + now.getMinutes(), mood.talliedDay, todayKey)) return;
-  const pushed = new Set(Object.keys(PUSH_KIND));
-  const heard = (store.get('chat.messages') as { role: string; at?: string }[] | undefined) ?? [];
-  const ignored = unanswered(asidesOn(getAsides(), todayKey).map(aside => ({ at: aside.at, source: aside.source, text: aside.text })), heard, pushed, Date.now());
-  const grudge = nextGrudge(mood.grudge ?? 0, ignored.length);
-  setMood({ ...mood, irritation: irritationAfterTally(mood.irritation, ignored.length, IRRITATION_MAX), grudge, ignoredToday: ignored.length, talliedDay: todayKey });
-  console.log(`[grudge] ${todayKey}: ${ignored.length} of her lines went unanswered — grudge ${mood.grudge ?? 0} -> ${grudge}, irritation ${mood.irritation} -> ${irritationAfterTally(mood.irritation, ignored.length, IRRITATION_MAX)}`);
-  if (!ignored.length) return;
+  if (tallyDue(now.getHours() * 60 + now.getMinutes(), mood.talliedDay, todayKey)) {
+    const pushed = new Set(Object.keys(PUSH_KIND));
+    const heard = (store.get('chat.messages') as { role: string; at?: string }[] | undefined) ?? [];
+    const ignored = unanswered(
+      asidesOn(getAsides(), todayKey).map(aside => ({ at: aside.at, source: aside.source, text: aside.text, reached: aside.reached })),
+      heard, pushed, Date.now());
+    const grudge = nextGrudge(mood.grudge ?? 0, ignored.length);
+    const irritation = irritationAfterTally(mood.irritation, ignored.length, IRRITATION_MAX);
+    // Banked here and nowhere else, so a day is counted exactly once however
+    // many times the telling below has to be attempted.
+    setMood({ ...mood, irritation, grudge, ignoredToday: ignored.length, talliedDay: todayKey,
+      ignoredSamples: ignored.slice(0, 2).map(line => (line.text ?? '').slice(0, 80)) });
+    console.log(`[grudge] ${todayKey}: ${ignored.length} of her lines went unanswered — grudge ${mood.grudge ?? 0} -> ${grudge}, irritation ${mood.irritation} -> ${irritation}`);
+  }
+  await tellThemTheTally(config, todayKey);
+}
+
+/** Not before this: interject refuses mid-conversation, and that passes. */
+let tallyQuietUntil = 0;
+const TALLY_RETRY_MS = 10 * 60_000;
+
+/**
+ * Saying it, which is the point of counting it.
+ *
+ * Separate from the counting because the two fail differently. The count must
+ * happen once; the line has to get past interject's rate limiter, which
+ * deliberately refuses while they are talking to her — and at eight in the
+ * evening they very often are. Marking the day done before the line was out
+ * meant one refusal cost the whole evening and she never mentioned it again.
+ */
+async function tellThemTheTally(config: ProviderConfig, todayKey: string) {
+  const mood = getMood();
+  if (mood.talliedDay !== todayKey || mood.toldDay === todayKey) return;
+  const ignored = mood.ignoredToday ?? 0;
+  // A clean day is not something she brings up; it is just quieter than usual.
+  if (!ignored) { setMood({ ...mood, toldDay: todayKey }); return; }
+  if (Date.now() < tallyQuietUntil) return;
   const character = getActiveCharacter();
   const system = [
     character.identity,
     character.style,
-    moodInstruction(irritationAfterTally(mood.irritation, ignored.length, IRRITATION_MAX)),
-    grudgeInstruction(grudge, ignored.length),
-    tallyInstruction(ignored.length, grudge, ignored.map(line => line.text ?? '')),
+    moodInstruction(mood.irritation),
+    grudgeInstruction(mood.grudge ?? 0, ignored),
+    tallyInstruction(ignored, mood.grudge ?? 0, mood.ignoredSamples ?? []),
     EXPRESSIVE,
     'No quotation marks, no stage directions.',
   ].filter(Boolean).join(' ');
   try {
     const line = await ollamaQuip(system, 'Say it.', config);
-    if (line && interject(line, { source: 'idle' })) console.log('[grudge] told them');
+    if (line && interject(line, { source: 'idle' })) {
+      setMood({ ...getMood(), toldDay: todayKey });
+      console.log(`[grudge] told them about the ${ignored} they left`);
+      return;
+    }
   } catch (error) {
     console.warn('[grudge] could not compose the evening line:', error instanceof Error ? error.message : error);
   }
+  tallyQuietUntil = Date.now() + TALLY_RETRY_MS;
+  console.log(`[grudge] the evening line did not get out — trying again in ${Math.round(TALLY_RETRY_MS / 60_000)} min`);
 }
 
 function startProactive() {

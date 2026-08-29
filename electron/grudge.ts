@@ -9,7 +9,9 @@
 // long as they keep doing it, and only slowly earns her back with days where
 // nothing was ignored. Pure, so the counting and the thresholds are testable.
 
-export type Said = { at: string; source: string; text?: string };
+export type Said = { at: string; source: string; text?: string;
+  /** False only where it is known the push never landed — see Aside.reached. */
+  reached?: boolean };
 export type Heard = { role: string; at?: string };
 
 /** How long she gives them to answer a line of hers before it counts as ignored. */
@@ -32,6 +34,8 @@ export function unanswered(said: Said[], heard: Heard[], pushed: ReadonlySet<str
     .sort((a, b) => a - b);
   return said
     .filter(line => pushed.has(line.source))
+    // Never sent is not ignored. Undefined predates the flag and counts as before.
+    .filter(line => line.reached !== false)
     .filter(line => {
       const at = Date.parse(line.at);
       if (!Number.isFinite(at) || at + ANSWER_WINDOW_MS > nowMs) return false;

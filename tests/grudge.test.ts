@@ -56,3 +56,22 @@ test('the evening line names the count and quotes what was ignored', () => {
   assert.match(line, /"You forgot the bins again\." and "Rain at four, take a coat\."/);
   assert.match(line, /That is 5 now/);
 });
+
+test('a line that never got to the phone is not one they ignored', () => {
+  const said = [
+    { at: at(1), source: 'idle', reached: true },
+    { at: at(2), source: 'idle', reached: false },
+    { at: at(3), source: 'idle' },
+  ];
+  // Only the delivered one and the one from before the flag existed.
+  assert.deepEqual(unanswered(said, [], PUSHED, evening).map(line => line.at), [at(1), at(3)]);
+});
+
+test('the three sources that used to be lost on the way to disk are counted', () => {
+  const said = [
+    { at: at(1), source: 'hanging' },
+    { at: at(2), source: 'weather' },
+    { at: at(3), source: 'upcoming' },
+  ];
+  assert.equal(unanswered(said, [], PUSHED, evening).length, 3);
+});

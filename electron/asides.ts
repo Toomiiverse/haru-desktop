@@ -46,6 +46,17 @@ export type Aside = {
   day: string;
   source: AsideSource;
   text: string;
+  /**
+   * Whether this one actually reached their phone.
+   *
+   * Written when the push is attempted, and only for the sources that push at
+   * all. It matters because the evening tally holds unanswered lines against
+   * them: a line composed inside the quiet hours, or while the subscription was
+   * refused, never arrived, and counting it is blaming them for a message they
+   * were never sent. Absent on anything written before this existed, which
+   * counts the old way rather than pretending to know.
+   */
+  reached?: boolean;
 };
 
 /** Enough to scroll back through a few days of her, and a bound on the file. */
@@ -54,7 +65,13 @@ export const MAX_ASIDES = 400;
 /** How long the log keeps a day before dropping it. */
 export const ASIDE_DAYS = 7;
 
-const SOURCES: AsideSource[] = ['screen', 'screenshot', 'activity', 'fullscreen', 'reminder', 'idle', 'journal', 'page', 'poke', 'kept', 'system', 'other'];
+// Every member of AsideSource, and it has to stay that way: anything missing
+// here is silently rewritten to 'other' the next time the file is read, so a
+// line she pushed comes back as a line she never pushed. 'hanging', 'weather'
+// and 'upcoming' were missing, which is three of the seven sources that reach
+// the phone — the evening tally counted none of them, so being left on read
+// after "you left me hanging" cost them nothing.
+const SOURCES: AsideSource[] = ['screen', 'screenshot', 'activity', 'fullscreen', 'reminder', 'idle', 'journal', 'page', 'poke', 'kept', 'system', 'hanging', 'weather', 'upcoming', 'other'];
 
 export function readAsides(saved: unknown): Aside[] {
   if (!Array.isArray(saved)) return [];
@@ -67,7 +84,13 @@ export function readAsides(saved: unknown): Aside[] {
       day: typeof entry.day === 'string' ? entry.day : '',
       source: SOURCES.includes(entry.source as AsideSource) ? entry.source as AsideSource : 'other',
       text: String(entry.text).trim(),
+      ...(typeof entry.reached === 'boolean' ? { reached: entry.reached } : {}),
     }));
+}
+
+/** Records whether one of them got to the phone. See Aside.reached. */
+export function markReached(asides: Aside[], id: string, reached: boolean): Aside[] {
+  return asides.map(aside => (aside.id === id ? { ...aside, reached } : aside));
 }
 
 export function addAside(asides: Aside[], text: string, source: AsideSource, now: Date, day: string): { asides: Aside[]; aside: Aside } {
