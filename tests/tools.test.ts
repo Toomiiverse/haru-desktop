@@ -21,7 +21,7 @@ const EVERYTHING: ToolAvailability = {
   journal: true,
   anilist: true,
   web: false,
-  search: { enabled: true, readPages: true },
+  search: { enabled: true, readPages: true, transcripts: true },
   knowledge: true,
   system: { enabled: true, level: 2 },
   hands: true,
@@ -33,7 +33,7 @@ const NOTHING: ToolAvailability = {
   journal: false,
   anilist: false,
   web: false,
-  search: { enabled: false, readPages: false },
+  search: { enabled: false, readPages: false, transcripts: false },
   knowledge: false,
   system: { enabled: false, level: 0 },
   hands: false,
@@ -119,7 +119,7 @@ test('no handler is dead code — every one is reachable from some setting', asy
   const reachable = new Set(offered(EVERYTHING));
   const handled = [
     'note_check_in', 'save_journal_entry', 'look_up_anime', 'convert_picture',
-    'open_app', 'close_app', 'power', 'read_web_page', 'offer_choices', 'search_web',
+    'open_app', 'close_app', 'power', 'read_web_page', 'read_video_transcript', 'offer_choices', 'search_web',
     'show_wardrobe', 'remember_about_user', 'core_memory_append', 'core_memory_replace',
     'create_kept_item', 'complete_kept_item', 'update_kept_item', 'delete_kept_item',
     'get_system_info', 'get_gpu_info', 'get_processes', 'get_docker_status',
@@ -134,7 +134,7 @@ test('no handler is dead code — every one is reachable from some setting', asy
 
 test('switched off means not on the table', () => {
   const bare = offered(NOTHING);
-  for (const name of ['search_web', 'read_web_page', 'look_up_knowledge', 'look_up_anime',
+  for (const name of ['search_web', 'read_web_page', 'read_video_transcript', 'look_up_knowledge', 'look_up_anime',
                       'save_journal_entry', 'offer_choices', 'open_app', 'close_app', 'power',
                       'get_system_info', 'restart_haru']) {
     assert.ok(!bare.includes(name), `${name} should not be offered when it is switched off`);
@@ -145,7 +145,7 @@ test('switched off means not on the table', () => {
 });
 
 test('reading pages is offered separately from searching', () => {
-  const searchOnly = offered({ ...NOTHING, search: { enabled: true, readPages: false } });
+  const searchOnly = offered({ ...NOTHING, search: { enabled: true, readPages: false, transcripts: false } });
   assert.ok(searchOnly.includes('search_web'));
   assert.ok(!searchOnly.includes('read_web_page'));
 });

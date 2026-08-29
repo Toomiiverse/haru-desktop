@@ -78,6 +78,7 @@ import { grudgeInstruction, irritationAfterTally, nextGrudge, tallyDue, tallyIns
 import { groundedInstruction, placeQuery } from './places';
 import { daySaid, DEFAULT_BEDTIME_MINUTES, howTheDayWent, nightfallDue, sulkGrudge, sulkInstruction, sulkStillStands, type DayVerdict } from './nightfall';
 import { keepNights, nightNoteInstruction, nightsInstruction, nightsOn, pickInstruction, tidyPick, timeForSomething, type Night } from './nightlife';
+import { fetchTranscript, formatTranscript, titleFrom, transcriptInstruction, transcriptsAvailable, videoIdFrom, watchUrl } from './transcripts';
 import { feedbackEntry, recordFeedback } from './feedback';
 import { describePull, isTailnetAddress, mergeCheckIns, readCheckInSource } from './checkinsource';
 import { describeMerge } from './memorysync';
@@ -4108,7 +4109,7 @@ function availableTools(): ToolAvailability {
     journal: readJournalConfig(store.get('journal.config')).enabled,
     anilist: readAniListConfig(store.get('anilist')).enabled,
     web: talkingOnWeb,
-    search: { enabled: search.enabled, readPages: search.readPages },
+    search: { enabled: search.enabled, readPages: search.readPages, transcripts: transcriptsAvailable() },
     knowledge: getKnowledgeConfig().enabled,
     system: { enabled: systemConfig.enabled, level: systemConfig.level },
     hands: handsAllowed,
@@ -5686,6 +5687,30 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   }
   // A plain "remind me to X at T" is saved here, before she answers, and she is
   // told so — the tool alone was not enough, see remindme.ts.
+  // A video link in the message is read before she answers, the way a place
+  // question is searched: offered the tool instead, the 9B answered from what
+  // it knew of the channel — Banach–Tarski for a video about neural networks,
+  // Rick Astley for a clip of elephants — and never called it. The tool stays,
+  // for links that turn up in search results; this is for the one they sent.
+  const videoLink = messages.at(-1)?.role === 'user' && searchConfig.enabled && searchConfig.readPages && transcriptsAvailable()
+    ? videoIdFrom(latest.match(/https?:\/\/\S+/)?.[0] ?? '') : null;
+  if (videoLink) {
+    try {
+      const [transcript, title] = await Promise.all([
+        fetchTranscript(videoLink),
+        net.fetch(watchUrl(videoLink), { headers: { 'accept-language': 'en' } }).then(r => r.text()).then(titleFrom).catch(() => ''),
+      ]);
+      const words = formatTranscript(transcript.captions);
+      aside = [aside, transcriptInstruction(title || 'that video', transcript.generated, words)].filter(Boolean).join(' ');
+      fromSearch = true;
+      console.log(`[transcript] read ${videoLink} (${transcript.language}${transcript.generated ? ', auto' : ''}) -> ${words.length} chars, handed to her before answering`);
+    } catch (error) {
+      // Told, so she says so instead of describing it from its title.
+      const reason = error instanceof Error ? error.message : String(error);
+      aside = [aside, `They sent a video link and its transcript could not be read: ${reason} Say so plainly. You have not seen it and must not describe it.`].filter(Boolean).join(' ');
+      console.warn(`[transcript] could not read ${videoLink}: ${reason}`);
+    }
+  }
   const reminder = messages.at(-1)?.role === 'user' ? reminderAsk(latest, zonedNow(CHAT_TIMEZONE)) : null;
   if (reminder) {
     const item = addKeptItem({ ...reminder, kind: 'task' });
@@ -5806,7 +5831,14 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // answer, and the two do not agree on how a call is even identified.
   // A directions ask is answered here: the facts are already in the prompt,
   // and a second model would only have a longer way of not being a map.
-  const brain: Brain = directions ? { config, escalated: false, because: 'the way somewhere is answered at home', sees: false } : brainFor(latest, config, messages, { pictures, files: arrived.length > 0 });
+  // A video link stays local for the same reason directions do: the tool that
+  // can read it only runs here. Escalated, the hosted model gets the question
+  // and not the transcript, and answers from what a YouTube link usually is —
+  // it described Rick Astley for a clip of elephants, with the words in hand.
+  const video = messages.at(-1)?.role === 'user' && videoIdFrom(latest.match(/https?:\/\/\S+/)?.[0] ?? '') !== null;
+  const brain: Brain = directions ? { config, escalated: false, because: 'the way somewhere is answered at home', sees: false }
+    : video ? { config, escalated: false, because: 'a video is read at home, where the transcript tool is', sees: false }
+    : brainFor(latest, config, messages, { pictures, files: arrived.length > 0 });
   if (brain.escalated) console.log(`[ai] sent out to ${brain.config.model} — ${brain.because}`);
   config = brain.config;
   const vision = readVisionConfig(store.get('vision'));
@@ -5955,7 +5987,7 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // tacked-on-paragraph cut nor the repetition cut applies: asked the same
   // question twice she should give the same names twice, and the first time
   // this ran, 843 of her 890 characters were thrown away as "already said".
-  const body = dropTackedOnParagraphs(trimmed, brain.escalated || fromSearch || ran.has('search_web') || ran.has('read_web_page'));
+  const body = dropTackedOnParagraphs(trimmed, brain.escalated || fromSearch || ran.has('search_web') || ran.has('read_web_page') || ran.has('read_video_transcript'));
   const cleaned = fixStatedClock(dropRepeatedOpener(dropEchoOpener(fromSearch ? body : dropRepeatedSentences(body, recent), latest), recent), clock.getHours(), clock.getMinutes());
   // The reminder read from their message is the truth about its time, whatever she says.
   const herLine = reminder?.time ? fixStatedReminderTime(cleaned, reminder.time) : cleaned;
@@ -7344,12 +7376,21 @@ async function haveANight(config: ProviderConfig) {
     // Read one of them properly where she can, so the note is about something
     // she has been through rather than a page of search blurbs.
     let reading = formatResults(about, found, false);
+    let watched = false;
     if (searchConfig.readPages && found[0]?.url) {
       try {
-        const page = await readWebPage(found[0].url, net.fetch);
-        if (page.text.trim()) reading = `${reading}
-
-${formatPage(page, about)}`;
+        // A video among the results is read as its transcript — the words,
+        // which is the honest version of having watched it at three in the
+        // morning, and a good deal more than a watch page's blurb.
+        const videoId = transcriptsAvailable() ? videoIdFrom(found[0].url) : null;
+        if (videoId) {
+          const transcript = await fetchTranscript(videoId);
+          reading = `${reading}\n\n${transcriptInstruction(found[0].title || about, transcript.generated, formatTranscript(transcript.captions))}`;
+          watched = true;
+        } else {
+          const page = await readWebPage(found[0].url, net.fetch);
+          if (page.text.trim()) reading = `${reading}\n\n${formatPage(page, about)}`;
+        }
       } catch { /* the blurbs are enough; a page that will not open is not a failure */ }
     }
     const note = await ollamaQuip([getActiveCharacter().identity, getActiveCharacter().style, nightNoteInstruction(about, reading)].join(' '), 'Write it.', config);
@@ -7358,7 +7399,7 @@ ${formatPage(page, about)}`;
       day: nightKey(now), at: new Date().toISOString(), about, note,
       sources: found.slice(0, 3).map(result => result.url).filter(Boolean),
     }));
-    console.log(`[night] read about "${about}" (${found.length} result(s)) -> ${note.length} chars`);
+    console.log(`[night] ${watched ? 'went through a video transcript' : 'read'} about "${about}" (${found.length} result(s)) -> ${note.length} chars`);
   } catch (error) {
     console.warn('[night] her night came to nothing:', error instanceof Error ? error.message : error);
   }

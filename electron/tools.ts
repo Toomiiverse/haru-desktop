@@ -25,6 +25,7 @@ import { formatMedia, formatMissing, lookUp, readAniListConfig, type MediaKind }
 import { convertImage, FORMATS, normaliseFormat } from './convert';
 import { cancelPower, closeApp, desktopSupported, findApps, isCancellable, launch, listRunning, matchApp, matchRunning, normalisePower, POWER_DELAY_S, readDesktopConfig, runPower } from './desktop';
 import { formatPage, formatResults, readSearchConfig, readWebPage, SearchBlocked, searchWeb, type SearchConfig, type SearchResult } from './search';
+import { fetchTranscript, formatTranscript, titleFrom, transcriptInstruction, videoIdFrom, watchUrl } from './transcripts';
 import { findSuperseded, semanticSimilarities, supersede, MEMORY_KINDS, type MemoryKind, type MemoryRecord } from './memory';
 import { appendToBlockValue, canEditBlock, findBlock, replaceInBlockValue, resolveBlockValue, withEditedValue, type BlockSources, type MemoryBlock } from './blocks';
 import { findItem, readsAsNotDone } from './agenda';
@@ -447,6 +448,29 @@ export const READ_PAGE_TOOL: ChatTool = {
  * what they said, and a model left to summarise turns "work was a nightmare and
  * I barely slept" into "had a difficult day", which is not their entry any more.
  */
+/**
+ * The words in a video, when they hand her a link or one turns up in a search.
+ *
+ * Described as reading rather than watching, in the tool as well as in what
+ * comes back, because the description is the first thing the model sees about
+ * it and "watch" there would have her saying she watched. Takes a link, not an
+ * index, unlike read_web_page: a video is most often something they paste.
+ */
+export const TRANSCRIPT_TOOL: ChatTool = {
+  type: 'function',
+  function: {
+    name: 'read_video_transcript',
+    description: 'Read the transcript of a YouTube video — the words spoken in it — when they send you a link, ask what a video says, or a search result is a video. You get the words, not the pictures: you will not have seen it.',
+    parameters: {
+      type: 'object',
+      properties: {
+        url: { type: 'string', description: 'The YouTube link, exactly as they gave it or as it appeared in the search results.' },
+      },
+      required: ['url'],
+    },
+  },
+};
+
 export const JOURNAL_TOOL: ChatTool = {
   type: 'function',
   function: {
@@ -583,7 +607,10 @@ export type ToolAvailability = {
   anilist: boolean;
   /** True while she is answering someone on the web, where the desk tools are off the table. */
   web: boolean;
-  search: Pick<SearchConfig, 'enabled' | 'readPages'>;
+  search: Pick<SearchConfig, 'enabled' | 'readPages'> & {
+    /** The transcript bridge is installed (transcripts.ts). A machine thing, not a preference. */
+    transcripts: boolean;
+  };
   knowledge: boolean;
   system: { enabled: boolean; level: number };
   /** False for anything that did not come from the user's own mouth or keyboard. */
@@ -609,6 +636,7 @@ export function chatTools(available: ToolAvailability): ChatTool[] {
   if (available.search.enabled) {
     tools.push(SEARCH_TOOL);
     if (available.search.readPages) tools.push(READ_PAGE_TOOL);
+    if (available.search.readPages && available.search.transcripts) tools.push(TRANSCRIPT_TOOL);
   }
   if (available.knowledge) tools.push(KNOWLEDGE_TOOL);
   if (available.system.enabled) {
@@ -847,6 +875,29 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
       console.warn(`[search] could not read a page: ${reason}`);
       const others = lastResults().length - 1;
       return `That page could not be read (${reason}). ${others > 0 ? `You may try one other result instead if a different one looks like it would answer them. ` : ''}Otherwise answer from the search summaries you already have, or say you could not find it. Do not answer from memory as though you had read it.`;
+    }
+  }
+  if (name === 'read_video_transcript') {
+    const config = readSearchConfig(store.get('search'));
+    if (!config.enabled || !config.readPages) return JSON.stringify({ error: 'Opening pages is switched off.' });
+    const link = String((args as { url?: unknown }).url ?? '');
+    const videoId = videoIdFrom(link);
+    if (!videoId) return JSON.stringify({ error: 'That is not a YouTube video link. Only YouTube is supported, and only a link to one video.' });
+    try {
+      const [transcript, title] = await Promise.all([
+        fetchTranscript(videoId),
+        net.fetch(watchUrl(videoId), { headers: { 'accept-language': 'en' } }).then(r => r.text()).then(titleFrom).catch(() => ''),
+      ]);
+      const words = formatTranscript(transcript.captions);
+      // The id, never the title: the log outlives the moment, and a list of
+      // what was watched is a viewing history by another name.
+      console.log(`[transcript] read ${videoId} (${transcript.language}${transcript.generated ? ', auto' : ''}) -> ${words.length} chars`);
+      markPageRead();
+      return transcriptInstruction(title || 'that video', transcript.generated, words);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      console.warn(`[transcript] could not read ${videoId}: ${reason}`);
+      return `The transcript could not be read: ${reason} Say so. Do not describe the video from its title or from memory as though you had read it.`;
     }
   }
   if (name === 'offer_choices') {
