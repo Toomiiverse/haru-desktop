@@ -21,6 +21,7 @@
 import { checkInInstruction, type CheckIn } from './checkins';
 import { asideContext, type Aside } from './asides';
 import { egoInstruction, goodnightInstruction, leverageInstruction, moodInstruction, notTwiceInstruction, shoutInstruction, type ShoutState } from './mood';
+import { grudgeInstruction } from './grudge';
 import { findItem, formatAgenda, missedInstruction, putOffInstruction, tickOffInstruction, whenMismatchInstruction, type AgendaItem } from './agenda';
 import { pushbackInstruction, type Pushback } from './pushback';
 import { lookItUpInstruction, type SearchConfig } from './search';
@@ -155,6 +156,9 @@ export type PromptState = {
    *  admission from being asked to move it. */
   movedJustNow: { title: string; to: string } | null;
   pushback: Pushback | undefined;
+  /** Being left on read, counted each evening (grudge.ts): the standing grudge, and today's share of it. */
+  grudge?: number;
+  ignoredToday?: number;
   /** Where their phone says they are, already put into words (whereabouts.ts), or nothing. */
   whereabouts?: string;
   /** The weather where they are, already in words (weather.ts), or nothing. */
@@ -268,6 +272,7 @@ export function chatSystemPrompt(state: PromptState): string {
     CONTINUITY,
     'Answer what they said and stop. One thought — usually a short paragraph, two if it genuinely needs it. Do not make your point again in different words, do not sweep in a topic they did not raise, and do not finish with a parting flourish or a send-off. Trailing off mid-thought is better than padding.',
     moodInstruction(state.irritation),
+    grudgeInstruction(state.grudge ?? 0, state.ignoredToday ?? 0),
     egoInstruction(state.ego),
     leverageInstruction(state.ego),
     // Immediately after the three lines that cause it, and for the same reason

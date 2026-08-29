@@ -206,7 +206,7 @@ export function pushRequest(
 }
 
 /** The gap between one unprompted push and the next: somewhere in here, never the same twice. */
-export const NUDGE_GAP_MS: [number, number] = [45 * 60_000, 150 * 60_000];
+export const NUDGE_GAP_MS: [number, number] = [45 * 60_000, 120 * 60_000];
 
 /**
  * How long until the next unprompted push.

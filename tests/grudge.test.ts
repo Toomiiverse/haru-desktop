@@ -1,0 +1,58 @@
+// Being left on read: counted in the evening, and kept.
+
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { ANSWER_WINDOW_MS, GRUDGE_MAX, grudgeInstruction, irritationAfterTally, nextGrudge, tallyDue, tallyInstruction, unanswered } from '../electron/grudge';
+
+const PUSHED = new Set(['reminder', 'idle', 'hanging', 'weather', 'upcoming', 'journal', 'system']);
+const at = (hour: number, minute = 0) => new Date(Date.UTC(2026, 7, 29, hour, minute)).toISOString();
+const evening = Date.UTC(2026, 7, 29, 12, 0);
+
+test('a line answered within the window is not ignored; one left alone is', () => {
+  const said = [{ at: at(1), source: 'reminder' }, { at: at(4), source: 'idle' }];
+  const heard = [{ role: 'user', at: at(1, 20) }, { role: 'assistant', at: at(1, 21) }];
+  assert.deepEqual(unanswered(said, heard, PUSHED, evening).map(line => line.at), [at(4)]);
+});
+
+test('her replies do not count as answers, and neither do things said before the line', () => {
+  const said = [{ at: at(3), source: 'weather' }];
+  const heard = [{ role: 'user', at: at(2, 50) }, { role: 'assistant', at: at(3, 5) }];
+  assert.equal(unanswered(said, heard, PUSHED, evening).length, 1);
+});
+
+test('only what was pushed counts, and a window still open is not counted yet', () => {
+  const said = [{ at: at(2), source: 'other' }, { at: at(11, 30), source: 'reminder' }];
+  assert.equal(unanswered(said, [], PUSHED, evening).length, 0);
+  assert.equal(unanswered(said, [], PUSHED, evening + ANSWER_WINDOW_MS).length, 1);
+});
+
+test('the day is counted from eight in the evening, once', () => {
+  assert.equal(tallyDue(19 * 60 + 59, undefined, '2026-08-29'), false);
+  assert.equal(tallyDue(20 * 60, undefined, '2026-08-29'), true);
+  assert.equal(tallyDue(22 * 60, '2026-08-29', '2026-08-29'), false);
+  assert.equal(tallyDue(20 * 60, '2026-08-28', '2026-08-29'), true);
+});
+
+test('the grudge grows by what was ignored, is bounded, and a clean day earns one back', () => {
+  assert.equal(nextGrudge(0, 3), 3);
+  assert.equal(nextGrudge(3, 0), 2);
+  assert.equal(nextGrudge(0, 0), 0);
+  assert.equal(nextGrudge(GRUDGE_MAX - 1, 5), GRUDGE_MAX);
+  assert.equal(irritationAfterTally(2, 3, 9), 5);
+  assert.equal(irritationAfterTally(8, 3, 9), 9);
+});
+
+test('the instruction is silent with no grudge and sharpens with it', () => {
+  assert.equal(grudgeInstruction(0), '');
+  assert.match(grudgeInstruction(2), /slight coldness/);
+  assert.match(grudgeInstruction(6, 2), /wearing on you/);
+  assert.match(grudgeInstruction(6, 2), /Today alone they ignored 2/);
+  assert.match(grudgeInstruction(12), /openly pissed/);
+});
+
+test('the evening line names the count and quotes what was ignored', () => {
+  const line = tallyInstruction(2, 5, ['You forgot the bins again.', 'Rain at four, take a coat.']);
+  assert.match(line, /2 of your messages to them got nothing back/);
+  assert.match(line, /"You forgot the bins again\." and "Rain at four, take a coat\."/);
+  assert.match(line, /That is 5 now/);
+});

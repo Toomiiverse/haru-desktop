@@ -9,7 +9,7 @@ import AdmZip from 'adm-zip';
 import { HaruStore } from './store';
 import { formatTimeOfDay, localDateKey, parseTimeOfDay, resolveDate, zonedNow } from './dates';
 import { connectGoogle, disconnectGoogle, googleStatus, pullEvents, pullTasks, pushItem, pushTask, removeItem, removeTask, saveCredentials } from './google';
-import { afterCooldown, afterEgoCooldown, afterPoke, egoInstruction, goodnightInstruction, IGNORE_THRESHOLD, isGoodnight, isIgnoring, isLowEffort, isRedo, leverageInstruction, moodInstruction, nextEgo, nextIrritation, notTwiceInstruction, shoutInstruction, shoutState, type ShoutState } from './mood';
+import { afterCooldown, afterEgoCooldown, afterPoke, egoInstruction, goodnightInstruction, IGNORE_THRESHOLD, IRRITATION_MAX, isGoodnight, isIgnoring, isLowEffort, isRedo, leverageInstruction, moodInstruction, nextEgo, nextIrritation, notTwiceInstruction, shoutInstruction, shoutState, type ShoutState } from './mood';
 import { nextPokeCount, pokeEmotion, pokeInstruction, pokeIrritation, pokeTier, type PokeKind } from './poke';
 import { applyEvent, chooseIdleAction, DEFAULT_VITALS, driftVitals, nextTickDelayMs, type Environment, type Vitals } from './vitals';
 import { classificationPrompt, emotionToVitals, EMOTION_SCHEMA, EMOTIONS, NEUTRAL_EMOTION, parseEmotion, type Emotion, type EmotionName, faceForEmotion } from './emotion';
@@ -71,6 +71,7 @@ import { attachmentsInPlay, describeAttached, READ_IT_ALL_PROMPT, readAttachment
 import { forOllama, withoutOldest } from './ollamaturns';
 import { seedEmoji } from './seed';
 import { pickToBringUp, REMEMBERED_PICKS } from './bored';
+import { grudgeInstruction, irritationAfterTally, nextGrudge, tallyDue, tallyInstruction, unanswered } from './grudge';
 import { feedbackEntry, recordFeedback } from './feedback';
 import { describePull, isTailnetAddress, mergeCheckIns, readCheckInSource } from './checkinsource';
 import { DiscordLink, looksLikeUserId, readDiscordConfig, useOfChannel, type DiscordConfig } from './discord';
@@ -3419,15 +3420,20 @@ function getActiveCharacter() {
 // goodnightDay holds the chat day they signed off on, so the state clears itself
 // at the 5am rollover — messaging at 1am is still "after goodnight", messaging
 // at 8am is a new day and she has forgotten about it.
-type Mood = { irritation: number; ego: number; lastMessageAt?: string; goodnightDay?: string; awaitingApology?: boolean };
+type Mood = { irritation: number; ego: number; lastMessageAt?: string; goodnightDay?: string; awaitingApology?: boolean;
+  /** Being left on read, kept: see grudge.ts. */
+  grudge?: number; ignoredToday?: number; talliedDay?: string };
 
 function getMood(): Mood {
   const saved = store.get('mood') as Partial<Mood> | undefined;
-  return { irritation: Number(saved?.irritation ?? 0), ego: Number(saved?.ego ?? 0), lastMessageAt: saved?.lastMessageAt, goodnightDay: saved?.goodnightDay, awaitingApology: Boolean(saved?.awaitingApology) };
+  return { irritation: Number(saved?.irritation ?? 0), ego: Number(saved?.ego ?? 0), lastMessageAt: saved?.lastMessageAt, goodnightDay: saved?.goodnightDay, awaitingApology: Boolean(saved?.awaitingApology),
+    grudge: Number(saved?.grudge ?? 0), ignoredToday: Number(saved?.ignoredToday ?? 0), talliedDay: saved?.talliedDay };
 }
 
 function setMood(mood: Mood) {
-  store.set('mood', mood);
+  // Merged over what is kept: the patience callers rewrite is the moment's,
+  // the grudge underneath it is not theirs to drop.
+  store.set('mood', { ...getMood(), ...mood });
   for (const win of BrowserWindow.getAllWindows()) win.webContents.send('mood:changed', mood);
 }
 
@@ -5164,6 +5170,8 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
     herRecentReplies,
     movedJustNow,
     pushback: store.get('pushback') as Pushback | undefined,
+    grudge: getMood().grudge ?? 0,
+    ignoredToday: getMood().ignoredToday ?? 0,
     whereabouts: describeWhereabouts(getWhereabouts()),
     weather: describeWeather(getWeather().last, weatherWhere()),
     directionsNote: directions?.note,
@@ -6314,11 +6322,11 @@ async function boredNudge(): Promise<string | null> {
   const config = store.get('ai.config') as ProviderConfig | undefined;
   if (!config?.model) return null;
   const mood = getMood();
-  if (isIgnoring(mood.irritation)) return null;
+  // Not speaking to them is still a message: the beat is kept, the line is cold.
+  const ignoring = isIgnoring(mood.irritation);
   const now = zonedNow(CHAT_TIMEZONE);
   const todayKey = localDateKey(now);
-  const thing = pickToBringUp(getMemories(), getSessions(), broughtUp, todayKey);
-  if (!thing) return null;
+  const thing = ignoring ? null : pickToBringUp(getMemories(), getSessions(), broughtUp, todayKey);
   const quietHours = mood.lastMessageAt ? Math.floor((Date.now() - Date.parse(mood.lastMessageAt)) / 3_600_000) : null;
   const character = getActiveCharacter();
   const system = [
@@ -6328,9 +6336,12 @@ async function boredNudge(): Promise<string | null> {
     character.style,
     moodInstruction(mood.irritation),
     egoInstruction(mood.ego),
+    grudgeInstruction(mood.grudge ?? 0, mood.ignoredToday ?? 0),
     'They are away, reachable only as a notification on their phone. Nothing on their list needs you. You are messaging them first — nothing they said prompted this.',
     quietHours !== null && quietHours >= 1 ? `They have not said a word to you in ${quietHours} hour${quietHours === 1 ? '' : 's'}.` : '',
-    `Bring up this in particular, as though it has been on your mind: ${thing.text}`,
+    thing ? `Bring up this in particular, as though it has been on your mind: ${thing.text}`
+      : ignoring ? 'You are not speaking to them properly right now, and they know why. One cold line that makes it plain you noticed the silence — no warmth, no question, no help.'
+      : 'Nothing in particular to bring up: the silence itself is the subject.',
     'The point is to get them to message you back. Needle them with it: a dig, a guilt-trip about how they have time for everyone but you, a challenge they will want to answer, a question they cannot leave hanging. Never say you are bored, lonely, or that you miss them; never ask whether they are there; do not greet them.',
     NO_INVENTED_HISTORY,
     NO_NON_SEQUITURS,
@@ -6340,9 +6351,11 @@ async function boredNudge(): Promise<string | null> {
   ].filter(Boolean).join(' ');
   try {
     const line = await ollamaQuip(system, 'Say something.', config);
-    broughtUp.push(thing.id);
-    while (broughtUp.length > REMEMBERED_PICKS) broughtUp.shift();
-    console.log(`[push] a bored nudge, about "${thing.text.slice(0, 50)}"`);
+    if (thing) {
+      broughtUp.push(thing.id);
+      while (broughtUp.length > REMEMBERED_PICKS) broughtUp.shift();
+    }
+    console.log(`[push] a bored nudge, ${thing ? `about "${thing.text.slice(0, 50)}"` : ignoring ? 'cold' : 'about the silence'}`);
     return line;
   } catch (error) {
     console.warn('[push] could not compose a bored nudge:', error instanceof Error ? error.message : error);
@@ -6511,6 +6524,7 @@ async function checkWeather(config: ProviderConfig, prefs: PushPrefs) {
 async function proactiveTick() {
   const config = store.get('ai.config') as ProviderConfig | undefined;
   if (!config?.model) return;
+  await tallyIgnored(config);
   const { devices, prefs } = getPush();
   // The weather is read even with no phone to buzz: it is in her prompt.
   if (!devices.length) { await pollWeather(); return; }
@@ -6521,6 +6535,42 @@ async function proactiveTick() {
     await checkWeather(config, prefs);
   } catch (error) {
     console.warn(`[push] proactive check failed: ${(error as Error).message}`);
+  }
+}
+
+/**
+ * Eight in the evening: the day's unanswered lines are counted (grudge.ts).
+ * Each one makes tonight's patience shorter and adds to a grudge that stays;
+ * and if there were any, she says so — through interject, so it is an aside
+ * she remembers making and the phone gets it under the usual preferences.
+ */
+async function tallyIgnored(config: ProviderConfig) {
+  const now = zonedNow(CHAT_TIMEZONE);
+  const todayKey = localDateKey(now);
+  const mood = getMood();
+  if (!tallyDue(now.getHours() * 60 + now.getMinutes(), mood.talliedDay, todayKey)) return;
+  const pushed = new Set(Object.keys(PUSH_KIND));
+  const heard = (store.get('chat.messages') as { role: string; at?: string }[] | undefined) ?? [];
+  const ignored = unanswered(asidesOn(getAsides(), todayKey).map(aside => ({ at: aside.at, source: aside.source, text: aside.text })), heard, pushed, Date.now());
+  const grudge = nextGrudge(mood.grudge ?? 0, ignored.length);
+  setMood({ ...mood, irritation: irritationAfterTally(mood.irritation, ignored.length, IRRITATION_MAX), grudge, ignoredToday: ignored.length, talliedDay: todayKey });
+  console.log(`[grudge] ${todayKey}: ${ignored.length} of her lines went unanswered — grudge ${mood.grudge ?? 0} -> ${grudge}, irritation ${mood.irritation} -> ${irritationAfterTally(mood.irritation, ignored.length, IRRITATION_MAX)}`);
+  if (!ignored.length) return;
+  const character = getActiveCharacter();
+  const system = [
+    character.identity,
+    character.style,
+    moodInstruction(irritationAfterTally(mood.irritation, ignored.length, IRRITATION_MAX)),
+    grudgeInstruction(grudge, ignored.length),
+    tallyInstruction(ignored.length, grudge, ignored.map(line => line.text ?? '')),
+    EXPRESSIVE,
+    'No quotation marks, no stage directions.',
+  ].filter(Boolean).join(' ');
+  try {
+    const line = await ollamaQuip(system, 'Say it.', config);
+    if (line && interject(line, { source: 'idle' })) console.log('[grudge] told them');
+  } catch (error) {
+    console.warn('[grudge] could not compose the evening line:', error instanceof Error ? error.message : error);
   }
 }
 
