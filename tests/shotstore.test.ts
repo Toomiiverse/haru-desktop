@@ -6,7 +6,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import {
@@ -71,9 +71,10 @@ test('a kept screenshot lands under its day and reads back', () => {
   const dir = root();
   keepShot(dir, '2026-08-29', 'shot.png', bytes);
   assert.equal(existsSync(path.join(dir, '2026-08-29', 'shot.png')), true);
+  assert.deepEqual(heldShots(dir), { '2026-08-29': ['shot.png'] });
   assert.deepEqual(readShot(dir, '2026-08-29', 'shot.png'), bytes);
   assert.equal(readShot(dir, '2026-08-29', 'missing.png'), null);
-  assert.equal(readShot(dir, '2026-08-29', '../escape.png'), null);
+  assert.equal(readShot(dir, '2026-08-29', '../escape.png'), null, 'a climbing name reads back too');
 });
 
 test('what is held is listed by day, and rubbish in the folder is ignored', () => {

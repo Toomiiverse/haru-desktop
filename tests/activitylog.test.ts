@@ -7,8 +7,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  MAX_ENTRIES_PER_DAY, isRedacted, mergeActivity, minutesOf, noteActivity,
-  normalizeActivityLog, summariseDay, type ActivityEntry, type ActivityLog,
+  MAX_ENTRIES_PER_DAY, describeShot, isRedacted, isScreenshotEntry, mergeActivity,
+  minutesOf, noteActivity, noteScreenshot, normalizeActivityLog, summariseDay,
+  summariseShots, type ActivityEntry, type ActivityLog,
 } from '../electron/activitylog';
 
 const DAY = '2026-08-29';
@@ -128,4 +129,88 @@ test('rubbish off the network is dropped rather than stored', () => {
   });
   assert.equal(mixed[DAY].length, 1, 'only the entry with both fields survived');
   assert.equal(mixed[DAY][0].until, 'a', 'a missing end falls back to the start');
+});
+
+// -- screenshots ------------------------------------------------------------------
+//
+// These shipped broken once and it is worth saying how: a screenshot is taken at
+// an instant, so its entry has no duration, and summariseDay put every entry
+// through a five-minute floor. The whole log of them travelled to the server and
+// was then dropped before the day pass ever saw it. Counting, not timing.
+
+test('a screenshot is noted with what was in front at the time', () => {
+  const log = noteScreenshot({}, DAY, { name: 'shot.png', doing: { kind: 'coding', label: 'VS Code' } }, at(0));
+  const [entry] = log[DAY];
+  assert.equal(entry.shot, 'shot.png');
+  assert.equal(entry.title, 'shot.png — while in VS Code');
+  assert.equal(entry.kind, 'coding');
+  assert.equal(isScreenshotEntry(entry), true);
+});
+
+test('a screenshot taken during adult browsing does not say so', () => {
+  const log = noteScreenshot({}, DAY, { name: 'shot.png', doing: { kind: 'adult', label: 'a site' } }, at(0));
+  const [entry] = log[DAY];
+  assert.equal(entry.title, 'shot.png', 'the label came along for the ride');
+  assert.equal(entry.kind, 'other');
+});
+
+test('screenshots are counted rather than timed, however long ago', () => {
+  // The bug: three screenshots, zero minutes between them, dropped entirely.
+  let log: ActivityLog = {};
+  for (const name of ['a.png', 'b.png', 'c.png']) log = noteScreenshot(log, DAY, { name }, at(0));
+  const digest = summariseDay(log[DAY]);
+  assert.ok(digest.includes('3 screenshots'), digest);
+});
+
+test('one screenshot is one screenshot, not one screenshots', () => {
+  const log = noteScreenshot({}, DAY, { name: 'a.png' }, at(0));
+  assert.equal(summariseShots(log[DAY]), '1 screenshot');
+});
+
+test('what the vision model saw is what makes a screenshot worth remembering', () => {
+  let log = noteScreenshot({}, DAY, { name: 'a.png' }, at(0));
+  log = describeShot(log, DAY, 'a.png', '  a stack trace in a code editor  ');
+  assert.equal(log[DAY][0].description, 'a stack trace in a code editor', 'trimmed');
+  assert.ok(summariseShots(log[DAY]).includes('a stack trace in a code editor'));
+});
+
+test('a description lands on its own screenshot, not the newest one', () => {
+  let log = noteScreenshot({}, DAY, { name: 'first.png' }, at(0));
+  log = noteScreenshot(log, DAY, { name: 'second.png' }, at(1));
+  log = describeShot(log, DAY, 'first.png', 'the first thing');
+  assert.equal(log[DAY][0].description, 'the first thing');
+  assert.equal(log[DAY][1].description, undefined, 'it landed on the wrong entry');
+});
+
+test('a description with nothing to attach to changes nothing', () => {
+  const log = noteScreenshot({}, DAY, { name: 'a.png' }, at(0));
+  assert.equal(describeShot(log, DAY, 'missing.png', 'anything'), log);
+  assert.equal(describeShot(log, '2026-01-01', 'a.png', 'anything'), log);
+  assert.equal(describeShot(log, DAY, 'a.png', '   '), log, 'an empty description is not a description');
+  const once = describeShot(log, DAY, 'a.png', 'the same words');
+  assert.equal(describeShot(once, DAY, 'a.png', 'the same words'), once, 'writing the same thing twice is a write');
+});
+
+test('the stretches and the screenshots both survive into one digest', () => {
+  let log: ActivityLog = { [DAY]: [
+    { at: '2026-08-29T09:00:00.000Z', until: '2026-08-29T10:00:00.000Z', kind: 'working', label: 'Figma', process: 'chrome', title: 'a' },
+  ] };
+  log = noteScreenshot(log, DAY, { name: 'a.png' }, at(0));
+  log = describeShot(log, DAY, 'a.png', 'a poster half finished');
+  const digest = summariseDay(log[DAY]);
+  assert.ok(digest.includes('Figma (working, 60m)'), digest);
+  assert.ok(digest.includes('1 screenshot: a poster half finished'), digest);
+});
+
+test('a day of nothing but screenshots still says something', () => {
+  const log = noteScreenshot({}, DAY, { name: 'a.png' }, at(0));
+  assert.equal(summariseDay(log[DAY]), '1 screenshot');
+});
+
+test('a screenshot entry survives the trip to the server with its description', () => {
+  let log = noteScreenshot({}, DAY, { name: 'a.png' }, at(0));
+  log = describeShot(log, DAY, 'a.png', 'a stack trace');
+  const there = mergeActivity({}, JSON.parse(JSON.stringify(log)));
+  assert.equal(there[DAY][0].description, 'a stack trace');
+  assert.equal(there[DAY][0].shot, 'a.png');
 });

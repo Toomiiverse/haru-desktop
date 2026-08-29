@@ -79,7 +79,7 @@ import { groundedInstruction, placeQuery } from './places';
 import { feedbackEntry, recordFeedback } from './feedback';
 import { describePull, isTailnetAddress, mergeCheckIns, readCheckInSource } from './checkinsource';
 import { describeMerge } from './memorysync';
-import { isRedacted, mergeActivity, noteActivity, summariseDay } from './activitylog';
+import { describeShot, mergeActivity, noteActivity, noteScreenshot, summariseDay } from './activitylog';
 import { heldShots, keepShot, localShots, missingFrom, pruneShots, readShot, MAX_SHOT_BYTES } from './shotstore';
 import { DiscordLink, looksLikeUserId, readDiscordConfig, useOfChannel, type DiscordConfig } from './discord';
 import { reactedPrompt, readReaction, REACTION_COOLDOWN_MS } from './reacted';
@@ -1600,17 +1600,36 @@ async function remarkOnScreenshot() {
   if (!shot) return;
   const config = readScreenshotConfig(store.get('screenshots'));
   const vision = readVisionConfig(store.get('vision'));
-  if (!maySpeak(config, screenshotSpokeAt, Date.now()) || !vision.enabled) return;
+  if (!vision.enabled) return;
   const provider = store.get('ai.config') as ProviderConfig | undefined;
   if (!provider?.model) return;
   if (!await settled(shot.path)) { console.warn('[shot] the file never finished being written'); return; }
 
-  screenshotSpokeAt = Date.now();
+  // Looking and speaking come apart here, and they used to be one decision.
+  // Whether she may remark is a question about the last few minutes; whether
+  // this is worth writing down is a question about the day. Gated together, a
+  // screenshot taken inside the quiet window was never described at all — so
+  // the log reached the server saying one had been taken and nothing about what
+  // it was of, which is not a fact about anybody's day. The burst debounce still
+  // means one look per burst, not one per file.
+  const mayRemark = maySpeak(config, screenshotSpokeAt, Date.now());
   try {
     const bytes = readFileSync(shot.path);
     // Always the local vision model, whatever the chat model is set to.
     const sighting = await look(bytes.toString('base64'), vision, visionEndpoint(provider, vision), modelHeaders(visionEndpoint(provider, vision)), net.fetch);
-    console.log(`[shot] ${path.basename(shot.path)} (${(bytes.length / 1024 | 0)}KB) -> ${sighting.description.length} chars`);
+    const name = path.basename(shot.path);
+    console.log(`[shot] ${name} (${(bytes.length / 1024 | 0)}KB) -> ${sighting.description.length} chars${mayRemark ? '' : ', quiet hours — noted not said'}`);
+    // Written down whether or not she says anything, and here rather than only
+    // on the server: this is the desk's own copy, and it is what the desk's day
+    // pass reads. The server captions the same picture into its own store once
+    // the image reaches it (seen.ts) — that pass is for the backlog the desk
+    // never looked at, not for shots it has already described.
+    if (store.get('activityLog', true) === true) {
+      const described = describeShot(store.getActivityLog(), currentChatDayKey(), name, sighting.description);
+      if (described !== store.getActivityLog()) store.setActivityLog(described);
+    }
+    if (!mayRemark) return;
+    screenshotSpokeAt = Date.now();
     const character = getActiveCharacter();
     // A screenshot arrives as a description, never a title — so without this she
     // is reacting to "a black and white comic panel" with no idea it is the
@@ -1652,13 +1671,9 @@ function watchScreenshots() {
       // what was in front of them at the time is most of what makes it worth
       // remembering — the file name alone says nothing.
       if (store.get('activityLog', true) === true) {
-        const doing = currentActivity;
-        const day = currentChatDayKey();
-        store.setActivityLog(noteActivity(store.getActivityLog(), day, {
-          kind: doing && !isRedacted(doing.kind) ? doing.kind : 'other',
-          label: 'screenshot',
-          process: 'screenshot',
-          title: doing && !isRedacted(doing.kind) ? `${String(name)} — while in ${doing.label}` : String(name),
+        store.setActivityLog(noteScreenshot(store.getActivityLog(), currentChatDayKey(), {
+          name: String(name),
+          doing: currentActivity ?? undefined,
         }, new Date()));
       }
       // Debounced across a burst, so five in a row earn one remark about the last.

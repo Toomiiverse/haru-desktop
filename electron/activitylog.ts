@@ -30,6 +30,14 @@ export type ActivityEntry = {
   /** The raw window title. Empty for anything redacted. */
   title: string;
   url?: string;
+  /** Set on a screenshot entry: the bare file name, which is what identifies it
+   *  when the description arrives a moment later. */
+  shot?: string;
+  /** What the local vision model made of that screenshot. This, not the image,
+   *  is what travels far enough to become a memory — the server has no vision
+   *  model, and describing it twice on two machines would be paying twice for
+   *  an answer the desk already has. */
+  description?: string;
 };
 
 /** Day key (`2026-08-29`) to what was in front of them that day. */
@@ -99,6 +107,63 @@ export function noteActivity(
   return { ...log, [day]: [...today, entry].slice(-MAX_ENTRIES_PER_DAY) };
 }
 
+/**
+ * Note that a screenshot was taken, and what was in front when it was.
+ *
+ * Its own entry rather than a stretch: a screenshot happens at an instant, so
+ * it has no duration and never will, and everything that reasons about
+ * durations has to know not to ask.
+ */
+export function noteScreenshot(
+  log: ActivityLog,
+  day: string,
+  shot: { name: string; doing?: { kind: ActivityKind; label: string } },
+  now: Date,
+): ActivityLog {
+  const at = now.toISOString();
+  const doing = shot.doing && !isRedacted(shot.doing.kind) ? shot.doing : null;
+  const entry: ActivityEntry = {
+    at,
+    until: at,
+    kind: doing ? doing.kind : 'other',
+    label: 'screenshot',
+    process: SCREENSHOT_PROCESS,
+    title: doing ? `${shot.name} — while in ${doing.label}` : shot.name,
+    shot: shot.name,
+  };
+  return { ...log, [day]: [...(log[day] ?? []), entry].slice(-MAX_ENTRIES_PER_DAY) };
+}
+
+/** The process name a screenshot entry carries, so nothing has to parse a title
+ *  to know it is looking at one. */
+export const SCREENSHOT_PROCESS = 'screenshot';
+
+export function isScreenshotEntry(entry: ActivityEntry): boolean {
+  return entry.process === SCREENSHOT_PROCESS;
+}
+
+/**
+ * Attach what the vision model saw to the screenshot it saw it in.
+ *
+ * Matched on the file name rather than on position: the description arrives a
+ * second or two after the entry, and a burst of screenshots can put other
+ * entries in between. Returns the log unchanged when there is nothing to attach
+ * it to, so a caller can avoid a pointless write.
+ */
+export function describeShot(log: ActivityLog, day: string, name: string, description: string): ActivityLog {
+  const today = log[day];
+  const text = description.trim();
+  if (!today || !text) return log;
+  let index = -1;
+  for (let at = today.length - 1; at >= 0; at -= 1) {
+    if (today[at].shot === name) { index = at; break; }
+  }
+  if (index < 0 || today[index].description === text) return log;
+  const next = [...today];
+  next[index] = { ...next[index], description: text };
+  return { ...log, [day]: next };
+}
+
 /** Whole minutes at one window, rounded down; a stretch under a minute is 0. */
 export function minutesOf(entry: ActivityEntry): number {
   const span = new Date(entry.until).getTime() - new Date(entry.at).getTime();
@@ -117,18 +182,42 @@ export function minutesOf(entry: ActivityEntry): number {
 export function summariseDay(entries: ActivityEntry[], limit = 12): string {
   const byLabel = new Map<string, { label: string; kind: ActivityKind; minutes: number }>();
   for (const entry of entries) {
+    // Screenshots are counted below, not timed. They are taken at an instant,
+    // so their duration is zero by construction — put through the minutes floor
+    // with everything else they were silently dropped, which made the whole log
+    // of them reach the server and then never reach her.
+    if (isScreenshotEntry(entry)) continue;
     const label = entry.label || entry.process;
     if (!label) continue;
     const held = byLabel.get(label.toLowerCase());
     if (held) held.minutes += minutesOf(entry);
     else byLabel.set(label.toLowerCase(), { label, kind: entry.kind, minutes: minutesOf(entry) });
   }
-  return [...byLabel.values()]
+  const stretches = [...byLabel.values()]
     .filter(item => item.minutes >= 5)
     .sort((a, b) => b.minutes - a.minutes)
     .slice(0, limit)
     .map(item => `${item.label} (${item.kind}, ${item.minutes}m)`)
     .join('; ');
+  return [stretches, summariseShots(entries)].filter(Boolean).join('. ');
+}
+
+/** How many screenshots, and what the ones she looked at were of. */
+export const SHOT_DESCRIPTIONS = 3;
+
+export function summariseShots(entries: ActivityEntry[]): string {
+  const shots = entries.filter(isScreenshotEntry);
+  if (!shots.length) return '';
+  const count = `${shots.length} screenshot${shots.length === 1 ? '' : 's'}`;
+  // The descriptions are the whole reason a screenshot is worth remembering —
+  // "a screenshot was taken" is not a fact about anybody's day. Trimmed hard,
+  // because a vision model given no limit will write a paragraph per image.
+  const said = shots
+    .map(entry => entry.description?.trim())
+    .filter((text): text is string => Boolean(text))
+    .slice(-SHOT_DESCRIPTIONS)
+    .map(text => text.slice(0, 160));
+  return said.length ? `${count}: ${said.join('; ')}` : count;
 }
 
 /**
