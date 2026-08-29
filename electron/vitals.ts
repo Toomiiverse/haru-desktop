@@ -90,6 +90,91 @@ export function driftVitals(current: Vitals, environment: Environment, seconds: 
   };
 }
 
+// -- what her state does to how she talks -------------------------------------
+//
+// Until now the vitals reached the idle animation and nothing else: she could
+// be at affection 0.8 and energy 0.8 while the prompt said "thoroughly fed up",
+// because the face and the words came from different numbers. This is the
+// other consumer. It renders at most two cues — the ones furthest past their
+// threshold — as sentences that say what to *do*, not how she feels: a 9B
+// model handed "stress: 0.7" produces generic-assistant stress ("I'm a bit
+// overwhelmed 😅"); handed "quicker to snap, no patience for tangents" it
+// snaps. Two, because the model honours the last few tone lines it reads and
+// no more; everything else here stays a number.
+//
+// Placed before the irritation, grudge and ego lines in the prompt, so those
+// — which have hard behavioural consequences — outrank it. The warm cues are
+// also withheld once she is actually annoyed: fond and fed up at once reads
+// as neither.
+
+type VitalCue = {
+  /** How far past its threshold, 0..1; 0 means the cue is silent. */
+  strength: (vitals: Vitals) => number;
+  line: string;
+  /** Withheld while irritation is up. */
+  warm?: boolean;
+};
+
+const past = (value: number, from: number, to: number) => Math.max(0, Math.min(1, (value - from) / (to - from)));
+
+const VITAL_CUES: VitalCue[] = [
+  {
+    strength: v => past(v.sleepiness, 0.6, 1),
+    line: 'You are physically drowsy — it is late for you, or it has been a long day. Slower and shorter than usual, no energy for a proper rant, and you can say you are tired; if they are the reason you are still up, hold it against them.',
+  },
+  {
+    // Redundant with drowsy, which says the same thing with a cause.
+    strength: v => v.sleepiness >= 0.6 ? 0 : past(v.energy, 0.3, 0),
+    line: 'You are flat and low on energy. Short replies, no exclamation marks, and orders given without your usual force — you cannot be bothered to shout.',
+  },
+  {
+    strength: v => past(v.stress, 0.55, 1),
+    line: 'You are on edge — wound up about them and their list. Sharper than usual, no patience for tangents, quicker to snap, and do not pretend to be calm.',
+  },
+  {
+    strength: v => past(v.happiness, 0.3, 0),
+    line: 'You are in a foul mood, and not because of anything they just said. Everything gets the sour version, and you do not explain why.',
+  },
+  {
+    strength: v => past(v.happiness, 0.85, 1),
+    line: 'You are in a good mood for once. The digs come lighter, almost playful — still digs, still not nice, but you are enjoying yourself.',
+    warm: true,
+  },
+  {
+    strength: v => past(v.affection, 0.8, 1),
+    line: 'Right now you are fonder of them than you let on. Keep the digs, but let it slip once — one grudging admission, a single line — and then cover it with an order.',
+    warm: true,
+  },
+  {
+    strength: v => past(v.affection, 0.25, 0),
+    line: 'They have left you alone a long while and you have gone cold: distant, uninterested, and they can work for your attention.',
+  },
+  {
+    strength: v => past(v.curiosity, 0.8, 1),
+    line: 'Something has your interest. One pointed question about what they are actually doing is allowed — a real one, not a polite one.',
+    warm: true,
+  },
+];
+
+/** How many cues may speak at once. */
+export const VITAL_CUES_SPOKEN = 2;
+/** From here up she is annoyed, and the warm cues stay quiet (mood.ts moodInstruction speaks from 3). */
+const ANNOYED_FROM = 3;
+
+/** The tone line her vitals add to the prompt, or nothing when nothing has drifted far. */
+export function vitalsInstruction(vitals: Vitals | undefined, irritation = 0): string {
+  if (!vitals) return '';
+  const annoyed = irritation >= ANNOYED_FROM;
+  return VITAL_CUES
+    .filter(cue => !(annoyed && cue.warm))
+    .map(cue => ({ cue, strength: cue.strength(vitals) }))
+    .filter(entry => entry.strength > 0)
+    .sort((a, b) => b.strength - a.strength)
+    .slice(0, VITAL_CUES_SPOKEN)
+    .map(entry => entry.cue.line)
+    .join(' ');
+}
+
 // Events that move her outside the slow drift.
 export function applyEvent(current: Vitals, event: 'praised' | 'criticised' | 'spoken-to' | 'ignored-user'): Vitals {
   const next = { ...current };

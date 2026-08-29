@@ -5207,6 +5207,7 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
     fresh,
     herRecentReplies,
     movedJustNow,
+    vitals,
     pushback: store.get('pushback') as Pushback | undefined,
     grudge: getMood().grudge ?? 0,
     ignoredToday: getMood().ignoredToday ?? 0,

@@ -7,9 +7,44 @@ import {
   isNight,
   chooseIdleAction,
   DEFAULT_VITALS,
+  vitalsInstruction,
+  VITAL_CUES_SPOKEN,
   type Vitals,
   type Environment,
 } from '../electron/vitals';
+
+// ---- vitalsInstruction: at most two cues, said as behaviour ----
+
+test('vitalsInstruction is silent at the defaults and without vitals', () => {
+  assert.equal(vitalsInstruction(DEFAULT_VITALS), '');
+  assert.equal(vitalsInstruction(undefined), '');
+});
+
+test('drowsy speaks once, and flat energy defers to it', () => {
+  const late: Vitals = { ...DEFAULT_VITALS, sleepiness: 0.9, energy: 0.1 };
+  const line = vitalsInstruction(late);
+  assert.match(line, /drowsy/);
+  assert.doesNotMatch(line, /flat and low on energy/);
+  const flat: Vitals = { ...DEFAULT_VITALS, sleepiness: 0.2, energy: 0.1 };
+  assert.match(vitalsInstruction(flat), /flat and low on energy/);
+});
+
+test('only the two strongest cues speak', () => {
+  const rough: Vitals = { ...DEFAULT_VITALS, stress: 0.95, happiness: 0.05, affection: 0.1 };
+  const line = vitalsInstruction(rough);
+  assert.match(line, /on edge/);
+  assert.match(line, /foul mood/);
+  assert.doesNotMatch(line, /gone cold/);
+  assert.equal(VITAL_CUES_SPOKEN, 2);
+});
+
+test('the warm cues are withheld once she is annoyed', () => {
+  const fond: Vitals = { ...DEFAULT_VITALS, affection: 1, curiosity: 1, happiness: 1 };
+  assert.match(vitalsInstruction(fond, 0), /fonder of them/);
+  assert.equal(vitalsInstruction(fond, 3), '');
+  // A cold or stressed reading still speaks through the annoyance.
+  assert.match(vitalsInstruction({ ...DEFAULT_VITALS, stress: 0.9 }, 5), /on edge/);
+});
 
 // ---- sleepinessForHour: the day curve ----
 

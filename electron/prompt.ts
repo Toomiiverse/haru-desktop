@@ -22,6 +22,7 @@ import { checkInInstruction, type CheckIn } from './checkins';
 import { asideContext, type Aside } from './asides';
 import { NO_FAKE_CHECKING } from './room';
 import { egoInstruction, goodnightInstruction, leverageInstruction, moodInstruction, notTwiceInstruction, shoutInstruction, type ShoutState } from './mood';
+import { vitalsInstruction, type Vitals } from './vitals';
 import { grudgeInstruction } from './grudge';
 import { findItem, formatAgenda, missedInstruction, putOffInstruction, tickOffInstruction, whenMismatchInstruction, type AgendaItem } from './agenda';
 import { pushbackInstruction, type Pushback } from './pushback';
@@ -148,6 +149,8 @@ export type PromptState = {
   following: Following;
   irritation: number;
   ego: number;
+  /** Her slow state — energy, stress, affection and the rest (vitals.ts). Optional so the pure callers need not fake one. */
+  vitals?: Vitals;
   goodnight: 'said' | 'after' | 'none';
   shout: ShoutState;
   latestMessage: string;
@@ -273,6 +276,9 @@ export function chatSystemPrompt(state: PromptState): string {
     // rule, which it qualifies — the one thought has to be the right thought.
     CONTINUITY,
     'Answer what they said and stop. One thought — usually a short paragraph, two if it genuinely needs it. Do not make your point again in different words, do not sweep in a topic they did not raise, and do not finish with a parting flourish or a send-off. Trailing off mid-thought is better than padding.',
+    // Her slow state first, so the three lines after it — which carry hard
+    // consequences (ignoring, withholding, coasting) — read later and win.
+    vitalsInstruction(state.vitals, state.irritation),
     moodInstruction(state.irritation),
     grudgeInstruction(state.grudge ?? 0, state.ignoredToday ?? 0),
     egoInstruction(state.ego),

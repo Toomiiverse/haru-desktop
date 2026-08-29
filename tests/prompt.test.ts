@@ -257,3 +257,10 @@ test('the weather where they are sits with their whereabouts, when she has a rea
   const read = chatSystemPrompt(state({ weather: "Where they are it is 17°C and clear; today's range 10°C to 19°C. That is the actual weather, from a forecast service, as of a few minutes ago — use it rather than guessing, and do not say you cannot check." }));
   assert.match(read, /17°C and clear/);
 });
+
+test('chatSystemPrompt carries her vitals as a tone line before the irritation line, and only when they have drifted', () => {
+  const calm = chatSystemPrompt(state({ vitals: { energy: 0.6, happiness: 0.6, curiosity: 0.5, affection: 0.4, sleepiness: 0.2, stress: 0.2, focus: 0.5 } }));
+  assert.doesNotMatch(calm, /on edge|drowsy|fonder of them/);
+  const tense = chatSystemPrompt(state({ irritation: 5, vitals: { energy: 0.6, happiness: 0.6, curiosity: 0.5, affection: 0.4, sleepiness: 0.2, stress: 0.9, focus: 0.5 } }));
+  assert.ok(tense.indexOf('on edge') < tense.indexOf('thoroughly fed up'));
+});
