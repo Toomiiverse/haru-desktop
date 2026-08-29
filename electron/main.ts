@@ -7068,7 +7068,11 @@ async function tellThemTheTally(config: ProviderConfig, todayKey: string) {
     'No quotation marks, no stage directions.',
   ].filter(Boolean).join(' ');
   try {
-    const line = await ollamaQuip(system, 'Say it.', config);
+    // Through the clock fixer: the samples she is quoting are her own earlier
+    // lines, and some of them open with the time they were said ("8:37 PM — ..."),
+    // which she lifts out and announces as though it were now.
+    const clock = zonedNow(CHAT_TIMEZONE);
+    const line = fixStatedClock(await ollamaQuip(system, 'Say it.', config), clock.getHours(), clock.getMinutes());
     if (line && interject(line, { source: 'idle' })) {
       setMood({ ...getMood(), toldDay: todayKey });
       console.log(`[grudge] told them about the ${ignored} they left`);
