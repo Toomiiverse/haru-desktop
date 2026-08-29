@@ -724,7 +724,11 @@ export function inventedTimeFor<T extends AgendaItem>(line: string, items: T[]):
   if (!STATED_TIME.test(line)) return null;
   const untimed = items.filter(item => !item.time && !item.done);
   if (!untimed.length) return null;
-  return findItem(untimed, line) ?? null;
+  // `whole` for the same reason staleItemNamed needs it: this reads a line she
+  // wrote, not one they said, and a single distinctive word is not evidence
+  // there. Without it a greeting that happens to contain "message" is refused
+  // for inventing a time for "Message Connor", which it never mentioned.
+  return findItem(untimed, line, { whole: true }) ?? null;
 }
 
 /**
@@ -736,7 +740,10 @@ export function inventedTimeFor<T extends AgendaItem>(line: string, items: T[]):
 export function raisedRecently<T extends AgendaItem>(lines: string[], items: T[]): T[] {
   const out: T[] = [];
   for (const line of lines) {
-    const named = findItem(items, line);
+    // Her own lines again, and the failure here is the quiet one: an ordinary
+    // word colliding with a title marks that task as already raised, and she
+    // then says nothing about something she never mentioned.
+    const named = findItem(items, line, { whole: true });
     if (named && !out.includes(named)) out.push(named);
   }
   return out;

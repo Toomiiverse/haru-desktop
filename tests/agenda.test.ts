@@ -556,3 +556,24 @@ test('formatAgenda says an all-day item has no time, and only when there is one'
   const timed = formatAgenda([item({ title: 'Dentist', date: TODAY, time: '2:30 PM' })], at(12), TODAY);
   assert.doesNotMatch(timed, /Never state, guess or invent a time/);
 });
+
+test('an ordinary word in her own line does not name a task she never mentioned', () => {
+  // The shape the tally hit: "message" belongs to exactly one old title, so a
+  // single distinctive word matched every line that used the word in earnest.
+  const items = [
+    { id: '1', title: 'Message Connor', date: '2026-08-05', done: true },
+    { id: '2', title: 'Pick up the motherboard from Umart', date: '2026-08-29', done: false },
+  ];
+  assert.deepEqual(raisedRecently(['You never answer a single message I send you.'], items), []);
+  assert.equal(inventedTimeFor('Send me a message at 7:30 if you are still up.', items), null);
+});
+
+test('but a line that really does name the task still counts', () => {
+  const items = [
+    { id: '1', title: 'Message Connor', date: '2026-08-29', done: false },
+    { id: '2', title: 'Pick up the motherboard from Umart', date: '2026-08-29', done: false },
+  ];
+  assert.deepEqual(raisedRecently(['Have you messaged Connor yet or not?'], items).map(item => item.id), ['1']);
+  const invented = inventedTimeFor('The motherboard pickup from Umart is at 7:30.', items);
+  assert.equal(invented?.id, '2');
+});
