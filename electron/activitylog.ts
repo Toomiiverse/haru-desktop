@@ -221,13 +221,46 @@ export function summariseShots(entries: ActivityEntry[]): string {
 }
 
 /**
+ * Which of two copies of the same entry to keep.
+ *
+ * Every rule is ordered and total, so both machines reach the same answer for
+ * the same pair without conferring — the property the whole sync rests on. The
+ * previous rule was "the longer stretch wins, otherwise keep what we already
+ * have", and the second half of that is not symmetric: a screenshot has no
+ * duration, so `until` always tied, and whichever machine ran the merge kept its
+ * own copy. That was invisible until captions arrived. The desk captions a
+ * screenshot with the model on its GPU and pushes it; the server, holding its
+ * own copy of the same entry, kept that one and discarded the caption; and
+ * because the push only goes one way the desk never found out. Two machines,
+ * two different captions for one screenshot, for ever.
+ *
+ * A caption is therefore the first thing compared, and the copy that has one
+ * beats the copy that does not, whichever side is asking.
+ */
+function preferred(a: ActivityEntry, b: ActivityEntry): ActivityEntry {
+  const captionOf = (entry: ActivityEntry) => (entry.description ?? '').trim();
+  const mine = captionOf(a);
+  const theirs = captionOf(b);
+  if (Boolean(mine) !== Boolean(theirs)) return mine ? a : b;
+  // A stretch seen for longer is the better view of it.
+  if (a.until !== b.until) return a.until > b.until ? a : b;
+  // Two captions of one image, from two models. Neither side can tell which
+  // model wrote which, so this picks by something both can see and agree on
+  // rather than pretending to judge: the fuller account, then the alphabet.
+  if (mine !== theirs) return mine.length !== theirs.length ? (mine.length > theirs.length ? a : b) : (mine > theirs ? a : b);
+  // Equal on everything that is compared, and possibly still not identical.
+  // Ordered on the whole record so the answer does not depend on which side
+  // happens to be holding it.
+  return JSON.stringify(a) <= JSON.stringify(b) ? a : b;
+}
+
+/**
  * Both machines' logs as one day.
  *
  * Only the desk writes these in practice — the server has no foreground window
  * — but a merge that assumed so would silently drop whatever it found, so this
  * does not assume it. An entry is identified by when it started and what was in
- * front; the copy covering the longer stretch wins, since a push that arrived
- * mid-stretch is the shorter one.
+ * front; which copy of it survives is preferred()'s business.
  */
 export function mergeActivity(mine: ActivityLog, theirs: unknown): ActivityLog {
   const incoming = normalizeActivityLog(theirs);
@@ -237,7 +270,7 @@ export function mergeActivity(mine: ActivityLog, theirs: unknown): ActivityLog {
     for (const entry of [...(merged[day] ?? []), ...entries]) {
       const key = `${entry.at}|${entry.process}|${entry.title}`;
       const held = byKey.get(key);
-      if (!held || entry.until > held.until) byKey.set(key, entry);
+      byKey.set(key, held ? preferred(held, entry) : entry);
     }
     merged[day] = [...byKey.values()]
       .sort((a, b) => a.at.localeCompare(b.at))

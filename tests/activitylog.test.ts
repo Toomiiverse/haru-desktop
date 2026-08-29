@@ -214,3 +214,66 @@ test('a screenshot entry survives the trip to the server with its description', 
   assert.equal(there[DAY][0].description, 'a stack trace');
   assert.equal(there[DAY][0].shot, 'a.png');
 });
+
+// -- which copy of an entry survives -----------------------------------------------
+//
+// The split-brain this fixes: a screenshot has no duration, so `until` always
+// tied, and the old rule fell through to "keep what we already have" - which is
+// whichever machine is running the merge. The desk captioned a screenshot on its
+// GPU and pushed it; the server kept its own uncaptioned copy and dropped the
+// caption; and because the push is one-way the desk never found out. Two
+// machines, two answers, for ever.
+
+const shot = (over: Partial<ActivityEntry> = {}): ActivityEntry => ({
+  at: '2026-08-29T09:00:00.000Z', until: '2026-08-29T09:00:00.000Z',
+  kind: 'other', label: 'screenshot', process: 'screenshot', title: 'a.png', shot: 'a.png', ...over,
+});
+
+test('a caption beats no caption, whichever machine is asking', () => {
+  const captioned = shot({ description: 'Search Console: gaming cafe perth, 73 impressions' });
+  const bare = shot();
+  const atTheDesk = mergeActivity({ [DAY]: [captioned] }, { [DAY]: [bare] });
+  const atTheServer = mergeActivity({ [DAY]: [bare] }, { [DAY]: [captioned] });
+  assert.equal(atTheDesk[DAY][0].description, captioned.description);
+  assert.equal(atTheServer[DAY][0].description, captioned.description, 'the server dropped the caption it was sent');
+  assert.deepEqual(atTheDesk, atTheServer);
+});
+
+test('two captions of one image resolve the same way from either side', () => {
+  const desk = shot({ description: 'Google Search Console, Performance. Queries: gaming cafe perth, 73 impressions.' });
+  const server = shot({ description: 'a web browser showing a graph' });
+  const atTheDesk = mergeActivity({ [DAY]: [desk] }, { [DAY]: [server] });
+  const atTheServer = mergeActivity({ [DAY]: [server] }, { [DAY]: [desk] });
+  assert.deepEqual(atTheDesk, atTheServer, 'the two machines disagreed');
+  assert.equal(atTheDesk[DAY][0].description, desk.description, 'the fuller account should survive');
+});
+
+test('a longer stretch still wins when neither has a caption', () => {
+  const short = { at: '2026-08-29T09:00:00.000Z', until: '2026-08-29T09:10:00.000Z', kind: 'working' as const, label: 'Figma', process: 'chrome', title: 'a' };
+  const long = { ...short, until: '2026-08-29T09:40:00.000Z' };
+  assert.equal(minutesOf(mergeActivity({ [DAY]: [short] }, { [DAY]: [long] })[DAY][0]), 40);
+  assert.equal(minutesOf(mergeActivity({ [DAY]: [long] }, { [DAY]: [short] })[DAY][0]), 40);
+});
+
+test('a caption outranks a longer stretch, since duration is not what was lost', () => {
+  const captionedShort = shot({ until: '2026-08-29T09:00:00.000Z', description: 'what was on the screen' });
+  const bareLong = shot({ until: '2026-08-29T09:30:00.000Z' });
+  const merged = mergeActivity({ [DAY]: [bareLong] }, { [DAY]: [captionedShort] });
+  assert.equal(merged[DAY][0].description, 'what was on the screen');
+});
+
+test('an empty caption is not a caption', () => {
+  const blank = shot({ description: '   ' });
+  const real = shot({ description: 'the actual screen' });
+  assert.equal(mergeActivity({ [DAY]: [blank] }, { [DAY]: [real] })[DAY][0].description, 'the actual screen');
+  assert.equal(mergeActivity({ [DAY]: [real] }, { [DAY]: [blank] })[DAY][0].description, 'the actual screen');
+});
+
+test('captions settle, so syncing twice does not flap between them', () => {
+  const desk = { [DAY]: [shot({ description: 'the fuller account of the screen' })] };
+  const server = { [DAY]: [shot({ description: 'a browser' })] };
+  const once = mergeActivity(server, desk);
+  const twice = mergeActivity(once, desk);
+  assert.deepEqual(twice, once, 'a second push changed the answer');
+  assert.deepEqual(mergeActivity(once, server), once, 'the older caption came back');
+});

@@ -1615,8 +1615,11 @@ async function remarkOnScreenshot() {
   const mayRemark = maySpeak(config, screenshotSpokeAt, Date.now());
   try {
     const bytes = readFileSync(shot.path);
-    // Always the local vision model, whatever the chat model is set to.
-    const sighting = await look(bytes.toString('base64'), vision, visionEndpoint(provider, vision), modelHeaders(visionEndpoint(provider, vision)), net.fetch);
+    // Always the local vision model, whatever the chat model is set to, and
+    // asked as a screen rather than as a picture — the same SHOT_LOOK_PROMPT
+    // the server pass uses, so a shot described here and one described there
+    // come back in the same shape.
+    const sighting = await look(bytes.toString('base64'), vision, visionEndpoint(provider, vision), modelHeaders(visionEndpoint(provider, vision)), net.fetch, { ask: SHOT_LOOK_PROMPT });
     const name = path.basename(shot.path);
     console.log(`[shot] ${name} (${(bytes.length / 1024 | 0)}KB) -> ${sighting.description.length} chars${mayRemark ? '' : ', quiet hours — noted not said'}`);
     // Written down whether or not she says anything, and here rather than only
