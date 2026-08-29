@@ -58,9 +58,21 @@ export function checkInsOn(store: CheckInStore, date: string): CheckIn[] {
   return store.entries.filter(e => e.date === date).sort((a, b) => a.at.localeCompare(b.at));
 }
 
-const clock = (at: string) => {
+/**
+ * The clock, in the user's zone — the same job asides.ts:170 does, and for the
+ * same reason, which is where this was copied from without the argument.
+ *
+ * A check-in is filed under a CHAT_TIMEZONE day key and read back by one, but
+ * this rendered its time in whatever zone the machine happened to be in. On the
+ * server, eight hours behind, a note written at 9am Perth came back as 01:00 —
+ * so she was told the day's first note was written before the day started, and
+ * "anxious at 9, fine by 2" inverted. That ordering is the whole reason the
+ * times are kept; see the comment below.
+ */
+const clock = (at: string, timeZone: string) => {
   const when = new Date(at);
-  return Number.isNaN(when.getTime()) ? '' : when.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+  if (Number.isNaN(when.getTime())) return '';
+  return new Intl.DateTimeFormat('en-GB', { timeZone, hour: '2-digit', minute: '2-digit' }).format(when);
 };
 
 /**
@@ -71,9 +83,9 @@ const clock = (at: string) => {
  * are kept because "anxious at 9, fine by 2" is a different day from "fine all
  * morning, anxious at 6", and only one of them is about work.
  */
-export function summariseCheckIns(entries: CheckIn[]): string {
+export function summariseCheckIns(entries: CheckIn[], timeZone: string): string {
   if (!entries.length) return '';
-  const lines = entries.map(e => `${clock(e.at)}${e.anxiety ? ` (anxiety ${e.anxiety}/10)` : ''} — ${e.note}`);
+  const lines = entries.map(e => `${clock(e.at, timeZone)}${e.anxiety ? ` (anxiety ${e.anxiety}/10)` : ''} — ${e.note}`);
   const rated = entries.filter(e => typeof e.anxiety === 'number').map(e => e.anxiety as number);
   const shape = rated.length
     ? ` Anxiety ran ${Math.min(...rated)} to ${Math.max(...rated)} across ${rated.length} of them.`
@@ -88,11 +100,11 @@ export function summariseCheckIns(entries: CheckIn[]): string {
  * their own day out is not a check-in. The notes are so she can ask about the
  * part that actually mattered.
  */
-export function checkInInstruction(entries: CheckIn[]): string {
+export function checkInInstruction(entries: CheckIn[], timeZone: string): string {
   if (!entries.length) return '';
   const worst = entries.filter(e => typeof e.anxiety === 'number').sort((a, b) => (b.anxiety ?? 0) - (a.anxiety ?? 0))[0];
   return [
-    summariseCheckIns(entries),
+    summariseCheckIns(entries, timeZone),
     'Use these to ask about the day properly, in your own way.',
     worst && (worst.anxiety ?? 0) >= 6
       ? `Ask about "${worst.note.slice(0, 80)}" specifically — that was the worst of it, and skipping past it is how a check-in becomes a form.`

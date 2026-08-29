@@ -15,7 +15,7 @@ import { applyEvent, chooseIdleAction, cueLog, DEFAULT_VITALS, driftVitals, next
 import { classificationPrompt, emotionToVitals, EMOTION_SCHEMA, EMOTIONS, NEUTRAL_EMOTION, parseEmotion, type Emotion, type EmotionName, faceForEmotion } from './emotion';
 import { withDiscoveredExpressions } from './expressions';
 import { reportCapabilities } from './capabilities';
-import { chaseableOverdue, findItem, formatAgenda, itemStatus, missedInstruction, putOffInstruction, putOffUntil, relevantItems, readsAsAnswerToHer, readsAsBareReport, tickOffInstruction, readsAsDone, doneClause, readsAsNotDone, relativeDay, staleItemNamed, inventedTimeFor, raisedRecently, type ItemStatus } from './agenda';
+import { chaseableOverdue, findItem, shiftDays, formatAgenda, itemStatus, missedInstruction, putOffInstruction, putOffUntil, relevantItems, readsAsAnswerToHer, readsAsBareReport, tickOffInstruction, readsAsDone, doneClause, readsAsNotDone, relativeDay, staleItemNamed, inventedTimeFor, raisedRecently, type ItemStatus } from './agenda';
 import { isRelaunchNotReturn, openingAngles, pickAngle, shouldPipeUp } from './opening';
 import { allDayDueMinutes, isEveningCheck, reminderInstruction, reminderTier, reminderVolume, shouldRemind, type ReminderState } from './reminders';
 import { isHeated, readTone, sharpen, toneGesture, tonePose } from './tone';
@@ -3884,7 +3884,14 @@ function herLinesLastDay(nowMs: number): string[] {
     .map(entry => String(entry.content ?? ''));
   const messages = (store.get('chat.messages') as Line[] | undefined) ?? [];
   const archive = store.getArchive() as Record<string, Line[]>;
-  const yesterday = archive[localDateKey(new Date(nowMs - 86_400_000))] ?? [];
+  // The day before the chat day, not the day before this instant. The archive is
+  // keyed by currentChatDayKey — Perth, and rolled back before 5am — and this
+  // used to build its key from the machine's own clock with no roll at all. It
+  // was wrong twice over: on the server the zones disagree for eight hours a
+  // day, and on the desk between midnight and 5am the minus-24h key IS the
+  // current chat day, so today's own transcript came back as yesterday's. Either
+  // way raisedRecently saw nothing and she re-raised what she had already said.
+  const yesterday = archive[shiftDays(currentChatDayKey(), -1)] ?? [];
   const asides = getAsides().filter(aside => Date.parse(aside.at) >= since).map(aside => aside.text);
   return [...hers(yesterday), ...hers(messages), ...asides];
 }
@@ -3970,7 +3977,7 @@ async function composeOpening(): Promise<string | null> {
     // resumed a conversation from the previous night as though it had paused for
     // a moment — which is the same defect as the rest of this, seen from the end
     // where she speaks first.
-    sinceLast(messages as { role: string; content: string; at?: string }[], new Date()),
+    sinceLast(messages as { role: string; content: string; at?: string }[], new Date(), CHAT_TIMEZONE),
     // The failure mode without this is a chirpy assistant greeting, which is the
     // one thing her character is defined against.
     NO_INVENTED_HISTORY,
@@ -5769,7 +5776,7 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   if (carried.length) console.log(`[attach] ${carried.length} in play — ${carried.map(file => `${file.name}${file.kind === 'image' && brain.sees ? ' (sent)' : ' (read)'}`).join(', ')}`);
   // Her recent replies as she should believe she said them — see seed.ts for
   // the measurement. The stored transcript is not touched; only what is sent.
-  const conversation: OllamaMessage[] = [{ role: 'system', content: brief ? `${system} ${BREVITY}` : system }, ...seedEmoji(markTimeGaps(withoutStaleDenials(withFiles, hasItems)))];
+  const conversation: OllamaMessage[] = [{ role: 'system', content: brief ? `${system} ${BREVITY}` : system }, ...seedEmoji(markTimeGaps(withoutStaleDenials(withFiles, hasItems), CHAT_TIMEZONE))];
   // The last thing she reads before she speaks — see LAST_WORD for the
   // measurement. A system message just before their last turn: the Ollama
   // shaper folds it into that turn, an OpenAI-shaped endpoint takes it as it

@@ -5,12 +5,12 @@ const WEEKDAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'frida
 
 // Reads the wall-clock date/time in `timeZone` as local Date fields, so day-boundary
 // math (getDate/getHours/etc.) reflects that zone regardless of the OS's own timezone.
-export function zonedNow(timeZone: string): Date {
+export function zonedNow(timeZone: string, at: Date = new Date()): Date {
   const parts = new Intl.DateTimeFormat('en-US', {
     timeZone, hour12: false,
     year: 'numeric', month: '2-digit', day: '2-digit',
     hour: '2-digit', minute: '2-digit', second: '2-digit',
-  }).formatToParts(new Date());
+  }).formatToParts(at);
   const get = (type: string) => Number(parts.find(p => p.type === type)?.value ?? 0);
   return new Date(get('year'), get('month') - 1, get('day'), get('hour') % 24, get('minute'), get('second'));
 }

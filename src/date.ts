@@ -2,6 +2,35 @@
 // both convert through UTC, which shifts the calendar day near midnight in most timezones —
 // exactly the kind of off-by-one that's easy to miss and wrong for a calendar view.
 
+/**
+ * Where the user is. Must match CHAT_TIMEZONE in electron/main.ts.
+ *
+ * Duplicated rather than plumbed through preload because it is one string that
+ * changes when somebody emigrates, and the alternative was four files. If it
+ * ever does change, the symptom is this log heading a remark "Thursday, Sep 3"
+ * when it means "Today" — visible, and it leads straight back here.
+ *
+ * It matters at all because the main process files an aside under a Perth day
+ * key and stamps it with a real instant. Read back with the machine's own
+ * getters, a remark made at nine in the morning in Perth showed as nine the
+ * previous evening in New York, filed under the wrong heading.
+ */
+export const USER_TIMEZONE = 'Australia/Perth';
+
+/** Today where the user is, as a date key — not where the machine is. */
+export function todayInZone(timeZone: string = USER_TIMEZONE): string {
+  const parts = new Intl.DateTimeFormat('en-US', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date());
+  const get = (type: string) => parts.find(part => part.type === type)?.value ?? '';
+  return `${get('year')}-${get('month')}-${get('day')}`;
+}
+
+/** An instant on the user's clock, for a log that is read back as theirs. */
+export function clockInZone(at: string, timeZone: string = USER_TIMEZONE): string {
+  const when = new Date(at);
+  if (Number.isNaN(when.getTime())) return '';
+  return new Intl.DateTimeFormat(undefined, { timeZone, hour: 'numeric', minute: '2-digit' }).format(when);
+}
+
 export function toISODate(d: Date) {
   const year = d.getFullYear();
   const month = String(d.getMonth() + 1).padStart(2, '0');

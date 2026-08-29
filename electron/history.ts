@@ -16,12 +16,28 @@
 // The fix is not to hide the old messages — the history is worth having — but to
 // say plainly where the seams are.
 
+import { zonedNow } from './dates';
+
 export type Dated = { role: string; content: string; at?: string };
 
 /** Below this a gap is just someone thinking, and marking it would be noise. */
 export const GAP_MINUTES = 90;
 
 const MINUTE = 60_000;
+
+/**
+ * Both instants read in the user's zone before anything is compared.
+ *
+ * "The next morning" is a statement about their day, and their day happens
+ * somewhere. Read with the machine's own getters instead — which is what this
+ * did — a night that ran from 20:00 to 06:00 Perth is 12:00 to 22:00 on a UTC
+ * server: one calendar day, ten hours apart, and she was told an overnight
+ * silence was an afternoon lull. The hour test misread the same way, calling
+ * eight in the evening "the next afternoon".
+ */
+function inZone(at: Date, timeZone: string): Date {
+  return zonedNow(timeZone, at);
+}
 
 function sameDay(a: Date, b: Date) {
   return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
@@ -34,16 +50,20 @@ function sameDay(a: Date, b: Date) {
  * and a bare timestamp invites her to read it out. The one exception is a gap
  * long enough that "later" stops being meaningful.
  */
-export function describeGap(before: Date, after: Date): string {
+export function describeGap(before: Date, after: Date, timeZone: string): string {
+  // The length of the gap is a fact about the two instants and needs no zone;
+  // which day and which part of the day they fall in is a fact about the user.
   const minutes = Math.round((after.getTime() - before.getTime()) / MINUTE);
   const hours = Math.round(minutes / 60);
   const days = Math.round(hours / 24);
-  if (sameDay(before, after)) {
+  const there = { before: inZone(before, timeZone), after: inZone(after, timeZone) };
+  if (sameDay(there.before, there.after)) {
     if (hours < 4) return `about ${hours} hour${hours === 1 ? '' : 's'} later, the same day`;
     return 'later the same day';
   }
   if (days <= 1) {
-    const part = after.getHours() < 12 ? 'the next morning' : after.getHours() < 18 ? 'the next afternoon' : 'the next evening';
+    const hour = there.after.getHours();
+    const part = hour < 12 ? 'the next morning' : hour < 18 ? 'the next afternoon' : 'the next evening';
     return part;
   }
   if (days < 7) return `${days} days later`;
@@ -62,7 +82,7 @@ export function describeGap(before: Date, after: Date): string {
  * predates this and has no timestamp to reason from; guessing one would be worse
  * than the flatness being fixed.
  */
-export function markTimeGaps<T extends Dated>(messages: T[], gapMinutes = GAP_MINUTES): (T | { role: 'system'; content: string })[] {
+export function markTimeGaps<T extends Dated>(messages: T[], timeZone: string, gapMinutes = GAP_MINUTES): (T | { role: 'system'; content: string })[] {
   const out: (T | { role: 'system'; content: string })[] = [];
   let previous: Date | null = null;
   for (const message of messages) {
@@ -71,7 +91,7 @@ export function markTimeGaps<T extends Dated>(messages: T[], gapMinutes = GAP_MI
     if (usable && previous && usable.getTime() - previous.getTime() >= gapMinutes * MINUTE) {
       out.push({
         role: 'system',
-        content: `[Time passed here — what follows was said ${describeGap(previous, usable)}. Everything above this line is from before that gap: it is background, not something still going on. Do not carry a plan, a mood or a time of day across this line, and do not refer to anything above it as though it were still happening unless they bring it up.]`,
+        content: `[Time passed here — what follows was said ${describeGap(previous, usable, timeZone)}. Everything above this line is from before that gap: it is background, not something still going on. Do not carry a plan, a mood or a time of day across this line, and do not refer to anything above it as though it were still happening unless they bring it up.]`,
       });
     }
     if (usable) previous = usable;
@@ -86,13 +106,13 @@ export function markTimeGaps<T extends Dated>(messages: T[], gapMinutes = GAP_MI
  * She opens conversations, and an opening line written as though the last
  * exchange were still warm is the same failure seen from the other end.
  */
-export function sinceLast(messages: Dated[], now: Date): string {
+export function sinceLast(messages: Dated[], now: Date, timeZone: string): string {
   for (let i = messages.length - 1; i >= 0; i--) {
     const at = messages[i].at ? new Date(messages[i].at as string) : null;
     if (!at || Number.isNaN(at.getTime())) continue;
     const minutes = Math.round((now.getTime() - at.getTime()) / MINUTE);
     if (minutes < GAP_MINUTES) return '';
-    return `The last thing either of you said was ${describeGap(at, now)} — that conversation is over. Do not pick it up mid-thought or refer back to it as though no time has passed.`;
+    return `The last thing either of you said was ${describeGap(at, now, timeZone)} — that conversation is over. Do not pick it up mid-thought or refer back to it as though no time has passed.`;
   }
   return '';
 }

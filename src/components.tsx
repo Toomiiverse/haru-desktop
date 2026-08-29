@@ -1,7 +1,7 @@
 import { Component, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Paperclip, MicOff, CalendarDays, Check, ChevronDown, CornerDownRight, FileAudio, FileText, FileVideo, Mic, Quote, Reply, SquareCheck, ChevronLeft, ChevronRight, CircleDot, Import, MessageSquarePlus, Plus, NotebookPen, MessageSquare, Square, ImagePlus, Sparkles, ThumbsDown, ThumbsUp, Trash2, X } from 'lucide-react';
 import type { Aside, AsideSource, Attachment, UpdateReport, AniListConfig, Character, DesktopConfig, GamingConfig, ScreenshotConfig, WatchingConfig, VisionConfig, HaruNote, ForgettingEntry, JournalConfig, JournalEntry, JournalField, JournalRange, JournalStats, JournalFieldStats, LastRetrieval, MemoryBlock, RoamConfig, EmotionName, GoogleStatus, KeptItem, ListenConfig, Memory, MemoryKind, Message, Profile, ProviderConfig, Reaction, SearchConfig, SessionSummary, VoiceConfig, VoiceEngine, VoiceReference, WardrobeControl, WebStatus } from './types';
-import { buildMonthGrid, datesInView, dayLabel, rangeLabel, shiftISODate, toISODate, weekOf, type CalendarView } from './date';
+import { buildMonthGrid, clockInZone, datesInView, dayLabel, rangeLabel, shiftISODate, todayInZone, toISODate, weekOf, type CalendarView } from './date';
 import { startListening, startRecording, type Listener, type Recorder } from './companion/microphone';
 import { isUsableFollowUp, matchWake, readsAsFarewell } from './companion/wake';
 import { chimeListening, chimeStoppedListening, setChimeVolume } from './companion/chime';
@@ -2052,8 +2052,8 @@ function asideDayLabel(day: string, today: string) {
 }
 
 function asideClock(at: string) {
-  const when = new Date(at);
-  return Number.isNaN(when.getTime()) ? '' : when.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  // The user's clock, not this machine's — the aside was filed under their day.
+  return clockInZone(at);
 }
 
 /**
@@ -2081,7 +2081,7 @@ export function AsidesPage() {
     const stopClearing = window.haru.chat.onAsidesCleared(() => setAsides([]));
     return () => { stopAdding(); stopClearing(); };
   }, []);
-  const today = toISODate(new Date());
+  const today = todayInZone();
   const days = [...new Set(asides.map(aside => aside.day || today))].sort().reverse();
   return <section className="page asides">
     <div className="field">

@@ -204,7 +204,7 @@ export function chatSystemPrompt(state: PromptState): string {
     // the whole reason for taking them: back at the desk she can ask about the
     // eleven o'clock spike rather than "how was your day", which is the
     // difference between a check-in and a form.
-    checkInInstruction(state.checkInsToday),
+    checkInInstruction(state.checkInsToday, state.timezone),
     // Placed with the other things she simply knows, rather than as an
     // instruction: what is on their screen is context for answering, not a topic
     // she has been told to raise.
