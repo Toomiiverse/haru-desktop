@@ -23,6 +23,7 @@ import { loginPage, appPage, serviceWorker } from './webpage';
 import { readPushPrefs, type PushPrefs } from './push';
 import { emotionFile } from './emotions';
 import type { CheckIn } from './checkins';
+import { MAX_SHOT_BYTES, type HeldShots } from './shotstore';
 
 export type WebDeps = {
   readAccess(): WebAccess;
@@ -89,6 +90,13 @@ export type WebDeps = {
   activityLog(): unknown;
   /** Fold the desk's log into this machine's. Returns how many days it touched. */
   mergeActivity(theirs: unknown): { days: number; entries: number };
+  /** The screenshots themselves. The desk asks what is already here and sends
+   *  only the difference, so nothing is uploaded twice. */
+  shots: {
+    held(): HeldShots;
+    /** Throws when the day or the name is refused — that is a 400, not a 500. */
+    keep(day: unknown, name: unknown, bytes: Buffer): void;
+  };
   journal(): { date: string; text: string; mood?: number; anxiety?: number }[];
   writeJournal(entry: { text: string; mood?: number; anxiety?: number }): Promise<void> | void;
   /** Today's little notes, oldest first. */
@@ -513,7 +521,7 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
   // request from her own page rather than a form somebody else submitted.
   // A recording and an attached file are the two things posted here that are
   // not JSON; each checks its own body below rather than being waved through.
-  if (req.method === 'POST' && path !== '/api/listen' && path !== '/api/attach' && !/^application\/json/.test(req.headers['content-type'] ?? '')) {
+  if (req.method === 'POST' && path !== '/api/listen' && path !== '/api/attach' && path !== '/api/activity/shots' && !/^application\/json/.test(req.headers['content-type'] ?? '')) {
     return json(res, 415, { error: 'Send JSON.' });
   }
 
@@ -803,6 +811,34 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
   // it so the day pass there has the same material the desk's does.
   if (req.method === 'GET' && path === '/api/activity') {
     return json(res, 200, { activity: deps.activityLog() });
+  }
+
+  // What she was looking at, not only what it was called. The desk asks first
+  // and sends the difference, so a reconnect after a week off does not re-send
+  // the week.
+  if (req.method === 'GET' && path === '/api/activity/shots') {
+    return json(res, 200, { shots: deps.shots.held() });
+  }
+
+  if (req.method === 'POST' && path === '/api/activity/shots') {
+    const declared = Number(req.headers['content-length'] ?? 0);
+    if (declared > MAX_SHOT_BYTES) {
+      res.setHeader('Connection', 'close');
+      return json(res, 413, { error: 'That screenshot is too big.' });
+    }
+    let bytes: Buffer;
+    try { bytes = await readRaw(req, MAX_SHOT_BYTES); } catch {
+      res.setHeader('Connection', 'close');
+      return json(res, 413, { error: 'That screenshot is too big.' });
+    }
+    try {
+      // The day and the name are the sender's claim, and shotstore treats them
+      // as one — a name it will not accept is refused, never repaired.
+      deps.shots.keep(url.searchParams.get('day'), url.searchParams.get('name'), bytes);
+      return json(res, 200, { kept: true });
+    } catch (error) {
+      return json(res, 400, { error: error instanceof Error ? error.message : 'That could not be kept.' });
+    }
   }
 
   if (req.method === 'POST' && path === '/api/activity') {

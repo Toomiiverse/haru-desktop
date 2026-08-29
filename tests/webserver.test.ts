@@ -22,6 +22,7 @@ import { setPassword, type WebAccess } from '../electron/web';
 import { readPushPrefs } from '../electron/push';
 import { mergeMemories } from '../electron/memorysync';
 import { mergeActivity, type ActivityLog } from '../electron/activitylog';
+import { heldShots, keepShot } from '../electron/shotstore';
 import type { MemoryRecord } from '../electron/memory';
 
 const USERNAME = 'tom';
@@ -36,6 +37,7 @@ function access(overrides: Partial<WebAccess> = {}): WebAccess {
  *  post to the route and then read the same store back through it. */
 let syncedMemories: MemoryRecord[] = [];
 let pushedActivity: ActivityLog = {};
+let shotRoot = '';
 
 function deps(overrides: Partial<WebDeps> = {}): WebDeps {
   let stored = access();
@@ -54,6 +56,10 @@ function deps(overrides: Partial<WebDeps> = {}): WebDeps {
     memories: () => [],
     memoryRecords: () => syncedMemories,
     activityLog: () => pushedActivity,
+    shots: {
+      held: () => heldShots(shotRoot),
+      keep: (day, name, bytes) => { keepShot(shotRoot, day, name, bytes); },
+    },
     mergeActivity: (theirs) => {
       pushedActivity = mergeActivity(pushedActivity, theirs);
       return {
@@ -153,7 +159,7 @@ test('a stranger gets the sign-in page and nothing else', async () => {
     assert.equal(front.status, 200);
     assert.ok((await front.text()).includes('Sign in to reach her'));
 
-    for (const path of ['/api/chat', '/api/agenda', '/api/memory', '/api/memory/records', '/api/activity', '/api/journal', '/api/checkins', '/api/knowledge/stats', '/api/model', '/api/push', '/api/attach', '/api/where']) {
+    for (const path of ['/api/chat', '/api/agenda', '/api/memory', '/api/memory/records', '/api/activity', '/api/activity/shots', '/api/journal', '/api/checkins', '/api/knowledge/stats', '/api/model', '/api/push', '/api/attach', '/api/where']) {
       const refused = await web.call(path);
       assert.equal(refused.status, 401, `${path} answered a stranger`);
     }
@@ -728,5 +734,41 @@ test('the desk pushes its day, and a log of the wrong shape is refused', async (
       const refused = await web.call('/api/activity', { method: 'POST', body: JSON.stringify({ activity }) });
       assert.equal(refused.status, 400, `took ${JSON.stringify(activity)}`);
     }
+  } finally { await web.stop(); }
+});
+
+test('a screenshot is taken from the desk, and a climbing name is refused at the door', async () => {
+  shotRoot = mkdtempSync(join(tmpdir(), 'haru-web-shots-'));
+  const web = await door();
+  try {
+    assert.equal((await web.signIn()).status, 200);
+    assert.deepEqual((await (await web.call('/api/activity/shots')).json()).shots, {});
+
+    const sent = await web.call('/api/activity/shots?day=2026-08-29&name=shot.png', {
+      method: 'POST',
+      headers: { 'content-type': 'application/octet-stream' },
+      body: Buffer.from('some bytes'),
+    });
+    assert.equal(sent.status, 200);
+    assert.deepEqual((await (await web.call('/api/activity/shots')).json()).shots, { '2026-08-29': ['shot.png'] });
+
+    // The name and the day are the caller's claim and nothing more. Each of
+    // these is refused outright; none of them writes anything anywhere.
+    for (const query of [
+      '?day=2026-08-29&name=../escape.png',
+      '?day=../..&name=shot.png',
+      '?day=2026-08-29&name=shot.exe',
+      '?day=nope&name=shot.png',
+      '?name=shot.png',
+      '?day=2026-08-29',
+    ]) {
+      const refused = await web.call('/api/activity/shots' + query, {
+        method: 'POST',
+        headers: { 'content-type': 'application/octet-stream' },
+        body: Buffer.from('some bytes'),
+      });
+      assert.equal(refused.status, 400, `took ${query}`);
+    }
+    assert.deepEqual((await (await web.call('/api/activity/shots')).json()).shots, { '2026-08-29': ['shot.png'] });
   } finally { await web.stop(); }
 });

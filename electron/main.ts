@@ -78,6 +78,7 @@ import { feedbackEntry, recordFeedback } from './feedback';
 import { describePull, isTailnetAddress, mergeCheckIns, readCheckInSource } from './checkinsource';
 import { describeMerge } from './memorysync';
 import { isRedacted, mergeActivity, noteActivity, summariseDay } from './activitylog';
+import { heldShots, keepShot, localShots, missingFrom, pruneShots, MAX_SHOT_BYTES } from './shotstore';
 import { DiscordLink, looksLikeUserId, readDiscordConfig, useOfChannel, type DiscordConfig } from './discord';
 import { reactedPrompt, readReaction, REACTION_COOLDOWN_MS } from './reacted';
 import { startWebServer, type WebDeps } from './webserver';
@@ -133,6 +134,10 @@ const EVENTS_PER_DAY = 3;
 const live2dRoots = new Map<string, string>();
 let mainWindow: BrowserWindow | null = null;
 let companionWindow: BrowserWindow | null = null;
+
+/** Where screenshots pushed from a desk are kept. A folder per day under here,
+ *  which is the folder the activity log is describing. */
+function shotStoreRoot(): string { return path.join(app.getPath('userData'), 'screenshots'); }
 
 const knowledgeFile = process.env.HARU_KNOWLEDGE_FILE ? process.env.HARU_KNOWLEDGE_FILE : path.join(app.getPath('userData'), 'knowledge.json');
 
@@ -531,6 +536,12 @@ function pruneOldActivity() {
     store.setActivityLog(log);
     console.log(`[activity] pruned ${dropped} logged day(s) older than ${ARCHIVE_RETENTION_DAYS} days`);
   }
+  // The images go on the same clock, and by the cutoff alone rather than by
+  // which days survived above: a day kept because it was never distilled still
+  // does not need its screenshots held for ever, and they are the largest thing
+  // on the disk by a wide margin.
+  const shotsDropped = pruneShots(shotStoreRoot(), cutoff);
+  if (shotsDropped) console.log(`[activity] pruned ${shotsDropped} day(s) of screenshots older than ${ARCHIVE_RETENTION_DAYS} days`);
 }
 
 /**
@@ -5067,12 +5078,71 @@ async function syncMemories(): Promise<void> {
           console.log('[activity] the server holds ' + (held.days ?? 0) + ' day(s), ' + (held.entries ?? 0) + ' entr(ies)');
         }
       }
+      await pushScreenshots(source.url, headers);
     }
   } catch (error) {
     console.warn('[memory] could not reach the server:', error instanceof Error ? error.message : error);
   } finally {
     syncingMemories = false;
   }
+}
+
+/** At most this many per sync. A first run against a full folder would
+ *  otherwise send hundreds of megabytes in one go; the rest go next time, and
+ *  the count that was left is logged rather than passed over in silence. */
+const SHOTS_PER_SYNC = 20;
+
+/**
+ * The screenshots themselves, sent to the server.
+ *
+ * The desk asks what is already there and sends the difference, rather than
+ * keeping a queue of what it has uploaded. A queue goes stale the moment
+ * somebody deletes a screenshot or restores a backup; the two folders are the
+ * truth, and comparing them costs one request.
+ *
+ * Only the same window the activity log keeps — there is no point holding an
+ * image on the server for a day whose log has already been pruned out from
+ * under it.
+ */
+async function pushScreenshots(serverUrl: string, headers: Record<string, string>): Promise<void> {
+  const config = readScreenshotConfig(store.get('screenshots'));
+  if (!config.enabled) return;
+  const folder = screenshotFolder();
+  if (!existsSync(folder)) return;
+
+  const mine = localShots(folder, at => localDateKey(at), looksLikeScreenshot, new Date(), ARCHIVE_RETENTION_DAYS);
+  if (!mine.length) return;
+
+  const asked = await net.fetch(serverUrl + '/api/activity/shots', { headers });
+  if (asked.status === 404) { console.warn('[activity] that server is too old to take screenshots'); return; }
+  if (!asked.ok) { console.warn('[activity] could not ask what it already has (' + asked.status + ')'); return; }
+  const held = (await asked.json() as { shots?: unknown }).shots;
+  const missing = missingFrom(held && typeof held === 'object' ? held as Record<string, string[]> : {}, mine);
+  if (!missing.length) return;
+
+  let sent = 0;
+  for (const shot of missing.slice(0, SHOTS_PER_SYNC)) {
+    let bytes: Buffer;
+    // Read one at a time rather than up front: the folder is the user's own and
+    // a file can vanish between being listed and being sent.
+    try {
+      bytes = readFileSync(shot.file);
+      if (!bytes.length || bytes.length > MAX_SHOT_BYTES) continue;
+    } catch { continue; }
+    const query = `?day=${encodeURIComponent(shot.day)}&name=${encodeURIComponent(shot.name)}`;
+    const put = await net.fetch(serverUrl + '/api/activity/shots' + query, {
+      method: 'POST',
+      headers: { ...headers, 'content-type': 'application/octet-stream' },
+      body: bytes as never,
+    });
+    if (put.ok) sent += 1;
+    // A refusal is about this file, not the connection: a name the server will
+    // not take will never be taken, so it is logged and stepped over rather
+    // than retried for ever on every sync.
+    else console.warn('[activity] the server would not keep ' + shot.name + ' (' + put.status + ')');
+  }
+  const left = missing.length - Math.min(missing.length, SHOTS_PER_SYNC);
+  console.log(`[activity] sent ${sent} screenshot(s)` + (left ? `, ${left} still to go` : ''));
 }
 
 /**
@@ -7481,6 +7551,13 @@ function webDeps(): WebDeps {
     memories: () => getMemories().map(memory => memory.text),
     memoryRecords: () => getMemories(),
     activityLog: () => store.getActivityLog(),
+    shots: {
+      held: () => heldShots(shotStoreRoot()),
+      keep: (day, name, bytes) => {
+        const written = keepShot(shotStoreRoot(), day, name, bytes);
+        console.log(`[activity] kept ${path.basename(written)} (${(bytes.length / 1024 | 0)}KB) from the desk`);
+      },
+    },
     mergeActivity(theirs) {
       const before = store.getActivityLog();
       const merged = mergeActivity(before, theirs);
