@@ -568,3 +568,19 @@ export function fixStatedClock(reply: string, hour: number, minute: number): str
     return `${lead} ${shown}`;
   });
 }
+
+/**
+ * A reminder was just written down at one time, and she confirms a different
+ * one. Told the saved time in an aside and told not to change it, the 9B still
+ * announced "12:56 PM" for a 12:53 reminder. So any clock time she states in
+ * that reply becomes the one that was actually saved — the item is the truth.
+ */
+const STATED_TIME = /\b(\d{1,2})(?::(\d{2}))?\s?(am|pm)\b/giu;
+
+export function fixStatedReminderTime(reply: string, savedTime: string): string {
+  return reply.replace(STATED_TIME, (whole, h: string, m: string | undefined, meridiem: string) => {
+    if (Number(h) > 12 || (m !== undefined && Number(m) > 59)) return whole;
+    const said = `${Number(h)}:${(m ?? '00').padStart(2, '0')} ${meridiem.toUpperCase()}`;
+    return said === savedTime ? whole : savedTime;
+  });
+}

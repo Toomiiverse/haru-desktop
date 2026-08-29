@@ -11,7 +11,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { claimsDesktopAction, claimsTickOff, dropInventedContact, dropInventedScreenTalk, dropRepeatedAgendaMentions, dropRepeatedParagraphs, dropRoleHeader, dropStageDirections, dropTackedOnParagraphs, readsLikeAssistant, dropRepeatedOpener, dropEchoOpener, dropRepeatedSentences, fixStatedClock } from '../electron/reply';
+import { claimsDesktopAction, claimsTickOff, dropInventedContact, dropInventedScreenTalk, dropRepeatedAgendaMentions, dropRepeatedParagraphs, dropRoleHeader, dropStageDirections, dropTackedOnParagraphs, readsLikeAssistant, dropRepeatedOpener, dropEchoOpener, dropRepeatedSentences, fixStatedClock, fixStatedReminderTime } from '../electron/reply';
 
 // -- claiming to have touched the machine -------------------------------------
 
@@ -384,4 +384,12 @@ test('a stated time that is right, or nearly, is left as she said it', () => {
   assert.equal(fixStatedClock('It’s 1:45 PM. Move.', 13, 43), 'It’s 1:45 PM. Move.');
   assert.equal(fixStatedClock('It’s 1:43 PM. Move.', 13, 43), 'It’s 1:43 PM. Move.');
   assert.equal(fixStatedClock('No clock in this one.', 13, 43), 'No clock in this one.');
+});
+
+test('a reminder confirmed at the wrong time is corrected to the one saved', () => {
+  assert.equal(fixStatedReminderTime('Fine. 12:56 PM it is. Do not forget.', '12:53 PM'), 'Fine. 12:53 PM it is. Do not forget.');
+  assert.equal(fixStatedReminderTime('Noon, 12pm, got it.', '12:00 PM'), 'Noon, 12pm, got it.');
+  assert.equal(fixStatedReminderTime('Noon, 12:30pm, got it.', '12:00 PM'), 'Noon, 12:00 PM, got it.');
+  assert.equal(fixStatedReminderTime('12:53 PM. Eat.', '12:53 PM'), '12:53 PM. Eat.');
+  assert.equal(fixStatedReminderTime('No clock here.', '5:00 PM'), 'No clock here.');
 });

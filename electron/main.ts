@@ -53,7 +53,7 @@ import { haruNote, rangeStats, type HaruNote, type RangeName, type RangeStats } 
 import { describeRating, entryFor, journalPrompt, readEntries, readJournalConfig, readRating, recentTrend, shouldAsk, upsertEntry, SCALE_MAX, type JournalConfig, type JournalEntry } from './journal';
 import { formatList, formatMedia, formatMissing, lookUp, readAniListConfig, userList, type AniListConfig, type ListEntry, type MediaKind } from './anilist';
 import { createDesktopShortcut, desktopShortcutPath, isAutoStartEnabled, setAutoStart, startedHidden } from './startup';
-import { dropRoleHeader, dropTackedOnParagraphs, dropInventedContact, dropInventedScreenTalk, dropRepeatedAgendaMentions, dropRepeatedParagraphs, dropStageDirections, dropRepeatedOpener, dropEchoOpener, dropRepeatedSentences, fixStatedClock } from './reply';
+import { dropRoleHeader, dropTackedOnParagraphs, dropInventedContact, dropInventedScreenTalk, dropRepeatedAgendaMentions, dropRepeatedParagraphs, dropStageDirections, dropRepeatedOpener, dropEchoOpener, dropRepeatedSentences, fixStatedClock, fixStatedReminderTime } from './reply';
 import { runToolLoop } from './toolloop';
 import { chatTools, coerceKnowledgeCategory, runChatTool, type ToolAvailability, type ToolDeps } from './tools';
 import { createMemoryStore } from './memorystore';
@@ -5331,7 +5331,9 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // The echo first, then the signature: with "A keyboard?" gone, "Fine," is
   // the opener, and it is that which may have been used last time too.
   const clock = zonedNow(CHAT_TIMEZONE);
-  const herLine = fixStatedClock(dropRepeatedOpener(dropEchoOpener(dropRepeatedSentences(dropTackedOnParagraphs(trimmed, brain.escalated || ran.has('search_web') || ran.has('read_web_page')), recent), latest), recent), clock.getHours(), clock.getMinutes());
+  const cleaned = fixStatedClock(dropRepeatedOpener(dropEchoOpener(dropRepeatedSentences(dropTackedOnParagraphs(trimmed, brain.escalated || ran.has('search_web') || ran.has('read_web_page')), recent), latest), recent), clock.getHours(), clock.getMinutes());
+  // The reminder read from their message is the truth about its time, whatever she says.
+  const herLine = reminder?.time ? fixStatedReminderTime(cleaned, reminder.time) : cleaned;
   // The maps button goes under her words, not into her mouth: what is herLine
   // and what her mood is read from is the line she said.
   const content = directions?.found ? withDirections(dropRouteTalk(herLine), directions.found) : herLine;
