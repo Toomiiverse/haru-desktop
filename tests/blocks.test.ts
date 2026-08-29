@@ -209,6 +209,23 @@ test('formatMemoryBlocks renders the whole section and skips empty blocks', () =
   assert.deepEqual(cut, []);
 });
 
+test('formatMemoryBlocks leaves out omitted blocks, and the persona is what the chat render omits', () => {
+  const blocks = defaultMemoryBlocks();
+  const sources = {
+    character: { identity: 'Hyperactive, loud.', style: 'Bossy.' },
+    profile: { nickname: 'Tommy', occupation: '', about: '' },
+    memories: [record({ id: 'pref', text: 'Dislikes being nagged', kind: 'preference', importance: 0.85 })],
+    sessions: [] as SessionSummary[],
+  };
+  const { text } = formatMemoryBlocks(blocks, sources, { omit: ['persona'] });
+  assert.ok(!text.includes('<persona>'));
+  assert.ok(!text.includes('Hyperactive, loud.'));
+  assert.ok(text.includes('<human>'));
+  assert.ok(text.includes('<preferences>'));
+  // The block itself is untouched — it still resolves for the inspector.
+  assert.equal(resolveBlockValue(findBlock(blocks, 'persona')!, sources), 'Hyperactive, loud.\nBossy.');
+});
+
 test('formatMemoryBlocks reports what was cut to fit budgets', () => {
   const blocks = defaultMemoryBlocks().map(block => block.label === 'human' ? { ...block, limit: 80 } : block);
   const sources = {

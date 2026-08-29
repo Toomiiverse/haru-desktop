@@ -241,8 +241,9 @@ export function createMemoryStore(deps: MemoryStoreDeps) {
     // Memory blocks: the Letta-inspired context layer. Values are derived from
     // the deterministic engine on every render — the retrieval above is what
     // decides what the human block shows — so the blocks can never drift from
-    // the authoritative records.
-    const blocks = formatMemoryBlocks(store.getBlocks(), blockSources(query));
+    // the authoritative records. The persona block is left out here: the
+    // prompt ends on the same text, and it was going in twice.
+    const blocks = formatMemoryBlocks(store.getBlocks(), blockSources(query), { omit: ['persona'] });
     for (const entry of blocks.cut) {
       console.warn(`[blocks] ${entry.label} cut from ${entry.before} to ${entry.after} chars to fit its budget — selection was tighter than this; raise the block limit if it keeps happening`);
     }

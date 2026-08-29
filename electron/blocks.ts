@@ -374,16 +374,30 @@ export type BlockRenderResult = {
   cut: { label: string; before: number; after: number }[];
 };
 
+export type BlockRenderOptions = {
+  /** Labels left out of this render. Their values still resolve everywhere
+   *  else — the inspector, the tools — this only decides what the prompt says. */
+  omit?: string[];
+};
+
 /**
  * The whole memory-blocks section for the system prompt. Values are resolved
  * from the engine and fitted to their budgets; anything cut is reported so the
  * caller can log it — consolidation before truncation is the caller's job, and
  * truncation is never silent.
+ *
+ * The chat prompt leaves the persona block out. chatSystemPrompt already
+ * appends the same identity and style text at the very end, where a small
+ * model still has it; rendering it here as well put the whole persona — some
+ * 2,500 characters — into the prompt twice, once early where it is forgotten
+ * and once late where it counts. The block still exists for the inspector.
  */
-export function formatMemoryBlocks(blocks: MemoryBlock[], sources: BlockSources): BlockRenderResult {
+export function formatMemoryBlocks(blocks: MemoryBlock[], sources: BlockSources, options: BlockRenderOptions = {}): BlockRenderResult {
   const parts: string[] = [];
   const cut: BlockRenderResult['cut'] = [];
+  const omitted = new Set(options.omit ?? []);
   for (const block of blocks) {
+    if (omitted.has(block.label)) continue;
     const value = resolveBlockValue(block, sources);
     if (!value.trim()) continue;
     const fitted = fitToLimit(value, block);
