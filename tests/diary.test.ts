@@ -44,6 +44,8 @@ test('what she writes from is facts, laid out, with the rule that it is only tho
   };
   const note = diaryInstruction(m);
   assert.match(note, /night after 2026-08-29/);
+  assert.match(diaryInstruction({ ...m, clock: 'about 5:20 in the morning' }), /It is about 5:20 in the morning, the small hours/);
+  assert.match(note, /a time of day or a thing they own/);
   assert.match(note, /"nothing important, ignore me"/);
   assert.match(note, /37 messages in all/);
   assert.match(note, /They got on your nerves today\./);

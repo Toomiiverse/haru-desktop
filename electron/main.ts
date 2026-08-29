@@ -7518,6 +7518,7 @@ async function writeDiary(config: ProviderConfig) {
     nights: tonight.map(night => ({ about: night.about, note: night.note, interest: night.interest, game: night.game })),
     tastes: getInterests().filter(interest => interest.stance).map(interest => ({ name: interest.name, stance: interest.stance })),
     weather: describeWeather(getWeather().last, weatherWhere()).split('. That is the actual')[0] || undefined,
+    clock: `about ${formatTimeOfDay(now.getHours(), now.getMinutes())}`,
   });
   try {
     const entry = await ollamaQuipLong([getActiveCharacter().identity, profileSummary(''), getActiveCharacter().style, material].join(' '), 'Write tonight\'s entry.', config);

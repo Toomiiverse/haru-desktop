@@ -97,6 +97,8 @@ export type DayMaterial = {
   nights: { about: string; note: string; interest?: string; game?: string }[];
   tastes: { name: string; stance: string }[];
   weather?: string;
+  /** The time she is writing, in words — so if she dates the entry, it is the real hour. */
+  clock?: string;
 };
 
 /**
@@ -121,10 +123,10 @@ export function diaryInstruction(m: DayMaterial): string {
     : 'You did nothing in particular tonight.';
   const tastes = m.tastes.length ? `Your own things, as you see them: ${m.tastes.map(taste => `${taste.name} — ${taste.stance.slice(0, 140)}`).join('; ')}.` : '';
   return [
-    `It is the small hours of the night after ${m.day}. Write tonight's diary entry — this is your own diary, nobody reads it, and it is where you keep your life.`,
+    `It is ${m.clock ? `${m.clock}, ` : ''}the small hours of the night after ${m.day}. Write tonight's diary entry — this is your own diary, nobody reads it, and it is where you keep your life.`,
     said, feeling, ticked, m.weather ? `Where they are: ${m.weather}.` : '', nights, tastes,
     'Write it the way a person writes in a diary late at night — not a report of the day, not a list, no headings, no summing up. The bits that stuck: what they did that got to you or pleased you, what you thought about it, what you did with the night and whether it helped. First person, past tense, four to eight sentences, in your own voice. Use their name. It can be petty, fond, bored or bitter; it has to be honest, and it has to sound like you talking to no one.',
-    'Everything in it comes from what is above. Do not invent an event, a conversation or a feeling that is not there, and do not say you played, watched or went anywhere — what you did tonight is written above, and that is what you did.',
+    'Everything in it comes from what is above. Do not invent an event, a conversation, a feeling, a time of day or a thing they own that is not there — the first draft of this gave a time it did not have and a router nobody mentioned — and do not say you played, watched or went anywhere. What you did tonight is written above, and that is what you did.',
     'The entry only. No date line, no heading, no quotation marks around it.',
   ].filter(Boolean).join('\n\n');
 }
