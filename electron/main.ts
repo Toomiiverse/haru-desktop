@@ -48,7 +48,7 @@ import { convertImage, normaliseFormat, FORMATS } from './convert';
 import { cancelPower, closeApp, findApps, isCancellable, launch, listRunning, matchApp, matchRunning, normalisePower, POWER_DELAY_S, readDesktopConfig, runPower, supportedDesktop, type DesktopConfig } from './desktop';
 import { looksLikeScreenshot, maySpeak, readScreenshotConfig, screenshotPrompt, SETTLE_MS, SETTLE_TRIES, type ScreenshotConfig } from './screenshots';
 import { look, photoName, readVisionConfig, whileLooking, type VisionConfig } from './vision';
-import { noteCaption, readCaptions, unseenShots } from './seen';
+import { moreThanOnePass, noteCaption, readCaptions, unseenShots } from './seen';
 import { EXPRESSIVE, LAST_WORD, NO_INVENTED_HISTORY, NO_NON_SEQUITURS, readsAsRough, roomInstruction } from './room';
 import { journalStance } from './journal';
 import { haruNote, rangeStats, type HaruNote, type RangeName, type RangeStats } from './journal';
@@ -168,8 +168,13 @@ async function lookAtSyncedShots() {
   const root = shotStoreRoot();
   if (!existsSync(root)) return;
   const captions = readCaptions(store.get('shots.captions'));
-  const next = unseenShots(heldShots(root), captions);
+  const held = heldShots(root);
+  const next = unseenShots(held, captions);
   if (!next.length) return;
+  // Held between passes only while there is a backlog to come back to: the
+  // eyes run on the CPU here, where a cold start costs 16 seconds against 6
+  // for a caption.
+  const keepAlive = moreThanOnePass(held, captions) ? '10m' : '0';
   const provider = store.get('ai.config') as ProviderConfig | undefined;
   const endpoint = visionEndpoint(provider, vision);
   let saved = captions;
@@ -179,9 +184,7 @@ async function lookAtSyncedShots() {
     try {
       const sighting = await look(bytes.toString('base64'), vision, endpoint, modelHeaders(endpoint), net.fetch, {
         ask: SHOT_LOOK_PROMPT,
-        // Dropped as soon as the pass is done: the card it is on also holds her
-        // voice, which is the one thing here that cannot wait for VRAM.
-        keepAlive: '0',
+        keepAlive,
       });
       const text = sighting.description.trim();
       if (!text) continue;

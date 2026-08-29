@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { CAPTIONS_KEPT, captionsFor, forgetCaptions, noteCaption, readCaptions, unseenShots, type Caption } from '../electron/seen';
+import { CAPTIONS_KEPT, captionsFor, forgetCaptions, moreThanOnePass, noteCaption, readCaptions, unseenShots, type Caption } from '../electron/seen';
 
 const caption = (day: string, name: string, text = 'a window'): Caption => ({ day, name, at: `${day}T09:00:00.000Z`, text });
 
@@ -51,4 +51,14 @@ test('a day reads back in order, and captions do not outlive their shots', () =>
 test('a mangled record is dropped rather than carried forward', () => {
   assert.deepEqual(readCaptions(null), []);
   assert.deepEqual(readCaptions([{ day: '2026-08-28' }, caption('2026-08-28', 'a.png')]).length, 1);
+});
+
+test('the model is held only while there is a backlog to come back to', () => {
+  const one = { '2026-08-28': ['a.png', 'b.png'] };
+  assert.equal(moreThanOnePass(one, []), false);
+  const many = { '2026-08-28': Array.from({ length: 40 }, (_, i) => `${i}.png`) };
+  assert.equal(moreThanOnePass(many, []), true);
+  // Caught up mid-backlog: nothing left to come back for.
+  const done = many['2026-08-28'].map(name => caption('2026-08-28', name));
+  assert.equal(moreThanOnePass(many, done), false);
 });

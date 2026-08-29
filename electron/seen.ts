@@ -64,6 +64,20 @@ export function noteCaption(captions: Caption[], entry: Caption): Caption[] {
   return [...without, entry].slice(-CAPTIONS_KEPT);
 }
 
+/**
+ * Whether there is more here than one pass can take.
+ *
+ * It decides how long the model is held. On this machine the eyes run on the
+ * CPU — the second card is full of her voice and the transcriber, so Ollama
+ * declined to offload a single layer — and a cold start there costs 16 seconds
+ * against about 6 for a caption. Holding it between passes while a backlog
+ * lasts is 3 GB of ordinary RAM, of which there is plenty; holding it once the
+ * folder is caught up would be 3 GB for nothing.
+ */
+export function moreThanOnePass(held: Record<string, string[]>, captions: Caption[]): boolean {
+  return unseenShots(held, captions, SHOTS_PER_PASS + 1).length > SHOTS_PER_PASS;
+}
+
 /** What she saw on one day, in the order she saw it. */
 export function captionsFor(captions: Caption[], day: string): Caption[] {
   return captions.filter(caption => caption.day === day).sort((a, b) => a.name.localeCompare(b.name));
