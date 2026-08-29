@@ -29,7 +29,7 @@ export const PLAYED_WINDOW_DAYS = 3;
 /** Not the same game every night, whatever they play. */
 export const GUIDE_REST_NIGHTS = 3;
 /** With a game to read about, how often the night is spent on it rather than on anything. */
-export const GUIDE_ODDS = 0.6;
+export const GUIDE_ODDS = 0.2;
 
 function shiftDays(key: string, days: number): string {
   const [y, m, d] = key.split('-').map(Number);
@@ -138,9 +138,9 @@ export function guideNoteInstruction(game: Played, query: string, found: string)
   const how = game.minutes >= 60 ? `${Math.round(game.minutes / 60)} hours over the last few days` : game.minutes ? `${game.minutes} minutes lately` : game.steamMinutes ? `${Math.round(game.steamMinutes / 60)} hours in the last fortnight` : 'lately';
   const seen = game.seen.length ? `You have seen their screenshots from it: ${game.seen.map(text => `"${text}"`).join('; ')}.` : '';
   return [
-    `They have been playing ${game.name} — ${how}. ${seen} While they slept you went and read a guide to it ("${query}"). This is what you found, and it is everything you know about the game:`,
+    `They have been playing ${game.name} — ${how}. ${seen} While they slept you went and read about it ("${query}") — not to help them with it, but to have a view of it, since it is what they are spending their time on. This is what you found, and it is everything you know about the game:`,
     found,
-    'Write two or three sentences, as yourself, first person, past tense: what the guide said, and what you make of it — including whether it looks like something they are doing wrong, if the guide and their screenshots suggest it. Have an opinion.',
+    'Write two or three sentences, as yourself, first person, past tense: what you make of it. Is it any good? Would you rate it, or is it beneath the things you are into? If their screenshots show them making a hash of it, you may say so. Have an opinion you could defend.',
     'Only what is above. Do not add anything about the game you happen to remember, do not invent a mechanic or a boss to make a better point, and do not say you played it — you read a guide, which is all you did.',
     'No preamble, no addressing them, no questions. A note to yourself.',
   ].filter(Boolean).join('\n');

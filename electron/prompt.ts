@@ -169,6 +169,8 @@ export type PromptState = {
   weather?: string;
   /** What she read in the small hours, already in words (nightlife.ts), or nothing. */
   nights?: string;
+  /** Things of her own, with her views on them (tastes.ts), or nothing. */
+  tastes?: string;
   /** The way somewhere, when they asked for it: what was found and what the app will attach (directions.ts). */
   directionsNote?: string;
 };
@@ -196,6 +198,7 @@ export function chatSystemPrompt(state: PromptState): string {
     // is the same kind of fact: background she may use, never a thing to recite.
     state.whereabouts ?? '',
     state.weather ?? '',
+    state.tastes ?? '',
     state.nights ?? '',
     state.profile,
     // Beside the profile rather than behind the lookup tool, for the reason the

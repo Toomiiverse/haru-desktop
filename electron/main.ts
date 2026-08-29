@@ -79,6 +79,7 @@ import { groundedInstruction, placeQuery } from './places';
 import { daySaid, DEFAULT_BEDTIME_MINUTES, howTheDayWent, nightfallDue, sulkGrudge, sulkInstruction, sulkStillStands, type DayVerdict } from './nightfall';
 import { keepNights, nightNoteInstruction, nightsInstruction, nightsOn, pickInstruction, tidyPick, timeForSomething, type Night } from './nightlife';
 import { gamesPlayedLately, GUIDE_ODDS, guideNoteInstruction, guideQuery, pickGame, withSteam, type Played } from './gamenight';
+import { adopt, ADOPT_ODDS, adoptInstruction, deepen, deepenInstruction, isOneOfTheirs, MAX_INTERESTS, nightQuery, parseAdoption, parseDeepening, pickTonight, tastesInstruction, type Interest } from './tastes';
 import { readSteamWebConfig, recentlyPlayed } from './steamweb';
 import { fetchTranscript, formatTranscript, titleFrom, transcriptInstruction, transcriptsAvailable, videoIdFrom, watchUrl } from './transcripts';
 import { feedbackEntry, recordFeedback } from './feedback';
@@ -1280,7 +1281,7 @@ function unpromptedContext(): string {
   // not repeat at one in the morning is what she said at half eleven.
   // Where their phone says they are rides along too: a nudge that knows they
   // are at the shops has something to needle with.
-  const parts = [summariseFollowing(getFollowing(), Date.now()), todaySoFar(), alreadySaidRecently(asides, CHAT_TIMEZONE, Date.now()), stillWaiting(), describeWhereabouts(getWhereabouts()), weatherToDrawOn(getWeather().last, weatherWhere(), asides.map(aside => aside.text)), nightsInstruction(nightsOn(getNights(), lastNightKey()))].filter(Boolean);
+  const parts = [summariseFollowing(getFollowing(), Date.now()), todaySoFar(), alreadySaidRecently(asides, CHAT_TIMEZONE, Date.now()), stillWaiting(), describeWhereabouts(getWhereabouts()), weatherToDrawOn(getWeather().last, weatherWhere(), asides.map(aside => aside.text)), nightsInstruction(nightsOn(getNights(), lastNightKey())), tastesInstruction(getInterests())].filter(Boolean);
   if (!parts.length) return '';
   // "Do not repeat a point you have already made" was read as "change the
   // subject": once a thread was answered and settled she abandoned the day
@@ -4715,6 +4716,12 @@ async function inHerVoice(answer: string, recent: { role: string; content: strin
   }
 }
 
+/** The same call as ollamaQuip, keeping every line — for an answer that comes in a shape. */
+async function ollamaQuipLong(system: string, user: string, config: ProviderConfig): Promise<string> {
+  const message = await ollamaPost([{ role: 'system', content: system }, { role: 'user', content: user }], config, { tools: false, temperature: 0.9 });
+  return (message.content ?? '').trim().replace(/^["'“”]+|["'“”]+$/g, '').trim().slice(0, 1600);
+}
+
 async function ollamaQuip(system: string, user: string, config: ProviderConfig) {
   const once = async (instruction: string) => {
     const message = await ollamaPost(
@@ -5811,6 +5818,7 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
     // So "what did you get up to last night?" has a true answer. Without this
     // the only record of her night is on disk and she invents one instead.
     nights: nightsInstruction(nightsOn(getNights(), lastNightKey())),
+    tastes: tastesInstruction(getInterests()),
     directionsNote: directions?.note,
   });
   // Written down every reply so the eight thresholds in VITAL_CUES can be
@@ -7321,6 +7329,11 @@ async function tallyIgnored(config: ProviderConfig) {
 
 // ---- Her own night -------------------------------------------------------
 
+function getInterests(): Interest[] {
+  const saved = store.get('tastes') as Interest[] | undefined;
+  return Array.isArray(saved) ? saved.filter(interest => interest && typeof interest.name === 'string' && typeof interest.id === 'string') : [];
+}
+
 function getNights(): Night[] {
   const saved = store.get('nights') as Night[] | undefined;
   return Array.isArray(saved) ? saved.filter(night => night && typeof night.note === 'string') : [];
@@ -7373,12 +7386,12 @@ async function haveANight(config: ProviderConfig) {
   if (!timeForSomething(tonight, lastNightThingAt, Date.now())) return;
   lastNightThingAt = Date.now();
   try {
-    // Some nights are spent on their game. Decided here, not by the model:
+    // Whose night it is. Hers first: something she has taken up, or taking
+    // one up. Their game is looked at now and then, to have a view of it, not
+    // to help. The free pick is what is left. Decided here, not by the model:
     // asked to choose, a 9B chooses what it always chooses, and the point is
-    // that she turns up in the morning knowing something about what they are
-    // actually playing. The desk's record says what; Steam fills in what the
-    // desk never saw, when a key and an id have been given.
-    let game: Played | null = null;
+    // that she turns up with things of her own.
+    const theirs = getMemories().map(memory => memory.text);
     let steamRecent: Awaited<ReturnType<typeof recentlyPlayed>> = [];
     try {
       steamRecent = await recentlyPlayed(getSteamWebKey(), readSteamWebConfig(store.get('steam')), url => net.fetch(url));
@@ -7386,12 +7399,27 @@ async function haveANight(config: ProviderConfig) {
       console.warn('[night] Steam would not say what they have been playing:', error instanceof Error ? error.message : error);
     }
     const played = withSteam(gamesPlayedLately(store.getActivityLog(), nightKey(now)), steamRecent);
-    if (played.length && Math.random() < GUIDE_ODDS) game = pickGame(played, getNights(), nightKey(now));
+    const theirNames = [...played.map(entry => entry.name), ...theirs];
+    const mine = getInterests();
 
-    const theirs = getMemories().map(memory => memory.text);
+    let game: Played | null = null;
+    let interest: Interest | null = null;
+    let adopting: { kind: Interest['kind']; name: string; because: string } | null = null;
+    const roll = Math.random();
+    if (mine.length < MAX_INTERESTS && (roll < ADOPT_ODDS || !mine.length)) {
+      const raw = await ollamaQuip([getActiveCharacter().identity, getActiveCharacter().style, adoptInstruction(theirs, mine, { games: played.map(entry => entry.name), interests: theirs })].join(' '), 'What are you taking up?', config);
+      const picked = parseAdoption(raw);
+      if (!picked) console.log(`[night] she could not say what she was taking up ("${raw.slice(0, 60)}")`);
+      else if (isOneOfTheirs(picked.name, theirNames) || mine.some(own => own.name.toLowerCase() === picked.name.toLowerCase())) console.log(`[night] "${picked.name}" is theirs, or already hers — not tonight`);
+      else adopting = picked;
+    }
+    if (!adopting && mine.length) interest = pickTonight(mine, Date.now());
+    if (!adopting && !interest && played.length && Math.random() < GUIDE_ODDS) game = pickGame(played, getNights(), nightKey(now));
+
     const before = getNights().map(night => night.about);
-    const about = game
-      ? guideQuery(game, getNights())
+    const about = adopting ? `${adopting.name} ${adopting.kind === 'topic' ? 'explained' : 'review'}`
+      : interest ? nightQuery(interest)
+      : game ? guideQuery(game, getNights())
       : tidyPick(await ollamaQuip([getActiveCharacter().identity, pickInstruction(theirs, before)].join(' '), 'What are you looking up?', config));
     if (!about) { console.log('[night] she could not settle on anything'); return; }
     const found = await searchWeb(about, { ...searchConfig, limit: Math.max(searchConfig.limit, 6) }, net.fetch, getSearchKey());
@@ -7415,6 +7443,22 @@ async function haveANight(config: ProviderConfig) {
           if (page.text.trim()) reading = `${reading}\n\n${formatPage(page, about)}`;
         }
       } catch { /* the blurbs are enough; a page that will not open is not a failure */ }
+    }
+    // One of hers: the view is rewritten from the reading, not a note about it.
+    if (adopting || interest) {
+      const day = nightKey(now);
+      const stamp = new Date().toISOString();
+      let list = getInterests();
+      let own = interest;
+      if (adopting) { list = adopt(list, adopting, day, stamp); own = list[list.length - 1]; }
+      if (!own) return;
+      const raw = await ollamaQuipLong([getActiveCharacter().identity, getActiveCharacter().style, deepenInstruction(own, about, reading)].join(' '), 'Write it.', config);
+      const next = parseDeepening(raw);
+      if (!next) { console.log(`[night] nothing came of ${own.name} tonight`); return; }
+      store.set('tastes', deepen(list, own.id, next, stamp));
+      store.set('nights', keepNights(getNights(), { day, at: stamp, about, note: next.stance, sources: found.slice(0, 3).map(result => result.url).filter(Boolean), interest: own.name }));
+      console.log(`[night] ${adopting ? `took up ${own.name} (${own.kind})` : `spent the night on ${own.name}`} — "${about}" -> ${next.stance.length} chars${next.favourite ? `, rates ${next.favourite}` : ''}`);
+      return;
     }
     const told = game ? guideNoteInstruction(game, about, reading) : nightNoteInstruction(about, reading);
     const note = await ollamaQuip([getActiveCharacter().identity, getActiveCharacter().style, told].join(' '), 'Write it.', config);

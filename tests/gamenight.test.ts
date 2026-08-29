@@ -76,7 +76,9 @@ test('what she is told: read a guide, did not play, knows only the guide', () =>
   assert.match(note, /seen their screenshots from it: "A knight faces Margit."/);
   assert.match(note, /everything you know about the game/);
   assert.match(note, /do not say you played it/);
-  assert.match(note, /something they are doing wrong/);
+  // Read to have a view of it, not to help them with it.
+  assert.match(note, /not to help them with it/);
+  assert.match(note, /making a hash of it/);
   assert.match(guideNoteInstruction({ name: 'X', minutes: 0, steamMinutes: 600, seen: [] }, 'q', 'f'), /10 hours in the last fortnight/);
 });
 
