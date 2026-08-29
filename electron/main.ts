@@ -48,7 +48,7 @@ import { convertImage, normaliseFormat, FORMATS } from './convert';
 import { cancelPower, closeApp, findApps, isCancellable, launch, listRunning, matchApp, matchRunning, normalisePower, POWER_DELAY_S, readDesktopConfig, runPower, supportedDesktop, type DesktopConfig } from './desktop';
 import { looksLikeScreenshot, maySpeak, readScreenshotConfig, screenshotPrompt, SETTLE_MS, SETTLE_TRIES, type ScreenshotConfig } from './screenshots';
 import { look, photoName, readVisionConfig, whileLooking, type VisionConfig } from './vision';
-import { CAPTION_MAX_CHARS, moreThanOnePass, noteCaption, readCaptions, unseenShots } from './seen';
+import { CAPTION_MAX_CHARS, describedShots, forgetCaptions, moreThanOnePass, noteCaption, readCaptions, shotsNeedingALook } from './seen';
 import { EXPRESSIVE, LAST_WORD, NO_INVENTED_HISTORY, NO_NON_SEQUITURS, readsAsRough, roomInstruction } from './room';
 import { journalStance } from './journal';
 import { haruNote, rangeStats, type HaruNote, type RangeName, type RangeStats } from './journal';
@@ -192,12 +192,17 @@ async function lookAtSyncedShots() {
   if (!existsSync(root)) return;
   const captions = readCaptions(store.get('shots.captions'));
   const held = heldShots(root);
-  const next = unseenShots(held, captions);
+  // Nothing the desk has already described. Its vision model looked at that
+  // burst anyway and wrote the answer onto the entry, and the entry travels
+  // here with the log — so this pass exists for what arrived with nothing said
+  // about it, not to say it again on a CPU.
+  const described = describedShots(store.getActivityLog());
+  const next = shotsNeedingALook(held, captions, described);
   if (!next.length) return;
   // Held between passes only while there is a backlog to come back to: the
   // eyes run on the CPU here, where a cold start costs 16 seconds against 6
   // for a caption.
-  const keepAlive = moreThanOnePass(held, captions) ? '10m' : '0';
+  const keepAlive = moreThanOnePass(held, captions, described) ? '10m' : '0';
   const provider = store.get('ai.config') as ProviderConfig | undefined;
   const endpoint = visionEndpoint(provider, vision);
   let saved = captions;
@@ -212,6 +217,14 @@ async function lookAtSyncedShots() {
       const text = sighting.description.trim().slice(0, CAPTION_MAX_CHARS);
       if (!text) continue;
       saved = noteCaption(saved, { day: shot.day, name: shot.name, at: new Date().toISOString(), text });
+      // Onto the entry as well, which is the road a description already travels
+      // to reach her: summariseDay carries it into the day pass, and the day
+      // pass is what turns a day into memories. Left only in the store beside
+      // it, a caption was written and read by nothing. describeShot returns the
+      // log unchanged when the shot has no entry to attach to — true of the
+      // backlog that arrived before the log did — and the store keeps it then.
+      const attached = describeShot(store.getActivityLog(), shot.day, shot.name, text);
+      if (attached !== store.getActivityLog()) store.setActivityLog(attached);
       console.log(`[shot] ${shot.day}/${shot.name}: ${text.slice(0, 90)}`);
     } catch (error) {
       // One failure means the model or the card is unavailable, and the rest of
@@ -626,6 +639,15 @@ function pruneOldActivity() {
   // on the disk by a wide margin.
   const shotsDropped = pruneShots(shotStoreRoot(), cutoff);
   if (shotsDropped) console.log(`[activity] pruned ${shotsDropped} day(s) of screenshots older than ${ARCHIVE_RETENTION_DAYS} days`);
+  // And what she made of them, on the same clock. The list is capped at 400 so
+  // this was never a leak, but a caption whose picture and whose day are both
+  // gone is a note about nothing.
+  const captions = readCaptions(store.get('shots.captions'));
+  const kept = forgetCaptions(captions, cutoff);
+  if (kept.length !== captions.length) {
+    store.set('shots.captions', kept);
+    console.log(`[activity] forgot ${captions.length - kept.length} caption(s) whose day has gone`);
+  }
 }
 
 /**

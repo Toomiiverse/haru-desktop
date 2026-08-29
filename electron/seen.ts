@@ -83,8 +83,40 @@ export function noteCaption(captions: Caption[], entry: Caption): Caption[] {
  * lasts is 3 GB of ordinary RAM, of which there is plenty; holding it once the
  * folder is caught up would be 3 GB for nothing.
  */
-export function moreThanOnePass(held: Record<string, string[]>, captions: Caption[]): boolean {
-  return unseenShots(held, captions, SHOTS_PER_PASS + 1).length > SHOTS_PER_PASS;
+export function moreThanOnePass(held: Record<string, string[]>, captions: Caption[], described: Record<string, string[]> = {}): boolean {
+  return shotsNeedingALook(held, captions, described, SHOTS_PER_PASS + 1).length > SHOTS_PER_PASS;
+}
+
+/**
+ * Shots that already carry a description from wherever they were taken.
+ *
+ * The desk runs its vision model over every burst anyway and now writes the
+ * answer onto the entry, so that description travels with the log for free.
+ * Looking at the same picture again here would be paying twice for an answer
+ * one machine already has — and paying it on a CPU. This pass is the fallback:
+ * shots that arrived with nothing said about them, which is the backlog synced
+ * before the desk started writing descriptions, and anything taken while its
+ * vision model was unavailable.
+ */
+export function describedShots(log: Record<string, { shot?: string; description?: string }[]>): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  for (const [day, entries] of Object.entries(log ?? {})) {
+    const named = (entries ?? []).filter(entry => entry?.shot && entry.description?.trim()).map(entry => entry.shot as string);
+    if (named.length) out[day] = named;
+  }
+  return out;
+}
+
+/** The next few with nothing said about them, by either machine. */
+export function shotsNeedingALook(
+  held: Record<string, string[]>,
+  captions: Caption[],
+  described: Record<string, string[]>,
+  limit = SHOTS_PER_PASS,
+): { day: string; name: string }[] {
+  const theirs: Caption[] = Object.entries(described)
+    .flatMap(([day, names]) => names.map(name => ({ day, name, at: '', text: '' })));
+  return unseenShots(held, [...captions, ...theirs], limit);
 }
 
 /** What she saw on one day, in the order she saw it. */

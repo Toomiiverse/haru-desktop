@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { CAPTIONS_KEPT, captionsFor, forgetCaptions, moreThanOnePass, noteCaption, readCaptions, unseenShots, type Caption } from '../electron/seen';
+import { CAPTIONS_KEPT, captionsFor, describedShots, forgetCaptions, moreThanOnePass, noteCaption, readCaptions, shotsNeedingALook, unseenShots, type Caption } from '../electron/seen';
 
 const caption = (day: string, name: string, text = 'a window'): Caption => ({ day, name, at: `${day}T09:00:00.000Z`, text });
 
@@ -61,4 +61,34 @@ test('the model is held only while there is a backlog to come back to', () => {
   // Caught up mid-backlog: nothing left to come back for.
   const done = many['2026-08-28'].map(name => caption('2026-08-28', name));
   assert.equal(moreThanOnePass(many, done), false);
+});
+
+test('a shot the desk already described is not looked at again', () => {
+  const held = { '2026-08-28': ['a.png', 'b.png', 'c.png'] };
+  const log = {
+    '2026-08-28': [
+      { shot: 'a.png', description: 'A browser showing the Search Console.' },
+      { shot: 'b.png', description: '   ' },
+      { shot: 'c.png' },
+    ],
+  };
+  assert.deepEqual(describedShots(log), { '2026-08-28': ['a.png'] });
+  // b has an empty description and c none at all, so both still need a look.
+  assert.deepEqual(shotsNeedingALook(held, [], describedShots(log), 5), [
+    { day: '2026-08-28', name: 'b.png' },
+    { day: '2026-08-28', name: 'c.png' },
+  ]);
+});
+
+test('the two ledgers agree — ours and theirs both count as done', () => {
+  const held = { '2026-08-28': ['a.png', 'b.png'] };
+  const described = { '2026-08-28': ['a.png'] };
+  const ours = [caption('2026-08-28', 'b.png')];
+  assert.deepEqual(shotsNeedingALook(held, ours, described, 5), []);
+  assert.equal(moreThanOnePass(held, ours, described), false);
+});
+
+test('a log with no descriptions changes nothing', () => {
+  assert.deepEqual(describedShots({}), {});
+  assert.deepEqual(describedShots({ '2026-08-28': [{ shot: 'a.png' }] }), {});
 });
