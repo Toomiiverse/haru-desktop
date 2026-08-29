@@ -9,7 +9,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createPublicKey, verify } from 'node:crypto';
-import { inQuietHours, newVapidKeys, pushRequest, readPushDevices, readPushPrefs, sealPayload, vapidToken, nextNudgeDelay, NUDGE_GAP_MS, NUDGE_FLOOR_MS, nudgeOverdue } from '../electron/push';
+import { inQuietHours, newVapidKeys, pushRequest, readPushDevices, readPushPrefs, sealPayload, vapidToken, nextNudgeDelay, NUDGE_GAP_MS, NUDGE_FLOOR_MS, nudgeOverdue, LAST_CALL_MS, untilQuiet } from '../electron/push';
 
 // -- RFC 8291 Appendix A, verbatim -------------------------------------------
 
@@ -123,9 +123,12 @@ test('the next nudge is a random while off, never in the quiet hours, and not on
   // Midday, shortest and longest gaps.
   assert.equal(nextNudgeDelay(prefs, at(12), fixed(0)), NUDGE_GAP_MS[0]);
   assert.equal(nextNudgeDelay(prefs, at(12), fixed(1)), NUDGE_GAP_MS[1]);
-  // Late evening: the gap would land at half past midnight — pushed to after six, plus a little.
-  const late = nextNudgeDelay(prefs, at(22, 30), fixed(0.5));
-  const lands = new Date(at(22, 30).getTime() + late);
+  // Almost bedtime, with too little evening left to be worth one: the gap would
+  // land after midnight, so it is pushed to after six, plus a little. (With more
+  // of the evening left it is squeezed into what remains instead — see the
+  // last-call test below, which is what stopped her sleeping on a whole night.)
+  const late = nextNudgeDelay(prefs, at(22, 50), fixed(0.5));
+  const lands = new Date(at(22, 50).getTime() + late);
   assert.ok(lands.getHours() >= 6 && lands.getHours() < 7, `lands after the quiet ends, not in it (${lands.getHours()}:${lands.getMinutes()})`);
   assert.ok(lands.getMinutes() >= 5, 'and not on the dot');
   // Small hours: same, and never a delay of nothing.
@@ -147,4 +150,37 @@ test('two hours without her landing anything is overdue, and the quiet hours are
   assert.equal(nudgeOverdue(small.getTime() - 6 * 60 * 60_000, small.getTime(), prefs, small), false);
   // Nothing known yet is not the same as overdue.
   assert.equal(nudgeOverdue(0, now, prefs, noon), false);
+});
+
+test('the last of the evening is used rather than thrown over the night', () => {
+  const prefs = { quietFrom: '23:00', quietTo: '06:00' };
+  const at = (h: number, m = 0) => new Date(2026, 7, 28, h, m, 0, 0);
+  const fixed = (v: number) => () => v;
+  // 21:37 with 83 minutes of evening left: the long draw would land at 23:22
+  // and used to hop the whole night — 526 minutes for having said hello.
+  const late = nextNudgeDelay(prefs, at(21, 37), fixed(1));
+  assert.ok(late < 83 * 60_000, `stayed inside the evening, got ${Math.round(late / 60_000)} min`);
+  const lands = new Date(at(21, 37).getTime() + late);
+  assert.equal(inQuietHours(prefs, lands), false);
+  // Never immediate, however little is left.
+  assert.ok(nextNudgeDelay(prefs, at(22, 45), fixed(0)) >= 60_000);
+  // Too close to the quiet to be worth one: hop as before, to after six.
+  const closing = nextNudgeDelay(prefs, at(22, 50), fixed(1));
+  const after = new Date(at(22, 50).getTime() + closing);
+  assert.ok(after.getHours() >= 6 && after.getHours() < 7, `hopped the night, got ${after.getHours()}:${after.getMinutes()}`);
+  // A draw that lands before the quiet is untouched either way.
+  assert.equal(nextNudgeDelay(prefs, at(12), fixed(0)), NUDGE_GAP_MS[0]);
+});
+
+test('how long is left of the waking day', () => {
+  const prefs = { quietFrom: '23:00', quietTo: '06:00' };
+  const at = (h: number, m = 0) => new Date(2026, 7, 28, h, m, 0, 0);
+  assert.equal(untilQuiet(prefs, at(22, 30)), 30 * 60_000);
+  assert.equal(untilQuiet(prefs, at(22, 30)), LAST_CALL_MS);
+  assert.equal(untilQuiet(prefs, at(7)), 16 * 60 * 60_000);
+  // Already in it.
+  assert.equal(untilQuiet(prefs, at(23, 30)), null);
+  assert.equal(untilQuiet(prefs, at(2)), null);
+  // No quiet hours configured at all.
+  assert.equal(untilQuiet({ quietFrom: '08:00', quietTo: '08:00' }, at(12)), 20 * 60 * 60_000);
 });

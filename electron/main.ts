@@ -84,7 +84,7 @@ import { heldShots, keepShot, localShots, missingFrom, pruneShots, readShot, MAX
 import { DiscordLink, looksLikeUserId, readDiscordConfig, useOfChannel, type DiscordConfig } from './discord';
 import { reactedPrompt, readReaction, REACTION_COOLDOWN_MS } from './reacted';
 import { startWebServer, type WebDeps } from './webserver';
-import { inQuietHours, newVapidKeys, pushRequest, readPushDevices, readPushPrefs, type PushDevice, type PushPrefs, nextNudgeDelay, NUDGE_RETRY_MS, nudgeOverdue } from './push';
+import { inQuietHours, newVapidKeys, pushRequest, readPushDevices, readPushPrefs, type PushDevice, type PushPrefs, nextNudgeDelay, NUDGE_GAP_MS, NUDGE_RETRY_MS, nudgeOverdue } from './push';
 import { CHECK_EVERY_MS, describeUpdate, progressStep, whyNotCheck, type UpdateState } from './updates';
 import { BREVITY, summonedLine } from './summoned';
 import { CHOICES_TOOL, readChoices } from './choices';
@@ -6999,16 +6999,23 @@ const FLOOR_BACKOFF_MS = 20 * 60_000;
 
 /**
  * 'sent' — something of hers went out. 'refused' — she had a line and it was
- * thrown away, so it is worth coming back soon. 'quiet' — deliberately nothing
- * (asleep, mid-conversation, silenced, nothing to chase), which is not a
- * failure and must not turn into a retry storm.
+ * thrown away, so it is worth coming back soon. 'later' — the moment is wrong
+ * but the reason expires: she was spoken to a minute ago, or she has just said
+ * something, and `inMs` is how long that has left to run. 'quiet' — there is
+ * nothing to do at all (asleep, no phone, nudges switched off), which deserves
+ * a whole fresh cycle and must not turn into a retry storm.
+ *
+ * The split matters because it was costing whole evenings. One message to her
+ * at half past nine put her inside TALKING_RECENTLY_MS, which returned 'quiet',
+ * which drew a fresh 45-120 minutes, which landed after the quiet hours began
+ * and was thrown over the night — 526 minutes for having said hello.
  */
-type PesterResult = 'sent' | 'refused' | 'quiet';
+type PesterOutcome = { how: 'sent' | 'refused' | 'later' | 'quiet'; inMs?: number };
 
-async function pesterOnPush(): Promise<PesterResult> {
+async function pesterOnPush(): Promise<PesterOutcome> {
   const { devices, prefs } = getPush();
-  if (!webServer || !devices.length) return 'quiet';
-  if (inQuietHours(prefs, zonedNow(CHAT_TIMEZONE))) return 'quiet';
+  if (!webServer || !devices.length) return { how: 'quiet' };
+  if (inQuietHours(prefs, zonedNow(CHAT_TIMEZONE))) return { how: 'quiet' };
   // Something on the list that needs chasing comes first, always.
   if (prefs.events) {
     const said = await nudgeForPhone();
@@ -7018,16 +7025,25 @@ async function pesterOnPush(): Promise<PesterResult> {
       // out from there by its kind like every other unprompted line.
       if (noteAside(said.line, 'reminder')) {
         console.log(`[push] pestered about "${said.about}"`);
-        return 'sent';
+        return { how: 'sent' };
       }
-      return 'refused';
+      return { how: 'refused' };
     }
   }
-  if (!prefs.random) return 'quiet';
-  if (chasing || Date.now() - lastRemindedAt < REMINDER_SPACING_MS) return 'quiet';
-  if (isSilenced(store.get('pushback') as Pushback | undefined, Date.now())) return 'quiet';
+  if (!prefs.random) return { how: 'quiet' };
+  // All three of these expire on a clock, so they say when to come back rather
+  // than handing the beat a fresh cycle.
+  if (chasing) return { how: 'later', inMs: REMINDER_SPACING_MS };
+  const sinceChase = Date.now() - lastRemindedAt;
+  if (sinceChase < REMINDER_SPACING_MS) return { how: 'later', inMs: REMINDER_SPACING_MS - sinceChase + 30_000 };
+  const silenced = isSilenced(store.get('pushback') as Pushback | undefined, Date.now());
+  if (silenced) return { how: 'quiet' };
   const mood = getMood();
-  if (mood.lastMessageAt && Date.now() - Date.parse(mood.lastMessageAt) < TALKING_RECENTLY_MS) return 'quiet';
+  const sinceSpoke = mood.lastMessageAt ? Date.now() - Date.parse(mood.lastMessageAt) : Infinity;
+  if (sinceSpoke < TALKING_RECENTLY_MS) {
+    console.log(`[push] they were talking to her ${Math.round(sinceSpoke / 60_000)} min ago — back in ${Math.round((TALKING_RECENTLY_MS - sinceSpoke) / 60_000) + 1} min`);
+    return { how: 'later', inMs: TALKING_RECENTLY_MS - sinceSpoke + 60_000 };
+  }
   let composed = false;
   for (let attempt = 1; attempt <= NUDGE_TRIES; attempt++) {
     // Asked before composing, and again before each retry. The tries exist for
@@ -7040,7 +7056,7 @@ async function pesterOnPush(): Promise<PesterResult> {
     const wrongMoment = whyNotInterject();
     if (wrongMoment) {
       console.log(`[push] not the moment — ${wrongMoment}`);
-      return 'refused';
+      return { how: 'later', inMs: NUDGE_RETRY_MS };
     }
     const line = await boredNudge();
     if (!line) continue;
@@ -7050,11 +7066,11 @@ async function pesterOnPush(): Promise<PesterResult> {
       // unprompted path reads, and a line nobody saw has not used any of it up.
       lastRemindedAt = Date.now();
       console.log(`[push] sent a bored nudge${attempt > 1 ? ` (on try ${attempt})` : ''}`);
-      return 'sent';
+      return { how: 'sent' };
     }
   }
   if (composed) console.log(`[push] she had ${NUDGE_TRIES} goes and every one was refused — coming back in ${Math.round(NUDGE_RETRY_MS / 60_000)} min`);
-  return composed ? 'refused' : 'quiet';
+  return { how: composed ? 'refused' : 'quiet' };
 }
 
 // ---- Speaking up on her own: left hanging, the weather, what is coming up ----
@@ -7299,13 +7315,17 @@ function startProactive() {
  * she was down, she takes it shortly after coming back rather than pretending
  * it never existed. A refused line comes back in minutes, not the full cycle.
  */
-function scheduleNextPush(resume = false, after: PesterResult | null = null) {
+function scheduleNextPush(resume = false, after: PesterOutcome | null = null) {
   if (pushPesterTimer) clearTimeout(pushPesterTimer);
   const now = Date.now();
   const booked = resume ? getPush().nextNudgeAt : 0;
   let delay: number;
-  if (after === 'refused') {
+  if (after?.how === 'refused') {
     delay = NUDGE_RETRY_MS;
+  } else if (after?.how === 'later') {
+    // Long enough for the reason to have expired, and never so long that a
+    // passing condition costs the rest of the day.
+    delay = Math.min(Math.max(after.inMs ?? NUDGE_RETRY_MS, 60_000), NUDGE_GAP_MS[0]);
   } else if (booked > now) {
     delay = booked - now;
     console.log(`[push] picking the booking back up where the restart left it: ${Math.round(delay / 60_000)} min`);
@@ -7319,7 +7339,7 @@ function scheduleNextPush(resume = false, after: PesterResult | null = null) {
   }
   savePush({ nextNudgeAt: now + delay });
   console.log(`[push] next unprompted push in ${Math.round(delay / 60_000)} min`);
-  pushPesterTimer = setTimeout(() => { void pesterOnPush().then(result => scheduleNextPush(false, result), () => scheduleNextPush()); }, delay);
+  pushPesterTimer = setTimeout(() => { void pesterOnPush().then(outcome => scheduleNextPush(false, outcome), () => scheduleNextPush()); }, delay);
 }
 
 /**
@@ -7353,12 +7373,15 @@ async function checkNudgeFloor() {
   }
   if (!nudgeOverdue(reached, Date.now(), prefs, zonedNow(CHAT_TIMEZONE))) return;
   console.log(`[push] ${Math.round((Date.now() - reached) / 60_000)} min since anything of hers landed — going on the floor, not the beat`);
-  const result = await pesterOnPush();
+  const outcome = await pesterOnPush();
   // Rebook the random beat from here, so the floor and the beat do not end up
   // firing on top of each other.
-  if (result === 'sent') return scheduleNextPush();
-  floorQuietUntil = Date.now() + (result === 'refused' ? NUDGE_RETRY_MS : FLOOR_BACKOFF_MS);
-  console.log(`[push] the floor came to nothing (${result}) — not trying again for ${Math.round((floorQuietUntil - Date.now()) / 60_000)} min`);
+  if (outcome.how === 'sent') return scheduleNextPush();
+  const backOff = outcome.how === 'refused' ? NUDGE_RETRY_MS
+    : outcome.how === 'later' ? Math.max(outcome.inMs ?? NUDGE_RETRY_MS, 60_000)
+    : FLOOR_BACKOFF_MS;
+  floorQuietUntil = Date.now() + backOff;
+  console.log(`[push] the floor came to nothing (${outcome.how}) — not trying again for ${Math.round(backOff / 60_000)} min`);
 }
 
 const DEFAULT_WEB_PORT = 8787;

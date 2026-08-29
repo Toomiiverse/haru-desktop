@@ -217,10 +217,37 @@ export const NUDGE_GAP_MS: [number, number] = [45 * 60_000, 120 * 60_000];
  * dot of the quiet ending either. `now` is the user's own clock (zonedNow),
  * the same clock inQuietHours reads.
  */
+/**
+ * Enough of an evening left to be worth one more, rather than sleeping on it.
+ *
+ * At twenty to ten a draw of 45-120 minutes lands after eleven about half the
+ * time, and the hop below then carries it past the whole night: she went quiet
+ * at 21:37 with a booking 526 minutes out, skipping the eighty minutes of
+ * evening that were left. Inside this much of the wakeful day, the draw is
+ * squeezed into what remains instead of being thrown over the night.
+ */
+export const LAST_CALL_MS = 30 * 60_000;
+
+/** How long until the quiet hours begin, or null if they are already here. */
+export function untilQuiet(prefs: Pick<PushPrefs, 'quietFrom' | 'quietTo'>, now: Date): number | null {
+  if (inQuietHours(prefs, now)) return null;
+  const [hour, minute] = prefs.quietFrom.split(':').map(Number);
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null;
+  const begins = new Date(now.getTime());
+  begins.setHours(hour, minute, 0, 0);
+  if (begins.getTime() <= now.getTime()) begins.setDate(begins.getDate() + 1);
+  return begins.getTime() - now.getTime();
+}
+
 export function nextNudgeDelay(prefs: Pick<PushPrefs, 'quietFrom' | 'quietTo'>, now: Date, random: () => number = Math.random): number {
   const delay = NUDGE_GAP_MS[0] + random() * (NUDGE_GAP_MS[1] - NUDGE_GAP_MS[0]);
   const at = new Date(now.getTime() + delay);
   if (!inQuietHours(prefs, at)) return delay;
+  // Would land in the quiet, but the evening is not over: take what is left of
+  // it instead of writing off the night. A minute of margin keeps the landing
+  // off the exact stroke of the quiet hour.
+  const left = untilQuiet(prefs, now);
+  if (left !== null && left >= LAST_CALL_MS) return Math.max(60_000, random() * (left - 60_000));
   const [hour, minute] = prefs.quietTo.split(':').map(Number);
   const wake = new Date(at.getTime());
   wake.setHours(hour, minute, 0, 0);
