@@ -11,9 +11,10 @@ import { formatTimeOfDay, localDateKey, parseTimeOfDay, resolveDate, zonedNow } 
 import { connectGoogle, disconnectGoogle, googleStatus, pullEvents, pullTasks, pushItem, pushTask, removeItem, removeTask, saveCredentials } from './google';
 import { afterCooldown, afterEgoCooldown, afterPoke, egoInstruction, goodnightInstruction, IGNORE_THRESHOLD, IRRITATION_MAX, isGoodnight, isIgnoring, isLowEffort, isRedo, leverageInstruction, moodInstruction, nextEgo, nextIrritation, notTwiceInstruction, shoutInstruction, shoutState, type ShoutState } from './mood';
 import { nextPokeCount, pokeEmotion, pokeInstruction, pokeIrritation, pokeTier, type PokeKind } from './poke';
-import { applyEvent, chooseIdleAction, DEFAULT_VITALS, driftVitals, nextTickDelayMs, type Environment, type Vitals } from './vitals';
+import { applyEvent, chooseIdleAction, DEFAULT_VITALS, driftVitals, nextTickDelayMs, shouldPersistVitals, type Environment, type Vitals } from './vitals';
 import { classificationPrompt, emotionToVitals, EMOTION_SCHEMA, EMOTIONS, NEUTRAL_EMOTION, parseEmotion, type Emotion, type EmotionName, faceForEmotion } from './emotion';
 import { withDiscoveredExpressions } from './expressions';
+import { reportCapabilities } from './capabilities';
 import { chaseableOverdue, findItem, formatAgenda, itemStatus, missedInstruction, putOffInstruction, putOffUntil, relevantItems, readsAsAnswerToHer, readsAsBareReport, tickOffInstruction, readsAsDone, doneClause, readsAsNotDone, relativeDay, staleItemNamed, inventedTimeFor, raisedRecently, type ItemStatus } from './agenda';
 import { isRelaunchNotReturn, openingAngles, pickAngle, shouldPipeUp } from './opening';
 import { allDayDueMinutes, isEveningCheck, reminderInstruction, reminderTier, reminderVolume, shouldRemind, type ReminderState } from './reminders';
@@ -44,7 +45,7 @@ import { markMentioned, upcomingToMention } from './upcoming';
 import { directionsAsk, directionsNote, dropRouteTalk, matchNamedPlace, startingPoint, withDirections, type DirectionsAsk } from './directions';
 import { absorb, describeWhereabouts, distanceM, forgetPlace, namePlace, placeAt, readSpot, readWhereabouts, whereForPage, type Whereabouts } from './whereabouts';
 import { convertImage, normaliseFormat, FORMATS } from './convert';
-import { cancelPower, closeApp, findApps, isCancellable, launch, listRunning, matchApp, matchRunning, normalisePower, POWER_DELAY_S, readDesktopConfig, runPower, type DesktopConfig } from './desktop';
+import { cancelPower, closeApp, findApps, isCancellable, launch, listRunning, matchApp, matchRunning, normalisePower, POWER_DELAY_S, readDesktopConfig, runPower, supportedDesktop, type DesktopConfig } from './desktop';
 import { looksLikeScreenshot, maySpeak, readScreenshotConfig, screenshotPrompt, SETTLE_MS, SETTLE_TRIES, type ScreenshotConfig } from './screenshots';
 import { look, photoName, readVisionConfig, whileLooking, type VisionConfig } from './vision';
 import { EXPRESSIVE, LAST_WORD, NO_INVENTED_HISTORY, NO_NON_SEQUITURS, readsAsRough, roomInstruction } from './room';
@@ -450,7 +451,7 @@ function extractDayEvents(messages: { role?: string; content?: string }[], trans
  * tick; a day without a summary is never touched.
  */
 function pruneOldArchives() {
-  const archive = (store.get('chat.archive') as Record<string, unknown[]> | undefined) ?? {};
+  const archive = store.getArchive();
   const cutoff = localDateKey(new Date(Date.now() - ARCHIVE_RETENTION_DAYS * 86_400_000));
   const sessions = getSessions();
   let dropped = 0;
@@ -461,7 +462,7 @@ function pruneOldArchives() {
     dropped += 1;
   }
   if (dropped) {
-    store.set('chat.archive', archive);
+    store.setArchive(archive);
     console.log(`[memory] pruned ${dropped} archived day(s) older than ${ARCHIVE_RETENTION_DAYS} days — summaries kept`);
   }
 }
@@ -479,9 +480,9 @@ function pruneOldArchives() {
  * actually finished.
  */
 function archiveMessages(messages: unknown[], dayKey: string) {
-  const archive = (store.get('chat.archive') as Record<string, unknown[]> | undefined) ?? {};
+  const archive = store.getArchive();
   archive[dayKey] = [...(archive[dayKey] ?? []), ...messages];
-  store.set('chat.archive', archive);
+  store.setArchive(archive);
 }
 
 /**
@@ -495,7 +496,7 @@ function archiveMessages(messages: unknown[], dayKey: string) {
  * orphaned, so this is recoverable rather than merely preventable.
  */
 function mergeArchiveFragments() {
-  const archive = (store.get('chat.archive') as Record<string, unknown[]> | undefined) ?? {};
+  const archive = store.getArchive();
   const fragmented = Object.keys(archive).filter(key => key.includes('#'));
   if (fragmented.length) {
     // The keys belonging to each day, not their contents — this map is the plan,
@@ -512,7 +513,7 @@ function mergeArchiveFragments() {
       keys.sort((a, b) => (Number(a.split('#')[1] ?? 1)) - (Number(b.split('#')[1] ?? 1)));
       rebuilt[day] = keys.flatMap(key => archive[key] ?? []);
     }
-    store.set('chat.archive', rebuilt);
+    store.setArchive(rebuilt);
     console.log(`[memory] merged ${Object.keys(archive).length} archive fragments into ${Object.keys(rebuilt).length} days`);
   }
 
@@ -522,12 +523,12 @@ function mergeArchiveFragments() {
   // backfilled here, sequentially and deliberately unhurried: each is a model
   // call, and nothing here is urgent enough to stall a launch over.
   const sessions = getSessions();
-  const days = Object.keys((store.get('chat.archive') as Record<string, unknown[]> | undefined) ?? {}).sort();
+  const days = Object.keys(store.getArchive()).sort();
   let delay = 0;
   for (const day of days) {
     if (sessions.some(session => session.day === day)) continue;
     delay += 20_000;
-    const transcript = ((store.get('chat.archive') as Record<string, unknown[]> | undefined) ?? {})[day] ?? [];
+    const transcript = store.getArchive()[day] ?? [];
     setTimeout(() => summariseSession(transcript as { role?: string; content?: string }[], day, { replace: true }), delay);
   }
   if (delay) console.log(`[memory] backfilling ${delay / 20_000} day summaries in the background`);
@@ -563,7 +564,7 @@ function performChatResetIfDue() {
   // — because a day summarised from only its last stretch is as partial as one
   // summarised from only its first.
   if (previousKey) {
-    const whole = ((store.get('chat.archive') as Record<string, unknown[]> | undefined) ?? {})[previousKey] ?? [];
+    const whole = store.getArchive()[previousKey] ?? [];
     try {
       summariseSession(whole as { role?: string; content?: string }[], previousKey, { replace: true });
     } catch (error) {
@@ -772,7 +773,7 @@ function lifeTick() {
   const environment = readEnvironment();
   vitals = driftVitals(vitals, environment, (now - lastTickAt) / 1000);
   lastTickAt = now;
-  store.set('vitals', vitals);
+  persistVitals();
   broadcastLife(chooseIdleAction(vitals, environment), environment);
   // Reminders outrank idle chatter: something she was asked to chase beats
   // something she thought of, and both at once would be two voices at once.
@@ -782,12 +783,34 @@ function lifeTick() {
   tickTimer = setTimeout(lifeTick, nextTickDelayMs(vitals));
 }
 
+/**
+ * The saved copy of her state, and when it was last written. Held here rather
+ * than read back from the store because the question is not what is on disk —
+ * it is how far she has drifted since the last time anything was.
+ */
+let savedVitals: Vitals | null = null;
+let savedVitalsAt = 0;
+
+/** Writes only when she has actually moved, or every five minutes regardless.
+ *  `force` is for shutdown, where the next read is the one that matters. */
+function persistVitals(force = false) {
+  if (!force && !shouldPersistVitals(vitals, savedVitals, Date.now() - savedVitalsAt)) return;
+  store.set('vitals', vitals);
+  savedVitals = { ...vitals };
+  savedVitalsAt = Date.now();
+}
+
 function startLifeLoop() {
   const saved = store.get('vitals') as Vitals | undefined;
   // Resuming where she left off means closing and reopening the app does not
   // hand back a factory-fresh mood.
   if (saved) vitals = { ...DEFAULT_VITALS, ...saved };
   lastTickAt = Date.now();
+  // What is on disk right now, so the first tick is measured against it rather
+  // than against nothing and written out immediately. Null when there was
+  // nothing saved, which is the one case where the first tick should write.
+  savedVitals = saved ? { ...vitals } : null;
+  savedVitalsAt = Date.now();
   clearTimeout(tickTimer);
   tickTimer = setTimeout(lifeTick, 4_000);
 }
@@ -974,7 +997,7 @@ const UNPROMPTED_CONTEXT_TURNS = 10;
  * morning is its own kind of wrong.
  */
 function spokenOn(day: string, today: string): { role?: string; content?: string }[] {
-  const archived = (((store.get('chat.archive') as Record<string, unknown[]> | undefined) ?? {})[day] ?? []) as { role?: string; content?: string }[];
+  const archived = (store.getArchive()[day] ?? []) as { role?: string; content?: string }[];
   // The live list is whatever has not been archived yet, which is always today.
   const live = day === today ? ((store.get('chat.messages') as { role?: string; content?: string }[] | undefined) ?? []) : [];
   return [...archived, ...live].filter(message => message.role === 'user' || message.role === 'assistant');
@@ -989,7 +1012,7 @@ function todaySoFar(limit = UNPROMPTED_CONTEXT_TURNS): string {
   const todays = spokenOn(today, today);
   if (todays.length) return `What has already been said today, oldest first:\n${render(todays)}`;
 
-  const archive = (store.get('chat.archive') as Record<string, unknown[]> | undefined) ?? {};
+  const archive = store.getArchive();
   const earlier = Object.keys(archive).filter(day => day < today).sort().pop();
   if (!earlier) return '';
   const last = spokenOn(earlier, today);
@@ -1667,6 +1690,11 @@ function broadcastWatching() {
  * ducking has to land the instant she starts speaking.
  */
 function startWindowsHelper() {
+  // Not attempted anywhere else. It spawned regardless before this, and left
+  // one `spawn powershell.exe ENOENT` per launch in the log of a Linux server
+  // that was never going to have it — noise standing in for a statement, which
+  // the startup capability report now makes properly.
+  if (process.platform !== 'win32') return;
   // Packaged next to the compiled main, or read from source in development.
   const candidates = [path.join(__dirname, 'windows-helper.ps1'), path.join(__dirname, '../electron/windows-helper.ps1')];
   const script = candidates.find(candidate => existsSync(candidate));
@@ -3589,7 +3617,7 @@ function herLinesLastDay(nowMs: number): string[] {
     .filter(entry => entry.role === 'assistant' && (!entry.at || Date.parse(entry.at) >= since))
     .map(entry => String(entry.content ?? ''));
   const messages = (store.get('chat.messages') as Line[] | undefined) ?? [];
-  const archive = (store.get('chat.archive') as Record<string, Line[]> | undefined) ?? {};
+  const archive = store.getArchive() as Record<string, Line[]>;
   const yesterday = archive[localDateKey(new Date(nowMs - 86_400_000))] ?? [];
   const asides = getAsides().filter(aside => Date.parse(aside.at) >= since).map(aside => aside.text);
   return [...hers(yesterday), ...hers(messages), ...asides];
@@ -3772,7 +3800,7 @@ function availableTools(): ToolAvailability {
     knowledge: getKnowledgeConfig().enabled,
     system: { enabled: systemConfig.enabled, level: systemConfig.level },
     hands: handsAllowed,
-    desktop: readDesktopConfig(store.get('desktop')),
+    desktop: supportedDesktop(readDesktopConfig(store.get('desktop'))),
   };
 }
 
@@ -7450,7 +7478,7 @@ app.whenReady().then(() => {
     return store.get('chat.messages') ?? [];
   });
   ipcMain.handle('chat:setMessages', (_e, messages) => { store.set('chat.messages', messages); });
-  ipcMain.handle('chat:getArchive', () => store.get('chat.archive') ?? {});
+  ipcMain.handle('chat:getArchive', () => store.getArchive());
   ipcMain.handle('chat:getAsides', () => getAsides());
   ipcMain.handle('chat:clearAsides', () => {
     store.set('chat.asides', []);
@@ -8128,6 +8156,7 @@ app.whenReady().then(() => {
   // leave the app running with nothing on screen and no way back into it.
   if (!startedHidden() || !store.get('live2d.model')) createWindow();
   createCompanionWindow();
+  reportCapabilities();
   startWindowsHelper();
   watchScreenshots();
   startWatchingScreen();
@@ -8206,6 +8235,9 @@ app.on('before-quit', () => {
   // any of them throwing used to take the whole shutdown with it. The helper is
   // the likeliest: writing to the stdin of a PowerShell that has already exited
   // raises EPIPE, asynchronously, where nothing was listening for it.
+  // Her state is only written every few minutes now, so the last few minutes
+  // of drift are still in memory at this point and would otherwise go with it.
+  try { persistVitals(true); } catch (error) { noteCrash('saving her vitals', error); }
   try { releaseDuck(); } catch (error) { noteCrash('releasing the duck', error); }
   try { helper?.stdin?.write('quit\n'); } catch (error) { noteCrash('telling the helper to quit', error); }
   try { helper?.kill(); } catch (error) { noteCrash('killing the helper', error); }

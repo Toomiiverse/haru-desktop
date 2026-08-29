@@ -1,6 +1,12 @@
 // Haru's persistence layer — the only module that reads or writes the on-disk
 // store files: config.json for application/configuration state, knowledge.json
-// for structured memory.
+// for structured memory, archive.json for the day-by-day transcripts.
+//
+// Three files rather than two since v4, and the split is not filing tidiness.
+// electron-store rewrites the whole of config.json on every set, and the life
+// loop sets one key every twenty seconds — so the transcripts, which change
+// twice a day, were being written to disk four thousand times a day along with
+// everything else. See archive.ts.
 //
 // What that buys is real and worth keeping. No other module imports
 // electron-store or knows where the files live, and this is the one place that
@@ -27,11 +33,12 @@ import { copyFileSync, existsSync, readFileSync, readdirSync, rmSync, statSync }
 import os from 'node:os';
 import path from 'node:path';
 import { emptyKnowledge, loadKnowledge, saveKnowledge, type KnowledgeStore } from './knowledge';
+import { loadArchive, normalizeArchive, saveArchive, type Archive } from './archive';
 import { mergeBlockDefaults, type MemoryBlock } from './blocks';
 import { migrateMemories, type ForgettingEntry, type MemoryRecord, type SessionSummary } from './memory';
 
 /** The current schema version of the store. Bumped by each schema migration. */
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 export type MigrationStep = {
   /** The schema version this step produces. Steps run in ascending order. */
@@ -71,11 +78,29 @@ export const MIGRATIONS: MigrationStep[] = [
       haruStore.setBlocks(mergeBlockDefaults(haruStore.get('memory.blocks')));
     },
   },
+  {
+    version: 4,
+    label: 'the day-by-day transcript archive moves out of config.json into archive.json',
+    run: (haruStore) => {
+      const saved = haruStore.get('chat.archive');
+      // Written before the key is dropped, and dropped only once the write has
+      // returned: the archive is the one thing here with no other copy.
+      if (saved && typeof saved === 'object' && Object.keys(saved).length) {
+        haruStore.setArchive({ ...haruStore.getArchive(), ...normalizeArchive(saved) });
+        console.log(`[store] moved ${Object.keys(saved).length} archived day(s) out of config.json`);
+      }
+      haruStore.delete('chat.archive');
+    },
+  },
 ];
 
 export type HaruStoreOptions = {
   /** Where knowledge.json lives. */
   knowledgeFile: string;
+  /** Where archive.json lives. Defaults to sitting beside config.json, which
+   *  is where it belongs — it is the same user's data, just the part that does
+   *  not need rewriting every twenty seconds. */
+  archiveFile?: string;
   /** Only used in tests — overrides where the config file lives. */
   cwd?: string;
   configName?: string;
@@ -100,7 +125,12 @@ function backupStamp(): string {
 export class HaruStore {
   private readonly electron: Store<Record<string, unknown>>;
   private readonly knowledgeFile: string;
+  private readonly archiveFile: string;
   private readonly maxBackups: number;
+  /** Read once, then kept. This process is the only writer, so the copy in
+   *  memory cannot go stale, and the alternative is parsing half a megabyte of
+   *  transcript several times per reply. */
+  private archiveCache: Archive | null = null;
 
   constructor(options: HaruStoreOptions) {
     this.knowledgeFile = options.knowledgeFile;
@@ -109,6 +139,7 @@ export class HaruStore {
     if (options.cwd) storeOptions.cwd = options.cwd;
     if (options.configName) storeOptions.name = options.configName;
     this.electron = new Store<Record<string, unknown>>(storeOptions);
+    this.archiveFile = options.archiveFile ?? path.join(path.dirname(this.electron.path), 'archive.json');
   }
 
   // -- generic access. Same surface as electron-store so existing callers and
@@ -203,6 +234,23 @@ export class HaruStore {
     saveKnowledge(this.knowledgeFile, value);
   }
 
+  // -- the archive. Its own file since v4: see archive.ts for why.
+
+  /** Every day of transcript she still has. Always an object, never undefined —
+   *  callers used to write `?? {}` after every read of the old key. */
+  getArchive(): Archive {
+    if (!this.archiveCache) this.archiveCache = loadArchive(this.archiveFile);
+    // A copy of the top level, so a caller that deletes a day it was only
+    // reading cannot quietly delete it for everyone else too. The transcripts
+    // themselves are shared; nothing appends to one in place.
+    return { ...this.archiveCache };
+  }
+
+  setArchive(archive: Archive): void {
+    this.archiveCache = archive;
+    saveArchive(this.archiveFile, archive);
+  }
+
   // -- lifecycle safety.
 
   /**
@@ -227,7 +275,7 @@ export class HaruStore {
    */
   backup(reason: string): string[] {
     const made: string[] = [];
-    for (const file of [this.electron.path, this.knowledgeFile]) {
+    for (const file of [this.electron.path, this.knowledgeFile, this.archiveFile]) {
       if (!existsSync(file)) continue;
       const target = `${file}.before-${reason}-${backupStamp()}`;
       try {
@@ -274,7 +322,7 @@ export class HaruStore {
         return false;
       }
     };
-    return ok(this.electron.path) && ok(this.knowledgeFile);
+    return ok(this.electron.path) && ok(this.knowledgeFile) && ok(this.archiveFile);
   }
 
   /**
@@ -284,7 +332,7 @@ export class HaruStore {
    */
   static recoverBackups(options: HaruStoreOptions): boolean {
     let restored = false;
-    for (const file of [path.join(options.cwd ?? '', options.configName ? `${options.configName}.json` : 'config.json'), options.knowledgeFile]) {
+    for (const file of [path.join(options.cwd ?? '', options.configName ? `${options.configName}.json` : 'config.json'), options.knowledgeFile, options.archiveFile ?? path.join(options.cwd ?? '', 'archive.json')]) {
       if (!existsSync(file)) continue;
       const newest = this.newestBackup(file);
       if (!newest) continue;

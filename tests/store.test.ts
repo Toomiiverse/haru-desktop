@@ -246,3 +246,55 @@ test('a knowledge file that is a list, or a number, is not a store', () => {
     assert.deepEqual(store.getKnowledge(), { documents: [], chunks: [] }, `${junk} was not refused`);
   }
 });
+
+test('the archive is read and written through its own file, not config.json', () => {
+  const { store, dir } = makeStore();
+  assert.deepEqual(store.getArchive(), {});
+  store.set('marker', 'still in config');
+  store.setArchive({ '2026-08-29': [{ role: 'user', content: 'hi' }] });
+  assert.deepEqual(store.getArchive(), { '2026-08-29': [{ role: 'user', content: 'hi' }] });
+  assert.equal(existsSync(path.join(dir, 'archive.json')), true);
+  // The point of the exercise: the transcripts are not in the file that is
+  // rewritten every time anything else changes.
+  const config = readFileSync(path.join(dir, 'haru-config-test.json'), 'utf8');
+  assert.equal(config.includes('still in config'), true);
+  assert.equal(config.includes('"hi"'), false);
+});
+
+test('a caller that deletes a day it was only reading cannot delete it for everyone', () => {
+  const { store } = makeStore();
+  store.setArchive({ '2026-08-28': ['a'], '2026-08-29': ['b'] });
+  const reading = store.getArchive();
+  delete reading['2026-08-28'];
+  assert.deepEqual(Object.keys(store.getArchive()).sort(), ['2026-08-28', '2026-08-29']);
+});
+
+test('migration v4 moves an existing archive out of config.json and drops the key', () => {
+  const { store, dir } = makeStore();
+  store.set('chat.archive', { '2026-08-01': ['old'], '2026-08-02': ['older'] });
+  store.set('schema.version', 3);
+  const report = store.migrate();
+  assert.equal(report.to, SCHEMA_VERSION);
+  assert.ok(report.steps.some(step => step.includes('archive.json')));
+  assert.equal(store.get('chat.archive'), undefined);
+  assert.deepEqual(store.getArchive(), { '2026-08-01': ['old'], '2026-08-02': ['older'] });
+  assert.equal(existsSync(path.join(dir, 'archive.json')), true);
+});
+
+test('migrating with no archive to move leaves an empty one and no key', () => {
+  const { store } = makeStore();
+  store.set('schema.version', 3);
+  store.migrate();
+  assert.equal(store.has('chat.archive'), false);
+  assert.deepEqual(store.getArchive(), {});
+});
+
+test('the archive is backed up and verified alongside the other store files', () => {
+  const { store, dir } = makeStore();
+  store.setArchive({ '2026-08-29': ['kept'] });
+  const made = store.backup('a-reason');
+  assert.equal(made.some(file => file.includes('archive.json.before-a-reason-')), true);
+  assert.equal(store.verify(), true);
+  writeFileSync(path.join(dir, 'archive.json'), 'not json at all');
+  assert.equal(store.verify(), false);
+});

@@ -252,3 +252,27 @@ export function nextTickDelayMs(vitals: Vitals, random: () => number = Math.rand
   const base = 30_000 - alertness * 18_000;
   return Math.round(base * (0.7 + random() * 0.6));
 }
+
+// --- how often any of this reaches the disk ---------------------------------
+
+/**
+ * The life loop ticks every 8-39 seconds and used to persist the vitals on
+ * every one of them. electron-store rewrites the whole config file per set, so
+ * that was the entire store — persona, keys, memories — written to disk some
+ * four thousand times a day to record a drift of 0.003 in sleepiness.
+ *
+ * Nothing needs the saved copy to be current. It exists for one purpose: so
+ * that closing and reopening the app does not hand back a factory-fresh mood.
+ * A copy a few minutes old serves that exactly as well as a copy from four
+ * seconds ago, and the one moment precision would matter — a real change of
+ * state — is the one this still writes immediately.
+ */
+export const VITALS_SAVE_DELTA = 0.05;
+export const VITALS_SAVE_INTERVAL_MS = 5 * 60_000;
+
+export function shouldPersistVitals(current: Vitals, saved: Vitals | null, sinceSaveMs: number): boolean {
+  if (!saved) return true;
+  if (sinceSaveMs >= VITALS_SAVE_INTERVAL_MS) return true;
+  return (Object.keys(current) as (keyof Vitals)[])
+    .some(key => Math.abs((current[key] ?? 0) - (saved[key] ?? 0)) >= VITALS_SAVE_DELTA);
+}

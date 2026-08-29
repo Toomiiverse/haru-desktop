@@ -9,6 +9,9 @@ import {
   DEFAULT_VITALS,
   vitalsInstruction,
   VITAL_CUES_SPOKEN,
+  shouldPersistVitals,
+  VITALS_SAVE_DELTA,
+  VITALS_SAVE_INTERVAL_MS,
   type Vitals,
   type Environment,
 } from '../electron/vitals';
@@ -166,4 +169,32 @@ test('doze is only reachable at night, high sleepiness, and alone', () => {
     const action = chooseIdleAction(sleepyVitals, daytimeAlone, () => roll);
     assert.notEqual(action, 'doze');
   }
+});
+
+test('vitals are not written to disk on every tick', () => {
+  const saved = { ...DEFAULT_VITALS };
+  // A tick of ordinary drift, seconds after the last save: nothing worth a
+  // rewrite of the whole store.
+  const drifted = { ...saved, sleepiness: saved.sleepiness + 0.004, energy: saved.energy - 0.003 };
+  assert.equal(shouldPersistVitals(drifted, saved, 20_000), false);
+});
+
+test('a real change of state is written immediately', () => {
+  const saved = { ...DEFAULT_VITALS };
+  // Just over and just under the threshold. Not exactly on it: 0.2 + 0.05 - 0.2
+  // is 0.049999999999999996 in binary, and a test that turns on that is a test
+  // about floating point rather than about her.
+  assert.equal(shouldPersistVitals({ ...saved, stress: saved.stress + VITALS_SAVE_DELTA * 1.2 }, saved, 1_000), true);
+  assert.equal(shouldPersistVitals({ ...saved, stress: saved.stress + VITALS_SAVE_DELTA * 0.8 }, saved, 1_000), false);
+  assert.equal(shouldPersistVitals({ ...saved, happiness: saved.happiness - 0.4 }, saved, 1_000), true);
+});
+
+test('and so is a long quiet stretch, so the saved copy cannot drift far behind', () => {
+  const saved = { ...DEFAULT_VITALS };
+  assert.equal(shouldPersistVitals(saved, saved, VITALS_SAVE_INTERVAL_MS), true);
+  assert.equal(shouldPersistVitals(saved, saved, VITALS_SAVE_INTERVAL_MS - 1), false);
+});
+
+test('with nothing saved yet, the first write always happens', () => {
+  assert.equal(shouldPersistVitals(DEFAULT_VITALS, null, 0), true);
 });
