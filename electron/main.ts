@@ -7413,7 +7413,10 @@ async function haveANight(config: ProviderConfig) {
     let adopting: { kind: Interest['kind']; name: string; because: string } | null = null;
     const roll = Math.random();
     if (mine.length < MAX_INTERESTS && (roll < ADOPT_ODDS || !mine.length)) {
-      const raw = await ollamaQuip([getActiveCharacter().identity, getActiveCharacter().style, adoptInstruction(theirs, mine, { games: played.map(entry => entry.name), interests: theirs })].join(' '), 'What are you taking up?', config);
+      // ollamaQuipLong, not ollamaQuip: the answer is three lines, and the
+      // one-line helper kept only "KIND: anime" — so she could never take
+      // anything up, and the log said so twice before anyone read it.
+      const raw = await ollamaQuipLong([getActiveCharacter().identity, getActiveCharacter().style, adoptInstruction(theirs, mine, { games: played.map(entry => entry.name), interests: theirs })].join(' '), 'What are you taking up?', config);
       const picked = parseAdoption(raw);
       if (!picked) console.log(`[night] she could not say what she was taking up ("${raw.slice(0, 60)}")`);
       else if (isOneOfTheirs(picked.name, theirNames) || mine.some(own => own.name.toLowerCase() === picked.name.toLowerCase())) console.log(`[night] "${picked.name}" is theirs, or already hers — not tonight`);

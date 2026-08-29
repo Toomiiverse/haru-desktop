@@ -36,6 +36,9 @@ test('what comes back from the model is turned into something a search box takes
   assert.equal(tidyPick("I'd like to look up the history of neon signs"), 'the history of neon signs');
   assert.equal(tidyPick('Search: brutalist architecture Perth\n(that one)'), 'brutalist architecture Perth');
   assert.equal(tidyPick('why do cats knead.'), 'why do cats knead');
+  // The model narrating the search, not the search.
+  assert.equal(tidyPick('Searching Angel Beats plot holes deep now'), 'Angel Beats plot holes');
+  assert.equal(tidyPick('Looking into deep sea gigantism tonight'), 'deep sea gigantism');
   // Not a search: one word, a speech, or nothing.
   assert.equal(tidyPick('cats'), null);
   assert.equal(tidyPick(''), null);

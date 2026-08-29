@@ -88,7 +88,9 @@ export function tidyPick(raw: string): string | null {
   const line = (raw ?? '').trim().split('\n').find(text => text.trim()) ?? '';
   const cleaned = line
     .replace(/^["'“‘]+|["'”’]+$/g, '')
-    .replace(/^(?:i(?:'|’)?d?\s+(?:want|like|think|would|will)\s+(?:to\s+)?(?:look\s+up|read\s+about|search\s+for)\s*|let(?:'|’)?s\s+|maybe\s+|search:\s*|tonight:?\s*)/i, '')
+    .replace(/^(?:i(?:'|’)?d?\s+(?:want|like|think|would|will)\s+(?:to\s+)?(?:look\s+up|read\s+about|search\s+for)\s*|let(?:'|’)?s\s+|maybe\s+|search(?:ing)?:?\s+(?:for\s+)?|looking\s+(?:up|into)\s+|reading\s+about\s+|tonight:?\s*)/i, '')
+    // "…deep now", "…tonight", "…right now": the model narrating the search, not the search.
+    .replace(/\s+(?:deep\s+)?(?:right\s+)?(?:now|tonight|properly|deeply)\s*$/i, '')
     .replace(/[.!?]+$/, '')
     .trim();
   const words = cleaned.split(/\s+/).filter(Boolean);
