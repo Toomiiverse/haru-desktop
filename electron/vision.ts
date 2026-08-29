@@ -87,6 +87,8 @@ export type LookOptions = {
   temperature?: number;
   /** How long Ollama holds the model. The default drops it after five minutes. */
   keepAlive?: string;
+  /** Room for the image plus the answer. Raise for very large screens. */
+  numCtx?: number;
 };
 
 export async function look(imageBase64: string | string[], config: VisionConfig, endpoint: string, headers: Record<string, string>, fetchImpl: Fetcher, options: LookOptions = {}): Promise<Sighting> {
@@ -112,8 +114,13 @@ export async function look(imageBase64: string | string[], config: VisionConfig,
       //
       // Harmless on a model that does not reason: Ollama ignores it.
       think: false,
-      // Low: this is meant to be an accurate account, not an interesting one.
-      options: { temperature: options.temperature ?? 0.2 },
+      // Low temperature: this is meant to be an accurate account, not an
+      // interesting one. The window is set because the default is not enough to
+      // hold a screenshot — a full-screen 1440p capture arrived as 4103 image
+      // tokens against Ollama's 4096, and every shot of that size failed with a
+      // 400 until this was raised. Cheap on a small model, and the alternative
+      // is a size limit on what she is allowed to look at.
+      options: { temperature: options.temperature ?? 0.2, num_ctx: options.numCtx ?? 8192 },
     }),
   });
   if (!response.ok) {
@@ -122,7 +129,12 @@ export async function look(imageBase64: string | string[], config: VisionConfig,
     if (/does not support|no vision|image/i.test(detail) && response.status === 400) {
       throw new Error(`${config.model} cannot see images. Pick a model with vision — gemma4:12b has it.`);
     }
-    throw new Error(`the vision model returned ${response.status}${detail ? `: ${detail.slice(0, 200)}` : ''}`);
+    // Tagged so a caller can tell "this picture is a problem" from "the model
+    // is not there". One oversized screenshot should cost that screenshot, not
+    // the queue behind it.
+    const error = new Error(`the vision model returned ${response.status}${detail ? `: ${detail.slice(0, 200)}` : ''}`);
+    (error as Error & { aboutThisImage?: boolean }).aboutThisImage = response.status >= 400 && response.status < 500;
+    throw error;
   }
   const payload = await response.json() as { message?: { content?: string } };
   const description = (payload.message?.content ?? '').trim();

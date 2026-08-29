@@ -227,9 +227,15 @@ async function lookAtSyncedShots() {
       if (attached !== store.getActivityLog()) store.setActivityLog(attached);
       console.log(`[shot] ${shot.day}/${shot.name}: ${text.slice(0, 90)}`);
     } catch (error) {
-      // One failure means the model or the card is unavailable, and the rest of
-      // the pass would fail the same way. They keep for the next one.
-      console.warn(`[shot] could not look at ${shot.day}/${shot.name}:`, error instanceof Error ? error.message : error);
+      const why = error instanceof Error ? error.message : String(error);
+      console.warn(`[shot] could not look at ${shot.day}/${shot.name}:`, why);
+      // A refusal about this picture — too large for the window, a format it
+      // cannot read — is about this picture. Left as a break it stalled the
+      // whole queue for ever: the shot was never captioned, so the next pass
+      // started on the same one and stopped there again. Anything else means
+      // the model or the machine is unavailable and the rest would fail the
+      // same way, so those still keep for the next pass.
+      if ((error as { aboutThisImage?: boolean })?.aboutThisImage) continue;
       break;
     }
   }
