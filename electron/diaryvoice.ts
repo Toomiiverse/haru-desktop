@@ -68,3 +68,38 @@ export function liftedFrom(entry: string, examples: string[], span = LIFTED_SPAN
 
 /** What she is told when she has copied rather than written. */
 export const NOT_THOSE_LINES = 'You just used a sentence from an earlier entry word for word. Those are a tone to aim at, not lines to reuse — and they were about other days. Write tonight in your own words, about tonight.';
+
+/**
+ * Names in the entry that appear nowhere in what she was given.
+ *
+ * A diary that has to be true cannot name a campus, a series or a person the
+ * night never mentioned. This is the one check here that looks at her output
+ * rather than her input, and it is here because the input was clean: three
+ * drafts in a row named the same two things from a prompt containing neither,
+ * which means they came from somewhere other than the prompt — and a true
+ * record cannot afford to guess where.
+ *
+ * Capitalised words only, mid-sentence, so "Tommy" passes when he is in the
+ * material and "The" never counts. Names of one common word are let through;
+ * it is the proper nouns that carry events.
+ */
+export function unknownNames(entry: string, allowed: string[]): string[] {
+  const pool = allowed.join(' ').toLowerCase();
+  const seen = new Set<string>();
+  const out: string[] = [];
+  // A run of capitalised words, possibly joined by "of"/"the"; not at a sentence start.
+  const each = /(?<=[a-z,;:—–-]\s+|["“(]\s?)((?:[A-Z][\w'’]+)(?:\s+(?:of|the|de|and)?\s*[A-Z][\w'’]+)*)/g;
+  let match: RegExpExecArray | null;
+  while ((match = each.exec(entry ?? '')) !== null) {
+    const name = match[1].trim();
+    const key = name.toLowerCase();
+    if (seen.has(key) || COMMON.has(key) || name.length < 4) continue;
+    seen.add(key);
+    if (!pool.includes(key) && !key.split(/\s+/).every(word => pool.includes(word))) out.push(name);
+  }
+  return out;
+}
+
+const COMMON = new Set(['i', 'no', 'not', 'yes', 'ugh', 'boom', 'god', 'okay', 'fine', 'nothing', 'absolutely', 'barely', 'probably', 'still', 'then', 'and', 'but', 'so', 'he', 'she', 'his', 'her', 'it', 'that', 'this', 'one', 'single', 'thing', 'was', 'did', 'what', 'the', 'a']);
+
+export const NOT_THOSE_NAMES = (names: string[]) => `You named ${names.map(name => `"${name}"`).join(', ')}, and none of that is in what you were given tonight. Nothing happened with those. Write the entry again from only what is above, naming only what is there.`;

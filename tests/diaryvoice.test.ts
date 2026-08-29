@@ -2,7 +2,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { DIARY_FRAGMENTS, DIARY_VOICE, fragmentsInstruction, liftedFrom, LIFTED_SPAN_WORDS, NOT_THOSE_LINES } from '../electron/diaryvoice';
+import { DIARY_FRAGMENTS, DIARY_VOICE, fragmentsInstruction, liftedFrom, LIFTED_SPAN_WORDS, NOT_THOSE_LINES, NOT_THOSE_NAMES, unknownNames } from '../electron/diaryvoice';
 
 const example = 'We were sitting there. In silence. A comfortable, post-competent-frying-pan-purchase silence. And then he says it. "Hey, uh... my girlfriend is coming over tomorrow." I just sat there.';
 
@@ -27,4 +27,15 @@ test('a lifted sentence is caught; a shared turn of phrase is not', () => {
   assert.equal(liftedFrom('anything at all', []), null);
   assert.notEqual(liftedFrom('AND THEN HE SAYS IT — "hey, uh, my GIRLFRIEND is coming over"', [example]), null);
   assert.match(NOT_THOSE_LINES, /a tone to aim at/);
+});
+
+test('a name the night never mentioned is caught; the ones it did are not', () => {
+  const given = ['Tommy said "Boom see! I am actually doing work"', 'They got done: Rental Inspection, Scarlett Birthday Party.', 'Angel Beats is one of your own things'];
+  const entry = 'Tommy shouted "Boom" at nothing. I dragged my feet across the Murdoch campus map planner, then devoured Angel Beats lore. Scarlett got her present. Was it impressive? Absolutely not.';
+  assert.deepEqual(unknownNames(entry, given), ['Murdoch']);
+  // Nothing strange in an entry that stays on its material.
+  assert.deepEqual(unknownNames('Tommy did the Rental Inspection and then sulked. Barely a day.', given), []);
+  // A sentence-opening capital is grammar, not a name.
+  assert.deepEqual(unknownNames('Nothing happened. Honestly nothing. Tommy slept.', given), []);
+  assert.match(NOT_THOSE_NAMES(['Murdoch']), /You named "Murdoch"/);
 });

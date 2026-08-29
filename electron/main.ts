@@ -82,7 +82,7 @@ import { gamesPlayedLately, GUIDE_ODDS, guideNoteInstruction, guideQuery, pickGa
 import { adopt, ADOPT_ODDS, adoptInstruction, deepen, deepenInstruction, isOneOfTheirs, MAX_INTERESTS, nightQuery, parseAdoption, parseDeepening, pickTonight, tastesInstruction, type Interest } from './tastes';
 import { readSteamWebConfig, recentlyPlayed } from './steamweb';
 import { appendDream, appendEntry, diaryContext, diaryDueFor, diaryInstruction, recentEntries, type Dream } from './diary';
-import { DIARY_VOICE, fragmentsInstruction, liftedFrom, NOT_THOSE_LINES } from './diaryvoice';
+import { DIARY_VOICE, fragmentsInstruction, liftedFrom, NOT_THOSE_LINES, NOT_THOSE_NAMES, unknownNames } from './diaryvoice';
 import { fetchTranscript, formatTranscript, titleFrom, transcriptInstruction, transcriptsAvailable, videoIdFrom, watchUrl } from './transcripts';
 import { feedbackEntry, recordFeedback } from './feedback';
 import { describePull, isTailnetAddress, mergeCheckIns, readCheckInSource } from './checkinsource';
@@ -7544,6 +7544,16 @@ async function writeDiary(config: ProviderConfig) {
       entry = await ollamaQuipLong(`${system} ${NOT_THOSE_LINES}`, 'Write tonight\'s entry.', config);
       const again = liftedFrom(entry, examples);
       if (again) { console.warn(`[diary] still lifting ("${again}…") — not written tonight`); return; }
+    }
+    // A diary that has to be true cannot name what the night never mentioned.
+    // Everything she was given is the allowed pool; a name outside it is a
+    // fabricated event, and she is asked once to write without it.
+    const strange = unknownNames(entry, [system]);
+    if (strange.length) {
+      console.log(`[diary] she named ${strange.map(name => `"${name}"`).join(', ')}, which tonight never mentioned — asking again`);
+      entry = await ollamaQuipLong(`${system} ${NOT_THOSE_NAMES(strange)}`, 'Write tonight\'s entry.', config);
+      const still = unknownNames(entry, [system]);
+      if (still.length) { console.warn(`[diary] still naming ${still.map(name => `"${name}"`).join(', ')} — not written tonight`); return; }
     }
     if (entry.trim().length < 40) { console.log('[diary] nothing worth keeping came out — not written'); return; }
     appendEntry(app.getPath('home'), due, entry, new Intl.DateTimeFormat('en-AU', { weekday: 'long', timeZone: 'UTC' }));
