@@ -37,6 +37,7 @@ import { correct, noteUsed, readHearing, remember } from './hearing';
 import { assumeItIsTheirs, identifyWork, noteWork, readFollowing, recogniseNow, summariseFollowing } from './following';
 import { lookUpPlace, readWindowsLocation, searchPlaces, type FoundPlace } from './location';
 import { INTERRUPTED_ASIDE, wakeAck } from './wake';
+import { reminderAsk, reminderSavedAside } from './remindme';
 import { describeWeather, readForecast, weatherEvents, weatherUrl, WEATHER_POLL_MS, type WeatherSample } from './weather';
 import { leftHanging } from './hanging';
 import { markMentioned, upcomingToMention } from './upcoming';
@@ -551,16 +552,22 @@ function performChatResetIfDue() {
   if (previousKey === key) return;
   const previousMessages = store.get('chat.messages') as unknown[] | undefined;
   if (previousKey && previousMessages?.length) archiveMessages(previousMessages, previousKey);
+  // The key moves before the day is distilled: killed between the two, the next
+  // start would otherwise file the same messages under the old day again.
+  store.set('chat.dayKey', key);
+  store.delete('chat.messages' as never);
   // The day is over, so now it becomes one line. Over everything the day
   // collected — what was on screen at 5am plus whatever was cleared away earlier
   // — because a day summarised from only its last stretch is as partial as one
   // summarised from only its first.
   if (previousKey) {
     const whole = ((store.get('chat.archive') as Record<string, unknown[]> | undefined) ?? {})[previousKey] ?? [];
-    summariseSession(whole as { role?: string; content?: string }[], previousKey, { replace: true });
+    try {
+      summariseSession(whole as { role?: string; content?: string }[], previousKey, { replace: true });
+    } catch (error) {
+      console.warn('[memory] could not start the day summary:', error instanceof Error ? error.message : error);
+    }
   }
-  store.set('chat.dayKey', key);
-  store.delete('chat.messages' as never);
   // Her log is trimmed rather than cleared. The conversation starts fresh every
   // day because a conversation is a thing you are in the middle of; the log is a
   // record, and a record you can only ever see today's page of is not one. A few
@@ -631,6 +638,11 @@ function setKept(items: KeptItem[]) {
 }
 
 function addKeptItem(item: Omit<KeptItem, 'id' | 'done'>): KeptItem {
+  // The same ask can arrive twice — read from the message and then called for
+  // by the model's tool, or a retry of the same turn — and is still one item.
+  const same = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+  const existing = getKept().find(kept => !kept.done && kept.date === item.date && (kept.time ?? '') === (item.time ?? '') && same(kept.title, item.title));
+  if (existing) return existing;
   const created: KeptItem = { ...item, id: randomUUID(), done: false };
   setKept([...getKept(), created]);
   // Pushed in the background: a slow or failed Google call should not hold up
@@ -5065,6 +5077,14 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   noteTheyAccounted(latest);
   // They have spoken, which is what every escalation was trying to achieve.
   acknowledgeReminders();
+  // A plain "remind me to X at T" is saved here, before she answers, and she is
+  // told so — the tool alone was not enough, see remindme.ts.
+  const reminder = messages.at(-1)?.role === 'user' ? reminderAsk(latest, zonedNow(CHAT_TIMEZONE)) : null;
+  if (reminder) {
+    const item = addKeptItem({ ...reminder, kind: 'task' });
+    console.log(`[remind] read from the message: "${item.title}" on ${item.date}${item.time ? ` at ${item.time}` : ''}`);
+    aside = [aside, reminderSavedAside(reminder, localDateKey(zonedNow(CHAT_TIMEZONE)))].filter(Boolean).join(' ');
+  }
   // Counted here rather than in the prompt so it survives across turns: telling
   // her to drop it and having her comply for one reply is the whole complaint.
   const pushback = nextPushback(store.get('pushback') as Pushback | undefined, readsAsDropIt(latest), Date.now());
@@ -6361,6 +6381,30 @@ async function pesterOnPush() {
 // same preferences and quiet hours as everything else.
 
 const PROACTIVE_TICK_MS = 5 * 60_000;
+
+// ---- Chasing on time ------------------------------------------------------
+//
+// The desk's reminder loop is gated on the machine being idle, which a headless
+// box never passes, and the random push beat above can land two hours from a
+// task's time. So the phone has a minute hand of its own: the same chase rules
+// as everywhere else (lead, staleness, spacing, the escalation ladder), asked
+// once a minute, pushed only when they say so. Quiet hours are the push
+// preferences', as for every other push.
+const CHASE_TICK_MS = 60_000;
+let chaseTimer: ReturnType<typeof setInterval> | null = null;
+
+async function chaseTick() {
+  const { devices, prefs } = getPush();
+  if (!webServer || !devices.length || !prefs.events) return;
+  if (inQuietHours(prefs, zonedNow(CHAT_TIMEZONE))) return;
+  const said = await nudgeForPhone();
+  if (said && await pushToPhone('events', said.line)) console.log(`[push] chased about "${said.about}"`);
+}
+
+function startChasing() {
+  if (chaseTimer) return;
+  chaseTimer = setInterval(() => { void chaseTick(); }, CHASE_TICK_MS);
+}
 let proactiveTimer: NodeJS.Timeout | null = null;
 let lastWeatherPollAt = 0;
 
@@ -7005,6 +7049,7 @@ async function startWebDoor() {
     // subscriptions itself, so closing the door silences it with no bookkeeping.
     if (!pushPesterTimer) scheduleNextPush();
     startProactive();
+    startChasing();
   } catch (error) {
     const why = error instanceof Error ? error.message : String(error);
     // "Check the log" was useless advice twice over: there was no log, and the
