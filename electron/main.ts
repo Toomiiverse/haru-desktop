@@ -76,6 +76,7 @@ import { seedEmoji } from './seed';
 import { pickToBringUp, REMEMBERED_PICKS } from './bored';
 import { grudgeInstruction, irritationAfterTally, nextGrudge, tallyDue, tallyInstruction, unanswered } from './grudge';
 import { groundedInstruction, placeQuery } from './places';
+import { daySaid, DEFAULT_BEDTIME_MINUTES, howTheDayWent, nightfallDue, sulkGrudge, sulkInstruction, sulkStillStands, type DayVerdict } from './nightfall';
 import { feedbackEntry, recordFeedback } from './feedback';
 import { describePull, isTailnetAddress, mergeCheckIns, readCheckInSource } from './checkinsource';
 import { describeMerge } from './memorysync';
@@ -1997,14 +1998,27 @@ function findVoiceLauncher(): string | null {
   return null;
 }
 
-/** Any HTTP answer at all means something is there; only a refused connection means nothing is. */
-async function isAnswering(endpoint: string, ms = 1500): Promise<boolean> {
-  try {
-    await net.fetch(`${trimEndpoint(endpoint)}/`, { signal: AbortSignal.timeout(ms) });
-    return true;
-  } catch {
-    return false;
+/**
+ * Any HTTP answer at all means something is there; only a refused connection or
+ * a silence means nothing is.
+ *
+ * `tries` for the one probe whose answer decides something. A single 1500ms
+ * reach on a box that is briefly busy — mid vision pass, seconds after a
+ * restart — came back false for a server that was up and answering in under a
+ * millisecond when asked again a moment later. Once in twenty-two starts, and
+ * it read in the log as her having lost her voice. The wait loop below keeps
+ * one try, because looping every two seconds is already the retry.
+ */
+async function isAnswering(endpoint: string, ms = 1500, tries = 1): Promise<boolean> {
+  for (let attempt = 1; attempt <= tries; attempt += 1) {
+    try {
+      await net.fetch(`${trimEndpoint(endpoint)}/`, { signal: AbortSignal.timeout(ms) });
+      return true;
+    } catch {
+      if (attempt < tries) await new Promise(done => setTimeout(done, 400));
+    }
   }
+  return false;
 }
 
 async function reviveVoiceServer() {
@@ -2012,9 +2026,14 @@ async function reviveVoiceServer() {
   if (voice.engine !== 'gpt-sovits') return;
   // Somebody else's machine is somebody else's to start.
   if (isRemote(voice.endpoint)) return;
-  if (await isAnswering(voice.endpoint)) { console.log('[voice] the speech server is already up'); return; }
+  if (await isAnswering(voice.endpoint, 1500, 3)) { console.log('[voice] the speech server is already up'); return; }
   const launcher = findVoiceLauncher();
-  if (!launcher) { console.warn(`[voice] nothing at ${voice.endpoint} and no ${VOICE_LAUNCHER} found — she will be silent`); return; }
+  // Says what it knows. Speaking does not go through this probe — it reaches
+  // the endpoint when there is something to say — so nothing here establishes
+  // that she is mute, only that this machine has no way to start a server that
+  // did not answer. On anything but Windows there never will be: the launcher
+  // is a .cmd.
+  if (!launcher) { console.warn(`[voice] nothing answered at ${voice.endpoint}, and there is no ${VOICE_LAUNCHER} here to start one — she will speak if it comes up on its own`); return; }
   console.log(`[voice] nothing at ${voice.endpoint} — starting ${launcher}`);
   try {
     // Detached and unref'd: it outlives this app deliberately, the same way it
@@ -3742,13 +3761,17 @@ type Mood = { irritation: number; ego: number; lastMessageAt?: string; goodnight
    * can fail, and either one used to lose the whole evening silently because
    * the day was already marked done. See tellThemTheTally.
    */
-  toldDay?: string; ignoredSamples?: string[] };
+  toldDay?: string; ignoredSamples?: string[];
+  /** The bedtime check (nightfall.ts): the day it last ran, and the morning it owes. */
+  nightfallDay?: string;
+  owedMorning?: { day: string; went: DayVerdict; said: number } };
 
 function getMood(): Mood {
   const saved = store.get('mood') as Partial<Mood> | undefined;
   return { irritation: Number(saved?.irritation ?? 0), ego: Number(saved?.ego ?? 0), lastMessageAt: saved?.lastMessageAt, goodnightDay: saved?.goodnightDay, awaitingApology: Boolean(saved?.awaitingApology),
     grudge: Number(saved?.grudge ?? 0), ignoredToday: Number(saved?.ignoredToday ?? 0), talliedDay: saved?.talliedDay,
-    toldDay: saved?.toldDay, ignoredSamples: Array.isArray(saved?.ignoredSamples) ? saved.ignoredSamples.map(String) : [] };
+    toldDay: saved?.toldDay, ignoredSamples: Array.isArray(saved?.ignoredSamples) ? saved.ignoredSamples.map(String) : [],
+    nightfallDay: saved?.nightfallDay, owedMorning: saved?.owedMorning };
 }
 
 function setMood(mood: Mood) {
@@ -7209,6 +7232,8 @@ async function proactiveTick() {
   const config = store.get('ai.config') as ProviderConfig | undefined;
   if (!config?.model) return;
   await tallyIgnored(config);
+  sulkAtNightfall();
+  await sayItInTheMorning(config);
   await checkNudgeFloor();
   const { devices, prefs } = getPush();
   // The weather is read even with no phone to buzz: it is in her prompt.
@@ -7248,6 +7273,93 @@ async function tallyIgnored(config: ProviderConfig) {
     console.log(`[grudge] ${todayKey}: ${ignored.length} of her lines went unanswered — grudge ${mood.grudge ?? 0} -> ${grudge}, irritation ${mood.irritation} -> ${irritation}`);
   }
   await tellThemTheTally(config, todayKey);
+}
+
+/**
+ * Bedtime: were they ever going to say anything about today?
+ *
+ * Silent here — it runs at the top of the quiet hours, and waking somebody to
+ * complain that they went to sleep is not the point. It costs them on the spot
+ * and leaves a note for the morning, which sayItInTheMorning picks up the
+ * moment the quiet is over.
+ *
+ * Deliberately not folded into the eight o'clock tally: that counts lines of
+ * hers that got no answer, and a day where neither of them said anything has
+ * none of those. By the tally it reads as a clean day and even earns a point
+ * back, which is the wrong answer to being ignored all day.
+ */
+function sulkAtNightfall() {
+  const now = zonedNow(CHAT_TIMEZONE);
+  const todayKey = localDateKey(now);
+  const mood = getMood();
+  const { prefs } = getPush();
+  const [hour, minute] = prefs.quietFrom.split(':').map(Number);
+  const bedtime = prefs.quietFrom === prefs.quietTo || !Number.isFinite(hour) ? DEFAULT_BEDTIME_MINUTES : hour * 60 + minute;
+  if (!nightfallDue(now.getHours() * 60 + now.getMinutes(), bedtime, mood.nightfallDay, todayKey)) return;
+  const messages = (store.get('chat.messages') as { role: string; content?: string }[] | undefined) ?? [];
+  const said = daySaid(messages);
+  // The journal and the check-ins are the "how was your day" channels; using
+  // one of them is telling her, whatever the chat looked like.
+  const toldElsewhere = getJournal().some(entry => entry.date === todayKey)
+    || checkInsOn(getCheckIns(), todayKey).length > 0;
+  const went = howTheDayWent(said, toldElsewhere);
+  const grudge = sulkGrudge(mood.grudge ?? 0, went);
+  setMood({ ...mood, grudge, nightfallDay: todayKey, owedMorning: went === 'fine' ? undefined : { day: todayKey, went, said } });
+  console.log(`[nightfall] ${todayKey}: ${said} real message(s)${toldElsewhere ? ' plus a journal or check-in' : ''} — ${went}, grudge ${mood.grudge ?? 0} -> ${grudge}${went === 'fine' ? '' : ', owed a word in the morning'}`);
+}
+
+/** Not before this: interject refuses mid-conversation, and that passes. */
+let morningQuietUntil = 0;
+
+/**
+ * The note she went to bed with, said the moment the quiet is over.
+ *
+ * Gated on the quiet ending rather than on a clock of its own, so it follows
+ * whatever hours they have set. Kept until it actually gets out — the same
+ * lesson as the evening tally, where marking it done before the line was said
+ * lost the whole thing to one refusal — and dropped after a day, because
+ * bringing up Tuesday on Thursday is not holding a grudge, it is a non sequitur.
+ */
+async function sayItInTheMorning(config: ProviderConfig) {
+  const mood = getMood();
+  const owed = mood.owedMorning;
+  if (!owed) return;
+  const now = zonedNow(CHAT_TIMEZONE);
+  const todayKey = localDateKey(now);
+  const { prefs } = getPush();
+  if (inQuietHours(prefs, now)) return;
+  if (!sulkStillStands(owed.day, todayKey)) {
+    console.log(`[nightfall] the word owed for ${owed.day} has gone stale — dropping it`);
+    setMood({ ...getMood(), owedMorning: undefined });
+    return;
+  }
+  // The night it is about has to be over: at 23:05 the quiet has begun, but a
+  // check that ran a minute earlier would otherwise fire straight back out.
+  if (owed.day === todayKey) return;
+  if (Date.now() < morningQuietUntil) return;
+  const character = getActiveCharacter();
+  const system = [
+    character.identity,
+    character.style,
+    moodInstruction(mood.irritation),
+    grudgeInstruction(mood.grudge ?? 0, 0),
+    sulkInstruction(owed.went, owed.said, mood.grudge ?? 0),
+    EXPRESSIVE,
+    'No quotation marks, no stage directions.',
+  ].filter(Boolean).join(' ');
+  try {
+    const clock = zonedNow(CHAT_TIMEZONE);
+    const line = fixStatedClock(await ollamaQuip(system, 'Say it.', config), clock.getHours(), clock.getMinutes());
+    if (line && interject(line, { source: 'idle' })) {
+      setMood({ ...getMood(), owedMorning: undefined });
+      console.log(`[nightfall] said it — they had gone ${owed.went} on her`);
+      return;
+    }
+  } catch (error) {
+    console.warn('[nightfall] could not compose the morning line:', error instanceof Error ? error.message : error);
+  }
+  morningQuietUntil = Date.now() + TALLY_RETRY_MS;
+  console.log(`[nightfall] the morning line did not get out — trying again in ${Math.round(TALLY_RETRY_MS / 60_000)} min`);
 }
 
 /** Not before this: interject refuses mid-conversation, and that passes. */
