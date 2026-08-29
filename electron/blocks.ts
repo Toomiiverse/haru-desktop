@@ -378,7 +378,24 @@ export type BlockRenderOptions = {
   /** Labels left out of this render. Their values still resolve everywhere
    *  else — the inspector, the tools — this only decides what the prompt says. */
   omit?: string[];
+  /**
+   * Tag and value only: no description paragraph, no character budget. The
+   * full shape is Letta's, written for an agent that reads the description to
+   * decide what belongs where and watches chars_current to manage its own
+   * budget. Neither happens here — the budgets are enforced in code and the
+   * append tool refuses over-limit writes itself, the tool schema names the
+   * blocks, and the behavioural lines in the descriptions ("do not infer",
+   * "follow them even when not mentioned") are already said, more forcefully,
+   * elsewhere in the prompt. Measured against the live config, the wrappers
+   * were ~1,700 characters a turn that told the model nothing it acts on.
+   */
+  compact?: boolean;
 };
+
+/** The compact shape: the label as the tag, then the value. */
+export function renderBlockCompact(block: MemoryBlock, value: string): string {
+  return [`<${block.label}>`, value, `</${block.label}>`].join('\n');
+}
 
 /**
  * The whole memory-blocks section for the system prompt. Values are resolved
@@ -402,7 +419,7 @@ export function formatMemoryBlocks(blocks: MemoryBlock[], sources: BlockSources,
     if (!value.trim()) continue;
     const fitted = fitToLimit(value, block);
     if (fitted.cut) cut.push({ label: block.label, before: value.length, after: fitted.value.length });
-    parts.push(renderBlock(block, fitted.value));
+    parts.push(options.compact ? renderBlockCompact(block, fitted.value) : renderBlock(block, fitted.value));
   }
   const text = parts.length ? `<memory_blocks>\n${parts.join('\n')}\n</memory_blocks>` : '';
   return { text, cut };

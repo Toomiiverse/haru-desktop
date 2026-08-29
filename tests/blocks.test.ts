@@ -226,6 +226,28 @@ test('formatMemoryBlocks leaves out omitted blocks, and the persona is what the 
   assert.equal(resolveBlockValue(findBlock(blocks, 'persona')!, sources), 'Hyperactive, loud.\nBossy.');
 });
 
+test('formatMemoryBlocks compact render is tag and value only, and still fits and reports cuts', () => {
+  const blocks = defaultMemoryBlocks().map(block => block.label === 'preferences' ? { ...block, limit: 40 } : block);
+  const sources = {
+    character: { identity: 'Hyperactive, loud.', style: 'Bossy.' },
+    profile: { nickname: 'Tommy', occupation: '', about: '' },
+    memories: [
+      record({ id: 'pref', text: 'Dislikes being nagged', kind: 'preference', importance: 0.85 }),
+      record({ id: 'pref2', text: 'Wants every single reply kept to one short paragraph at most', kind: 'preference', importance: 0.85 }),
+    ],
+    sessions: [] as SessionSummary[],
+  };
+  const { text, cut } = formatMemoryBlocks(blocks, sources, { omit: ['persona'], compact: true });
+  assert.ok(text.startsWith('<memory_blocks>'));
+  assert.ok(!text.includes('<description>'));
+  assert.ok(!text.includes('<metadata>'));
+  assert.ok(!text.includes('chars_current='));
+  assert.ok(!text.includes('<value>'));
+  assert.ok(text.includes('<human>\n- Goes by Tommy.\n'));
+  assert.ok(text.includes('<preferences>'));
+  assert.ok(cut.some(entry => entry.label === 'preferences'));
+});
+
 test('formatMemoryBlocks reports what was cut to fit budgets', () => {
   const blocks = defaultMemoryBlocks().map(block => block.label === 'human' ? { ...block, limit: 80 } : block);
   const sources = {

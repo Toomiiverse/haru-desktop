@@ -242,8 +242,9 @@ export function createMemoryStore(deps: MemoryStoreDeps) {
     // the deterministic engine on every render — the retrieval above is what
     // decides what the human block shows — so the blocks can never drift from
     // the authoritative records. The persona block is left out here: the
-    // prompt ends on the same text, and it was going in twice.
-    const blocks = formatMemoryBlocks(store.getBlocks(), blockSources(query), { omit: ['persona'] });
+    // prompt ends on the same text, and it was going in twice. Compact, for
+    // the reason given on BlockRenderOptions.
+    const blocks = formatMemoryBlocks(store.getBlocks(), blockSources(query), { omit: ['persona'], compact: true });
     for (const entry of blocks.cut) {
       console.warn(`[blocks] ${entry.label} cut from ${entry.before} to ${entry.after} chars to fit its budget — selection was tighter than this; raise the block limit if it keeps happening`);
     }
