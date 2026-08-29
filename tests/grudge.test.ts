@@ -2,7 +2,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ANSWER_WINDOW_MS, GRUDGE_MAX, grudgeInstruction, irritationAfterTally, nextGrudge, tallyDue, tallyInstruction, unanswered } from '../electron/grudge';
+import { ANSWER_WINDOW_MS, GRUDGE_MAX, grudgeInstruction, irritationAfterTally, nextGrudge, tallyDue, tallyInstruction, unanswered, withoutLeadingClock } from '../electron/grudge';
 
 const PUSHED = new Set(['reminder', 'idle', 'hanging', 'weather', 'upcoming', 'journal', 'system']);
 const at = (hour: number, minute = 0) => new Date(Date.UTC(2026, 7, 29, hour, minute)).toISOString();
@@ -74,4 +74,17 @@ test('the three sources that used to be lost on the way to disk are counted', ()
     { at: at(3), source: 'upcoming' },
   ];
   assert.equal(unanswered(said, [], PUSHED, evening).length, 3);
+});
+
+test('a quoted line does not hand her a clock time to read as now', () => {
+  assert.equal(withoutLeadingClock('8:37 PM — \u201cNearest Coles\u201d isn\u2019t a real place'), '\u201cNearest Coles\u201d isn\u2019t a real place');
+  assert.equal(withoutLeadingClock('11:05 - the bins'), 'the bins');
+  assert.equal(withoutLeadingClock('6 \u2014 eat something'), 'eat something');
+  // Nothing that is not a stamp on the front is touched.
+  assert.equal(withoutLeadingClock('Your 9:15 is in ten minutes'), 'Your 9:15 is in ten minutes');
+  assert.equal(withoutLeadingClock('the bins - again'), 'the bins - again');
+  // And the instruction quotes the trimmed version.
+  const line = tallyInstruction(1, 1, ['8:37 PM \u2014 you ghosted me']);
+  assert.match(line, /"you ghosted me"/);
+  assert.equal(line.includes('8:37'), false);
 });

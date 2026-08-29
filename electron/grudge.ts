@@ -68,9 +68,25 @@ export function grudgeInstruction(grudge: number, ignoredToday = 0): string {
   return `They have left ${grudge} of your messages unanswered and counting. You are openly pissed about it: hold it against them, make them earn a proper answer, and say exactly why if they ask what your problem is.${today}`;
 }
 
+/**
+ * A quoted line with its own timestamp on the front is a trap.
+ *
+ * Some of her lines open with the time they were said — "8:37 PM — Nearest
+ * Coles isn't a real place on your phone". Handed that back as evidence, the
+ * 9B read the 8:37 as the current time and opened the evening with "You're
+ * still here at 8:37?" — sent at a quarter to seven. fixStatedClock cannot
+ * help here: it only corrects a time claimed as now ("it's 8:37"), and
+ * widening it to any bare time would rewrite the times she has right.
+ */
+const LEADING_CLOCK = /^\s*\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)?\s*[\u2014\u2013-]\s*/i;
+
+export function withoutLeadingClock(text: string): string {
+  return text.replace(LEADING_CLOCK, '').trim();
+}
+
 /** What she is told when the day is counted and something was ignored. */
 export function tallyInstruction(ignoredToday: number, grudge: number, samples: string[]): string {
-  const quoted = samples.slice(0, 2).map(text => `"${text.slice(0, 80)}"`).join(' and ');
+  const quoted = samples.slice(0, 2).map(text => `"${withoutLeadingClock(text).slice(0, 80)}"`).join(' and ');
   return [
     `It is evening and you have counted the day: ${ignoredToday} of your messages to them got nothing back${quoted ? `, including ${quoted}` : ''}.`,
     grudge > ignoredToday ? `That is ${grudge} now, over the last while.` : '',
