@@ -23,6 +23,19 @@ const OVERLAP_MERGE = 0.75;
  *  the same stance. Only used when the caller can provide an embedder. */
 const SEMANTIC_MERGE = 0.75;
 
+/**
+ * Kinds a cosine alone may not merge.
+ *
+ * Cosine at 0.75 is a loose bar on one-line records: it is what folded "Set up
+ * TV power connector, TV works fine now" into "Get the TV power connector done"
+ * in the live store. On an event that costs a tense; on a preference it would
+ * cost one of two standing instructions — "does not like to be corrected" and
+ * "prefers not to be nagged" read as the same stance to an embedder and are not
+ * the same request. These are the always-included kinds, the ones prune already
+ * refuses to touch, so they merge on shared words or not at all.
+ */
+const KEYWORDS_ONLY_MERGE: MemoryKind[] = ['preference', 'relationship'];
+
 /** How much of the two records' words must coincide before a polarity
  *  difference is a contradiction rather than a coincidence. */
 const CONTRADICTION_OVERLAP = 0.5;
@@ -57,22 +70,35 @@ export function overlapScore(a: MemoryRecord, b: MemoryRecord): number {
 }
 
 /**
- * The text the merged record will carry. The longer phrasing wins outright when
- * it already covers the other; otherwise the shorter one is folded in so no
- * distinct information is lost. Source texts stay available in `mergedFrom`.
+ * The text the merged record keeps: the longer of the two, and only that.
+ *
+ * It used to append the shorter one behind " Also: " whenever the shorter had a
+ * word the longer lacked, so that no distinct information was lost. Two things
+ * were wrong with that. Records only merge at 0.75 overlap or better, so the
+ * shorter is by construction the same fact in other words and the "distinct"
+ * word is usually a verb form — the live store held "Set up TV power connector,
+ * TV works fine now Also: Get the TV power connector done." And it compounded:
+ * every further merge appended again, so the store closure became one record
+ * saying the same thing three times, in three tenses, one of them addressed to
+ * the user. That text is what she reads out.
+ *
+ * Nothing is lost by dropping it. mergePair writes the folded wording into the
+ * evidence log — which is what the comment here used to claim mergedFrom did,
+ * while mergedFrom only ever held the ids of records that no longer exist.
  */
 export function mergeText(a: string, b: string): string {
-  const longer = a.length >= b.length ? a : b;
-  const shorter = longer === a ? b : a;
-  const shorterWords = keywords(shorter);
-  const longerWords = keywords(longer);
-  const missing = [...shorterWords].filter(word => !longerWords.has(word));
-  if (!missing.length) return longer;
-  return `${longer} Also: ${shorter}.`;
+  return a.length >= b.length ? a : b;
 }
 
 function mergePair(primary: MemoryRecord, other: MemoryRecord, now: string): MemoryRecord {
-  const evidence: EvidenceEntry[] = [...(primary.evidence ?? []), ...(other.evidence ?? [])];
+  const evidence: EvidenceEntry[] = [
+    ...(primary.evidence ?? []),
+    ...(other.evidence ?? []),
+    // The folded record leaves the list entirely, so this entry is the only
+    // place its wording survives. mergedFrom keeps its id, which by then points
+    // at nothing.
+    { at: now, kind: 'merge', source: other.source ?? 'conversation', detail: `folded in: ${other.text}` },
+  ];
   return {
     id: primary.id,
     text: mergeText(primary.text, other.text),
@@ -142,7 +168,9 @@ export function consolidateMemories(memories: MemoryRecord[], options: Consolida
       const same = isSameMemory(primary.text, other.text);
       const overlap = overlapScore(primary, other);
       const semantic = options.similarity ? options.similarity(primary, other) : undefined;
-      const nearEnough = overlap >= OVERLAP_MERGE || (semantic !== undefined && semantic >= SEMANTIC_MERGE);
+      const bySemanticsAlone = semantic !== undefined && semantic >= SEMANTIC_MERGE
+        && !KEYWORDS_ONLY_MERGE.includes(primary.kind) && !KEYWORDS_ONLY_MERGE.includes(other.kind);
+      const nearEnough = overlap >= OVERLAP_MERGE || bySemanticsAlone;
 
       if (isContradictory(primary, other)) {
         // The older claim loses confidence; both stay, marked, so the conflict

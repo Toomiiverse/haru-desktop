@@ -23,6 +23,12 @@ import {
   semanticSimilarities,
   retrieveMemories,
   SEMANTIC_FLOOR,
+  readsAsSecondPerson,
+  migrateMemories,
+  EVIDENCE_KINDS,
+  summaryPrompt,
+  eventsPrompt,
+  isWorthAnEvent,
   type MemoryRecord,
 } from '../electron/memory';
 
@@ -438,4 +444,49 @@ test('isWorthKeeping rejects the "nothing notable" sentinel and rejects empty su
   assert.equal(isWorthKeeping('Nothing notable.'), false);
   assert.equal(isWorthKeeping(''), false);
   assert.equal(isWorthKeeping('Spent the afternoon debugging the audio driver.'), true);
+});
+
+test('a note that talks to somebody is spotted, whoever it means', () => {
+  // Both of these were in the live store, and they do not agree on who "you"
+  // is: the first meant the user, the second meant Haru. Either way the line
+  // ends up in her prompt, where "you" is her.
+  assert.equal(readsAsSecondPerson('You were dealing with reminders about The PC Project'), true);
+  assert.equal(readsAsSecondPerson('You reminded them about Scarlett’s birthday party'), true);
+  assert.equal(readsAsSecondPerson('The user woke up and started working, with trivia updates from you'), true);
+  assert.equal(readsAsSecondPerson("You're closing the store from Monday to Tuesday"), true);
+  assert.equal(readsAsSecondPerson('Picked up the motherboard, your call'), true);
+});
+
+test('a note written about them is left alone', () => {
+  for (const line of [
+    'They spent the day on a custom PC build and the store clean-up',
+    'Tommy was dealing with multiple distractions and a long workday ahead',
+    'Rental inspection went well, no issues found',
+    'Youngest sibling visited on Saturday',
+  ]) assert.equal(readsAsSecondPerson(line), false, line);
+});
+
+test('the summary and event prompts both pin the person', () => {
+  for (const prompt of [summaryPrompt(), eventsPrompt()]) {
+    assert.match(prompt, /Call them "they"/);
+    assert.match(prompt, /never "you" or "your"/);
+  }
+});
+
+test('an event addressed to the user is not an event', () => {
+  assert.equal(isWorthAnEvent("You're closing the store from Monday to Tuesday for cleaning"), false);
+  assert.equal(isWorthAnEvent('Closed The PC Project store Monday to Tuesday for a deep clean'), true);
+});
+
+test('every kind the code can write survives a read from disk', () => {
+  // The validator in migrateMemories used to carry its own copy of this list.
+  // A kind added to the union and not to the copy compiles, then vanishes on
+  // the next load — silently, and taking whatever it carried with it.
+  const evidence = EVIDENCE_KINDS.map(kind => ({ at: '2026-08-29T00:00:00.000Z', kind, source: 'conversation' as const, detail: `a ${kind} entry` }));
+  const [record] = migrateMemories([{
+    id: 'r1', text: 'Runs a shop called The PC Project', kind: 'fact',
+    createdAt: '2026-08-01T00:00:00.000Z', lastSeenAt: '2026-08-01T00:00:00.000Z', mentions: 1, evidence,
+  }], '2026-08-29T00:00:00.000Z');
+  assert.deepEqual((record.evidence ?? []).map(entry => entry.kind), [...EVIDENCE_KINDS]);
+  assert.equal(EVIDENCE_KINDS.includes('merge'), true);
 });

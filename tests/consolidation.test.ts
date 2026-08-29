@@ -44,12 +44,32 @@ test('overlapScore shares content words', () => {
   assert.equal(overlapScore(a, record({ id: 'c', text: 'Plays the piano', kind: 'fact' })), 0);
 });
 
-test('mergeText folds distinct words in and keeps the longer alone', () => {
+test('mergeText keeps the fuller wording and never glues two together', () => {
   assert.equal(mergeText('Has a dog called Rex', 'Has a dog called Rex'), 'Has a dog called Rex');
   assert.equal(mergeText('Likes green tea', 'Likes green tea and prefers it cold'), 'Likes green tea and prefers it cold');
-  const merged = mergeText('Dislikes being corrected', 'Dislikes being nagged');
-  assert.ok(merged.includes('corrected'));
-  assert.ok(merged.includes('nagged'));
+  assert.equal(mergeText('Dislikes being nagged', 'Dislikes being corrected'), 'Dislikes being corrected');
+});
+
+test('the sentences the old glue produced cannot be produced again', () => {
+  // Both were in the live store. The second is what a second merge did to the
+  // first — the reason this had to stop compounding rather than read better.
+  const glued = mergeText('Set up TV power connector, TV works fine now', 'Get the TV power connector done.');
+  assert.equal(glued, 'Set up TV power connector, TV works fine now');
+  assert.equal(mergeText('Rental inspection went well, no issues found', 'Rental inspection completed, but details not shared.'), 'Rental inspection completed, but details not shared.');
+  for (const text of [glued, mergeText('a', 'bb'), mergeText('longer text here', 'short')]) {
+    assert.equal(text.includes(' Also: '), false);
+  }
+});
+
+test('the folded wording survives in the evidence log, since its record does not', () => {
+  const a = record({ id: 'a', text: 'Has a dog called Rex', kind: 'fact', mentions: 3 });
+  const b = record({ id: 'b', text: 'has a dog named Rex', kind: 'fact', mentions: 1 });
+  const { memories } = consolidateMemories([a, b], { now: NOW });
+  assert.equal(memories.length, 1);
+  const folded = (memories[0].evidence ?? []).filter(entry => entry.kind === 'merge');
+  assert.equal(folded.length, 1);
+  assert.match(folded[0].detail ?? '', /has a dog named Rex/);
+  assert.deepEqual(memories[0].mergedFrom, ['b']);
 });
 
 test('consolidateMemories merges rewording of the same fact', () => {
@@ -65,16 +85,35 @@ test('consolidateMemories merges rewording of the same fact', () => {
 });
 
 test('consolidateMemories merges near-duplicates via semantic similarity', () => {
-  const a = record({ id: 'a', text: 'Does not like to be corrected on tasks or reminders without being told how to improve', kind: 'preference', mentions: 2 });
-  const b = record({ id: 'b', text: 'Prefer not to be constantly nagged and reminded of tasks when not asked', kind: 'preference', mentions: 1 });
+  const a = record({ id: 'a', text: 'Picked up the motherboard from Umart in Belmont on Thursday', kind: 'event', mentions: 2 });
+  const b = record({ id: 'b', text: 'Collected the mainboard', kind: 'event', mentions: 1 });
   const similarity = () => 0.9;
   const { memories, changes } = consolidateMemories([a, b], { now: NOW, similarity });
   assert.equal(memories.length, 1);
-  assert.equal(memories[0].kind, 'preference');
-  assert.ok(memories[0].text.includes('corrected'));
-  assert.ok(memories[0].text.includes('nagged'));
+  assert.equal(memories[0].kind, 'event');
+  // One wording, the fuller one — and the other kept where it can still be read.
+  assert.equal(memories[0].text, 'Picked up the motherboard from Umart in Belmont on Thursday');
+  assert.match((memories[0].evidence ?? []).find(entry => entry.kind === 'merge')?.detail ?? '', /Collected the mainboard/);
   assert.deepEqual(memories[0].mergedFrom, ['b']);
   assert.equal(changes.length, 1);
+});
+
+test('two standing preferences are not merged by a cosine alone', () => {
+  // The live pair. An embedder reads both as "do not push me"; they are a rule
+  // about correction and a rule about nagging, and she needs both.
+  const a = record({ id: 'a', text: 'Does not like to be corrected on tasks or reminders without being told how to improve', kind: 'preference', mentions: 2 });
+  const b = record({ id: 'b', text: 'Prefer not to be constantly nagged and reminded of tasks when not asked', kind: 'preference', mentions: 1 });
+  const { memories, changes } = consolidateMemories([a, b], { now: NOW, similarity: () => 0.95 });
+  assert.equal(memories.length, 2);
+  assert.equal(changes.length, 0);
+});
+
+test('but preferences that really are the same words still merge', () => {
+  const a = record({ id: 'a', text: 'Prefers not to be nagged about tasks when not asked', kind: 'preference', mentions: 2 });
+  const b = record({ id: 'b', text: 'Prefers not to be nagged about tasks', kind: 'preference', mentions: 1 });
+  const { memories } = consolidateMemories([a, b], { now: NOW });
+  assert.equal(memories.length, 1);
+  assert.equal(memories[0].text, 'Prefers not to be nagged about tasks when not asked');
 });
 
 test('consolidateMemories flags contradictions and drops confidence of the older', () => {

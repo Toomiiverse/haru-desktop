@@ -16,15 +16,31 @@ export const MEMORY_KINDS = ['preference', 'relationship', 'event', 'fact'] as c
 export type MemoryKind = typeof MEMORY_KINDS[number];
 
 /** Where a memory came from. Reliable sources start with higher confidence. */
-export type MemorySource = 'conversation' | 'explicit' | 'inferred' | 'activity' | 'import';
+export type MemorySource = typeof MEMORY_SOURCES[number];
 
 /** Lifecycle state. DORMANT and ARCHIVED are set by decay, never silently. */
-export type MemoryStatus = 'active' | 'dormant' | 'archived';
+export type MemoryStatus = typeof MEMORY_STATUSES[number];
 
 /** The kind of knowing, alongside the interaction kind in `kind`. */
-export type MemoryType = 'semantic' | 'episodic' | 'procedural' | 'relational';
+export type MemoryType = typeof MEMORY_TYPES[number];
 
-export type EvidenceKind = 'statement' | 'repeat' | 'confirmation' | 'contradiction' | 'inference';
+/**
+ * Listed once and derived into the type, not spelled out twice.
+ *
+ * migrateMemories validates evidence against this list on every read, and it
+ * used to carry its own copy of the five original kinds. Adding 'merge' to the
+ * union alone would have compiled cleanly and then silently dropped every merge
+ * entry on the next load — and since the folded record's wording now lives only
+ * there, that would have quietly lost the thing it exists to keep. Found by the
+ * session next door, which had just fixed the same shape in asides.ts, where a
+ * short SOURCES list rewrote three real sources to 'other' on every read.
+ */
+export const EVIDENCE_KINDS = ['statement', 'repeat', 'confirmation', 'contradiction', 'inference', 'merge'] as const;
+export type EvidenceKind = typeof EVIDENCE_KINDS[number];
+
+export const MEMORY_SOURCES = ['conversation', 'explicit', 'inferred', 'activity', 'import'] as const;
+export const MEMORY_STATUSES = ['active', 'dormant', 'archived'] as const;
+export const MEMORY_TYPES = ['semantic', 'episodic', 'procedural', 'relational'] as const;
 
 /** One observed moment behind a memory — what makes it worth believing. */
 export type EvidenceEntry = {
@@ -767,13 +783,38 @@ export function formatMemoryPrompt(memories: MemoryRecord[], sessions: SessionSu
 
 // Kept tight on purpose: this is recalled months later as a single line, so it
 // has to be worth the space it takes.
+/**
+ * The person is pinned rather than merely requested. "In the third person" was
+ * already in here and the model drifted anyway: of 26 stored summaries, five
+ * said "you". Worse, they did not agree on who "you" was — "You were dealing
+ * with reminders about The PC Project" meant the user, "You reminded them about
+ * Scarlett's birthday party" meant Haru. These lines go into her own system
+ * prompt, where "you" is unambiguously her, so the first kind quietly tells her
+ * she did the user's day.
+ *
+ * "They" rather than a name: the transcript is labelled `They:` for the same
+ * reason, so the word the note should use is the word the input already uses.
+ */
 export function summaryPrompt() {
   return [
-    'Summarise this conversation in one sentence, under 25 words, in the third person, as a note to your future self.',
-    'Record what the user was doing or dealing with, not what you said back.',
+    'Summarise this conversation in one sentence, under 25 words, as a note to your future self.',
+    'The note is about the user. Call them "they" — never "you" or "your", which in your own notes mean you, Haru.',
+    'Record what they were doing or dealing with, not what you said back.',
     'Skip greetings and small talk. If nothing of substance happened, reply with exactly: nothing notable.',
     'Reply with the sentence only.',
   ].join(' ');
+}
+
+/** Said again, harder, when the first answer came back addressed to somebody. */
+export const THIRD_PERSON_AGAIN = 'That was addressed to a person. Write it again about the user in the third person, using "they", with no "you" or "your" anywhere.';
+
+/**
+ * Whether a note talks to somebody instead of about them. Used to catch the
+ * drift the prompt above is meant to prevent — a deterministic backstop behind
+ * an instruction, because the instruction demonstrably was not enough.
+ */
+export function readsAsSecondPerson(text: string): boolean {
+  return /\b(you|your|yours|yourself|you're|you've|you'll|you'd)\b/i.test(text);
 }
 
 export function isWorthKeeping(summary: string) {
@@ -789,7 +830,8 @@ export function isWorthKeeping(summary: string) {
  */
 export function eventsPrompt() {
   return [
-    'List the events from this conversation worth remembering, one per line, under 15 words each, in the third person, as a note to your future self.',
+    'List the events from this conversation worth remembering, one per line, under 15 words each, as a note to your future self.',
+    'Each line is about the user. Call them "they" — never "you" or "your", which in your own notes mean you, Haru.',
     'Include only what will still matter in a month: decisions made, projects completed or changed, notable personal events, lasting changes to their setup or plans.',
     'Skip routine errands, reminders, small talk and passing feelings.',
     'If nothing qualifies, reply with exactly: nothing notable.',
@@ -824,6 +866,10 @@ export function isWorthAnEvent(text: string): boolean {
   // A sentence addressed to Haru is material for the preference/task systems,
   // not an event in the user's life.
   if (/^haru\b/i.test(clean)) return false;
+  // Nor is one addressed to the user. "You're closing the store from Monday to
+  // Tuesday" reached the store this way and then read, in her own prompt, as
+  // something she was doing — the same drift the summary prompt now pins.
+  if (readsAsSecondPerson(clean)) return false;
   // A passing moment stays a moment even when it names the subject — "work
   // emails" in a procrastination sentence does not make it an event.
   if (GENERIC_MOMENT.test(clean)) return false;
@@ -863,17 +909,13 @@ export function migrateMemories(saved: unknown, now: string): MemoryRecord[] {
       importance: typeof record.importance === 'number' && Number.isFinite(record.importance)
         ? Math.min(1, Math.max(0, record.importance))
         : scoreImportance(kind, text),
-      source: record.source === 'conversation' || record.source === 'explicit' || record.source === 'inferred' || record.source === 'activity' || record.source === 'import'
-        ? record.source
-        : 'conversation',
-      status: record.status === 'active' || record.status === 'dormant' || record.status === 'archived' ? record.status : 'active',
-      memoryType: record.memoryType === 'semantic' || record.memoryType === 'episodic' || record.memoryType === 'procedural' || record.memoryType === 'relational'
-        ? record.memoryType
-        : guessMemoryType(kind, text),
+      source: MEMORY_SOURCES.includes(record.source as MemorySource) ? record.source as MemorySource : 'conversation',
+      status: MEMORY_STATUSES.includes(record.status as MemoryStatus) ? record.status as MemoryStatus : 'active',
+      memoryType: MEMORY_TYPES.includes(record.memoryType as MemoryType) ? record.memoryType as MemoryType : guessMemoryType(kind, text),
       predicate: typeof record.predicate === 'string' ? record.predicate : undefined,
       object: typeof record.object === 'string' ? record.object : undefined,
       evidence: Array.isArray(record.evidence)
-        ? record.evidence.filter(entry => entry && typeof entry.at === 'string' && (entry.kind === 'statement' || entry.kind === 'repeat' || entry.kind === 'confirmation' || entry.kind === 'contradiction' || entry.kind === 'inference'))
+        ? record.evidence.filter(entry => entry && typeof entry.at === 'string' && EVIDENCE_KINDS.includes(entry.kind))
         : [{ at: createdAt, kind: 'statement', source: 'conversation' }],
       mergedFrom: Array.isArray(record.mergedFrom) ? record.mergedFrom.filter(id => typeof id === 'string') : undefined,
       conflictsWith: Array.isArray(record.conflictsWith) ? record.conflictsWith.filter(id => typeof id === 'string') : undefined,
