@@ -84,6 +84,11 @@ export type WebDeps = {
   /** Fold that machine's memories into this one's. Vetted on the way in, so
    *  whatever arrives here is treated as a claim rather than a record. */
   mergeMemories(theirs: unknown): { added: number; updated: number };
+  /** The day at the desk, day-keyed. Raw window titles, so this is behind the
+   *  same login as everything else and reached only over the tailnet. */
+  activityLog(): unknown;
+  /** Fold the desk's log into this machine's. Returns how many days it touched. */
+  mergeActivity(theirs: unknown): { days: number; entries: number };
   journal(): { date: string; text: string; mood?: number; anxiety?: number }[];
   writeJournal(entry: { text: string; mood?: number; anxiety?: number }): Promise<void> | void;
   /** Today's little notes, oldest first. */
@@ -791,6 +796,21 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
   // not one (checkinsource.ts), and these notes are no less hers than that.
   if (req.method === 'GET' && path === '/api/memory/records') {
     return json(res, 200, { memories: deps.memoryRecords() });
+  }
+
+  // What they were doing, as opposed to what they said about it. Pushed by the
+  // desk, which is the only machine with a foreground window; the server keeps
+  // it so the day pass there has the same material the desk's does.
+  if (req.method === 'GET' && path === '/api/activity') {
+    return json(res, 200, { activity: deps.activityLog() });
+  }
+
+  if (req.method === 'POST' && path === '/api/activity') {
+    const body = await readBody(req) as { activity?: unknown };
+    if (!body.activity || typeof body.activity !== 'object' || Array.isArray(body.activity)) {
+      return json(res, 400, { error: 'Send a log keyed by day.' });
+    }
+    return json(res, 200, deps.mergeActivity(body.activity));
   }
 
   if (req.method === 'POST' && path === '/api/memory/records') {

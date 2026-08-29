@@ -1,7 +1,8 @@
 // Haru's persistence layer — the only module that reads or writes the on-disk
 // store files: config.json for application/configuration state, knowledge.json
 // for structured memory, archive.json for the day-by-day transcripts,
-// memories.json for what she actually remembers.
+// memories.json for what she actually remembers, activity.json for the day at
+// the desk.
 //
 // Four files rather than one, and the split is not filing tidiness.
 // electron-store rewrites the whole of config.json on every set, and the life
@@ -41,6 +42,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { emptyKnowledge, loadKnowledge, saveKnowledge, type KnowledgeStore } from './knowledge';
 import { loadArchive, normalizeArchive, saveArchive, type Archive } from './archive';
+import { normalizeActivityLog, type ActivityLog } from './activitylog';
 import { mergeBlockDefaults, type MemoryBlock } from './blocks';
 import { migrateMemories, type ForgettingEntry, type MemoryRecord, type SessionSummary } from './memory';
 
@@ -170,6 +172,8 @@ export type HaruStoreOptions = {
   archiveFile?: string;
   /** Where memories.json lives. Beside config.json by the same reasoning. */
   memoriesFile?: string;
+  /** Where activity.json lives. Beside config.json, same as the rest. */
+  activityFile?: string;
   /** Only used in tests — overrides where the config file lives. */
   cwd?: string;
   configName?: string;
@@ -196,6 +200,7 @@ export class HaruStore {
   private readonly knowledgeFile: string;
   private readonly archiveFile: string;
   private readonly memoriesFile: string;
+  private readonly activityFile: string;
   private readonly maxBackups: number;
   /** Read once, then kept. This process is the only writer, so the copy in
    *  memory cannot go stale, and the alternative is parsing half a megabyte of
@@ -204,6 +209,9 @@ export class HaruStore {
   /** Read once, then kept, for archiveCache's reasons — and one more: retrieval
    *  reads the memories several times per reply. */
   private memoryCache: MemoryFile | null = null;
+  /** Read once, then kept. Appended to on every window change, so parsing it
+   *  each time would be the most-repeated read in the app. */
+  private activityCache: ActivityLog | null = null;
 
   constructor(options: HaruStoreOptions) {
     this.knowledgeFile = options.knowledgeFile;
@@ -214,6 +222,7 @@ export class HaruStore {
     this.electron = new Store<Record<string, unknown>>(storeOptions);
     this.archiveFile = options.archiveFile ?? path.join(path.dirname(this.electron.path), 'archive.json');
     this.memoriesFile = options.memoriesFile ?? path.join(path.dirname(this.electron.path), 'memories.json');
+    this.activityFile = options.activityFile ?? path.join(path.dirname(this.electron.path), 'activity.json');
   }
 
   // -- generic access. Same surface as electron-store so existing callers and
@@ -325,6 +334,33 @@ export class HaruStore {
     this.set('memory.blocks', blocks);
   }
 
+  // -- the day at the desk. Its own file for the archive's reason: it is
+  //    appended to on every window change and holds nothing config.json needs.
+
+  getActivityLog(): ActivityLog {
+    if (!this.activityCache) {
+      try {
+        this.activityCache = existsSync(this.activityFile)
+          ? normalizeActivityLog(JSON.parse(readFileSync(this.activityFile, 'utf8')))
+          : {};
+      } catch (error) {
+        console.warn(`[store] could not read ${this.activityFile}:`, error instanceof Error ? error.message : error);
+        this.activityCache = {};
+      }
+    }
+    // Top-level copy, so a caller pruning a day it was only reading does not
+    // prune it for everyone — the same guard getArchive makes.
+    return { ...this.activityCache };
+  }
+
+  setActivityLog(log: ActivityLog): void {
+    this.activityCache = log;
+    mkdirSync(path.dirname(this.activityFile), { recursive: true });
+    const tmp = `${this.activityFile}.tmp-${process.pid}-${Date.now().toString(36)}`;
+    writeFileSync(tmp, JSON.stringify(log));
+    renameSync(tmp, this.activityFile);
+  }
+
   // -- knowledge. The file is read and written only here; main.ts holds its own
   //    in-memory copy and hands it over through these two methods.
 
@@ -389,7 +425,7 @@ export class HaruStore {
    */
   backup(reason: string): string[] {
     const made: string[] = [];
-    for (const file of [this.electron.path, this.knowledgeFile, this.archiveFile, this.memoriesFile]) {
+    for (const file of [this.electron.path, this.knowledgeFile, this.archiveFile, this.memoriesFile, this.activityFile]) {
       if (!existsSync(file)) continue;
       const target = `${file}.before-${reason}-${backupStamp()}`;
       try {
@@ -436,7 +472,7 @@ export class HaruStore {
         return false;
       }
     };
-    return ok(this.electron.path) && ok(this.knowledgeFile) && ok(this.archiveFile) && ok(this.memoriesFile);
+    return ok(this.electron.path) && ok(this.knowledgeFile) && ok(this.archiveFile) && ok(this.memoriesFile) && ok(this.activityFile);
   }
 
   /**
@@ -446,7 +482,7 @@ export class HaruStore {
    */
   static recoverBackups(options: HaruStoreOptions): boolean {
     let restored = false;
-    for (const file of [path.join(options.cwd ?? '', options.configName ? `${options.configName}.json` : 'config.json'), options.knowledgeFile, options.archiveFile ?? path.join(options.cwd ?? '', 'archive.json'), options.memoriesFile ?? path.join(options.cwd ?? '', 'memories.json')]) {
+    for (const file of [path.join(options.cwd ?? '', options.configName ? `${options.configName}.json` : 'config.json'), options.knowledgeFile, options.archiveFile ?? path.join(options.cwd ?? '', 'archive.json'), options.memoriesFile ?? path.join(options.cwd ?? '', 'memories.json'), options.activityFile ?? path.join(options.cwd ?? '', 'activity.json')]) {
       if (!existsSync(file)) continue;
       const newest = this.newestBackup(file);
       if (!newest) continue;
@@ -471,7 +507,7 @@ export class HaruStore {
     // Every store file, not just the two that existed when this was written:
     // archive.json is ninety days of what was said and memories.json is what
     // she knows about them, and neither is less private than config.json.
-    const targets = [this.electron.path, this.knowledgeFile, this.archiveFile, this.memoriesFile].filter(existsSync);
+    const targets = [this.electron.path, this.knowledgeFile, this.archiveFile, this.memoriesFile, this.activityFile].filter(existsSync);
     if (!targets.length) return;
     const user = os.userInfo().username;
     const args = (file: string) => [file, '/inheritance:r', '/grant:r', `${user}:(F)`, 'SYSTEM:(F)', 'Administrators:(F)'];

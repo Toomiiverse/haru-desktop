@@ -77,6 +77,7 @@ import { groundedInstruction, placeQuery } from './places';
 import { feedbackEntry, recordFeedback } from './feedback';
 import { describePull, isTailnetAddress, mergeCheckIns, readCheckInSource } from './checkinsource';
 import { describeMerge } from './memorysync';
+import { isRedacted, mergeActivity, noteActivity, summariseDay } from './activitylog';
 import { DiscordLink, looksLikeUserId, readDiscordConfig, useOfChannel, type DiscordConfig } from './discord';
 import { reactedPrompt, readReaction, REACTION_COOLDOWN_MS } from './reacted';
 import { startWebServer, type WebDeps } from './webserver';
@@ -386,16 +387,34 @@ function currentChatDayKey(): string {
 // Distilled as the day is archived, because the raw transcript is far too big to
 // carry forward and too dull to reread. One line per day is what lets her say
 // "you were dealing with that thing on Tuesday" months later.
+/**
+ * What they spent the day doing, in the one line a model should get.
+ *
+ * This is the point of keeping the log. The day pass below already knows how to
+ * turn a day into memories; until now the only thing it was ever given was what
+ * was said out loud, so a day spent entirely in Blender with the chat quiet
+ * produced nothing, because nothing had been said about it.
+ */
+function activityDigest(day: string): string {
+  if (store.get('activityLog', true) !== true) return '';
+  const digest = summariseDay(store.getActivityLog()[day] ?? []);
+  return digest ? `What they had open that day, longest first: ${digest}` : '';
+}
+
 function summariseSession(messages: { role?: string; content?: string }[], day: string, { replace = false, attempt = 0 } = {}) {
   const config = store.get('ai.config') as ProviderConfig | undefined;
-  if (!config?.model || messages.length < 4) return;
+  const doing = activityDigest(day);
+  // A day is worth distilling if it was talked through or worked through. The
+  // second half is new: the bar was four messages, so a Saturday spent in
+  // Blender without a word said about it left no trace at all.
+  if (!config?.model || (messages.length < 4 && !doing)) return;
   // Skipping a day that already has a summary was right when a day produced one
   // archive and wrong the moment it produced fourteen: the first fragment got
   // distilled, the other thirteen were filed and never read again. Now the day
   // is summarised once, at the roll, over all of it — and re-summarising has to
   // be able to replace what the old behaviour left behind.
   if (!replace && getSessions().some(session => session.day === day)) return;
-  const transcript = messages
+  const said = messages
     .filter(message => message.role === 'user' || message.role === 'assistant')
     // Labelled `They:` and `Haru:` rather than `Them:` and `You:`. The note the
     // model is about to write goes into her own system prompt, where "you" is
@@ -404,6 +423,9 @@ function summariseSession(messages: { role?: string; content?: string }[], day: 
     .map(message => `${message.role === 'user' ? 'They' : 'Haru'}: ${String(message.content ?? '').slice(0, 300)}`)
     .join('\n')
     .slice(0, 6000);
+  // Appended after the conversation is capped, so a long day at the keyboard
+  // cannot push the day's talking out of the window.
+  const transcript = [said, doing].filter(Boolean).join('\n\n');
   ollamaPost(
     [{ role: 'system', content: attempt ? `${summaryPrompt()} ${THIRD_PERSON_AGAIN}` : summaryPrompt() }, { role: 'user', content: transcript }],
     config,
@@ -437,7 +459,10 @@ function summariseSession(messages: { role?: string; content?: string }[], day: 
  * background rhythm — one more model call, never urgent.
  */
 function extractDayEvents(messages: { role?: string; content?: string }[], transcript: string, day: string, config: ProviderConfig) {
-  if (messages.length < 4) return;
+  // The transcript carries the day's activity as well as its conversation now,
+  // so a quiet day at a busy desk has something to mine. Guarding on the message
+  // count alone threw that away before looking at it.
+  if (messages.length < 4 && !transcript.trim()) return;
   ollamaPost(
     [{ role: 'system', content: eventsPrompt() }, { role: 'user', content: transcript }],
     config,
@@ -478,6 +503,33 @@ function pruneOldArchives() {
   if (dropped) {
     store.setArchive(archive);
     console.log(`[memory] pruned ${dropped} archived day(s) older than ${ARCHIVE_RETENTION_DAYS} days — summaries kept`);
+  }
+  pruneOldActivity();
+}
+
+/**
+ * The activity log on the same clock as the transcripts, and for the same
+ * reason: once a day has been distilled into a summary and whatever events
+ * survived the gate, the minute-by-minute record has given what it has to give.
+ * Keeping a browsing history past that point is retention with no recall behind
+ * it — the more so for this file, which is the one holding raw titles.
+ */
+function pruneOldActivity() {
+  const log = store.getActivityLog();
+  const cutoff = localDateKey(new Date(Date.now() - ARCHIVE_RETENTION_DAYS * 86_400_000));
+  const sessions = getSessions();
+  let dropped = 0;
+  for (const day of Object.keys(log)) {
+    if (day >= cutoff) continue;
+    // A day that was never distilled is kept, exactly as the archive keeps it:
+    // dropping it would lose the day outright rather than compressing it.
+    if (!sessions.some(session => session.day === day)) continue;
+    delete log[day];
+    dropped += 1;
+  }
+  if (dropped) {
+    store.setActivityLog(log);
+    console.log(`[activity] pruned ${dropped} logged day(s) older than ${ARCHIVE_RETENTION_DAYS} days`);
   }
 }
 
@@ -1483,6 +1535,21 @@ function watchScreenshots() {
       // anything a backup tool touches.
       try { if (Date.now() - statSync(file).birthtimeMs > 30_000) return; } catch { return; }
       pendingShot = { path: file, at: Date.now() };
+      // Noted here rather than in remarkOnScreenshot, which only runs when she
+      // is allowed to speak and the vision model is on. Taking a screenshot is
+      // a thing they did whether or not she had anything to say about it, and
+      // what was in front of them at the time is most of what makes it worth
+      // remembering — the file name alone says nothing.
+      if (store.get('activityLog', true) === true) {
+        const doing = currentActivity;
+        const day = currentChatDayKey();
+        store.setActivityLog(noteActivity(store.getActivityLog(), day, {
+          kind: doing && !isRedacted(doing.kind) ? doing.kind : 'other',
+          label: 'screenshot',
+          process: 'screenshot',
+          title: doing && !isRedacted(doing.kind) ? `${String(name)} — while in ${doing.label}` : String(name),
+        }, new Date()));
+      }
       // Debounced across a burst, so five in a row earn one remark about the last.
       if (settleTimer) clearTimeout(settleTimer);
       settleTimer = setTimeout(() => { void remarkOnScreenshot(); }, 1200);
@@ -1871,6 +1938,20 @@ function handleHelperLine(line: string) {
     if (activity.kind === 'gaming') { const provider = store.get('ai.config') as ProviderConfig | undefined; if (provider?.model) void releaseModelForGame(provider); }
     else if (!watchingTitle) evictedFor = null;
     noteFollowing(activity, steamName ?? '');
+    // Written here rather than in reactToActivity, which is where the reacting
+    // is decided: that returns early on a cooldown, a mood, a tool window she
+    // is silent about — and a day she spent quietly is still a day she spent.
+    // Every foreground change reaches this line and only this line.
+    if (store.get('activityLog', true) === true) {
+      const day = currentChatDayKey();
+      const before = store.getActivityLog();
+      const after = noteActivity(before, day, {
+        kind: activity.kind, label: steamName || activity.label, process, title, url,
+      }, new Date());
+      // Only when something moved: the poller repeats itself far more often
+      // than the picture changes, and this writes a file.
+      if (after !== before) store.setActivityLog(after);
+    }
     void reactToActivity(activity, url);
     return;
   }
@@ -4965,6 +5046,28 @@ async function syncMemories(): Promise<void> {
     if (!sent.ok) { console.warn('[memory] the server would not take ours (' + sent.status + ')'); return; }
     const took = await sent.json() as { added?: number; updated?: number };
     if (took.added || took.updated) console.log('[memory] the server took ' + (took.added ?? 0) + ' new, ' + (took.updated ?? 0) + ' updated');
+
+    // The day at the desk goes with them. One direction only: the server has no
+    // foreground window, so there is nothing there to pull back. It rides this
+    // exchange rather than opening its own because it is the same machine, the
+    // same login and the same tailnet check — and a second sign-in would only
+    // be a second thing to fail.
+    if (store.get('activityLog', true) === true) {
+      const log = store.getActivityLog();
+      if (Object.keys(log).length) {
+        const pushed = await net.fetch(source.url + '/api/activity', {
+          method: 'POST',
+          headers: { ...headers, 'content-type': 'application/json' },
+          body: JSON.stringify({ activity: log }),
+        });
+        if (pushed.status === 404) console.warn('[activity] that server is too old to take the log');
+        else if (!pushed.ok) console.warn('[activity] the server would not take the log (' + pushed.status + ')');
+        else {
+          const held = await pushed.json() as { days?: number; entries?: number };
+          console.log('[activity] the server holds ' + (held.days ?? 0) + ' day(s), ' + (held.entries ?? 0) + ' entr(ies)');
+        }
+      }
+    }
   } catch (error) {
     console.warn('[memory] could not reach the server:', error instanceof Error ? error.message : error);
   } finally {
@@ -7377,6 +7480,16 @@ function webDeps(): WebDeps {
     },
     memories: () => getMemories().map(memory => memory.text),
     memoryRecords: () => getMemories(),
+    activityLog: () => store.getActivityLog(),
+    mergeActivity(theirs) {
+      const before = store.getActivityLog();
+      const merged = mergeActivity(before, theirs);
+      store.setActivityLog(merged);
+      const days = Object.keys(merged).length;
+      const entries = Object.values(merged).reduce((total, list) => total + list.length, 0);
+      console.log(`[activity] the desk sent ${days} day(s), ${entries} entr(ies) held`);
+      return { days, entries };
+    },
     mergeMemories(theirs) {
       const report = mergeIn(theirs);
       const what = describeMerge(report);

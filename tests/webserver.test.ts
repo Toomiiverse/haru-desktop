@@ -21,6 +21,7 @@ import { startWebServer, type WebDeps } from '../electron/webserver';
 import { setPassword, type WebAccess } from '../electron/web';
 import { readPushPrefs } from '../electron/push';
 import { mergeMemories } from '../electron/memorysync';
+import { mergeActivity, type ActivityLog } from '../electron/activitylog';
 import type { MemoryRecord } from '../electron/memory';
 
 const USERNAME = 'tom';
@@ -34,6 +35,7 @@ function access(overrides: Partial<WebAccess> = {}): WebAccess {
 /** The desk's copy, as the server would hold it. Module scope so a test can
  *  post to the route and then read the same store back through it. */
 let syncedMemories: MemoryRecord[] = [];
+let pushedActivity: ActivityLog = {};
 
 function deps(overrides: Partial<WebDeps> = {}): WebDeps {
   let stored = access();
@@ -51,6 +53,14 @@ function deps(overrides: Partial<WebDeps> = {}): WebDeps {
     tickOff: () => {},
     memories: () => [],
     memoryRecords: () => syncedMemories,
+    activityLog: () => pushedActivity,
+    mergeActivity: (theirs) => {
+      pushedActivity = mergeActivity(pushedActivity, theirs);
+      return {
+        days: Object.keys(pushedActivity).length,
+        entries: Object.values(pushedActivity).reduce((total, list) => total + list.length, 0),
+      };
+    },
     mergeMemories: (theirs) => {
       const merged = mergeMemories(syncedMemories, theirs, '2026-08-29T12:00:00.000Z');
       syncedMemories = merged.memories;
@@ -143,7 +153,7 @@ test('a stranger gets the sign-in page and nothing else', async () => {
     assert.equal(front.status, 200);
     assert.ok((await front.text()).includes('Sign in to reach her'));
 
-    for (const path of ['/api/chat', '/api/agenda', '/api/memory', '/api/memory/records', '/api/journal', '/api/checkins', '/api/knowledge/stats', '/api/model', '/api/push', '/api/attach', '/api/where']) {
+    for (const path of ['/api/chat', '/api/agenda', '/api/memory', '/api/memory/records', '/api/activity', '/api/journal', '/api/checkins', '/api/knowledge/stats', '/api/model', '/api/push', '/api/attach', '/api/where']) {
       const refused = await web.call(path);
       assert.equal(refused.status, 401, `${path} answered a stranger`);
     }
@@ -694,5 +704,29 @@ test('the desk trades memories with the server, and is not trusted while it does
     });
     assert.equal(junk.status, 200);
     assert.equal((await junk.json()).memories.length, 1, 'only the real one survived');
+  } finally { await web.stop(); }
+});
+
+test('the desk pushes its day, and a log of the wrong shape is refused', async () => {
+  pushedActivity = {};
+  const web = await door();
+  try {
+    assert.equal((await web.signIn()).status, 200);
+
+    const day = { '2026-08-29': [{ at: '2026-08-29T09:00:00.000Z', until: '2026-08-29T09:40:00.000Z', kind: 'working', label: 'Figma', process: 'chrome', title: 'poster' }] };
+    const sent = await web.call('/api/activity', { method: 'POST', body: JSON.stringify({ activity: day }) });
+    assert.equal(sent.status, 200);
+    assert.deepEqual(await sent.json(), { days: 1, entries: 1 });
+
+    const back = await web.call('/api/activity');
+    assert.equal(back.status, 200);
+    assert.equal((await back.json()).activity['2026-08-29'][0].label, 'Figma');
+
+    // A day-keyed object or nothing: a list and a string are both refused
+    // outright rather than normalised into an empty log and quietly accepted.
+    for (const activity of ['a log', ['a log'], 7, null]) {
+      const refused = await web.call('/api/activity', { method: 'POST', body: JSON.stringify({ activity }) });
+      assert.equal(refused.status, 400, `took ${JSON.stringify(activity)}`);
+    }
   } finally { await web.stop(); }
 });

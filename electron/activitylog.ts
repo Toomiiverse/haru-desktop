@@ -1,0 +1,178 @@
+// The day at the desk, written down.
+//
+// Everything else in the activity path is built to forget. readActivity reduces
+// a window to a category, only the category reaches the log, and main.ts says
+// plainly why: "a browsing history written to disk is a different thing from her
+// reading a window title and forgetting it". That is still true. This file is
+// the deliberate exception, switched on by hand, because a companion who cannot
+// remember what you spent Tuesday doing has to ask every time.
+//
+// So it keeps the raw titles. What makes that defensible is where they go: this
+// machine, and one other machine on the same tailnet that belongs to the same
+// person. Nothing here is sent to a model vendor, and the push refuses any
+// address that is not a tailnet one for the same reason the check-in pull does.
+//
+// Two things keep it from becoming a firehose. Consecutive sightings of the same
+// window extend the entry they already have rather than adding a row, so a day
+// of alt-tabbing between two windows is two entries that grow, not four hundred;
+// and a day is capped, so a pathological loop cannot fill the disk.
+
+import type { ActivityKind } from './activity';
+
+/** One stretch at one window. `until` moves while it stays in front. */
+export type ActivityEntry = {
+  at: string;
+  until: string;
+  kind: ActivityKind;
+  /** What she would call it — the Steam name for a game, the site for a page. */
+  label: string;
+  process: string;
+  /** The raw window title. Empty for anything redacted. */
+  title: string;
+  url?: string;
+};
+
+/** Day key (`2026-08-29`) to what was in front of them that day. */
+export type ActivityLog = Record<string, ActivityEntry[]>;
+
+/** Beyond this a day is a loop, not a day. */
+export const MAX_ENTRIES_PER_DAY = 600;
+
+/**
+ * Coming back to the same window after this long is a new sitting rather than
+ * the same one continuing. Matches familiar.ts's SAME_SITTING_MS, so the log and
+ * the haunts agree about what counts as one stretch.
+ */
+export const SAME_STRETCH_MS = 8 * 60_000;
+
+/**
+ * What never gets written down, whatever else does.
+ *
+ * activity.ts classifies adult browsing so that the raw title never reaches the
+ * model. Writing it to a file that then travels to another machine would undo
+ * that decision by the back door, so the category and the timing are kept and
+ * the title is not. Delete this and the two lines that call it to log those
+ * titles like any other.
+ */
+export function isRedacted(kind: ActivityKind): boolean {
+  return kind === 'adult';
+}
+
+function sameWindow(entry: ActivityEntry, next: { process: string; title: string }): boolean {
+  return entry.process === next.process && entry.title === next.title;
+}
+
+/**
+ * Note that this window is in front, now.
+ *
+ * Returns the log unchanged when nothing about it moved, so a caller can write
+ * only when there is something to write — the poller fires far more often than
+ * the picture actually changes.
+ */
+export function noteActivity(
+  log: ActivityLog,
+  day: string,
+  seen: { kind: ActivityKind; label: string; process: string; title: string; url?: string },
+  now: Date,
+): ActivityLog {
+  const at = now.toISOString();
+  const redacted = isRedacted(seen.kind);
+  const entry: ActivityEntry = {
+    at,
+    until: at,
+    kind: seen.kind,
+    label: redacted ? '' : seen.label,
+    process: seen.process,
+    title: redacted ? '' : seen.title,
+    ...(redacted || !seen.url ? {} : { url: seen.url }),
+  };
+  const today = log[day] ?? [];
+  const last = today[today.length - 1];
+  // Still here: move the end, do not add a row. Compared on the raw window
+  // rather than the label, since two different pages on one site share a label
+  // and are not the same stretch.
+  if (last && sameWindow(last, { process: entry.process, title: entry.title })
+    && now.getTime() - new Date(last.until).getTime() < SAME_STRETCH_MS) {
+    if (last.until === at) return log;
+    return { ...log, [day]: [...today.slice(0, -1), { ...last, until: at }] };
+  }
+  return { ...log, [day]: [...today, entry].slice(-MAX_ENTRIES_PER_DAY) };
+}
+
+/** Whole minutes at one window, rounded down; a stretch under a minute is 0. */
+export function minutesOf(entry: ActivityEntry): number {
+  const span = new Date(entry.until).getTime() - new Date(entry.at).getTime();
+  return Number.isFinite(span) && span > 0 ? Math.floor(span / 60_000) : 0;
+}
+
+/**
+ * The day in the few lines worth giving a model.
+ *
+ * Grouped by what she would call the thing rather than listed by the minute:
+ * "Figma 95m, Elden Ring 140m" is what a day was about, where two hundred
+ * timestamped rows is a log file. Longest first, since that is the order in
+ * which a day is worth mentioning, and short stretches are dropped entirely —
+ * a window someone passed through is not something they did.
+ */
+export function summariseDay(entries: ActivityEntry[], limit = 12): string {
+  const byLabel = new Map<string, { label: string; kind: ActivityKind; minutes: number }>();
+  for (const entry of entries) {
+    const label = entry.label || entry.process;
+    if (!label) continue;
+    const held = byLabel.get(label.toLowerCase());
+    if (held) held.minutes += minutesOf(entry);
+    else byLabel.set(label.toLowerCase(), { label, kind: entry.kind, minutes: minutesOf(entry) });
+  }
+  return [...byLabel.values()]
+    .filter(item => item.minutes >= 5)
+    .sort((a, b) => b.minutes - a.minutes)
+    .slice(0, limit)
+    .map(item => `${item.label} (${item.kind}, ${item.minutes}m)`)
+    .join('; ');
+}
+
+/**
+ * Both machines' logs as one day.
+ *
+ * Only the desk writes these in practice — the server has no foreground window
+ * — but a merge that assumed so would silently drop whatever it found, so this
+ * does not assume it. An entry is identified by when it started and what was in
+ * front; the copy covering the longer stretch wins, since a push that arrived
+ * mid-stretch is the shorter one.
+ */
+export function mergeActivity(mine: ActivityLog, theirs: unknown): ActivityLog {
+  const incoming = normalizeActivityLog(theirs);
+  const merged: ActivityLog = { ...mine };
+  for (const [day, entries] of Object.entries(incoming)) {
+    const byKey = new Map<string, ActivityEntry>();
+    for (const entry of [...(merged[day] ?? []), ...entries]) {
+      const key = `${entry.at}|${entry.process}|${entry.title}`;
+      const held = byKey.get(key);
+      if (!held || entry.until > held.until) byKey.set(key, entry);
+    }
+    merged[day] = [...byKey.values()]
+      .sort((a, b) => a.at.localeCompare(b.at))
+      .slice(-MAX_ENTRIES_PER_DAY);
+  }
+  return merged;
+}
+
+/**
+ * What survives a read, whether off the disk or off the network. Anything
+ * missing the two fields every caller indexes on is dropped rather than handed
+ * on half-formed.
+ */
+export function normalizeActivityLog(value: unknown): ActivityLog {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const out: ActivityLog = {};
+  for (const [day, entries] of Object.entries(value as Record<string, unknown>)) {
+    if (!Array.isArray(entries)) continue;
+    const kept = entries.filter((entry): entry is ActivityEntry =>
+      Boolean(entry) && typeof entry === 'object'
+      && typeof (entry as ActivityEntry).at === 'string'
+      && typeof (entry as ActivityEntry).process === 'string')
+      .map(entry => ({ ...entry, until: typeof entry.until === 'string' ? entry.until : entry.at }));
+    if (kept.length) out[day] = kept.slice(-MAX_ENTRIES_PER_DAY);
+  }
+  return out;
+}
