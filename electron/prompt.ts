@@ -20,6 +20,7 @@
 
 import { checkInInstruction, type CheckIn } from './checkins';
 import { asideContext, type Aside } from './asides';
+import { NO_FAKE_CHECKING } from './room';
 import { egoInstruction, goodnightInstruction, leverageInstruction, moodInstruction, notTwiceInstruction, shoutInstruction, type ShoutState } from './mood';
 import { grudgeInstruction } from './grudge';
 import { findItem, formatAgenda, missedInstruction, putOffInstruction, tickOffInstruction, whenMismatchInstruction, type AgendaItem } from './agenda';
@@ -266,6 +267,7 @@ export function chatSystemPrompt(state: PromptState): string {
     // unrelated item off the list, and a send-off. Only the first was an answer.
     NO_NON_SEQUITURS,
     NO_INVENTED_HISTORY,
+    NO_FAKE_CHECKING,
     summariseFollowing(state.following, nowMs),
     // After the persona, so a small model still has it; before the length
     // rule, which it qualifies — the one thought has to be the right thought.

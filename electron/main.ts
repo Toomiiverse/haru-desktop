@@ -72,6 +72,7 @@ import { forOllama, withoutOldest } from './ollamaturns';
 import { seedEmoji } from './seed';
 import { pickToBringUp, REMEMBERED_PICKS } from './bored';
 import { grudgeInstruction, irritationAfterTally, nextGrudge, tallyDue, tallyInstruction, unanswered } from './grudge';
+import { groundedInstruction, placeQuery } from './places';
 import { feedbackEntry, recordFeedback } from './feedback';
 import { describePull, isTailnetAddress, mergeCheckIns, readCheckInSource } from './checkinsource';
 import { DiscordLink, looksLikeUserId, readDiscordConfig, useOfChannel, type DiscordConfig } from './discord';
@@ -2913,7 +2914,16 @@ async function considerReminding(environment: Environment): Promise<boolean> {
 /** Any word from them ends every escalation in progress, and drops her back to
  *  her normal voice. Being answered is the whole objective. */
 function acknowledgeReminders() {
-  if (Object.keys(reminderStates()).length) store.set('reminders', {});
+  const states = reminderStates();
+  if (Object.keys(states).length) {
+    // Marked answered rather than forgotten. Clearing it read as "never chased",
+    // and the ladder started again three minutes later — see ReminderState.
+    const open = new Set(getKept().filter(item => !item.done).map(item => item.id));
+    const answered = Date.now();
+    store.set('reminders', Object.fromEntries(Object.entries(states)
+      .filter(([id]) => open.has(id))
+      .map(([id, state]) => [id, { ...state, attempts: 0, answeredAt: answered }])));
+  }
   sendToWindows('voice:insistence', 1);
 }
 
@@ -5083,6 +5093,34 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   noteTheyAccounted(latest);
   // They have spoken, which is what every escalation was trying to achieve.
   acknowledgeReminders();
+  // Asked for somewhere real — a steakhouse, a barber, a place to eat — the
+  // search runs before she answers and the results ride in beside the message,
+  // because names are the one thing a small model invents most convincingly.
+  // See places.ts.
+  const searchConfig = readSearchConfig(store.get('search'));
+  // Set once the results are in her hands, and read again by the reply filters:
+  // an answer built out of a list somebody else wrote is not her repeating
+  // herself, and it is not padding either.
+  let fromSearch = false;
+  const lookUp = messages.at(-1)?.role === 'user' && searchConfig.enabled ? placeQuery(latest, searchConfig.place) : null;
+  if (lookUp) {
+    try {
+      // A wider net than the usual four: she is picking three or four out of
+      // it, and half of any page of results is a listicle rather than a place.
+      const found = await searchWeb(lookUp, { ...searchConfig, limit: Math.max(searchConfig.limit, 8) }, net.fetch, getSearchKey());
+      if (found.length) {
+        aside = [aside, groundedInstruction(formatResults(lookUp, found, false))].filter(Boolean).join(' ');
+        fromSearch = true;
+        console.log(`[places] "${lookUp}" -> ${found.length} result(s), handed to her before answering`);
+      } else {
+        console.log(`[places] "${lookUp}" -> nothing found`);
+      }
+    } catch (error) {
+      // A failed lookup costs her the names, not the reply: without results the
+      // rule above still forbids inventing any.
+      console.warn('[places] could not look it up:', error instanceof Error ? error.message : error);
+    }
+  }
   // A plain "remind me to X at T" is saved here, before she answers, and she is
   // told so — the tool alone was not enough, see remindme.ts.
   const reminder = messages.at(-1)?.role === 'user' ? reminderAsk(latest, zonedNow(CHAT_TIMEZONE)) : null;
@@ -5322,7 +5360,10 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // subject is, so it should get its say before the blunter filters start
   // counting words.
   const onList = getKept().map(item => item.title);
-  const deduped = dropRepeatedAgendaMentions(said, recent, onList, latest);
+  // Not on a grounded answer: with "eat breakfast" on the list, every paragraph
+  // of a restaurant list reads as her nagging about breakfast again, and the
+  // list is what they asked for.
+  const deduped = fromSearch ? said : dropRepeatedAgendaMentions(said, recent, onList, latest);
   // Outermost on purpose: it counts paragraphs, so it has to see the ones
   // that survive everything else rather than the ones about to be dropped.
   // "ran" is what she actually reached for this turn, which is a fact about
@@ -5333,18 +5374,27 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // their names from the list she gave ten minutes earlier because that is the
   // answer, and its length is the world's. Asked to compare Qwen and Gemma she
   // came back with 930 characters and these two left 107 — the opening dig.
-  const trimmed = dropRoleHeader(dropInventedContact(dropStageDirections(dropInventedScreenTalk(brain.escalated ? deduped : dropRepeatedParagraphs(deduped, recent), grounded))));
+  const trimmed = dropRoleHeader(dropInventedContact(dropStageDirections(dropInventedScreenTalk(brain.escalated || fromSearch ? deduped : dropRepeatedParagraphs(deduped, recent), grounded))));
   // Last, on the reply that survives everything else: a signature opener is
   // only a signature against what she said last time.
   // The echo first, then the signature: with "A keyboard?" gone, "Fine," is
   // the opener, and it is that which may have been used last time too.
   const clock = zonedNow(CHAT_TIMEZONE);
-  const cleaned = fixStatedClock(dropRepeatedOpener(dropEchoOpener(dropRepeatedSentences(dropTackedOnParagraphs(trimmed, brain.escalated || ran.has('search_web') || ran.has('read_web_page')), recent), latest), recent), clock.getHours(), clock.getMinutes());
+  // A grounded answer is a list of places she was handed, so neither the
+  // tacked-on-paragraph cut nor the repetition cut applies: asked the same
+  // question twice she should give the same names twice, and the first time
+  // this ran, 843 of her 890 characters were thrown away as "already said".
+  const body = dropTackedOnParagraphs(trimmed, brain.escalated || fromSearch || ran.has('search_web') || ran.has('read_web_page'));
+  const cleaned = fixStatedClock(dropRepeatedOpener(dropEchoOpener(fromSearch ? body : dropRepeatedSentences(body, recent), latest), recent), clock.getHours(), clock.getMinutes());
   // The reminder read from their message is the truth about its time, whatever she says.
   const herLine = reminder?.time ? fixStatedReminderTime(cleaned, reminder.time) : cleaned;
   // The maps button goes under her words, not into her mouth: what is herLine
   // and what her mood is read from is the line she said.
-  const content = directions?.found ? withDirections(dropRouteTalk(herLine), directions.found) : herLine;
+  // Two features meet on "where can I get a decent burger": directions wants one
+  // destination and a maps button, and cuts the place talk to get it. When the
+  // answer was grounded in a search, the place talk is the answer — she keeps
+  // her list and still gets the button under it.
+  const content = directions?.found ? withDirections(fromSearch ? herLine : dropRouteTalk(herLine), directions.found) : herLine;
   if (herLine !== said) console.log(`[ai] dropped ${said.length - content.length} chars she had already said`);
   console.log(`[ai] chat reply in ${Date.now() - started}ms, ${content.length} chars`);
   // Cleared only once a reply actually exists, so a failed or unreachable turn

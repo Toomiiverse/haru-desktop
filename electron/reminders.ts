@@ -104,7 +104,23 @@ export function reminderInstruction(tier: ReminderTier, title: string, when: str
   return `${base} The task is "${title}"${when ? `, ${when}` : ''}.`;
 }
 
-export type ReminderState = { attempts: number; lastAt: number };
+export type ReminderState = {
+  attempts: number;
+  lastAt: number;
+  /** When they last said something while this was being chased. See shouldRemind. */
+  answeredAt?: number;
+};
+
+/**
+ * How long a task is left alone after they answer.
+ *
+ * Being spoken to used to delete the record entirely, which read as "never
+ * chased" — so three minutes later she started the same task again from the
+ * top, and answering her was the one thing that guaranteed being asked again.
+ * Now the answer is remembered: quiet for a good while, and after that only
+ * something genuinely overdue is worth raising a second time.
+ */
+export const ANSWERED_QUIET_MINUTES = 45;
 
 /**
  * Whether to chase this item now.
@@ -138,6 +154,12 @@ export function shouldRemind(input: {
 
   const state = input.state;
   if (!state) return true;
+  if (state.answeredAt !== undefined) {
+    if ((input.now - state.answeredAt) / 60_000 < ANSWERED_QUIET_MINUTES) return false;
+    // Past that, she has not forgotten it — but only something already missed
+    // is worth going back to, and never the thing they just discussed.
+    if (input.minutesUntilDue > 0) return false;
+  }
   // Answered since the last attempt: they have engaged, so let it go.
   if (input.minutesSinceUserSpoke * 60_000 < input.now - state.lastAt) return false;
   const waited = (input.now - state.lastAt) / 60_000;
