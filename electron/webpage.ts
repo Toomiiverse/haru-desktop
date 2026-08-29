@@ -753,6 +753,14 @@ export function appPage(): string {
   .todo .tick { flex:0 0 auto; background:var(--glass); border:1px solid var(--edge); color:var(--ink);
     border-radius:1rem; padding:.2rem .6rem; font-size:.85rem; line-height:1.2; }
   .todo .tick:disabled { opacity:.4; }
+  /* Her diary reads like one: a page of dated entries, generous line height,
+     no cards fighting for attention. */
+  #diary { flex:1; overflow-y:auto; padding:.4rem 1.1rem 1.6rem; -webkit-overflow-scrolling:touch; }
+  #diary h2 { margin:0 0 .6rem; font-size:1.15rem; letter-spacing:-.01em; }
+  #diary .entry { margin:0 0 1.4rem; }
+  #diary .entry h3 { margin:0 0 .3rem; font-size:.8rem; text-transform:uppercase; letter-spacing:.06em; color:var(--ink-dim); font-weight:700; }
+  #diary .entry p { margin:0; line-height:1.65; white-space:pre-wrap; }
+  #diary .none { color:var(--ink-dim); }
   .card.stale h3 { color:var(--ink-dim); }
   .card.stale .lead { color:var(--ink-dim); font-size:.82rem; margin:0 0 .35rem; }
   #status .facts { display:flex; flex-wrap:wrap; gap:.35rem .9rem; color:var(--ink-dim); font-size:.86rem; }
@@ -861,9 +869,10 @@ export function appPage(): string {
 <div class=topbar><span class=dot></span><span class=name>Haru</span><span id=net hidden>Offline</span><span id=talk hidden></span><button id=bell title="Notifications">🔔</button><button id=out>Sign out</button></div>
 <div id=psheet hidden><div id=pushpart></div><div id=wherepart></div></div>
 <section id=stage></section>
-<div class=tabs role=tablist><button id=tab-chat role=tab aria-selected=true aria-controls=chat>Chat</button><button id=tab-her role=tab aria-selected=false aria-controls=status>Her</button></div>
+<div class=tabs role=tablist><button id=tab-chat role=tab aria-selected=true aria-controls=chat>Chat</button><button id=tab-her role=tab aria-selected=false aria-controls=status>Her</button><button id=tab-diary role=tab aria-selected=false aria-controls=diary>Diary</button></div>
 <section id=chat></section>
 <section id=status hidden aria-labelledby=tab-her></section>
+<section id=diary hidden aria-labelledby=tab-diary></section>
 <div id=chips></div>
 <form class=compose id=cf><button type=button id=att class=icon title="Attach a file">📎</button><button type=button id=mic class=icon title="Tap to talk with her; tap again to stop">🎙</button><textarea id=ci rows=1 placeholder="Say something…"></textarea><button id=cb>Send</button></form>
 <input type=file id=af multiple hidden>
@@ -1414,20 +1423,30 @@ function loadStatus(){
     if(!$('status').innerHTML) $('status').innerHTML='<p class=said>Could not reach her just now.</p>';
   });
 }
+function drawDiary(entries){
+  if(!entries.length){ $('diary').innerHTML='<h2>Haru\u2019s Diary</h2><p class=none>Nothing written yet. She writes one entry a night, just before the quiet hours end.</p>'; return; }
+  const day=d=>{ const [y,m,dd]=d.split('-').map(Number); return new Date(Date.UTC(y,m-1,dd)).toLocaleDateString(undefined,{weekday:'long',day:'numeric',month:'long',timeZone:'UTC'}); };
+  $('diary').innerHTML='<h2>Haru\u2019s Diary</h2>'+entries.map(e=>'<div class=entry><h3>'+esc(day(e.day))+'</h3><p>'+esc(e.text)+'</p></div>').join('');
+}
+function loadDiary(){
+  return get('/api/diary').then(r=>drawDiary(r.entries||[])).catch(()=>{ if(!$('diary').innerHTML) $('diary').innerHTML='<p class=none>Could not reach her just now.</p>'; });
+}
 function showTab(which){
-  const her=which==='her';
-  $('tab-chat').setAttribute('aria-selected',her?'false':'true');
+  const her=which==='her', diary=which==='diary', chat=!her&&!diary;
+  $('tab-chat').setAttribute('aria-selected',chat?'true':'false');
   $('tab-her').setAttribute('aria-selected',her?'true':'false');
-  $('chat').hidden=her; $('status').hidden=!her;
+  $('tab-diary').setAttribute('aria-selected',diary?'true':'false');
+  $('chat').hidden=!chat; $('status').hidden=!her; $('diary').hidden=!diary;
   // The composer goes with the chat: there is nothing to say to a status
-  // screen, and leaving it up invites a message that lands on the wrong view.
-  $('cf').hidden=her; $('chips').hidden=her;
+  // screen or a diary, and leaving it up invites a message on the wrong view.
+  $('cf').hidden=!chat; $('chips').hidden=!chat;
   if(statusTimer){ clearInterval(statusTimer); statusTimer=null; }
   if(her){ void loadStatus(); statusTimer=setInterval(()=>{ if(!document.hidden) void loadStatus(); },STATUS_EVERY); }
+  if(diary) void loadDiary();
 }
-$('status').addEventListener('click',tickOff);
 $('tab-chat').onclick=()=>showTab('chat');
 $('tab-her').onclick=()=>showTab('her');
+$('tab-diary').onclick=()=>showTab('diary');
 document.addEventListener('visibilitychange',()=>{ if(!document.hidden&&!$('status').hidden) void loadStatus(); });
 
 //

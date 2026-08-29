@@ -171,6 +171,8 @@ export type PromptState = {
   nights?: string;
   /** Things of her own, with her views on them (tastes.ts), or nothing. */
   tastes?: string;
+  /** Her last diary entry or two (diary.ts), or nothing. */
+  diary?: string;
   /** The way somewhere, when they asked for it: what was found and what the app will attach (directions.ts). */
   directionsNote?: string;
 };
@@ -200,6 +202,7 @@ export function chatSystemPrompt(state: PromptState): string {
     state.weather ?? '',
     state.tastes ?? '',
     state.nights ?? '',
+    state.diary ?? '',
     state.profile,
     // Beside the profile rather than behind the lookup tool, for the reason the
     // agenda is: asked what they are in the middle of, a model that would have

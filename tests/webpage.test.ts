@@ -677,7 +677,9 @@ function statusTab({ standing, fails = false }: { standing?: Record<string, unkn
     JSON, Math, Promise, Set, Error, Object,
     $: el,
     esc: (v: unknown) => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!)),
-    get: () => (fails ? Promise.reject(new Error('down')) : Promise.resolve(JSON.parse(JSON.stringify(screen)))),
+    get: (url: string) => (fails ? Promise.reject(new Error('down'))
+      : url === '/api/diary' ? Promise.resolve({ entries: [{ day: '2026-08-29', text: 'Tommy was a pain.\nI read about Elden Ring instead.' }] })
+      : Promise.resolve(JSON.parse(JSON.stringify(screen)))),
     post: (url: string, body: { id: string }) => { ticked.push(url + ':' + body.id); return Promise.resolve({}); },
     setInterval: (_fn: () => void, every: number) => { timers.push({ every }); return timers.length; },
     clearInterval: () => {},
@@ -797,4 +799,25 @@ test('ticking one off tells her, and redraws rather than guessing the new list',
   ticked.length = 0;
   win.tickOff({ target: { closest: () => null } });
   assert.deepEqual(ticked, []);
+});
+
+test('the diary tab reads like a diary, and takes the composer away with the chat', async () => {
+  const { el, win } = statusTab();
+  win.showTab('diary');
+  assert.equal(el('diary').hidden, false);
+  assert.equal(el('chat').hidden, true);
+  assert.equal(el('status').hidden, true);
+  assert.equal(el('cf').hidden, true);
+  assert.equal(el('tab-diary').attrs['aria-selected'], 'true');
+  await win.loadDiary();
+  const html = String(el('diary').innerHTML);
+  assert.match(html, /Haru’s Diary/);
+  assert.match(html, /<h3>[^<]*29[^<]*August[^<]*<\/h3>|<h3>[^<]*August[^<]*29[^<]*<\/h3>/);
+  assert.match(html, /Tommy was a pain\.\nI read about Elden Ring instead\./, 'line breaks kept, text escaped not summarised');
+  win.showTab('chat');
+  assert.equal(el('diary').hidden, true);
+  assert.equal(el('cf').hidden, false);
+  // Nothing written yet says so, in her terms.
+  win.drawDiary([]);
+  assert.match(String(el('diary').innerHTML), /Nothing written yet/);
 });

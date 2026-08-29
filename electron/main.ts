@@ -81,6 +81,7 @@ import { keepNights, nightNoteInstruction, nightsInstruction, nightsOn, pickInst
 import { gamesPlayedLately, GUIDE_ODDS, guideNoteInstruction, guideQuery, pickGame, withSteam, type Played } from './gamenight';
 import { adopt, ADOPT_ODDS, adoptInstruction, deepen, deepenInstruction, isOneOfTheirs, MAX_INTERESTS, nightQuery, parseAdoption, parseDeepening, pickTonight, tastesInstruction, type Interest } from './tastes';
 import { readSteamWebConfig, recentlyPlayed } from './steamweb';
+import { appendDream, appendEntry, diaryContext, diaryDueFor, diaryInstruction, recentEntries, type Dream } from './diary';
 import { fetchTranscript, formatTranscript, titleFrom, transcriptInstruction, transcriptsAvailable, videoIdFrom, watchUrl } from './transcripts';
 import { feedbackEntry, recordFeedback } from './feedback';
 import { describePull, isTailnetAddress, mergeCheckIns, readCheckInSource } from './checkinsource';
@@ -3774,14 +3775,16 @@ type Mood = { irritation: number; ego: number; lastMessageAt?: string; goodnight
   toldDay?: string; ignoredSamples?: string[];
   /** The bedtime check (nightfall.ts): the day it last ran, and the morning it owes. */
   nightfallDay?: string;
-  owedMorning?: { day: string; went: DayVerdict; said: number } };
+  owedMorning?: { day: string; went: DayVerdict; said: number };
+  /** The evening the last diary entry was written for (diary.ts). */
+  diaryDay?: string };
 
 function getMood(): Mood {
   const saved = store.get('mood') as Partial<Mood> | undefined;
   return { irritation: Number(saved?.irritation ?? 0), ego: Number(saved?.ego ?? 0), lastMessageAt: saved?.lastMessageAt, goodnightDay: saved?.goodnightDay, awaitingApology: Boolean(saved?.awaitingApology),
     grudge: Number(saved?.grudge ?? 0), ignoredToday: Number(saved?.ignoredToday ?? 0), talliedDay: saved?.talliedDay,
     toldDay: saved?.toldDay, ignoredSamples: Array.isArray(saved?.ignoredSamples) ? saved.ignoredSamples.map(String) : [],
-    nightfallDay: saved?.nightfallDay, owedMorning: saved?.owedMorning };
+    nightfallDay: saved?.nightfallDay, owedMorning: saved?.owedMorning, diaryDay: saved?.diaryDay };
 }
 
 function setMood(mood: Mood) {
@@ -5819,6 +5822,7 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
     // the only record of her night is on disk and she invents one instead.
     nights: nightsInstruction(nightsOn(getNights(), lastNightKey())),
     tastes: tastesInstruction(getInterests()),
+    diary: diaryContext(recentEntries(app.getPath('home'), 2)),
     directionsNote: directions?.note,
   });
   // Written down every reply so the eight thresholds in VITAL_CUES can be
@@ -7284,6 +7288,7 @@ async function proactiveTick() {
   if (!config?.model) return;
   await tallyIgnored(config);
   await haveANight(config);
+  await writeDiary(config);
   sulkAtNightfall();
   await sayItInTheMorning(config);
   await checkNudgeFloor();
@@ -7423,7 +7428,15 @@ async function haveANight(config: ProviderConfig) {
       : tidyPick(await ollamaQuip([getActiveCharacter().identity, pickInstruction(theirs, before)].join(' '), 'What are you looking up?', config));
     if (!about) { console.log('[night] she could not settle on anything'); return; }
     const found = await searchWeb(about, { ...searchConfig, limit: Math.max(searchConfig.limit, 6) }, net.fetch, getSearchKey());
-    if (!found.length) { console.log(`[night] "${about}" turned nothing up — nothing to say about it, so nothing is written`); return; }
+    const dream = (extra: Partial<Dream>): Dream => ({
+      at: new Date().toISOString(), day: nightKey(now), kind: 'free', about,
+      sources: found.map(result => ({ title: result.title ?? '', url: result.url })), reading: '', wrote: '', ...extra,
+    });
+    if (!found.length) {
+      console.log(`[night] "${about}" turned nothing up — nothing to say about it, so nothing is written`);
+      appendDream(app.getPath('userData'), dream({ kind: 'nothing' }));
+      return;
+    }
     // Read one of them properly where she can, so the note is about something
     // she has been through rather than a page of search blurbs.
     let reading = formatResults(about, found, false);
@@ -7457,6 +7470,7 @@ async function haveANight(config: ProviderConfig) {
       if (!next) { console.log(`[night] nothing came of ${own.name} tonight`); return; }
       store.set('tastes', deepen(list, own.id, next, stamp));
       store.set('nights', keepNights(getNights(), { day, at: stamp, about, note: next.stance, sources: found.slice(0, 3).map(result => result.url).filter(Boolean), interest: own.name }));
+      appendDream(app.getPath('userData'), dream({ kind: adopting ? 'adopt' : 'deepen', interest: own.name, reading, transcript: watched, wrote: raw }));
       console.log(`[night] ${adopting ? `took up ${own.name} (${own.kind})` : `spent the night on ${own.name}`} — "${about}" -> ${next.stance.length} chars${next.favourite ? `, rates ${next.favourite}` : ''}`);
       return;
     }
@@ -7468,9 +7482,51 @@ async function haveANight(config: ProviderConfig) {
       sources: found.slice(0, 3).map(result => result.url).filter(Boolean),
       ...(game ? { game: game.name } : {}),
     }));
+    appendDream(app.getPath('userData'), dream({ kind: game ? 'guide' : 'free', game: game?.name, reading, transcript: watched, wrote: note }));
     console.log(`[night] ${game ? `read a guide to ${game.name}` : watched ? 'went through a video transcript' : 'read'} — "${about}" (${found.length} result(s)) -> ${note.length} chars`);
   } catch (error) {
     console.warn('[night] her night came to nothing:', error instanceof Error ? error.message : error);
+  }
+}
+
+/**
+ * Her diary: one entry a night, about the day with them and the night without.
+ *
+ * Written just before the quiet ends so the night is in it, and composed from
+ * the day's actual material — what they said, how she was left, what she read
+ * — because a diary that invents its days is a novel, and hers is a record.
+ * Lands in diary.md in her data folder, hers to build over months.
+ */
+async function writeDiary(config: ProviderConfig) {
+  const now = zonedNow(CHAT_TIMEZONE);
+  const { prefs } = getPush();
+  const due = diaryDueFor(now, prefs, at => nightKey(at));
+  const mood = getMood();
+  if (!due || mood.diaryDay === due) return;
+  const messages = (store.get('chat.messages') as { role: string; content?: string; at?: string }[] | undefined) ?? [];
+  const theirs = messages.filter(message => message.role === 'user').map(message => String(message.content ?? '').trim()).filter(Boolean);
+  const substantial = theirs.filter(text => text.split(/\s+/).length >= 4);
+  const theySaid = [...substantial.slice(-3), ...substantial.slice(0, 1)].filter((text, index, all) => all.indexOf(text) === index).map(text => text.slice(0, 140));
+  const tonight = nightsOn(getNights(), due);
+  const material = diaryInstruction({
+    day: due,
+    theySaid, theirMessages: theirs.length,
+    herUnprompted: asidesOn(getAsides(), due).length,
+    irritation: mood.irritation, grudge: mood.grudge ?? 0, ignoredToday: mood.ignoredToday ?? 0,
+    went: mood.owedMorning?.day === due ? mood.owedMorning.went : mood.nightfallDay === due ? 'fine' : null,
+    ticked: getKept().filter(item => item.done && item.completedAt?.startsWith(due)).map(item => item.title),
+    nights: tonight.map(night => ({ about: night.about, note: night.note, interest: night.interest, game: night.game })),
+    tastes: getInterests().filter(interest => interest.stance).map(interest => ({ name: interest.name, stance: interest.stance })),
+    weather: describeWeather(getWeather().last, weatherWhere()).split('. That is the actual')[0] || undefined,
+  });
+  try {
+    const entry = await ollamaQuipLong([getActiveCharacter().identity, profileSummary(''), getActiveCharacter().style, material].join(' '), 'Write tonight\'s entry.', config);
+    if (entry.trim().length < 40) { console.log('[diary] nothing worth keeping came out — not written'); return; }
+    appendEntry(app.getPath('home'), due, entry, new Intl.DateTimeFormat('en-AU', { weekday: 'long', timeZone: 'UTC' }));
+    setMood({ ...getMood(), diaryDay: due });
+    console.log(`[diary] wrote the entry for ${due} (${entry.length} chars)`);
+  } catch (error) {
+    console.warn('[diary] could not write tonight\'s entry:', error instanceof Error ? error.message : error);
   }
 }
 
@@ -8088,6 +8144,7 @@ function webDeps(): WebDeps {
     // vitals, the conversation's patience, the evening grudge, and the list —
     // because none of them agree on a shape and the page should not have to
     // know that. The arithmetic is in standing.ts, which is pure and tested.
+    diary: () => recentEntries(app.getPath('home'), 60).reverse(),
     standing: () => {
       const now = zonedNow(CHAT_TIMEZONE);
       const today = localDateKey(now);

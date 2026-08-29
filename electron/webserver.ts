@@ -82,6 +82,8 @@ export type WebDeps = {
   memories(): string[];
   /** Where they stand with her, for the status tab. See standing.ts. */
   standing(): Standing;
+  /** Her diary, newest first, for the diary tab. See diary.ts. */
+  diary(): { day: string; text: string }[];
   /** The whole records, for the other Haru of hers to merge against. The page
    *  never asks for these — it shows the text and nothing else. */
   memoryRecords(): unknown[];
@@ -799,6 +801,7 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
   }
 
   if (req.method === 'GET' && path === '/api/status') return json(res, 200, deps.standing());
+  if (req.method === 'GET' && path === '/api/diary') return json(res, 200, { entries: deps.diary() });
 
   if (req.method === 'GET' && path === '/api/memory') return json(res, 200, { memories: deps.memories() });
 
