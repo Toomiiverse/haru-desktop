@@ -638,3 +638,132 @@ test('the worker tells the page when a push lands and when a notification is tap
   assert.ok(app.includes("if(!document.hidden){ refreshIfIdle();"), 'coming back does not re-read the day');
   assert.ok(app.includes("function refreshIfIdle(){ if($('cb').disabled) return;"), 'a re-read would clobber a reply in flight');
 });
+
+// -- the second tab -----------------------------------------------------------
+
+/** The status-tab block, run the way the phone block above is: lifted out of
+ *  the page and given only the handful of things it actually reaches for. */
+function statusTab({ standing, fails = false }: { standing?: Record<string, unknown>; fails?: boolean } = {}) {
+  const app = appPage();
+  const start = app.indexOf('// ---- The second tab: where you stand with her');
+  assert.ok(start > 0, 'the status block is no longer where this test can find it');
+  const end = app.indexOf("document.addEventListener('visibilitychange'", start);
+  assert.ok(end > start, 'the end of the status block moved');
+  const source = app.slice(start, app.indexOf('\n', end) + 1);
+
+  const made = new Map<string, Stub>();
+  const el = (id: string): Stub => {
+    if (!made.has(id)) made.set(id, { id, hidden: false, innerHTML: '', attrs: {} as Record<string, string>,
+      setAttribute(name: string, value: string) { (this as Stub).attrs[name] = value; } });
+    return made.get(id)!;
+  };
+  const screen = standing ?? {
+    emotion: 'affectionate', face: 'love', mood: 'Warm towards you.',
+    bond: { value: 62, level: 3, of: 5, title: 'Fond of you', note: 'She notices.', toNext: 16 },
+    meters: [{ key: 'affection', label: 'Affection', value: 74, note: 'How warm she is.' },
+             { key: 'stress', label: 'Stress', value: 80, note: 'Wound up.' }],
+    patience: { key: 'patience', label: 'Patience', value: 100, note: 'Intact.' },
+    grudge: { value: 3, of: 30, note: '3 unanswered.' },
+    knownDays: 28, daysTalked: 12, minutesSinceSpoke: 90, waiting: ['Get a present'],
+  };
+  const expressed: string[] = [];
+  const timers: { every: number }[] = [];
+  const win: Stub = {
+    JSON, Math, Promise, Set, Error, Object,
+    $: el,
+    esc: (v: unknown) => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!)),
+    get: () => (fails ? Promise.reject(new Error('down')) : Promise.resolve(JSON.parse(JSON.stringify(screen)))),
+    setInterval: (_fn: () => void, every: number) => { timers.push({ every }); return timers.length; },
+    clearInterval: () => {},
+    document: { hidden: false, addEventListener: () => {} },
+    haruAvatar: { express: (name: string) => expressed.push(name) },
+  };
+  win.window = win;
+  vm.runInContext(source, vm.createContext(win), { filename: 'status.js' });
+  return { el, win, expressed, timers, made };
+}
+
+test('the status tab draws her standing, and the face follows it', async () => {
+  const { el, win, expressed } = statusTab();
+  await win.loadStatus();
+  const html = String(el('status').innerHTML);
+  assert.match(html, /Affectionate/);
+  assert.match(html, /Fond of you/);
+  assert.match(html, /3 \/ 5/);
+  assert.match(html, /16 to go/);
+  assert.match(html, /width:74%/);
+  assert.match(html, /Get a present/);
+  assert.match(html, /Known you <b>28<\/b> days/);
+  assert.match(html, /Last word <b>1 hour ago<\/b>/);
+  // The grudge arrives as a count and is drawn as a share of its own maximum.
+  assert.match(html, /Held against you/);
+  assert.match(html, /width:10%/);
+  assert.deepEqual(expressed, ['affectionate']);
+});
+
+test('a high stress bar does not read as an achievement', () => {
+  const { win } = statusTab();
+  assert.equal(win.tone('stress', 80), 'warm');
+  assert.equal(win.tone('sleepiness', 80), 'warm');
+  assert.equal(win.tone('ego', 80), 'warm');
+  assert.equal(win.tone('stress', 20), 'cool');
+  // Everything else is plain accent, high or low.
+  assert.equal(win.tone('affection', 90), '');
+  assert.equal(win.tone('affection', 10), '');
+});
+
+test('how long ago she last heard from them, in words', () => {
+  const { win } = statusTab();
+  assert.equal(win.agoWords(null), 'not yet');
+  assert.equal(win.agoWords(0), 'just now');
+  assert.equal(win.agoWords(5), '5 min ago');
+  assert.equal(win.agoWords(60), '1 hour ago');
+  assert.equal(win.agoWords(200), '3 hours ago');
+  assert.equal(win.agoWords(60 * 24), '1 day ago');
+  assert.equal(win.agoWords(60 * 24 * 5), '5 days ago');
+});
+
+test('switching tabs takes the composer with the chat, and stops polling when it leaves', () => {
+  const { el, win, timers } = statusTab();
+  win.showTab('her');
+  assert.equal(el('chat').hidden, true);
+  assert.equal(el('status').hidden, false);
+  assert.equal(el('cf').hidden, true, 'the composer stayed up on a screen with nothing to say to');
+  assert.equal(el('chips').hidden, true);
+  assert.equal(el('tab-her').attrs['aria-selected'], 'true');
+  assert.equal(el('tab-chat').attrs['aria-selected'], 'false');
+  assert.equal(timers.length, 1);
+  win.showTab('chat');
+  assert.equal(el('chat').hidden, false);
+  assert.equal(el('status').hidden, true);
+  assert.equal(el('cf').hidden, false);
+  assert.equal(el('tab-chat').attrs['aria-selected'], 'true');
+  // No second timer booked, and the first was cleared rather than left running.
+  assert.equal(timers.length, 1);
+});
+
+test('a status that cannot be fetched says so once and does not blank what is there', async () => {
+  const { el, win } = statusTab({ fails: true });
+  await win.loadStatus();
+  assert.match(String(el('status').innerHTML), /Could not reach her/);
+  // With something already drawn, a failed refresh leaves it alone.
+  el('status').innerHTML = '<h2>Curious</h2>';
+  await win.loadStatus();
+  assert.equal(el('status').innerHTML, '<h2>Curious</h2>');
+});
+
+test('nothing on her list means no empty section', async () => {
+  const { el, win } = statusTab({ standing: {
+    emotion: 'neutral', face: 'neutral', mood: 'Around.',
+    bond: { value: 10, level: 0, of: 5, title: 'Nodding terms', note: 'She answers.', toNext: 10 },
+    meters: [], patience: { key: 'patience', label: 'Patience', value: 100, note: 'Intact.' },
+    grudge: { value: 0, of: 30, note: 'Nothing held against you.' },
+    knownDays: 1, daysTalked: 1, minutesSinceSpoke: null, waiting: [],
+  } });
+  await win.loadStatus();
+  const html = String(el('status').innerHTML);
+  assert.equal(html.includes('Waiting on you'), false);
+  assert.match(html, /Known you <b>1<\/b> day[^s]/);
+  assert.match(html, /Last word <b>not yet<\/b>/);
+  assert.match(html, /As far as this goes|10 to go/);
+});

@@ -15,6 +15,7 @@
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from 'node:http';
 import { createReadStream, existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import filePath from 'node:path';
+import type { Standing } from './standing';
 import {
   type WebAccess, passwordMatches, newToken, deviceFor, rememberDevice, touchDevice,
   noteFailure, lockedFor, clearFailures, type Attempts, DEVICE_DAYS,
@@ -79,6 +80,8 @@ export type WebDeps = {
   agenda(): { id: string; title: string; date: string; time: string | null; kind: string; done?: boolean; daysAway: number }[];
   tickOff(id: string): Promise<void> | void;
   memories(): string[];
+  /** Where they stand with her, for the status tab. See standing.ts. */
+  standing(): Standing;
   /** The whole records, for the other Haru of hers to merge against. The page
    *  never asks for these — it shows the text and nothing else. */
   memoryRecords(): unknown[];
@@ -794,6 +797,8 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
     await deps.tickOff(body.id);
     return json(res, 200, { items: deps.agenda() });
   }
+
+  if (req.method === 'GET' && path === '/api/status') return json(res, 200, deps.standing());
 
   if (req.method === 'GET' && path === '/api/memory') return json(res, 200, { memories: deps.memories() });
 

@@ -714,6 +714,40 @@ export function appPage(): string {
 
   #chat { flex:1; overflow-y:auto; padding:1rem .9rem 1.2rem; -webkit-overflow-scrolling:touch; }
 
+  /* Two views, one column. The face sits above the switch and belongs to both:
+     it is the whole point of the second tab, and moving it on every switch
+     would restart the float animation. */
+  .tabs { display:flex; gap:.3rem; padding:0 .9rem .4rem; flex:0 0 auto; }
+  .tabs button { flex:1; background:var(--glass); border:1px solid var(--edge); color:var(--ink-dim);
+    padding:.4rem .6rem; border-radius:1rem; font-size:.85rem; font-weight:600; backdrop-filter:blur(12px); }
+  .tabs button[aria-selected=true] { border-color:var(--accent); color:var(--ink); background:var(--mine); }
+  #status { flex:1; overflow-y:auto; padding:.4rem .9rem 1.4rem; -webkit-overflow-scrolling:touch; }
+  #status h2 { margin:0 0 .1rem; font-size:1.15rem; letter-spacing:-.01em; }
+  #status .said { color:var(--ink-dim); font-size:.9rem; margin:0 0 .9rem; }
+  .card { background:var(--glass); border:1px solid var(--edge); border-radius:var(--r-md);
+    padding:.8rem .9rem; margin:0 0 .7rem; backdrop-filter:blur(12px); }
+  .card h3 { margin:0 0 .5rem; font-size:.78rem; text-transform:uppercase; letter-spacing:.06em; color:var(--ink-dim); font-weight:700; }
+  .bond .title { font-size:1.25rem; font-weight:700; }
+  .bond .rank { float:right; color:var(--ink-dim); font-size:.85rem; font-weight:600; }
+  .bond .note { color:var(--ink-dim); font-size:.88rem; margin:.15rem 0 .6rem; }
+  /* The meter is a div rather than <progress> so the fill can carry a colour
+     that means something — see tone() — which no browser lets you set on one. */
+  .meter { margin:0 0 .55rem; }
+  .meter:last-child { margin-bottom:0; }
+  .meter .top { display:flex; justify-content:space-between; align-items:baseline; gap:.5rem; font-size:.9rem; }
+  .meter .top b { font-weight:600; }
+  .meter .top span { color:var(--ink-dim); font-variant-numeric:tabular-nums; font-size:.85rem; }
+  .bar { height:7px; border-radius:4px; background:rgba(255,255,255,.09); overflow:hidden; margin-top:.28rem; }
+  .bar i { display:block; height:100%; border-radius:4px; background:var(--accent); transition:width .5s cubic-bezier(0.33, 1, 0.68, 1); }
+  .bar.warm i { background:oklch(78% 0.140 25); }
+  .bar.cool i { background:oklch(76% 0.090 var(--hue)); }
+  .meter .why { color:var(--ink-dim); font-size:.8rem; margin:.2rem 0 0; }
+  #status ul { margin:.1rem 0 0; padding-left:1.1rem; }
+  #status li { margin:.15rem 0; }
+  #status .facts { display:flex; flex-wrap:wrap; gap:.35rem .9rem; color:var(--ink-dim); font-size:.86rem; }
+  #status .facts b { color:var(--ink); font-weight:600; font-variant-numeric:tabular-nums; }
+  @media (prefers-reduced-motion: reduce) { .bar i { transition:none; } }
+
   .msg { max-width:82%; padding:.7rem 1rem; border-radius:var(--r-lg); margin:0 0 .55rem; white-space:pre-wrap; overflow-wrap:anywhere; }
   .msg b { font-weight:700; }
   .msg code { font-family:ui-monospace,monospace; font-size:.88em; background:rgba(255,255,255,.08); border-radius:.3rem; padding:.05rem .3rem; }
@@ -816,7 +850,9 @@ export function appPage(): string {
 <div class=topbar><span class=dot></span><span class=name>Haru</span><span id=net hidden>Offline</span><span id=talk hidden></span><button id=bell title="Notifications">🔔</button><button id=out>Sign out</button></div>
 <div id=psheet hidden><div id=pushpart></div><div id=wherepart></div></div>
 <section id=stage></section>
+<div class=tabs role=tablist><button id=tab-chat role=tab aria-selected=true aria-controls=chat>Chat</button><button id=tab-her role=tab aria-selected=false aria-controls=status>Her</button></div>
 <section id=chat></section>
+<section id=status hidden aria-labelledby=tab-her></section>
 <div id=chips></div>
 <form class=compose id=cf><button type=button id=att class=icon title="Attach a file">📎</button><button type=button id=mic class=icon title="Tap to talk with her; tap again to stop">🎙</button><textarea id=ci rows=1 placeholder="Say something…"></textarea><button id=cb>Send</button></form>
 <input type=file id=af multiple hidden>
@@ -1280,6 +1316,85 @@ function refreshIfIdle(){ if($('cb').disabled) return; void load(); }
 setInterval(askIfSheHasSomethingToSay,4*60_000);
 
 // ---- Being told about her when nothing of hers is open ---------------------
+// ---- The second tab: where you stand with her ------------------------------
+//
+// Everything on this screen is state she already had and nobody could see —
+// the vitals that drift on their own, the patience the conversation burns, the
+// grudge counted each evening. Read-only on purpose: it is a window on her, not
+// a set of dials, and a slider that set her affection would make the number
+// mean nothing.
+const STATUS_EVERY=45000;
+let statusTimer=null;
+
+// Two of these read backwards: a full stress bar is bad news, and so is a full
+// ego. Colour says which, because a bar that is only ever accent-coloured makes
+// "wound up" look like an achievement.
+function tone(key,value){
+  if(key==='stress'||key==='sleepiness'||key==='ego') return value>=60?'warm':'cool';
+  return '';
+}
+function meterRow(m){
+  return '<div class=meter><div class=top><b>'+esc(m.label)+'</b><span>'+m.value+'%</span></div>'
+    +'<div class="bar '+tone(m.key,m.value)+'"><i style="width:'+m.value+'%"></i></div>'
+    +'<p class=why>'+esc(m.note)+'</p></div>';
+}
+function agoWords(mins){
+  if(mins===null||mins===undefined) return 'not yet';
+  if(mins<1) return 'just now';
+  if(mins<60) return mins+' min ago';
+  // Floored, not rounded: ninety minutes ago is an hour and a half ago, and
+  // "2 hours ago" for something that has not been two hours reads as wrong.
+  const h=Math.floor(mins/60);
+  if(h<24) return h+(h===1?' hour ago':' hours ago');
+  const d=Math.floor(h/24);
+  return d+(d===1?' day ago':' days ago');
+}
+function drawStatus(s){
+  const facts=[];
+  facts.push('Known you <b>'+s.knownDays+'</b> day'+(s.knownDays===1?'':'s'));
+  facts.push('Spoken on <b>'+s.daysTalked+'</b> of them');
+  facts.push('Last word <b>'+agoWords(s.minutesSinceSpoke)+'</b>');
+  let html='<h2>'+esc(s.emotion.charAt(0).toUpperCase()+s.emotion.slice(1))+'</h2>'
+    +'<p class=said>'+esc(s.mood)+'</p>'
+    +'<div class="card bond"><span class=rank>'+s.bond.level+' / '+s.bond.of+'</span>'
+      +'<div class=title>'+esc(s.bond.title)+'</div>'
+      +'<p class=note>'+esc(s.bond.note)+'</p>'
+      +'<div class=bar><i style="width:'+s.bond.value+'%"></i></div>'
+      +'<p class=why>'+(s.bond.toNext>0?esc(s.bond.toNext+' to go before she thaws further.'):'As far as this goes.')+'</p></div>'
+    +'<div class=card><h3>Right now</h3>'+meterRow(s.patience)+meterRow(s.grudgeMeter)+'</div>'
+    +'<div class=card><h3>How she is</h3>'+s.meters.map(meterRow).join('')+'</div>';
+  if(s.waiting.length){
+    html+='<div class=card><h3>Waiting on you</h3><ul>'+s.waiting.map(t=>'<li>'+esc(t)+'</li>').join('')+'</ul></div>';
+  }
+  html+='<div class=card><h3>The two of you</h3><p class=facts>'+facts.join('<span></span>')+'</p></div>';
+  $('status').innerHTML=html;
+  if(window.haruAvatar) window.haruAvatar.express(s.emotion);
+}
+function loadStatus(){
+  return get('/api/status').then(s=>{
+    // The grudge arrives as a count out of its own maximum rather than a
+    // percentage, so it is turned into a row here rather than in the model.
+    s.grudgeMeter={key:'grudge',label:'Held against you',value:Math.round(Math.min(1,s.grudge.value/s.grudge.of)*100),note:s.grudge.note};
+    drawStatus(s);
+  }).catch(()=>{
+    if(!$('status').innerHTML) $('status').innerHTML='<p class=said>Could not reach her just now.</p>';
+  });
+}
+function showTab(which){
+  const her=which==='her';
+  $('tab-chat').setAttribute('aria-selected',her?'false':'true');
+  $('tab-her').setAttribute('aria-selected',her?'true':'false');
+  $('chat').hidden=her; $('status').hidden=!her;
+  // The composer goes with the chat: there is nothing to say to a status
+  // screen, and leaving it up invites a message that lands on the wrong view.
+  $('cf').hidden=her; $('chips').hidden=her;
+  if(statusTimer){ clearInterval(statusTimer); statusTimer=null; }
+  if(her){ void loadStatus(); statusTimer=setInterval(()=>{ if(!document.hidden) void loadStatus(); },STATUS_EVERY); }
+}
+$('tab-chat').onclick=()=>showTab('chat');
+$('tab-her').onclick=()=>showTab('her');
+document.addEventListener('visibilitychange',()=>{ if(!document.hidden&&!$('status').hidden) void loadStatus(); });
+
 //
 // iOS only offers web push to a page installed from Share → Add to Home
 // Screen, and only asks permission inside a tap. So the worker is registered on

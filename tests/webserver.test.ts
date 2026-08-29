@@ -18,6 +18,8 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { startWebServer, type WebDeps } from '../electron/webserver';
+import { standingFrom } from '../electron/standing';
+import { DEFAULT_VITALS } from '../electron/vitals';
 import { setPassword, type WebAccess } from '../electron/web';
 import { readPushPrefs } from '../electron/push';
 import { mergeMemories } from '../electron/memorysync';
@@ -54,6 +56,10 @@ function deps(overrides: Partial<WebDeps> = {}): WebDeps {
     agenda: () => [],
     tickOff: () => {},
     memories: () => [],
+    standing: () => standingFrom({
+      vitals: DEFAULT_VITALS, irritation: 0, ego: 0, grudge: 0, ignoredToday: 0,
+      daysTalked: 0, waiting: [], now: Date.parse('2026-08-29T12:00:00.000Z'), today: '2026-08-29',
+    }),
     memoryRecords: () => syncedMemories,
     activityLog: () => pushedActivity,
     shots: {
@@ -159,7 +165,7 @@ test('a stranger gets the sign-in page and nothing else', async () => {
     assert.equal(front.status, 200);
     assert.ok((await front.text()).includes('Sign in to reach her'));
 
-    for (const path of ['/api/chat', '/api/agenda', '/api/memory', '/api/memory/records', '/api/activity', '/api/activity/shots', '/api/journal', '/api/checkins', '/api/knowledge/stats', '/api/model', '/api/push', '/api/attach', '/api/where']) {
+    for (const path of ['/api/chat', '/api/agenda', '/api/status', '/api/memory', '/api/memory/records', '/api/activity', '/api/activity/shots', '/api/journal', '/api/checkins', '/api/knowledge/stats', '/api/model', '/api/push', '/api/attach', '/api/where']) {
       const refused = await web.call(path);
       assert.equal(refused.status, 401, `${path} answered a stranger`);
     }
@@ -770,5 +776,22 @@ test('a screenshot is taken from the desk, and a climbing name is refused at the
       assert.equal(refused.status, 400, `took ${query}`);
     }
     assert.deepEqual((await (await web.call('/api/activity/shots')).json()).shots, { '2026-08-29': ['shot.png'] });
+  } finally { await web.stop(); }
+});
+
+test('the status tab is served her live standing, signed in', async () => {
+  const web = await door();
+  try {
+    await web.signIn();
+    const got = await web.call('/api/status');
+    assert.equal(got.status, 200);
+    const screen = await got.json() as { emotion: string; face: string; bond: { value: number; title: string }; meters: { key: string; value: number }[]; patience: { value: number } };
+    // Enough of the shape that the page can render without guarding every field.
+    assert.equal(typeof screen.emotion, 'string');
+    assert.equal(typeof screen.face, 'string');
+    assert.equal(typeof screen.bond.title, 'string');
+    assert.ok(screen.meters.length >= 5);
+    assert.ok(screen.meters.every(meter => meter.value >= 0 && meter.value <= 100));
+    assert.equal(screen.patience.value, 100);
   } finally { await web.stop(); }
 });

@@ -67,6 +67,7 @@ import { appendToBlockValue, canEditBlock, findBlock, formatMemoryBlocks, replac
 import { forgetDevice, forgetEveryDevice, readWebAccess, setPassword, weakPassword, type WebAccess } from './web';
 import { conversationMayLeave, mayLeaveTheMachine } from './sensitivity';
 import { addCheckIn, checkInInstruction, checkInsOn, readCheckIns, type CheckIn } from './checkins';
+import { standingFrom } from './standing';
 import { addAside, alreadySaidRecently, asideContext, asidesOn, markReached, pruneAsides, readAsides, type Aside, type AsideSource } from './asides';
 import { attachmentsInPlay, describeAttached, READ_IT_ALL_PROMPT, readAttachments, type Attachment, type Opened } from './attachments';
 import { forOllama, withoutOldest } from './ollamaturns';
@@ -7566,6 +7567,29 @@ function webDeps(): WebDeps {
       return fixed.text;
     },
     memories: () => getMemories().map(memory => memory.text),
+    // Assembled from the four places her state actually lives — the drifting
+    // vitals, the conversation's patience, the evening grudge, and the list —
+    // because none of them agree on a shape and the page should not have to
+    // know that. The arithmetic is in standing.ts, which is pure and tested.
+    standing: () => {
+      const now = zonedNow(CHAT_TIMEZONE);
+      const today = localDateKey(now);
+      const mood = getMood();
+      const days = getSessions().map(session => session.day).filter(Boolean).sort();
+      return standingFrom({
+        vitals,
+        irritation: mood.irritation,
+        ego: mood.ego,
+        grudge: mood.grudge ?? 0,
+        ignoredToday: mood.ignoredToday ?? 0,
+        lastMessageAt: mood.lastMessageAt,
+        knownSince: days[0],
+        daysTalked: new Set(days).size,
+        waiting: getKept().filter(item => !item.done).map(item => item.title),
+        now: Date.now(),
+        today,
+      });
+    },
     memoryRecords: () => getMemories(),
     activityLog: () => store.getActivityLog(),
     shots: {
