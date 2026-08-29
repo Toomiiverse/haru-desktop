@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import {
   isWorthRemembering,
   isAboutTheConversation,
+  scoreImportance,
+  ALWAYS_IMPORTANT,
   bansATopic,
   isSameMemory,
   rememberInto,
@@ -28,6 +30,32 @@ const fixture = (overrides: Partial<MemoryRecord> & { id: string; text: string; 
   createdAt: '2026-08-01T00:00:00.000Z', lastSeenAt: '2026-08-28T00:00:00.000Z', mentions: 1,
   confidence: 0.8, importance: 0.5, source: 'conversation', status: 'active', memoryType: 'semantic',
   ...overrides,
+});
+
+// ---- importance: lasting topics are permanent, the work itself is not ----
+
+test('scoreImportance keeps health, dates, contact details and identity at the permanent tier', () => {
+  for (const line of [
+    'Allergic to shellfish',
+    'Takes medication for ADHD every morning',
+    'Has been diagnosed with ADHD, and sees a psychologist regularly once a month named Sam.',
+    'Their anniversary is 18 June',
+    'Address is Unit 2, 62 Fitzgerald Street, Northbridge',
+    'Is the founder of a company called The PC Project',
+    'Acts as the Creative Director of the company',
+  ]) assert.ok(scoreImportance('fact', line) >= ALWAYS_IMPORTANT, line);
+});
+
+test('scoreImportance puts the work itself one tier down, so it is offered when relevant and fades when over', () => {
+  for (const line of [
+    'Wants 6 mailboxes total for The PC Project.',
+    'Has a deadline on the marketing plan next Friday',
+    'The company is looking for a second unit',
+    'Rent went up this year',
+  ]) assert.equal(scoreImportance('fact', line), 0.6, line);
+  assert.equal(scoreImportance('fact', 'Watched a YouTube clip'), 0.2);
+  assert.equal(scoreImportance('fact', 'Has a dog called Miso'), 0.6);
+  assert.equal(scoreImportance('fact', 'is usually up late'), 0.4);
 });
 
 // ---- recurrence is counted in days, not mentions ----

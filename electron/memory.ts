@@ -937,7 +937,29 @@ export function withContradiction(confidence: number): number {
  * model with worthiness, see isWorthRemembering).
  */
 
-const IMPORTANT_TOPICS = /\b(medicat\w+|allerg\w+|diabet\w+|health\w+|project\w*|compan\w+|business\w*|work\b|job\b|income\w*|rent\w*|mortgage\w*|deadline\w*|important\b|never\s+forget|birthday\w*|anniversar\w*|wedding\w*|address\b|phone\w*\s+number\b)\b/i;
+/**
+ * Two tiers where there was one.
+ *
+ * One list held health, "never forget", birthdays and addresses alongside
+ * project, company, work and job — and every match scored 0.8, which is the
+ * tier that never decays and is offered on every turn whatever the message.
+ * For a user who runs a company that meant most of what he said was
+ * permanent: "wants 6 mailboxes total for The PC Project" was in the prompt
+ * for "2+2", and would have been in it in ten years. The word "project"
+ * was doing what only "allergic" should.
+ *
+ * LASTING is what must never be forgotten and shapes every conversation:
+ * health, the things they said mattered, dates, contact details, and who
+ * they are — founder, director, owner — since identity outlives the work.
+ * LIVING is the work itself: real, worth 0.6 (a 180-day half-life, offered
+ * when the message touches it), and allowed to fade when it is over.
+ */
+const LASTING_TOPICS = /\b(medicat\w+|allerg\w+|diabet\w+|health\w+|diagnos\w+|therap\w+|important\b|never\s+forget|birthday\w*|anniversar\w*|wedding\w*|address\b|phone\w*\s+number\b|founder\w*|founded|co-?founder\w*|ceo\b|director\w*|owner\w*|owns\s+(a|the)\b)\b/i;
+
+const LIVING_TOPICS = /\b(project\w*|compan\w+|business\w*|work\b|job\b|income\w*|rent\w*|mortgage\w*|deadline\w*)\b/i;
+
+/** Either tier — what isWorthAnEvent means by "about something that matters". */
+const IMPORTANT_TOPICS = new RegExp(`${LASTING_TOPICS.source}|${LIVING_TOPICS.source}`, 'i');
 
 const TRIVIAL_TOPICS = /\b(youtube|video\b|clip\b|stream\b|episode\b|manga\b|anime\b|game\b|steam\b|browser\b|tab\b|window\b|download\w*|watched\b|played\b)\b/i;
 
@@ -951,7 +973,8 @@ export function scoreImportance(kind: MemoryKind, text: string): number {
     // A moment in time matters while it is current and as history afterwards.
     case 'event': return 0.45;
     default: {
-      if (IMPORTANT_TOPICS.test(said)) return 0.8;
+      if (LASTING_TOPICS.test(said)) return 0.8;
+      if (LIVING_TOPICS.test(said)) return 0.6;
       if (TRIVIAL_TOPICS.test(said)) return 0.2;
       // Something nameable — a person, a place, a project — is worth more than
       // a generic sentence about now.

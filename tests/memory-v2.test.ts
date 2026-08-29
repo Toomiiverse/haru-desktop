@@ -38,7 +38,10 @@ test('scoreImportance is high for preferences and relationships', () => {
 test('scoreImportance weighs fact content', () => {
   assert.equal(scoreImportance('event', 'Rental inspection on the 20th'), 0.45);
   assert.equal(scoreImportance('fact', 'Allergic to shellfish'), 0.8);
-  assert.equal(scoreImportance('fact', 'Works on the PC Project'), 0.8);
+  // The work itself is one tier below health and identity: offered when
+  // relevant, and allowed to fade when it is over.
+  assert.equal(scoreImportance('fact', 'Works on the PC Project'), 0.6);
+  assert.equal(scoreImportance('fact', 'Is the founder of The PC Project'), 0.8);
   assert.equal(scoreImportance('fact', 'Watched a YouTube video'), 0.2);
   assert.equal(scoreImportance('fact', 'Lives in Perth'), 0.6);
   assert.equal(scoreImportance('fact', 'Feeling a bit tired'), 0.4);
