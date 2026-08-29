@@ -77,6 +77,7 @@ import { pickToBringUp, REMEMBERED_PICKS } from './bored';
 import { grudgeInstruction, irritationAfterTally, nextGrudge, tallyDue, tallyInstruction, unanswered } from './grudge';
 import { groundedInstruction, placeQuery } from './places';
 import { daySaid, DEFAULT_BEDTIME_MINUTES, howTheDayWent, nightfallDue, sulkGrudge, sulkInstruction, sulkStillStands, type DayVerdict } from './nightfall';
+import { keepNights, nightNoteInstruction, nightsInstruction, nightsOn, pickInstruction, tidyPick, timeForSomething, type Night } from './nightlife';
 import { feedbackEntry, recordFeedback } from './feedback';
 import { describePull, isTailnetAddress, mergeCheckIns, readCheckInSource } from './checkinsource';
 import { describeMerge } from './memorysync';
@@ -1276,7 +1277,7 @@ function unpromptedContext(): string {
   // not repeat at one in the morning is what she said at half eleven.
   // Where their phone says they are rides along too: a nudge that knows they
   // are at the shops has something to needle with.
-  const parts = [summariseFollowing(getFollowing(), Date.now()), todaySoFar(), alreadySaidRecently(asides, CHAT_TIMEZONE, Date.now()), stillWaiting(), describeWhereabouts(getWhereabouts()), weatherToDrawOn(getWeather().last, weatherWhere(), asides.map(aside => aside.text))].filter(Boolean);
+  const parts = [summariseFollowing(getFollowing(), Date.now()), todaySoFar(), alreadySaidRecently(asides, CHAT_TIMEZONE, Date.now()), stillWaiting(), describeWhereabouts(getWhereabouts()), weatherToDrawOn(getWeather().last, weatherWhere(), asides.map(aside => aside.text)), nightsInstruction(nightsOn(getNights(), lastNightKey()))].filter(Boolean);
   if (!parts.length) return '';
   // "Do not repeat a point you have already made" was read as "change the
   // subject": once a thread was answered and settled she abandoned the day
@@ -5775,6 +5776,9 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
     ignoredToday: getMood().ignoredToday ?? 0,
     whereabouts: describeWhereabouts(getWhereabouts()),
     weather: describeWeather(getWeather().last, weatherWhere()),
+    // So "what did you get up to last night?" has a true answer. Without this
+    // the only record of her night is on disk and she invents one instead.
+    nights: nightsInstruction(nightsOn(getNights(), lastNightKey())),
     directionsNote: directions?.note,
   });
   // Written down every reply so the eight thresholds in VITAL_CUES can be
@@ -7232,6 +7236,7 @@ async function proactiveTick() {
   const config = store.get('ai.config') as ProviderConfig | undefined;
   if (!config?.model) return;
   await tallyIgnored(config);
+  await haveANight(config);
   sulkAtNightfall();
   await sayItInTheMorning(config);
   await checkNudgeFloor();
@@ -7273,6 +7278,90 @@ async function tallyIgnored(config: ProviderConfig) {
     console.log(`[grudge] ${todayKey}: ${ignored.length} of her lines went unanswered — grudge ${mood.grudge ?? 0} -> ${grudge}, irritation ${mood.irritation} -> ${irritation}`);
   }
   await tellThemTheTally(config, todayKey);
+}
+
+// ---- Her own night -------------------------------------------------------
+
+function getNights(): Night[] {
+  const saved = store.get('nights') as Night[] | undefined;
+  return Array.isArray(saved) ? saved.filter(night => night && typeof night.note === 'string') : [];
+}
+
+/**
+ * The night that is hers to talk about today.
+ *
+ * Through the morning that is the night just gone; from midday it is still the
+ * same one, because a night does not stop having happened at lunchtime. It
+ * rolls over only when the next one starts.
+ */
+function lastNightKey(): string {
+  const now = zonedNow(CHAT_TIMEZONE);
+  const yesterday = new Date(now.getTime());
+  yesterday.setDate(yesterday.getDate() - 1);
+  return now.getHours() < 12 ? localDateKey(yesterday) : nightKey(now);
+}
+
+/** The evening a small hour belongs to: 2am on Sunday is Saturday night. */
+function nightKey(now: Date): string {
+  const evening = new Date(now.getTime());
+  if (evening.getHours() < 12) evening.setDate(evening.getDate() - 1);
+  return localDateKey(evening);
+}
+
+let lastNightThingAt: number | null = null;
+
+/**
+ * Something of her own, while they are asleep.
+ *
+ * The point of it is that it is true. A model asked what it did last night will
+ * answer beautifully and none of it will have happened, and then every follow-up
+ * question is a request for more invention — the Melbourne-restaurants failure,
+ * with a whole inner life built on top. So she actually searches, actually reads
+ * what comes back, and the note is written from that and nothing else. She
+ * cannot watch anything and is told not to say she did.
+ *
+ * Quiet hours only: this is the time nobody is talking to her, which is the
+ * whole conceit, and it keeps a search and two model calls off the hours when
+ * the GPU is answering them.
+ */
+async function haveANight(config: ProviderConfig) {
+  const now = zonedNow(CHAT_TIMEZONE);
+  const { prefs } = getPush();
+  if (!inQuietHours(prefs, now)) return;
+  const searchConfig = readSearchConfig(store.get('search'));
+  if (!searchConfig.enabled) return;
+  const tonight = nightsOn(getNights(), nightKey(now));
+  if (!timeForSomething(tonight, lastNightThingAt, Date.now())) return;
+  lastNightThingAt = Date.now();
+  try {
+    const theirs = getMemories().map(memory => memory.text);
+    const before = getNights().map(night => night.about);
+    const raw = await ollamaQuip([getActiveCharacter().identity, pickInstruction(theirs, before)].join(' '), 'What are you looking up?', config);
+    const about = tidyPick(raw);
+    if (!about) { console.log(`[night] she could not settle on anything ("${raw.slice(0, 60)}")`); return; }
+    const found = await searchWeb(about, { ...searchConfig, limit: Math.max(searchConfig.limit, 6) }, net.fetch, getSearchKey());
+    if (!found.length) { console.log(`[night] "${about}" turned nothing up — nothing to say about it, so nothing is written`); return; }
+    // Read one of them properly where she can, so the note is about something
+    // she has been through rather than a page of search blurbs.
+    let reading = formatResults(about, found, false);
+    if (searchConfig.readPages && found[0]?.url) {
+      try {
+        const page = await readWebPage(found[0].url, net.fetch);
+        if (page.text.trim()) reading = `${reading}
+
+${formatPage(page, about)}`;
+      } catch { /* the blurbs are enough; a page that will not open is not a failure */ }
+    }
+    const note = await ollamaQuip([getActiveCharacter().identity, getActiveCharacter().style, nightNoteInstruction(about, reading)].join(' '), 'Write it.', config);
+    if (!note) return;
+    store.set('nights', keepNights(getNights(), {
+      day: nightKey(now), at: new Date().toISOString(), about, note,
+      sources: found.slice(0, 3).map(result => result.url).filter(Boolean),
+    }));
+    console.log(`[night] read about "${about}" (${found.length} result(s)) -> ${note.length} chars`);
+  } catch (error) {
+    console.warn('[night] her night came to nothing:', error instanceof Error ? error.message : error);
+  }
 }
 
 /**
