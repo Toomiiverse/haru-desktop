@@ -821,3 +821,11 @@ test('the diary tab reads like a diary, and takes the composer away with the cha
   win.drawDiary([]);
   assert.match(String(el('diary').innerHTML), /Nothing written yet/);
 });
+
+test('the tick button is actually wired to the status section, not just defined', () => {
+  // The handler existed and the test called it directly; the page had lost the
+  // line that attaches it, and the Done button did nothing on the phone.
+  const html = appPage();
+  assert.ok(html.includes("$('status').addEventListener('click',tickOff)"), 'tickOff must be registered on #status');
+  assert.ok(html.includes("$('tab-diary').onclick=()=>showTab('diary')"), 'the diary tab must be wired');
+});

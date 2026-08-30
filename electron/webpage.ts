@@ -1444,6 +1444,8 @@ function showTab(which){
   if(her){ void loadStatus(); statusTimer=setInterval(()=>{ if(!document.hidden) void loadStatus(); },STATUS_EVERY); }
   if(diary) void loadDiary();
 }
+// Delegated on the section, because the list is redrawn on every refresh.
+$('status').addEventListener('click',tickOff);
 $('tab-chat').onclick=()=>showTab('chat');
 $('tab-her').onclick=()=>showTab('her');
 $('tab-diary').onclick=()=>showTab('diary');
