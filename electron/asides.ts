@@ -162,7 +162,7 @@ export function asideContext(asides: Aside[], now: number): string {
   return [
     'You said this to them yourself a moment ago, unprompted. It is not written in the conversation below, but they heard it:',
     lines.join('\n'),
-    'If what they have just said is an answer to it, take it as one. If it is not, leave it alone — do not repeat any of it, do not bring it up again, and do not treat it as something they raised.',
+    'If what they have just said is an answer to it, take it as one. If they are asking what you meant by it — "what plan?", "what are you on about?" — say plainly what it was and where it came from, in a sentence; do not expand it into a plan, a list or a task, and do not act on it. If it is neither, leave it alone — do not repeat any of it, do not bring it up again, and do not treat it as something they raised.',
   ].join('\n');
 }
 

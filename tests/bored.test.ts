@@ -2,7 +2,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { pickToBringUp, REMEMBERED_PICKS } from '../electron/bored';
+import { EVENT_FRESH_DAYS, pickToBringUp, REMEMBERED_PICKS } from '../electron/bored';
 
 const memories = [
   { id: 'm1', text: 'Live with girlfriend Emma in student lodgings at Murdoch.', kind: 'relationship', status: 'active', importance: 0.8 },
@@ -44,4 +44,15 @@ test('what she brought up last is kept out of the draw, until there is nothing e
 test('with nothing to bring up she says nothing', () => {
   assert.equal(pickToBringUp([], [], [], '2026-08-28'), null);
   assert.equal(pickToBringUp([{ id: 'p', text: 'Likes it blunt.', kind: 'preference' }], [], [], '2026-08-28'), null);
+});
+
+test('an old event is not on her mind, however important it was', () => {
+  const today = '2026-08-30';
+  const fresh = { id: 'f', text: 'Is planning to close the store on Monday for cleaning it up', kind: 'event', importance: 0.9, lastSeenAt: '2026-08-29T10:00:00.000Z' };
+  const stale = { id: 's', text: 'Is planning to close the store from Monday to Tuesday for cleaning it up', kind: 'event', importance: 0.9, lastSeenAt: '2026-08-23T10:00:00.000Z' };
+  const fact = { id: 'x', text: 'Runs a company called The PC Project in Northbridge', kind: 'fact', importance: 0.5, lastSeenAt: '2026-08-01T10:00:00.000Z' };
+  const picks = new Set(Array.from({ length: 40 }, (_, i) => pickToBringUp([fresh, stale, fact], [], [], today, () => (i % 10) / 10)?.id));
+  assert.equal(picks.has('s'), false, 'a week-old plan is a thing that happened');
+  assert.equal(picks.has('f') || picks.has('x'), true);
+  assert.ok(EVENT_FRESH_DAYS >= 2);
 });

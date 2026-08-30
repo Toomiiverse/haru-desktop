@@ -2,7 +2,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { EXCHANGE_WINDOW_MS, HANGING_MAX_QUIET_MS, HANGING_MIN_QUIET_MS, leftHanging , saidTheyWereLeaving } from '../electron/hanging';
+import { EXCHANGE_WINDOW_MS, HANGING_MAX_QUIET_MS, HANGING_MIN_QUIET_MS, leftHanging , saidTheyWereLeaving, isClosing } from '../electron/hanging';
 
 const T0 = Date.parse('2026-08-28T10:00:00Z');
 const at = (min: number) => new Date(T0 + min * 60_000).toISOString();
@@ -47,4 +47,11 @@ test('telling her where they are going is not leaving her hanging', () => {
     assert.equal(saidTheyWereLeaving(said), true, said);
   for (const said of ['Fine?', 'Anyways what did you get up to last night', 'Okay ok I am sorry', 'I just got out the shower'])
     assert.equal(saidTheyWereLeaving(said), false, said);
+});
+
+test('a closing is the end of a conversation, not a silence', () => {
+  for (const said of ['All right. Thanks, Haru.', 'ok', 'Okay ok', 'got it', 'thanks for the reminder Haru', 'Fine.', 'cheers'])
+    assert.equal(isClosing(said), true, said);
+  for (const said of ['Anyways what did you get up to last night', 'I just got out the shower', 'Remind me to get Nutella @4pm please', 'thanks but what did you mean?'])
+    assert.equal(isClosing(said), false, said);
 });

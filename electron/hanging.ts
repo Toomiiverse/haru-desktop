@@ -19,6 +19,13 @@ export const HANGING_COOLDOWN_MS = 60 * 60_000;
  * it is telling her where they are — and thirteen minutes later she chased
  * them for it.
  */
+/** "Thanks", "alright", "ok", "got it": the conversation ended, it is not hanging. */
+export function isClosing(text: string): boolean {
+  const t = (text ?? '').trim().toLowerCase().replace(/[.!…]+$/, '');
+  return /^(?:(?:ok|okay|k|kk|alright|all right|right|fine|yep|yeah|yes|no|nah|sure|cool|nice|sweet|great|good|got it|will do|noted|done|cheers|thanks|thank you|thx|ta|love you|bye|later|see ya|night|goodnight|good night|lol|haha|ha)[,.!]?\s*)+(?:haru)?$/i.test(t)
+    || /\b(?:thanks|thank you|cheers)\b[^?]*$/i.test(t) && t.length < 60;
+}
+
 export function saidTheyWereLeaving(text: string): boolean {
   return /\b(?:brb|gtg|g2g|be right back|back (?:soon|later|in a (?:bit|sec|min))|(?:i(?:'|’)?(?:ll|m)|gonna|going to|about to|off to|heading|need to|have to|gotta)\s+(?:go\s+)?(?:shower|sleep|bed|nap|eat|cook|drive|work|the gym|gym|out|run|walk|train|study|leave|head off|get ready|pick up|shop|clean|jump in the shower)|(?:shower|sleep|driving|at work|in a meeting|busy)\s+now|talk (?:later|soon|tomorrow)|night night|goodnight|good night|see you (?:later|tomorrow|soon)|ttyl)\b/i.test(text ?? '');
 }

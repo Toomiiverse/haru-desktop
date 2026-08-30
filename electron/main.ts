@@ -40,8 +40,9 @@ import { lookUpPlace, readWindowsLocation, searchPlaces, type FoundPlace } from 
 import { INTERRUPTED_ASIDE, wakeAck } from './wake';
 import { reminderAsk, reminderSavedAside } from './remindme';
 import { describeWeather, readForecast, weatherEvents, weatherToDrawOn, weatherUrl, WEATHER_POLL_MS, type WeatherSample } from './weather';
-import { HANGING_COOLDOWN_MS, leftHanging, saidTheyWereLeaving } from './hanging';
+import { HANGING_COOLDOWN_MS, isClosing, leftHanging, saidTheyWereLeaving } from './hanging';
 import { awakeHoursSince, theyAreUp } from './awake';
+import { describeTold, placeToldFrom, toldTheyAreBusy, type Told } from './told';
 import { markMentioned, upcomingToMention } from './upcoming';
 import { directionsAsk, directionsNote, dropRouteTalk, matchNamedPlace, startingPoint, withDirections, type DirectionsAsk } from './directions';
 import { absorb, describeWhereabouts, distanceM, forgetPlace, namePlace, placeAt, readSpot, readWhereabouts, whereForPage, type Whereabouts } from './whereabouts';
@@ -1284,7 +1285,7 @@ function unpromptedContext(): string {
   // not repeat at one in the morning is what she said at half eleven.
   // Where their phone says they are rides along too: a nudge that knows they
   // are at the shops has something to needle with.
-  const parts = [summariseFollowing(getFollowing(), Date.now()), todaySoFar(), alreadySaidRecently(asides, CHAT_TIMEZONE, Date.now()), stillWaiting(), describeWhereabouts(getWhereabouts()), weatherToDrawOn(getWeather().last, weatherWhere(), asides.map(aside => aside.text)), nightsToDrawOn(nightsOn(getNights(), lastNightKey()), asides.map(aside => aside.text)), tastesInstruction(getInterests())].filter(Boolean);
+  const parts = [summariseFollowing(getFollowing(), Date.now()), todaySoFar(), alreadySaidRecently(asides, CHAT_TIMEZONE, Date.now()), stillWaiting(), describeWhereabouts(getWhereabouts()), toldNow(), weatherToDrawOn(getWeather().last, weatherWhere(), asides.map(aside => aside.text)), nightsToDrawOn(nightsOn(getNights(), lastNightKey()), asides.map(aside => aside.text)), tastesInstruction(getInterests())].filter(Boolean);
   if (!parts.length) return '';
   // "Do not repeat a point you have already made" was read as "change the
   // subject": once a thread was answered and settled she abandoned the day
@@ -3197,6 +3198,7 @@ async function considerReminding(environment: Environment): Promise<boolean> {
   chasing = true;
   lastRemindedAt = Date.now();
   store.set('reminders', { ...states, [target.item.id]: { attempts: attempts + 1, lastAt: Date.now() } });
+  store.set('reminders.lastChased', { id: target.item.id, at: Date.now() });
   try {
     const intoDay = now.getHours() * 60 + now.getMinutes();
     const evening = !target.item.time && isEveningCheck(intoDay);
@@ -3241,8 +3243,20 @@ async function considerReminding(environment: Environment): Promise<boolean> {
 
 /** Any word from them ends every escalation in progress, and drops her back to
  *  her normal voice. Being answered is the whole objective. */
+/** How long after a chase a reply still counts as a reply to it. */
+const REPLY_TO_CHASE_MS = 20 * 60_000;
+
 function acknowledgeReminders() {
-  const states = reminderStates();
+  let states = reminderStates();
+  // A reply within minutes of a chase is a reply to that chase, whether or
+  // not the item had a record yet: "I finish at 4:30 and go straight after"
+  // was answered with "Go to Mums right now" because the record did not exist.
+  const chased = store.get('reminders.lastChased') as { id?: string; at?: number } | undefined;
+  if (chased?.id && Date.now() - Number(chased.at ?? 0) < REPLY_TO_CHASE_MS && getKept().some(item => item.id === chased.id && !item.done)) {
+    states = { ...states, [chased.id]: { ...(states[chased.id] ?? { attempts: 0, lastAt: 0 }), attempts: 0, answeredAt: Date.now() } };
+    store.set('reminders', states);
+    store.delete('reminders.lastChased' as never);
+  }
   if (Object.keys(states).length) {
     // Marked answered rather than forgotten. Clearing it read as "never chased",
     // and the ladder started again three minutes later — see ReminderState.
@@ -5741,6 +5755,13 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
       console.warn(`[transcript] could not read ${videoLink}: ${reason}`);
     }
   }
+  // Where they say they are is kept, in their words, for every composer —
+  // the GPS knows the place, not that it is work or that it ends at half four.
+  const said = messages.at(-1)?.role === 'user' ? placeToldFrom(latest, new Date().toISOString()) : null;
+  if (said) {
+    store.set('told', said);
+    console.log(`[told] they are ${said.enRoute ? 'on their way to ' : ''}${said.where}${said.until ? ` until ${said.until}` : ''}${said.thenTo ? `, then ${said.thenTo}` : ''}`);
+  }
   const reminder = messages.at(-1)?.role === 'user' ? reminderAsk(latest, zonedNow(CHAT_TIMEZONE)) : null;
   if (reminder) {
     const item = addKeptItem({ ...reminder, kind: 'task' });
@@ -5829,7 +5850,7 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
     pushback: store.get('pushback') as Pushback | undefined,
     grudge: getMood().grudge ?? 0,
     ignoredToday: getMood().ignoredToday ?? 0,
-    whereabouts: describeWhereabouts(getWhereabouts()),
+    whereabouts: [describeWhereabouts(getWhereabouts()), toldNow()].filter(Boolean).join(' '),
     weather: describeWeather(getWeather().last, weatherWhere()),
     // So "what did you get up to last night?" has a true answer. Without this
     // the only record of her night is on disk and she invents one instead.
@@ -6330,6 +6351,7 @@ async function nudgeForPhone(): Promise<{ line: string; about: string } | null> 
   chasing = true;
   lastRemindedAt = Date.now();
   store.set('reminders', { ...states, [target.item.id]: { attempts: attempts + 1, lastAt: Date.now() } });
+  store.set('reminders.lastChased', { id: target.item.id, at: Date.now() });
   try {
     const intoDay = now.getHours() * 60 + now.getMinutes();
     const evening = !target.item.time && isEveningCheck(intoDay);
@@ -6341,6 +6363,7 @@ async function nudgeForPhone(): Promise<{ line: string; about: string } | null> 
       : `due in about ${Math.round(target.due)} minutes, ${onDay}`;
     const character = getActiveCharacter();
     const system = [
+      toldNow(),
       character.identity,
       character.style,
       reminderInstruction(tier, target.item.title, when, evening),
@@ -7274,10 +7297,18 @@ async function checkHanging(config: ProviderConfig) {
   const nudged = (store.get('hanging.nudgedFor') as string | undefined) ?? '';
   if (nudged === hanging.key) return;
   if (isSilenced(store.get('pushback') as Pushback | undefined, Date.now())) return;
-  // Told where they were going is not being left: mark it seen and let it be.
-  if (saidTheyWereLeaving(hanging.theirLast.content)) {
+  // Left hanging means she asked and got nothing. A reply that asked nothing,
+  // a conversation they closed, a "going for a shower", or an afternoon they
+  // said they were at work — none of that is being left, and four chases in
+  // one morning came from treating every pause as one.
+  const why = !hanging.sheAsked ? 'she asked nothing'
+    : isClosing(hanging.theirLast.content) ? 'they closed the conversation'
+    : saidTheyWereLeaving(hanging.theirLast.content) ? 'they said they were going'
+    : toldTheyAreBusy(getTold(), Date.now()) ? `they said they are ${getTold()?.where}`
+    : null;
+  if (why) {
     store.set('hanging.nudgedFor', hanging.key);
-    console.log('[push] not chasing — they said they were going');
+    console.log(`[push] not chasing — ${why}`);
     return;
   }
   const lastChase = Number(store.get('hanging.lastAt') ?? 0) || 0;
@@ -7301,6 +7332,7 @@ async function checkUpcoming(config: ProviderConfig) {
   const next = upcomingToMention(kept, now, todayKey, marked);
   if (!next) return;
   store.set('upcoming.marked', markMentioned(marked, next.item.id, next.lead, kept.filter(item => item.date >= todayKey).map(item => item.id)));
+  store.set('reminders.lastChased', { id: next.item.id, at: Date.now() });
   const what = next.item.kind === 'event' ? 'an event' : 'a task';
   const system = proactiveSystem(
     `They have ${what} coming up: "${next.item.title}" at ${next.item.time}, which is in about ${next.inMinutes} minutes. Remind them, in your way — the name and how long they have must survive.`,
@@ -7795,6 +7827,16 @@ function scheduleNextPush(resume = false, after: PesterOutcome | null = null) {
  * Whether they are up, as far as she can tell — see awake.ts. The quiet ending
  * is when she may speak; this is when there is someone to speak to.
  */
+/** Where they last said they were (told.ts), and a clock for saying when. */
+function getTold(): Told | undefined {
+  const saved = store.get('told') as Told | undefined;
+  return saved && typeof saved.where === 'string' && typeof saved.at === 'string' ? saved : undefined;
+}
+const clockAt = (ms: number) => new Intl.DateTimeFormat('en-AU', { hour: 'numeric', minute: '2-digit', timeZone: CHAT_TIMEZONE }).format(new Date(ms));
+function toldNow(): string {
+  return describeTold(getTold(), Date.now(), clockAt);
+}
+
 function theyAreUpNow(): boolean {
   const log = store.getActivityLog();
   const days = Object.keys(log).sort();

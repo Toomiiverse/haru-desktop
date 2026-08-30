@@ -7,7 +7,10 @@
 // she used kept out of the draw so a long silence does not get the same jab
 // four times.
 
-export type Remembered = { id: string; text: string; kind?: string; status?: string; importance?: number };
+export type Remembered = { id: string; text: string; kind?: string; status?: string; importance?: number; lastSeenAt?: string; createdAt?: string };
+
+/** An event is on her mind for this long; after that it is a thing that happened, not a thing to raise. */
+export const EVENT_FRESH_DAYS = 3;
 export type Day = { day: string; summary: string };
 export type Something = { id: string; text: string; from: 'memory' | 'day' };
 
@@ -34,6 +37,9 @@ export function pickToBringUp(memories: Remembered[], days: Day[], recent: strin
   const worth = (text: string) => text.trim().split(/\s+/).length >= MIN_WORDS && !NOTHING_TO_SAY.test(text) && !HOW_TO_TREAT_THEM.test(text);
   const facts = memories
     .filter(m => m.text && worth(m.text) && (m.status === undefined || m.status === 'active') && m.kind !== 'preference')
+    // A week-old plan raised as "the store cleaning you're avoiding" was a
+    // memory of an event that had long since happened. Events go stale.
+    .filter(m => m.kind !== 'event' || dayDistance((m.lastSeenAt ?? m.createdAt ?? '').slice(0, 10) || todayKey, todayKey) <= EVENT_FRESH_DAYS)
     .map(m => ({ thing: { id: m.id, text: m.text.trim(), from: 'memory' as const }, weight: m.importance ?? DEFAULT_IMPORTANCE }));
   const recentDays = days
     .filter(d => d.summary && d.day && d.day < todayKey && dayDistance(d.day, todayKey) <= DAYS_WORTH_RAISING && worth(d.summary))
