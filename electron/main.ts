@@ -5757,10 +5757,10 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   }
   // Where they say they are is kept, in their words, for every composer —
   // the GPS knows the place, not that it is work or that it ends at half four.
-  const said = messages.at(-1)?.role === 'user' ? placeToldFrom(latest, new Date().toISOString()) : null;
-  if (said) {
-    store.set('told', said);
-    console.log(`[told] they are ${said.enRoute ? 'on their way to ' : ''}${said.where}${said.until ? ` until ${said.until}` : ''}${said.thenTo ? `, then ${said.thenTo}` : ''}`);
+  const spot = messages.at(-1)?.role === 'user' ? placeToldFrom(latest, new Date().toISOString()) : null;
+  if (spot) {
+    store.set('told', spot);
+    console.log(`[told] they are ${spot.enRoute ? 'on their way to ' : ''}${spot.where}${spot.until ? ` until ${spot.until}` : ''}${spot.thenTo ? `, then ${spot.thenTo}` : ''}`);
   }
   const reminder = messages.at(-1)?.role === 'user' ? reminderAsk(latest, zonedNow(CHAT_TIMEZONE)) : null;
   if (reminder) {
@@ -7837,6 +7837,9 @@ function toldNow(): string {
   return describeTold(getTold(), Date.now(), clockAt);
 }
 
+/** Between two wake-up lines. She does not greet someone every time their phone wakes. */
+const WAKE_ACK_GAP_MS = 2 * 3_600_000;
+
 function theyAreUpNow(): boolean {
   const log = store.getActivityLog();
   const days = Object.keys(log).sort();
@@ -8256,7 +8259,15 @@ function webDeps(): WebDeps {
       const folder = [path.join(app.getAppPath(), 'build', 'emotions'), path.join(process.resourcesPath ?? '', 'build', 'emotions')].find(existsSync);
       return folder ?? null;
     },
-    wake: () => wakeAck(),
+    // The phone's "she woke up" word. Not before they are — it put "You're awake,
+    // so you've probably done nothing but stare at the ceiling" into the
+    // conversation at five in the morning — and not more than once in a while.
+    wake: () => {
+      const last = Number(store.get('wake.lastAckAt') ?? 0) || 0;
+      if (!theyAreUpNow() || Date.now() - last < WAKE_ACK_GAP_MS) return { line: '', emotion: 'neutral' as const };
+      store.set('wake.lastAckAt', Date.now());
+      return wakeAck();
+    },
     async speak(text, emotion) {
       // The same voice, the same reference clip, the same server the desktop
       // speaks through. Nothing about her sounds different for being far away.
@@ -8269,7 +8280,19 @@ function webDeps(): WebDeps {
       // and her angry clip for a line she is shouting, which is where the volume
       // actually comes from. A mood she has no clip for is her usual voice.
       const reference = referenceFor(voice, emotion && (EMOTIONS as readonly string[]).includes(emotion) ? emotion as EmotionName : null);
-      return synthesise(spokenCase(speakableText(text)), voice, hasShout(text) ? shoutReference(voice, reference) : reference, remoteAuth(voice.endpoint));
+      const chosen = hasShout(text) ? shoutReference(voice, reference) : reference;
+      try {
+        return await synthesise(spokenCase(speakableText(text)), voice, chosen, remoteAuth(voice.endpoint));
+      } catch (error) {
+        // A mood clip the server will not take — four of hers ran over the
+        // 3-10 second limit — costs the mood, not the line: her usual voice.
+        const why = error instanceof Error ? error.message : String(error);
+        if (chosen.clip !== voice.voice && /3-10 second|reference audio/i.test(why)) {
+          console.warn(`[voice] the clip for "${emotion}" was refused (${chosen.clip.split('/').pop()}) — speaking in her usual voice instead`);
+          return synthesise(spokenCase(speakableText(text)), voice, referenceFor(voice), remoteAuth(voice.endpoint));
+        }
+        throw error;
+      }
     },
     async hear(audio, mime) {
       const listen = readListenConfig(store.get('listen'));

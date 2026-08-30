@@ -20,9 +20,18 @@ const ASKS: { pattern: RegExp; nearest?: boolean }[] = [
   { pattern: new RegExp(String.raw`\b(?:take|guide|walk|drive|navigate|get) (?:me|us) (?:back )?to\s+(.+?)` + TAIL, 'i') },
   { pattern: new RegExp(String.raw`\b(?:take|guide|walk|drive|get) (?:me|us) (home)` + TAIL, 'i') },
   { pattern: new RegExp(String.raw`\bhow far (?:is|to|away is)\s+(.+?)` + TAIL, 'i') },
+  // Travel time is a route question too. Without these she guessed — "roughly
+  // 45 minutes to an hour" for a half-hour drive — and a guess about a journey
+  // is exactly the confident wrong number the map exists to replace.
+  { pattern: new RegExp(String.raw`\bhow long (?:does|would|will|did|should) it take (?:(?:me|us) )?(?:to (?:get|drive|walk|travel|go|ride|cycle|bus|train) )?(?:back )?(?:to|from [^?]+? to)\s+(.+?)` + TAIL, 'i') },
+  { pattern: new RegExp(String.raw`\bhow long (?:to|till|until) (?:(?:i|we) )?(?:get to |reach |arrive at )?(.+?)` + TAIL, 'i') },
+  { pattern: new RegExp(String.raw`\b(?:travel|drive|driving|journey|trip) time (?:to|from [^?]+? to)\s+(.+?)` + TAIL, 'i') },
+  { pattern: new RegExp(String.raw`\beta (?:to|for)\s+(.+?)` + TAIL, 'i') },
   { pattern: new RegExp(String.raw`\b(?:where(?:'s| is)|find(?: me)?|nearest|closest)\s+(?:the |a )?(?:nearest|closest)\s+(.+?)` + TAIL, 'i'), nearest: true },
 ];
 const NOT_A_PLACE = /^(?:there|here|it|that|this|you|her|him|them|me|us|the point|sleep|bed|work on it|the top|the bottom)$/i;
+/** "How long does it take to boil an egg" has the shape of a journey and none of the substance. */
+const NOT_A_JOURNEY = /^(?:you|i|we|they|he|she|it|this|that|boil|cook|make|bake|do|finish|learn|read|write|build|fix|charge|download|install|render|compile|get ready|fall asleep|heal|recover|grow|dry|load|update|stop|start|be)\b/i;
 
 /** Tidied for a search: quotes, a leading article, a trailing "from here" gone; casing kept for names. */
 export function cleanDestination(raw: string): string {
@@ -41,7 +50,7 @@ export function directionsAsk(text: string): DirectionsAsk | null {
     const cleaned = cleanDestination(m[1]);
     const near = /^(?:the )?(?:nearest|closest|nearby|near(?:by)? )\s*/i.exec(cleaned);
     const destination = near ? cleanDestination(cleaned.slice(near[0].length)) : cleaned;
-    if (destination.length < 2 || NOT_A_PLACE.test(destination)) return null;
+    if (destination.length < 2 || NOT_A_PLACE.test(destination) || NOT_A_JOURNEY.test(destination)) return null;
     return { destination, nearest: nearest === true || near !== null };
   }
   return null;

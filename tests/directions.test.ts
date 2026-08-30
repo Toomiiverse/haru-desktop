@@ -89,3 +89,14 @@ test('roads, buses and journey times she made up are cut; her own words stay; he
   assert.equal(dropRouteTalk('Head south on the freeway for 20 mins.'), 'Head south on the freeway for 20 mins.', 'nothing else to keep');
   assert.equal(dropRouteTalk('Fine. Go. 🙄'), 'Fine. Go. 🙄');
 });
+
+test('a travel-time question is a route question', () => {
+  assert.equal(directionsAsk('how long does it take to get to Rockingham?')?.destination, 'Rockingham');
+  assert.equal(directionsAsk('How long does it take to get from Murdoch University to Rockingham?')?.destination, 'Rockingham');
+  assert.equal(directionsAsk('how long to mums house')?.destination, 'mums house');
+  assert.equal(directionsAsk('travel time to Perth Airport please')?.destination, 'Perth Airport');
+  assert.equal(directionsAsk('eta to the airport')?.destination, 'the airport');
+  // Not a journey.
+  assert.equal(directionsAsk('how long does it take to boil an egg?'), null);
+  assert.equal(directionsAsk('how long until you stop nagging me'), null);
+});

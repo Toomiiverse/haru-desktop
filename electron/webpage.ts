@@ -1599,6 +1599,8 @@ function act(actions){
 async function acknowledge(){
   try{
     const {line,emotion}=await post('/api/wake');
+    // Nothing to say — she has no sign they are up, or said hello not long ago.
+    if(!line){ if(talk) act(talk.spokeEnd(now())); return; }
     $('chat').insertAdjacentHTML('beforeend','<div class="msg them">'+esc(line)+'</div>'); $('chat').scrollTop=$('chat').scrollHeight;
     if(window.haruAvatar){ window.haruAvatar.express(emotion); window.haruAvatar.notify(); }
     const started=await speak(line,emotion);
