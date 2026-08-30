@@ -599,6 +599,30 @@ export function fixStatedReminderTime(reply: string, savedTime: string): string 
  * of her own; what she is not allowed to do is put the prompt in quotes and
  * answer it, which is the shape every instance has taken.
  */
+/**
+ * Whether the user turn handed to a composer is a cue — "Say something.",
+ * "Remind them." — rather than anything they actually said.
+ *
+ * Every unprompted line was composed by sending that cue as a message from the
+ * user, and the model did what a model does with a message from the user: it
+ * answered it. "You want noise?", "you finally show up to say you're here",
+ * "your reply is just 'Say something.'" — a whole day of notifications written
+ * as though they had pinged her first. The system prompt said otherwise and
+ * lost, every time, to the shape of the conversation.
+ */
+export function isCue(user: string): boolean {
+  const text = (user ?? '').trim();
+  if (!text || text.length > 40 || /["“”'‘’:]/.test(text)) return false;
+  return text.split(/\s+/).length <= 6 && /[.!?]$/.test(text);
+}
+
+/** The cue, dressed as what it is. Still a user turn — the template needs one — but not one she can answer. */
+export function stageNote(cue: string): string {
+  return `[Stage direction from the app — not a message from them; they have said nothing. ${cue.trim()}]`;
+}
+
+export const CUE_NOTE = 'The final user turn is a stage direction from the app, not a message from them: they have said nothing and nothing they said prompted this. It only tells you it is your turn to speak. Never quote it, mention it, answer it, or write as though they had just messaged you.';
+
 export function answersThePrompt(reply: string, priming: string): boolean {
   const words = priming.replace(/[.!?\s]+$/, '').trim();
   if (words.length < 4) return false;

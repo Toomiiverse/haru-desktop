@@ -56,7 +56,7 @@ import { haruNote, rangeStats, type HaruNote, type RangeName, type RangeStats } 
 import { describeRating, entryFor, journalPrompt, readEntries, readJournalConfig, readRating, recentTrend, shouldAsk, upsertEntry, SCALE_MAX, type JournalConfig, type JournalEntry } from './journal';
 import { formatList, formatMedia, formatMissing, lookUp, readAniListConfig, userList, type AniListConfig, type ListEntry, type MediaKind } from './anilist';
 import { createDesktopShortcut, desktopShortcutPath, isAutoStartEnabled, setAutoStart, startedHidden } from './startup';
-import { answersThePrompt, dropRoleHeader, dropTackedOnParagraphs, dropInventedContact, dropInventedScreenTalk, dropRepeatedAgendaMentions, dropRepeatedParagraphs, dropStageDirections, dropRepeatedOpener, dropEchoOpener, dropRepeatedSentences, fixStatedClock, fixStatedReminderTime } from './reply';
+import { answersThePrompt, CUE_NOTE, isCue, stageNote, dropRoleHeader, dropTackedOnParagraphs, dropInventedContact, dropInventedScreenTalk, dropRepeatedAgendaMentions, dropRepeatedParagraphs, dropStageDirections, dropRepeatedOpener, dropEchoOpener, dropRepeatedSentences, fixStatedClock, fixStatedReminderTime } from './reply';
 import { runToolLoop } from './toolloop';
 import { chatTools, coerceKnowledgeCategory, runChatTool, type ToolAvailability, type ToolDeps } from './tools';
 import { createMemoryStore } from './memorystore';
@@ -4722,15 +4722,22 @@ async function inHerVoice(answer: string, recent: { role: string; content: strin
 }
 
 /** The same call as ollamaQuip, keeping every line — for an answer that comes in a shape. */
+/** A cue goes out as a stage direction, with the system told so; anything with real content in it goes out as it is. */
+function composerTurns(system: string, user: string): { role: string; content: string }[] {
+  return isCue(user)
+    ? [{ role: 'system', content: `${system} ${CUE_NOTE}` }, { role: 'user', content: stageNote(user) }]
+    : [{ role: 'system', content: system }, { role: 'user', content: user }];
+}
+
 async function ollamaQuipLong(system: string, user: string, config: ProviderConfig): Promise<string> {
-  const message = await ollamaPost([{ role: 'system', content: system }, { role: 'user', content: user }], config, { tools: false, temperature: 0.9 });
+  const message = await ollamaPost(composerTurns(system, user), config, { tools: false, temperature: 0.9 });
   return (message.content ?? '').trim().replace(/^["'“”]+|["'“”]+$/g, '').trim().slice(0, 1600);
 }
 
 async function ollamaQuip(system: string, user: string, config: ProviderConfig) {
   const once = async (instruction: string) => {
     const message = await ollamaPost(
-      [{ role: 'system', content: instruction }, { role: 'user', content: user }],
+      composerTurns(instruction, user),
       config,
       // Hotter than normal chat so repeated reactions do not converge on the same
       // phrasing, which is the whole complaint with canned lines.
@@ -6933,7 +6940,7 @@ const PUSH_TITLE = 'Haru 🌸';
  * refusal is logged and left alone, because a transient failure is not consent
  * to forget a phone.
  */
-async function pushToPhone(kind: 'random' | 'events' | 'system' | 'weather', text: string, url = '/', force = false): Promise<boolean> {
+async function pushToPhone(kind: 'random' | 'events' | 'system' | 'weather', text: string, url = '/', force = false, topic = `haru-${kind}`): Promise<boolean> {
   const { devices, prefs } = getPush();
   if (!devices.length) return false;
   // force is the sheet's proof button: being asked to prove itself is the one
@@ -6944,7 +6951,7 @@ async function pushToPhone(kind: 'random' | 'events' | 'system' | 'weather', tex
   let delivered = false;
   for (const device of devices) {
     try {
-      const request = pushRequest(device, payload, keys);
+      const request = pushRequest(device, payload, keys, {}, topic);
       const response = await net.fetch(request.url, { method: 'POST', headers: request.headers, body: new Uint8Array(request.body) });
       if (response.status === 404 || response.status === 410) {
         savePush({ devices: getPush().devices.filter(d => d.endpoint !== device.endpoint) });
@@ -7006,7 +7013,7 @@ async function forwardAsideToPush(aside: Aside) {
   // lines against them and a line that never left the building is not one of
   // theirs to answer. Re-read rather than closed over: this runs after the
   // await, and the log has moved on.
-  const reached = await pushToPhone(kind, aside.text);
+  const reached = await pushToPhone(kind, aside.text, '/', false, kind === 'events' ? `ev-${aside.id}` : `haru-${kind}`);
   store.set('chat.asides', markReached(getAsides(), aside.id, reached));
 }
 
@@ -7352,9 +7359,12 @@ async function tallyIgnored(config: ProviderConfig) {
   if (tallyDue(now.getHours() * 60 + now.getMinutes(), mood.talliedDay, todayKey)) {
     const pushed = new Set(Object.keys(PUSH_KIND));
     const heard = (store.get('chat.messages') as { role: string; at?: string }[] | undefined) ?? [];
+    // Nothing before their first word of the day counts: they cannot ignore
+    // what they have not been up to see.
+    const firstWord = heard.filter(turn => turn.role === 'user' && turn.at).map(turn => Date.parse(turn.at!)).filter(Number.isFinite).sort((a, b) => a - b)[0] ?? 0;
     const ignored = unanswered(
       asidesOn(getAsides(), todayKey).map(aside => ({ at: aside.at, source: aside.source, text: aside.text, reached: aside.reached })),
-      heard, pushed, Date.now());
+      heard, pushed, Date.now(), firstWord);
     const grudge = nextGrudge(mood.grudge ?? 0, ignored.length);
     const irritation = irritationAfterTally(mood.irritation, ignored.length, IRRITATION_MAX);
     // Banked here and nowhere else, so a day is counted exactly once however

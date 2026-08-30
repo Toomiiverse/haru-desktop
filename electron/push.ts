@@ -190,6 +190,7 @@ export function pushRequest(
   payload: string,
   vapid: { publicKey: string; privateKey: string },
   options: { now?: Date; local?: { privateKey: Buffer }; salt?: Buffer } = {},
+  topic?: string,
 ): { url: string; headers: Record<string, string>; body: Buffer } {
   const body = sealPayload(
     Buffer.from(device.p256dh, 'base64url'),
@@ -207,6 +208,10 @@ export function pushRequest(
       'Content-Type': 'application/octet-stream',
       'TTL': String(TTL_SECONDS),
       'Urgency': 'normal',
+      // Same topic, and the push service keeps only the newest while the phone
+      // is unreachable: three nudges queued through a bad hour arrive as one.
+      // Reminders get a topic of their own each, and never replace each other.
+      ...(topic ? { 'Topic': topic.replace(/[^A-Za-z0-9_-]/g, '').slice(0, 32) } : {}),
     },
     body,
   };

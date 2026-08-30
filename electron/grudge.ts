@@ -26,7 +26,7 @@ export const GRUDGE_MAX = 30;
  * after it within the window; a line said inside the window of an earlier one
  * shares its answer. Lines whose window is still open are not counted yet.
  */
-export function unanswered(said: Said[], heard: Heard[], pushed: ReadonlySet<string>, nowMs: number): Said[] {
+export function unanswered(said: Said[], heard: Heard[], pushed: ReadonlySet<string>, nowMs: number, notBeforeMs = 0): Said[] {
   const theirs = heard
     .filter(turn => turn.role === 'user' && turn.at)
     .map(turn => Date.parse(turn.at!))
@@ -36,6 +36,9 @@ export function unanswered(said: Said[], heard: Heard[], pushed: ReadonlySet<str
     .filter(line => pushed.has(line.source))
     // Never sent is not ignored. Undefined predates the flag and counts as before.
     .filter(line => line.reached !== false)
+    // Nor is a line sent before they were up: two of the three she held
+    // against them one evening had gone out while they were asleep.
+    .filter(line => !notBeforeMs || Date.parse(line.at) >= notBeforeMs)
     .filter(line => {
       const at = Date.parse(line.at);
       if (!Number.isFinite(at) || at + ANSWER_WINDOW_MS > nowMs) return false;

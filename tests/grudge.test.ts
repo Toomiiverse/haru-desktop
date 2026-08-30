@@ -88,3 +88,12 @@ test('a quoted line does not hand her a clock time to read as now', () => {
   assert.match(line, /"you ghosted me"/);
   assert.equal(line.includes('8:37'), false);
 });
+
+test('a line sent before their first word of the day is not one they ignored', () => {
+  const said = [{ at: at(1), source: 'idle' }, { at: at(5), source: 'idle' }];
+  const heard = [{ role: 'user', at: at(3) }];
+  // Counted the old way: both windows closed and neither answered inside its window.
+  assert.equal(unanswered(said, heard, PUSHED, evening).length, 2);
+  // Not before they were up: the 01:00 line went to a sleeping phone.
+  assert.deepEqual(unanswered(said, heard, PUSHED, evening, Date.parse(at(3))).map(l => l.at), [at(5)]);
+});

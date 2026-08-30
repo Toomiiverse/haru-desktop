@@ -197,3 +197,12 @@ test('one notification at a time, except a reminder', () => {
   // Nothing ever landed: nothing to wait for.
   assert.equal(tooSoonToPush('random', 0, now), false);
 });
+
+test('a push carries a topic, made safe for the header', () => {
+  const keys = newVapidKeys();
+  const device = { endpoint: 'https://push.example/x', p256dh: RFC.receiverPublic, auth: RFC.authSecret };
+  const topped = pushRequest(device, '{"a":1}', keys, {}, 'haru-random');
+  assert.equal(topped.headers['Topic'], 'haru-random');
+  assert.equal(pushRequest(device, '{"a":1}', keys, {}, 'ev-abc/def!').headers['Topic'], 'ev-abcdef');
+  assert.equal('Topic' in pushRequest(device, '{"a":1}', keys).headers, false);
+});

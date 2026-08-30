@@ -11,7 +11,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { answersThePrompt, claimsDesktopAction, claimsTickOff, dropInventedContact, dropInventedScreenTalk, dropRepeatedAgendaMentions, dropRepeatedParagraphs, dropRoleHeader, dropStageDirections, dropTackedOnParagraphs, readsLikeAssistant, dropRepeatedOpener, dropEchoOpener, dropRepeatedSentences, fixStatedClock, fixStatedReminderTime } from '../electron/reply';
+import { answersThePrompt, CUE_NOTE, isCue, stageNote, claimsDesktopAction, claimsTickOff, dropInventedContact, dropInventedScreenTalk, dropRepeatedAgendaMentions, dropRepeatedParagraphs, dropRoleHeader, dropStageDirections, dropTackedOnParagraphs, readsLikeAssistant, dropRepeatedOpener, dropEchoOpener, dropRepeatedSentences, fixStatedClock, fixStatedReminderTime } from '../electron/reply';
 
 // -- claiming to have touched the machine -------------------------------------
 
@@ -410,4 +410,13 @@ test('a line that quotes the cue and argues with it is not a line to them', () =
 test('the cue is still caught when the full stop sits inside the quotes', () => {
   assert.equal(answersThePrompt('Nine hours of silence and your reply is just \u201cSay something.\u201d \U0001F644'.replace('\\U0001F644', ''), 'Say something.'), true);
   assert.equal(answersThePrompt('your reply is just "Say something!"', 'Say something.'), true);
+});
+
+test('a cue is a cue, and anything they might actually have said is not', () => {
+  for (const cue of ['Say something.', 'Say it.', 'Remind them.', 'Tell them.', 'Write it.', 'What are you looking up?', 'What are you taking up?'])
+    assert.equal(isCue(cue), true, cue);
+  for (const said of ['They wrote: "hello there"', 'The window that just went fullscreen is titled: "x"', 'You were half-way through saying this out loud: "no"', 'a long sentence with more than six words in it.'])
+    assert.equal(isCue(said), false, said);
+  assert.match(stageNote('Say something.'), /^\[Stage direction from the app — not a message from them; they have said nothing\. Say something\.\]$/);
+  assert.match(CUE_NOTE, /never quote it, mention it, answer it/i);
 });
