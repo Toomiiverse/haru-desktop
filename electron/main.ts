@@ -38,7 +38,7 @@ import { correct, noteUsed, readHearing, remember } from './hearing';
 import { assumeItIsTheirs, identifyWork, noteWork, readFollowing, recogniseNow, summariseFollowing } from './following';
 import { lookUpPlace, readWindowsLocation, searchPlaces, type FoundPlace } from './location';
 import { INTERRUPTED_ASIDE, wakeAck } from './wake';
-import { reminderAsk, reminderSavedAside } from './remindme';
+import { promisedTitle, reminderAsk, reminderPromised, reminderSavedAside } from './remindme';
 import { describeWeather, readForecast, weatherEvents, weatherToDrawOn, weatherUrl, WEATHER_POLL_MS, type WeatherSample } from './weather';
 import { HANGING_COOLDOWN_MS, isClosing, leftHanging, saidTheyWereLeaving } from './hanging';
 import { awakeHoursSince, theyAreUp } from './awake';
@@ -6049,6 +6049,14 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   const body = dropTackedOnParagraphs(trimmed, brain.escalated || fromSearch || ran.has('search_web') || ran.has('read_web_page') || ran.has('read_video_transcript'));
   const cleaned = fixStatedClock(dropRepeatedOpener(dropEchoOpener(fromSearch ? body : dropRepeatedSentences(body, recent), latest), recent), clock.getHours(), clock.getMinutes());
   // The reminder read from their message is the truth about its time, whatever she says.
+  // Her promise, kept: "I'll set the reminder at 6:54 AM" with nothing written
+  // is a reminder that exists only in the conversation. See reminderPromised.
+  const promised = !reminder && messages.at(-1)?.role === 'user' ? reminderPromised(cleaned, zonedNow(CHAT_TIMEZONE)) : null;
+  if (promised) {
+    const theirs = messages.filter(message => message.role === 'user').slice(-4).map(message => String(message.content ?? ''));
+    const item = addKeptItem({ title: promisedTitle(theirs), date: promised.date, time: promised.time, kind: 'task' });
+    console.log(`[remind] she promised one in her reply — written down: "${item.title}" on ${item.date} at ${item.time}`);
+  }
   const herLine = reminder?.time ? fixStatedReminderTime(cleaned, reminder.time) : cleaned;
   // The maps button goes under her words, not into her mouth: what is herLine
   // and what her mood is read from is the line she said.

@@ -2,7 +2,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { reminderAsk, reminderSavedAside } from '../electron/remindme';
+import { promisedTitle, reminderPromised, reminderAsk, reminderSavedAside } from '../electron/remindme';
 
 // Saturday 29 August 2026, 11:04 in the morning, their clock.
 const morning = new Date(2026, 7, 29, 11, 4);
@@ -53,4 +53,21 @@ test('the aside matches what was saved', () => {
   const aside = reminderSavedAside({ title: 'Eat', date: '2026-08-29', time: '12:00 PM' }, '2026-08-29');
   assert.match(aside, /"Eat", today at 12:00 PM/);
   assert.match(aside, /do not call a tool/);
+});
+
+test('a reminder she promised in her own reply is read back off it', () => {
+  const now = new Date(2026, 7, 30, 22, 4); // 10:04 pm
+  assert.deepEqual(reminderPromised("🙄 Of course I can. But don't expect me to babysit you into adulthood. I'll set the reminder at 6:54 AM sharp — don't be late.", now), { time: '6:54 AM', date: '2026-08-31' });
+  assert.deepEqual(reminderPromised("Great. I'll remind you at 6:54 AM if you need it.", now), { time: '6:54 AM', date: '2026-08-31' });
+  assert.deepEqual(reminderPromised("Fine, I've set a reminder for 4pm.", new Date(2026, 7, 30, 12, 0)), { time: '4:00 PM', date: '2026-08-30' });
+  assert.deepEqual(reminderPromised("Consider it set for 7 tomorrow.", now), { time: '7:00 AM', date: '2026-08-31' });
+  // Not a promise: talking about a time, or a threat.
+  assert.equal(reminderPromised("Don't make me come find you at 6:55 AM.", now), null);
+  assert.equal(reminderPromised("You're going to be up before the sun tomorrow.", now), null);
+  assert.equal(reminderPromised('', now), null);
+});
+
+test('what the reminder is for comes from what they said, not from her', () => {
+  assert.equal(promisedTitle(['Kinda sucks because I have to be at the shop tomorrow by 7am as we have some electricians coming in to change the lights', 'Yes please', 'You can set a reminder for me can’t you Haru?']), 'Be at the shop tomorrow by 7am');
+  assert.equal(promisedTitle(['yes']), 'What you asked her to remind you about');
 });

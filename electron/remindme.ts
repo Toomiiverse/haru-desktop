@@ -99,3 +99,51 @@ export function reminderSavedAside(ask: ReminderAsk, todayKey: string): string {
   const when = ask.time ? `${day} at ${ask.time}` : day;
   return `This is already written down: "${ask.title}", ${when}. It is on the list and you will chase them about it when it comes round. Confirm it in your own way in one short line — do not offer to set it, do not call a tool for it, and do not change the time.`;
 }
+
+
+/**
+ * A reminder she promised in her own words.
+ *
+ * "I'll set the reminder at 6:54 AM sharp — don't be late." Twice in one
+ * evening, and nothing was written: the time was in her offer and the user
+ * only said "yes please", so reminderAsk above had nothing to read, and the
+ * model never called the tool. Her promise is the plainest possible statement
+ * of what should exist, so it is read back off her reply and kept — the one
+ * case where her output, not their input, is the source, because the
+ * alternative is a reminder that exists only in the conversation.
+ */
+const PROMISED = /\b(?:i(?:'|’)?ll|i will|i(?:'|’)?ve|i have|consider it|reminder(?:'s| is)?)\s+(?:go(?:ing)? (?:to|and) )?(?:(?:set|put|add|write|note|log)(?:ting)?\s+(?:you\s+)?(?:up\s+)?(?:a |the |that |your )?(?:reminder|alarm|note)s?\s*(?:down\s+)?(?:for|at|@)|remind(?:ing)?\s+you\s+(?:about\s+\S+\s+)?(?:at|@|for)|set(?:ting)?\s+(?:for|at|@))\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)?)\b/i;
+
+export function reminderPromised(herReply: string, now: Date): { time: string; date: string } | null {
+  const m = PROMISED.exec((herReply ?? '').replace(/[‘’]/g, "'"));
+  if (!m) return null;
+  const raw = m[1].toLowerCase().replace(/\./g, '').replace(/\s+/g, '');
+  const parts = /^(\d{1,2})(?::(\d{2}))?(am|pm)?$/.exec(raw);
+  if (!parts) return null;
+  let hour = Number(parts[1]); const minute = Number(parts[2] ?? '0');
+  if (hour > 23 || minute > 59) return null;
+  const meridiem = parts[3];
+  if (meridiem === 'pm' && hour < 12) hour += 12;
+  if (meridiem === 'am' && hour === 12) hour = 0;
+  // No meridiem: the next reading of that clock from now.
+  if (!meridiem && hour <= 12) {
+    const asIs = hour * 60 + minute, later = (hour + 12) * 60 + minute, nowMin = now.getHours() * 60 + now.getMinutes();
+    if (asIs <= nowMin && hour < 12 && later > nowMin) hour += 12;
+  }
+  const when = new Date(now.getTime()); when.setHours(hour, minute, 0, 0);
+  const tomorrow = /\btomorrow\b/i.test(herReply) || when.getTime() <= now.getTime();
+  if (tomorrow && when.getTime() <= now.getTime() + 60_000) when.setDate(when.getDate() + 1);
+  else if (tomorrow && /\btomorrow\b/i.test(herReply) && when.getDate() === now.getDate()) when.setDate(when.getDate() + 1);
+  const h12 = hour % 12 === 0 ? 12 : hour % 12;
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return { time: `${h12}:${pad(minute)} ${hour < 12 ? 'AM' : 'PM'}`, date: `${when.getFullYear()}-${pad(when.getMonth() + 1)}-${pad(when.getDate())}` };
+}
+
+/** What the reminder is for, from what they said: the last thing with a time or an obligation in it. */
+export function promisedTitle(theirRecent: string[]): string {
+  const said = [...theirRecent].reverse().find(text => text.trim().split(/\s+/).length >= 4 && !/^(?:yes|yeah|yep|sure|ok(?:ay)?|please|do it|go on|thanks)\b/i.test(text.trim()) && !/\?\s*$/.test(text.trim()));
+  if (!said) return 'What you asked her to remind you about';
+  const cut = said.replace(/^(?:kinda sucks because |it sucks because |well,? |so,? |anyway,? )/i, '').replace(/^i (?:have|need|\'ve got|got|ve got) to /i, '').replace(/\s+as we have .*$/i, '').replace(/\s+because .*$/i, '').trim();
+  const title = cut.charAt(0).toUpperCase() + cut.slice(1);
+  return title.length > 64 ? `${title.slice(0, 61).trimEnd()}…` : title;
+}
