@@ -41,6 +41,7 @@ import { INTERRUPTED_ASIDE, wakeAck } from './wake';
 import { reminderAsk, reminderSavedAside } from './remindme';
 import { describeWeather, readForecast, weatherEvents, weatherToDrawOn, weatherUrl, WEATHER_POLL_MS, type WeatherSample } from './weather';
 import { HANGING_COOLDOWN_MS, leftHanging, saidTheyWereLeaving } from './hanging';
+import { awakeHoursSince, theyAreUp } from './awake';
 import { markMentioned, upcomingToMention } from './upcoming';
 import { directionsAsk, directionsNote, dropRouteTalk, matchNamedPlace, startingPoint, withDirections, type DirectionsAsk } from './directions';
 import { absorb, describeWhereabouts, distanceM, forgetPlace, namePlace, placeAt, readSpot, readWhereabouts, whereForPage, type Whereabouts } from './whereabouts';
@@ -6989,6 +6990,13 @@ async function forwardAsideToPush(aside: Aside) {
   // Said, but not buzzed: the line is on the page for when they next look,
   // and is not held against them (reached: false), because they were never
   // told it was there.
+  // Nothing but a reminder buzzes someone who is not up yet. The line is on
+  // the page for when they are.
+  if (kind !== 'events' && !theyAreUpNow()) {
+    console.log(`[push] a ${aside.source} line held back — they are not up yet`);
+    store.set('chat.asides', markReached(getAsides(), aside.id, false));
+    return;
+  }
   if (tooSoonToPush(kind, getPush().lastReachedAt, Date.now())) {
     console.log(`[push] a ${aside.source} line held back — one landed ${Math.round((Date.now() - getPush().lastReachedAt) / 60_000)} min ago (breather ${Math.round(PUSH_BREATHER_MS / 60_000)} min)`);
     store.set('chat.asides', markReached(getAsides(), aside.id, false));
@@ -7039,7 +7047,9 @@ async function boredNudge(): Promise<string | null> {
   const now = zonedNow(CHAT_TIMEZONE);
   const todayKey = localDateKey(now);
   const thing = ignoring ? null : pickToBringUp(getMemories(), getSessions(), broughtUp, todayKey);
-  const quietHours = mood.lastMessageAt ? Math.floor((Date.now() - Date.parse(mood.lastMessageAt)) / 3_600_000) : null;
+  // Counted from when the quiet ended, not from their last word: eight hours
+  // of sleep is not eight hours of ignoring her.
+  const quietHours = awakeHoursSince(mood.lastMessageAt, getPush().prefs, now);
   const character = getActiveCharacter();
   const system = [
     character.identity,
@@ -7122,6 +7132,8 @@ async function pesterOnPush(): Promise<PesterOutcome> {
     }
   }
   if (!prefs.random) return { how: 'quiet' };
+  // Not yet up: come back in a while, and do not compose a line nobody is awake for.
+  if (!theyAreUpNow()) return { how: 'later', inMs: 20 * 60_000 };
   // All three of these expire on a clock, so they say when to come back rather
   // than handing the beat a fresh cycle.
   if (chasing) return { how: 'later', inMs: REMINDER_SPACING_MS };
@@ -7641,6 +7653,8 @@ async function sayItInTheMorning(config: ProviderConfig) {
   const todayKey = localDateKey(now);
   const { prefs } = getPush();
   if (inQuietHours(prefs, now)) return;
+  // The first thing she says when they are up — not the first thing after six.
+  if (!theyAreUpNow()) return;
   if (!sulkStillStands(owed.day, todayKey)) {
     console.log(`[nightfall] the word owed for ${owed.day} has gone stale — dropping it`);
     setMood({ ...getMood(), owedMorning: undefined });
@@ -7768,6 +7782,21 @@ function scheduleNextPush(resume = false, after: PesterOutcome | null = null) {
 }
 
 /**
+ * Whether they are up, as far as she can tell — see awake.ts. The quiet ending
+ * is when she may speak; this is when there is someone to speak to.
+ */
+function theyAreUpNow(): boolean {
+  const log = store.getActivityLog();
+  const days = Object.keys(log).sort();
+  const latest = days.length ? (log[days[days.length - 1]] ?? []).map(entry => entry.until ?? entry.at).sort().at(-1) : undefined;
+  return theyAreUp({
+    lastMessageAt: getMood().lastMessageAt,
+    lastOpenedAt: store.get('web.lastOpenedAt') as string | undefined,
+    lastActivityAt: latest,
+  }, getPush().prefs, zonedNow(CHAT_TIMEZONE));
+}
+
+/**
  * The floor: two hours without a word from her and she says something,
  * whatever the random beat is doing.
  *
@@ -7789,6 +7818,8 @@ async function checkNudgeFloor() {
   const { devices, prefs } = getPush();
   if (!webServer || !devices.length || !prefs.random) return;
   if (Date.now() < floorQuietUntil) return;
+  // Two hours of silence from someone asleep is not two hours of silence.
+  if (!theyAreUpNow()) return;
   const reached = lastReachedThem();
   if (!reached) {
     // First run since this existed: start the clock now rather than treating an
@@ -7853,6 +7884,8 @@ function webDeps(): WebDeps {
     readAccess: getWebAccess,
     saveAccess: saveWebAccess,
     history: () => {
+      // Opening the page is a sign of life: the morning waits for one.
+      store.set('web.lastOpenedAt', new Date().toISOString());
       const messages = (store.get('chat.messages') as { id?: string; role: string; content: string; at?: string; reaction?: string; note?: string; aside?: string }[] | undefined) ?? [];
       // What she said to the phone on her own — a chase, a nudge, the weather
       // — is an aside, not a message, and the notification that carried it

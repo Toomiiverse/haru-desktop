@@ -44,6 +44,12 @@ export type PushPrefs = {
   /** "HH:MM" pair; equal means no quiet hours. Spans midnight when from > to. */
   quietFrom: string;
   quietTo: string;
+  /**
+   * The hour they are up by, "HH:MM". The quiet ending is when she may speak;
+   * this is when she assumes they are awake if nothing has told her so. Empty
+   * means she waits for a sign of life however long it takes.
+   */
+  upBy: string;
 };
 
 export function readPushDevices(saved: unknown): PushDevice[] {
@@ -77,6 +83,7 @@ export function readPushPrefs(saved: unknown): PushPrefs {
     // companion whose permission gets revoked, which is the quieter failure.
     quietFrom: time(record.quietFrom, '23:00'),
     quietTo: time(record.quietTo, '08:00'),
+    upBy: typeof record.upBy === 'string' && (record.upBy === '' || TIME.test(record.upBy)) ? record.upBy : '09:00',
   };
 }
 
