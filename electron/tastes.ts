@@ -182,3 +182,29 @@ export function tastesInstruction(interests: Interest[]): string {
     'Hold them. Bring one up when it fits, and when they rate something you think is worse, say so and say why — a real disagreement, not a joke about having one, and not a lecture. You can be argued out of a view by a good point and you can dig in against a bad one. What you know of each is what you have read about it, and no more: if they push past that, say you have only read about it.',
   ].join('\n');
 }
+
+
+/**
+ * A note to herself that talks to somebody.
+ *
+ * Her chat style is bossy at him — "Listen up, subordinate" — and composed with
+ * that style in the prompt, a view of her own opened with it, then went into
+ * her prompt and her diary as her opinion of Chainsaw Man. The style is left
+ * out of these composers now; this catches what leaks through anyway. Only the
+ * first couple of sentences are judged: a view that mentions "you" in passing
+ * later is a view, one that opens by addressing someone is a message.
+ */
+export function addressesSomeone(text: string): boolean {
+  const opening = (text ?? '').trim().split(/(?<=[.!?…])\s+/).slice(0, 2).join(' ');
+  return /\b(?:you|your|you're|yourself|subordinate|listen up|don't get cocky|get moving)\b/i.test(opening) && !/\b(?:you'd think|you could say|you know the type)\b/i.test(opening);
+}
+
+/** The addressed opening cut off, leaving the view. */
+export function unaddressed(text: string): string {
+  const sentences = (text ?? '').trim().split(/(?<=[.!?…])\s+/);
+  let index = 0;
+  while (index < sentences.length && index < 3 && /\b(?:you|your|you're|yourself|subordinate|listen up)\b/i.test(sentences[index])) index++;
+  return sentences.slice(index).join(' ').trim() || (text ?? '').trim();
+}
+
+export const NOBODY_HERE = 'Nobody is here and nobody is being addressed: this is a note to yourself. No "you", no "subordinate", no orders, no scene-setting about him — start on the thing itself.';

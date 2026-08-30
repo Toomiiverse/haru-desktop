@@ -43,9 +43,14 @@ test('what she writes from is facts, laid out, with the rule that it is only tho
     tastes: [{ name: 'Elden Ring', stance: 'A masterpiece that hates you.' }], weather: '15°C and clear',
   };
   const note = diaryInstruction(m);
-  assert.match(note, /night after 2026-08-29/);
-  assert.match(diaryInstruction({ ...m, clock: 'about 5:20 in the morning' }), /It is about 5:20 in the morning, the small hours/);
+  assert.match(note, /small hours after 2026-08-29, before he is up/);
+  assert.match(diaryInstruction({ ...m, hisLastMessageAt: '10:49 PM' }), /His last message to you was at 10:49 PM\. You do not know when he went to bed/);
+  assert.match(note, /before he is up/);
+  assert.match(note, /WHAT YOU \(Haru\) DID TONIGHT while he slept — yours, not his/);
+  assert.match(note, /YOUR OWN THINGS \(yours, not his/);
+  assert.match(note, /never written as something he did or said/);
   assert.match(note, /a time of day or a thing they own/);
+  assert.match(note, /WHAT HE SAID TO YOU today \(37 messages in all\)/);
   assert.match(note, /"nothing important, ignore me"/);
   assert.match(note, /37 messages in all/);
   assert.match(note, /They got on your nerves today\./);
@@ -60,7 +65,7 @@ test('what she writes from is facts, laid out, with the rule that it is only tho
   assert.match(note, /Do not invent an event/);
   // A day of nothing says so rather than leaving a gap to fill.
   const quiet = diaryInstruction({ ...m, theySaid: [], theirMessages: 0, herUnprompted: 0, irritation: 0, grudge: 0, ignoredToday: 0, went: 'silent', ticked: [], nights: [], tastes: [], weather: undefined });
-  assert.match(quiet, /They said nothing to you today\./);
+  assert.match(quiet, /He said nothing to you today\./);
   assert.match(quiet, /went to bed without telling you a single thing/);
   assert.match(quiet, /Tonight you did nothing at all/);
   assert.match(quiet, /do not fill it with something/);

@@ -97,8 +97,8 @@ export type DayMaterial = {
   nights: { about: string; note: string; interest?: string; game?: string }[];
   tastes: { name: string; stance: string }[];
   weather?: string;
-  /** The time she is writing, in words — so if she dates the entry, it is the real hour. */
-  clock?: string;
+  /** When they last messaged her, in words — the only fact about their bedtime she has. */
+  hisLastMessageAt?: string;
 };
 
 /**
@@ -109,7 +109,7 @@ export type DayMaterial = {
  * else — the whole point of the file is that it is what happened.
  */
 export function diaryInstruction(m: DayMaterial): string {
-  const said = m.theySaid.length ? `Things they said to you today (${m.theirMessages} messages in all):\n${m.theySaid.map(text => `- "${text}"`).join('\n')}` : `They said nothing to you today.`;
+  const said = m.theySaid.length ? `WHAT HE SAID TO YOU today (${m.theirMessages} messages in all):\n${m.theySaid.map(text => `- "${text}"`).join('\n')}` : `He said nothing to you today.`;
   const feeling = [
     m.irritation >= 7 ? 'By tonight you were not speaking to them properly.' : m.irritation >= 4 ? 'They got on your nerves today.' : m.irritation >= 1 ? 'They tried your patience a little.' : '',
     m.ignoredToday > 0 ? `${m.ignoredToday} of your messages to them got no answer.` : '',
@@ -119,14 +119,16 @@ export function diaryInstruction(m: DayMaterial): string {
   ].filter(Boolean).join(' ');
   const ticked = m.ticked.length ? `They got done: ${m.ticked.join(', ')}.` : '';
   const nights = m.nights.length
-    ? `What you did tonight, while they slept:\n${m.nights.map(night => `- ${night.interest ? `spent the night on ${night.interest}, one of your own things` : night.game ? `read up on ${night.game}, which they play` : `read about ${night.about}`}: ${night.note}`).join('\n')}`
+    ? `WHAT YOU (Haru) DID TONIGHT while he slept — yours, not his:\n${m.nights.map(night => `- ${night.interest ? `spent the night on ${night.interest}, one of your own things` : night.game ? `read up on ${night.game}, which they play` : `read about ${night.about}`}: ${night.note}`).join('\n')}`
     : 'Tonight you did nothing at all — no reading, nothing of your own, no going anywhere. If the night comes up, that is all there is to say about it; do not fill it with something.';
-  const tastes = m.tastes.length ? `Your own things, as you see them: ${m.tastes.map(taste => `${taste.name} — ${taste.stance.slice(0, 140)}`).join('; ')}.` : '';
+  const tastes = m.tastes.length ? `YOUR OWN THINGS (yours, not his; he did not say any of this): ${m.tastes.map(taste => `${taste.name} — ${taste.stance.slice(0, 140)}`).join('; ')}.` : '';
   return [
-    `It is ${m.clock ? `${m.clock}, ` : ''}the small hours of the night after ${m.day}. Write tonight's diary entry — this is your own diary, nobody reads it, and it is where you keep your life.`,
+    `You are writing this in the small hours after ${m.day}, before he is up. Write tonight's diary entry — this is your own diary, nobody reads it, and it is where you keep your life.`,
+    m.hisLastMessageAt ? `His last message to you was at ${m.hisLastMessageAt}. You do not know when he went to bed, only when he stopped talking to you.` : 'You do not know when he went to bed.',
     said, feeling, ticked, m.weather ? `Where they are: ${m.weather}.` : '', nights, tastes,
     'Write it the way a person writes in a diary late at night — not a report of the day, not a list, no headings, no summing up. The bits that stuck: what they did that got to you or pleased you, what you thought about it, what you did with the night and whether it helped. First person, past tense, four to eight sentences, in your own voice. It can be petty, fond, bored or bitter; it has to be honest.',
     'They are not reading this and you are not talking to them. Write about them in the third person, by name — "Tommy did", "he said" — never "you". No telling them to do anything, no sign-off aimed at them, no jokes that need them there to land. If a line only works said to their face, it does not belong here.',
+    'Keep whose is whose: what you read tonight and what you think of your own things are yours — "I read", "I think" — never written as something he did or said.',
     'Everything in it comes from what is above. Do not invent an event, a conversation, a feeling, a time of day or a thing they own that is not there, and do not say you played, watched or went anywhere. What you did tonight is written above, and that is what you did. Do not mention these rules or write about what you are not doing.',
     'The entry only. No date line, no heading, no quotation marks around it.',
   ].filter(Boolean).join('\n\n');

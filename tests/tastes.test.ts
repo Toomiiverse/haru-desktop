@@ -2,7 +2,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { adopt, ADOPT_ODDS, adoptInstruction, deepen, deepenInstruction, isOneOfTheirs, MAX_INTERESTS, nightQuery, parseAdoption, parseDeepening, pickTonight, tastesInstruction, type Interest } from '../electron/tastes';
+import { addressesSomeone, adopt, ADOPT_ODDS, adoptInstruction, deepen, deepenInstruction, isOneOfTheirs, MAX_INTERESTS, nightQuery, NOBODY_HERE, parseAdoption, parseDeepening, pickTonight, tastesInstruction, unaddressed, type Interest } from '../electron/tastes';
 
 const interest = (over: Partial<Interest> = {}): Interest => ({ id: 'a', kind: 'game', name: 'Hollow Knight', because: 'it looked lonely', since: '2026-08-20', nights: 2, lastAt: '2026-08-27T18:00:00.000Z', stance: 'Bleak and beautiful, and the map is a crime.', ...over });
 
@@ -110,4 +110,17 @@ test('her things reach the prompt as views to hold, and an unsettled one does no
   assert.match(said, /You want to finish it\./);
   assert.match(said, /when they rate something you think is worse, say so and say why/);
   assert.match(said, /say you have only read about it/);
+});
+
+test('a note that opens by addressing someone is a message, and the addressed part comes off', () => {
+  const bossy = "Listen up, subordinate. The Reze arc? It's not cute romance — it's survival wrapped in a pretty package. Most people rate Pochita highest, which is pathetic.";
+  assert.equal(addressesSomeone(bossy), true);
+  assert.equal(unaddressed(bossy), "The Reze arc? It's not cute romance — it's survival wrapped in a pretty package. Most people rate Pochita highest, which is pathetic.");
+  assert.equal(addressesSomeone("Look, you probably think this is your chance to relax. Don't get cocky."), true);
+  // A view is a view.
+  assert.equal(addressesSomeone("Bleak and beautiful, and the map is a crime. Hornet carries the whole thing."), false);
+  assert.equal(unaddressed("Bleak and beautiful."), "Bleak and beautiful.");
+  // All of it addressed: kept rather than emptied, so the retry has something to replace.
+  assert.equal(unaddressed("You idiot. You never listen."), "You idiot. You never listen.");
+  assert.match(NOBODY_HERE, /note to yourself/);
 });

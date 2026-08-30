@@ -82,7 +82,7 @@ import { groundedInstruction, placeQuery } from './places';
 import { daySaid, DEFAULT_BEDTIME_MINUTES, howTheDayWent, nightfallDue, sulkGrudge, sulkInstruction, sulkStillStands, type DayVerdict } from './nightfall';
 import { keepNights, nightNoteInstruction, nightsInstruction, nightsOn, nightsToDrawOn, pickInstruction, tidyPick, timeForSomething, type Night } from './nightlife';
 import { gamesPlayedLately, GUIDE_ODDS, guideNoteInstruction, guideQuery, pickGame, withSteam, type Played } from './gamenight';
-import { adopt, ADOPT_ODDS, adoptInstruction, deepen, deepenInstruction, isOneOfTheirs, MAX_INTERESTS, nightQuery, parseAdoption, parseDeepening, pickTonight, tastesInstruction, type Interest } from './tastes';
+import { addressesSomeone, adopt, ADOPT_ODDS, adoptInstruction, deepen, deepenInstruction, isOneOfTheirs, MAX_INTERESTS, nightQuery, NOBODY_HERE, parseAdoption, parseDeepening, pickTonight, tastesInstruction, unaddressed, type Interest } from './tastes';
 import { readSteamWebConfig, recentlyPlayed } from './steamweb';
 import { appendDream, appendEntry, diaryContext, diaryDueFor, diaryInstruction, recentEntries, type Dream, type Entry } from './diary';
 import { DIARY_VOICE, fragmentsInstruction, liftedFrom, NOT_THOSE_LINES, NOT_THOSE_NAMES, unknownNames } from './diaryvoice';
@@ -7585,8 +7585,12 @@ async function haveANight(config: ProviderConfig) {
       let own = interest;
       if (adopting) { list = adopt(list, adopting, day, stamp); own = list[list.length - 1]; }
       if (!own) return;
-      const raw = await ollamaQuipLong([getActiveCharacter().identity, getActiveCharacter().style, deepenInstruction(own, about, reading)].join(' '), 'Write it.', config);
-      const next = parseDeepening(raw);
+      // Identity, not style: the style is how she talks to him, and a view of
+      // her own opened "Listen up, subordinate". A note that still addresses
+      // someone is written once more, then the addressed part is cut.
+      let raw = await ollamaQuipLong([getActiveCharacter().identity, deepenInstruction(own, about, reading)].join(' '), 'Write it.', config);
+      if (addressesSomeone(raw)) raw = await ollamaQuipLong([getActiveCharacter().identity, deepenInstruction(own, about, reading), NOBODY_HERE].join(' '), 'Write it.', config);
+      const next = parseDeepening(unaddressed(raw));
       if (!next) { console.log(`[night] nothing came of ${own.name} tonight`); return; }
       store.set('tastes', deepen(list, own.id, next, stamp));
       store.set('nights', keepNights(getNights(), { day, at: stamp, about, note: next.stance, sources: found.slice(0, 3).map(result => result.url).filter(Boolean), interest: own.name }));
@@ -7595,7 +7599,8 @@ async function haveANight(config: ProviderConfig) {
       return;
     }
     const told = game ? guideNoteInstruction(game, about, reading) : nightNoteInstruction(about, reading);
-    const note = await ollamaQuip([getActiveCharacter().identity, getActiveCharacter().style, told].join(' '), 'Write it.', config);
+    let note = await ollamaQuip([getActiveCharacter().identity, told].join(' '), 'Write it.', config);
+    if (addressesSomeone(note)) note = unaddressed(await ollamaQuip([getActiveCharacter().identity, told, NOBODY_HERE].join(' '), 'Write it.', config));
     if (!note) return;
     store.set('nights', keepNights(getNights(), {
       day: nightKey(now), at: new Date().toISOString(), about, note,
@@ -7646,7 +7651,7 @@ async function writeDiary(config: ProviderConfig) {
     nights: tonight.map(night => ({ about: night.about, note: night.note, interest: night.interest, game: night.game })),
     tastes: getInterests().filter(interest => interest.stance).map(interest => ({ name: interest.name, stance: interest.stance })),
     weather: describeWeather(getWeather().last, weatherWhere()).split('. That is the actual')[0] || undefined,
-    clock: `about ${formatTimeOfDay(now.getHours(), now.getMinutes())}`,
+    hisLastMessageAt: (() => { const last = messages.filter(message => message.role === 'user' && message.at).at(-1)?.at; return last ? clockAt(Date.parse(last)) : undefined; })(),
   });
   try {
     // Her identity and what she knows of them, but not her style: the style is
