@@ -39,3 +39,11 @@ test('a name the night never mentioned is caught; the ones it did are not', () =
   assert.deepEqual(unknownNames('Nothing happened. Honestly nothing. Tommy slept.', given), []);
   assert.match(NOT_THOSE_NAMES(['Murdoch']), /You named "Murdoch"/);
 });
+
+test('a possessive or a curly apostrophe is not a new name', () => {
+  const given = ["Tommy said hello", "one of your own things: Chainsaw Man — Denji's moment in the Reze arc"];
+  assert.deepEqual(unknownNames("Tommy’s day was a mess. Chainsaw Man’s Reze arc kept me up.", given), []);
+  // A sentence-opening capital is grammar; mid-sentence, a stranger's name is caught without its 's.
+  assert.deepEqual(unknownNames("Emma’s brother came over.", given), []);
+  assert.deepEqual(unknownNames("Then, Emma’s brother came over.", given), ['Emma']);
+});

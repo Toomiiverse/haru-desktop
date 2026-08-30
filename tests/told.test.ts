@@ -28,6 +28,10 @@ test("the afternoon that went wrong, in their own words", () => {
   assert.equal(tell('how long does it take to get to Rockingham?'), null);
   assert.equal(tell('Got the Nutella !'), null);
   assert.equal(tell('I’m home')?.where, 'home');
+  // The morning it went wrong: eight chases for a man who had said this.
+  const leaving = tell('Leaving for the store now. How’s the traffic from Murdoch into Perth this morning?')!;
+  assert.equal(leaving.where, 'store'); assert.equal(leaving.enRoute, true);
+  assert.equal(tell('Left for work')?.enRoute, true);
 });
 
 test('what she is told, and when it stops being true', () => {

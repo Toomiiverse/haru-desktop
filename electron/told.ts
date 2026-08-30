@@ -52,8 +52,12 @@ function clock(raw: string): string | undefined {
  * 4:30" — never a question or a mention of somewhere else.
  */
 export function placeToldFrom(text: string, nowIso: string): Told | null {
-  const whole = tidy((text ?? '').replace(/[‘’]/g, "'"));
-  if (!whole || whole.length > 300 || /\?\s*$/.test(whole)) return null;
+  // Sentence by sentence: "Leaving for the store now. How's the traffic?" is a
+  // statement followed by a question, and the statement is the part that says
+  // where they are. Only the questions are dropped.
+  const said = (text ?? '').replace(/[‘’]/g, "'").split(/(?<=[.!?])\s+/).filter(part => !/\?\s*$/.test(part.trim())).join(' ');
+  const whole = tidy(said);
+  if (!whole || whole.length > 300) return null;
   // "…then heading to mum's" is where they are going next, not where they are:
   // the tail is read for that and kept away from the current-place patterns.
   const split = /\b(?:and )?(?:then|after(?: that| work| this)?|straight after(?: work)?|afterwards)\b/i.exec(whole);
@@ -62,14 +66,14 @@ export function placeToldFrom(text: string, nowIso: string): Told | null {
   // The patterns run case-insensitively so "heading" and "Heading" both
   // match, which also lets [A-Z] match "about". A captured place has to be a
   // proper noun in the original, or one of the plain places she knows.
-  const KNOWN = /^(?:home|(?:my )?mum'?s?(?: house| place)?|(?:my )?(?:dad|nan|gran|grandma|grandpa|sister|brother|mate|friend)'?s?(?: house| place)?|the (?:gym|shops?|office|airport|hospital|doctor'?s?|dentist|uni|library|beach|park|pub|bar)|work)$/i;
+  const KNOWN = /^(?:home|(?:my )?mum'?s?(?: house| place)?|(?:my )?(?:dad|nan|gran|grandma|grandpa|sister|brother|mate|friend)'?s?(?: house| place)?|the (?:gym|shops?|store|mall|servo|office|airport|hospital|doctor'?s?|dentist|uni|library|beach|park|pub|bar)|work)$/i;
   const proper = (m: RegExpExecArray | null) => (m && (/^[A-Z]/.test(m[1]) || KNOWN.test(m[1])) ? m : null);
   const lower = head.toLowerCase();
   let told: Told | null = null;
 
-  const PLACE = "(home|(?:my )?mum'?s?(?: house| place)?|(?:my )?(?:dad|nan|gran|grandma|grandpa|sister|brother|mate|friend)'?s?(?: house| place)?|the (?:gym|shops?|office|airport|hospital|doctor'?s?|dentist|uni|library|beach|park|pub|bar)|[A-Z][\\w']+(?:\\s+[A-Z][\\w']+){0,3})";
+  const PLACE = "(home|(?:my )?mum'?s?(?: house| place)?|(?:my )?(?:dad|nan|gran|grandma|grandpa|sister|brother|mate|friend)'?s?(?: house| place)?|the (?:gym|shops?|store|mall|servo|office|airport|hospital|doctor'?s?|dentist|uni|library|beach|park|pub|bar)|[A-Z][\\w']+(?:\\s+[A-Z][\\w']+){0,3})";
   const arrived = proper(new RegExp(`\\b(?:i(?:'ve| have)? ?(?:just )?(?:arrived|got|made it)(?: at| to| in| here at)?|(?:i'm|im|i am) (?:now )?(?:at|in))\\s+${PLACE}\\b`, 'i').exec(head));
-  const heading = proper(new RegExp(`\\b(?:heading|on (?:my|the) way|going|off|driving|walking|about to (?:go|head|leave for|drive))\\s+(?:to|over to|down to|up to|back to)?\\s*${PLACE}\\b`, 'i').exec(head));
+  const heading = proper(new RegExp(`\\b(?:heading|on (?:my|the) way|going|off|driving|walking|leaving|left|setting off|about to (?:go|head|leave for|drive))\\s+(?:to|for|over to|down to|up to|back to)?\\s*${PLACE}\\b`, 'i').exec(head));
   const working = proper(/\b(?:work(?:s|ing)?(?: here)? (?:at|in|for)|at work (?:at|in))\s+((?:[A-Z][\w']+)(?:\s+[A-Z][\w']+){0,3}|home)\b/i.exec(head));
   const atWork = /\b(?:i'?m|i am)\s+(?:now\s+)?(?:at|in)\s+work\b|\bat work(?: now)?\b|\bi'?m working\b|\bworking now\b/i.test(head);
   const home = /\b(?:i'?m|i am|i've|i have|just)\s+(?:got |gotten |now |back )?(?:home|at home|back home)\b/i.test(lower) || /^home( now)?$/i.test(head);

@@ -69,8 +69,16 @@ export function reminderTier(attempts: number): ReminderTier {
  * past a point, going faster stops reading as urgency and starts reading as a
  * stuck process, and she is still not being answered either way.
  */
+/**
+ * Eight chases in twenty-eight minutes, one morning, to a man who had said he
+ * was leaving and was driving. The old ladder tightened as she was ignored —
+ * right for someone sat at the desk pretending not to hear, wrong for a phone.
+ * It widens now, and stops.
+ */
+export const MAX_CHASES = 4;
+
 export function nextAttemptMinutes(tier: ReminderTier): number {
-  return tier === 'first' ? 3 : tier === 'again' ? 2.5 : tier === 'insistent' ? 2 : 3;
+  return tier === 'first' ? 5 : tier === 'again' ? 8 : tier === 'insistent' ? 12 : 20;
 }
 
 /**
@@ -154,6 +162,12 @@ export function shouldRemind(input: {
 
   const state = input.state;
   if (!state) return true;
+  // The line at the moment it is due goes out once whatever they said a minute
+  // ago — that line is the reminder. Everything after it is chasing, and
+  // chasing stops when they answer, and stops for good after a few goes.
+  const dueNow = input.minutesUntilDue <= 0 && input.minutesUntilDue > -5;
+  if (state.attempts === 0 && dueNow) return true;
+  if (state.attempts >= MAX_CHASES) return false;
   if (state.answeredAt !== undefined) {
     if ((input.now - state.answeredAt) / 60_000 < ANSWERED_QUIET_MINUTES) return false;
     // Past that, she has not forgotten it — but only something already missed

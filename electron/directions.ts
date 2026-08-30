@@ -27,6 +27,9 @@ const ASKS: { pattern: RegExp; nearest?: boolean }[] = [
   { pattern: new RegExp(String.raw`\bhow long (?:to|till|until) (?:(?:i|we) )?(?:get to |reach |arrive at )?(.+?)` + TAIL, 'i') },
   { pattern: new RegExp(String.raw`\b(?:travel|drive|driving|journey|trip) time (?:to|from [^?]+? to)\s+(.+?)` + TAIL, 'i') },
   { pattern: new RegExp(String.raw`\beta (?:to|for)\s+(.+?)` + TAIL, 'i') },
+  // "How's the traffic into Perth?" was answered "Traffic's fine" — she cannot
+  // see traffic. The map can; so it is a route question, and the button shows it.
+  { pattern: new RegExp(String.raw`\b(?:how(?:'s| is| are|'re) the )?traffic\s+(?:like\s+)?(?:from [^?]+? )?(?:into|to|towards?|on the way to|heading to|going to)\s+(.+?)` + TAIL, 'i') },
   { pattern: new RegExp(String.raw`\b(?:where(?:'s| is)|find(?: me)?|nearest|closest)\s+(?:the |a )?(?:nearest|closest)\s+(.+?)` + TAIL, 'i'), nearest: true },
 ];
 const NOT_A_PLACE = /^(?:there|here|it|that|this|you|her|him|them|me|us|the point|sleep|bed|work on it|the top|the bottom)$/i;

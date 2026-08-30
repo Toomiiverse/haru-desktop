@@ -3263,6 +3263,20 @@ function acknowledgeReminders() {
     store.set('reminders', states);
     store.delete('reminders.lastChased' as never);
   }
+  // And anything they say within half an hour of a reminder is taken as having
+  // heard about it: "Leaving for the store now" at 06:34 should have quieted
+  // a 06:54 reminder, and instead it was chased eight times. The line at the
+  // due minute still goes out once — shouldRemind keeps that one.
+  const nowLocal = zonedNow(CHAT_TIMEZONE); const todayKey = localDateKey(nowLocal); const intoDay = nowLocal.getHours() * 60 + nowLocal.getMinutes();
+  for (const item of getKept()) {
+    if (item.done || item.date !== todayKey || !item.time) continue;
+    const at = parseTimeOfDay(item.time); if (!at) continue;
+    const untilDue = at.hour * 60 + at.minute - intoDay;
+    if (untilDue > -30 && untilDue <= 30 && !states[item.id]?.answeredAt) {
+      states = { ...states, [item.id]: { ...(states[item.id] ?? { attempts: 0, lastAt: 0 }), answeredAt: Date.now() } };
+      store.set('reminders', states);
+    }
+  }
   if (Object.keys(states).length) {
     // Marked answered rather than forgotten. Clearing it read as "never chased",
     // and the ladder started again three minutes later — see ReminderState.
@@ -6367,6 +6381,11 @@ async function nudgeForPhone(): Promise<{ line: string; about: string } | null> 
   const target = chaseTarget(now, todayKey, states, minutesSinceUserSpoke, 0);
   if (!target) return null;
 
+  // Not a second line about the same item inside eight minutes, whichever
+  // path wrote the first — the 15-minute heads-up and the first chase landed
+  // in the same minute.
+  const last = store.get('reminders.lastChased') as { id?: string; at?: number } | undefined;
+  if (last?.id === target.item.id && Date.now() - Number(last.at ?? 0) < 8 * 60_000) return null;
   const attempts = states[target.item.id]?.attempts ?? 0;
   const tier = reminderTier(attempts);
   chasing = true;
@@ -6385,6 +6404,7 @@ async function nudgeForPhone(): Promise<{ line: string; about: string } | null> 
     const character = getActiveCharacter();
     const system = [
       toldNow(),
+      'If they have told you they are on their way there, chase them about being on time — not about getting up, their chair or their phone.',
       character.identity,
       character.style,
       reminderInstruction(tier, target.item.title, when, evening),

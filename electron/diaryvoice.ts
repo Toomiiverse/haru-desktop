@@ -84,7 +84,11 @@ export const NOT_THOSE_LINES = 'You just used a sentence from an earlier entry w
  * it is the proper nouns that carry events.
  */
 export function unknownNames(entry: string, allowed: string[]): string[] {
-  const pool = allowed.join(' ').toLowerCase();
+  // Curly apostrophes and possessives are not new names: "Tommy’s" is Tommy,
+  // "Man’s Reze" is Chainsaw Man's Reze — both were refused one night.
+  const plain = (text: string) => text.replace(/[‘’]/g, "'").replace(/'s\b/g, '').toLowerCase();
+  const pool = plain(allowed.join(' '));
+  entry = (entry ?? '').replace(/[‘’]/g, "'");
   const seen = new Set<string>();
   const out: string[] = [];
   // A run of capitalised words, possibly joined by "of"/"the"; not at a sentence start.
@@ -92,10 +96,10 @@ export function unknownNames(entry: string, allowed: string[]): string[] {
   let match: RegExpExecArray | null;
   while ((match = each.exec(entry ?? '')) !== null) {
     const name = match[1].trim();
-    const key = name.toLowerCase();
+    const key = plain(name);
     if (seen.has(key) || COMMON.has(key) || name.length < 4) continue;
     seen.add(key);
-    if (!pool.includes(key) && !key.split(/\s+/).every(word => pool.includes(word))) out.push(name);
+    if (!pool.includes(key) && !key.split(/\s+/).every(word => pool.includes(word))) out.push(name.replace(/'s\b/g, ''));
   }
   return out;
 }
