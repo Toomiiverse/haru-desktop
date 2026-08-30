@@ -7321,7 +7321,7 @@ async function checkHanging(config: ProviderConfig) {
   store.set('hanging.nudgedFor', hanging.key);
   store.set('hanging.lastAt', Date.now());
   const system = proactiveSystem(
-    `They were mid-conversation with you and then went silent ${hanging.quietMin} minutes ago. Their last message: ${hanging.theirLast.content.slice(0, 300)}`,
+    `They were mid-conversation with you and then went silent ${hanging.quietMin} minutes ago — ${hanging.quietMin} minutes, not hours; if you mention how long, say it in minutes, and never give a clock time. Their last message: ${hanging.theirLast.content.slice(0, 300)}`,
     `Your reply, which they left unanswered: ${hanging.herLast.content.slice(0, 300)}${hanging.sheAsked ? ' — you asked them something and got nothing back.' : ''}`,
     'Call them out for leaving you hanging and get them back to finish the conversation. Needle; do not plead. Never say you miss them, never ask whether they are there.',
   );
