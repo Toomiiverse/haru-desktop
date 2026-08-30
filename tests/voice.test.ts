@@ -309,3 +309,9 @@ test('a wav that arrived inside a pooled buffer is read from the right place', (
   assert.equal(isSilent(pooled), true);
   assert.equal(isSilent(Buffer.concat([Buffer.from([1, 2, 3]), Buffer.from(wav(SPEECH))]).subarray(3)), false);
 });
+
+test('the desk can be told to keep quiet without silencing the phone', () => {
+  assert.equal(readVoiceConfig({}).desktopEnabled, true);
+  assert.equal(readVoiceConfig({ desktopEnabled: false }).desktopEnabled, false);
+  assert.equal(readVoiceConfig({ desktopEnabled: false }).webEnabled, true);
+});

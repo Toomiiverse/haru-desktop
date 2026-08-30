@@ -1732,6 +1732,8 @@ function watchScreenshots() {
   }
 }
 
+let saidDesktopIsMute = false;
+
 async function speak(reply: string, mood?: Promise<Emotion | null>) {
   const config = getVoiceConfig();
   const text = speakableText(reply);
@@ -1743,6 +1745,9 @@ async function speak(reply: string, mood?: Promise<Emotion | null>) {
   // without the chat window open is the whole point of it.
   if (store.get('companion.subtitles', true)) sendToWindows('companion:say', text);
   if (config.engine === 'off') return;
+  // Thirty-six syntheses in a day, on a headless box, for a window nobody
+  // watches: the phone keeps its voice (voice.webEnabled), the desk gives up its own.
+  if (!config.desktopEnabled) { if (!saidDesktopIsMute) { saidDesktopIsMute = true; console.log('[voice] desk speech is off (voice.desktopEnabled) — the phone still speaks'); } return; }
   const turn = ++speechTurn;
   sendToWindows('speech:stop');
   // Waited on rather than read from currentEmotion, which at this point still

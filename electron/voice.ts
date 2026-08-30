@@ -47,6 +47,8 @@ export type VoiceConfig = {
    * silent rather than blocking on synthesis.
    */
   webEnabled: boolean;
+  /** The desk window speaking her replies aloud. Off on a headless box, where it is a synthesis per reply for nobody. */
+  desktopEnabled: boolean;
 };
 
 export const DEFAULT_VOICE: VoiceConfig = {
@@ -59,6 +61,7 @@ export const DEFAULT_VOICE: VoiceConfig = {
   volume: 0.9,
   emotionVoices: {},
   webEnabled: true,
+  desktopEnabled: true,
 };
 
 /**
@@ -338,6 +341,7 @@ export function readVoiceConfig(saved: unknown): VoiceConfig {
     emotionVoices: readEmotionVoices(record.emotionVoices),
     shoutVoice: readReference(record.shoutVoice),
     webEnabled: record.webEnabled !== false,
+    desktopEnabled: record.desktopEnabled !== false,
   };
 }
 
