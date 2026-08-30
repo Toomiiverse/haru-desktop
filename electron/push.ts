@@ -272,6 +272,21 @@ export const NUDGE_FLOOR_MS = 2 * 60 * 60_000;
 export const NUDGE_RETRY_MS = 6 * 60_000;
 
 /**
+ * The least time between two notifications that are not reminders.
+ *
+ * Every unprompted path has its own spacing and they do not know about each
+ * other: a hanging chase, a second hanging chase and a bored nudge landed at
+ * 10:07, 10:22 and 10:35 one morning, each within its own rules. Reminders are
+ * exempt because a reminder is about a time; the rest can wait.
+ */
+export const PUSH_BREATHER_MS = 20 * 60_000;
+
+export function tooSoonToPush(kind: 'random' | 'events' | 'system' | 'weather', lastReachedAt: number, now: number): boolean {
+  if (kind === 'events') return false;
+  return lastReachedAt > 0 && now - lastReachedAt < PUSH_BREATHER_MS;
+}
+
+/**
  * Has it been too long since anything of hers reached them?
  *
  * `lastReachedAt` counts a delivered push or a message from them — a

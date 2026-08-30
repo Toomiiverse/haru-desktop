@@ -122,6 +122,28 @@ export function nightNoteInstruction(about: string, found: string): string {
  * it: this is the only record that she was awake, and without it the first
  * "what did you get up to?" is answered by invention.
  */
+/** Whether one of her recent lines already brought this night up. */
+export function mentionsNight(text: string, night: Night): boolean {
+  const words = [night.about, night.interest ?? '', night.game ?? ''].join(' ').toLowerCase().match(/[a-z][a-z'’]{4,}/g) ?? [];
+  const lower = (text ?? '').toLowerCase();
+  return words.some(word => lower.includes(word));
+}
+
+/** How many of her own recent lines are looked at before her night is offered again. */
+export const NIGHT_RECENT_LINES = 4;
+
+/**
+ * Her night for a line nobody asked for — offered once. Given it on every
+ * unprompted line she opened four in a row with it, including the weather
+ * warning. Same lever as the weather itself: stop putting it there.
+ */
+export function nightsToDrawOn(nights: Night[], recentLines: string[]): string {
+  if (!nights.length) return '';
+  const recent = recentLines.slice(-NIGHT_RECENT_LINES);
+  if (nights.some(night => recent.some(line => mentionsNight(line, night)))) return '';
+  return nightsInstruction(nights);
+}
+
 export function nightsInstruction(nights: Night[]): string {
   if (!nights.length) return '';
   const said = nights.slice(-MAX_PER_NIGHT).map(night => `- ${night.interest ? `${night.interest}, one of your own things` : night.game ? `${night.game}, which they have been playing — sizing it up` : night.about}: ${night.note}`).join('\n');

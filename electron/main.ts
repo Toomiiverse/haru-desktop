@@ -40,7 +40,7 @@ import { lookUpPlace, readWindowsLocation, searchPlaces, type FoundPlace } from 
 import { INTERRUPTED_ASIDE, wakeAck } from './wake';
 import { reminderAsk, reminderSavedAside } from './remindme';
 import { describeWeather, readForecast, weatherEvents, weatherToDrawOn, weatherUrl, WEATHER_POLL_MS, type WeatherSample } from './weather';
-import { leftHanging } from './hanging';
+import { HANGING_COOLDOWN_MS, leftHanging, saidTheyWereLeaving } from './hanging';
 import { markMentioned, upcomingToMention } from './upcoming';
 import { directionsAsk, directionsNote, dropRouteTalk, matchNamedPlace, startingPoint, withDirections, type DirectionsAsk } from './directions';
 import { absorb, describeWhereabouts, distanceM, forgetPlace, namePlace, placeAt, readSpot, readWhereabouts, whereForPage, type Whereabouts } from './whereabouts';
@@ -77,7 +77,7 @@ import { pickToBringUp, REMEMBERED_PICKS } from './bored';
 import { grudgeInstruction, irritationAfterTally, nextGrudge, tallyDue, tallyInstruction, unanswered } from './grudge';
 import { groundedInstruction, placeQuery } from './places';
 import { daySaid, DEFAULT_BEDTIME_MINUTES, howTheDayWent, nightfallDue, sulkGrudge, sulkInstruction, sulkStillStands, type DayVerdict } from './nightfall';
-import { keepNights, nightNoteInstruction, nightsInstruction, nightsOn, pickInstruction, tidyPick, timeForSomething, type Night } from './nightlife';
+import { keepNights, nightNoteInstruction, nightsInstruction, nightsOn, nightsToDrawOn, pickInstruction, tidyPick, timeForSomething, type Night } from './nightlife';
 import { gamesPlayedLately, GUIDE_ODDS, guideNoteInstruction, guideQuery, pickGame, withSteam, type Played } from './gamenight';
 import { adopt, ADOPT_ODDS, adoptInstruction, deepen, deepenInstruction, isOneOfTheirs, MAX_INTERESTS, nightQuery, parseAdoption, parseDeepening, pickTonight, tastesInstruction, type Interest } from './tastes';
 import { readSteamWebConfig, recentlyPlayed } from './steamweb';
@@ -92,7 +92,7 @@ import { heldShots, keepShot, localShots, missingFrom, pruneShots, readShot, MAX
 import { DiscordLink, looksLikeUserId, readDiscordConfig, useOfChannel, type DiscordConfig } from './discord';
 import { reactedPrompt, readReaction, REACTION_COOLDOWN_MS } from './reacted';
 import { startWebServer, type WebDeps } from './webserver';
-import { inQuietHours, newVapidKeys, pushRequest, readPushDevices, readPushPrefs, type PushDevice, type PushPrefs, nextNudgeDelay, NUDGE_GAP_MS, NUDGE_RETRY_MS, nudgeOverdue } from './push';
+import { inQuietHours, newVapidKeys, pushRequest, readPushDevices, readPushPrefs, type PushDevice, type PushPrefs, nextNudgeDelay, NUDGE_GAP_MS, NUDGE_RETRY_MS, nudgeOverdue, PUSH_BREATHER_MS, tooSoonToPush } from './push';
 import { CHECK_EVERY_MS, describeUpdate, progressStep, whyNotCheck, type UpdateState } from './updates';
 import { BREVITY, summonedLine } from './summoned';
 import { CHOICES_TOOL, readChoices } from './choices';
@@ -1283,7 +1283,7 @@ function unpromptedContext(): string {
   // not repeat at one in the morning is what she said at half eleven.
   // Where their phone says they are rides along too: a nudge that knows they
   // are at the shops has something to needle with.
-  const parts = [summariseFollowing(getFollowing(), Date.now()), todaySoFar(), alreadySaidRecently(asides, CHAT_TIMEZONE, Date.now()), stillWaiting(), describeWhereabouts(getWhereabouts()), weatherToDrawOn(getWeather().last, weatherWhere(), asides.map(aside => aside.text)), nightsInstruction(nightsOn(getNights(), lastNightKey())), tastesInstruction(getInterests())].filter(Boolean);
+  const parts = [summariseFollowing(getFollowing(), Date.now()), todaySoFar(), alreadySaidRecently(asides, CHAT_TIMEZONE, Date.now()), stillWaiting(), describeWhereabouts(getWhereabouts()), weatherToDrawOn(getWeather().last, weatherWhere(), asides.map(aside => aside.text)), nightsToDrawOn(nightsOn(getNights(), lastNightKey()), asides.map(aside => aside.text)), tastesInstruction(getInterests())].filter(Boolean);
   if (!parts.length) return '';
   // "Do not repeat a point you have already made" was read as "change the
   // subject": once a thread was answered and settled she abandoned the day
@@ -4735,7 +4735,11 @@ async function ollamaQuip(system: string, user: string, config: ProviderConfig) 
       // phrasing, which is the whole complaint with canned lines.
       { tools: false, temperature: 1 },
     );
-    const line = (message.content ?? '').trim().split('\n').find(text => text.trim())?.trim() ?? '';
+    // The first paragraph, not the first line: her one-liners often open
+    // "Fine." on a line of its own with the actual line under it, and taking
+    // the first line sent "Fine." to the phone as the whole notification.
+    const paragraphs = (message.content ?? '').trim().split(/\n\s*\n/).map(text => text.trim()).filter(Boolean);
+    const line = (paragraphs[0] ?? '').split('\n').map(text => text.trim()).filter(Boolean).join(' ');
     // Models like to wrap a one-liner in quotes despite being told not to.
     return line.replace(/^["'“”]+|["'“”]+$/g, '').trim();
   };
@@ -6982,6 +6986,14 @@ const PUSH_KIND: Partial<Record<AsideSource, 'random' | 'events' | 'system' | 'w
 async function forwardAsideToPush(aside: Aside) {
   const kind = PUSH_KIND[aside.source];
   if (!kind) return;
+  // Said, but not buzzed: the line is on the page for when they next look,
+  // and is not held against them (reached: false), because they were never
+  // told it was there.
+  if (tooSoonToPush(kind, getPush().lastReachedAt, Date.now())) {
+    console.log(`[push] a ${aside.source} line held back — one landed ${Math.round((Date.now() - getPush().lastReachedAt) / 60_000)} min ago (breather ${Math.round(PUSH_BREATHER_MS / 60_000)} min)`);
+    store.set('chat.asides', markReached(getAsides(), aside.id, false));
+    return;
+  }
   // Recorded on the line itself, because the evening tally holds unanswered
   // lines against them and a line that never left the building is not one of
   // theirs to answer. Re-read rather than closed over: this runs after the
@@ -7243,7 +7255,16 @@ async function checkHanging(config: ProviderConfig) {
   const nudged = (store.get('hanging.nudgedFor') as string | undefined) ?? '';
   if (nudged === hanging.key) return;
   if (isSilenced(store.get('pushback') as Pushback | undefined, Date.now())) return;
+  // Told where they were going is not being left: mark it seen and let it be.
+  if (saidTheyWereLeaving(hanging.theirLast.content)) {
+    store.set('hanging.nudgedFor', hanging.key);
+    console.log('[push] not chasing — they said they were going');
+    return;
+  }
+  const lastChase = Number(store.get('hanging.lastAt') ?? 0) || 0;
+  if (Date.now() - lastChase < HANGING_COOLDOWN_MS) return;
   store.set('hanging.nudgedFor', hanging.key);
+  store.set('hanging.lastAt', Date.now());
   const system = proactiveSystem(
     `They were mid-conversation with you and then went silent ${hanging.quietMin} minutes ago. Their last message: ${hanging.theirLast.content.slice(0, 300)}`,
     `Your reply, which they left unanswered: ${hanging.herLast.content.slice(0, 300)}${hanging.sheAsked ? ' — you asked them something and got nothing back.' : ''}`,

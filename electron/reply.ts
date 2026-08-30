@@ -602,6 +602,8 @@ export function fixStatedReminderTime(reply: string, savedTime: string): string 
 export function answersThePrompt(reply: string, priming: string): boolean {
   const words = priming.replace(/[.!?\s]+$/, '').trim();
   if (words.length < 4) return false;
-  const quoted = new RegExp(`["'\u201c\u201d\u2018\u2019]\\s*${words.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*["'\u201c\u201d\u2018\u2019]`, 'i');
+  // The full stop may sit inside the quotes — “Say something.” — and did, in
+  // a line that went to the phone: "your reply is just “Say something.”"
+  const quoted = new RegExp(`["'\u201c\u201d\u2018\u2019]\\s*${words.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[.!?…]*\\s*["'\u201c\u201d\u2018\u2019]`, 'i');
   return quoted.test(reply);
 }

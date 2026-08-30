@@ -9,7 +9,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createPublicKey, verify } from 'node:crypto';
-import { inQuietHours, newVapidKeys, pushRequest, readPushDevices, readPushPrefs, sealPayload, vapidToken, nextNudgeDelay, NUDGE_GAP_MS, NUDGE_FLOOR_MS, nudgeOverdue, LAST_CALL_MS, untilQuiet } from '../electron/push';
+import { inQuietHours, newVapidKeys, pushRequest, readPushDevices, readPushPrefs, sealPayload, vapidToken, nextNudgeDelay, NUDGE_GAP_MS, NUDGE_FLOOR_MS, nudgeOverdue, LAST_CALL_MS, untilQuiet, PUSH_BREATHER_MS, tooSoonToPush } from '../electron/push';
 
 // -- RFC 8291 Appendix A, verbatim -------------------------------------------
 
@@ -183,4 +183,17 @@ test('how long is left of the waking day', () => {
   assert.equal(untilQuiet(prefs, at(2)), null);
   // No quiet hours configured at all.
   assert.equal(untilQuiet({ quietFrom: '08:00', quietTo: '08:00' }, at(12)), 20 * 60 * 60_000);
+});
+
+test('one notification at a time, except a reminder', () => {
+  const now = Date.parse('2026-08-30T02:22:00.000Z');
+  const justNow = now - 5 * 60_000;
+  assert.equal(tooSoonToPush('random', justNow, now), true);
+  assert.equal(tooSoonToPush('weather', justNow, now), true);
+  assert.equal(tooSoonToPush('system', justNow, now), true);
+  // A reminder is about a time, and waits for nothing.
+  assert.equal(tooSoonToPush('events', justNow, now), false);
+  assert.equal(tooSoonToPush('random', now - PUSH_BREATHER_MS, now), false);
+  // Nothing ever landed: nothing to wait for.
+  assert.equal(tooSoonToPush('random', 0, now), false);
 });

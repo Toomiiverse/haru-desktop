@@ -9,7 +9,19 @@ export type Turn = { id?: string; role: string; content: string; at?: string };
 
 export type Hanging = { herLast: Turn; theirLast: Turn; quietMin: number; sheAsked: boolean; key: string };
 
-export const HANGING_MIN_QUIET_MS = 12 * 60_000;
+/** Twelve minutes was a text message's idea of silence; on a phone it is a shower. */
+export const HANGING_MIN_QUIET_MS = 25 * 60_000;
+/** Once she has chased, the next chase waits — two in fifteen minutes is not chasing, it is nagging. */
+export const HANGING_COOLDOWN_MS = 60 * 60_000;
+
+/**
+ * They said they were going. "I'll go shower now" is not leaving her hanging,
+ * it is telling her where they are — and thirteen minutes later she chased
+ * them for it.
+ */
+export function saidTheyWereLeaving(text: string): boolean {
+  return /\b(?:brb|gtg|g2g|be right back|back (?:soon|later|in a (?:bit|sec|min))|(?:i(?:'|’)?(?:ll|m)|gonna|going to|about to|off to|heading|need to|have to|gotta)\s+(?:go\s+)?(?:shower|sleep|bed|nap|eat|cook|drive|work|the gym|gym|out|run|walk|train|study|leave|head off|get ready|pick up|shop|clean|jump in the shower)|(?:shower|sleep|driving|at work|in a meeting|busy)\s+now|talk (?:later|soon|tomorrow)|night night|goodnight|good night|see you (?:later|tomorrow|soon)|ttyl)\b/i.test(text ?? '');
+}
 export const HANGING_MAX_QUIET_MS = 90 * 60_000;
 export const EXCHANGE_WINDOW_MS = 15 * 60_000;
 

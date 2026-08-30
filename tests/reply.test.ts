@@ -406,3 +406,8 @@ test('a line that quotes the cue and argues with it is not a line to them', () =
   assert.equal(answersThePrompt('"Go" is not a plan.', 'Go.'), false);
   assert.equal(answersThePrompt('They said "hello" and left.', 'They wrote: "hello"'), false);
 });
+
+test('the cue is still caught when the full stop sits inside the quotes', () => {
+  assert.equal(answersThePrompt('Nine hours of silence and your reply is just \u201cSay something.\u201d \U0001F644'.replace('\\U0001F644', ''), 'Say something.'), true);
+  assert.equal(answersThePrompt('your reply is just "Say something!"', 'Say something.'), true);
+});

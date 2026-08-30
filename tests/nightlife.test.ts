@@ -2,7 +2,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { keepNights, MAX_PER_NIGHT, NIGHT_GAP_MS, NIGHTS_KEPT, nightNoteInstruction, nightsInstruction, nightsOn, pickInstruction, tidyPick, timeForSomething, type Night } from '../electron/nightlife';
+import { keepNights, MAX_PER_NIGHT, mentionsNight, NIGHT_GAP_MS, NIGHTS_KEPT, nightNoteInstruction, nightsInstruction, nightsOn, nightsToDrawOn, pickInstruction, tidyPick, timeForSomething, type Night } from '../electron/nightlife';
 
 const night = (day: string, about: string): Night => ({ day, at: `${day}T18:40:00.000Z`, about, note: 'It was all right.', sources: ['https://example.com'] });
 
@@ -72,4 +72,16 @@ test('her night reaches the prompt as something that happened, with a limit on w
   assert.match(said, /deep sea gigantism: It was all right\./);
   assert.match(said, /neon signs/);
   assert.match(said, /say you only read a bit about it rather than filling the gap/);
+});
+
+test('her night is offered to an unprompted line once, not as the opener of every one', () => {
+  const nights = [night('2026-08-29', 'Murdoch Uni campus map route planning'), night('2026-08-29', 'Angel Beats plot holes')];
+  assert.match(nightsToDrawOn(nights, ['You ghosted me.', 'Three messages, nothing back.']), /Murdoch/);
+  // Having just brought it up, she is not handed it again.
+  assert.equal(nightsToDrawOn(nights, ['Nine hours of silence? I had to drag a campus map across the Murdoch dirt.']), '');
+  assert.equal(nightsToDrawOn(nights, ['read Angel Beats plot holes like they were my taxes']), '');
+  // Only the last few lines count.
+  assert.match(nightsToDrawOn(nights, ['about Angel Beats', 'a', 'b', 'c', 'd']), /Angel Beats/);
+  assert.equal(mentionsNight('nothing to do with it', nights[0]), false);
+  assert.equal(nightsToDrawOn([], []), '');
 });
