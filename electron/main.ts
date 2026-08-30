@@ -38,7 +38,7 @@ import { correct, noteUsed, readHearing, remember } from './hearing';
 import { assumeItIsTheirs, identifyWork, noteWork, readFollowing, recogniseNow, summariseFollowing } from './following';
 import { lookUpPlace, readWindowsLocation, searchPlaces, type FoundPlace } from './location';
 import { INTERRUPTED_ASIDE, wakeAck } from './wake';
-import { promisedTitle, reminderAsk, reminderPromised, reminderSavedAside } from './remindme';
+import { acceptedOffer, promisedTitle, reminderAsk, reminderPromised, reminderSavedAside } from './remindme';
 import { describeWeather, readForecast, weatherEvents, weatherToDrawOn, weatherUrl, WEATHER_POLL_MS, type WeatherSample } from './weather';
 import { HANGING_COOLDOWN_MS, isClosing, leftHanging, saidTheyWereLeaving } from './hanging';
 import { awakeHoursSince, theyAreUp } from './awake';
@@ -5768,7 +5768,14 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
     store.set('told', spot);
     console.log(`[told] they are ${spot.enRoute ? 'on their way to ' : ''}${spot.where}${spot.until ? ` until ${spot.until}` : ''}${spot.thenTo ? `, then ${spot.thenTo}` : ''}`);
   }
-  const reminder = messages.at(-1)?.role === 'user' ? reminderAsk(latest, zonedNow(CHAT_TIMEZONE)) : null;
+  // Their own ask first; failing that, her offer plus their yes — "I'll remind
+  // you at 6:54 AM if you need it" / "Yes please" — which reads as a request
+  // only when the two messages are read together. See acceptedOffer.
+  const herPrevious = [...messages].reverse().find(message => message.role === 'assistant')?.content;
+  const theirRecent = messages.filter(message => message.role === 'user').slice(-4).map(message => String(message.content ?? ''));
+  const reminder = messages.at(-1)?.role === 'user'
+    ? (reminderAsk(latest, zonedNow(CHAT_TIMEZONE)) ?? acceptedOffer(latest, typeof herPrevious === 'string' ? herPrevious : undefined, theirRecent, zonedNow(CHAT_TIMEZONE)))
+    : null;
   if (reminder) {
     const item = addKeptItem({ ...reminder, kind: 'task' });
     console.log(`[remind] read from the message: "${item.title}" on ${item.date}${item.time ? ` at ${item.time}` : ''}`);

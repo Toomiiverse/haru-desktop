@@ -2,7 +2,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { promisedTitle, reminderPromised, reminderAsk, reminderSavedAside } from '../electron/remindme';
+import { acceptedOffer, acceptsOffer, promisedTitle, reminderOffered, reminderPromised, reminderAsk, reminderSavedAside } from '../electron/remindme';
 
 // Saturday 29 August 2026, 11:04 in the morning, their clock.
 const morning = new Date(2026, 7, 29, 11, 4);
@@ -70,4 +70,22 @@ test('a reminder she promised in her own reply is read back off it', () => {
 test('what the reminder is for comes from what they said, not from her', () => {
   assert.equal(promisedTitle(['Kinda sucks because I have to be at the shop tomorrow by 7am as we have some electricians coming in to change the lights', 'Yes please', 'You can set a reminder for me can’t you Haru?']), 'Be at the shop tomorrow by 7am');
   assert.equal(promisedTitle(['yes']), 'What you asked her to remind you about');
+});
+
+test('her offer and their yes, read together, are a reminder', () => {
+  const now = new Date(2026, 7, 30, 22, 3);
+  const offer = "Great. I'll remind you at 6:54 AM if you need it.";
+  assert.deepEqual(reminderOffered(offer, now), { time: '6:54 AM', date: '2026-08-31' });
+  assert.deepEqual(reminderOffered('Want me to set a reminder for 4pm?', new Date(2026, 7, 30, 12, 0)), { time: '4:00 PM', date: '2026-08-30' });
+  assert.equal(reminderOffered("Don't make me come find you at 6:55 AM.", now), null);
+  for (const yes of ['Yes please', 'yes', 'sure, thanks', 'Do it', 'You can set a reminder for me can’t you Haru?', 'please do'])
+    assert.equal(acceptsOffer(yes), true, yes);
+  for (const no of ['No thanks', 'What time is it', 'Remind me to get Nutella @4pm please', 'I just got out the shower', 'yes I did eat, what did you get up to last night?'])
+    assert.equal(acceptsOffer(no), false, no);
+  const theirs = ['Kinda sucks because I have to be at the shop tomorrow by 7am as we have some electricians coming in to change the lights', 'Yes please'];
+  assert.deepEqual(acceptedOffer('Yes please', offer, theirs, now), { title: 'Be at the shop tomorrow by 7am', date: '2026-08-31', time: '6:54 AM' });
+  // No offer, or no yes: nothing.
+  assert.equal(acceptedOffer('Yes please', 'Go to sleep.', theirs, now), null);
+  assert.equal(acceptedOffer('what?', offer, theirs, now), null);
+  assert.equal(acceptedOffer('Yes please', undefined, theirs, now), null);
 });

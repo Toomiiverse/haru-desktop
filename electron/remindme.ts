@@ -147,3 +147,42 @@ export function promisedTitle(theirRecent: string[]): string {
   const title = cut.charAt(0).toUpperCase() + cut.slice(1);
   return title.length > 64 ? `${title.slice(0, 61).trimEnd()}…` : title;
 }
+
+
+/**
+ * She offered, they said yes: that is a reminder.
+ *
+ * "I'll remind you at 6:54 AM if you need it." / "Yes please." The offer has
+ * the time and their answer has the consent, and neither message on its own
+ * reads as a request — so nothing was written and she said "done" to an
+ * empty list. Read together, before she answers, so her reply is about a
+ * reminder that exists.
+ */
+const OFFERED = /\b(?:(?:want|like|need) me to|shall i|should i|do you want (?:me to |a )?|i(?:'|’)?ll|i can|i could)\s+(?:set (?:you )?(?:up )?(?:a |the )?(?:reminder|alarm)(?: for you)?\s*(?:for|at|@)|remind you(?: about \S+(?: \S+){0,4})?\s+(?:at|@|for)|(?:set|wake you|nudge you|ping you)\s+(?:up\s+)?(?:for|at|@))\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)?)\b/i;
+
+export function reminderOffered(herLine: string, now: Date): { time: string; date: string } | null {
+  const line = (herLine ?? '').replace(/[‘’]/g, "'");
+  if (!OFFERED.test(line)) return null;
+  // Same clock reading as a promise, once the offer's shape has been recognised.
+  const m = OFFERED.exec(line)!;
+  return reminderPromised(`I'll set the reminder at ${m[1]}${/\btomorrow\b/i.test(line) ? ' tomorrow' : ''}`, now);
+}
+
+/** "Yes please", "sure", "do it", "you can set a reminder for me can't you" — consent, not a new ask. */
+export function acceptsOffer(text: string): boolean {
+  const t = (text ?? '').trim().toLowerCase().replace(/[‘’]/g, "'").replace(/[!.]+$/, '');
+  if (!t || t.length > 90) return false;
+  if (/^(?:yes|yeah|yep|yup|ya|sure|ok|okay|please|please do|yes please|do it|go on|go for it|sounds good|that works|do that|thanks|thank you|alright|all right|fine)(?:[,!. ]+(?:please|thanks|haru|do it|go on|that would be great))*\s*(?:haru)?$/i.test(t)) return true;
+  return /\b(?:you can|can you|could you|would you|will you)\b.*\b(?:reminder|remind|alarm)\b/i.test(t) || /\bset (?:it|one|that)\b/i.test(t);
+}
+
+/**
+ * A reminder made of her offer and their yes, or null. `herPrevious` is her
+ * last reply before this message of theirs; `theirRecent` their last few.
+ */
+export function acceptedOffer(latest: string, herPrevious: string | undefined, theirRecent: string[], now: Date): ReminderAsk | null {
+  if (!herPrevious || !acceptsOffer(latest)) return null;
+  const offer = reminderOffered(herPrevious, now);
+  if (!offer) return null;
+  return { title: promisedTitle(theirRecent), date: offer.date, time: offer.time };
+}
