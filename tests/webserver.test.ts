@@ -56,7 +56,7 @@ function deps(overrides: Partial<WebDeps> = {}): WebDeps {
     agenda: () => [],
     tickOff: () => {},
     memories: () => [],
-    diary: () => [{ day: '2026-08-29', text: 'Tommy was a pain. I read about Elden Ring instead.' }],
+    diary: () => [{ day: '2026-08-29', title: 'Tommy was a pain.', text: 'Tommy was a pain. I read about Elden Ring instead.' }],
     standing: () => standingFrom({
       vitals: DEFAULT_VITALS, irritation: 0, ego: 0, grudge: 0, ignoredToday: 0,
       daysTalked: 0, kept: [], weekday: new Intl.DateTimeFormat('en-AU', { weekday: 'long', timeZone: 'UTC' }), now: Date.parse('2026-08-29T12:00:00.000Z'), today: '2026-08-29',

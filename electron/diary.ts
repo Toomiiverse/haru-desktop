@@ -132,32 +132,46 @@ export function diaryInstruction(m: DayMaterial): string {
   ].filter(Boolean).join('\n\n');
 }
 
-export function formatEntry(day: string, text: string, weekday: Intl.DateTimeFormat): string {
-  const [y, m, d] = day.split('-').map(Number);
-  const name = weekday.format(new Date(Date.UTC(y, (m ?? 1) - 1, d ?? 1)));
-  return `## ${day} — ${name}\n\n${text.trim()}\n\n`;
+export type Entry = { day: string; title: string; text: string };
+
+/** A title she did not give: the first sentence, cut to fit a tab. */
+export function entryTitle(text: string, given?: string): string {
+  const title = (given ?? '').replace(/^["'“”]+|["'“”]+$/g, '').trim();
+  if (title) return title.slice(0, 80);
+  const first = (text ?? '').trim().split(/(?<=[.!?…])\s+/)[0] ?? '';
+  return first.length > 64 ? `${first.slice(0, 61).trimEnd()}…` : first;
 }
 
-export function appendEntry(root: string, day: string, text: string, weekday: Intl.DateTimeFormat): void {
+export function formatEntry(day: string, text: string, weekday: Intl.DateTimeFormat, title?: string): string {
+  const [y, m, d] = day.split('-').map(Number);
+  const name = weekday.format(new Date(Date.UTC(y, (m ?? 1) - 1, d ?? 1)));
+  const head = title ? `## ${day} — ${name} — ${title.replace(/\n/g, ' ').trim()}` : `## ${day} — ${name}`;
+  return `${head}\n\n${text.trim()}\n\n`;
+}
+
+export function appendEntry(root: string, day: string, text: string, weekday: Intl.DateTimeFormat, title?: string): void {
   mkdirSync(root, { recursive: true });
   const file = path.join(root, DIARY_FILE);
   if (!existsSync(file)) appendFileSync(file, "# Haru's Diary\n\n", 'utf8');
-  appendFileSync(file, formatEntry(day, text, weekday), 'utf8');
+  appendFileSync(file, formatEntry(day, text, weekday, title), 'utf8');
 }
 
-export function parseEntries(markdown: string): { day: string; text: string }[] {
-  const out: { day: string; text: string }[] = [];
+export function parseEntries(markdown: string): Entry[] {
+  const out: Entry[] = [];
   const parts = (markdown ?? '').split(/^## /m).slice(1);
   for (const part of parts) {
     const [head, ...rest] = part.split('\n');
     const day = /^(\d{4}-\d{2}-\d{2})/.exec(head ?? '')?.[1];
     const text = rest.join('\n').trim();
-    if (day && text) out.push({ day, text });
+    // "day — weekday — title": the title is everything after the second dash.
+    const bits = (head ?? '').split(' — ');
+    const given = bits.length >= 3 ? bits.slice(2).join(' — ') : '';
+    if (day && text) out.push({ day, title: entryTitle(text, given), text });
   }
   return out;
 }
 
-export function recentEntries(root: string, count: number): { day: string; text: string }[] {
+export function recentEntries(root: string, count: number): Entry[] {
   const file = path.join(root, DIARY_FILE);
   if (!existsSync(file)) return [];
   return parseEntries(readFileSync(file, 'utf8')).slice(-count);

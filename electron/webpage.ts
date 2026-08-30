@@ -757,9 +757,16 @@ export function appPage(): string {
      no cards fighting for attention. */
   #diary { flex:1; overflow-y:auto; padding:.4rem 1.1rem 1.6rem; -webkit-overflow-scrolling:touch; }
   #diary h2 { margin:0 0 .6rem; font-size:1.15rem; letter-spacing:-.01em; }
-  #diary .entry { margin:0 0 1.4rem; }
-  #diary .entry h3 { margin:0 0 .3rem; font-size:.8rem; text-transform:uppercase; letter-spacing:.06em; color:var(--ink-dim); font-weight:700; }
-  #diary .entry p { margin:0; line-height:1.65; white-space:pre-wrap; }
+  /* Each entry is a tab: the date and her title on the bar, the entry under
+     it on a tap. Native <details>, so it works with nothing but the browser. */
+  #diary .entry { margin:0 0 .6rem; background:var(--glass); border:1px solid var(--edge); border-radius:var(--r-md); backdrop-filter:blur(12px); }
+  #diary .entry summary { list-style:none; cursor:pointer; padding:.7rem .9rem; display:flex; flex-direction:column; gap:.15rem; }
+  #diary .entry summary::-webkit-details-marker { display:none; }
+  #diary .entry summary .when { font-size:.72rem; text-transform:uppercase; letter-spacing:.06em; color:var(--ink-dim); font-weight:700; }
+  #diary .entry summary .title { font-weight:600; line-height:1.3; padding-right:1.4rem; position:relative; }
+  #diary .entry summary .title::after { content:'›'; position:absolute; right:0; top:0; color:var(--ink-dim); transform:rotate(90deg); transition:transform .2s; }
+  #diary .entry[open] summary .title::after { transform:rotate(-90deg); }
+  #diary .entry p { margin:0; padding:0 .9rem .9rem; line-height:1.65; white-space:pre-wrap; }
   #diary .none { color:var(--ink-dim); }
   .card.stale h3 { color:var(--ink-dim); }
   .card.stale .lead { color:var(--ink-dim); font-size:.82rem; margin:0 0 .35rem; }
@@ -1426,7 +1433,7 @@ function loadStatus(){
 function drawDiary(entries){
   if(!entries.length){ $('diary').innerHTML='<h2>Haru\u2019s Diary</h2><p class=none>Nothing written yet. She writes one entry a night, just before the quiet hours end.</p>'; return; }
   const day=d=>{ const [y,m,dd]=d.split('-').map(Number); return new Date(Date.UTC(y,m-1,dd)).toLocaleDateString(undefined,{weekday:'long',day:'numeric',month:'long',timeZone:'UTC'}); };
-  $('diary').innerHTML='<h2>Haru\u2019s Diary</h2>'+entries.map(e=>'<div class=entry><h3>'+esc(day(e.day))+'</h3><p>'+esc(e.text)+'</p></div>').join('');
+  $('diary').innerHTML='<h2>Haru\u2019s Diary</h2>'+entries.map((e,i)=>'<details class=entry'+(i===0?' open':'')+'><summary><span class=when>'+esc(day(e.day))+'</span><span class=title>'+esc(e.title||'')+'</span></summary><p>'+esc(e.text)+'</p></details>').join('');
 }
 function loadDiary(){
   return get('/api/diary').then(r=>drawDiary(r.entries||[])).catch(()=>{ if(!$('diary').innerHTML) $('diary').innerHTML='<p class=none>Could not reach her just now.</p>'; });

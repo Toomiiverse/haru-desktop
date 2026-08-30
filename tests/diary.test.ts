@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { appendDream, appendEntry, DIARY_BEFORE_WAKE_MINUTES, DIARY_FILE, diaryContext, diaryDueFor, diaryInstruction, DREAMS_FILE, formatEntry, parseEntries, readDreams, recentEntries, type DayMaterial, type Dream } from '../electron/diary';
+import { appendDream, appendEntry, DIARY_BEFORE_WAKE_MINUTES, DIARY_FILE, diaryContext, diaryDueFor, diaryInstruction, DREAMS_FILE, entryTitle, formatEntry, parseEntries, readDreams, recentEntries, type DayMaterial, type Dream } from '../electron/diary';
 
 const weekday = new Intl.DateTimeFormat('en-AU', { weekday: 'long', timeZone: 'UTC' });
 const dream = (over: Partial<Dream> = {}): Dream => ({ at: '2026-08-30T18:30:00.000Z', day: '2026-08-29', kind: 'deepen', about: 'Elden Ring review', interest: 'Elden Ring', sources: [{ title: 'IGN', url: 'https://ign.example/x' }], reading: 'a whole page of review text', wrote: 'still brilliant', ...over });
@@ -74,11 +74,11 @@ test('entries are dated sections, appended, and read back newest last', () => {
   assert.match(raw, /^# Haru's Diary/);
   assert.match(raw, /## 2026-08-29 — Saturday/);
   assert.match(raw, /## 2026-08-30 — Sunday/);
-  assert.deepEqual(recentEntries(root, 1), [{ day: '2026-08-30', text: 'Better today.' }]);
+  assert.deepEqual(recentEntries(root, 1), [{ day: '2026-08-30', title: 'Better today.', text: 'Better today.' }]);
   assert.equal(recentEntries(root, 5).length, 2);
   assert.equal(recentEntries(path.join(root, 'nowhere'), 2).length, 0);
   assert.equal(formatEntry('2026-08-29', '  x  ', weekday), '## 2026-08-29 — Saturday\n\nx\n\n');
-  assert.deepEqual(parseEntries('## bad header\n\ntext\n## 2026-01-01 — Thursday\n\nok'), [{ day: '2026-01-01', text: 'ok' }]);
+  assert.deepEqual(parseEntries('## bad header\n\ntext\n## 2026-01-01 — Thursday\n\nok'), [{ day: '2026-01-01', title: 'ok', text: 'ok' }]);
 });
 
 test('the last entries reach her prompt as her own words, and none is nothing', () => {
@@ -86,4 +86,16 @@ test('the last entries reach her prompt as her own words, and none is nothing', 
   const said = diaryContext([{ day: '2026-08-29', text: 'Tommy was a pain.' }]);
   assert.match(said, /From your own diary/);
   assert.match(said, /2026-08-29: Tommy was a pain\./);
+});
+
+test('an entry carries her title on its heading, and an old one gets its first sentence', () => {
+  const weekday = new Intl.DateTimeFormat('en-AU', { weekday: 'long', timeZone: 'UTC' });
+  assert.equal(formatEntry('2026-08-29', 'x', weekday, 'The night he said Boom'), '## 2026-08-29 — Saturday — The night he said Boom\n\nx\n\n');
+  const parsed = parseEntries('## 2026-08-29 — Saturday — The night he said Boom\n\nTommy shouted. I read.\n\n## 2026-08-30 — Sunday\n\nA long first sentence that goes on and on past the point where a tab can show it in one line, honestly. Then more.');
+  assert.equal(parsed[0].title, 'The night he said Boom');
+  assert.match(parsed[1].title, /^A long first sentence that goes on and on past the point wher…$/);
+  assert.equal(entryTitle('Short one. And another.'), 'Short one.');
+  assert.equal(entryTitle('anything', '"Quoted title"'), 'Quoted title');
+  // A title with a dash in it survives the split.
+  assert.equal(parseEntries('## 2026-08-29 — Saturday — Boom — and then nothing\n\nx')[0].title, 'Boom — and then nothing');
 });

@@ -83,7 +83,7 @@ import { keepNights, nightNoteInstruction, nightsInstruction, nightsOn, nightsTo
 import { gamesPlayedLately, GUIDE_ODDS, guideNoteInstruction, guideQuery, pickGame, withSteam, type Played } from './gamenight';
 import { adopt, ADOPT_ODDS, adoptInstruction, deepen, deepenInstruction, isOneOfTheirs, MAX_INTERESTS, nightQuery, parseAdoption, parseDeepening, pickTonight, tastesInstruction, type Interest } from './tastes';
 import { readSteamWebConfig, recentlyPlayed } from './steamweb';
-import { appendDream, appendEntry, diaryContext, diaryDueFor, diaryInstruction, recentEntries, type Dream } from './diary';
+import { appendDream, appendEntry, diaryContext, diaryDueFor, diaryInstruction, recentEntries, type Dream, type Entry } from './diary';
 import { DIARY_VOICE, fragmentsInstruction, liftedFrom, NOT_THOSE_LINES, NOT_THOSE_NAMES, unknownNames } from './diaryvoice';
 import { fetchTranscript, formatTranscript, titleFrom, transcriptInstruction, transcriptsAvailable, videoIdFrom, watchUrl } from './transcripts';
 import { feedbackEntry, recordFeedback } from './feedback';
@@ -7639,7 +7639,12 @@ async function writeDiary(config: ProviderConfig) {
       if (still.length) { console.warn(`[diary] still naming ${still.map(name => `"${name}"`).join(', ')} — not written tonight`); return; }
     }
     if (entry.trim().length < 40) { console.log('[diary] nothing worth keeping came out — not written'); return; }
-    appendEntry(app.getPath('home'), due, entry, new Intl.DateTimeFormat('en-AU', { weekday: 'long', timeZone: 'UTC' }));
+    // A title for the tab: hers, short, from the entry alone.
+    let title = '';
+    try {
+      title = (await ollamaQuip(`${getActiveCharacter().identity} Here is tonight's diary entry of yours:\n${entry}\n\nGive it a title, the way a diary entry gets one: four to eight words, in your voice, about what the day was. No quotation marks, no date, the title only.`, 'Title it.', config)).slice(0, 80);
+    } catch { title = ''; }
+    appendEntry(app.getPath('home'), due, entry, new Intl.DateTimeFormat('en-AU', { weekday: 'long', timeZone: 'UTC' }), title);
     setMood({ ...getMood(), diaryDay: due });
     console.log(`[diary] wrote the entry for ${due} (${entry.length} chars)`);
   } catch (error) {

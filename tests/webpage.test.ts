@@ -678,7 +678,7 @@ function statusTab({ standing, fails = false }: { standing?: Record<string, unkn
     $: el,
     esc: (v: unknown) => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!)),
     get: (url: string) => (fails ? Promise.reject(new Error('down'))
-      : url === '/api/diary' ? Promise.resolve({ entries: [{ day: '2026-08-29', text: 'Tommy was a pain.\nI read about Elden Ring instead.' }] })
+      : url === '/api/diary' ? Promise.resolve({ entries: [{ day: '2026-08-29', title: 'The night he said Boom', text: 'Tommy was a pain.\nI read about Elden Ring instead.' }, { day: '2026-08-28', title: 'Nothing much', text: 'Quiet.' }] })
       : Promise.resolve(JSON.parse(JSON.stringify(screen)))),
     post: (url: string, body: { id: string }) => { ticked.push(url + ':' + body.id); return Promise.resolve({}); },
     setInterval: (_fn: () => void, every: number) => { timers.push({ every }); return timers.length; },
@@ -812,8 +812,11 @@ test('the diary tab reads like a diary, and takes the composer away with the cha
   await win.loadDiary();
   const html = String(el('diary').innerHTML);
   assert.match(html, /Haru’s Diary/);
-  assert.match(html, /<h3>[^<]*29[^<]*August[^<]*<\/h3>|<h3>[^<]*August[^<]*29[^<]*<\/h3>/);
+  assert.match(html, /<span class=when>[^<]*29[^<]*August[^<]*<\/span>|<span class=when>[^<]*August[^<]*29[^<]*<\/span>/);
   assert.match(html, /Tommy was a pain\.\nI read about Elden Ring instead\./, 'line breaks kept, text escaped not summarised');
+  // Each entry is a tab: date and title on the bar, the newest open, the rest closed.
+  assert.match(html, /<details class=entry open><summary><span class=when>[^<]*<\/span><span class=title>The night he said Boom<\/span><\/summary>/);
+  assert.match(html, /<details class=entry><summary><span class=when>[^<]*<\/span><span class=title>Nothing much<\/span>/);
   win.showTab('chat');
   assert.equal(el('diary').hidden, true);
   assert.equal(el('cf').hidden, false);
