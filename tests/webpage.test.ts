@@ -679,6 +679,7 @@ function statusTab({ standing, fails = false }: { standing?: Record<string, unkn
     esc: (v: unknown) => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!)),
     get: (url: string) => (fails ? Promise.reject(new Error('down'))
       : url === '/api/diary' ? Promise.resolve({ entries: [{ day: '2026-08-29', title: 'The night he said Boom', text: 'Tommy was a pain.\nI read about Elden Ring instead.' }, { day: '2026-08-28', title: 'Nothing much', text: 'Quiet.' }] })
+      : url === '/api/her' ? Promise.resolve({ things: [{ name: 'Elden Ring', kind: 'game', since: '2026-08-29', nights: 2, because: 'to mock him', stance: 'Brilliant and cruel.', favourite: 'the freedom', wants: 'to beat a boss' }], adventures: [{ day: '2026-08-29', at: '', about: 'Elden Ring review', why: 'one of her things: Elden Ring', note: 'Read IGN.', sources: ['https://ign.example/x'] }], likes: [{ name: 'the freedom', of: 'Elden Ring' }], wants: [{ wish: 'to beat a boss', of: 'Elden Ring' }], diary: { entries: 1, since: '2026-08-29', latest: { day: '2026-08-29', title: 'The night he said Boom' } }, nightsOut: { count: 1, first: '2026-08-29' } })
       : Promise.resolve(JSON.parse(JSON.stringify(screen)))),
     post: (url: string, body: { id: string }) => { ticked.push(url + ':' + body.id); return Promise.resolve({}); },
     setInterval: (_fn: () => void, every: number) => { timers.push({ every }); return timers.length; },
@@ -831,4 +832,26 @@ test('the tick button is actually wired to the status section, not just defined'
   const html = appPage();
   assert.ok(html.includes("$('status').addEventListener('click',tickOff)"), 'tickOff must be registered on #status');
   assert.ok(html.includes("$('tab-diary').onclick=()=>showTab('diary')"), 'the diary tab must be wired');
+});
+
+test('under the standing: her things, what she rates and wants, her nights with sources, her diary', async () => {
+  const { el, win } = statusTab();
+  await win.loadStatus();
+  // drawStatus leaves a slot and fetches her; the stub answers at once.
+  await win.loadHer();
+  const html = String(el('her').innerHTML);
+  assert.match(html, /<h3>Her things<\/h3>/);
+  assert.match(html, /<details class=fold><summary><span class=k>game · 2 nights · since [^<]*<\/span><span class=t>Elden Ring<\/span>/);
+  assert.match(html, /Brilliant and cruel\./);
+  assert.match(html, /Rates: the freedom/);
+  assert.match(html, /What she rates<\/h3>[\s\S]*the freedom <span class=of>· Elden Ring/);
+  assert.match(html, /What she wants<\/h3>[\s\S]*to beat a boss/);
+  assert.match(html, /Her nights · 1<\/h3>/);
+  assert.match(html, /one of her things: Elden Ring<\/span><span class=t>Elden Ring review/);
+  assert.match(html, /<a href="https:\/\/ign\.example\/x" target=_blank rel=noopener>ign\.example\/x<\/a>/);
+  assert.match(html, /Her diary<\/h3>[\s\S]*<b>1<\/b> entry[\s\S]*Latest: <b>The night he said Boom<\/b>/);
+  // Nothing of her own yet says so, rather than an empty card.
+  win.drawHer({ things: [], adventures: [], likes: [], wants: [], diary: { entries: 0 }, nightsOut: { count: 0 } });
+  assert.match(String(el('her').innerHTML), /Nothing of her own yet/);
+  assert.match(String(el('her').innerHTML), /Nothing written yet/);
 });

@@ -16,6 +16,7 @@ import { createServer, type IncomingMessage, type ServerResponse, type Server } 
 import { createReadStream, existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import filePath from 'node:path';
 import type { Standing } from './standing';
+import type { Her } from './her';
 import {
   type WebAccess, passwordMatches, newToken, deviceFor, rememberDevice, touchDevice,
   noteFailure, lockedFor, clearFailures, type Attempts, DEVICE_DAYS,
@@ -84,6 +85,8 @@ export type WebDeps = {
   standing(): Standing;
   /** Her diary, newest first, for the diary tab. See diary.ts. */
   diary(): { day: string; title: string; text: string }[];
+  /** Her own things, nights, likes and wants, for the Her tab. See her.ts. */
+  her(): Her;
   /** The whole records, for the other Haru of hers to merge against. The page
    *  never asks for these — it shows the text and nothing else. */
   memoryRecords(): unknown[];
@@ -802,6 +805,7 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
 
   if (req.method === 'GET' && path === '/api/status') return json(res, 200, deps.standing());
   if (req.method === 'GET' && path === '/api/diary') return json(res, 200, { entries: deps.diary() });
+  if (req.method === 'GET' && path === '/api/her') return json(res, 200, deps.her());
 
   if (req.method === 'GET' && path === '/api/memory') return json(res, 200, { memories: deps.memories() });
 

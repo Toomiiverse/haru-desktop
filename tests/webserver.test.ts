@@ -57,6 +57,7 @@ function deps(overrides: Partial<WebDeps> = {}): WebDeps {
     tickOff: () => {},
     memories: () => [],
     diary: () => [{ day: '2026-08-29', title: 'Tommy was a pain.', text: 'Tommy was a pain. I read about Elden Ring instead.' }],
+    her: () => ({ things: [], adventures: [], likes: [], wants: [], diary: { entries: 0 }, nightsOut: { count: 0 } }),
     standing: () => standingFrom({
       vitals: DEFAULT_VITALS, irritation: 0, ego: 0, grudge: 0, ignoredToday: 0,
       daysTalked: 0, kept: [], weekday: new Intl.DateTimeFormat('en-AU', { weekday: 'long', timeZone: 'UTC' }), now: Date.parse('2026-08-29T12:00:00.000Z'), today: '2026-08-29',
@@ -166,7 +167,7 @@ test('a stranger gets the sign-in page and nothing else', async () => {
     assert.equal(front.status, 200);
     assert.ok((await front.text()).includes('Sign in to reach her'));
 
-    for (const path of ['/api/chat', '/api/agenda', '/api/status', '/api/diary', '/api/memory', '/api/memory/records', '/api/activity', '/api/activity/shots', '/api/journal', '/api/checkins', '/api/knowledge/stats', '/api/model', '/api/push', '/api/attach', '/api/where']) {
+    for (const path of ['/api/chat', '/api/agenda', '/api/status', '/api/diary', '/api/her', '/api/memory', '/api/memory/records', '/api/activity', '/api/activity/shots', '/api/journal', '/api/checkins', '/api/knowledge/stats', '/api/model', '/api/push', '/api/attach', '/api/where']) {
       const refused = await web.call(path);
       assert.equal(refused.status, 401, `${path} answered a stranger`);
     }

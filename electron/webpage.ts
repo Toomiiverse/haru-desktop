@@ -768,6 +768,23 @@ export function appPage(): string {
   #diary .entry[open] summary .title::after { transform:rotate(-90deg); }
   #diary .entry p { margin:0; padding:0 .9rem .9rem; line-height:1.65; white-space:pre-wrap; }
   #diary .none { color:var(--ink-dim); }
+  /* Her own things, on the same tab, under the standing. Folding rows so a
+     long night's note does not push the meters off the screen. */
+  .fold { border-top:1px solid var(--edge); }
+  .fold:first-of-type { border-top:0; }
+  .fold summary { list-style:none; cursor:pointer; padding:.45rem 0; display:flex; flex-direction:column; gap:.1rem; }
+  .fold summary::-webkit-details-marker { display:none; }
+  .fold summary .k { font-size:.72rem; text-transform:uppercase; letter-spacing:.06em; color:var(--ink-dim); font-weight:700; }
+  .fold summary .t { font-weight:600; line-height:1.3; padding-right:1.2rem; position:relative; }
+  .fold summary .t::after { content:'›'; position:absolute; right:0; top:0; color:var(--ink-dim); transform:rotate(90deg); transition:transform .2s; }
+  .fold[open] summary .t::after { transform:rotate(-90deg); }
+  .fold .body { padding:0 0 .6rem; line-height:1.55; color:var(--ink); }
+  .fold .body p { margin:.2rem 0; }
+  .fold .body .dim { color:var(--ink-dim); font-size:.85rem; }
+  .fold .body a { color:var(--accent); word-break:break-all; font-size:.82rem; }
+  .pills { display:flex; flex-wrap:wrap; gap:.35rem; }
+  .pill { background:var(--glass); border:1px solid var(--edge); border-radius:1rem; padding:.2rem .6rem; font-size:.85rem; }
+  .pill .of { color:var(--ink-dim); }
   .card.stale h3 { color:var(--ink-dim); }
   .card.stale .lead { color:var(--ink-dim); font-size:.82rem; margin:0 0 .35rem; }
   #status .facts { display:flex; flex-wrap:wrap; gap:.35rem .9rem; color:var(--ink-dim); font-size:.86rem; }
@@ -1402,7 +1419,9 @@ function drawStatus(s){
       +'<p class=lead>Too long ago for her to bring up. Clear them out.</p>'+todoList(s.stale)+'</div>';
   }
   html+='<div class=card><h3>The two of you</h3><p class=facts>'+facts.join('<span></span>')+'</p></div>';
+  html+='<div id=her></div>';
   $('status').innerHTML=html;
+  void loadHer();
   if(window.haruAvatar) window.haruAvatar.express(s.emotion);
 }
 // Delegated, because the list is redrawn on every refresh and per-row handlers
@@ -1419,6 +1438,30 @@ function todoList(items){
   return '<ul class=todo>'+items.map(t=>'<li'+(t.late?' class=late':'')+'><span class=what>'+esc(t.title)
     +'<span class=when>'+esc(t.when)+'</span></span>'
     +'<button class=tick data-id="'+esc(t.id)+'">Done</button></li>').join('')+'</ul>';
+}
+// Her own things: read off her records, not composed — see her.ts.
+function drawHer(h){
+  const day=d=>{ const [y,m,dd]=String(d||'').split('-').map(Number); return y?new Date(Date.UTC(y,m-1,dd)).toLocaleDateString(undefined,{day:'numeric',month:'short',timeZone:'UTC'}):''; };
+  let out='';
+  if(h.things.length){
+    out+='<div class=card><h3>Her things</h3>'+h.things.map(t=>'<details class=fold><summary><span class=k>'+esc(t.kind)+' \u00b7 '+t.nights+' night'+(t.nights===1?'':'s')+' \u00b7 since '+esc(day(t.since))+'</span><span class=t>'+esc(t.name)+'</span></summary><div class=body>'
+      +(t.stance?'<p>'+esc(t.stance)+'</p>':'<p class=dim>No settled view yet.</p>')
+      +(t.because?'<p class=dim>Why she took it up: '+esc(t.because)+'</p>':'')
+      +(t.favourite?'<p>Rates: '+esc(t.favourite)+'</p>':'')+(t.wants?'<p>Wants: '+esc(t.wants)+'</p>':'')+'</div></details>').join('')+'</div>';
+  } else out+='<div class=card><h3>Her things</h3><p class=dim>Nothing of her own yet. She takes things up in the small hours.</p></div>';
+  if(h.likes.length||h.wants.length){
+    out+='<div class=card>'+(h.likes.length?'<h3>What she rates</h3><div class=pills>'+h.likes.map(l=>'<span class=pill>'+esc(l.name)+' <span class=of>\u00b7 '+esc(l.of)+'</span></span>').join('')+'</div>':'')
+      +(h.wants.length?'<h3 style="margin-top:.7rem">What she wants</h3><div class=pills>'+h.wants.map(w=>'<span class=pill>'+esc(w.wish)+' <span class=of>\u00b7 '+esc(w.of)+'</span></span>').join('')+'</div>':'')+'</div>';
+  }
+  if(h.adventures.length){
+    out+='<div class=card><h3>Her nights \u00b7 '+h.nightsOut.count+'</h3>'+h.adventures.slice(0,12).map(a=>'<details class=fold><summary><span class=k>'+esc(day(a.day))+' \u00b7 '+esc(a.why)+'</span><span class=t>'+esc(a.about)+'</span></summary><div class=body><p>'+esc(a.note)+'</p>'
+      +(a.sources.length?'<p class=dim>'+a.sources.map(s=>'<a href="'+esc(s)+'" target=_blank rel=noopener>'+esc(s.replace(/^https?:\\/\\//,'').slice(0,48))+'</a>').join('<br>')+'</p>':'')+'</div></details>').join('')+'</div>';
+  }
+  out+='<div class=card><h3>Her diary</h3><p class=facts>'+(h.diary.entries?'<b>'+h.diary.entries+'</b> entr'+(h.diary.entries===1?'y':'ies')+(h.diary.since?' since <b>'+esc(day(h.diary.since))+'</b>':'')+(h.diary.latest?'<span></span>Latest: <b>'+esc(h.diary.latest.title)+'</b>':''):'Nothing written yet.')+'</p></div>';
+  const el=$('her'); if(el) el.innerHTML=out;
+}
+function loadHer(){
+  return get('/api/her').then(drawHer).catch(()=>{});
 }
 function loadStatus(){
   return get('/api/status').then(s=>{

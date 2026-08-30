@@ -71,6 +71,7 @@ import { forgetDevice, forgetEveryDevice, readWebAccess, setPassword, weakPasswo
 import { conversationMayLeave, mayLeaveTheMachine } from './sensitivity';
 import { addCheckIn, checkInInstruction, checkInsOn, readCheckIns, type CheckIn } from './checkins';
 import { standingFrom } from './standing';
+import { herFrom } from './her';
 import { addAside, alreadySaidRecently, asideContext, asidesOn, markReached, pruneAsides, readAsides, type Aside, type AsideSource } from './asides';
 import { attachmentsInPlay, describeAttached, READ_IT_ALL_PROMPT, readAttachments, type Attachment, type Opened } from './attachments';
 import { forOllama, withoutOldest } from './ollamaturns';
@@ -8321,6 +8322,7 @@ function webDeps(): WebDeps {
     // because none of them agree on a shape and the page should not have to
     // know that. The arithmetic is in standing.ts, which is pure and tested.
     diary: () => recentEntries(app.getPath('home'), 60).reverse(),
+    her: () => herFrom({ interests: getInterests(), nights: getNights(), diary: recentEntries(app.getPath('home'), 365) }),
     standing: () => {
       const now = zonedNow(CHAT_TIMEZONE);
       const today = localDateKey(now);
