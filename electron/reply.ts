@@ -653,10 +653,11 @@ export function fixStatedMinutes(line: string, minutes: number): string {
  *
  * A backstop behind the wording, not a substitute for it: told plainly not to,
  * a model that has ended forty replies the same way ends the forty-first that
- * way too. Only the one she has used in every one of her last few replies, only
- * when this reply has another emoji or enough words to stand without it.
+ * way too. Only the one she has used in every one of her last two replies — so
+ * three in a row is not something she can do — and only when the reply still
+ * says something without it.
  */
-export function dropOverusedEmoji(reply: string, previousReplies: string[], emoji: readonly string[], checked = 3): string {
+export function dropOverusedEmoji(reply: string, previousReplies: string[], emoji: readonly string[], checked = 2): string {
   const recent = previousReplies.slice(-checked);
   if (recent.length < checked) return reply;
   const stuck = emoji.find(one => recent.every(previous => previous.includes(one)) && reply.includes(one));

@@ -24,11 +24,12 @@ test('an emoji in three of her last four replies is named back to her, with the 
   assert.equal(emojiRut(['Fine. 🙄', 'Yes. 🙄']), '', 'too few replies to call it a habit');
 });
 
-test('the backstop takes the stuck emoji out of this reply, and never empties it', () => {
-  const three = ['a 🙄', 'b 🙄', 'c 🙄'];
-  assert.equal(dropOverusedEmoji('Get on with it. 🙄', three, HER_EMOJI), 'Get on with it.');
-  assert.equal(dropOverusedEmoji('Fine 🙄, whatever.', three, HER_EMOJI), 'Fine, whatever.');
-  assert.equal(dropOverusedEmoji('Get on with it. 😏', three, HER_EMOJI), 'Get on with it. 😏', 'a different one is hers to use');
-  assert.equal(dropOverusedEmoji('🙄', three, HER_EMOJI), '🙄', 'never left with nothing');
-  assert.equal(dropOverusedEmoji('Fine. 🙄', ['a 🙄', 'b'], HER_EMOJI), 'Fine. 🙄', 'not every recent reply had it');
+test('the backstop takes the stuck emoji out, so three in a row is not something she can do', () => {
+  const two = ['a 🙄', 'b 🙄'];
+  assert.equal(dropOverusedEmoji('Get on with it. 🙄', two, HER_EMOJI), 'Get on with it.');
+  assert.equal(dropOverusedEmoji('Fine 🙄, whatever.', two, HER_EMOJI), 'Fine, whatever.');
+  assert.equal(dropOverusedEmoji('Get on with it. 😏', two, HER_EMOJI), 'Get on with it. 😏', 'a different one is hers to use');
+  assert.equal(dropOverusedEmoji('🙄', two, HER_EMOJI), '🙄', 'never left with nothing');
+  assert.equal(dropOverusedEmoji('Fine. 🙄', ['a 🙄', 'b'], HER_EMOJI), 'Fine. 🙄', 'only the one both of them had');
+  assert.equal(dropOverusedEmoji('Fine. 🙄', ['a 🙄'], HER_EMOJI), 'Fine. 🙄', 'one reply is not a run');
 });
