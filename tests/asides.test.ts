@@ -10,7 +10,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { addAside, markReached, readAsides, markAsked, openAsk, answerAsk, askedRecently, unansweredAsks, unansweredAsksNote, ASK_OPEN_MS, type Aside, type AsideSource } from '../electron/asides';
+import { addAside, markReached, readAsides, markAsked, openAsk, answerAsk, askedRecently, unansweredAsks, unansweredAsksNote, ASK_OPEN_MS, type Aside, type AsideSource, asideContext } from '../electron/asides';
 
 // Every member of AsideSource. This is a Record over the union, so adding a
 // source without adding it here fails to compile.
@@ -79,5 +79,17 @@ test('an ask about their day is open for three hours, answered by the next messa
   assert.deepEqual(unansweredAsks(answered, t0 + ASK_OPEN_MS + 60_000), [], 'nor held');
   assert.equal(readAsides(JSON.parse(JSON.stringify(answered)))[0].answeredAt, answered[0].answeredAt, 'kept across a reload');
   assert.equal(openAsk(asides, t0 + ASK_OPEN_MS + 1), null, 'too late to be an answer');
+});
+
+test('a line that chased something off the list says so, so "what\'s this about?" has an answer', () => {
+  const now = Date.parse('2026-08-31T11:47:00.000Z');
+  const { asides } = addAside([], '6 p.m. sharp. Venice route. Do not sleepwalk through it.', 'reminder', new Date(now - 2 * 60_000), '2026-08-31', 'Check the Venice route');
+  const context = asideContext(asides, now);
+  assert.match(context, /2 minutes ago: "6 p\.m\. sharp\./);
+  assert.match(context, /that was you chasing "Check the Venice route" off their list/);
+  assert.match(context, /using what is written above rather than guessing from the conversation/);
+  assert.equal(readAsides(JSON.parse(JSON.stringify(asides)))[0].about, 'Check the Venice route', 'kept across a reload');
+  const plain = addAside([], 'Still at The PC Project?', 'idle', new Date(now - 2 * 60_000), '2026-08-31').asides;
+  assert.doesNotMatch(asideContext(plain, now), /chasing/, 'a line about nothing on the list says nothing about one');
 });
 

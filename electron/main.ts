@@ -1170,10 +1170,10 @@ function getAsides(): Aside[] {
 /** Set by boredNudge when the line it composed is a question about their day; stamped on the aside as it is recorded. */
 let pendingAsk: string | null = null;
 
-function noteAside(text: string, source: AsideSource): Aside | null {
+function noteAside(text: string, source: AsideSource, about = ''): Aside | null {
   const line = text.trim();
   if (!line) return null;
-  const made = addAside(getAsides(), line, source, new Date(), localDateKey(zonedNow(CHAT_TIMEZONE)));
+  const made = addAside(getAsides(), line, source, new Date(), localDateKey(zonedNow(CHAT_TIMEZONE)), about);
   const aside = made.aside;
   const asides = pendingAsk && source === 'idle' && /\?/.test(line) ? markAsked(made.asides, aside.id, pendingAsk) : made.asides;
   if (pendingAsk && source === 'idle') { if (/\?/.test(line)) console.log(`[push] she asked ${pendingAsk} — the next thing they say answers it`); pendingAsk = null; }
@@ -1363,7 +1363,7 @@ function whyNotInterject({ aboutTheGame = false } = {}): string | null {
  * not butt in; a version of it that silences only the written half prevents
  * nothing and loses the record.
  */
-function interject(line: string, { aboutTheGame = false, source = 'other' as AsideSource } = {}): boolean {
+function interject(line: string, { aboutTheGame = false, source = 'other' as AsideSource, about = '' } = {}): boolean {
   const now = Date.now();
   const refusal = whyNotInterject({ aboutTheGame });
   if (refusal) {
@@ -1391,7 +1391,7 @@ function interject(line: string, { aboutTheGame = false, source = 'other' as Asi
   // written. Anything that reaches the conversation instead does so by not
   // coming through here, which is a short and deliberate list: see the two
   // "hold on, I'm looking" sites, which answer a button the user just pressed.
-  noteAside(line, source);
+  noteAside(line, source, about);
   expectAnswerWhenDone();
   return true;
 }
@@ -3252,7 +3252,7 @@ async function considerReminding(environment: Environment): Promise<boolean> {
     sendToWindows('voice:insistence', reminderVolume(tier));
     const emotion = classifyEmotion(line, config);
     // Spoken only if it was also written down — see interject.
-    if (interject(line, { source: 'reminder' })) void speak(line, emotion);
+    if (interject(line, { source: 'reminder', about: target.item.title })) void speak(line, emotion);
     return true;
   } catch (error) {
     console.warn('[remind] could not write a reminder:', error instanceof Error ? error.message : error);
@@ -7548,7 +7548,7 @@ async function pesterOnPush(): Promise<PesterOutcome> {
       // Through the aside log rather than straight to the phone: written down,
       // it is on the page when they tap the notification, and the push goes
       // out from there by its kind like every other unprompted line.
-      if (noteAside(said.line, 'reminder')) {
+      if (noteAside(said.line, 'reminder', said.about)) {
         console.log(`[push] pestered about "${said.about}"`);
         return { how: 'sent' };
       }
@@ -7627,7 +7627,7 @@ async function chaseTick() {
   if (!webServer || !devices.length || !prefs.events) return;
   if (inQuietHours(prefs, zonedNow(CHAT_TIMEZONE))) return;
   const said = await nudgeForPhone();
-  if (said && noteAside(said.line, 'reminder')) console.log(`[push] chased about "${said.about}"`);
+  if (said && noteAside(said.line, 'reminder', said.about)) console.log(`[push] chased about "${said.about}"`);
 }
 
 function startChasing() {

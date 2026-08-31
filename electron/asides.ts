@@ -59,6 +59,8 @@ export type Aside = {
   reached?: boolean;
   /** What she asked them about, when the line was a question about their day — "what they are doing at The PC Project". */
   asked?: string;
+  /** What the line was about, when it was about a thing on the list: the item's title. Asked "what's this about?" she can say, rather than guess. */
+  about?: string;
   /** When they answered it, if they did. */
   answeredAt?: string;
 };
@@ -133,6 +135,7 @@ export function readAsides(saved: unknown): Aside[] {
       text: String(entry.text).trim(),
       ...(typeof entry.reached === 'boolean' ? { reached: entry.reached } : {}),
       ...(typeof entry.asked === 'string' && entry.asked ? { asked: entry.asked } : {}),
+      ...(typeof entry.about === 'string' && entry.about ? { about: entry.about } : {}),
       ...(typeof entry.answeredAt === 'string' && entry.answeredAt ? { answeredAt: entry.answeredAt } : {}),
     }));
 }
@@ -142,13 +145,14 @@ export function markReached(asides: Aside[], id: string, reached: boolean): Asid
   return asides.map(aside => (aside.id === id ? { ...aside, reached } : aside));
 }
 
-export function addAside(asides: Aside[], text: string, source: AsideSource, now: Date, day: string): { asides: Aside[]; aside: Aside } {
+export function addAside(asides: Aside[], text: string, source: AsideSource, now: Date, day: string, about = ''): { asides: Aside[]; aside: Aside } {
   const aside: Aside = {
     id: Math.random().toString(36).slice(2, 10),
     at: now.toISOString(),
     day,
     source,
     text: text.trim(),
+    ...(about.trim() ? { about: about.trim() } : {}),
   };
   return { asides: [...asides, aside].slice(-MAX_ASIDES), aside };
 }
@@ -206,12 +210,16 @@ export function asideContext(asides: Aside[], now: number): string {
   const lines = recent.map(aside => {
     const minutes = Math.round((now - Date.parse(aside.at)) / 60_000);
     const when = minutes < 1 ? 'just now' : `${minutes} minute${minutes === 1 ? '' : 's'} ago`;
-    return `${when}: "${aside.text.replace(/\s+/g, ' ').slice(0, 300)}"`;
+    // What it was about, when it was about something: asked "what's this
+    // about?" two minutes after chasing a task, she answered from the
+    // conversation instead and named the wrong thing entirely.
+    const about = aside.about ? ` — that was you chasing "${aside.about}" off their list` : '';
+    return `${when}: "${aside.text.replace(/\s+/g, ' ').slice(0, 300)}"${about}`;
   });
   return [
     'You said this to them yourself a moment ago, unprompted. It is not written in the conversation below, but they heard it:',
     lines.join('\n'),
-    'If what they have just said is an answer to it, take it as one. If they are asking what you meant by it — "what plan?", "what are you on about?" — say plainly what it was and where it came from, in a sentence; do not expand it into a plan, a list or a task, and do not act on it. If it is neither, leave it alone — do not repeat any of it, do not bring it up again, and do not treat it as something they raised.',
+    'If what they have just said is an answer to it, take it as one. If they are asking what you meant by it — "what plan?", "what are you on about?", "what\'s this about?" — say plainly what it was and where it came from, in a sentence, using what is written above rather than guessing from the conversation; do not expand it into a plan, a list or a task, and do not act on it. If it is neither, leave it alone — do not repeat any of it, do not bring it up again, and do not treat it as something they raised.',
   ].join('\n');
 }
 
