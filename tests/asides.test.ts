@@ -10,7 +10,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { addAside, markReached, readAsides, type Aside, type AsideSource } from '../electron/asides';
+import { addAside, markReached, readAsides, markAsked, openAsk, answerAsk, askedRecently, unansweredAsks, unansweredAsksNote, ASK_OPEN_MS, type Aside, type AsideSource } from '../electron/asides';
 
 // Every member of AsideSource. This is a Record over the union, so adding a
 // source without adding it here fails to compile.
@@ -63,3 +63,21 @@ test('marking one reached leaves the rest of the log alone', () => {
   // An id that is not there changes nothing.
   assert.deepEqual(markReached(two, 'nope', true), two satisfies Aside[]);
 });
+
+test('an ask about their day is open for three hours, answered by the next message, and held over them after that', () => {
+  const t0 = Date.parse('2026-08-31T06:53:00.000Z');
+  let { asides, aside } = addAside([], 'So what are you actually doing at The PC Project, huh?', 'idle', new Date(t0), '2026-08-31');
+  asides = markAsked(asides, aside.id, 'what they are doing at The PC Project');
+  assert.equal(openAsk(asides, t0 + 20 * 60_000)?.id, aside.id, 'open twenty minutes on');
+  assert.equal(askedRecently(asides, t0 + 60 * 60_000), true, 'not asked again within two hours');
+  assert.equal(askedRecently(asides, t0 + 3 * 60 * 60_000), false);
+  assert.deepEqual(unansweredAsks(asides, t0 + 20 * 60_000), [], 'not held against them while it is still open');
+  assert.equal(unansweredAsks(asides, t0 + ASK_OPEN_MS + 60_000).length, 1, 'held after the window');
+  assert.match(unansweredAsksNote(asides, 'Australia/Perth', t0 + ASK_OPEN_MS + 60_000), /at 2:53 pm you asked what they are doing at The PC Project and heard nothing back/i);
+  const answered = answerAsk(asides, aside.id, new Date(t0 + 10 * 60_000).toISOString());
+  assert.equal(openAsk(answered, t0 + 20 * 60_000), null, 'answered: no longer open');
+  assert.deepEqual(unansweredAsks(answered, t0 + ASK_OPEN_MS + 60_000), [], 'nor held');
+  assert.equal(readAsides(JSON.parse(JSON.stringify(answered)))[0].answeredAt, answered[0].answeredAt, 'kept across a reload');
+  assert.equal(openAsk(asides, t0 + ASK_OPEN_MS + 1), null, 'too late to be an answer');
+});
+

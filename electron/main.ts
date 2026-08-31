@@ -45,7 +45,7 @@ import { awakeHoursSince, theyAreUp, awakeMinutesSince } from './awake';
 import { describeTold, placeToldFrom, toldTheyAreBusy, type Told } from './told';
 import { markMentioned, upcomingToMention } from './upcoming';
 import { directionsAskFrom, directionsNote, dropRouteTalk, matchNamedPlace, startingPoint, withDirections, withoutMapsLinks, type DirectionsAsk } from './directions';
-import { absorb, describeWhereabouts, distanceM, forgetPlace, namePlace, placeAt, readSpot, readWhereabouts, whereForPage, type Whereabouts } from './whereabouts';
+import { absorb, describeWhereabouts, distanceM, forgetPlace, namePlace, placeAt, readSpot, readWhereabouts, whereForPage, type Whereabouts, SPOT_STALE_MS } from './whereabouts';
 import { convertImage, normaliseFormat, FORMATS } from './convert';
 import { cancelPower, closeApp, findApps, isCancellable, launch, listRunning, matchApp, matchRunning, normalisePower, POWER_DELAY_S, readDesktopConfig, runPower, supportedDesktop, type DesktopConfig } from './desktop';
 import { looksLikeScreenshot, maySpeak, readScreenshotConfig, screenshotPrompt, SETTLE_MS, SETTLE_TRIES, type ScreenshotConfig } from './screenshots';
@@ -74,7 +74,7 @@ import { standingFrom } from './standing';
 import { herFrom } from './her';
 import { computeRoute, fixStatedRoute, routeWords, type Route } from './routes';
 import { placeAsk, placeNote, placeWords, searchGooglePlaces, type GooglePlace } from './placeinfo';
-import { addAside, alreadySaidRecently, asideContext, asidesOn, markReached, pruneAsides, readAsides, type Aside, type AsideSource } from './asides';
+import { addAside, alreadySaidRecently, asideContext, asidesOn, markReached, pruneAsides, readAsides, type Aside, type AsideSource, markAsked, openAsk, answerAsk, askedRecently, unansweredAsksNote } from './asides';
 import { attachmentsInPlay, describeAttached, READ_IT_ALL_PROMPT, readAttachments, type Attachment, type Opened } from './attachments';
 import { forOllama, withoutOldest } from './ollamaturns';
 import { seedEmoji } from './seed';
@@ -1167,10 +1167,16 @@ function getAsides(): Aside[] {
 }
 
 /** Everything she says without having been spoken to is written here. */
+/** Set by boredNudge when the line it composed is a question about their day; stamped on the aside as it is recorded. */
+let pendingAsk: string | null = null;
+
 function noteAside(text: string, source: AsideSource): Aside | null {
   const line = text.trim();
   if (!line) return null;
-  const { asides, aside } = addAside(getAsides(), line, source, new Date(), localDateKey(zonedNow(CHAT_TIMEZONE)));
+  const made = addAside(getAsides(), line, source, new Date(), localDateKey(zonedNow(CHAT_TIMEZONE)));
+  const aside = made.aside;
+  const asides = pendingAsk && source === 'idle' && /\?/.test(line) ? markAsked(made.asides, aside.id, pendingAsk) : made.asides;
+  if (pendingAsk && source === 'idle') { if (/\?/.test(line)) console.log(`[push] she asked ${pendingAsk} — the next thing they say answers it`); pendingAsk = null; }
   store.set('chat.asides', asides);
   sendToWindows('chat:aside', aside);
   // Fire-and-forget: a Discord or push hiccup must not hold up the desk or the
@@ -1289,7 +1295,7 @@ function unpromptedContext(): string {
   // not repeat at one in the morning is what she said at half eleven.
   // Where their phone says they are rides along too: a nudge that knows they
   // are at the shops has something to needle with.
-  const parts = [summariseFollowing(getFollowing(), Date.now()), todaySoFar(), alreadySaidRecently(asides, CHAT_TIMEZONE, Date.now()), stillWaiting(), describeWhereabouts(getWhereabouts()), toldNow(), weatherToDrawOn(getWeather().last, weatherWhere(), asides.map(aside => aside.text), Date.now(), getWeather().disputedAt), nightsToDrawOn(nightsOn(getNights(), lastNightKey()), asides.map(aside => aside.text)), tastesInstruction(getInterests())].filter(Boolean);
+  const parts = [summariseFollowing(getFollowing(), Date.now()), todaySoFar(), alreadySaidRecently(asides, CHAT_TIMEZONE, Date.now()), stillWaiting(), describeWhereabouts(getWhereabouts()), toldNow(), unansweredAsksNote(asides, CHAT_TIMEZONE, Date.now()), weatherToDrawOn(getWeather().last, weatherWhere(), asides.map(aside => aside.text), Date.now(), getWeather().disputedAt), nightsToDrawOn(nightsOn(getNights(), lastNightKey()), asides.map(aside => aside.text)), tastesInstruction(getInterests())].filter(Boolean);
   if (!parts.length) return '';
   // "Do not repeat a point you have already made" was read as "change the
   // subject": once a thread was answered and settled she abandoned the day
@@ -5843,6 +5849,17 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
     saveWeather({ ...getWeather(), disputedAt: Date.now() });
     console.log('[weather] they say it is not raining where they are — their word over the forecast for two hours');
   }
+  // Their answer to what she asked about their day, taken as one: the aside is
+  // marked answered, and the brain that replies is told what this is.
+  let answering = '';
+  if (messages.at(-1)?.role === 'user') {
+    const ask = openAsk(getAsides(), Date.now());
+    if (ask) {
+      store.set('chat.asides', answerAsk(getAsides(), ask.id, new Date().toISOString()));
+      answering = `They are answering what you asked at ${clockAt(Date.parse(ask.at))} — ${ask.asked}. Take it as the answer: react to it as you would, and remember it as a fact about their day.`;
+      console.log(`[push] they answered her ask (${ask.asked})`);
+    }
+  }
   const spot = messages.at(-1)?.role === 'user' ? placeToldFrom(latest, new Date().toISOString()) : null;
   if (spot) {
     store.set('told', spot);
@@ -6018,7 +6035,7 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // Her recent replies as she should believe she said them — see seed.ts for
   // the measurement. The stored transcript is not touched; only what is sent.
   // The length rule fits the brain answering — see LENGTH_RULE_HOSTED.
-  const sized = brain.hosted ? system.replace(LENGTH_RULE_LOCAL, LENGTH_RULE_HOSTED) : system;
+  const sized = (brain.hosted ? system.replace(LENGTH_RULE_LOCAL, LENGTH_RULE_HOSTED) : system) + (answering ? ` ${answering}` : '');
   const conversation: OllamaMessage[] = [{ role: 'system', content: brief ? `${sized} ${BREVITY}` : sized }, ...seedEmoji(markTimeGaps(withoutStaleDenials(withFiles, hasItems), CHAT_TIMEZONE))];
   // The last thing she reads before she speaks — see LAST_WORD for the
   // measurement. A system message just before their last turn: the Ollama
@@ -7401,7 +7418,18 @@ async function boredNudge(): Promise<string | null> {
   const justDone = getKept().filter(item => item.done && item.completedAt && nowMs - Date.parse(item.completedAt) <= FOLLOW_UP_MS && !broughtUp.includes(`task:${item.id}`)).sort((a, b) => (b.completedAt ?? '').localeCompare(a.completedAt ?? ''))[0];
   const task = underway ? { id: `task:${underway.id}`, from: 'task' as const, text: `the "${underway.title}" they told you at ${clockAt(Date.parse(underway.underway!))} they were getting on with — it is still not ticked off. Ask how it is going, or whether it is actually done; needle them if it has gone quiet. Do not say it is done.` }
     : justDone ? { id: `task:${justDone.id}`, from: 'task' as const, text: `they got "${justDone.title}" done at ${clockAt(Date.parse(justDone.completedAt!))}. Ask how it went, or what it was like — that is what is on your mind, not a new subject.` } : null;
-  const thing = ignoring ? null : task ?? pickToBringUp(raisable, getSessions(), broughtUp, todayKey);
+  // Their day, asked about: with the phone or their own word putting them
+  // somewhere, no task on her mind, and no question about it in the last
+  // couple of hours, the nudge is a real question rather than a jab from
+  // memory — "so what are you actually doing at The PC Project?" — and the
+  // next thing they say answers it (openAsk).
+  const whereNow = (() => {
+    const where = getWhereabouts();
+    const spot = where.enabled && where.last && nowMs - Date.parse(where.last.at) <= SPOT_STALE_MS ? placeAt(where.places, where.last)?.name : undefined;
+    return spot ?? getTold()?.where;
+  })();
+  const askAbout = !ignoring && !task && whereNow && !askedRecently(getAsides(), nowMs) && Math.random() < 0.6 ? `what they are doing at ${whereNow}` : null;
+  const thing = ignoring || askAbout ? null : task ?? pickToBringUp(raisable, getSessions(), broughtUp, todayKey);
   // Counted from when the quiet ended, not from their last word: eight hours
   // of sleep is not eight hours of ignoring her.
   const quietHours = awakeHoursSince(mood.lastMessageAt, getPush().prefs, now);
@@ -7420,9 +7448,11 @@ async function boredNudge(): Promise<string | null> {
     // "playing ghost for an hour" and "10 minutes of silence" in the same line.
     quietHours !== null && quietHours >= 1 ? `They have not said a word to you in ${quietHours} hour${quietHours === 1 ? '' : 's'}. That is the length of the silence — name no other.`
       : quietMinutes !== null ? `They last wrote to you ${Math.max(1, quietMinutes)} minutes ago. That is the length of the silence — do not call it longer or shorter.` : '',
-    thing ? `Bring up this in particular, as though it has been on your mind: ${thing.text}`
+    askAbout ? `Ask them ${askAbout} right now — one real question, in your way ("So what are you actually doing at ${whereNow}, huh?"), the kind that gets an answer. Not the weather, not anything you have already remarked on: their day. What they say back is worth remembering.`
+      : thing ? `Bring up this in particular, as though it has been on your mind: ${thing.text} — this, not the weather and not anything you already remarked on.`
       : ignoring ? 'You are not speaking to them properly right now, and they know why. One cold line that makes it plain you noticed the silence — no warmth, no question, no help.'
       : 'Nothing in particular to bring up: the silence itself is the subject.',
+    unansweredAsksNote(getAsides(), CHAT_TIMEZONE, nowMs),
     'The point is to get them to message you back. Needle them with it: a dig, a guilt-trip about how they have time for everyone but you, a challenge they will want to answer, a question they cannot leave hanging. Never say you are bored, lonely, or that you miss them; never ask whether they are there; do not greet them.',
     NO_INVENTED_HISTORY,
     NO_NON_SEQUITURS,
@@ -7439,7 +7469,8 @@ async function boredNudge(): Promise<string | null> {
       broughtUp.push(thing.id);
       while (broughtUp.length > REMEMBERED_PICKS) broughtUp.shift();
     }
-    console.log(`[push] a bored nudge, ${thing ? `about "${thing.text.slice(0, 50)}"` : ignoring ? 'cold' : 'about the silence'}`);
+    pendingAsk = askAbout;
+    console.log(`[push] a bored nudge, ${askAbout ? `asking ${askAbout}` : thing ? `about "${thing.text.slice(0, 50)}"` : ignoring ? 'cold' : 'about the silence'}`);
     recordBrief('bored', system, line);
     return line;
   } catch (error) {
@@ -7681,8 +7712,10 @@ async function checkWeather(config: ProviderConfig, prefs: PushPrefs) {
   if (!polled || !prefs.weather) return;
   const state = getWeather();
   const events = weatherEvents(polled.previous, polled.current, state.notified, Date.now(), state.disputedAt);
-  if (!events.length) return;
-  const event = events[0];
+  // A sky that turned clear is background for the next thing she says anyway;
+  // it is not worth a buzz on its own. Rain, a storm, a swing in the heat are.
+  const event = events.find(candidate => candidate.kind !== 'sky-changed');
+  if (!event) return;
   saveWeather({ ...state, notified: { ...state.notified, [event.kind]: Date.now() } });
   const system = proactiveSystem(
     `${event.text} Tell them, in your way — what and when must survive; the attitude is yours.`,
