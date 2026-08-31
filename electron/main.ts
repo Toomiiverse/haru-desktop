@@ -4345,9 +4345,13 @@ function requireKeyFor(endpoint: string, provider: Provider) {
  * purpose: every composer in this file calls ollamaPost, and none of them should
  * have to know or care which provider answered.
  */
-type PostOptions = { tools?: boolean; temperature?: number; format?: unknown; maxTokens?: number; onChunk?: (text: string) => void };
+type PostOptions = { tools?: boolean; temperature?: number; format?: unknown; maxTokens?: number; onChunk?: (text: string) => void;
+  /** A deadline for a hosted answer, after which the local model speaks instead. */
+  signal?: AbortSignal;
+  /** The endpoint's prompt-cache key for this conversation. */
+  cacheKey?: string };
 
-async function openAIPost(conversation: OllamaMessage[], config: ProviderConfig, { tools = true, temperature = config.temperature, format, maxTokens, onChunk }: PostOptions = {}) {
+async function openAIPost(conversation: OllamaMessage[], config: ProviderConfig, { tools = true, temperature = config.temperature, format, maxTokens, onChunk, signal, cacheKey }: PostOptions = {}) {
   requireKeyFor(config.endpoint, (config.provider as Provider) ?? 'openai');
   const body = toOpenAIBody({
     model: config.model,
@@ -4357,11 +4361,14 @@ async function openAIPost(conversation: OllamaMessage[], config: ProviderConfig,
     maxTokens,
     json: Boolean(format),
     stream: Boolean(onChunk),
+    provider: config.provider,
+    cacheKey,
   });
   const response = await net.fetch(`${trimEndpoint(config.endpoint)}/chat/completions`, {
     method: 'POST',
     headers: modelHeaders(config.endpoint),
     body: JSON.stringify(body),
+    ...(signal ? { signal } : {}),
   });
   if (!response.ok) {
     const detail = await response.text().catch(() => '');
@@ -4370,7 +4377,7 @@ async function openAIPost(conversation: OllamaMessage[], config: ProviderConfig,
     if (response.status === 400 && /tool|function/i.test(detail) && tools) {
       toolless.add(config.model);
       console.warn(`[ai] ${config.model} rejected the tools — retrying without them. She cannot save reminders on this model.`);
-      return openAIPost(conversation, config, { tools: false, temperature, format, maxTokens, onChunk });
+      return openAIPost(conversation, config, { tools: false, temperature, format, maxTokens, onChunk, signal, cacheKey });
     }
     throw new Error(describeFailure(response.status, detail, (config.provider as Provider) ?? 'openai'));
   }
@@ -4544,10 +4551,10 @@ async function ollamaPost(conversation: OllamaMessage[], config: ProviderConfig,
   }
 }
 
-async function sendToProvider(conversation: OllamaMessage[], config: ProviderConfig, { tools = true, temperature = config.temperature, format, maxTokens, onChunk }: PostOptions = {}) {
+async function sendToProvider(conversation: OllamaMessage[], config: ProviderConfig, { tools = true, temperature = config.temperature, format, maxTokens, onChunk, signal, cacheKey }: PostOptions = {}) {
   // Routed here rather than at every call site: there are a dozen composers in
   // this file and none of them should know which provider is answering.
-  if (isOpenAIShaped(config.provider)) return openAIPost(conversation, config, { tools, temperature, format, maxTokens, onChunk });
+  if (isOpenAIShaped(config.provider)) return openAIPost(conversation, config, { tools, temperature, format, maxTokens, onChunk, signal, cacheKey });
   const send = async (withTools: boolean, streaming: boolean, quiet = true) => {
     const offered = withTools ? chatTools(availableTools()) : [];
     if (offered.length) console.log(`[ai] offering ${offered.length} tools to ${config.model}`);
@@ -5603,7 +5610,23 @@ function noteTheyAccounted(said: string) {
  * escalating sends the history with it. A key pasted three turns ago is still in
  * what would be posted.
  */
-type Brain = { config: ProviderConfig; escalated: boolean; because: string; sees: boolean };
+type Brain = { config: ProviderConfig; escalated: boolean; because: string; sees: boolean;
+  /** The conversation route (ai.conversation): a hosted model speaking as her, filtered as the local one is, never rewritten. */
+  hosted?: boolean };
+
+/**
+ * Where the conversation itself is answered, when somewhere other than the
+ * local model has been chosen for it. Distinct from escalation: that sends a
+ * research question out and says the answer again in her voice; this is her
+ * voice, on a stronger model, for what they say to her. Unprompted lines —
+ * nudges, weather, the diary — never come through here.
+ */
+const HOSTED_FIRST_WORD_MS = 8_000;
+function conversationRoute(): ProviderConfig | null {
+  const route = store.get('ai.conversation') as ProviderConfig | undefined;
+  if (!route?.model || !isOpenAIShaped(route.provider) || !hasKeyFor(route.endpoint)) return null;
+  return route;
+}
 
 /**
  * `pictures` and `files` force the question out to the hosted model, whatever
@@ -5934,10 +5957,19 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // and not the transcript, and answers from what a YouTube link usually is —
   // it described Rick Astley for a clip of elephants, with the words in hand.
   const video = messages.at(-1)?.role === 'user' && videoIdFrom(latest.match(/https?:\/\/\S+/)?.[0] ?? '') !== null;
-  const brain: Brain = directions ? { config, escalated: false, because: 'the way somewhere is answered at home', sees: false }
+  let brain: Brain = directions ? { config, escalated: false, because: 'the way somewhere is answered at home', sees: false }
     : video ? { config, escalated: false, because: 'a video is read at home, where the transcript tool is', sees: false }
     : brainFor(latest, config, messages, { pictures, files: arrived.length > 0 });
   if (brain.escalated) console.log(`[ai] sent out to ${brain.config.model} — ${brain.because}`);
+  // Their turn, not escalated, not a one-shot composer: the conversation route
+  // answers as her, if one is set and this conversation may leave the box.
+  const home = config;
+  const route = !brain.escalated && !brief && !choices && messages.at(-1)?.role === 'user' ? conversationRoute() : null;
+  if (route) {
+    const allowed = conversationMayLeave([...messages], pageWasRead);
+    if (allowed.safe) brain = { config: { ...route, temperature: config.temperature }, escalated: false, because: 'the conversation route', sees: false, hosted: true };
+    else console.log(`[router] the conversation route stays home this turn — ${allowed.because}`);
+  }
   config = brain.config;
   const vision = readVisionConfig(store.get('vision'));
   // Said out loud, once, when a picture has just been attached and cannot be
@@ -5999,6 +6031,7 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // pressed — any words already streamed would be a lie, so the sink is told to
   // take them back and the reader waits for the round that actually survives.
   let roundStreamed = '';
+  let spilledHome = false;
   const forwardChunk = onChunk ? (chunk: string) => { roundStreamed += chunk; onChunk(chunk); } : undefined;
   // Fixed for the whole turn. Only `tools` changes round to round, and that is
   // the loop's decision rather than this function's.
@@ -6014,6 +6047,20 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   };
   const { content: spoken, ran } = await runToolLoop(conversation, {
     ask: async (sending, { tools }) => {
+      // The conversation route: a deadline on the first word, and the local
+      // model answering when it passes or the call fails — she must never go
+      // quiet because a company did. A round already streaming is taken back
+      // first, so the reader is not shown two beginnings.
+      if (brain.hosted) {
+        try {
+          return await sendToProvider(sending, config, { ...roundOptions, tools, signal: AbortSignal.timeout(HOSTED_FIRST_WORD_MS), cacheKey: `haru-${localDateKey(zonedNow(CHAT_TIMEZONE))}` });
+        } catch (error) {
+          console.warn(`[ai] the conversation route (${config.model}) did not answer (${error instanceof Error ? error.message : String(error)}) — answering at home`);
+          if (roundStreamed) { roundStreamed = ''; onChunkReset?.(); }
+          spilledHome = true;
+          return ollamaPost(sending, home, { ...roundOptions, tools });
+        }
+      }
       try {
         return await ollamaPost(sending, config, { ...roundOptions, tools });
       } catch (error) {
@@ -6115,7 +6162,13 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   if (routeless !== herLine && directions?.route) console.log('[maps] corrected the minutes, distance or roads she stated to the route');
   const content = directions?.found ? withDirections(routeless, directions.found) : routeless;
   if (herLine !== said) console.log(`[ai] dropped ${said.length - content.length} chars she had already said`);
-  console.log(`[ai] chat reply in ${Date.now() - started}ms, ${content.length} chars`);
+  // The turn's ledger, one line: who answered, how much she was handed, and
+  // whether the filters had to touch what she said. The before-and-after of a
+  // change of brain is read from these.
+  const handed = Math.round(conversation.reduce((sum, message) => sum + (typeof message.content === 'string' ? message.content.length : 0), 0) / 4);
+  const brainName = brain.hosted ? (spilledHome ? `hosted:${config.model}->home` : `hosted:${config.model}`) : brain.escalated ? `escalated:${config.model}` : 'local';
+  const touched = said.trim() !== routeless.trim();
+  console.log(`[ai] chat reply in ${Date.now() - started}ms, ${content.length} chars — brain=${brainName} handed≈${handed}tok filters=${touched ? `touched(${said.trim().length - routeless.trim().length >= 0 ? '-' : '+'}${Math.abs(said.trim().length - routeless.trim().length)})` : 'untouched'}`);
   // Cleared only once a reply actually exists, so a failed or unreachable turn
   // leaves the note in place for the retry rather than losing it.
   if (fresh) store.delete('chat.freshStart');

@@ -12,7 +12,7 @@ export type Remembered = { id: string; text: string; kind?: string; status?: str
 /** An event is on her mind for this long; after that it is a thing that happened, not a thing to raise. */
 export const EVENT_FRESH_DAYS = 3;
 export type Day = { day: string; summary: string };
-export type Something = { id: string; text: string; from: 'memory' | 'day' };
+export type Something = { id: string; text: string; from: 'memory' | 'day' | 'task' };
 
 /** Days this far back are still worth a remark; older than that is memories' job. */
 export const DAYS_WORTH_RAISING = 10;

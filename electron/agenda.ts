@@ -11,6 +11,8 @@ import { localDateKey, parseTimeOfDay, resolveDate } from './dates';
 // not anyone marks it — so being told about it is the only thing that can ever
 // settle it, and without somewhere to record that she asks again forever.
 export type AgendaItem = { title: string; date: string; time?: string; done: boolean; completedAt?: string; heardAbout?: string;
+  /** When they said they were getting on with it — started, not finished. Chases pause for a while; the next thing she raises is this. */
+  underway?: string;
   /** 'event' or 'task', when the caller knows; an event is history once it is past. */
   kind?: string };
 export type ItemStatus = 'done' | 'overdue' | 'now' | 'upcoming';
@@ -354,6 +356,31 @@ export function doneClause(text: string): string | null {
     if (READS_AS_DONE.test(clauses[i]) || (i === 0 && READS_AS_DONE_BARE.test(clauses[i]))) return clauses[i];
   }
   return null;
+}
+
+/** Chases hold off this long after "getting it done now" — long enough to do a thing, not long enough to forget it. */
+export const UNDERWAY_GRACE_MS = 45 * 60_000;
+/** A thing done this recently is still worth asking about — "how did it go" — rather than a stale item she must not name. */
+export const FOLLOW_UP_MS = 4 * 60 * 60_000;
+
+// "Getting it done now", "on it", "doing that now", "just started": started,
+// not finished. It ticks nothing off, but it is news — she stops chasing and
+// what she asks next is how it is going.
+const READS_AS_UNDERWAY = /\b(?:getting (?:it|that|this|them|on with it|on it|to it|onto it|started) (?:done|sorted|going)?(?:\s+now)?|(?:i'?m |im |am )?(?:on|onto) (?:it|that|this)\b|doing (?:it|that|this|them)(?: right)?(?: now)?|(?:about|going) to (?:do|start|get on with) (?:it|that|this)|(?:just )?(?:started|starting) (?:it|that|this|now|on it)|working on (?:it|that|this)(?: now)?|will do (?:it|that|this) now|getting it done|getting that done)\b/i;
+
+/** The clause that says they have started something, when one does and none says it is finished. */
+export function underwayClause(text: string): string | null {
+  for (const clause of clausesOf(text)) {
+    if (readsAsNotDone(clause) || READS_AS_DONE.test(clause)) continue;
+    if (READS_AS_UNDERWAY.test(clause)) return clause;
+  }
+  return null;
+}
+
+export function isUnderway(item: Pick<AgendaItem, 'underway' | 'done'>, nowMs: number, graceMs = UNDERWAY_GRACE_MS): boolean {
+  if (item.done || !item.underway) return false;
+  const since = nowMs - Date.parse(item.underway);
+  return Number.isFinite(since) && since >= 0 && since <= graceMs;
 }
 
 export function readsAsDone(text: string) {
@@ -792,9 +819,12 @@ export function raisedRecently<T extends AgendaItem>(lines: string[], items: T[]
   return out;
 }
 
-export function staleItemNamed(line: string, items: AgendaItem[], todayKey: string): AgendaItem | null {
+export function staleItemNamed(line: string, items: AgendaItem[], todayKey: string, nowMs = Date.now()): AgendaItem | null {
   const lastEvent = shiftDays(todayKey, -CHASE_WINDOW_DAYS);
-  const stale = items.filter(item => item.done || (item.kind === 'event' && item.date < lastEvent));
+  // Done, but not just done: "how did the Steam thing go" an hour after it is a
+  // follow-up, not a thing she should have known was over.
+  const justDone = (item: AgendaItem) => !!item.completedAt && nowMs - Date.parse(item.completedAt) <= FOLLOW_UP_MS;
+  const stale = items.filter(item => (item.done && !justDone(item)) || (item.kind === 'event' && item.date < lastEvent));
   if (!stale.length) return null;
   return findItem(stale, line, { whole: true }) ?? null;
 }

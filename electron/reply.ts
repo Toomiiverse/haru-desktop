@@ -631,3 +631,20 @@ export function answersThePrompt(reply: string, priming: string): boolean {
   const quoted = new RegExp(`["'\u201c\u201d\u2018\u2019]\\s*${words.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[.!?…]*\\s*["'\u201c\u201d\u2018\u2019]`, 'i');
   return quoted.test(reply);
 }
+
+const NUMBER_WORDS: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19, twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60 };
+const STATED_MINUTES = /\b(?:(?:about|around|roughly|nearly|almost|over|a good)\s+)?(\d{1,3}|(?:twenty|thirty|forty|fifty)(?:[- ](?:one|two|three|four|five|six|seven|eight|nine))?|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|sixty)\s+(?:minutes?|mins?)\b/gi;
+
+/**
+ * The minutes of silence she states, made the real ones. Told "27 minutes
+ * ago" she wrote "fourteen minutes since you last typed" — a 9B and a number.
+ * Only the minutes are touched; the rest of the line is hers.
+ */
+export function fixStatedMinutes(line: string, minutes: number): string {
+  return line.replace(STATED_MINUTES, (whole, said: string) => {
+    const words = said.toLowerCase().split(/[- ]/);
+    const value = /^\d+$/.test(said) ? Number(said) : words.reduce((sum, word) => sum + (NUMBER_WORDS[word] ?? 0), 0);
+    return value === minutes ? whole : `${minutes} minutes`;
+  });
+}
+
