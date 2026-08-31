@@ -2,7 +2,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { emojiRut, EXPRESSIVE, HER_EMOJI, LAST_WORD } from '../electron/room';
+import { emojiRut, EXPRESSIVE, HER_EMOJI, LAST_WORD, NATURAL } from '../electron/room';
 import { dropOverusedEmoji } from '../electron/reply';
 
 test('the eye-roll is no longer named first or named as the default', () => {
@@ -35,3 +35,13 @@ test('the backstop takes the stuck emoji out, so the same one twice running is n
   assert.equal(dropOverusedEmoji('Fine. 🙄', ['a 😏'], HER_EMOJI), 'Fine. 🙄', 'a different one last time leaves this one alone');
   assert.equal(dropOverusedEmoji('Fine. 🙄', [], HER_EMOJI), 'Fine. 🙄', 'nothing to compare with');
 });
+
+test('how she writes is about the shape of the message, and does not soften what she is', () => {
+  assert.match(NATURAL, /a throwaway line gets a throwaway line back/);
+  assert.match(NATURAL, /Fragments are fine\. Contractions always\./);
+  assert.match(NATURAL, /not a tax on every message/);
+  assert.match(NATURAL, /No bullet points, no headings/);
+  assert.match(NATURAL, /Never sound like support staff/);
+  assert.doesNotMatch(NATURAL, /\b(kind|gentle|polite|nice|warm|supportive)\b/i, 'nothing here makes her nicer');
+});
+

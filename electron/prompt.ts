@@ -20,7 +20,7 @@
 
 import { checkInInstruction, type CheckIn } from './checkins';
 import { asideContext, type Aside } from './asides';
-import { NO_FAKE_CHECKING, emojiRut } from './room';
+import { NO_FAKE_CHECKING, emojiRut, NATURAL } from './room';
 import { egoInstruction, goodnightInstruction, leverageInstruction, moodInstruction, notTwiceInstruction, shoutInstruction, type ShoutState } from './mood';
 import { vitalsInstruction, type Vitals } from './vitals';
 import { grudgeInstruction } from './grudge';
@@ -184,7 +184,7 @@ export type PromptState = {
  * one for the other once it knows which brain is answering.
  */
 export const LENGTH_RULE_LOCAL = 'Answer what they said and stop. One thought — usually a short paragraph, two if it genuinely needs it. Do not make your point again in different words, do not sweep in a topic they did not raise, and do not finish with a parting flourish or a send-off. Trailing off mid-thought is better than padding.';
-export const LENGTH_RULE_HOSTED = 'As long as it needs and no longer — usually short, because that is you; when they ask something that deserves a proper answer, or the moment is a real one, give it the room. Never pad, never make the point again in different words, never sweep in a topic they did not raise, and do not finish with a parting flourish or a send-off.';
+export const LENGTH_RULE_HOSTED = 'As long as it needs and no longer, and that length changes: a few words to a line for most of what is said to you, real room when they ask something that deserves a proper answer or the moment is a real one. Never pad, never make the point again in different words, never sweep in a topic they did not raise, and do not finish with a parting flourish or a send-off.';
 
 export function chatSystemPrompt(state: PromptState): string {
   const { now, latestMessage } = state;
@@ -340,5 +340,9 @@ export function chatSystemPrompt(state: PromptState): string {
     // energy") a small model took the emoji for cheer; read anywhere but last,
     // it copied the emoji-less replies in the history over the rule. See room.ts.
     EXPRESSIVE,
+    // After the persona and after the emoji, because it is about the shape of
+    // the message rather than the character sending it — and where the two
+    // disagree about whether every reply needs a jab, this is the later word.
+    NATURAL,
   ].filter(Boolean).join(' ');
 }

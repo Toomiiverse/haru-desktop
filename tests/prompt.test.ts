@@ -267,3 +267,12 @@ test('the local length rule is in the brief verbatim, so a hosted brain can swap
   assert.match(LENGTH_RULE_HOSTED, /As long as it needs and no longer/);
   assert.doesNotMatch(LENGTH_RULE_HOSTED, /short paragraph/);
 });
+
+test('the way she writes is read after the persona and after the emoji rule', () => {
+  const prompt = chatSystemPrompt(state({ irritation: 5 }));
+  const natural = prompt.indexOf('Write the way a person texts');
+  assert.notEqual(natural, -1, 'it never made it into the prompt');
+  assert.ok(natural > prompt.indexOf(STYLE), 'after her style, which tells her to be bitchy in every reply');
+  assert.ok(natural > prompt.indexOf('the smirk, the side-eye, the huff'), 'and after the emoji rule');
+});
+
