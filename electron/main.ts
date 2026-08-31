@@ -108,6 +108,7 @@ import type { IngestResult } from './ingestion';
 import type { Embedder } from './embeddings';
 import { retrieveContext } from './retrieveContext';
 import type { VaultSyncReport } from './obsidian';
+import { diaryNotes, herNote, indexNote, memoriesNote, nightNotes, placesNote, standingNote, writeNotes } from './vault';
 import { collectAll, collectDocker, collectDockerLight, collectGpu, collectProcesses, collectServices, collectSystem, diagnose, KNOWN_SERVICES, USER_SERVICES, type Diagnosis } from './system';
 import { checkEvents, sampleFromCollectors, type EventThresholds, type SystemSample } from './systemState';
 
@@ -6937,6 +6938,61 @@ function stopDiscord() {
 let lastPlaceFound: { place: GooglePlace; at: number } | null = null;
 const PLACE_FOLLOW_UP_MS = 45 * 60_000;
 
+/** How she stands with him right now — the Standing tab's arithmetic, in standing.ts, which is pure and tested. */
+function currentStanding() {
+  const now = zonedNow(CHAT_TIMEZONE);
+  const today = localDateKey(now);
+  const mood = getMood();
+  const days = getSessions().map(session => session.day).filter(Boolean).sort();
+  return standingFrom({
+    vitals,
+    irritation: mood.irritation,
+    ego: mood.ego,
+    grudge: mood.grudge ?? 0,
+    ignoredToday: mood.ignoredToday ?? 0,
+    lastMessageAt: mood.lastMessageAt,
+    knownSince: days[0],
+    daysTalked: new Set(days).size,
+    kept: getKept().map(item => ({ id: item.id, title: item.title, date: item.date, time: item.time ?? null, done: item.done })),
+    weekday: new Intl.DateTimeFormat('en-AU', { weekday: 'long', timeZone: CHAT_TIMEZONE }),
+    now: Date.now(),
+    today,
+  });
+}
+
+/**
+ * Her folder in the Obsidian vault, brought up to date (vault.ts). Cheap
+ * enough to run often — a note is rewritten only when its text changed — so
+ * it runs after each diary entry and on a slow tick for the standing page.
+ */
+const VAULT_PUBLISH_MS = 15 * 60_000;
+function publishToVault(reason: string): void {
+  const vault = readVaultConfig().path;
+  if (!vault) return;
+  try {
+    const entries = recentEntries(app.getPath('home'), 3650);
+    const nights = getNights();
+    const her = herFrom({ interests: getInterests(), nights, diary: entries });
+    const standing = currentStanding();
+    const memories = getMemories();
+    const where = getWhereabouts();
+    const latestNight = [...nights].map(night => night.day).sort().at(-1);
+    const notes = [
+      ...diaryNotes(entries, new Set(nights.map(night => night.day))),
+      ...nightNotes(nights),
+      herNote(her),
+      standingNote(standing, new Date().toISOString()),
+      memoriesNote(memories),
+      placesNote(where, toldNow()),
+      indexNote({ latestDiary: entries.at(-1), latestNight, standing, her, memories: memories.filter(record => !record.supersededBy && record.status !== 'dormant').length, places: where.places.length }),
+    ];
+    const result = writeNotes(vault, notes);
+    if (result.written) console.log(`[vault] ${reason}: wrote ${result.written} of ${notes.length} notes to ${vault}`);
+  } catch (error) {
+    console.warn(`[vault] could not write her notes: ${error instanceof Error ? error.message : error}`);
+  }
+}
+
 async function directionsFor(latest: string, recentUser: string[] = []): Promise<{ ask: DirectionsAsk; found: FoundPlace | null; route: Route | null; note: string; about?: true } | null> {
   const ask = directionsAskFrom(latest, recentUser);
   const where = getWhereabouts();
@@ -7783,6 +7839,7 @@ async function writeDiary(config: ProviderConfig) {
     appendEntry(app.getPath('home'), due, entry, new Intl.DateTimeFormat('en-AU', { weekday: 'long', timeZone: 'UTC' }), title);
     setMood({ ...getMood(), diaryDay: due });
     console.log(`[diary] wrote the entry for ${due} (${entry.length} chars)`);
+    publishToVault('diary');
   } catch (error) {
     console.warn('[diary] could not write tonight\'s entry:', error instanceof Error ? error.message : error);
   }
@@ -8458,26 +8515,7 @@ function webDeps(): WebDeps {
     // know that. The arithmetic is in standing.ts, which is pure and tested.
     diary: () => recentEntries(app.getPath('home'), 60).reverse(),
     her: () => herFrom({ interests: getInterests(), nights: getNights(), diary: recentEntries(app.getPath('home'), 365) }),
-    standing: () => {
-      const now = zonedNow(CHAT_TIMEZONE);
-      const today = localDateKey(now);
-      const mood = getMood();
-      const days = getSessions().map(session => session.day).filter(Boolean).sort();
-      return standingFrom({
-        vitals,
-        irritation: mood.irritation,
-        ego: mood.ego,
-        grudge: mood.grudge ?? 0,
-        ignoredToday: mood.ignoredToday ?? 0,
-        lastMessageAt: mood.lastMessageAt,
-        knownSince: days[0],
-        daysTalked: new Set(days).size,
-        kept: getKept().map(item => ({ id: item.id, title: item.title, date: item.date, time: item.time ?? null, done: item.done })),
-        weekday: new Intl.DateTimeFormat('en-AU', { weekday: 'long', timeZone: CHAT_TIMEZONE }),
-        now: Date.now(),
-        today,
-      });
-    },
+    standing: currentStanding,
     memoryRecords: () => getMemories(),
     activityLog: () => store.getActivityLog(),
     shots: {
@@ -8779,6 +8817,9 @@ app.whenReady().then(() => {
   // waits on or blocks a conversation.
   setTimeout(() => { void autoSyncVault(); }, 60_000);
   setInterval(() => { void autoSyncVault(); }, 60 * 60_000);
+  // And her own folder in it, the other way round.
+  setTimeout(() => publishToVault('startup'), 30_000);
+  setInterval(() => publishToVault('tick'), VAULT_PUBLISH_MS);
   // A first pass shortly after boot so a backlog the desk sent overnight is
   // already being worked through by the time anyone asks, then every five
   // minutes. Both are no-ops until vision is switched on and shots exist.

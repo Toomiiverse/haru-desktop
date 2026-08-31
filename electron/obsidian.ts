@@ -13,8 +13,11 @@ export type VaultSyncReport = {
   ms: number;
 };
 
+/** Her own folder in the vault (vault.ts) — written by the app, and not read back as knowledge about his world. */
+export const HARU_FOLDER = 'Haru';
+
 /** Folders that are Obsidian housekeeping or should never be read as knowledge. */
-export const DEFAULT_VAULT_SKIP = ['.obsidian', '.trash', '.git', 'templates', '_templates', 'attachments', '_attachments', 'node_modules'];
+export const DEFAULT_VAULT_SKIP = ['.obsidian', '.trash', '.git', 'templates', '_templates', 'attachments', '_attachments', 'node_modules', HARU_FOLDER];
 
 export function walkVault(root: string, skip: string[] = DEFAULT_VAULT_SKIP): VaultFile[] {
   const out: VaultFile[] = [];
