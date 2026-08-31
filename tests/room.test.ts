@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { emojiRut, EXPRESSIVE, HER_EMOJI, LAST_WORD, NATURAL } from '../electron/room';
-import { dropOverusedEmoji } from '../electron/reply';
+import { dropOverusedEmoji, oneEmojiAtMost } from '../electron/reply';
 
 test('the eye-roll is no longer named first or named as the default', () => {
   assert.equal(HER_EMOJI[0], '😏');
@@ -43,5 +43,12 @@ test('how she writes is about the shape of the message, and does not soften what
   assert.match(NATURAL, /No bullet points, no headings/);
   assert.match(NATURAL, /Never sound like support staff/);
   assert.doesNotMatch(NATURAL, /\b(kind|gentle|polite|nice|warm|supportive)\b/i, 'nothing here makes her nicer');
+});
+
+test('one emoji at most, whichever came first', () => {
+  assert.equal(oneEmojiAtMost('Good. 😏 Now go to bed. 🙄', HER_EMOJI), 'Good. 😏 Now go to bed.');
+  assert.equal(oneEmojiAtMost('Fine. 🙄', HER_EMOJI), 'Fine. 🙄');
+  assert.equal(oneEmojiAtMost('Sure.', HER_EMOJI), 'Sure.');
+  assert.equal(oneEmojiAtMost('🙄 😏', HER_EMOJI), '🙄 😏', 'never left with nothing');
 });
 

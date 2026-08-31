@@ -669,3 +669,22 @@ export function dropOverusedEmoji(reply: string, previousReplies: string[], emoj
   return without;
 }
 
+/**
+ * One at most, whichever came first.
+ *
+ * "Good. You're knackered … 😏 Now go to bed … 🙄" — two in four lines is the
+ * sticker sheet the wording already forbids and the model produced anyway.
+ */
+export function oneEmojiAtMost(reply: string, emoji: readonly string[]): string {
+  const used = [...reply].filter(character => emoji.includes(character));
+  if (used.length < 2) return reply;
+  const keep = used[0];
+  let seen = false;
+  const out = [...reply].filter(character => {
+    if (!emoji.includes(character)) return true;
+    if (character === keep && !seen) { seen = true; return true; }
+    return false;
+  }).join('').replace(/[ \t]{2,}/g, ' ').replace(/ +([.,!?…])/g, '$1').replace(/[ \t]+$/gm, '').trim();
+  return /[\p{Letter}\p{Number}]/u.test(out) ? out : reply;
+}
+
