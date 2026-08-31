@@ -39,7 +39,7 @@ import { assumeItIsTheirs, identifyWork, noteWork, readFollowing, recogniseNow, 
 import { lookUpPlace, readWindowsLocation, searchPlaces, type FoundPlace } from './location';
 import { INTERRUPTED_ASIDE, wakeAck } from './wake';
 import { acceptedOffer, promisedTitle, reminderAsk, reminderPromised, reminderSavedAside } from './remindme';
-import { describeWeather, readForecast, weatherEvents, weatherToDrawOn, weatherUrl, WEATHER_POLL_MS, type WeatherSample } from './weather';
+import { describeWeather, readForecast, weatherEvents, weatherToDrawOn, weatherUrl, WEATHER_POLL_MS, type WeatherSample, disputesRain } from './weather';
 import { HANGING_COOLDOWN_MS, isClosing, leftHanging, saidTheyWereLeaving } from './hanging';
 import { awakeHoursSince, theyAreUp, awakeMinutesSince } from './awake';
 import { describeTold, placeToldFrom, toldTheyAreBusy, type Told } from './told';
@@ -1288,7 +1288,7 @@ function unpromptedContext(): string {
   // not repeat at one in the morning is what she said at half eleven.
   // Where their phone says they are rides along too: a nudge that knows they
   // are at the shops has something to needle with.
-  const parts = [summariseFollowing(getFollowing(), Date.now()), todaySoFar(), alreadySaidRecently(asides, CHAT_TIMEZONE, Date.now()), stillWaiting(), describeWhereabouts(getWhereabouts()), toldNow(), weatherToDrawOn(getWeather().last, weatherWhere(), asides.map(aside => aside.text)), nightsToDrawOn(nightsOn(getNights(), lastNightKey()), asides.map(aside => aside.text)), tastesInstruction(getInterests())].filter(Boolean);
+  const parts = [summariseFollowing(getFollowing(), Date.now()), todaySoFar(), alreadySaidRecently(asides, CHAT_TIMEZONE, Date.now()), stillWaiting(), describeWhereabouts(getWhereabouts()), toldNow(), weatherToDrawOn(getWeather().last, weatherWhere(), asides.map(aside => aside.text), Date.now(), getWeather().disputedAt), nightsToDrawOn(nightsOn(getNights(), lastNightKey()), asides.map(aside => aside.text)), tastesInstruction(getInterests())].filter(Boolean);
   if (!parts.length) return '';
   // "Do not repeat a point you have already made" was read as "change the
   // subject": once a thread was answered and settled she abandoned the day
@@ -5784,6 +5784,12 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   }
   // Where they say they are is kept, in their words, for every composer —
   // the GPS knows the place, not that it is work or that it ends at half four.
+  // "It's not raining here" — their window, against the forecast's model. Kept
+  // for a couple of hours: no rain pushes, and the prompt takes their word.
+  if (messages.at(-1)?.role === 'user' && disputesRain(latest)) {
+    saveWeather({ ...getWeather(), disputedAt: Date.now() });
+    console.log('[weather] they say it is not raining where they are — their word over the forecast for two hours');
+  }
   const spot = messages.at(-1)?.role === 'user' ? placeToldFrom(latest, new Date().toISOString()) : null;
   if (spot) {
     store.set('told', spot);
@@ -5885,7 +5891,7 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
     grudge: getMood().grudge ?? 0,
     ignoredToday: getMood().ignoredToday ?? 0,
     whereabouts: [describeWhereabouts(getWhereabouts()), toldNow()].filter(Boolean).join(' '),
-    weather: describeWeather(getWeather().last, weatherWhere()),
+    weather: describeWeather(getWeather().last, weatherWhere(), Date.now(), getWeather().disputedAt),
     // So "what did you get up to last night?" has a true answer. Without this
     // the only record of her night is on disk and she invents one instead.
     nights: nightsInstruction(nightsOn(getNights(), lastNightKey())),
@@ -6927,6 +6933,10 @@ function stopDiscord() {
  * prompt so she speaks from what was found, and the link is attached after she
  * has spoken (withDirections) rather than asked of her.
  */
+/** The place Google last found for them, for the "is it still open?" that follows. */
+let lastPlaceFound: { place: GooglePlace; at: number } | null = null;
+const PLACE_FOLLOW_UP_MS = 45 * 60_000;
+
 async function directionsFor(latest: string, recentUser: string[] = []): Promise<{ ask: DirectionsAsk; found: FoundPlace | null; route: Route | null; note: string; about?: true } | null> {
   const ask = directionsAskFrom(latest, recentUser);
   const where = getWhereabouts();
@@ -6950,12 +6960,20 @@ async function directionsFor(latest: string, recentUser: string[] = []): Promise
     if (!about || !getGoogleMapsKey()) return null;
     const from = startingPoint(where);
     let place: GooglePlace | null = null;
-    try {
-      place = pick(await searchGooglePlaces(about.destination, getGoogleMapsKey(), from, (url, init) => fetch(url, init)), from, about.destination);
-    } catch (error) {
-      console.warn(`[maps] the place lookup for "${about.destination}" failed: ${(error as Error).message}`);
-      return null;
+    if (about.followUp) {
+      // "Is it still open?" is about the place she just found, while it is fresh.
+      if (!lastPlaceFound || Date.now() - lastPlaceFound.at > PLACE_FOLLOW_UP_MS) return null;
+      place = lastPlaceFound.place;
+      about.destination = place.name.split(',')[0].trim() || place.name;
+    } else {
+      try {
+        place = pick(await searchGooglePlaces(about.destination, getGoogleMapsKey(), from, (url, init) => fetch(url, init)), from, about.destination);
+      } catch (error) {
+        console.warn(`[maps] the place lookup for "${about.destination}" failed: ${(error as Error).message}`);
+        return null;
+      }
     }
+    if (place) lastPlaceFound = { place, at: Date.now() };
     console.log(`[maps] about "${about.destination}" (${about.want}): ${place ? `${place.name}${typeof place.openNow === 'boolean' ? place.openNow ? ', open' : ', closed' : ''}` : 'not found'}`);
     return { ask: { destination: about.destination, nearest: false }, found: null, route: null, note: placeNote(about, place, weekday), about: true };
   }
@@ -6971,7 +6989,7 @@ async function directionsFor(latest: string, recentUser: string[] = []): Promise
     if (getGoogleMapsKey()) {
       try {
         const place = pick(await searchGooglePlaces(ask.destination, getGoogleMapsKey(), from, (url, init) => fetch(url, init)), from, ask.destination);
-        if (place) { found = place; facts = placeWords(place, weekday) || undefined; }
+        if (place) { found = place; facts = placeWords(place, weekday) || undefined; lastPlaceFound = { place, at: Date.now() }; }
       } catch (error) {
         console.warn(`[maps] Google could not find "${ask.destination}": ${(error as Error).message}`);
       }
@@ -7359,10 +7377,12 @@ function startChasing() {
 let proactiveTimer: NodeJS.Timeout | null = null;
 let lastWeatherPollAt = 0;
 
-type WeatherState = { last: WeatherSample | null; notified: Record<string, number>; where: string };
+type WeatherState = { last: WeatherSample | null; notified: Record<string, number>; where: string;
+  /** When they last said it is not raining where they are — their window over the forecast's model, for a while. */
+  disputedAt?: number };
 function getWeather(): WeatherState {
   const saved = (store.get('weather') ?? {}) as Partial<WeatherState>;
-  return { last: saved.last ?? null, notified: saved.notified ?? {}, where: saved.where ?? '' };
+  return { last: saved.last ?? null, notified: saved.notified ?? {}, where: saved.where ?? '', ...(typeof saved.disputedAt === 'number' ? { disputedAt: saved.disputedAt } : {}) };
 }
 function saveWeather(next: WeatherState) { store.set('weather', next); }
 /** "where they are" when the phone's fix is fresh, "at home" when that is all she has. */
@@ -7461,7 +7481,7 @@ async function checkWeather(config: ProviderConfig, prefs: PushPrefs) {
   const polled = await pollWeather();
   if (!polled || !prefs.weather) return;
   const state = getWeather();
-  const events = weatherEvents(polled.previous, polled.current, state.notified);
+  const events = weatherEvents(polled.previous, polled.current, state.notified, Date.now(), state.disputedAt);
   if (!events.length) return;
   const event = events[0];
   saveWeather({ ...state, notified: { ...state.notified, [event.kind]: Date.now() } });
@@ -7725,7 +7745,7 @@ async function writeDiary(config: ProviderConfig) {
     ticked: getKept().filter(item => item.done && item.completedAt?.startsWith(due)).map(item => item.title),
     nights: tonight.map(night => ({ about: night.about, note: night.note, interest: night.interest, game: night.game })),
     tastes: getInterests().filter(interest => interest.stance).map(interest => ({ name: interest.name, stance: interest.stance })),
-    weather: describeWeather(getWeather().last, weatherWhere()).split('. That is the actual')[0] || undefined,
+    weather: describeWeather(getWeather().last, weatherWhere(), Date.now(), getWeather().disputedAt).split('. That is the actual')[0] || undefined,
     hisLastMessageAt: (() => { const last = messages.filter(message => message.role === 'user' && message.at).at(-1)?.at; return last ? clockAt(Date.parse(last)) : undefined; })(),
   });
   try {

@@ -2,7 +2,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mentionsWeather, weatherToDrawOn, WEATHER_RECENT_LINES, COOLDOWN_MS, describeWeather, readForecast, skyOf, weatherEvents, weatherUrl, WEATHER_STALE_MS, type WeatherSample } from '../electron/weather';
+import { mentionsWeather, weatherToDrawOn, WEATHER_RECENT_LINES, COOLDOWN_MS, describeWeather, readForecast, skyOf, weatherEvents, weatherUrl, WEATHER_STALE_MS, type WeatherSample, disputesRain, describeWeather as describeWeatherAgain, DISPUTE_STANDS_MS } from '../electron/weather';
 
 // 16:30 in Perth (UTC+8) on 2026-08-28, as Open-Meteo stamps it.
 const NOW = Date.parse('2026-08-28T08:30:00Z');
@@ -56,6 +56,9 @@ test('what buzzes the phone: rain soon, rain started and stopped, a sky turned, 
   assert.deepEqual(weatherEvents(clear, drizzleWet, {}, NOW).map(e => e.kind), ['rain-started'], 'measurable drizzle is');
   assert.deepEqual(weatherEvents(wet, clear, {}, NOW), [], 'the end of rain she never announced is not news');
   assert.deepEqual(weatherEvents(wet, clear, { 'rain-started': NOW - 30 * 60_000 }, NOW).map(e => e.kind), ['rain-stopped'], 'the end of the one she did is');
+  assert.deepEqual(weatherEvents(clear, wet, {}, NOW, NOW - 20 * 60_000), [], 'told it is not raining there, its start is not news');
+  assert.deepEqual(weatherEvents(wet, clear, { 'rain-started': NOW - 30 * 60_000 }, NOW, NOW - 20 * 60_000), [], 'nor its end');
+  assert.deepEqual(weatherEvents(clear, wet, {}, NOW, NOW - DISPUTE_STANDS_MS - 1).map(e => e.kind), ['rain-started'], 'two hours on, the forecast speaks again');
   assert.deepEqual(weatherEvents(null, wet, {}, NOW), [], 'nothing to compare with yet');
 
   const overcast: WeatherSample = { ...clear, sky: 'overcast' };
@@ -104,3 +107,15 @@ test('she is not handed the temperature again while it is still in her mouth', (
   // Nothing to report is still nothing.
   assert.equal(weatherToDrawOn(null, 'At home', []), '');
 });
+
+test('"it is not raining here" is their word against the forecast, and the prompt takes their word for two hours', () => {
+  for (const line of ['Also it’s not raining here', 'its not raining', 'no rain here mate', "it isn't even raining", 'it’s dry out']) assert.equal(disputesRain(line), true, line);
+  for (const line of ['is it raining?', 'no rain due today?', 'it’s raining here', 'rain later maybe']) assert.equal(disputesRain(line), false, line);
+  const at = new Date(NOW - 60_000).toISOString();
+  const wet = { at, tempC: 18, sky: 'drizzle', raining: true, mm: 0.1, windKmh: 9, isDay: true, rainSoonMin: null, rainSoonProb: 36, turning: null, highC: 19.5, lowC: 13.6 } as const;
+  const said = describeWeatherAgain(wet, 'Where they are', NOW, NOW - 10 * 60_000);
+  assert.match(said, /overcast \(the forecast says rain, but they told you it is not raining where they are — their word wins, do not mention rain\)/);
+  assert.doesNotMatch(said, /and raining/);
+  assert.match(describeWeatherAgain(wet, 'Where they are', NOW), /and raining/);
+});
+

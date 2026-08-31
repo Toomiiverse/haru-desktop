@@ -129,10 +129,29 @@ const deg = (c: number) => `${Math.round(c)}°C`;
 /** She reads a forecast, not the sky over them: said as such, and never as what is happening to them. */
 const FORECAST_NOT_A_WINDOW = ' This is what the forecast service says, not something you can see: say it as the forecast, and do not tell them they are wet, caught in it, or out in it — you do not know that. If they say it is not raining where they are, they are right.';
 
-export function weatherEvents(previous: WeatherSample | null, current: WeatherSample, notified: Record<string, number>, nowMs = Date.now()): WeatherEvent[] {
+/** How long their "it's not raining here" outranks the forecast's rain. */
+export const DISPUTE_STANDS_MS = 2 * 60 * 60_000;
+
+// "It's not raining here", "no rain here", "it's dry out": their window
+// against the forecast's model, and the window wins.
+const DISPUTES_RAIN = /\b(?:it(?:'s|’s| is|s)?|its|it’s)\s+(?:not|isn(?:'|’)?t|ain(?:'|’)?t)\s+(?:even\s+|actually\s+|really\s+)?raining\b|\bnot raining\b|\bno rain\b(?! (?:due|forecast|coming))|\b(?:it(?:'s|’s| is)|its)\s+(?:bone\s+)?dry\s+(?:here|out|outside|at\b)|\bhasn(?:'|’)?t (?:been )?rain(?:ed|ing)\b|\bstopped raining\b/i;
+
+/** They said it is not raining where they are. */
+export function disputesRain(text: string): boolean {
+  return DISPUTES_RAIN.test(text ?? '');
+}
+
+export function disputeStands(disputedAtMs: number | undefined, nowMs: number): boolean {
+  return typeof disputedAtMs === 'number' && nowMs - disputedAtMs >= 0 && nowMs - disputedAtMs <= DISPUTE_STANDS_MS;
+}
+
+export function weatherEvents(previous: WeatherSample | null, current: WeatherSample, notified: Record<string, number>, nowMs = Date.now(), disputedAtMs?: number): WeatherEvent[] {
   const fresh = (kind: WeatherEvent['kind']) => nowMs - (notified[kind] ?? 0) >= COOLDOWN_MS[kind];
   const out: WeatherEvent[] = [];
-  if (!current.raining && current.rainSoonMin !== null && current.rainSoonMin <= 45 && fresh('rain-soon')) {
+  // Told it is not raining where they are, nothing about rain is news for a
+  // while: not its start, not its end, not its coming — they can see the sky.
+  const disputed = disputeStands(disputedAtMs, nowMs);
+  if (!disputed && !current.raining && current.rainSoonMin !== null && current.rainSoonMin <= 45 && fresh('rain-soon')) {
     const when = current.rainSoonMin <= 5 ? 'any minute now' : `in about ${current.rainSoonMin} minutes`;
     out.push({ kind: 'rain-soon', text: `The forecast has rain due where they are ${when}${current.rainSoonProb ? ` (${current.rainSoonProb}% likely)` : ''}. It is ${deg(current.tempC)} and ${current.sky} there right now.${FORECAST_NOT_A_WINDOW}` });
   }
@@ -141,11 +160,11 @@ export function weatherEvents(previous: WeatherSample | null, current: WeatherSa
     // a dry shop earned "It's raining, you're wet". Real rain, or measurable
     // drizzle, is a push; a code alone is not.
     const shower = current.raining && (current.sky !== 'drizzle' || (current.mm ?? 0) >= 0.3);
-    if (shower && !previous.raining && fresh('rain-started')) out.push({ kind: 'rain-started', text: `The forecast says it has started raining where they are (${current.sky}). ${deg(current.tempC)}.${FORECAST_NOT_A_WINDOW}` });
+    if (!disputed && shower && !previous.raining && fresh('rain-started')) out.push({ kind: 'rain-started', text: `The forecast says it has started raining where they are (${current.sky}). ${deg(current.tempC)}.${FORECAST_NOT_A_WINDOW}` });
     // Only the end of a shower she announced: the forecast's codes flap, and
     // "the rain has stopped" about rain nobody heard of is a non sequitur.
     const announced = nowMs - (notified['rain-started'] ?? 0) <= 6 * 60 * 60_000;
-    if (!current.raining && previous.raining && announced && fresh('rain-stopped')) out.push({ kind: 'rain-stopped', text: `The rain has stopped where they are; it is ${current.sky} now, ${deg(current.tempC)}.` });
+    if (!disputed && !current.raining && previous.raining && announced && fresh('rain-stopped')) out.push({ kind: 'rain-stopped', text: `The rain has stopped where they are; it is ${current.sky} now, ${deg(current.tempC)}.` });
     const swing = current.tempC - previous.tempC;
     if (Math.abs(swing) >= 5 && fresh('temp-swing')) out.push({ kind: 'temp-swing', text: `It has ${swing < 0 ? 'dropped' : 'climbed'} ${Math.round(Math.abs(swing))} degrees where they are since she last looked: ${deg(current.tempC)} now.` });
     const notable = (sky: Sky) => sky === 'clear' || sky === 'overcast' || sky === 'fog' || sky === 'snow';
@@ -190,26 +209,28 @@ export const WEATHER_RECENT_LINES = 4;
  * weather have their own channel (weatherEvents, pushed as a `weather` aside)
  * and do not depend on this.
  */
-export function weatherToDrawOn(sample: WeatherSample | null, where: string, recentLines: string[], nowMs = Date.now()): string {
+export function weatherToDrawOn(sample: WeatherSample | null, where: string, recentLines: string[], nowMs = Date.now(), disputedAtMs?: number): string {
   if (recentLines.slice(-WEATHER_RECENT_LINES).some(mentionsWeather)) return '';
-  const facts = weatherFacts(sample, where, nowMs);
+  const facts = weatherFacts(sample, where, nowMs, disputedAtMs);
   return facts ? `${facts}. Background only: they have not asked, and it is not what this is about.` : '';
 }
 
 /** The readings themselves, with no instruction attached about what to do with them. */
-function weatherFacts(sample: WeatherSample | null, where: string, nowMs: number): string {
+function weatherFacts(sample: WeatherSample | null, where: string, nowMs: number, disputedAtMs?: number): string {
   if (!sample) return '';
   const age = nowMs - Date.parse(sample.at);
   if (!Number.isFinite(age) || age < 0 || age > WEATHER_STALE_MS) return '';
-  const parts = [`${where} it is ${deg(sample.tempC)} and ${sample.raining ? 'raining' : sample.sky}${sample.windKmh >= 30 ? `, windy (${Math.round(sample.windKmh)} km/h)` : ''}`];
+  const disputed = disputeStands(disputedAtMs, nowMs);
+  const sky = sample.raining ? (disputed ? `${sample.sky === 'drizzle' || sample.sky === 'rain' || sample.sky === 'storm' ? 'overcast' : sample.sky} (the forecast says rain, but they told you it is not raining where they are — their word wins, do not mention rain)` : 'raining') : sample.sky;
+  const parts = [`${where} it is ${deg(sample.tempC)} and ${sky}${sample.windKmh >= 30 ? `, windy (${Math.round(sample.windKmh)} km/h)` : ''}`];
   if (sample.highC !== null && sample.lowC !== null) parts.push(`today's range ${deg(sample.lowC)} to ${deg(sample.highC)}`);
-  if (sample.rainSoonMin !== null && sample.rainSoonMin <= 120) parts.push(`rain due in about ${sample.rainSoonMin <= 5 ? 'a few' : sample.rainSoonMin} minutes`);
+  if (!disputed && sample.rainSoonMin !== null && sample.rainSoonMin <= 120) parts.push(`rain due in about ${sample.rainSoonMin <= 5 ? 'a few' : sample.rainSoonMin} minutes`);
   else if (sample.turning) parts.push(`turning ${sample.turning.to} in about ${sample.turning.inHours} hour${sample.turning.inHours === 1 ? '' : 's'}`);
   return parts.join('; ');
 }
 
 /** The one line the prompt gets when they have asked, or nothing when the reading is old. */
-export function describeWeather(sample: WeatherSample | null, where: string, nowMs = Date.now()): string {
-  const facts = weatherFacts(sample, where, nowMs);
+export function describeWeather(sample: WeatherSample | null, where: string, nowMs = Date.now(), disputedAtMs?: number): string {
+  const facts = weatherFacts(sample, where, nowMs, disputedAtMs);
   return facts ? `${facts}. That is the actual weather, from a forecast service, as of a few minutes ago — use it rather than guessing, and do not say you cannot check.` : '';
 }

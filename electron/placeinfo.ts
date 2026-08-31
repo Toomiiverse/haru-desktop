@@ -124,7 +124,9 @@ export function placeWords(place: PlaceFacts & { name: string }, weekday: number
   return bits.join(' ');
 }
 
-export type PlaceAsk = { destination: string; want: 'open' | 'hours' | 'rating' };
+export type PlaceAsk = { destination: string; want: 'open' | 'hours' | 'rating';
+  /** "Is it still open?" — the place is whichever one was last found, if it was recent. */
+  followUp?: true };
 
 // "Is Coles open?", "what time does Bunnings close", "Happytel opening hours",
 // "is the Rockingham Bunnings still open right now". The tail words are the
@@ -147,6 +149,7 @@ export function placeAsk(text: string): PlaceAsk | null {
     const m = line.match(pattern);
     if (!m) continue;
     const destination = m[1].trim().replace(/^["'“”‘’]+|["'“”‘’]+$/g, '').replace(/^(?:the|a|my)\s+/i, '').replace(/\s+/g, ' ').slice(0, 80);
+    if (/^(?:it|that|this|there|they|the place|that place|this place|the shop|the store|that shop|that store)$/i.test(destination)) return { destination, want, followUp: true };
     if (destination.length < 2 || NOT_A_SHOP.test(destination)) return null;
     return { destination, want };
   }

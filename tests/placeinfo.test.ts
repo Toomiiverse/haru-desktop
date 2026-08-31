@@ -69,7 +69,8 @@ test('the doors-and-hours questions are noticed, and the things that are not sho
   assert.deepEqual(placeAsk('what time does Happytel close today?'), { destination: 'Happytel', want: 'hours' });
   assert.deepEqual(placeAsk("what's Bunnings Rockingham's opening hours"), { destination: 'Bunnings Rockingham', want: 'hours' });
   assert.deepEqual(placeAsk('is Sushi Hub in Rockingham any good?'), { destination: 'Sushi Hub in Rockingham', want: 'rating' });
-  assert.equal(placeAsk('is it open?'), null);
+  assert.deepEqual(placeAsk('is it open?'), { destination: 'it', want: 'open', followUp: true }, 'a pronoun is the last place found');
+  assert.deepEqual(placeAsk('what time does that place close'), { destination: 'that place', want: 'hours', followUp: true });
   assert.equal(placeAsk('is the door open'), null);
   assert.equal(placeAsk('are you open to that'), null);
   assert.equal(placeAsk('is the server still open'), null);
