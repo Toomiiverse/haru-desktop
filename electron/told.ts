@@ -177,7 +177,9 @@ export function errandsToldFrom(text: string, nowIso: string): Errand[] {
   // The "I" is optional: "gonna go play some Chainsaw Man" is how it is usually typed.
   const opener = /\b(?:(?:i(?:'m| am)?\s+)?(?:just\s+)?(?:gonna|going to|about to|off to)|i'll)\s+([^.!?;]{3,80})/gi;
   for (const match of said.matchAll(opener)) {
-    for (const part of match[1].split(/\s+(?:and|then|&)\s+/i)) {
+    // Commas part them too: "have a shower, back soon" is one errand and a
+    // sign-off, and the sign-off has no doing in it to keep it.
+    for (const part of match[1].split(/\s+(?:and|then|&)\s+|\s*,\s*/i)) {
       const what = part.trim().replace(/\s+/g, ' ').replace(/[,\s]+$/, '').slice(0, 60);
       if (what.length < 3 || !DOING.test(what) || NOT_A_DOING.test(what)) continue;
       if (out.some(errand => errand.what.toLowerCase() === what.toLowerCase())) continue;

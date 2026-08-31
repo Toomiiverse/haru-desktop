@@ -59,6 +59,7 @@ test('at work or on the road is busy, at home is not', () => {
 test('what they said they were off to do is kept, so she has something to ask after', () => {
   const at = '2026-08-31T13:48:00.000Z';
   assert.deepEqual(errandsToldFrom("Alright I'll be right back. I'm going to eat dinner and have a shower", at).map(e => e.what), ['eat dinner', 'have a shower']);
+  assert.deepEqual(errandsToldFrom('right, im going to eat dinner and have a shower, back soon', at).map(e => e.what), ['eat dinner', 'have a shower'], 'the sign-off is not an errand');
   assert.deepEqual(errandsToldFrom('gonna go play some chainsaw man', at).map(e => e.what), ['go play some chainsaw man']);
   assert.deepEqual(errandsToldFrom("I'm going to be honest with you", at), [], 'being honest is not an errand');
   assert.deepEqual(errandsToldFrom("I'll let you know", at), []);
