@@ -6214,6 +6214,10 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   const handed = Math.round(conversation.reduce((sum, message) => sum + (typeof message.content === 'string' ? message.content.length : 0), 0) / 4);
   const brainName = brain.hosted ? (spilledHome ? `hosted:${config.model}->home` : `hosted:${config.model}`) : brain.escalated ? `escalated:${config.model}` : 'local';
   const touched = said.trim() !== routeless.trim();
+  // What the filters took from a hosted reply, kept beside what survived: the
+  // bake-off is judged on these, and a number alone says nothing about whether
+  // the cut was a repeat or a real sentence.
+  if (touched && brain.hosted) recordBrief(`chat filtered (${brainName}) — as she wrote it, then as sent`, said, routeless);
   console.log(`[ai] chat reply in ${Date.now() - started}ms, ${content.length} chars — brain=${brainName} handed≈${handed}tok filters=${touched ? `touched(${said.trim().length - routeless.trim().length >= 0 ? '-' : '+'}${Math.abs(said.trim().length - routeless.trim().length)})` : 'untouched'}`);
   // Cleared only once a reply actually exists, so a failed or unreachable turn
   // leaves the note in place for the retry rather than losing it.
