@@ -138,7 +138,7 @@ export function describeTold(told: Told | null | undefined, nowMs: number, clock
   if (told.doing) bits.push(`— ${told.doing}`);
   if (told.until) bits.push(`— until about ${told.until}`);
   if (told.thenTo) bits.push(`, then going to ${told.thenTo}`);
-  return `${bits.join(' ')}. That is where they are unless they have said otherwise since; do not ask where they are or what they are doing there, and do not tell them to be somewhere else.`;
+  return `${bits.join(' ')}. That is where they are unless they have said otherwise since; do not ask where they are or what they are doing there, and do not tell them to be somewhere else. Refer to it by name — "still at ${told.where}?" is fine, since they told you rather than the phone — never as "here" or "there": you are not with them.`;
 }
 
 /** Busy, as in not to be chased for going quiet: at work, driving, in a place that is not a chat. */

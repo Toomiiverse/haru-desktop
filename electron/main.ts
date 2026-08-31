@@ -6938,6 +6938,26 @@ function stopDiscord() {
 let lastPlaceFound: { place: GooglePlace; at: number } | null = null;
 const PLACE_FOLLOW_UP_MS = 45 * 60_000;
 
+/**
+ * Every brief she speaks first from, and what she made of it, appended to a
+ * file in her data folder. "Thirty seconds, Tommy." arrived with no way to
+ * know what she had been told; the next one will have its brief beside it.
+ */
+const BRIEFS_KEEP_BYTES = 2_000_000;
+function recordBrief(kind: string, brief: string, line: string): void {
+  try {
+    const file = path.join(app.getPath('userData'), 'briefs.log');
+    const entry = `\n=== ${new Date().toISOString()} ${kind}\n${brief}\n--- she said:\n${line}\n`;
+    if (existsSync(file) && statSync(file).size > BRIEFS_KEEP_BYTES) {
+      const kept = readFileSync(file, 'utf8').slice(-BRIEFS_KEEP_BYTES / 2);
+      writeFileSync(file, kept.slice(kept.indexOf('\n=== ')), 'utf8');
+    }
+    appendFileSync(file, entry, 'utf8');
+  } catch (error) {
+    console.warn(`[push] could not record the brief: ${error instanceof Error ? error.message : error}`);
+  }
+}
+
 /** How she stands with him right now — the Standing tab's arithmetic, in standing.ts, which is pure and tested. */
 function currentStanding() {
   const now = zonedNow(CHAT_TIMEZONE);
@@ -7262,7 +7282,11 @@ async function boredNudge(): Promise<string | null> {
   const ignoring = isIgnoring(mood.irritation);
   const now = zonedNow(CHAT_TIMEZONE);
   const todayKey = localDateKey(now);
-  const thing = ignoring ? null : pickToBringUp(getMemories(), getSessions(), broughtUp, todayKey);
+  // A memory that names something already ticked off would only be refused
+  // once she had written the line (interject) — three goes wasted on "stop by
+  // the store" while the fourth came out as a non sequitur. Kept out of the draw.
+  const raisable = getMemories().filter(memory => !staleItemNamed(memory.text, getKept(), todayKey));
+  const thing = ignoring ? null : pickToBringUp(raisable, getSessions(), broughtUp, todayKey);
   // Counted from when the quiet ended, not from their last word: eight hours
   // of sleep is not eight hours of ignoring her.
   const quietHours = awakeHoursSince(mood.lastMessageAt, getPush().prefs, now);
@@ -7298,6 +7322,7 @@ async function boredNudge(): Promise<string | null> {
       while (broughtUp.length > REMEMBERED_PICKS) broughtUp.shift();
     }
     console.log(`[push] a bored nudge, ${thing ? `about "${thing.text.slice(0, 50)}"` : ignoring ? 'cold' : 'about the silence'}`);
+    recordBrief('bored', system, line);
     return line;
   } catch (error) {
     console.warn('[push] could not compose a bored nudge:', error instanceof Error ? error.message : error);
@@ -7545,6 +7570,7 @@ async function checkWeather(config: ProviderConfig, prefs: PushPrefs) {
     `${event.text} Tell them, in your way — what and when must survive; the attitude is yours.`,
   );
   const line = await ollamaQuip(system, 'Tell them.', config);
+  recordBrief(`weather ${event.kind}`, system, line);
   if (line && interject(line, { source: 'weather' })) console.log(`[push] said the weather turned (${event.kind})`);
 }
 

@@ -147,7 +147,9 @@ export function describeWhereabouts(state: Whereabouts, nowMs = Date.now()): str
     const away = km === null ? '' : km < 1 ? ', not far from home' : `, about ${km < 10 ? km.toFixed(1) : Math.round(km)} km from home`;
     where = `Their phone puts them somewhere she has no name for${away}${onNet(state.last.net)}, as of ${when}.`;
   }
-  return `${where} Background: use it when it is relevant, and it is fair game for needling, but she has no coordinates and never quotes any.`;
+  // "You're still here" — here where? She is not with them: the place has a
+  // name, and it is the name she uses.
+  return `${where} Background: use it when it is relevant, and it is fair game for needling, but she has no coordinates and never quotes any. When you refer to where they are, say the place by name — "still at ${place ? place.name : 'wherever the phone put them'}" — never "here" or "there": you are not with them.`;
 }
 
 /** What the page is told: names, never numbers. */
