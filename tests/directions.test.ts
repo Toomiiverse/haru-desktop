@@ -115,3 +115,12 @@ test('the note carries the road when Google has answered, the straight line othe
   assert.match(directionsNote(ask, found, where, Date.now(), 'By car it is 31 minutes from where they are right now.'), /By car it is 31 minutes/);
   assert.match(directionsNote(ask, found, where), /It is about \d+(\.\d)? km from where they are\./);
 });
+
+test('what Google knows about the place rides along after the distance, and nothing when it knows nothing', () => {
+  const where = { enabled: false, places: [], last: null } as unknown as Parameters<typeof directionsNote>[2];
+  const found = { name: 'Bunnings Rockingham', lat: -32.28, lon: 115.74 };
+  const note = directionsNote({ destination: 'Bunnings', nearest: false }, found, where, Date.now(), undefined, 'It is open right now. Hours today — Monday: 6:30 am – 9:00 pm.');
+  assert.match(note, /Found: Bunnings Rockingham\. It is open right now\. Hours today — Monday: 6:30 am – 9:00 pm\. The app/);
+  assert.doesNotMatch(directionsNote({ destination: 'Bunnings', nearest: false }, found, where), /undefined/);
+});
+

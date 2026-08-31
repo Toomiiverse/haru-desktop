@@ -73,6 +73,7 @@ import { addCheckIn, checkInInstruction, checkInsOn, readCheckIns, type CheckIn 
 import { standingFrom } from './standing';
 import { herFrom } from './her';
 import { computeRoute, routeWords, type Route } from './routes';
+import { placeAsk, placeNote, placeWords, searchGooglePlaces, type GooglePlace } from './placeinfo';
 import { addAside, alreadySaidRecently, asideContext, asidesOn, markReached, pruneAsides, readAsides, type Aside, type AsideSource } from './asides';
 import { attachmentsInPlay, describeAttached, READ_IT_ALL_PROMPT, readAttachments, type Attachment, type Opened } from './attachments';
 import { forOllama, withoutOldest } from './ollamaturns';
@@ -6915,28 +6916,56 @@ function stopDiscord() {
  */
 async function directionsFor(latest: string): Promise<{ ask: DirectionsAsk; found: FoundPlace | null; route: Route | null; note: string } | null> {
   const ask = directionsAsk(latest);
-  if (!ask) return null;
   const where = getWhereabouts();
+  const weekday = zonedNow(CHAT_TIMEZONE).getDay();
+  // The nearest of what came back when she knows where they are; never something
+  // on another continent when they are asking from Perth: a hit over 400 km away
+  // is not the place they meant, however well it matched the name. Places
+  // before roads, then nearest: "Rockingham" is the suburb, not Rockingham Road
+  // twenty minutes nearer.
+  const pick = <T extends FoundPlace>(hits: T[], from: { lat: number; lon: number } | null, what: string): T | null => {
+    const road = (hit: FoundPlace) => (hit.kind === 'road' ? 1 : 0);
+    const ranked = from ? hits.map(hit => ({ hit, d: distanceM(from, hit) })).sort((a, b) => road(a.hit) - road(b.hit) || a.d - b.d) : [];
+    const near = ranked.filter(entry => entry.d <= 400_000);
+    if (from && ranked.length && !near.length) console.log(`[maps] every hit for "${what}" is ${Math.round(ranked[0].d / 1000)} km away — not it`);
+    return from ? near[0]?.hit ?? null : [...hits].sort((a, b) => road(a) - road(b))[0] ?? null;
+  };
+  if (!ask) {
+    // Not the way somewhere but the place itself — open, hours, any good. Google
+    // only: OpenStreetMap has no doors. No button under her words for this.
+    const about = placeAsk(latest);
+    if (!about || !getGoogleMapsKey()) return null;
+    const from = startingPoint(where);
+    let place: GooglePlace | null = null;
+    try {
+      place = pick(await searchGooglePlaces(about.destination, getGoogleMapsKey(), from, (url, init) => fetch(url, init)), from, about.destination);
+    } catch (error) {
+      console.warn(`[maps] the place lookup for "${about.destination}" failed: ${(error as Error).message}`);
+      return null;
+    }
+    console.log(`[maps] about "${about.destination}" (${about.want}): ${place ? `${place.name}${typeof place.openNow === 'boolean' ? place.openNow ? ', open' : ', closed' : ''}` : 'not found'}`);
+    return { ask: { destination: about.destination, nearest: false }, found: null, route: null, note: placeNote(about, place, weekday) };
+  }
   let found: FoundPlace | null = null;
+  let facts: string | undefined;
   const named = matchNamedPlace(ask.destination, where.places);
   if (named) {
     found = { name: named.name, lat: named.lat, lon: named.lon };
   } else {
     const from = startingPoint(where);
-    try {
+    // Google first when there is a key — it knows shops by name and says whether
+    // they are open — and OpenStreetMap when there is not, or Google found nothing.
+    if (getGoogleMapsKey()) {
+      try {
+        const place = pick(await searchGooglePlaces(ask.destination, getGoogleMapsKey(), from, (url, init) => fetch(url, init)), from, ask.destination);
+        if (place) { found = place; facts = placeWords(place, weekday) || undefined; }
+      } catch (error) {
+        console.warn(`[maps] Google could not find "${ask.destination}": ${(error as Error).message}`);
+      }
+    }
+    if (!found) try {
       const hits = await searchPlaces(ask.destination, (url, init) => fetch(url, init), from, readSearchConfig(store.get('search')).place, { bounded: ask.nearest && from !== null });
-      // The nearest of what came back when she knows where they are; else the
-      // service's own first choice.
-      // The nearest of what came back, and never something on another continent
-      // when they are asking from Perth: a hit over 400 km away is not the place
-      // they meant, however well it matched the name.
-      // Places before roads, then nearest: "Rockingham" is the suburb, not
-      // Rockingham Road twenty minutes nearer.
-      const road = (hit: FoundPlace) => (hit.kind === 'road' ? 1 : 0);
-      const ranked = from ? hits.map(hit => ({ hit, d: distanceM(from, hit) })).sort((a, b) => road(a.hit) - road(b.hit) || a.d - b.d) : [];
-      const near = ranked.filter(entry => entry.d <= 400_000);
-      if (from && ranked.length && !near.length) console.log(`[maps] every hit for "${ask.destination}" is ${Math.round(ranked[0].d / 1000)} km away — not it`);
-      found = from ? near[0]?.hit ?? null : [...hits].sort((a, b) => road(a) - road(b))[0] ?? null;
+      found = pick(hits, from, ask.destination);
     } catch (error) {
       console.warn(`[maps] the search for "${ask.destination}" failed: ${(error as Error).message}`);
     }
@@ -6955,7 +6984,7 @@ async function directionsFor(latest: string): Promise<{ ask: DirectionsAsk; foun
     }
   }
   console.log(`[maps] the way to "${ask.destination}": ${found ? found.name : 'not found'}`);
-  return { ask, found, route, note: directionsNote(ask, found, where, Date.now(), road) };
+  return { ask, found, route, note: directionsNote(ask, found, where, Date.now(), road, facts) };
 }
 
 function getWhereabouts(): Whereabouts {
