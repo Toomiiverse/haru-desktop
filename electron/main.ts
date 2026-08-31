@@ -6078,8 +6078,21 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
       // quiet because a company did. A round already streaming is taken back
       // first, so the reader is not shown two beginnings.
       if (brain.hosted) {
+        // The deadline is a race, not an abort: an AbortSignal handed to
+        // net.fetch was not honoured (a turn ran 27 s past an 8 s signal), and
+        // the request is left to finish on its own and be discarded. Streaming,
+        // the first chunk is the first word and the deadline is waived by it;
+        // otherwise the whole reply must land in time.
+        const startedAt = Date.now();
+        let firstWordAt = 0;
+        const cacheKey = `haru-${localDateKey(zonedNow(CHAT_TIMEZONE))}`;
+        const onChunkSeen = roundOptions.onChunk ? (text: string) => { if (!firstWordAt) firstWordAt = Date.now(); roundOptions.onChunk!(text); } : undefined;
         try {
-          return await sendToProvider(sending, config, { ...roundOptions, tools, signal: AbortSignal.timeout(HOSTED_FIRST_WORD_MS), cacheKey: `haru-${localDateKey(zonedNow(CHAT_TIMEZONE))}` });
+          const request = sendToProvider(sending, config, { ...roundOptions, tools, cacheKey, ...(onChunkSeen ? { onChunk: onChunkSeen } : {}) });
+          const deadline = new Promise<never>((_, reject) => setTimeout(() => { if (!firstWordAt) reject(new Error(`no first word in ${HOSTED_FIRST_WORD_MS / 1000}s`)); }, HOSTED_FIRST_WORD_MS));
+          const answer = await Promise.race([request, deadline]);
+          console.log(`[ai] ${config.model} answered in ${Date.now() - startedAt}ms${firstWordAt ? ` (first word at ${firstWordAt - startedAt}ms)` : ''}`);
+          return answer;
         } catch (error) {
           console.warn(`[ai] the conversation route (${config.model}) did not answer (${error instanceof Error ? error.message : String(error)}) — answering at home`);
           if (roundStreamed) { roundStreamed = ''; onChunkReset?.(); }
@@ -6203,9 +6216,12 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // Shared: the expression system consumes it through the broadcast inside,
   // and the voice awaits it to choose a clip matching how this line was said.
   const herWords = routeless;
-  const saidMood = classifyEmotion(herWords, config);
+  // The label and the place are the local model's work whichever brain spoke:
+  // Venice answered the classification in prose around the JSON and her face
+  // stuck on the previous mood.
+  const saidMood = classifyEmotion(herWords, home);
   void speak(herWords, saidMood);
-  void tieToPlace(latest, herWords, config);
+  void tieToPlace(latest, herWords, home);
   // Restarting herself kills the process she is answering from, so the
   // restart waits until this reply is built and on its way — the words leave
   // first, the restart follows a few seconds behind.
