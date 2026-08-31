@@ -145,6 +145,7 @@ test('an errand takes the address they gave a message earlier; an address alone,
   assert.equal(directionsAskFrom('This one: 40 Boddington Circuit', ['what a day']), null, 'an address with no question before it is just an address');
   assert.equal(directionsAskFrom('Give me the directions please', []), null);
   assert.deepEqual(directionsAskFrom('directions to Bunnings Rockingham', before), { destination: 'Bunnings Rockingham', nearest: false }, 'a real place is still itself');
+  assert.deepEqual(directionsAskFrom('directions to Get Wines Direct', before), { destination: 'Get Wines Direct', nearest: false }, 'a shop whose name starts with a verb is a shop');
 });
 
 test('a maps link is taken out of the text, hers or the app\'s, and plain words are left alone', () => {

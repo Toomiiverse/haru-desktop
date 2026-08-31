@@ -47,6 +47,7 @@ test('the minutes, distance and roads she states become the route\'s; a right nu
   assert.equal(fixStatedRoute('18 minutes, about 9.7 km via Fitzgerald St and Alexander Dr/State Route 56. Go.', route), '18 minutes, about 9.7 km via Fitzgerald St and Alexander Dr/State Route 56. Go.');
   assert.equal(fixStatedRoute('roughly 45 minutes to an hour, 33 km.', route), '18 minutes, 9.7 km.');
   assert.equal(fixStatedRoute('about half an hour away.', route), '18 minutes away.');
+  assert.equal(fixStatedRoute('18 minutes — 17 minutes on a normal day.', route), '18 minutes — 17 minutes on a normal day.', 'the typical time is hers to state too');
   assert.equal(fixStatedRoute('Get that CPU mounted in 10 minutes or else.', route), 'Get that CPU mounted in 18 minutes or else.', 'a duration she meant otherwise is the price of the rule — the route note tells her not to state others');
 });
 

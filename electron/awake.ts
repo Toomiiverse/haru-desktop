@@ -58,6 +58,15 @@ export function theyAreUp(signs: Signs, prefs: Pick<PushPrefs, 'quietFrom' | 'qu
 }
 
 /** Hours of their silence that are actually theirs: none of it counted while asleep. */
+/** The same in minutes, for a silence under an hour — "480 minutes" at breakfast is the night, not a silence. */
+export function awakeMinutesSince(lastMessageAt: string | undefined, prefs: Pick<PushPrefs, 'quietFrom' | 'quietTo'>, now: Date): number | null {
+  const spoke = Date.parse(lastMessageAt ?? '');
+  if (!Number.isFinite(spoke)) return null;
+  const ended = quietEndedAt(prefs, now);
+  const from = ended && ended.getTime() > spoke ? ended.getTime() : spoke;
+  return Math.max(0, Math.round((now.getTime() - from) / 60_000));
+}
+
 export function awakeHoursSince(lastMessageAt: string | undefined, prefs: Pick<PushPrefs, 'quietFrom' | 'quietTo'>, now: Date): number | null {
   const spoke = Date.parse(lastMessageAt ?? '');
   if (!Number.isFinite(spoke)) return null;

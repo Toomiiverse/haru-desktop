@@ -106,7 +106,7 @@ export function streetAddress(text: string): string | null {
 }
 
 /** "pick up the cpu", "the Dianella address" — a thing to do, not a place; the place is an address they gave. */
-const ERRAND = /^(?:(?:to )?(?:pick|pick up|get|grab|collect|fetch|buy|drop off|drop|return|deliver|see|meet|visit)\b|.*\baddress\b)/i;
+const ERRAND = /^(?:(?:to )?(?:pick|pick up|grab|collect|fetch|drop off|drop off at|drop)\b|.*\baddress\b)/i;
 /** The ask with no place in it: "give me the directions", "directions please", "how do I get there". */
 const BARE_ASK = /^(?:(?:can|could|would|will) you )?(?:(?:give|send|show|get|shoot) me )?(?:the |some |those |a )?(?:directions?|route|way there)(?: there| to (?:it|that|there|the place))?(?: please| pls| again| now| thanks)*[?.!\s]*$|^how (?:do|can|would) (?:i|we) get there(?: from here)?[?.!\s]*$/i;
 

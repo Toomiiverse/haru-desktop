@@ -142,7 +142,10 @@ export function weatherEvents(previous: WeatherSample | null, current: WeatherSa
     // drizzle, is a push; a code alone is not.
     const shower = current.raining && (current.sky !== 'drizzle' || (current.mm ?? 0) >= 0.3);
     if (shower && !previous.raining && fresh('rain-started')) out.push({ kind: 'rain-started', text: `The forecast says it has started raining where they are (${current.sky}). ${deg(current.tempC)}.${FORECAST_NOT_A_WINDOW}` });
-    if (!current.raining && previous.raining && fresh('rain-stopped')) out.push({ kind: 'rain-stopped', text: `The rain has stopped where they are; it is ${current.sky} now, ${deg(current.tempC)}.` });
+    // Only the end of a shower she announced: the forecast's codes flap, and
+    // "the rain has stopped" about rain nobody heard of is a non sequitur.
+    const announced = nowMs - (notified['rain-started'] ?? 0) <= 6 * 60 * 60_000;
+    if (!current.raining && previous.raining && announced && fresh('rain-stopped')) out.push({ kind: 'rain-stopped', text: `The rain has stopped where they are; it is ${current.sky} now, ${deg(current.tempC)}.` });
     const swing = current.tempC - previous.tempC;
     if (Math.abs(swing) >= 5 && fresh('temp-swing')) out.push({ kind: 'temp-swing', text: `It has ${swing < 0 ? 'dropped' : 'climbed'} ${Math.round(Math.abs(swing))} degrees where they are since she last looked: ${deg(current.tempC)} now.` });
     const notable = (sky: Sky) => sky === 'clear' || sky === 'overcast' || sky === 'fog' || sky === 'snow';

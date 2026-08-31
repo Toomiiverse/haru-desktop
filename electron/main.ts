@@ -41,7 +41,7 @@ import { INTERRUPTED_ASIDE, wakeAck } from './wake';
 import { acceptedOffer, promisedTitle, reminderAsk, reminderPromised, reminderSavedAside } from './remindme';
 import { describeWeather, readForecast, weatherEvents, weatherToDrawOn, weatherUrl, WEATHER_POLL_MS, type WeatherSample } from './weather';
 import { HANGING_COOLDOWN_MS, isClosing, leftHanging, saidTheyWereLeaving } from './hanging';
-import { awakeHoursSince, theyAreUp } from './awake';
+import { awakeHoursSince, theyAreUp, awakeMinutesSince } from './awake';
 import { describeTold, placeToldFrom, toldTheyAreBusy, type Told } from './told';
 import { markMentioned, upcomingToMention } from './upcoming';
 import { directionsAskFrom, directionsNote, dropRouteTalk, matchNamedPlace, startingPoint, withDirections, withoutMapsLinks, type DirectionsAsk } from './directions';
@@ -7192,6 +7192,7 @@ async function boredNudge(): Promise<string | null> {
   // Counted from when the quiet ended, not from their last word: eight hours
   // of sleep is not eight hours of ignoring her.
   const quietHours = awakeHoursSince(mood.lastMessageAt, getPush().prefs, now);
+  const quietMinutes = awakeMinutesSince(mood.lastMessageAt, getPush().prefs, now);
   const character = getActiveCharacter();
   const system = [
     character.identity,
@@ -7205,7 +7206,7 @@ async function boredNudge(): Promise<string | null> {
     // The exact length, or she invents one: told nothing under an hour she wrote
     // "playing ghost for an hour" and "10 minutes of silence" in the same line.
     quietHours !== null && quietHours >= 1 ? `They have not said a word to you in ${quietHours} hour${quietHours === 1 ? '' : 's'}. That is the length of the silence — name no other.`
-      : mood.lastMessageAt ? `They last wrote to you ${Math.max(1, Math.round((Date.now() - Date.parse(mood.lastMessageAt)) / 60_000))} minutes ago. That is the length of the silence — do not call it longer or shorter.` : '',
+      : quietMinutes !== null ? `They last wrote to you ${Math.max(1, quietMinutes)} minutes ago. That is the length of the silence — do not call it longer or shorter.` : '',
     thing ? `Bring up this in particular, as though it has been on your mind: ${thing.text}`
       : ignoring ? 'You are not speaking to them properly right now, and they know why. One cold line that makes it plain you noticed the silence — no warmth, no question, no help.'
       : 'Nothing in particular to bring up: the silence itself is the subject.',

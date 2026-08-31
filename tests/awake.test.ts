@@ -2,7 +2,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { awakeHoursSince, quietEndedAt, theyAreUp, upByAt } from '../electron/awake';
+import { awakeHoursSince, quietEndedAt, theyAreUp, upByAt, awakeMinutesSince } from '../electron/awake';
 
 const prefs = { quietFrom: '23:00', quietTo: '06:00', upBy: '09:00' };
 const at = (h: number, m = 0, d = 30) => new Date(2026, 7, d, h, m, 0, 0);
@@ -50,3 +50,12 @@ test('hours of silence do not include the hours they were asleep', () => {
   assert.equal(awakeHoursSince(iso(6, 40), prefs, at(9, 50)), 3);
   assert.equal(awakeHoursSince(undefined, prefs, at(9)), null);
 });
+
+test('minutes of silence are counted from when the quiet ended, not from a goodnight', () => {
+  const prefs = { quietFrom: '23:00', quietTo: '07:00' };
+  const at = (h: number, m: number, day = 31) => new Date(2026, 7, day, h, m, 0, 0);
+  assert.equal(awakeMinutesSince(at(22, 30, 30).toISOString(), prefs, at(7, 20)), 20, 'twenty minutes since seven, not the whole night');
+  assert.equal(awakeMinutesSince(at(8, 14).toISOString(), prefs, at(9, 0)), 46);
+  assert.equal(awakeMinutesSince(undefined, prefs, at(9, 0)), null);
+});
+

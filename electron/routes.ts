@@ -104,7 +104,7 @@ export function routeWords(route: Route, fromWhere: 'here' | 'home'): string {
  */
 export function fixStatedRoute(reply: string, route: Route): string {
   let out = reply.replace(/\b(?:(?:about|around|roughly|approximately|maybe|some|under|over|nearly|almost)\s+)?(\d{1,3})(?:\s*(?:-|–|to)\s*\d{1,3})?\s*(?:min|mins|minutes)\b/gi,
-    (m, n) => (Number(n) === route.minutes ? m : `${route.minutes} minutes`));
+    (m, n) => (Number(n) === route.minutes || Number(n) === route.typicalMinutes ? m : `${route.minutes} minutes`));
   out = out.replace(/\b(?:(?:about|around|roughly)\s+)?(?:half an hour|an hour|an hour and a half|two hours)\b/gi, m => {
     const said = /half an hour/i.test(m) ? 30 : /and a half/i.test(m) ? 90 : /two/i.test(m) ? 120 : 60;
     return Math.abs(said - route.minutes) <= 3 ? m : `${route.minutes} minutes`;
