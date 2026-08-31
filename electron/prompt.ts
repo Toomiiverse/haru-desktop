@@ -20,7 +20,7 @@
 
 import { checkInInstruction, type CheckIn } from './checkins';
 import { asideContext, type Aside } from './asides';
-import { NO_FAKE_CHECKING } from './room';
+import { NO_FAKE_CHECKING, emojiRut } from './room';
 import { egoInstruction, goodnightInstruction, leverageInstruction, moodInstruction, notTwiceInstruction, shoutInstruction, type ShoutState } from './mood';
 import { vitalsInstruction, type Vitals } from './vitals';
 import { grudgeInstruction } from './grudge';
@@ -307,6 +307,7 @@ export function chatSystemPrompt(state: PromptState): string {
     // is simply overridden by "you cannot be bothered". Silent unless she has
     // actually started repeating herself.
     notTwiceInstruction(state.herRecentReplies),
+    emojiRut(state.herRecentReplies),
     journalStance(state.journal, today),
     // Last of the tone lines: what they just said outranks anything she knew
     // beforehand, including her own mood.

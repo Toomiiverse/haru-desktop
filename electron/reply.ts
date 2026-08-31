@@ -648,3 +648,22 @@ export function fixStatedMinutes(line: string, minutes: number): string {
   });
 }
 
+/**
+ * The emoji she cannot stop using, taken out of this one reply.
+ *
+ * A backstop behind the wording, not a substitute for it: told plainly not to,
+ * a model that has ended forty replies the same way ends the forty-first that
+ * way too. Only the one she has used in every one of her last few replies, only
+ * when this reply has another emoji or enough words to stand without it.
+ */
+export function dropOverusedEmoji(reply: string, previousReplies: string[], emoji: readonly string[], checked = 3): string {
+  const recent = previousReplies.slice(-checked);
+  if (recent.length < checked) return reply;
+  const stuck = emoji.find(one => recent.every(previous => previous.includes(one)) && reply.includes(one));
+  if (!stuck) return reply;
+  const without = reply.split(stuck).join('').replace(/[ \t]{2,}/g, ' ').replace(/ +([.,!?…])/g, '$1').replace(/[ \t]+$/gm, '').trim();
+  // Never leave her with nothing, and never strip the only thing carrying the tone.
+  if (!/[\p{Letter}\p{Number}]/u.test(without)) return reply;
+  return without;
+}
+

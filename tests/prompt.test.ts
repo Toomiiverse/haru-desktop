@@ -227,7 +227,7 @@ test('a short follow-up is read as continuing the thread, and never echoed back 
 
 test('her emoji are named, as hers, beside the persona', () => {
   const prompt = chatSystemPrompt(state({ irritation: 5 }));
-  const expressive = prompt.indexOf('the eye-roll, the huff, the smirk');
+  const expressive = prompt.indexOf('the smirk, the side-eye, the huff');
   assert.notEqual(expressive, -1, 'the emoji rule never made it into the prompt');
   assert.ok(expressive > prompt.indexOf(STYLE), 'it is part of her voice, so it follows her style');
   assert.ok(expressive > prompt.indexOf('thoroughly fed up'), 'and after the mood and ego, which read as "no cheer" — before them the emoji were dropped as cheer');

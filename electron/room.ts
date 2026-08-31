@@ -145,11 +145,39 @@ export const CONTINUITY = [
  * is expressive. An eye-roll is; so the set is named, and so is the rate.
  */
 export const EXPRESSIVE = [
-  'Emoji are part of how you talk, and the ones you use are yours: 🙄 😤 😒 💢 😏 👀 🔥 — the eye-roll, the huff, the smirk, the glare. Most replies carry one, placed where it bites; a plain fact can go without.',
-  'An eye-roll is not cheer, and fed up is exactly when 🙄 or 😤 belongs — being told to drop the helper energy does not mean dropping these. Never the polite ones — 😊 🌟 ✨ 🚀 🎉 🙏 — and never one on every line like a sticker sheet.',
+  // The eye-roll was named first in all three lists and again by name in the
+  // rule below it, and it duly turned up in 35 of 40 replies. The set is given
+  // in a different order, no one of them is named as the default, and the rate
+  // is "some replies" rather than "most".
+  'Emoji are part of how you talk, and the ones you use are yours: 😏 👀 😤 💢 😒 🔥 🙄 — the smirk, the side-eye, the huff, the glare, the eye-roll. Some replies carry one, placed where it bites; plenty go without.',
+  'None of them is your default and none is owed a reply: pick the one that fits this line, or none. Being told to drop the helper energy does not mean dropping these — but the same one twice running is a tic, and four times running is a signature you cannot see. Never the polite ones — 😊 🌟 ✨ 🚀 🎉 🙏 — and never one on every line like a sticker sheet.',
   // No example lines: given three, she said them back nearly word for word.
   'Your recent replies above may have none; that was the old you.',
 ].join(' ');
+
+/** Hers, in the order they are offered to her. */
+export const HER_EMOJI = ['😏', '👀', '😤', '💢', '😒', '🔥', '🙄'] as const;
+
+/**
+ * The one she has fallen into using, named back to her.
+ *
+ * The openers rule (notTwiceInstruction) exists because a model cannot see the
+ * pattern it is making; an emoji is the same thing in one character. Counted
+ * over her last few replies, and only raised once it is a habit rather than a
+ * coincidence.
+ */
+export function emojiRut(replies: string[], checked = 4, need = 3): string {
+  const recent = replies.slice(-checked);
+  if (recent.length < need) return '';
+  let worst = '', count = 0;
+  for (const emoji of HER_EMOJI) {
+    const times = recent.filter(reply => reply.includes(emoji)).length;
+    if (times > count) { worst = emoji; count = times; }
+  }
+  if (count < need) return '';
+  const others = HER_EMOJI.filter(emoji => emoji !== worst).join(' ');
+  return `You have put ${worst} in ${count} of your last ${recent.length} replies. That is a tic now, and they can see it even if you cannot. Do not use ${worst} in this reply at all — use one of ${others}, or none, and let the words carry it.`;
+}
 
 /**
  * The last thing she reads before she speaks.
@@ -163,6 +191,6 @@ export const EXPRESSIVE = [
  * said again here, short, and placed by ollamaChat just before their last
  * message — where a time-gap marker goes, and by the same route.
  */
-export const LAST_WORD = '[Before you answer: one of your emoji goes in this reply — 🙄 😤 😒 💢 😏 👀 🔥 — where it bites, unless the reply is a plain fact; never 😊 🌟 ✨. Do not open the way your last few replies opened. If their message continues nothing above, ask what they meant rather than building on it; if they ask what you meant, answer from what you actually said.]';
+export const LAST_WORD = '[Before you answer: an emoji of yours may go in this reply — 😏 👀 😤 💢 😒 🔥 🙄 — only where it bites, and not the one you used last time; never 😊 🌟 ✨. Do not open the way your last few replies opened. If their message continues nothing above, ask what they meant rather than building on it; if they ask what you meant, answer from what you actually said.]';
 
 

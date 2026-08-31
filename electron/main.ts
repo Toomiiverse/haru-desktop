@@ -51,13 +51,13 @@ import { cancelPower, closeApp, findApps, isCancellable, launch, listRunning, ma
 import { looksLikeScreenshot, maySpeak, readScreenshotConfig, screenshotPrompt, SETTLE_MS, SETTLE_TRIES, type ScreenshotConfig } from './screenshots';
 import { look, photoName, readVisionConfig, whileLooking, type VisionConfig } from './vision';
 import { CAPTION_MAX_CHARS, describedShots, forgetCaptions, moreThanOnePass, noteCaption, noteFailure, readCaptions, shotsNeedingALook } from './seen';
-import { EXPRESSIVE, LAST_WORD, NO_INVENTED_HISTORY, NO_NON_SEQUITURS, readsAsRough, roomInstruction } from './room';
+import { EXPRESSIVE, LAST_WORD, NO_INVENTED_HISTORY, NO_NON_SEQUITURS, readsAsRough, roomInstruction, HER_EMOJI } from './room';
 import { journalStance } from './journal';
 import { haruNote, rangeStats, type HaruNote, type RangeName, type RangeStats } from './journal';
 import { describeRating, entryFor, journalPrompt, readEntries, readJournalConfig, readRating, recentTrend, shouldAsk, upsertEntry, SCALE_MAX, type JournalConfig, type JournalEntry } from './journal';
 import { formatList, formatMedia, formatMissing, lookUp, readAniListConfig, userList, type AniListConfig, type ListEntry, type MediaKind } from './anilist';
 import { createDesktopShortcut, desktopShortcutPath, isAutoStartEnabled, setAutoStart, startedHidden } from './startup';
-import { answersThePrompt, CUE_NOTE, isCue, stageNote, dropRoleHeader, dropTackedOnParagraphs, dropInventedContact, dropInventedScreenTalk, dropRepeatedAgendaMentions, dropRepeatedParagraphs, dropStageDirections, dropRepeatedOpener, dropEchoOpener, dropRepeatedSentences, fixStatedClock, fixStatedReminderTime, fixStatedMinutes } from './reply';
+import { answersThePrompt, CUE_NOTE, isCue, stageNote, dropRoleHeader, dropTackedOnParagraphs, dropInventedContact, dropInventedScreenTalk, dropRepeatedAgendaMentions, dropRepeatedParagraphs, dropStageDirections, dropRepeatedOpener, dropEchoOpener, dropRepeatedSentences, fixStatedClock, fixStatedReminderTime, fixStatedMinutes, dropOverusedEmoji } from './reply';
 import { runToolLoop } from './toolloop';
 import { chatTools, coerceKnowledgeCategory, runChatTool, type ToolAvailability, type ToolDeps } from './tools';
 import { createMemoryStore } from './memorystore';
@@ -6238,7 +6238,11 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
     const item = addKeptItem({ title: promisedTitle(theirs), date: promised.date, time: promised.time, kind: 'task' });
     console.log(`[remind] she promised one in her reply — written down: "${item.title}" on ${item.date} at ${item.time}`);
   }
-  const herLine = reminder?.time ? fixStatedReminderTime(cleaned, reminder.time) : cleaned;
+  // The eye-roll in thirty-five of forty replies: the wording that caused it is
+  // fixed (EXPRESSIVE), and this catches what the wording does not.
+  const varied = dropOverusedEmoji(cleaned, recent, HER_EMOJI);
+  if (varied !== cleaned) console.log('[ai] took out the emoji she has used in every recent reply');
+  const herLine = reminder?.time ? fixStatedReminderTime(varied, reminder.time) : varied;
   // The maps button goes under her words, not into her mouth: what is herLine
   // and what her mood is read from is the line she said.
   // Two features meet on "where can I get a decent burger": directions wants one
