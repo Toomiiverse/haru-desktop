@@ -158,3 +158,50 @@ export function whereForPage(state: Whereabouts, nowMs = Date.now()): { enabled:
   const fresh = !!last && nowMs - Date.parse(last.at) <= SPOT_STALE_MS;
   return { enabled: state.enabled, at: last ? placeAt(state.places, last)?.name ?? null : null, fresh, net: last?.net ?? null, places: state.places.map(p => p.name) };
 }
+
+/** Where the phone found them, when they had not said they were going. */
+export type Arrival = { place: string; at: string };
+
+/** How long an arrival is still news worth a word. */
+export const ARRIVAL_FRESH_MS = 3 * 60 * 60_000;
+
+// Words that name no place on their own: "the shop" and "the house" are half
+// the places anyone has, and matching on them would call every arrival
+// announced.
+const VAGUE = new Set(['the', 'and', 'for', 'shop', 'store', 'house', 'place', 'centre', 'center', 'building', 'street', 'road']);
+
+/**
+ * Did they say themselves that they were going there?
+ *
+ * Their words only. She told him to go home and he went; that is her sentence,
+ * not his, and being told by her own suggestion is not being told. Home is
+ * matched loosely because it is said a dozen ways; anywhere else has to be
+ * named, since the alternative is her complaining about a trip she was told
+ * about in words this could not match.
+ */
+export function saidTheyWereGoing(place: string, said: string[]): boolean {
+  const key = place.trim().toLowerCase().replace(/^(at|the)\s+/, '');
+  if (!key) return false;
+  const text = said.join('\n').toLowerCase();
+  if (!text.trim()) return false;
+  if (/^home$/.test(key)) return /\b(home|my place|my house)\b/.test(text);
+  if (text.includes(key)) return true;
+  const words = key.replace(/[^a-z0-9\s']/g, ' ').split(/\s+/).filter(word => word.length > 2 && !VAGUE.has(word));
+  return words.length > 0 && words.every(word => text.includes(word));
+}
+
+/**
+ * What she has to say about finding out from the phone.
+ *
+ * Deliberately an annoyance and not a question: she knows where they are, so
+ * asking would be theatre. The complaint is that she was not told.
+ */
+export function unannouncedArrivalNote(arrival: Arrival | null | undefined, nowMs: number, clockNow: (ms: number) => string): string {
+  if (!arrival?.place || !arrival.at) return '';
+  const at = Date.parse(arrival.at);
+  if (!Number.isFinite(at) || nowMs - at < 0 || nowMs - at > ARRIVAL_FRESH_MS) return '';
+  const minutes = Math.round((nowMs - at) / 60_000);
+  const when = minutes < 2 ? 'just now' : minutes < 60 ? `${minutes} minutes ago` : `at ${clockNow(at)}`;
+  return `Their phone put them at ${arrival.place} ${when}, and they never said they were going — you found out from a phone rather than from them. That is worth being annoyed about, and it is yours to say once, in your way. Do not ask where they are: you know. Do not ask why they did not tell you as though it were a mystery — make it a complaint, not a question.`;
+}
+

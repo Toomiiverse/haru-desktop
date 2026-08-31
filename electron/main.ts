@@ -45,7 +45,7 @@ import { awakeHoursSince, theyAreUp, awakeMinutesSince } from './awake';
 import { describeTold, placeToldFrom, toldTheyAreBusy, type Told } from './told';
 import { markMentioned, upcomingToMention } from './upcoming';
 import { directionsAskFrom, directionsNote, dropRouteTalk, matchNamedPlace, startingPoint, withDirections, withoutMapsLinks, type DirectionsAsk } from './directions';
-import { absorb, describeWhereabouts, distanceM, forgetPlace, namePlace, placeAt, readSpot, readWhereabouts, whereForPage, type Whereabouts, SPOT_STALE_MS } from './whereabouts';
+import { absorb, describeWhereabouts, distanceM, forgetPlace, namePlace, placeAt, readSpot, readWhereabouts, whereForPage, type Whereabouts, SPOT_STALE_MS, saidTheyWereGoing, unannouncedArrivalNote, type Arrival } from './whereabouts';
 import { convertImage, normaliseFormat, FORMATS } from './convert';
 import { cancelPower, closeApp, findApps, isCancellable, launch, listRunning, matchApp, matchRunning, normalisePower, POWER_DELAY_S, readDesktopConfig, runPower, supportedDesktop, type DesktopConfig } from './desktop';
 import { looksLikeScreenshot, maySpeak, readScreenshotConfig, screenshotPrompt, SETTLE_MS, SETTLE_TRIES, type ScreenshotConfig } from './screenshots';
@@ -1295,7 +1295,7 @@ function unpromptedContext(): string {
   // not repeat at one in the morning is what she said at half eleven.
   // Where their phone says they are rides along too: a nudge that knows they
   // are at the shops has something to needle with.
-  const parts = [summariseFollowing(getFollowing(), Date.now()), todaySoFar(), alreadySaidRecently(asides, CHAT_TIMEZONE, Date.now()), stillWaiting(), describeWhereabouts(getWhereabouts()), toldNow(), unansweredAsksNote(asides, CHAT_TIMEZONE, Date.now()), weatherToDrawOn(getWeather().last, weatherWhere(), asides.map(aside => aside.text), Date.now(), getWeather().disputedAt), nightsToDrawOn(nightsOn(getNights(), lastNightKey()), asides.map(aside => aside.text)), tastesInstruction(getInterests())].filter(Boolean);
+  const parts = [summariseFollowing(getFollowing(), Date.now()), todaySoFar(), alreadySaidRecently(asides, CHAT_TIMEZONE, Date.now()), stillWaiting(), describeWhereabouts(getWhereabouts()), toldNow(), arrivalNote(), unansweredAsksNote(asides, CHAT_TIMEZONE, Date.now()), weatherToDrawOn(getWeather().last, weatherWhere(), asides.map(aside => aside.text), Date.now(), getWeather().disputedAt), nightsToDrawOn(nightsOn(getNights(), lastNightKey()), asides.map(aside => aside.text)), tastesInstruction(getInterests())].filter(Boolean);
   if (!parts.length) return '';
   // "Do not repeat a point you have already made" was read as "change the
   // subject": once a thread was answered and settled she abandoned the day
@@ -5870,6 +5870,9 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
       console.log(`[push] they answered her ask (${ask.asked})`);
     }
   }
+  // Said once, to him, and then done with: she is annoyed, not a broken record.
+  const turnedUp = messages.at(-1)?.role === 'user' ? arrivalNote() : '';
+  if (turnedUp) { store.delete('where.arrival' as never); console.log('[where] she has the unannounced arrival to say something about'); }
   const spot = messages.at(-1)?.role === 'user' ? placeToldFrom(latest, new Date().toISOString()) : null;
   if (spot) {
     store.set('told', spot);
@@ -6045,7 +6048,7 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // Her recent replies as she should believe she said them — see seed.ts for
   // the measurement. The stored transcript is not touched; only what is sent.
   // The length rule fits the brain answering — see LENGTH_RULE_HOSTED.
-  const sized = (brain.hosted ? system.replace(LENGTH_RULE_LOCAL, LENGTH_RULE_HOSTED) : system) + (answering ? ` ${answering}` : '');
+  const sized = (brain.hosted ? system.replace(LENGTH_RULE_LOCAL, LENGTH_RULE_HOSTED) : system) + (answering ? ` ${answering}` : '') + (turnedUp ? ` ${turnedUp}` : '');
   const conversation: OllamaMessage[] = [{ role: 'system', content: brief ? `${sized} ${BREVITY}` : sized }, ...seedEmoji(markTimeGaps(withoutStaleDenials(withFiles, hasItems), CHAT_TIMEZONE))];
   // The last thing she reads before she speaks — see LAST_WORD for the
   // measurement. A system message just before their last turn: the Ollama
@@ -8228,6 +8231,44 @@ function getTold(): Told | undefined {
   return saved && typeof saved.where === 'string' && typeof saved.at === 'string' ? saved : undefined;
 }
 const clockAt = (ms: number) => new Intl.DateTimeFormat('en-AU', { hour: 'numeric', minute: '2-digit', timeZone: CHAT_TIMEZONE }).format(new Date(ms));
+function getArrival(): Arrival | null {
+  const saved = store.get('where.arrival') as Partial<Arrival> | undefined;
+  return saved && typeof saved.place === 'string' && typeof saved.at === 'string' ? { place: saved.place, at: saved.at } : null;
+}
+
+/** What she was told lately, in their words: their messages today, and the place they said they were at or heading for. */
+function theirWordsLately(): string[] {
+  const messages = (store.get('chat.messages') as { role?: string; content?: string; at?: string }[] | undefined) ?? [];
+  const since = Date.now() - 3 * 60 * 60_000;
+  const said = messages
+    .filter(message => message.role === 'user' && (!message.at || Date.parse(message.at) >= since))
+    .map(message => String(message.content ?? ''))
+    .slice(-8);
+  const told = getTold();
+  return [...said, told?.where ?? '', told?.thenTo ?? ''].filter(Boolean);
+}
+
+/**
+ * They turned up somewhere without a word about going. She finds out from a
+ * phone, which is not the same as being told, and it is meant to nettle her —
+ * see unannouncedArrivalNote. The bump stops short of the threshold where she
+ * stops answering: this is a thing to be sharp about, not to go silent over.
+ */
+function noteArrival(place: string): void {
+  if (saidTheyWereGoing(place, theirWordsLately())) {
+    console.log(`[where] they turned up at ${place}, and they had said so`);
+    return;
+  }
+  store.set('where.arrival', { place, at: new Date().toISOString() });
+  const mood = getMood();
+  setMood({ ...mood, irritation: Math.min(mood.irritation + 2, IGNORE_THRESHOLD - 1) });
+  console.log(`[where] they turned up at ${place} without saying — irritation ${mood.irritation} to ${Math.min(mood.irritation + 2, IGNORE_THRESHOLD - 1)}`);
+}
+
+function arrivalNote(): string {
+  return unannouncedArrivalNote(getArrival(), Date.now(), clockAt);
+}
+
 function toldNow(): string {
   return describeTold(getTold(), Date.now(), clockAt);
 }
@@ -8572,6 +8613,7 @@ function webDeps(): WebDeps {
         // Logged on arriving somewhere, not on every fix: a phone at rest still
         // reports every few minutes and that is nobody's news.
         if (before !== after || !state.last) console.log(`[where] the phone is ${after ? `at ${after}` : 'somewhere unnamed'} (±${spot.accuracy}m, ${spot.net})`);
+        if (after && after !== before && state.last) noteArrival(after);
         return true;
       },
       name(name) {

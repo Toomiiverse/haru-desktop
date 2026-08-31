@@ -2,7 +2,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { absorb, describeWhereabouts, distanceM, forgetPlace, namePlace, placeAt, readSpot, readWhereabouts, SPOT_STALE_MS, whereForPage, type Whereabouts } from '../electron/whereabouts';
+import { absorb, describeWhereabouts, distanceM, forgetPlace, namePlace, placeAt, readSpot, readWhereabouts, SPOT_STALE_MS, whereForPage, type Whereabouts, saidTheyWereGoing, unannouncedArrivalNote, ARRIVAL_FRESH_MS } from '../electron/whereabouts';
 
 const NOW = new Date('2026-08-28T10:00:00Z');
 const HOME = { lat: -31.9505, lon: 115.8605 };
@@ -84,3 +84,26 @@ test('the page is told names and freshness, never coordinates', () => {
   assert.equal(JSON.stringify(page).includes('115.86'), false);
   assert.equal(whereForPage(state, NOW.getTime() + SPOT_STALE_MS * 2).fresh, false);
 });
+
+test('going somewhere counts as told only when they named it themselves', () => {
+  assert.equal(saidTheyWereGoing('home', ['Just finished up work now Haru']), false, 'finishing work is not saying you are going home');
+  assert.equal(saidTheyWereGoing('home', ['heading home now']), true);
+  assert.equal(saidTheyWereGoing('home', ['on my way back to my place']), true);
+  assert.equal(saidTheyWereGoing('home', []), false);
+  assert.equal(saidTheyWereGoing('mums house', ['popping over to mums after this']), true);
+  assert.equal(saidTheyWereGoing('mums house', ['off to the house']), false, '"the house" names nowhere');
+  assert.equal(saidTheyWereGoing('The PC Project', ['at the pc project all morning']), true);
+});
+
+test('an unannounced arrival is a complaint she makes once, and stops being news after three hours', () => {
+  const now = Date.parse('2026-08-31T11:00:00.000Z');
+  const clock = (ms: number) => new Intl.DateTimeFormat('en-AU', { hour: 'numeric', minute: '2-digit', timeZone: 'Australia/Perth' }).format(new Date(ms));
+  const note = unannouncedArrivalNote({ place: 'home', at: new Date(now - 22 * 60_000).toISOString() }, now, clock);
+  assert.match(note, /Their phone put them at home 22 minutes ago, and they never said they were going/);
+  assert.match(note, /make it a complaint, not a question/);
+  assert.match(note, /Do not ask where they are: you know\./, 'she knows: the complaint is not a question about where');
+  assert.match(unannouncedArrivalNote({ place: 'home', at: new Date(now - 90 * 60_000).toISOString() }, now, clock), /at \d/, 'over an hour is given as a clock time');
+  assert.equal(unannouncedArrivalNote({ place: 'home', at: new Date(now - ARRIVAL_FRESH_MS - 1).toISOString() }, now, clock), '');
+  assert.equal(unannouncedArrivalNote(null, now, clock), '');
+});
+
