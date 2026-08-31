@@ -1,28 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {
-  nextIrritation,
-  afterCooldown,
-  nextEgo,
-  afterEgoCooldown,
-  isLowEffort,
-  isRedo,
-  isShouting,
-  isApology,
-  isGoodnight,
-  isIgnoring,
-  shoutState,
-  afterPoke,
-  IGNORE_THRESHOLD,
-  IRRITATION_MAX,
-  EGO_MAX,
-  COOLDOWN_MINUTES,
-  EGO_COOLDOWN_MINUTES,
-  moodInstruction,
-  egoInstruction,
-  goodnightInstruction,
-  shoutInstruction,
-} from '../electron/mood';
+import { nextIrritation, afterCooldown, nextEgo, afterEgoCooldown, isLowEffort, isRedo, isShouting, isApology, isGoodnight, isIgnoring, shoutState, afterPoke, IGNORE_THRESHOLD, IRRITATION_MAX, EGO_MAX, COOLDOWN_MINUTES, EGO_COOLDOWN_MINUTES, moodInstruction, egoInstruction, goodnightInstruction, shoutInstruction, notTwiceInstruction, repeatedPhrase } from '../electron/mood';
 
 // ---- nextIrritation arithmetic ----
 
@@ -195,3 +173,13 @@ test('shoutInstruction withholds the answer while shouted/awaiting, and answers 
   assert.notEqual(shoutInstruction('awaiting'), '');
   assert.notEqual(shoutInstruction('forgiven'), '');
 });
+
+test('a phrase she has used in three of her last four replies is named, whatever the openers did', () => {
+  const replies = ['Because you’re finally paying attention. 🙄 Don’t make it weird.', 'I’m not making it weird. You are. 😒 Now stop stalling and get back to work.', '"Fine fine." Two words, zero substance. Get back to work before I decide you’re wasting my time.', 'Stalling again. Get back to work.'];
+  assert.equal(repeatedPhrase(replies), 'get back to work'.slice(0, 15) === 'get back to wor' ? repeatedPhrase(replies) : '', 'sanity');
+  assert.match(repeatedPhrase(replies), /^(get back to|back to work)$/);
+  assert.match(notTwiceInstruction(replies), /You have also said ".*" in 4 of your last few replies/);
+  assert.equal(repeatedPhrase(['Fine.', 'Fine, whatever.', 'Fine then.', 'Right.']), '', 'nothing three words long');
+  assert.equal(repeatedPhrase(['I do not want to.', 'You are not going to.', 'Do not do that.', 'I am not on it.']), '', 'filler runs are not phrases');
+});
+

@@ -222,7 +222,36 @@ const OPENER_WORDS = 6;
  * Silent unless there is something to report, so a conversation where she is not
  * repeating herself carries none of this in its prompt.
  */
+/** Words that make a shingle nobody would call a phrase. */
+const SHINGLE_FILLER = new Set(['the', 'a', 'an', 'and', 'or', 'but', 'so', 'to', 'of', 'in', 'on', 'at', 'for', 'it', 'is', 'are', 'was', 'be', 'you', 'your', 'youre', 'i', 'im', 'me', 'my', 'that', 'this', 'not', 'dont', 'do', 'with', 'now', 'just']);
+
+/**
+ * A run of three words she has used in three of her last four replies —
+ * "get back to work" as the sign-off of every line — as opposed to the
+ * opener check above, which sees only how a reply begins.
+ */
+export function repeatedPhrase(replies: string[], checked = OPENERS_CHECKED, need = 3): string {
+  const words = (text: string) => text.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(Boolean);
+  const recent = replies.slice(-checked);
+  if (recent.length < need) return '';
+  const seenIn = new Map<string, number>();
+  for (const reply of recent) {
+    const w = words(reply); const mine = new Set<string>();
+    for (let i = 0; i + 3 <= w.length; i++) {
+      const shingle = w.slice(i, i + 3);
+      if (shingle.every(word => SHINGLE_FILLER.has(word))) continue;
+      mine.add(shingle.join(' '));
+    }
+    for (const shingle of mine) seenIn.set(shingle, (seenIn.get(shingle) ?? 0) + 1);
+  }
+  let worst = '', count = 0;
+  for (const [shingle, times] of seenIn) if (times > count || (times === count && shingle.length > worst.length)) { worst = shingle; count = times; }
+  return count >= need ? worst : '';
+}
+
 export function notTwiceInstruction(replies: string[], checked = OPENERS_CHECKED): string {
+  const said3 = repeatedPhrase(replies, checked);
+  const phraseNote = said3 ? ` You have also said "${said3}" in ${Math.min(checked, replies.length)} of your last few replies — the same jab every time stops landing. Leave that one out of this reply entirely.` : '';
   const opener = (text: string) => text
     .toLowerCase()
     .replace(/[^a-z0-9\s]/g, ' ')
@@ -239,14 +268,14 @@ export function notTwiceInstruction(replies: string[], checked = OPENERS_CHECKED
   let worst = '';
   let count = 0;
   for (const [line, times] of seen) if (times > count) { worst = line; count = times; }
-  if (count < 2) return '';
+  if (count < 2) return phraseNote.trim();
 
   // Quoted back from the original rather than the normalised form, so she is
   // shown the sentence she wrote instead of a stripped version of it that would
   // read as her being misquoted.
   const original = replies.slice(-checked).find(text => opener(text) === worst) ?? worst;
   const phrase = original.replace(/\s+/g, ' ').split(' ').slice(0, OPENER_WORDS).join(' ');
-  return `You have opened ${count} of your last few replies with "${phrase}". You are repeating yourself and it is obvious. Do not use that phrasing again — open this reply differently, on a different word, and say what you mean some other way. This is about the wording only: the subject is still yours to talk about.`;
+  return `You have opened ${count} of your last few replies with "${phrase}". You are repeating yourself and it is obvious. Do not use that phrasing again — open this reply differently, on a different word, and say what you mean some other way. This is about the wording only: the subject is still yours to talk about.${phraseNote}`;
 }
 
 export function moodInstruction(level: number): string {

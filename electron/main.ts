@@ -6643,7 +6643,7 @@ function quickHit(text: string, history: { role?: string; content?: string }[]) 
     irritation: mood.irritation,
     ignoring: isIgnoring(mood.irritation),
     lastOfHers: [...history].reverse().find(turn => turn.role === 'assistant')?.content,
-  });
+  }, { social: conversationRoute() === null });
   if (!hit) return null;
   // The same turn-keeping the full path does, so a quick answer is not a
   // conversation hole: she heard them, and her patience moves for what they

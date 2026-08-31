@@ -33,23 +33,31 @@ export type QuickData = {
 
 export type QuickHit = { reply: string; tier: 1 | 2 | 3 };
 
-export function quickAnswer(text: string, data: QuickData): QuickHit | null {
+/**
+ * `social`: whether the scripted greetings, "how are you" and the stray-word
+ * jabs may answer. They were written for a cold local model, where "Hey.
+ * What's up?" in 0.3ms beat her real voice arriving twelve seconds later.
+ * With a hosted model answering in three, a scripted hello is the one flat
+ * line in an otherwise live conversation — so the caller switches them off
+ * and only the mechanical lookups (the time, the date, the list) stay instant.
+ */
+export function quickAnswer(text: string, data: QuickData, { social = true } = {}): QuickHit | null {
   // While she is stonewalling, even the scripted lines hold their tongue — an
   // answer is an answer, and the ignore is the point of the mood at that level.
   if (data.ignoring) return null;
   const said = normalize(text);
   if (!said) return null;
 
-  const canned = cannedFaq(said);
+  const canned = social ? cannedFaq(said) : null;
   if (canned) return { reply: canned, tier: 1 };
 
-  const template = templateReply(said, data);
+  const template = templateReply(said, data, social);
   if (template) return { reply: template, tier: 2 };
 
   const looked = lookedUp(said, data);
   if (looked) return { reply: looked, tier: 3 };
 
-  const stray = strayWord(text, data);
+  const stray = social ? strayWord(text, data) : null;
   if (stray) return { reply: stray, tier: 2 };
 
   return null;
@@ -118,7 +126,7 @@ function cannedFaq(said: string): string | null {
 
 /** Tier 2 — the fixed skeleton filled with live data: the clock, the date,
  *  the greeting, her name, and a mood-coloured "how are you". */
-function templateReply(said: string, data: QuickData): string | null {
+function templateReply(said: string, data: QuickData, social = true): string | null {
   if (/^(what time is it|what'?s the time|what time is it now|time)$/.test(said)) {
     const h = data.now.getHours();
     const m = data.now.getMinutes();
@@ -131,6 +139,8 @@ function templateReply(said: string, data: QuickData): string | null {
     const month = data.now.toLocaleDateString('en-US', { month: 'long' });
     return `It's ${weekday}, ${month} ${data.now.getDate()}.`;
   }
+  // The rest of this function is small talk — hers to answer when she is quick enough to.
+  if (!social) return null;
   if (/^good (morning|afternoon|evening)$/.test(said)) {
     const h = data.now.getHours();
     const morning = h < 12;

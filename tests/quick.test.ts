@@ -37,3 +37,14 @@ test('two words, a number, or a sentence is not a stray word', () => {
     assert.ok(!hit || !hit.reply.includes('not a message'), text);
   }
 });
+
+test('with the small talk switched off, greetings and stray words go to the model; the lookups stay scripted', () => {
+  const data = { now: new Date(2026, 7, 31, 14, 30), todayKey: '2026-08-31', nickname: 'Tommy', herName: 'Haru', agenda: { today: [{ title: 'Verge', done: false }], tomorrow: [] }, checkInsToday: 0, irritation: 0, ignoring: false } as never;
+  assert.equal(quickAnswer('Hey Haru', data, { social: false }), null);
+  assert.equal(quickAnswer('how are you today', data, { social: false }), null);
+  assert.equal(quickAnswer('Rockingham', data, { social: false }), null);
+  assert.equal(quickAnswer('what time is it', data, { social: false })?.reply, "It's 2:30 PM.");
+  assert.equal(quickAnswer("what's on today", data, { social: false })?.tier, 3);
+  assert.equal(quickAnswer('Hey Haru', data)?.tier, 1, 'unchanged when small talk is allowed');
+});
+
