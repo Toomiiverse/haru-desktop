@@ -5871,8 +5871,18 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
     }
   }
   // Said once, to him, and then done with: she is annoyed, not a broken record.
-  const turnedUp = messages.at(-1)?.role === 'user' ? arrivalNote() : '';
-  if (turnedUp) { store.delete('where.arrival' as never); console.log('[where] she has the unannounced arrival to say something about'); }
+  // And if this very message is them naming the place — "I'm home now", late
+  // but said — the grievance is dropped rather than made: "they never said
+  // they were going" would be a complaint the conversation above disproves,
+  // and told both she believed the conversation, rightly.
+  let turnedUp = messages.at(-1)?.role === 'user' ? arrivalNote() : '';
+  const arrival = getArrival();
+  if (turnedUp && arrival && saidTheyWereGoing(arrival.place, [latest])) {
+    console.log(`[where] they have said it themselves now — no complaint about ${arrival.place}`);
+    turnedUp = '';
+  }
+  if (turnedUp) console.log('[where] she has the unannounced arrival to say something about');
+  if (arrival && messages.at(-1)?.role === 'user') store.delete('where.arrival' as never);
   const spot = messages.at(-1)?.role === 'user' ? placeToldFrom(latest, new Date().toISOString()) : null;
   if (spot) {
     store.set('told', spot);
@@ -6051,7 +6061,7 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // Her recent replies as she should believe she said them — see seed.ts for
   // the measurement. The stored transcript is not touched; only what is sent.
   // The length rule fits the brain answering — see LENGTH_RULE_HOSTED.
-  const sized = (brain.hosted ? system.replace(LENGTH_RULE_LOCAL, LENGTH_RULE_HOSTED) : system) + (answering ? ` ${answering}` : '') + (turnedUp ? ` ${turnedUp}` : '');
+  const sized = (brain.hosted ? system.replace(LENGTH_RULE_LOCAL, LENGTH_RULE_HOSTED) : system) + (answering ? ` ${answering}` : '');
   const conversation: OllamaMessage[] = [{ role: 'system', content: brief ? `${sized} ${BREVITY}` : sized }, ...seedEmoji(markTimeGaps(withoutStaleDenials(withFiles, hasItems), CHAT_TIMEZONE))];
   // The last thing she reads before she speaks — see LAST_WORD for the
   // measurement. A system message just before their last turn: the Ollama
@@ -6060,7 +6070,10 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   const lastUser = conversation.map(message => message.role).lastIndexOf('user');
   // An aside about this turn — they spoke over her — goes in the same place,
   // read just before LAST_WORD; the Ollama shaper folds both into their turn.
-  if (lastUser > 0) conversation.splice(lastUser, 0, ...[aside, LAST_WORD].filter(Boolean).map(content => ({ role: 'system', content })));
+  // The complaint about turning up unannounced goes here rather than into the
+  // system prompt: at the end of six thousand tokens she read the fact and
+  // answered "you're home" three times running without once minding it.
+  if (lastUser > 0) conversation.splice(lastUser, 0, ...[aside, turnedUp, LAST_WORD].filter(Boolean).map(content => ({ role: 'system', content })));
   // For tuning, when the environment asks for it: the prompt exactly as sent.
   // A rule that works on its own and fails in place can only be bisected by
   // replaying what she was actually told, and nothing else shows that.
