@@ -51,7 +51,7 @@ import { cancelPower, closeApp, findApps, isCancellable, launch, listRunning, ma
 import { looksLikeScreenshot, maySpeak, readScreenshotConfig, screenshotPrompt, SETTLE_MS, SETTLE_TRIES, type ScreenshotConfig } from './screenshots';
 import { look, photoName, readVisionConfig, whileLooking, type VisionConfig } from './vision';
 import { CAPTION_MAX_CHARS, describedShots, forgetCaptions, moreThanOnePass, noteCaption, noteFailure, readCaptions, shotsNeedingALook } from './seen';
-import { EXPRESSIVE, LAST_WORD, NO_INVENTED_HISTORY, NO_NON_SEQUITURS, readsAsRough, roomInstruction, HER_EMOJI, emojiRut } from './room';
+import { EXPRESSIVE, LAST_WORD, NO_INVENTED_HISTORY, NO_NON_SEQUITURS, readsAsRough, roomInstruction, HER_EMOJI, emojiRut, roomToRant } from './room';
 import { journalStance } from './journal';
 import { haruNote, rangeStats, type HaruNote, type RangeName, type RangeStats } from './journal';
 import { describeRating, entryFor, journalPrompt, readEntries, readJournalConfig, readRating, recentTrend, shouldAsk, upsertEntry, SCALE_MAX, type JournalConfig, type JournalEntry } from './journal';
@@ -5991,6 +5991,9 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
     // So "what did you get up to last night?" has a true answer. Without this
     // the only record of her night is on disk and she invents one instead.
     nights: nightsInstruction(nightsOn(getNights(), lastNightKey())),
+    // Her own reason to talk at length: what she was up to last night, or the
+    // thing she has been deep in, weighed against how wound up she is.
+    rant: rantRoom(),
     tastes: tastesInstruction(getInterests()),
     diary: diaryContext(recentEntries(app.getPath('home'), 2)),
     directionsNote: directions?.note,
@@ -7116,6 +7119,31 @@ function recordBrief(kind: string, brief: string, line: string): void {
   } catch (error) {
     console.warn(`[push] could not record the brief: ${error instanceof Error ? error.message : error}`);
   }
+}
+
+/**
+ * Room to go on about something, when she has it in her (roomToRant). The
+ * subject is last night's, or the thing of hers she has spent the most nights
+ * on — "she played her favourite game, so she will want to talk about it".
+ */
+function rantRoom(): string {
+  const mood = getMood();
+  const lastNight = nightsOn(getNights(), lastNightKey())[0];
+  const deepest = [...getInterests()].sort((a, b) => b.nights - a.nights)[0];
+  const subject = lastNight?.interest ?? lastNight?.about ?? deepest?.name ?? '';
+  const grantedAt = Number(store.get('chat.rantAt') ?? 0);
+  const room = roomToRant({
+    energy: vitals.energy, curiosity: vitals.curiosity,
+    irritation: mood.irritation, ego: mood.ego,
+    subject: subject.slice(0, 80),
+    sinceLastMs: grantedAt ? Date.now() - grantedAt : null,
+    roll: Math.random(),
+  });
+  if (room) {
+    store.set('chat.rantAt', Date.now());
+    console.log(`[ai] she has the room to go on${subject ? ` about ${subject}` : ''}`);
+  }
+  return room;
 }
 
 /** How she stands with him right now — the Standing tab's arithmetic, in standing.ts, which is pure and tested. */
