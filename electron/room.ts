@@ -252,7 +252,11 @@ export function roomToRant(input: {
   const chance = Math.min(score, 0.5);
   if (!(input.roll < chance)) return '';
   const about = input.subject
-    ? `You have been on ${input.subject} and you have things to say about it that have not been said. Get onto it — bring it up yourself if they have not, and do not hand it over in one polite sentence.`
-    : 'There is something you actually want to get off your chest.';
-  return `${about} This one reply may run as long as you want it to, whatever they sent you: a rant, a tangent, the whole opinion. Length here follows what is in you, not the size of their message. Do not apologise for it, do not announce that you are about to go on, and do not tie it off with a neat conclusion — stop when you are done.`;
+    ? `You have been on ${input.subject}, you have things to say about it that you have not said, and this is the reply where you say them. Open on it — they have not asked, and you are not waiting to be asked.`
+    : 'There is something you actually want to get off your chest, and this is the reply where it comes out.';
+  // The instruction it has to beat is "a throwaway line gets a throwaway line
+  // back", which is right nearly always and is exactly what this is for. Told
+  // only that it "may" run long, she wrote a hundred characters at a two-word
+  // message and went back to matching him.
+  return `${about} For this one reply only, the rule about matching the length of their message does not apply — ignore it. Several sentences at the least, more if you have it, however little they typed. Do not apologise for the length, do not announce that you are about to go on, and do not tie it off with a neat conclusion — stop when you are done.`;
 }

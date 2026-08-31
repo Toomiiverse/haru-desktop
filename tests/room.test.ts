@@ -55,10 +55,10 @@ test('one emoji at most, whichever came first', () => {
 test('room to go on about something comes from her evening and her mood, not from the size of his message', () => {
   const wound = { energy: 0.9, curiosity: 0.8, irritation: 5, ego: 5, subject: 'Chainsaw Man', sinceLastMs: null, roll: 0.01 };
   const room = roomToRant(wound);
-  assert.match(room, /You have been on Chainsaw Man and you have things to say about it/);
-  assert.match(room, /may run as long as you want it to, whatever they sent you/);
-  assert.match(room, /Length here follows what is in you, not the size of their message/);
-  assert.match(room, /Do not apologise for it, do not announce that you are about to go on/);
+  assert.match(room, /You have been on Chainsaw Man, you have things to say about it/);
+  assert.match(room, /the rule about matching the length of their message does not apply/);
+  assert.match(room, /Several sentences at the least, more if you have it, however little they typed/);
+  assert.match(room, /Do not apologise for the length, do not announce that you are about to go on/);
   assert.doesNotMatch(room, /bullet|summar/i, 'a rant is not a structured answer either');
   assert.equal(roomToRant({ ...wound, roll: 0.99 }), '', 'a chance, not a rule');
   assert.equal(roomToRant({ ...wound, sinceLastMs: RANT_COOLDOWN_MS - 1 }), '', 'not twice in ninety minutes');
