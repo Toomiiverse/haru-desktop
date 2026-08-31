@@ -57,7 +57,54 @@ export type Aside = {
    * counts the old way rather than pretending to know.
    */
   reached?: boolean;
+  /** What she asked them about, when the line was a question about their day — "what they are doing at The PC Project". */
+  asked?: string;
+  /** When they answered it, if they did. */
+  answeredAt?: string;
 };
+
+/** How long an answer can be an answer to it. */
+export const ASK_OPEN_MS = 3 * 60 * 60_000;
+/** Not asked twice in this long. */
+export const ASK_AGAIN_MS = 2 * 60 * 60_000;
+/** An unanswered ask is held over them for this long. */
+export const ASK_HELD_MS = 12 * 60 * 60_000;
+
+export function markAsked(asides: Aside[], id: string, asked: string): Aside[] {
+  return asides.map(aside => (aside.id === id ? { ...aside, asked } : aside));
+}
+
+/** The ask a message of theirs would be answering: her latest question about their day, still open. */
+export function openAsk(asides: Aside[], now: number, withinMs = ASK_OPEN_MS): Aside | null {
+  for (let i = asides.length - 1; i >= 0; i--) {
+    const aside = asides[i];
+    if (!aside.asked || aside.answeredAt) continue;
+    const at = Date.parse(aside.at);
+    if (!Number.isFinite(at) || now - at < 0 || now - at > withinMs) continue;
+    return aside;
+  }
+  return null;
+}
+
+export function answerAsk(asides: Aside[], id: string, at: string): Aside[] {
+  return asides.map(aside => (aside.id === id ? { ...aside, answeredAt: at } : aside));
+}
+
+export function askedRecently(asides: Aside[], now: number, withinMs = ASK_AGAIN_MS): boolean {
+  return asides.some(aside => aside.asked && Number.isFinite(Date.parse(aside.at)) && now - Date.parse(aside.at) >= 0 && now - Date.parse(aside.at) < withinMs);
+}
+
+/** The asks they left hanging, for her to hold over them. */
+export function unansweredAsks(asides: Aside[], now: number, withinMs = ASK_HELD_MS): Aside[] {
+  return asides.filter(aside => aside.asked && !aside.answeredAt && Number.isFinite(Date.parse(aside.at)) && now - Date.parse(aside.at) > ASK_OPEN_MS && now - Date.parse(aside.at) < withinMs);
+}
+
+export function unansweredAsksNote(asides: Aside[], timeZone: string, now: number): string {
+  const hanging = unansweredAsks(asides, now);
+  if (!hanging.length) return '';
+  const lines = hanging.slice(-3).map(aside => `at ${clock(aside.at, timeZone)} you asked ${aside.asked} and heard nothing back`);
+  return `Left unanswered: ${lines.join('; ')}. That silence is yours to hold over them, in your way — but do not ask the same question again word for word.`;
+}
 
 /** Enough to scroll back through a few days of her, and a bound on the file. */
 export const MAX_ASIDES = 400;
@@ -85,6 +132,8 @@ export function readAsides(saved: unknown): Aside[] {
       source: SOURCES.includes(entry.source as AsideSource) ? entry.source as AsideSource : 'other',
       text: String(entry.text).trim(),
       ...(typeof entry.reached === 'boolean' ? { reached: entry.reached } : {}),
+      ...(typeof entry.asked === 'string' && entry.asked ? { asked: entry.asked } : {}),
+      ...(typeof entry.answeredAt === 'string' && entry.answeredAt ? { answeredAt: entry.answeredAt } : {}),
     }));
 }
 
@@ -212,6 +261,6 @@ export function alreadySaidRecently(asides: Aside[], timeZone: string, now: numb
   return [
     'You have already said these, off your own back. They are not in the conversation because nobody said them to you — they were remarks, and they went unanswered:',
     lines.join('\n'),
-    'Do not make any of these points again, and do not open on a subject you have already remarked on.',
+    'Do not make any of these points again, and do not open on a subject you have already remarked on. The subjects of those remarks — the weather, the time, whatever they were about — are closed: do not raise them again in any form, however fresh they look in the conversation.',
   ].join('\n');
 }
