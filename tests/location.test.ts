@@ -52,8 +52,8 @@ test('a location fix says it is Windows only rather than failing to spawn', asyn
 
 test('a hit knows whether it is a road or a place', async () => {
   const fetchImpl = (async () => ({ ok: true, status: 200, json: async () => [
-    { name: 'Rockingham Road', display_name: 'Rockingham Road, Hamilton Hill', lat: '-32.08', lon: '115.78', class: 'highway', type: 'primary', address: { suburb: 'Hamilton Hill' } },
-    { name: 'Rockingham', display_name: 'Rockingham, WA', lat: '-32.28', lon: '115.73', class: 'place', type: 'town', address: { state: 'Western Australia' } },
+    { name: 'Rockingham Road', display_name: 'Rockingham Road, Hamilton Hill', lat: '-32.08', lon: '115.78', category: 'highway', type: 'primary', address: { suburb: 'Hamilton Hill' } },
+    { name: 'Rockingham', display_name: 'Rockingham, WA', lat: '-32.28', lon: '115.73', category: 'boundary', type: 'administrative', address: { state: 'Western Australia' } },
   ] })) as never;
   const hits = await searchPlaces('Rockingham', fetchImpl, { lat: -32.0, lon: 115.8 }, 'Perth, Australia');
   assert.deepEqual(hits.map(h => h.kind), ['road', 'place']);

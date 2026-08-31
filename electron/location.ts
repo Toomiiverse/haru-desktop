@@ -159,10 +159,18 @@ export async function searchPlaces(query: string, fetchImpl: Fetcher, near: { la
   // are nowhere in particular. With the phone's position known, a bare
   // "Rockingham" went out with a 13 km preference box Nominatim was free to
   // ignore, and it ranked Rockingham County, Virginia first.
+  // The country from the configured place, as a filter — not the city as words.
+  // "Rockingham, Perth, Australia" made Nominatim match the word Perth in the
+  // address, which Rockingham Road has and the suburb of Rockingham does not;
+  // a bare "Rockingham" within Australia returns the City of Rockingham first.
+  // The city is appended only as a second try, when the bare name found nothing.
+  const country = /\baustralia\b/i.test(fallbackPlace) ? '&countrycodes=au' : '';
+  // With nowhere to rank from, the city goes in up front — "Coles" alone would
+  // be any Coles in the country. With their position known, distance does the
+  // ranking and the bare name is asked for first.
   const region = fallbackPlace.split(',').map(part => part.trim().toLowerCase()).filter(Boolean);
   const alreadyPlaced = region.some(part => query.toLowerCase().includes(part)) || /\b(?:wa|nsw|vic|qld|sa|tas|nt|act|australia)\b/i.test(query);
-  const q = !fallbackPlace || alreadyPlaced ? query : `${query}, ${fallbackPlace}`;
-  const country = /\baustralia\b/i.test(fallbackPlace) ? '&countrycodes=au' : '';
+  const q = !near && fallbackPlace && !alreadyPlaced ? `${query}, ${fallbackPlace}` : query;
   // Bounded for "the nearest": only what is inside the box counts, and the
   // caller picks the closest of it. Otherwise the box merely ranks.
   const box = near ? `&viewbox=${(near.lon - 0.12).toFixed(3)},${(near.lat + 0.12).toFixed(3)},${(near.lon + 0.12).toFixed(3)},${(near.lat - 0.12).toFixed(3)}&bounded=${bounded ? 1 : 0}` : '';
@@ -172,7 +180,7 @@ export async function searchPlaces(query: string, fetchImpl: Fetcher, near: { la
     signal: AbortSignal.timeout(12_000),
   });
   if (!response.ok) throw new Error(`the place search returned ${response.status}`);
-  const payload = await response.json() as { name?: string; display_name?: string; lat?: string; lon?: string; address?: Address; class?: string; type?: string }[];
+  const payload = await response.json() as { name?: string; display_name?: string; lat?: string; lon?: string; address?: Address; class?: string; category?: string; type?: string }[];
   const found: FoundPlace[] = [];
   for (const hit of Array.isArray(payload) ? payload : []) {
     const lat = Number(hit.lat), lon = Number(hit.lon);
@@ -181,8 +189,13 @@ export async function searchPlaces(query: string, fetchImpl: Fetcher, near: { la
     const area = nameFrom(hit.address ?? {}).split(', ')[0];
     // "Rockingham" is a suburb 35 km south and a road 25 km away; asked for the
     // name alone, they mean the suburb, and the caller ranks by this.
-    const kind: FoundPlace['kind'] = hit.class === 'highway' ? 'road' : (hit.class === 'place' || hit.class === 'boundary') ? 'place' : 'other';
+    // jsonv2 calls it `category`; the older format `class`.
+    const cls = hit.category ?? hit.class;
+    const kind: FoundPlace['kind'] = cls === 'highway' ? 'road' : (cls === 'place' || cls === 'boundary') ? 'place' : 'other';
     found.push({ name: [...new Set([head, area].filter(Boolean))].join(', ') || q, lat, lon, kind });
+  }
+  if (!found.length && near && fallbackPlace && !alreadyPlaced) {
+    return searchPlaces(`${query}, ${fallbackPlace}`, fetchImpl, near, '', { bounded });
   }
   return found;
 }
