@@ -13,7 +13,9 @@ import { distanceM, homeOf, placeAt, SPOT_STALE_MS } from './whereabouts';
 export type DirectionsAsk = { destination: string; nearest: boolean };
 export type Found = { name: string; lat: number; lon: number };
 
-const TAIL = String.raw`\s*(?:from here|from where i am|from home|please|pls|now)?\s*[?.!]*\s*$`;
+// Everything a question can trail off with that is not part of the place: "from
+// here right now?", "this morning?", "please". Repeated, because they stack.
+const TAIL = String.raw`(?:\s+(?:from here|from where i am|from home|right now|at the moment|this (?:morning|afternoon|evening|arvo)|today|tonight|currently|please|pls|now|thanks))*\s*[?.!]*\s*$`;
 const ASKS: { pattern: RegExp; nearest?: boolean }[] = [
   { pattern: new RegExp(String.raw`\b(?:directions?|the way|a route|route|navigat(?:e|ion))\s+(?:to|for|towards?)\s+(.+?)` + TAIL, 'i') },
   { pattern: new RegExp(String.raw`\bhow (?:do|can|would|should|did) (?:i|we) get (?:back )?(?:to|home to)\s+(.+?)` + TAIL, 'i') },

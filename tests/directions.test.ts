@@ -102,7 +102,8 @@ test('a travel-time question is a route question', () => {
 });
 
 test('asking about traffic is asking for the road', () => {
-  assert.equal(directionsAsk('How’s the traffic from Murdoch into Perth this morning?')?.destination, 'Perth this morning');
+  assert.equal(directionsAsk('How’s the traffic from Murdoch into Perth this morning?')?.destination, 'Perth');
+  assert.equal(directionsAsk('How long does it take to get to Rockingham from here right now?')?.destination, 'Rockingham');
   assert.equal(directionsAsk('traffic to the airport?')?.destination, 'the airport');
   assert.equal(directionsAsk('the traffic was awful today'), null);
 });
