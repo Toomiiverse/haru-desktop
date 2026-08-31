@@ -70,3 +70,14 @@ test('no max tokens asked for means no max tokens sent, whichever the key would 
   assert.equal('max_tokens' in out, false);
   assert.equal('max_completion_tokens' in out, false);
 });
+
+test('Venice: its own system prompt and its thinking switched off, and a cache key rides along; nobody else gets those', () => {
+  const venice = toOpenAIBody({ model: 'qwen3-6-plus-uncensored', conversation, temperature: 0.7, provider: 'venice', cacheKey: 'haru-2026-08-31' }) as Record<string, unknown>;
+  assert.deepEqual(venice.venice_parameters, { include_venice_system_prompt: false, disable_thinking: true, strip_thinking_response: true });
+  assert.equal(venice.prompt_cache_key, 'haru-2026-08-31');
+  assert.equal(venice.max_tokens, undefined); assert.equal(venice.temperature, 0.7);
+  const openai = toOpenAIBody({ model: 'gpt-5.6-terra', conversation, temperature: 0.7, provider: 'openai' }) as Record<string, unknown>;
+  assert.equal('venice_parameters' in openai, false);
+  assert.equal('prompt_cache_key' in openai, false);
+});
+

@@ -170,11 +170,21 @@ export function toOpenAIBody(options: {
   maxTokens?: number;
   json?: boolean;
   stream?: boolean;
+  /** Which dialect speaker: Venice takes its own parameters on top of OpenAI's. */
+  provider?: string;
+  /** A stable key for the endpoint's prompt cache — the same brief, turn after turn, is not paid for twice. */
+  cacheKey?: string;
 }) {
   const quirks = openAIQuirks(options.model);
   return {
     model: options.model,
     messages: toOpenAIMessages(options.conversation),
+    // Venice puts its own system prompt in front of everyone's by default —
+    // that would sit on top of hers and argue with it every turn. Off. And a
+    // thinking model left to itself spends its time before it speaks; off too,
+    // and the thinking stripped from what comes back, as on the Ollama path.
+    ...(options.provider === 'venice' ? { venice_parameters: { include_venice_system_prompt: false, disable_thinking: true, strip_thinking_response: true } } : {}),
+    ...(options.cacheKey ? { prompt_cache_key: options.cacheKey } : {}),
     ...(options.tools?.length ? { tools: options.tools, tool_choice: 'auto' } : {}),
     ...(quirks.reasoningEffort ? { reasoning_effort: quirks.reasoningEffort } : {}),
     // num_ctx has no counterpart: context length is a property of the deployment,
