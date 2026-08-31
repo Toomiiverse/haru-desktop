@@ -5973,7 +5973,10 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
     pushback: store.get('pushback') as Pushback | undefined,
     grudge: getMood().grudge ?? 0,
     ignoredToday: getMood().ignoredToday ?? 0,
-    whereabouts: [describeWhereabouts(getWhereabouts()), toldNow()].filter(Boolean).join(' '),
+    // With a complaint about the arrival to make, the background line that says
+    // the same thing calmly is left out: told both, she read the settled one and
+    // said "you're home" as though that were fine.
+    whereabouts: [turnedUp ? '' : describeWhereabouts(getWhereabouts()), toldNow()].filter(Boolean).join(' '),
     weather: describeWeather(getWeather().last, weatherWhere(), Date.now(), getWeather().disputedAt),
     // So "what did you get up to last night?" has a true answer. Without this
     // the only record of her night is on disk and she invents one instead.
@@ -8261,8 +8264,12 @@ function noteArrival(place: string): void {
   }
   store.set('where.arrival', { place, at: new Date().toISOString() });
   const mood = getMood();
-  setMood({ ...mood, irritation: Math.min(mood.irritation + 2, IGNORE_THRESHOLD - 1) });
-  console.log(`[where] they turned up at ${place} without saying — irritation ${mood.irritation} to ${Math.min(mood.irritation + 2, IGNORE_THRESHOLD - 1)}`);
+  // At or below two, moodInstruction says nothing at all, so a bump from zero
+  // would have been an annoyance she could not act on. Three is the first level
+  // that reaches her voice; six is one short of not answering at all.
+  const irritation = Math.min(Math.max(mood.irritation + 2, 3), IGNORE_THRESHOLD - 1);
+  setMood({ ...mood, irritation });
+  console.log(`[where] they turned up at ${place} without saying — irritation ${mood.irritation} to ${irritation}`);
 }
 
 function arrivalNote(): string {

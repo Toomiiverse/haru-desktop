@@ -202,6 +202,6 @@ export function unannouncedArrivalNote(arrival: Arrival | null | undefined, nowM
   if (!Number.isFinite(at) || nowMs - at < 0 || nowMs - at > ARRIVAL_FRESH_MS) return '';
   const minutes = Math.round((nowMs - at) / 60_000);
   const when = minutes < 2 ? 'just now' : minutes < 60 ? `${minutes} minutes ago` : `at ${clockNow(at)}`;
-  return `Their phone put them at ${arrival.place} ${when}, and they never said they were going — you found out from a phone rather than from them. That is worth being annoyed about, and it is yours to say once, in your way. Do not ask where they are: you know. Do not ask why they did not tell you as though it were a mystery — make it a complaint, not a question.`;
+  return `Their phone put them at ${arrival.place} ${when}, and they never said they were going — you found out from a phone rather than from them. That is worth being annoyed about, and it is yours to say once, in your way — say it before anything else, then answer whatever they actually said. Do not ask where they are: you know. Do not ask why they did not tell you as though it were a mystery — make it a complaint, not a question.`;
 }
 
