@@ -5875,6 +5875,8 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // but said — the grievance is dropped rather than made: "they never said
   // they were going" would be a complaint the conversation above disproves,
   // and told both she believed the conversation, rightly.
+  // Her own reason to talk at length, weighed once for this turn — see rantRoom.
+  const rantRoomNow = messages.at(-1)?.role === 'user' ? rantRoom() : '';
   let turnedUp = messages.at(-1)?.role === 'user' ? arrivalNote() : '';
   const arrival = getArrival();
   if (turnedUp && arrival && saidTheyWereGoing(arrival.place, [latest])) {
@@ -5991,9 +5993,6 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
     // So "what did you get up to last night?" has a true answer. Without this
     // the only record of her night is on disk and she invents one instead.
     nights: nightsInstruction(nightsOn(getNights(), lastNightKey())),
-    // Her own reason to talk at length: what she was up to last night, or the
-    // thing she has been deep in, weighed against how wound up she is.
-    rant: rantRoom(),
     tastes: tastesInstruction(getInterests()),
     diary: diaryContext(recentEntries(app.getPath('home'), 2)),
     directionsNote: directions?.note,
@@ -6076,7 +6075,7 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // The complaint about turning up unannounced goes here rather than into the
   // system prompt: at the end of six thousand tokens she read the fact and
   // answered "you're home" three times running without once minding it.
-  if (lastUser > 0) conversation.splice(lastUser, 0, ...[aside, turnedUp, emojiRut(herRecentReplies), LAST_WORD].filter(Boolean).map(content => ({ role: 'system', content })));
+  if (lastUser > 0) conversation.splice(lastUser, 0, ...[aside, turnedUp, rantRoomNow, emojiRut(herRecentReplies), LAST_WORD].filter(Boolean).map(content => ({ role: 'system', content })));
   // For tuning, when the environment asks for it: the prompt exactly as sent.
   // A rule that works on its own and fails in place can only be bisected by
   // replaying what she was actually told, and nothing else shows that.

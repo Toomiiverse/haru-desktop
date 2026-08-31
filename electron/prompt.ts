@@ -151,8 +151,6 @@ export type PromptState = {
   ego: number;
   /** Her slow state — energy, stress, affection and the rest (vitals.ts). Optional so the pure callers need not fake one. */
   vitals?: Vitals;
-  /** Room to go on about something of hers, when she has it in her — see roomToRant. */
-  rant?: string;
   goodnight: 'said' | 'after' | 'none';
   shout: ShoutState;
   latestMessage: string;
@@ -346,8 +344,5 @@ export function chatSystemPrompt(state: PromptState): string {
     // the message rather than the character sending it — and where the two
     // disagree about whether every reply needs a jab, this is the later word.
     NATURAL,
-    // After everything about matching their length, because the whole point of
-    // it is that her own evening outranks the size of their message.
-    state.rant ?? '',
   ].filter(Boolean).join(' ');
 }
