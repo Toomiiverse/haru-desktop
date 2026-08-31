@@ -177,6 +177,15 @@ export type PromptState = {
   directionsNote?: string;
 };
 
+/**
+ * How long a reply may be. The local 9B given room repeated itself and drifted
+ * into topics they had not raised, so it is held to a paragraph; a hosted
+ * model given room uses it on purpose, which is what it is for. main.ts swaps
+ * one for the other once it knows which brain is answering.
+ */
+export const LENGTH_RULE_LOCAL = 'Answer what they said and stop. One thought — usually a short paragraph, two if it genuinely needs it. Do not make your point again in different words, do not sweep in a topic they did not raise, and do not finish with a parting flourish or a send-off. Trailing off mid-thought is better than padding.';
+export const LENGTH_RULE_HOSTED = 'As long as it needs and no longer — usually short, because that is you; when they ask something that deserves a proper answer, or the moment is a real one, give it the room. Never pad, never make the point again in different words, never sweep in a topic they did not raise, and do not finish with a parting flourish or a send-off.';
+
 export function chatSystemPrompt(state: PromptState): string {
   const { now, latestMessage } = state;
   const today = localDateKey(now);
@@ -284,7 +293,7 @@ export function chatSystemPrompt(state: PromptState): string {
     // After the persona, so a small model still has it; before the length
     // rule, which it qualifies — the one thought has to be the right thought.
     CONTINUITY,
-    'Answer what they said and stop. One thought — usually a short paragraph, two if it genuinely needs it. Do not make your point again in different words, do not sweep in a topic they did not raise, and do not finish with a parting flourish or a send-off. Trailing off mid-thought is better than padding.',
+    LENGTH_RULE_LOCAL,
     // Her slow state first, so the three lines after it — which carry hard
     // consequences (ignoring, withholding, coasting) — read later and win.
     vitalsInstruction(state.vitals, state.irritation),

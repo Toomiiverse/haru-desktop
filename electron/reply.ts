@@ -447,14 +447,14 @@ export function dropRepeatedParagraphs(reply: string, previousReplies: string[])
 const ENUMERATED = /^\s*(?:[-*•]|\d+[.)])\s/;
 const TACKED_ON_CEILING = 2;
 
-export function dropTackedOnParagraphs(reply: string, lookedSomethingUp: boolean): string {
+export function dropTackedOnParagraphs(reply: string, lookedSomethingUp: boolean, ceiling = TACKED_ON_CEILING): string {
   // She went and found this out. Its length is the answer's, not hers.
   if (lookedSomethingUp) return reply;
   const paragraphs = reply.split(/\n{2,}/);
-  if (paragraphs.length <= TACKED_ON_CEILING) return reply;
+  if (paragraphs.length <= ceiling) return reply;
   // A list is a shape, not padding: the parts are the answer.
   if (paragraphs.some(paragraph => ENUMERATED.test(paragraph))) return reply;
-  return paragraphs.slice(0, TACKED_ON_CEILING).join('\n\n').trim();
+  return paragraphs.slice(0, ceiling).join('\n\n').trim();
 }
 
 /**

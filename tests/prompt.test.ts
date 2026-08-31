@@ -7,10 +7,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {
-  chatSystemPrompt, feedbackSummary, freshStartInstruction, knowledgeInstruction,
-  screenContext, searchInstruction, systemInstruction, NO_GUESSING, type PromptState,
-} from '../electron/prompt';
+import { chatSystemPrompt, feedbackSummary, freshStartInstruction, knowledgeInstruction, screenContext, searchInstruction, systemInstruction, NO_GUESSING, type PromptState, LENGTH_RULE_LOCAL, LENGTH_RULE_HOSTED } from '../electron/prompt';
 import { readSearchConfig } from '../electron/search';
 
 const NOW = new Date('2026-08-20T19:30:00.000Z');
@@ -263,4 +260,10 @@ test('chatSystemPrompt carries her vitals as a tone line before the irritation l
   assert.doesNotMatch(calm, /on edge|drowsy|fonder of them/);
   const tense = chatSystemPrompt(state({ irritation: 5, vitals: { energy: 0.6, happiness: 0.6, curiosity: 0.5, affection: 0.4, sleepiness: 0.2, stress: 0.9, focus: 0.5 } }));
   assert.ok(tense.indexOf('on edge') < tense.indexOf('thoroughly fed up'));
+});
+
+test('the local length rule is in the brief verbatim, so a hosted brain can swap it for its own', () => {
+  assert.match(LENGTH_RULE_LOCAL, /One thought/);
+  assert.match(LENGTH_RULE_HOSTED, /As long as it needs and no longer/);
+  assert.doesNotMatch(LENGTH_RULE_HOSTED, /short paragraph/);
 });

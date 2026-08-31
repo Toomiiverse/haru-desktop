@@ -62,7 +62,7 @@ import { runToolLoop } from './toolloop';
 import { chatTools, coerceKnowledgeCategory, runChatTool, type ToolAvailability, type ToolDeps } from './tools';
 import { createMemoryStore } from './memorystore';
 import { createKnowledgeStore } from './knowledgestore';
-import { chatSystemPrompt, freshStartInstruction, type FreshStart, type RatedReply } from './prompt';
+import { chatSystemPrompt, freshStartInstruction, type FreshStart, type RatedReply, LENGTH_RULE_LOCAL, LENGTH_RULE_HOSTED } from './prompt';
 import { hasShout, readVoiceConfig, referenceFor, shoutReference, spokenCase, speakableText, splitForSpeech, synthesise, type SpeechClip, type VoiceConfig } from './voice';
 import { applyDecay, DEEP_RECALL_LIMIT, eventCandidates, eventsPrompt, findSuperseded, formatMemoryPrompt, isExplicitRecall, closeEvents, isWorthAnEvent, isWorthKeeping, isWorthRemembering, MEMORY_KINDS, migrateMemories, pruneMemories, readsAsSecondPerson, rememberInto, retrieveMemories, semanticSimilarities, summaryPrompt, supersede, THIRD_PERSON_AGAIN, vectorSimilarity, type ForgettingEntry, type MemoryKind, type MemoryRecord, type MemorySource, type RetrievalFactors, type ScoredMemory, type SessionSummary } from './memory';
 import { consolidateMemories, type ConsolidationChange } from './consolidation';
@@ -5647,6 +5647,9 @@ type Brain = { config: ProviderConfig; escalated: boolean; because: string; sees
  * nudges, weather, the diary — never come through here.
  */
 const HOSTED_FIRST_WORD_MS = 8_000;
+/** The phone's leash, on a hosted model: room for a real answer rather than a cut-off one. */
+const HOSTED_AWAY_MAX_TOKENS = 700;
+const HOSTED_PARAGRAPHS = 4;
 function conversationRoute(): ProviderConfig | null {
   const route = store.get('ai.conversation') as ProviderConfig | undefined;
   if (!route?.model || !isOpenAIShaped(route.provider) || !hasKeyFor(route.endpoint)) return null;
@@ -6014,7 +6017,9 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   if (carried.length) console.log(`[attach] ${carried.length} in play — ${carried.map(file => `${file.name}${file.kind === 'image' && brain.sees ? ' (sent)' : ' (read)'}`).join(', ')}`);
   // Her recent replies as she should believe she said them — see seed.ts for
   // the measurement. The stored transcript is not touched; only what is sent.
-  const conversation: OllamaMessage[] = [{ role: 'system', content: brief ? `${system} ${BREVITY}` : system }, ...seedEmoji(markTimeGaps(withoutStaleDenials(withFiles, hasItems), CHAT_TIMEZONE))];
+  // The length rule fits the brain answering — see LENGTH_RULE_HOSTED.
+  const sized = brain.hosted ? system.replace(LENGTH_RULE_LOCAL, LENGTH_RULE_HOSTED) : system;
+  const conversation: OllamaMessage[] = [{ role: 'system', content: brief ? `${sized} ${BREVITY}` : sized }, ...seedEmoji(markTimeGaps(withoutStaleDenials(withFiles, hasItems), CHAT_TIMEZONE))];
   // The last thing she reads before she speaks — see LAST_WORD for the
   // measurement. A system message just before their last turn: the Ollama
   // shaper folds it into that turn, an OpenAI-shaped endpoint takes it as it
@@ -6066,7 +6071,7 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
     // The reader is watching a chat app, a long reply is a long wait, and
     // away-turns were found to run long: the cap keeps her concise without
     // touching the desk, where a full answer is the point of the window.
-    ...(away ? { maxTokens: AWAY_MAX_TOKENS } : {}),
+    ...(away ? { maxTokens: brain.hosted ? HOSTED_AWAY_MAX_TOKENS : AWAY_MAX_TOKENS } : {}),
     // A hosted reply is not shown as it arrives: it is the research, not the
     // answer, and it is said again as herself below — that is what streams.
     ...(forwardChunk && !brain.escalated ? { onChunk: forwardChunk } : {}),
@@ -6174,7 +6179,7 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // tacked-on-paragraph cut nor the repetition cut applies: asked the same
   // question twice she should give the same names twice, and the first time
   // this ran, 843 of her 890 characters were thrown away as "already said".
-  const body = dropTackedOnParagraphs(trimmed, brain.escalated || fromSearch || ran.has('search_web') || ran.has('read_web_page') || ran.has('read_video_transcript'));
+  const body = dropTackedOnParagraphs(trimmed, brain.escalated || fromSearch || ran.has('search_web') || ran.has('read_web_page') || ran.has('read_video_transcript'), brain.hosted ? HOSTED_PARAGRAPHS : undefined);
   const cleaned = fixStatedClock(dropRepeatedOpener(dropEchoOpener(fromSearch ? body : dropRepeatedSentences(body, recent), latest), recent), clock.getHours(), clock.getMinutes());
   // The reminder read from their message is the truth about its time, whatever she says.
   // Her promise, kept: "I'll set the reminder at 6:54 AM" with nothing written

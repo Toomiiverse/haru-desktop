@@ -428,3 +428,9 @@ test('the minutes of silence she states become the real ones, digits or words; a
   assert.equal(fixStatedMinutes('No minutes mentioned here.', 27), 'No minutes mentioned here.');
 });
 
+test('the paragraph ceiling is the caller\'s: four for a hosted brain, two by default', () => {
+  const five = ['One.', 'Two.', 'Three.', 'Four.', 'Five.'].join('\n\n');
+  assert.equal(dropTackedOnParagraphs(five, false), 'One.\n\nTwo.');
+  assert.equal(dropTackedOnParagraphs(five, false, 4), 'One.\n\nTwo.\n\nThree.\n\nFour.');
+  assert.equal(dropTackedOnParagraphs(five, true, 4), five, 'looked up: untouched at any ceiling');
+});
