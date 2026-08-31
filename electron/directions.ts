@@ -84,6 +84,64 @@ export function dropRouteTalk(reply: string): string {
   return (first?.[0] ?? reply).trim();
 }
 
+// A street address, as Australians write one: "40 Boddington Circuit",
+// "2/62 Fitzgerald St, Northbridge WA 6003". A number, one to three name words,
+// a street suffix; then a suburb only when it is capitalised, and a state.
+// "5 minutes drive" has the shape and is excluded by the unit words.
+const SUFFIX = String.raw`(?:street|st|road|rd|circuit|cct|avenue|ave|av|drive|dr|way|court|ct|place|pl|crescent|cres|cr|lane|ln|parade|pde|terrace|tce|boulevard|blvd|bvd|highway|hwy|close|cl|loop|rise|grove|gr|mews|square|sq|esplanade|esp|promenade|prom|gardens|gdns|retreat|rtt|entrance|ent|view|vista|turn|bend|green|heights|hts|link|mall|nook|pass|ridge|row|trail|walk|wynd|cove|dale|glade|approach|app|broadway|circle|cir|crossing|parkway|pkwy|parkway|track|trk)`;
+const UNIT = String.raw`(?!(?:min|mins|minutes?|hours?|hrs?|km|kms|k|m|metres?|meters?|secs?|seconds?|days?|weeks?|months?|years?|dollars?|bucks|percent|people|guys|times)\b)`;
+const ADDRESS = new RegExp(String.raw`\b(\d{1,5}[a-z]?(?:\/\d{1,5})?\s+${UNIT}(?:[a-z][a-z'’-]+\s+){1,3}${SUFFIX})\b\.?((?:,?\s+[A-Za-z][a-z]+(?:\s+[A-Z][a-z]+)?)?(?:,?\s+(?:WA|NSW|VIC|QLD|SA|TAS|NT|ACT)\b)?(?:\s+\d{4}\b)?)`, 'i');
+const NOT_A_SUBURB = /^,?\s+(?:And|But|Then|Now|Today|Tomorrow|Please|Pls|Thanks|Thank|So|Or|If|When|Where|Which|That|This|Right|Later|Tonight|Instead|Again|First|Next|Asap|Before|After)\b/;
+
+/** The street address in the text, if there is one: number, street, and the suburb when it was given. */
+export function streetAddress(text: string): string | null {
+  const m = ADDRESS.exec(text ?? '');
+  if (!m) return null;
+  let rest = m[2] ?? '';
+  // The suburb only when written as a name — the regex is case-blind for the
+  // street, and "40 Boddington Circuit tomorrow" has no suburb in it.
+  if (rest && !/^,?\s+(?:[A-Z][a-z]|WA\b|NSW\b|VIC\b|QLD\b|SA\b|TAS\b|NT\b|ACT\b)/.test(rest)) rest = '';
+  if (NOT_A_SUBURB.test(rest)) rest = '';
+  return `${m[1]}${rest}`.replace(/\s+/g, ' ').replace(/\s*,\s*/g, ', ').trim();
+}
+
+/** "pick up the cpu", "the Dianella address" — a thing to do, not a place; the place is an address they gave. */
+const ERRAND = /^(?:(?:to )?(?:pick|pick up|get|grab|collect|fetch|buy|drop off|drop|return|deliver|see|meet|visit)\b|.*\baddress\b)/i;
+/** The ask with no place in it: "give me the directions", "directions please", "how do I get there". */
+const BARE_ASK = /^(?:(?:can|could|would|will) you )?(?:(?:give|send|show|get|shoot) me )?(?:the |some |those |a )?(?:directions?|route|way there)(?: there| to (?:it|that|there|the place))?(?: please| pls| again| now| thanks)*[?.!\s]*$|^how (?:do|can|would) (?:i|we) get there(?: from here)?[?.!\s]*$/i;
+
+/**
+ * The ask, with what they said just before in mind.
+ *
+ * "Give me directions to pick up the CPU" is not a place, and searched as one it
+ * found the shop they work at. The place was in the message before it: "40
+ * Boddington Circuit". So an errand takes the address they gave — in this
+ * message or a recent one — and an address on its own, or a bare "give me the
+ * directions", after a directions question, is that question answered.
+ */
+export function directionsAskFrom(latest: string, recentUser: string[]): DirectionsAsk | null {
+  const remembered = () => {
+    for (const earlier of [...recentUser].reverse()) { const found = streetAddress(earlier); if (found) return found; }
+    return null;
+  };
+  const ask = directionsAsk(latest);
+  if (ask) {
+    if (!ERRAND.test(ask.destination)) return ask;
+    const address = streetAddress(latest) ?? remembered();
+    return address ? { destination: address, nearest: false } : null;
+  }
+  const line = (latest ?? '').trim();
+  if (BARE_ASK.test(line)) {
+    const address = remembered();
+    return address ? { destination: address, nearest: false } : null;
+  }
+  const here = streetAddress(line);
+  if (here && line.length <= here.length + 40 && recentUser.slice(-3).some(earlier => directionsAsk(earlier) !== null || BARE_ASK.test(earlier.trim()))) {
+    return { destination: here, nearest: false };
+  }
+  return null;
+}
+
 /** A place she knows by that name — "home", "the store", "my place" for home. */
 export function matchNamedPlace(destination: string, places: Place[]): Place | null {
   const key = destination.toLowerCase().replace(/^(?:the|my)\s+/, '').trim();

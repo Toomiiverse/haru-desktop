@@ -14,6 +14,8 @@ export type WeatherSample = {
   tempC: number;
   sky: Sky;
   raining: boolean;
+  /** Millimetres in the last hour, as the forecast has it. */
+  mm?: number;
   windKmh: number;
   isDay: boolean;
   /** Minutes until the first rain due in the next couple of hours, or null. */
@@ -106,6 +108,7 @@ export function readForecast(payload: unknown, nowMs = Date.now()): WeatherSampl
     tempC: c.temperature_2m,
     sky: nowSky,
     raining,
+    mm: c.precipitation ?? 0,
     windKmh: c.wind_speed_10m ?? 0,
     isDay: c.is_day !== 0,
     rainSoonMin: raining ? null : rainSoonMin,
@@ -123,15 +126,22 @@ const deg = (c: number) => `${Math.round(c)}°C`;
  * cooldown, and rain-soon only when it was not already raining and was not
  * already said for this shower.
  */
+/** She reads a forecast, not the sky over them: said as such, and never as what is happening to them. */
+const FORECAST_NOT_A_WINDOW = ' This is what the forecast service says, not something you can see: say it as the forecast, and do not tell them they are wet, caught in it, or out in it — you do not know that. If they say it is not raining where they are, they are right.';
+
 export function weatherEvents(previous: WeatherSample | null, current: WeatherSample, notified: Record<string, number>, nowMs = Date.now()): WeatherEvent[] {
   const fresh = (kind: WeatherEvent['kind']) => nowMs - (notified[kind] ?? 0) >= COOLDOWN_MS[kind];
   const out: WeatherEvent[] = [];
   if (!current.raining && current.rainSoonMin !== null && current.rainSoonMin <= 45 && fresh('rain-soon')) {
     const when = current.rainSoonMin <= 5 ? 'any minute now' : `in about ${current.rainSoonMin} minutes`;
-    out.push({ kind: 'rain-soon', text: `Rain is due where they are ${when}${current.rainSoonProb ? ` (${current.rainSoonProb}% likely)` : ''}. It is ${deg(current.tempC)} and ${current.sky} there right now.` });
+    out.push({ kind: 'rain-soon', text: `The forecast has rain due where they are ${when}${current.rainSoonProb ? ` (${current.rainSoonProb}% likely)` : ''}. It is ${deg(current.tempC)} and ${current.sky} there right now.${FORECAST_NOT_A_WINDOW}` });
   }
   if (previous) {
-    if (current.raining && !previous.raining && fresh('rain-started')) out.push({ kind: 'rain-started', text: `It has started raining where they are. ${deg(current.tempC)}.` });
+    // Drizzle is a weather code, not a shower: a forecast model's "drizzle" over
+    // a dry shop earned "It's raining, you're wet". Real rain, or measurable
+    // drizzle, is a push; a code alone is not.
+    const shower = current.raining && (current.sky !== 'drizzle' || (current.mm ?? 0) >= 0.3);
+    if (shower && !previous.raining && fresh('rain-started')) out.push({ kind: 'rain-started', text: `The forecast says it has started raining where they are (${current.sky}). ${deg(current.tempC)}.${FORECAST_NOT_A_WINDOW}` });
     if (!current.raining && previous.raining && fresh('rain-stopped')) out.push({ kind: 'rain-stopped', text: `The rain has stopped where they are; it is ${current.sky} now, ${deg(current.tempC)}.` });
     const swing = current.tempC - previous.tempC;
     if (Math.abs(swing) >= 5 && fresh('temp-swing')) out.push({ kind: 'temp-swing', text: `It has ${swing < 0 ? 'dropped' : 'climbed'} ${Math.round(Math.abs(swing))} degrees where they are since she last looked: ${deg(current.tempC)} now.` });

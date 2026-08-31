@@ -49,6 +49,11 @@ test('what buzzes the phone: rain soon, rain started and stopped, a sky turned, 
 
   const wet: WeatherSample = { ...clear, raining: true, sky: 'rain', tempC: 14 };
   assert.deepEqual(weatherEvents(clear, wet, {}, NOW).map(e => e.kind), ['rain-started']);
+  assert.match(weatherEvents(clear, wet, {}, NOW)[0].text, /^The forecast says it has started raining where they are \(rain\)\..*do not tell them they are wet/);
+  const drizzleCode: WeatherSample = { ...clear, raining: true, sky: 'drizzle', mm: 0 };
+  assert.deepEqual(weatherEvents(clear, drizzleCode, {}, NOW), [], 'a drizzle code with nothing measured is not a shower');
+  const drizzleWet: WeatherSample = { ...clear, raining: true, sky: 'drizzle', mm: 0.4 };
+  assert.deepEqual(weatherEvents(clear, drizzleWet, {}, NOW).map(e => e.kind), ['rain-started'], 'measurable drizzle is');
   assert.deepEqual(weatherEvents(wet, clear, {}, NOW).map(e => e.kind), ['rain-stopped']);
   assert.deepEqual(weatherEvents(null, wet, {}, NOW), [], 'nothing to compare with yet');
 

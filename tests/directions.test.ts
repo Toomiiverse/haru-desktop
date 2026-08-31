@@ -2,7 +2,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { cleanDestination, directionsAsk, directionsNote, dropRouteTalk, googleMapsLink, mapsLink, matchNamedPlace, startingPoint, withDirections } from '../electron/directions';
+import { cleanDestination, directionsAsk, directionsAskFrom, directionsNote, streetAddress, dropRouteTalk, googleMapsLink, mapsLink, matchNamedPlace, startingPoint, withDirections } from '../electron/directions';
 import { absorb, namePlace, readSpot, readWhereabouts, type Whereabouts } from '../electron/whereabouts';
 
 const NOW = new Date('2026-08-28T10:00:00Z');
@@ -122,5 +122,28 @@ test('what Google knows about the place rides along after the distance, and noth
   const note = directionsNote({ destination: 'Bunnings', nearest: false }, found, where, Date.now(), undefined, 'It is open right now. Hours today — Monday: 6:30 am – 9:00 pm.');
   assert.match(note, /Found: Bunnings Rockingham\. It is open right now\. Hours today — Monday: 6:30 am – 9:00 pm\. The app/);
   assert.doesNotMatch(directionsNote({ destination: 'Bunnings', nearest: false }, found, where), /undefined/);
+});
+
+test('a street address is picked out of what they wrote, suburb and all, and time words are not one', () => {
+  assert.equal(streetAddress('I’m popping out to pick up a CPU at 40 Boddington Circuit. And yes - I stopped for coffee'), '40 Boddington Circuit');
+  assert.equal(streetAddress('This one: 40 boddington circuit, Dianella'), '40 boddington circuit, Dianella');
+  assert.equal(streetAddress('meet at 2/62 Fitzgerald St, Northbridge WA 6003 please'), '2/62 Fitzgerald St, Northbridge WA 6003');
+  assert.equal(streetAddress('40 Boddington Circuit tomorrow'), '40 Boddington Circuit');
+  assert.equal(streetAddress('it is a 5 minutes drive'), null);
+  assert.equal(streetAddress('back in 20 mins'), null);
+  assert.equal(streetAddress('no address here'), null);
+});
+
+test('an errand takes the address they gave a message earlier; an address alone, or a bare ask, after a directions question is the question', () => {
+  const before = ['I’m popping out to pick up a CPU at 40 Boddington Circuit. And yes - I did stop for coffee'];
+  assert.deepEqual(directionsAskFrom('Give me directions to pick up the cpu', before), { destination: '40 Boddington Circuit', nearest: false });
+  assert.deepEqual(directionsAskFrom('I meant directions to the Dianella address to pick up the CPU', [...before, 'Give me directions to pick up the cpu']), { destination: '40 Boddington Circuit', nearest: false });
+  assert.deepEqual(directionsAskFrom('This one: 40 Boddington Circuit', ['Give me directions to pick up the cpu', 'That’s where I work btw']), { destination: '40 Boddington Circuit', nearest: false });
+  assert.deepEqual(directionsAskFrom('Give me the directions please', ['This one: 40 Boddington Circuit']), { destination: '40 Boddington Circuit', nearest: false });
+  assert.deepEqual(directionsAskFrom('how do I get there?', ['This one: 40 Boddington Circuit']), { destination: '40 Boddington Circuit', nearest: false });
+  assert.equal(directionsAskFrom('Give me directions to pick up the cpu', ['no address anywhere']), null, 'an errand with no address is not searched for as a place');
+  assert.equal(directionsAskFrom('This one: 40 Boddington Circuit', ['what a day']), null, 'an address with no question before it is just an address');
+  assert.equal(directionsAskFrom('Give me the directions please', []), null);
+  assert.deepEqual(directionsAskFrom('directions to Bunnings Rockingham', before), { destination: 'Bunnings Rockingham', nearest: false }, 'a real place is still itself');
 });
 

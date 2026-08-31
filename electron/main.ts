@@ -44,7 +44,7 @@ import { HANGING_COOLDOWN_MS, isClosing, leftHanging, saidTheyWereLeaving } from
 import { awakeHoursSince, theyAreUp } from './awake';
 import { describeTold, placeToldFrom, toldTheyAreBusy, type Told } from './told';
 import { markMentioned, upcomingToMention } from './upcoming';
-import { directionsAsk, directionsNote, dropRouteTalk, matchNamedPlace, startingPoint, withDirections, type DirectionsAsk } from './directions';
+import { directionsAskFrom, directionsNote, dropRouteTalk, matchNamedPlace, startingPoint, withDirections, type DirectionsAsk } from './directions';
 import { absorb, describeWhereabouts, distanceM, forgetPlace, namePlace, placeAt, readSpot, readWhereabouts, whereForPage, type Whereabouts } from './whereabouts';
 import { convertImage, normaliseFormat, FORMATS } from './convert';
 import { cancelPower, closeApp, findApps, isCancellable, launch, listRunning, matchApp, matchRunning, normalisePower, POWER_DELAY_S, readDesktopConfig, runPower, supportedDesktop, type DesktopConfig } from './desktop';
@@ -5844,7 +5844,7 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // not from the model's assumptions about what it runs on.
   const machineNote = await systemContextFor(latest);
   // Likewise the way somewhere: found first, spoken about second, linked last.
-  const directions = await directionsFor(latest);
+  const directions = await directionsFor(latest, messages.filter(message => message.role === 'user').map(message => message.content).filter(Boolean).slice(0, -1).slice(-4));
   // Semantic retrieval: embed this turn's query (cached) and fold the memory
   // similarities into what she gets told, so "the thing we did to the server"
   // can find the memory even with no words in common.
@@ -6093,7 +6093,10 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // answer was grounded in a search, the place talk is the answer — she keeps
   // her list and still gets the button under it.
   // With a real route in hand her minutes are Google's, not a guess: the filter that strips route talk stands aside.
-  const content = directions?.found ? withDirections(fromSearch || directions.route ? herLine : dropRouteTalk(herLine), directions.found) : herLine;
+  // And with nothing found she is still not a maps app: "about 10 minutes via
+  // Stirling Hwy" for an address she never looked up is cut the same way.
+  const routeless = directions && !directions.about && !directions.route && !fromSearch ? dropRouteTalk(herLine) : herLine;
+  const content = directions?.found ? withDirections(routeless, directions.found) : routeless;
   if (herLine !== said) console.log(`[ai] dropped ${said.length - content.length} chars she had already said`);
   console.log(`[ai] chat reply in ${Date.now() - started}ms, ${content.length} chars`);
   // Cleared only once a reply actually exists, so a failed or unreachable turn
@@ -6101,7 +6104,7 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   if (fresh) store.delete('chat.freshStart');
   // Shared: the expression system consumes it through the broadcast inside,
   // and the voice awaits it to choose a clip matching how this line was said.
-  const herWords = directions?.found && !directions.route ? dropRouteTalk(herLine) : herLine;
+  const herWords = routeless;
   const saidMood = classifyEmotion(herWords, config);
   void speak(herWords, saidMood);
   void tieToPlace(latest, herWords, config);
@@ -6914,8 +6917,8 @@ function stopDiscord() {
  * prompt so she speaks from what was found, and the link is attached after she
  * has spoken (withDirections) rather than asked of her.
  */
-async function directionsFor(latest: string): Promise<{ ask: DirectionsAsk; found: FoundPlace | null; route: Route | null; note: string } | null> {
-  const ask = directionsAsk(latest);
+async function directionsFor(latest: string, recentUser: string[] = []): Promise<{ ask: DirectionsAsk; found: FoundPlace | null; route: Route | null; note: string; about?: true } | null> {
+  const ask = directionsAskFrom(latest, recentUser);
   const where = getWhereabouts();
   const weekday = zonedNow(CHAT_TIMEZONE).getDay();
   // The nearest of what came back when she knows where they are; never something
@@ -6944,7 +6947,7 @@ async function directionsFor(latest: string): Promise<{ ask: DirectionsAsk; foun
       return null;
     }
     console.log(`[maps] about "${about.destination}" (${about.want}): ${place ? `${place.name}${typeof place.openNow === 'boolean' ? place.openNow ? ', open' : ', closed' : ''}` : 'not found'}`);
-    return { ask: { destination: about.destination, nearest: false }, found: null, route: null, note: placeNote(about, place, weekday) };
+    return { ask: { destination: about.destination, nearest: false }, found: null, route: null, note: placeNote(about, place, weekday), about: true };
   }
   let found: FoundPlace | null = null;
   let facts: string | undefined;
@@ -7189,7 +7192,10 @@ async function boredNudge(): Promise<string | null> {
     egoInstruction(mood.ego),
     grudgeInstruction(mood.grudge ?? 0, mood.ignoredToday ?? 0),
     'They are away, reachable only as a notification on their phone. Nothing on their list needs you. You are messaging them first — nothing they said prompted this.',
-    quietHours !== null && quietHours >= 1 ? `They have not said a word to you in ${quietHours} hour${quietHours === 1 ? '' : 's'}.` : '',
+    // The exact length, or she invents one: told nothing under an hour she wrote
+    // "playing ghost for an hour" and "10 minutes of silence" in the same line.
+    quietHours !== null && quietHours >= 1 ? `They have not said a word to you in ${quietHours} hour${quietHours === 1 ? '' : 's'}. That is the length of the silence — name no other.`
+      : mood.lastMessageAt ? `They last wrote to you ${Math.max(1, Math.round((Date.now() - Date.parse(mood.lastMessageAt)) / 60_000))} minutes ago. That is the length of the silence — do not call it longer or shorter.` : '',
     thing ? `Bring up this in particular, as though it has been on your mind: ${thing.text}`
       : ignoring ? 'You are not speaking to them properly right now, and they know why. One cold line that makes it plain you noticed the silence — no warmth, no question, no help.'
       : 'Nothing in particular to bring up: the silence itself is the subject.',
