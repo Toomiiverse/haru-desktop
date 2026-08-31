@@ -6930,10 +6930,13 @@ async function directionsFor(latest: string): Promise<{ ask: DirectionsAsk; foun
       // The nearest of what came back, and never something on another continent
       // when they are asking from Perth: a hit over 400 km away is not the place
       // they meant, however well it matched the name.
-      const ranked = from ? hits.map(hit => ({ hit, d: distanceM(from, hit) })).sort((a, b) => a.d - b.d) : [];
+      // Places before roads, then nearest: "Rockingham" is the suburb, not
+      // Rockingham Road twenty minutes nearer.
+      const road = (hit: FoundPlace) => (hit.kind === 'road' ? 1 : 0);
+      const ranked = from ? hits.map(hit => ({ hit, d: distanceM(from, hit) })).sort((a, b) => road(a.hit) - road(b.hit) || a.d - b.d) : [];
       const near = ranked.filter(entry => entry.d <= 400_000);
       if (from && ranked.length && !near.length) console.log(`[maps] every hit for "${ask.destination}" is ${Math.round(ranked[0].d / 1000)} km away — not it`);
-      found = from ? near[0]?.hit ?? null : hits[0] ?? null;
+      found = from ? near[0]?.hit ?? null : [...hits].sort((a, b) => road(a) - road(b))[0] ?? null;
     } catch (error) {
       console.warn(`[maps] the search for "${ask.destination}" failed: ${(error as Error).message}`);
     }

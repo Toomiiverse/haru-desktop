@@ -14,7 +14,8 @@ test('the search is biased around them, and every hit comes back named and place
   const asked: string[] = [];
   const fetchImpl = async (url: string) => { asked.push(url); return { ok: true, json: async () => hits } as unknown as Response; };
   const found = await searchPlaces('coles', fetchImpl, { lat: -31.95, lon: 115.86 });
-  assert.deepEqual(found, [
+  // The old shape, exactly; `kind` is checked on its own below.
+  assert.deepEqual(found.map(({ kind, ...rest }) => rest), [
     { name: 'Coles, Wembley', lat: -31.933, lon: 115.799 },
     { name: 'Coles Express, Subiaco', lat: -31.948, lon: 115.825 },
   ]);
@@ -47,4 +48,13 @@ test('a location fix says it is Windows only rather than failing to spawn', asyn
   } finally {
     Object.defineProperty(process, 'platform', { value: platform, configurable: true });
   }
+});
+
+test('a hit knows whether it is a road or a place', async () => {
+  const fetchImpl = (async () => ({ ok: true, status: 200, json: async () => [
+    { name: 'Rockingham Road', display_name: 'Rockingham Road, Hamilton Hill', lat: '-32.08', lon: '115.78', class: 'highway', type: 'primary', address: { suburb: 'Hamilton Hill' } },
+    { name: 'Rockingham', display_name: 'Rockingham, WA', lat: '-32.28', lon: '115.73', class: 'place', type: 'town', address: { state: 'Western Australia' } },
+  ] })) as never;
+  const hits = await searchPlaces('Rockingham', fetchImpl, { lat: -32.0, lon: 115.8 }, 'Perth, Australia');
+  assert.deepEqual(hits.map(h => h.kind), ['road', 'place']);
 });

@@ -141,7 +141,9 @@ export async function lookUpPlace(fix: Fix, fetchImpl: Fetcher): Promise<string>
   return name;
 }
 
-export type FoundPlace = { name: string; lat: number; lon: number };
+export type FoundPlace = { name: string; lat: number; lon: number;
+  /** What Nominatim says it is: a road, a place (suburb, town, locality), or something else (a shop, an amenity). */
+  kind?: 'road' | 'place' | 'other' };
 
 /**
  * Places by name, through the same service, biased to where they are.
@@ -170,14 +172,17 @@ export async function searchPlaces(query: string, fetchImpl: Fetcher, near: { la
     signal: AbortSignal.timeout(12_000),
   });
   if (!response.ok) throw new Error(`the place search returned ${response.status}`);
-  const payload = await response.json() as { name?: string; display_name?: string; lat?: string; lon?: string; address?: Address }[];
+  const payload = await response.json() as { name?: string; display_name?: string; lat?: string; lon?: string; address?: Address; class?: string; type?: string }[];
   const found: FoundPlace[] = [];
   for (const hit of Array.isArray(payload) ? payload : []) {
     const lat = Number(hit.lat), lon = Number(hit.lon);
     if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
     const head = (hit.name || (hit.display_name ?? '').split(',')[0] || '').trim();
     const area = nameFrom(hit.address ?? {}).split(', ')[0];
-    found.push({ name: [...new Set([head, area].filter(Boolean))].join(', ') || q, lat, lon });
+    // "Rockingham" is a suburb 35 km south and a road 25 km away; asked for the
+    // name alone, they mean the suburb, and the caller ranks by this.
+    const kind: FoundPlace['kind'] = hit.class === 'highway' ? 'road' : (hit.class === 'place' || hit.class === 'boundary') ? 'place' : 'other';
+    found.push({ name: [...new Set([head, area].filter(Boolean))].join(', ') || q, lat, lon, kind });
   }
   return found;
 }
