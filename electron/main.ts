@@ -4876,6 +4876,14 @@ function recentExchange(limit = 6): string {
     .join('\n');
 }
 
+/**
+ * Every note she is handed calls him "they" — they are written to her, about
+ * him. Composing a line from them, the 9B wrote "They're just sitting there,
+ * scrolling" to his phone, and he asked who she meant. There is nobody else in
+ * the conversation, so the notes' "they" is the person reading the line.
+ */
+const WRITING_TO_THEM = 'These notes call them "they" and "them" because they are written to you about the person you are messaging. You are writing to that person: address them as "you". Never write about them in the third person — there is nobody else here, and "they" reads as someone else in the room.';
+
 const IN_THE_MOMENT = 'Answer inside that conversation, not beside it. If they were on their way out, or busy, or you had just told them to do something, your line belongs to that moment — carry it on rather than commenting on yourself from nowhere.';
 
 const normaliseLine = (text: string) => text.toLowerCase().replace(/[^\p{L}\p{N} ]/gu, ' ').replace(/\s+/g, ' ').trim();
@@ -4934,7 +4942,7 @@ export function ollamaRetort(disliked: string, config: ProviderConfig) {
     recent ? `How the conversation was going, oldest first:\n${recent}\n` : '',
     `This is the reply I marked as poor: "${disliked.slice(0, 500)}"${interrupted}`,
   ].filter(Boolean).join('\n');
-  return quipOfHerOwn(system, user, config, RETORT_EXAMPLES);
+  return quipOfHerOwn(system, user, config, [...RETORT_EXAMPLES, disliked]);
 }
 
 // Praise is not thanked for, it is cashed in. The line should read as her taking
@@ -4960,7 +4968,9 @@ export function ollamaGloat(praised: string, config: ProviderConfig, ego: number
     recent ? `How the conversation was going, oldest first:\n${recent}\n` : '',
     `This is the reply I marked as good: "${praised.slice(0, 500)}"${interrupted}`,
   ].filter(Boolean).join('\n');
-  return quipOfHerOwn(system, user, config, GLOAT_EXAMPLES);
+  // Her own praised line, handed back verbatim, went out as the gloat — the
+  // same reply twice, six seconds apart. It is a line she must not reuse.
+  return quipOfHerOwn(system, user, config, [...GLOAT_EXAMPLES, praised]);
 }
 
 /**
@@ -7458,6 +7468,7 @@ async function boredNudge(): Promise<string | null> {
     NO_NON_SEQUITURS,
     EXPRESSIVE,
     unpromptedContext(),
+    WRITING_TO_THEM,
     'One short line. No quotation marks, no stage directions.',
   ].filter(Boolean).join(' ');
   try {
@@ -7652,7 +7663,11 @@ function proactiveSystem(...facts: string[]): string {
     `It is ${formatTimeOfDay(now.getHours(), now.getMinutes())}, in their timezone.`,
     ...facts,
     'They are away from their desk; this arrives as a notification on their phone. One or two short lines, in your voice. No quotation marks, no stage directions, no greeting.',
-    NO_INVENTED_HISTORY, EXPRESSIVE, unpromptedContext(),
+    NO_INVENTED_HISTORY, EXPRESSIVE, unpromptedContext(), WRITING_TO_THEM,
+    // Last, because everything above it is context and this is the errand: told
+    // rain was due in 44 minutes she wrote about him scrolling and never
+    // mentioned it, and a weather notification with no weather in it is noise.
+    facts.length ? 'The facts at the top are why you are writing at all: what they say — the thing and when — must survive into your line. The attitude is yours; the fact is not optional.' : '',
   ].filter(Boolean).join('\n\n');
 }
 
