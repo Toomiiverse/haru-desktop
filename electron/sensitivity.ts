@@ -107,7 +107,16 @@ function hasHighEntropyRun(text: string): boolean {
  * put a local file into the conversation. A document she was asked to read is
  * the user's own writing, and no pattern here would recognise it as private.
  */
-export function mayLeaveTheMachine(text: string, readLocalContent = false): Verdict {
+/** The name of a secret with a value beside it — "password: hunter2", "the api key is sk…" — as opposed to the word on its own. */
+const NAMES_A_SECRET_WITH_VALUE = new RegExp(NAMES_A_SECRET.source + String.raw`\s*(?:is|was|:|=|->|—|–)\s*["'\`]?\S{4,}`, 'i');
+
+/**
+ * `namesAlone`: whether merely naming a secret is enough to refuse. It is for
+ * what they type — "what's my wifi password" is a topic they chose to keep at
+ * home — and not for what she said back: "you're using my name like a
+ * password" kept the next six turns local for the word alone.
+ */
+export function mayLeaveTheMachine(text: string, readLocalContent = false, { namesAlone = true } = {}): Verdict {
   if (readLocalContent) return refuse('a file from this machine is in this conversation');
   const said = text ?? '';
   if (!said.trim()) return SAFE;
@@ -116,7 +125,7 @@ export function mayLeaveTheMachine(text: string, readLocalContent = false): Verd
     if (pattern.test(said)) return refuse(`it contains ${what}`);
   }
   if (hasCardNumber(said)) return refuse('it contains what looks like a card number');
-  if (NAMES_A_SECRET.test(said)) return refuse('it is about passwords or keys');
+  if (namesAlone ? NAMES_A_SECRET.test(said) : NAMES_A_SECRET_WITH_VALUE.test(said)) return refuse('it is about passwords or keys');
   if (hasHighEntropyRun(said)) return refuse('it contains something that looks like a key');
   return SAFE;
 }
@@ -137,7 +146,7 @@ export function conversationMayLeave(
 ): Verdict {
   if (readLocalContent) return refuse('a file from this machine is in this conversation');
   for (const message of messages.slice(-depth)) {
-    const verdict = mayLeaveTheMachine(String(message.content ?? ''));
+    const verdict = mayLeaveTheMachine(String(message.content ?? ''), false, { namesAlone: message.role === 'user' });
     if (!verdict.safe) {
       return refuse(message.role === 'user' ? verdict.because : `${verdict.because}, from earlier in this conversation`);
     }

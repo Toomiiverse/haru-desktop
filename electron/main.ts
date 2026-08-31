@@ -6166,7 +6166,9 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // The reminder read from their message is the truth about its time, whatever she says.
   // Her promise, kept: "I'll set the reminder at 6:54 AM" with nothing written
   // is a reminder that exists only in the conversation. See reminderPromised.
-  const promised = !reminder && messages.at(-1)?.role === 'user' ? reminderPromised(cleaned, zonedNow(CHAT_TIMEZONE)) : null;
+  // Not when she already wrote it down herself this turn: the tool ran and
+  // she said "reminder set", and the net caught the sentence a second time.
+  const promised = !reminder && !ran.has('create_kept_item') && messages.at(-1)?.role === 'user' ? reminderPromised(cleaned, zonedNow(CHAT_TIMEZONE)) : null;
   if (promised) {
     const theirs = messages.filter(message => message.role === 'user').slice(-4).map(message => String(message.content ?? ''));
     const item = addKeptItem({ title: promisedTitle(theirs), date: promised.date, time: promised.time, kind: 'task' });
