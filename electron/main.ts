@@ -44,7 +44,7 @@ import { HANGING_COOLDOWN_MS, isClosing, leftHanging, saidTheyWereLeaving } from
 import { awakeHoursSince, theyAreUp } from './awake';
 import { describeTold, placeToldFrom, toldTheyAreBusy, type Told } from './told';
 import { markMentioned, upcomingToMention } from './upcoming';
-import { directionsAskFrom, directionsNote, dropRouteTalk, matchNamedPlace, startingPoint, withDirections, type DirectionsAsk } from './directions';
+import { directionsAskFrom, directionsNote, dropRouteTalk, matchNamedPlace, startingPoint, withDirections, withoutMapsLinks, type DirectionsAsk } from './directions';
 import { absorb, describeWhereabouts, distanceM, forgetPlace, namePlace, placeAt, readSpot, readWhereabouts, whereForPage, type Whereabouts } from './whereabouts';
 import { convertImage, normaliseFormat, FORMATS } from './convert';
 import { cancelPower, closeApp, findApps, isCancellable, launch, listRunning, matchApp, matchRunning, normalisePower, POWER_DELAY_S, readDesktopConfig, runPower, supportedDesktop, type DesktopConfig } from './desktop';
@@ -5900,7 +5900,11 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // What she can still see. Not only this message: a picture has to ride along
   // again on the next turn or "what is in week three" cannot be answered, and
   // attachmentsInPlay is where the bound on doing that lives.
-  const vetted = messages.map(message => (message.attachments?.length ? { ...message, attachments: ourFiles(message.attachments) } : message));
+  // The maps buttons the app put under her earlier words are stored in the
+  // message and are not hers to see: shown one, she wrote one, coordinates
+  // and all, in place of a reply.
+  const vetted = messages.map(message => (message.attachments?.length ? { ...message, attachments: ourFiles(message.attachments) } : message))
+    .map(message => (message.role === 'assistant' && /maps\.apple\.com|google\.com\/maps|goo\.gl/.test(message.content ?? '') ? { ...message, content: withoutMapsLinks(message.content) } : message));
   const inPlay = attachmentsInPlay(vetted, Date.now());
   const carried = [...inPlay.values()].flat();
   // Only what arrived with this message decides where it is answered. A
@@ -6053,7 +6057,10 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // Not on a grounded answer: with "eat breakfast" on the list, every paragraph
   // of a restaurant list reads as her nagging about breakfast again, and the
   // list is what they asked for.
-  const deduped = fromSearch ? said : dropRepeatedAgendaMentions(said, recent, onList, latest);
+  // Any maps link she typed is a made-up one — the app attaches the real button below.
+  const unlinked = withoutMapsLinks(said);
+  if (unlinked !== said) console.log('[maps] dropped a link she wrote herself');
+  const deduped = fromSearch ? unlinked : dropRepeatedAgendaMentions(unlinked, recent, onList, latest);
   // Outermost on purpose: it counts paragraphs, so it has to see the ones
   // that survive everything else rather than the ones about to be dropped.
   // "ran" is what she actually reached for this turn, which is a fact about

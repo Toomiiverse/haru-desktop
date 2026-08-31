@@ -190,6 +190,16 @@ export function directionsNote(ask: DirectionsAsk, found: Found | null, where: W
   return `They asked the way to "${ask.destination}". Found: ${found.name}.${distance}${there}${about} The app is attaching a button under your words that opens their maps with the route. You do not know the roads, buses or journey times there, so anything you say about the route would be made up and will be cut; one or two lines of yours, in your voice, about them going, is all that is wanted.`;
 }
 
+// A maps link, as the app writes one under her words — and as she then copied
+// it, coordinates invented, once one sat in her own history. The app attaches
+// the button; she never types one.
+const MAPS_LINK = /\s*\[[^\]\n]*\]\(\s*https?:\/\/(?:maps\.apple\.com|(?:www\.)?google\.com\/maps|maps\.google\.com|goo\.gl\/maps|maps\.app\.goo\.gl)[^)\s]*\)|\s*https?:\/\/(?:maps\.apple\.com|(?:www\.)?google\.com\/maps|maps\.google\.com|maps\.app\.goo\.gl)\S*/gi;
+
+/** The text without any maps link in it: her history as she should see it, and her line as she may write it. */
+export function withoutMapsLinks(text: string): string {
+  return (text ?? '').replace(MAPS_LINK, '').replace(/\n{3,}/g, '\n\n').trim();
+}
+
 /** Her words with the button's link under them, as a markdown link the page and the desktop both render. */
 export function withDirections(reply: string, found: Found): string {
   const label = `Directions to ${found.name.split(',')[0].trim() || 'there'}`;

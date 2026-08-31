@@ -2,7 +2,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { cleanDestination, directionsAsk, directionsAskFrom, directionsNote, streetAddress, dropRouteTalk, googleMapsLink, mapsLink, matchNamedPlace, startingPoint, withDirections } from '../electron/directions';
+import { cleanDestination, directionsAsk, directionsAskFrom, directionsNote, streetAddress, withoutMapsLinks, dropRouteTalk, googleMapsLink, mapsLink, matchNamedPlace, startingPoint, withDirections } from '../electron/directions';
 import { absorb, namePlace, readSpot, readWhereabouts, type Whereabouts } from '../electron/whereabouts';
 
 const NOW = new Date('2026-08-28T10:00:00Z');
@@ -147,3 +147,9 @@ test('an errand takes the address they gave a message earlier; an address alone,
   assert.deepEqual(directionsAskFrom('directions to Bunnings Rockingham', before), { destination: 'Bunnings Rockingham', nearest: false }, 'a real place is still itself');
 });
 
+test('a maps link is taken out of the text, hers or the app\'s, and plain words are left alone', () => {
+  assert.equal(withoutMapsLinks('Don’t dawdle. 🙄\n\n[Directions to The PC Project](https://maps.apple.com/?daddr=-31.94527,115.85322&dirflg=d)'), 'Don’t dawdle. 🙄');
+  assert.equal(withoutMapsLinks('[Directions to 40 Boddington Circuit](https://maps.apple.com/?daddr=-31.9727,115.8478&dirflg=d)'), '');
+  assert.equal(withoutMapsLinks('Here: https://www.google.com/maps/dir/?api=1&destination=-32.1,115.8 go.'), 'Here: go.');
+  assert.equal(withoutMapsLinks('Get that CPU mounted.'), 'Get that CPU mounted.');
+});
