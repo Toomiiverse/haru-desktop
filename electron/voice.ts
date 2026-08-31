@@ -23,9 +23,9 @@ export type VoiceReference = { clip: string; text: string;
   /** More clips of the same voice in the same mood (GPT-SoVITS v2+ `aux_ref_audio_paths`): the timbre is fused across them, so one clip's quirk does not colour every line. */
   aux?: string[] };
 
-/** GPT-SoVITS sampling. The server's defaults, except a cooler temperature: on a small English fine-tune it steadies pitch and drops fewer words. */
+/** GPT-SoVITS sampling, sent rather than left to the server. Temperature stays at 1: at 0.85 the smug reference cut every line off at half length — the cooler sampling reaches the end-of-speech token early. */
 export type VoiceSampling = { topK: number; topP: number; temperature: number; repetitionPenalty: number; fragmentInterval: number };
-export const DEFAULT_SAMPLING: VoiceSampling = { topK: 15, topP: 1, temperature: 0.85, repetitionPenalty: 1.35, fragmentInterval: 0.3 };
+export const DEFAULT_SAMPLING: VoiceSampling = { topK: 15, topP: 1, temperature: 1, repetitionPenalty: 1.35, fragmentInterval: 0.3 };
 
 export type VoiceConfig = {
   engine: VoiceEngine;
