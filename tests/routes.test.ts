@@ -2,7 +2,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { computeRoute, parseRoute, plainRouteError, routeRequest, routeWords, ROUTES_URL } from '../electron/routes';
+import { computeRoute, fixStatedRoute, parseRoute, plainRouteError, routeRequest, routeWords, ROUTES_URL } from '../electron/routes';
 
 const google = { routes: [{ duration: '1860s', staticDuration: '1740s', distanceMeters: 33600, description: 'Kwinana Fwy/State Route 2' }] };
 
@@ -39,3 +39,14 @@ test('a refusal is said plainly, and a good answer comes back whole', async () =
   assert.equal(plainRouteError(403, { error: { message: 'You must enable Billing on the Google Cloud Project' } }), 'Google wants billing enabled on the project');
   assert.equal(plainRouteError(500, {}), 'Google answered 500');
 });
+
+test('the minutes, distance and roads she states become the route\'s; a right number and the rest of her line are left alone', () => {
+  const route = { minutes: 18, typicalMinutes: 17, km: 9.7, via: 'Fitzgerald St and Alexander Dr/State Route 56' };
+  assert.equal(fixStatedRoute('By car it’s about 10 minutes from where you are, via Stirling Hwy and Dianella Drive. Don’t dawdle. 🙄', route),
+    'By car it’s 18 minutes from where you are, via Fitzgerald St and Alexander Dr/State Route 56. Don’t dawdle. 🙄');
+  assert.equal(fixStatedRoute('18 minutes, about 9.7 km via Fitzgerald St and Alexander Dr/State Route 56. Go.', route), '18 minutes, about 9.7 km via Fitzgerald St and Alexander Dr/State Route 56. Go.');
+  assert.equal(fixStatedRoute('roughly 45 minutes to an hour, 33 km.', route), '18 minutes, 9.7 km.');
+  assert.equal(fixStatedRoute('about half an hour away.', route), '18 minutes away.');
+  assert.equal(fixStatedRoute('Get that CPU mounted in 10 minutes or else.', route), 'Get that CPU mounted in 18 minutes or else.', 'a duration she meant otherwise is the price of the rule — the route note tells her not to state others');
+});
+

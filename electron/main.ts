@@ -72,7 +72,7 @@ import { conversationMayLeave, mayLeaveTheMachine } from './sensitivity';
 import { addCheckIn, checkInInstruction, checkInsOn, readCheckIns, type CheckIn } from './checkins';
 import { standingFrom } from './standing';
 import { herFrom } from './her';
-import { computeRoute, routeWords, type Route } from './routes';
+import { computeRoute, fixStatedRoute, routeWords, type Route } from './routes';
 import { placeAsk, placeNote, placeWords, searchGooglePlaces, type GooglePlace } from './placeinfo';
 import { addAside, alreadySaidRecently, asideContext, asidesOn, markReached, pruneAsides, readAsides, type Aside, type AsideSource } from './asides';
 import { attachmentsInPlay, describeAttached, READ_IT_ALL_PROMPT, readAttachments, type Attachment, type Opened } from './attachments';
@@ -6102,7 +6102,10 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // With a real route in hand her minutes are Google's, not a guess: the filter that strips route talk stands aside.
   // And with nothing found she is still not a maps app: "about 10 minutes via
   // Stirling Hwy" for an address she never looked up is cut the same way.
-  const routeless = directions && !directions.about && !directions.route && !fromSearch ? dropRouteTalk(herLine) : herLine;
+  // With a route in hand her numbers are made Google's — her own guess from
+  // an hour earlier, still in the history, outweighed the brief.
+  const routeless = directions?.route ? fixStatedRoute(herLine, directions.route) : directions && !directions.about && !fromSearch ? dropRouteTalk(herLine) : herLine;
+  if (routeless !== herLine && directions?.route) console.log('[maps] corrected the minutes, distance or roads she stated to the route');
   const content = directions?.found ? withDirections(routeless, directions.found) : routeless;
   if (herLine !== said) console.log(`[ai] dropped ${said.length - content.length} chars she had already said`);
   console.log(`[ai] chat reply in ${Date.now() - started}ms, ${content.length} chars`);

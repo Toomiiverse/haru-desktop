@@ -95,3 +95,25 @@ export function routeWords(route: Route, fromWhere: 'here' | 'home'): string {
     : ', about the same as a normal day';
   return `By car it is ${route.minutes} minutes ${from} right now${traffic}; ${route.km} km${route.via ? `, via ${route.via}` : ''}. These numbers are from Google with live traffic, as of now — quote them as they are, do not round them into a guess, and say nothing about the road beyond them.`;
 }
+
+/**
+ * Her stated numbers, made Google's. Told 18 minutes via Alexander Drive she
+ * still wrote "about 10 minutes via Stirling Hwy" — her own guess from an
+ * hour earlier, sitting in the history. The minutes, the distance and the
+ * roads she names are replaced with the route's; the rest of the line is hers.
+ */
+export function fixStatedRoute(reply: string, route: Route): string {
+  let out = reply.replace(/\b(?:(?:about|around|roughly|approximately|maybe|some|under|over|nearly|almost)\s+)?(\d{1,3})(?:\s*(?:-|–|to)\s*\d{1,3})?\s*(?:min|mins|minutes)\b/gi,
+    (m, n) => (Number(n) === route.minutes ? m : `${route.minutes} minutes`));
+  out = out.replace(/\b(?:(?:about|around|roughly)\s+)?(?:half an hour|an hour|an hour and a half|two hours)\b/gi, m => {
+    const said = /half an hour/i.test(m) ? 30 : /and a half/i.test(m) ? 90 : /two/i.test(m) ? 120 : 60;
+    return Math.abs(said - route.minutes) <= 3 ? m : `${route.minutes} minutes`;
+  });
+  out = out.replace(/\b(?:(?:about|around|roughly)\s+)?(\d{1,3}(?:\.\d)?)\s*(?:km|kms|kilometres|kilometers)\b/gi,
+    (m, n) => (Math.abs(Number(n) - route.km) < 0.6 ? m : `${route.km} km`));
+  // "45 minutes to an hour" is two numbers made one twice over.
+  out = out.replace(new RegExp(`${route.minutes} minutes\\s*(?:-|–|to|or)\\s*${route.minutes} minutes`, 'gi'), `${route.minutes} minutes`);
+  if (route.via) out = out.replace(/\bvia\s+[^.,;!?\n]+/gi, m => (m.slice(4).trim().toLowerCase() === route.via.toLowerCase() ? m : `via ${route.via}`));
+  return out;
+}
+
