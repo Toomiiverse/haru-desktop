@@ -11,7 +11,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { answersThePrompt, CUE_NOTE, isCue, stageNote, claimsDesktopAction, claimsTickOff, dropInventedContact, dropInventedScreenTalk, dropRepeatedAgendaMentions, dropRepeatedParagraphs, dropRoleHeader, dropStageDirections, dropTackedOnParagraphs, readsLikeAssistant, dropRepeatedOpener, dropEchoOpener, dropRepeatedSentences, fixStatedClock, fixStatedReminderTime } from '../electron/reply';
+import { answersThePrompt, CUE_NOTE, isCue, stageNote, claimsDesktopAction, claimsTickOff, dropInventedContact, dropInventedScreenTalk, dropRepeatedAgendaMentions, dropRepeatedParagraphs, dropRoleHeader, dropStageDirections, dropTackedOnParagraphs, readsLikeAssistant, dropRepeatedOpener, dropEchoOpener, dropRepeatedSentences, fixStatedClock, fixStatedReminderTime, fixStatedMinutes } from '../electron/reply';
 
 // -- claiming to have touched the machine -------------------------------------
 
@@ -420,3 +420,11 @@ test('a cue is a cue, and anything they might actually have said is not', () => 
   assert.match(stageNote('Say something.'), /^\[Stage direction from the app — not a message from them; they have said nothing\. Say something\.\]$/);
   assert.match(CUE_NOTE, /never quote it, mention it, answer it/i);
 });
+
+test('the minutes of silence she states become the real ones, digits or words; a right number is left alone', () => {
+  assert.equal(fixStatedMinutes('It’s been fourteen minutes since you last typed a damn thing.', 27), 'It’s been 27 minutes since you last typed a damn thing.');
+  assert.equal(fixStatedMinutes('Forty-five mins of nothing. Typical.', 27), '27 minutes of nothing. Typical.');
+  assert.equal(fixStatedMinutes('27 minutes. I counted.', 27), '27 minutes. I counted.');
+  assert.equal(fixStatedMinutes('No minutes mentioned here.', 27), 'No minutes mentioned here.');
+});
+

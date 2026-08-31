@@ -35,7 +35,7 @@ import {
   staleItemNamed,
   inventedTimeFor,
   raisedRecently,
-} from '../electron/agenda';
+  underwayClause, isUnderway, FOLLOW_UP_MS, UNDERWAY_GRACE_MS } from '../electron/agenda';
 
 const TODAY = '2026-08-20';
 const at = (hour: number, minute = 0) => new Date(2026, 7, 20, hour, minute);
@@ -510,6 +510,10 @@ test('an unprompted line that names a party three weeks gone, or a thing already
   assert.equal(staleItemNamed('Did you sleep through Ammie’s party, or are you just slow?', items, '2026-08-28')?.title, 'Ammie’s Birthday Party');
   assert.equal(staleItemNamed('The store cleaning is still waiting on you.', items, '2026-08-28')?.title, 'Store cleaning');
   assert.equal(staleItemNamed('Scarlett’s present. Still nothing?', items, '2026-08-28'), null, 'a live item may be chased');
+  const now = Date.parse('2026-08-31T06:00:00Z');
+  const fresh = [{ title: 'Create a Steam family cache', date: '2026-08-31', time: '1:00 PM', kind: 'task', done: true, completedAt: '2026-08-31T05:30:00Z' }];
+  assert.equal(staleItemNamed('So how did the Steam family cache go?', fresh, '2026-08-31', now), null, 'just done is a follow-up, not stale');
+  assert.equal(staleItemNamed('So how did the Steam family cache go?', fresh, '2026-08-31', now + FOLLOW_UP_MS + 60_000)?.title, 'Create a Steam family cache', 'hours later it is over');
   assert.equal(staleItemNamed('It is 1:43 PM and you look like a zombie.', items, '2026-08-28'), null, 'a line that names nothing passes');
   // One ordinary word that happens to belong to somebody's old errand is not
   // naming it. Every evening tally was dropped for "message", which is the
@@ -585,3 +589,19 @@ test('but a line that really does name the task still counts', () => {
   const invented = inventedTimeFor('The motherboard pickup from Umart is at 7:30.', items);
   assert.equal(invented?.id, '2');
 });
+
+test('"getting it done now" is started, not finished — and holds the chase for a while', () => {
+  assert.equal(underwayClause('Getting it done now'), 'Getting it done now');
+  assert.ok(underwayClause('ok on it'));
+  assert.ok(underwayClause('Doing that now, stop nagging'));
+  assert.ok(underwayClause('just started it'));
+  assert.equal(underwayClause('Done, got it sorted'), null, 'finished is finished');
+  assert.equal(underwayClause("haven't done it yet"), null);
+  assert.equal(underwayClause('what are the three window icons called'), null);
+  const now = Date.parse('2026-08-31T05:00:00Z');
+  const item = { underway: '2026-08-31T05:00:00Z', done: false };
+  assert.equal(isUnderway(item, now + 10 * 60_000), true);
+  assert.equal(isUnderway(item, now + UNDERWAY_GRACE_MS + 60_000), false, 'after the grace she asks again');
+  assert.equal(isUnderway({ ...item, done: true }, now + 60_000), false);
+});
+

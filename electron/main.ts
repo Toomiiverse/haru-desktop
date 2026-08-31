@@ -15,7 +15,7 @@ import { applyEvent, chooseIdleAction, cueLog, DEFAULT_VITALS, driftVitals, next
 import { classificationPrompt, emotionToVitals, EMOTION_SCHEMA, EMOTIONS, NEUTRAL_EMOTION, parseEmotion, type Emotion, type EmotionName, faceForEmotion } from './emotion';
 import { withDiscoveredExpressions } from './expressions';
 import { reportCapabilities, seesItsOwnScreen } from './capabilities';
-import { chaseableOverdue, findItem, shiftDays, formatAgenda, itemStatus, missedInstruction, putOffInstruction, putOffUntil, relevantItems, readsAsAnswerToHer, readsAsBareReport, tickOffInstruction, readsAsDone, doneClause, readsAsNotDone, relativeDay, staleItemNamed, inventedTimeFor, raisedRecently, type ItemStatus } from './agenda';
+import { chaseableOverdue, findItem, shiftDays, formatAgenda, itemStatus, missedInstruction, putOffInstruction, putOffUntil, relevantItems, readsAsAnswerToHer, readsAsBareReport, tickOffInstruction, readsAsDone, doneClause, readsAsNotDone, relativeDay, staleItemNamed, inventedTimeFor, raisedRecently, type ItemStatus, underwayClause, isUnderway, FOLLOW_UP_MS } from './agenda';
 import { isRelaunchNotReturn, openingAngles, pickAngle, shouldPipeUp } from './opening';
 import { allDayDueMinutes, isEveningCheck, reminderInstruction, reminderTier, reminderVolume, shouldRemind, type ReminderState } from './reminders';
 import { isHeated, readTone, sharpen, toneGesture, tonePose } from './tone';
@@ -57,7 +57,7 @@ import { haruNote, rangeStats, type HaruNote, type RangeName, type RangeStats } 
 import { describeRating, entryFor, journalPrompt, readEntries, readJournalConfig, readRating, recentTrend, shouldAsk, upsertEntry, SCALE_MAX, type JournalConfig, type JournalEntry } from './journal';
 import { formatList, formatMedia, formatMissing, lookUp, readAniListConfig, userList, type AniListConfig, type ListEntry, type MediaKind } from './anilist';
 import { createDesktopShortcut, desktopShortcutPath, isAutoStartEnabled, setAutoStart, startedHidden } from './startup';
-import { answersThePrompt, CUE_NOTE, isCue, stageNote, dropRoleHeader, dropTackedOnParagraphs, dropInventedContact, dropInventedScreenTalk, dropRepeatedAgendaMentions, dropRepeatedParagraphs, dropStageDirections, dropRepeatedOpener, dropEchoOpener, dropRepeatedSentences, fixStatedClock, fixStatedReminderTime } from './reply';
+import { answersThePrompt, CUE_NOTE, isCue, stageNote, dropRoleHeader, dropTackedOnParagraphs, dropInventedContact, dropInventedScreenTalk, dropRepeatedAgendaMentions, dropRepeatedParagraphs, dropStageDirections, dropRepeatedOpener, dropEchoOpener, dropRepeatedSentences, fixStatedClock, fixStatedReminderTime, fixStatedMinutes } from './reply';
 import { runToolLoop } from './toolloop';
 import { chatTools, coerceKnowledgeCategory, runChatTool, type ToolAvailability, type ToolDeps } from './tools';
 import { createMemoryStore } from './memorystore';
@@ -121,7 +121,7 @@ type Live2DModel = { path: string; name: string; url: string };
 // completedAt is when a task was ticked off, not when it was due — the two come
 // apart whenever something is confirmed late, and it is the former she needs to
 // know how freshly she was told. Absent on anything ticked before it was kept.
-type KeptItem = { id: string; title: string; date: string; time?: string; kind: 'task' | 'event'; done: boolean; completedAt?: string; heardAbout?: string; googleEventId?: string; googleTaskId?: string };
+type KeptItem = { id: string; title: string; date: string; time?: string; kind: 'task' | 'event'; done: boolean; completedAt?: string; heardAbout?: string; underway?: string; googleEventId?: string; googleTaskId?: string };
 type Profile = { nickname: string; occupation: string; about: string };
 type Memory = { id: string; text: string; createdAt: string };
 
@@ -913,7 +913,7 @@ function removeKept(id: string) {
   return removed;
 }
 
-function updateKept(id: string, changes: Partial<Pick<KeptItem, 'title' | 'date' | 'time'>>) {
+function updateKept(id: string, changes: Partial<Pick<KeptItem, 'title' | 'date' | 'time' | 'underway'>>) {
   const target = getKept().find(item => item.id === id);
   if (!target) return null;
   const updated = { ...target, ...changes };
@@ -3175,7 +3175,7 @@ function chaseTarget(
   // Only tasks: an event happens whether or not they are reminded of it, and
   // there is nothing for them to have done about it.
   return getKept()
-    .filter(item => item.kind === 'task')
+    .filter(item => item.kind === 'task' && !isUnderway(item, Date.now()))
     .map(item => ({ item, due: minutesUntil(item, now, todayKey) }))
     // Soonest first, and anything already overdue ahead of anything upcoming.
     .sort((a, b) => a.due - b.due)
@@ -3227,7 +3227,8 @@ async function considerReminding(environment: Environment): Promise<boolean> {
     const day = relativeDay(target.item.date, todayKey, new Intl.DateTimeFormat('en-US', { weekday: 'long' }));
     // "today" and "last Friday" are already adverbial; a bare weekday needs "on".
     const onDay = /^(today|yesterday|tomorrow|last )/.test(day) ? day : `on ${day}`;
-    const when = evening ? `which they put on for ${day} with no particular time`
+    const when = target.item.underway ? `which they told you at ${clockAt(Date.parse(target.item.underway))} they were getting on with, and which is still not ticked off — ask whether it is actually done, not whether they have started`
+      : evening ? `which they put on for ${day} with no particular time`
       : target.due < -1 ? `which was down for ${onDay}${target.item.time ? ` at ${target.item.time}` : ''} and has not been done`
       : target.due <= 1 ? `which is due right now, ${onDay}`
       : `due in about ${Math.round(target.due)} minutes, ${onDay}`;
@@ -5073,6 +5074,30 @@ function putOffSpoken(said: string) {
   return updated;
 }
 
+/**
+ * "Getting it done now" ticks nothing off — it says they have started. The
+ * item is marked underway: chases hold off for a while, and the next thing
+ * she raises unprompted is how it is going (boredNudge). Without this she
+ * answered "I'll take it" and then, half an hour on, needled them about an
+ * old day summary as if the task had never been mentioned.
+ */
+function startedSpoken(said: string) {
+  if (doneClause(said)) return null;
+  const clause = underwayClause(said);
+  if (!clause) return null;
+  const open = getKept().filter(item => item.kind === 'task' && !item.done);
+  if (!open.length) return null;
+  const now = zonedNow(CHAT_TIMEZONE);
+  const todayKey = localDateKey(now);
+  // Named, else the one she was chasing, else the one due nearest to now.
+  const nearest = open.map(item => ({ item, gap: Math.abs(minutesUntil(item, now, todayKey)) })).sort((a, b) => a.gap - b.gap)[0];
+  const match = findItem(open, clause) ?? whatSheWasChasing(open) ?? (nearest && nearest.gap <= 120 ? nearest.item : null);
+  if (!match) return null;
+  updateKept(match.id, { underway: new Date().toISOString() });
+  console.log(`[agenda] underway from what they said: "${match.title}"`);
+  return match;
+}
+
 function tickOffSpoken(said: string) {
   // Matched against the clause that reports it done, not the whole message.
   // Everything else they said is about something else by definition.
@@ -5745,6 +5770,7 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // They are talking to her, so the silence she was waiting out is over.
   noteUserSpoke();
   tickOffSpoken(latest);
+  startedSpoken(latest);
   // A new day for something is as much a report as finishing it is.
   putOffSpoken(latest);
   // Separate from ticking off, and it has to be: an event is never ticked off,
@@ -6478,7 +6504,8 @@ async function nudgeForPhone(): Promise<{ line: string; about: string } | null> 
     const evening = !target.item.time && isEveningCheck(intoDay);
     const day = relativeDay(target.item.date, todayKey, new Intl.DateTimeFormat('en-US', { weekday: 'long' }));
     const onDay = /^(today|yesterday|tomorrow|last )/.test(day) ? day : `on ${day}`;
-    const when = evening ? `which they put on for ${day} with no particular time`
+    const when = target.item.underway ? `which they told you at ${clockAt(Date.parse(target.item.underway))} they were getting on with, and which is still not ticked off — ask whether it is actually done, not whether they have started`
+      : evening ? `which they put on for ${day} with no particular time`
       : target.due < -1 ? `which was down for ${onDay}${target.item.time ? ` at ${target.item.time}` : ''} and has not been done`
       : target.due <= 1 ? `which is due right now, ${onDay}`
       : `due in about ${Math.round(target.due)} minutes, ${onDay}`;
@@ -6492,6 +6519,7 @@ async function nudgeForPhone(): Promise<{ line: string; about: string } | null> 
       'They are on their phone, away from their desk. One or two short lines. No quotation marks, no stage directions.',
     ].join(' ');
     const line = await ollamaQuip(system, 'Remind them.', config);
+    recordBrief(`reminder ${tier}`, system, line);
     console.log(`[web] nudged about "${target.item.title}" (attempt ${attempts + 1}, ${tier})`);
     return { line, about: target.item.title };
   } catch (error) {
@@ -7339,7 +7367,14 @@ async function boredNudge(): Promise<string | null> {
   // once she had written the line (interject) — three goes wasted on "stop by
   // the store" while the fourth came out as a non sequitur. Kept out of the draw.
   const raisable = getMemories().filter(memory => !staleItemNamed(memory.text, getKept(), todayKey));
-  const thing = ignoring ? null : pickToBringUp(raisable, getSessions(), broughtUp, todayKey);
+  // A task they said they were getting on with, or one just done, comes
+  // before anything from the memory draw: it is what is actually on her mind.
+  const nowMs = Date.now();
+  const underway = getKept().filter(item => item.kind === 'task' && !item.done && item.underway && !broughtUp.includes(`task:${item.id}`)).sort((a, b) => (b.underway ?? '').localeCompare(a.underway ?? ''))[0];
+  const justDone = getKept().filter(item => item.done && item.completedAt && nowMs - Date.parse(item.completedAt) <= FOLLOW_UP_MS && !broughtUp.includes(`task:${item.id}`)).sort((a, b) => (b.completedAt ?? '').localeCompare(a.completedAt ?? ''))[0];
+  const task = underway ? { id: `task:${underway.id}`, from: 'task' as const, text: `the "${underway.title}" they told you at ${clockAt(Date.parse(underway.underway!))} they were getting on with — it is still not ticked off. Ask how it is going, or whether it is actually done; needle them if it has gone quiet. Do not say it is done.` }
+    : justDone ? { id: `task:${justDone.id}`, from: 'task' as const, text: `they got "${justDone.title}" done at ${clockAt(Date.parse(justDone.completedAt!))}. Ask how it went, or what it was like — that is what is on your mind, not a new subject.` } : null;
+  const thing = ignoring ? null : task ?? pickToBringUp(raisable, getSessions(), broughtUp, todayKey);
   // Counted from when the quiet ended, not from their last word: eight hours
   // of sleep is not eight hours of ignoring her.
   const quietHours = awakeHoursSince(mood.lastMessageAt, getPush().prefs, now);
@@ -7369,7 +7404,10 @@ async function boredNudge(): Promise<string | null> {
     'One short line. No quotation marks, no stage directions.',
   ].filter(Boolean).join(' ');
   try {
-    const line = await ollamaQuip(system, 'Say something.', config);
+    const raw = await ollamaQuip(system, 'Say something.', config);
+    // Told 27 minutes she wrote fourteen: the number she states is the real one.
+    const line = quietMinutes !== null && (quietHours === null || quietHours < 1) ? fixStatedMinutes(raw, Math.max(1, quietMinutes)) : raw;
+    if (line !== raw) console.log('[push] corrected the minutes she stated');
     if (thing) {
       broughtUp.push(thing.id);
       while (broughtUp.length > REMEMBERED_PICKS) broughtUp.shift();
