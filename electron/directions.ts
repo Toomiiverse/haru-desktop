@@ -115,13 +115,14 @@ function km(m: number): string {
  * to be the directions. Nothing found is said plainly too — a model that is
  * not told will invent a street.
  */
-export function directionsNote(ask: DirectionsAsk, found: Found | null, where: Whereabouts, nowMs = Date.now()): string {
+export function directionsNote(ask: DirectionsAsk, found: Found | null, where: Whereabouts, nowMs = Date.now(), road?: string): string {
   const from = startingPoint(where, nowMs);
   if (!found) {
     return `They asked the way to "${ask.destination}". The map was searched and nothing was found by that name${from ? '' : ', and she does not know where they are to search nearby'}. Say so in your own way; do not invent an address or a route, and do not offer a link — none will be attached.`;
   }
   const at = from ? placeAt(where.places, { lat: found.lat, lon: found.lon, accuracy: 0 }) : null;
-  const distance = from ? ` It is about ${km(distanceM(from, found))} from ${from.known === 'here' ? 'where they are' : 'home'}.` : '';
+  // The road, when Google has answered (routes.ts); the straight line otherwise.
+  const distance = road ? ` ${road}` : from ? ` It is about ${km(distanceM(from, found))} from ${from.known === 'here' ? 'where they are' : 'home'}.` : '';
   const there = at && from && distanceM(from, found) < 200 ? ' They are already there, as far as the phone can tell.' : '';
   return `They asked the way to "${ask.destination}". Found: ${found.name}.${distance}${there} The app is attaching a button under your words that opens their maps with the route. You do not know the roads, buses or journey times there, so anything you say about the route would be made up and will be cut; one or two lines of yours, in your voice, about them going, is all that is wanted.`;
 }

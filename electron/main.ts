@@ -72,6 +72,7 @@ import { conversationMayLeave, mayLeaveTheMachine } from './sensitivity';
 import { addCheckIn, checkInInstruction, checkInsOn, readCheckIns, type CheckIn } from './checkins';
 import { standingFrom } from './standing';
 import { herFrom } from './her';
+import { computeRoute, routeWords, type Route } from './routes';
 import { addAside, alreadySaidRecently, asideContext, asidesOn, markReached, pruneAsides, readAsides, type Aside, type AsideSource } from './asides';
 import { attachmentsInPlay, describeAttached, READ_IT_ALL_PROMPT, readAttachments, type Attachment, type Opened } from './attachments';
 import { forOllama, withoutOldest } from './ollamaturns';
@@ -2298,6 +2299,11 @@ function saveSearchKey(apiKey: string) {
 
 function getSearchKey(): string {
   return decryptSecret(store.get('searchApiKey') as string | undefined);
+}
+
+/** Google Maps Platform key — routes with traffic, places, geocoding. See routes.ts. */
+function getGoogleMapsKey(): string {
+  return decryptSecret(store.get('googleMapsApiKey') as string | undefined);
 }
 
 /** Steam's Web API key — read-only, made by the account holder, never their login. See steamweb.ts. */
@@ -6085,7 +6091,8 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // destination and a maps button, and cuts the place talk to get it. When the
   // answer was grounded in a search, the place talk is the answer — she keeps
   // her list and still gets the button under it.
-  const content = directions?.found ? withDirections(fromSearch ? herLine : dropRouteTalk(herLine), directions.found) : herLine;
+  // With a real route in hand her minutes are Google's, not a guess: the filter that strips route talk stands aside.
+  const content = directions?.found ? withDirections(fromSearch || directions.route ? herLine : dropRouteTalk(herLine), directions.found) : herLine;
   if (herLine !== said) console.log(`[ai] dropped ${said.length - content.length} chars she had already said`);
   console.log(`[ai] chat reply in ${Date.now() - started}ms, ${content.length} chars`);
   // Cleared only once a reply actually exists, so a failed or unreachable turn
@@ -6093,7 +6100,7 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   if (fresh) store.delete('chat.freshStart');
   // Shared: the expression system consumes it through the broadcast inside,
   // and the voice awaits it to choose a clip matching how this line was said.
-  const herWords = directions?.found ? dropRouteTalk(herLine) : herLine;
+  const herWords = directions?.found && !directions.route ? dropRouteTalk(herLine) : herLine;
   const saidMood = classifyEmotion(herWords, config);
   void speak(herWords, saidMood);
   void tieToPlace(latest, herWords, config);
@@ -6906,7 +6913,7 @@ function stopDiscord() {
  * prompt so she speaks from what was found, and the link is attached after she
  * has spoken (withDirections) rather than asked of her.
  */
-async function directionsFor(latest: string): Promise<{ ask: DirectionsAsk; found: FoundPlace | null; note: string } | null> {
+async function directionsFor(latest: string): Promise<{ ask: DirectionsAsk; found: FoundPlace | null; route: Route | null; note: string } | null> {
   const ask = directionsAsk(latest);
   if (!ask) return null;
   const where = getWhereabouts();
@@ -6925,8 +6932,21 @@ async function directionsFor(latest: string): Promise<{ ask: DirectionsAsk; foun
       console.warn(`[maps] the search for "${ask.destination}" failed: ${(error as Error).message}`);
     }
   }
+  // The road itself, with traffic, when there is a key and somewhere to start
+  // from. Coordinates both ends — see routes.ts for why.
+  let road: string | undefined; let route: Route | null = null;
+  const from = startingPoint(where);
+  if (found && from && getGoogleMapsKey()) {
+    try {
+      route = await computeRoute(from, found, getGoogleMapsKey(), (url, init) => fetch(url, init));
+      road = routeWords(route, from.known);
+      console.log(`[maps] ${route.minutes} min now / ${route.typicalMinutes} typical, ${route.km} km via ${route.via || '?'}`);
+    } catch (error) {
+      console.warn(`[maps] no route: ${(error as Error).message}`);
+    }
+  }
   console.log(`[maps] the way to "${ask.destination}": ${found ? found.name : 'not found'}`);
-  return { ask, found, note: directionsNote(ask, found, where) };
+  return { ask, found, route, note: directionsNote(ask, found, where, Date.now(), road) };
 }
 
 function getWhereabouts(): Whereabouts {

@@ -106,3 +106,11 @@ test('asking about traffic is asking for the road', () => {
   assert.equal(directionsAsk('traffic to the airport?')?.destination, 'the airport');
   assert.equal(directionsAsk('the traffic was awful today'), null);
 });
+
+test('the note carries the road when Google has answered, the straight line otherwise', () => {
+  const where = { enabled: true, last: { lat: -32.07, lon: 115.83, accuracy: 10, at: new Date().toISOString(), net: 'wifi' }, places: [] } as never;
+  const found = { name: 'Rockingham WA', lat: -32.29, lon: 115.74 };
+  const ask = directionsAsk('how long to Rockingham')!;
+  assert.match(directionsNote(ask, found, where, Date.now(), 'By car it is 31 minutes from where they are right now.'), /By car it is 31 minutes/);
+  assert.match(directionsNote(ask, found, where), /It is about \d+(\.\d)? km from where they are\./);
+});
