@@ -138,7 +138,10 @@ export function describeTold(told: Told | null | undefined, nowMs: number, clock
   if (told.doing) bits.push(`— ${told.doing}`);
   if (told.until) bits.push(`— until about ${told.until}`);
   if (told.thenTo) bits.push(`, then going to ${told.thenTo}`);
-  return `${bits.join(' ')}. That is where they are unless they have said otherwise since; do not ask where they are or what they are doing there, and do not tell them to be somewhere else. Refer to it by name — "still at ${told.where}?" is fine, since they told you rather than the phone — never as "here" or "there": you are not with them.`;
+  // The example sentence here used to be "still at home?" and she sent exactly
+  // that, twice in an hour, as a whole notification. A place they told you
+  // about is not a question worth asking again.
+  return `${bits.join(' ')}. That is where they are unless they have said otherwise since; do not ask where they are or what they are doing there, and do not tell them to be somewhere else. Refer to the place by name rather than as "here" or "there" — you are not with them — and do not open by asking whether they are still there: they told you, and asking again is not a conversation.`;
 }
 
 /** Busy, as in not to be chased for going quiet: at work, driving, in a place that is not a chat. */
@@ -147,3 +150,49 @@ export function toldTheyAreBusy(told: Told | null | undefined, nowMs: number): b
   if (told.enRoute) return true;
   return /\b(work|gym|hospital|doctor|dentist|meeting|uni|class|driving)\b/i.test(told.where + ' ' + (told.doing ?? ''));
 }
+
+/** Something they said they were about to do — "eat dinner", "have a shower" — and when they said it. */
+export type Errand = { what: string; at: string };
+
+/** How long one of these is worth following up on. */
+export const ERRAND_FRESH_MS = 3 * 60 * 60_000;
+
+// The doing has to be a doing: "going to bed" and "having a shower" are things
+// to ask about later, "going to be honest" and "going to say" are not.
+const DOING = /\b(?:eat|eating|ate|have|having|grab|grabbing|get|cook|cooking|make|making|shower|showering|bath|nap|napping|sleep|sleeping|bed|lie down|clean|cleaning|tidy|wash|washing|watch|watching|play|playing|read|reading|call|calling|ring|walk|walking|feed|feeding|mow|fix|fixing|build|building|sort|sorting|pack|packing|study|studying|train|run|running|gym|shop|shopping|cut|paint|finish|finishing)\b/i;
+const NOT_A_DOING = /\b(?:be honest|say|tell you|guess|assume|admit|ask|let you know|see|think|try to remember|check in|be there|be back|come back|head back)\b/i;
+
+/**
+ * What they said they were off to do, so she has something real to check up on.
+ *
+ * "I'll be right back. I'm going to eat dinner and have a shower" was three
+ * things she could have asked about an hour later, and instead she sent "still
+ * home, right?" twice — because where they were was the only thing the prompt
+ * had turned into a fact she could use.
+ */
+export function errandsToldFrom(text: string, nowIso: string): Errand[] {
+  const said = (text ?? '').replace(/[‘’]/g, "'");
+  if (!said.trim() || said.length > 300) return [];
+  const out: Errand[] = [];
+  // The "I" is optional: "gonna go play some Chainsaw Man" is how it is usually typed.
+  const opener = /\b(?:(?:i(?:'m| am)?\s+)?(?:just\s+)?(?:gonna|going to|about to|off to)|i'll)\s+([^.!?;]{3,80})/gi;
+  for (const match of said.matchAll(opener)) {
+    for (const part of match[1].split(/\s+(?:and|then|&)\s+/i)) {
+      const what = part.trim().replace(/\s+/g, ' ').replace(/[,\s]+$/, '').slice(0, 60);
+      if (what.length < 3 || !DOING.test(what) || NOT_A_DOING.test(what)) continue;
+      if (out.some(errand => errand.what.toLowerCase() === what.toLowerCase())) continue;
+      out.push({ what, at: nowIso });
+    }
+  }
+  return out.slice(0, 3);
+}
+
+/** The one worth asking after: the most recent that is still fresh. */
+export function errandToAskAfter(errands: Errand[], nowMs: number): Errand | null {
+  for (let i = errands.length - 1; i >= 0; i--) {
+    const at = Date.parse(errands[i].at);
+    if (Number.isFinite(at) && nowMs - at >= 0 && nowMs - at <= ERRAND_FRESH_MS) return errands[i];
+  }
+  return null;
+}
+

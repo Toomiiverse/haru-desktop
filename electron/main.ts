@@ -42,7 +42,7 @@ import { acceptedOffer, promisedTitle, reminderAsk, reminderPromised, reminderSa
 import { describeWeather, readForecast, weatherEvents, weatherToDrawOn, weatherUrl, WEATHER_POLL_MS, type WeatherSample, disputesRain } from './weather';
 import { HANGING_COOLDOWN_MS, isClosing, leftHanging, saidTheyWereLeaving } from './hanging';
 import { awakeHoursSince, theyAreUp, awakeMinutesSince } from './awake';
-import { describeTold, placeToldFrom, toldTheyAreBusy, type Told } from './told';
+import { describeTold, placeToldFrom, toldTheyAreBusy, type Told, errandsToldFrom, errandToAskAfter, type Errand } from './told';
 import { markMentioned, upcomingToMention } from './upcoming';
 import { directionsAskFrom, directionsNote, dropRouteTalk, matchNamedPlace, startingPoint, withDirections, withoutMapsLinks, type DirectionsAsk } from './directions';
 import { absorb, describeWhereabouts, distanceM, forgetPlace, namePlace, placeAt, readSpot, readWhereabouts, whereForPage, type Whereabouts, SPOT_STALE_MS, saidTheyWereGoing, unannouncedArrivalNote, type Arrival } from './whereabouts';
@@ -5885,6 +5885,16 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   }
   if (turnedUp) console.log('[where] she has the unannounced arrival to say something about');
   if (arrival && messages.at(-1)?.role === 'user') store.delete('where.arrival' as never);
+  // What they said they were off to do, kept so she has something real to ask
+  // after later — see errandsToldFrom.
+  if (messages.at(-1)?.role === 'user') {
+    const fresh = errandsToldFrom(latest, new Date().toISOString());
+    if (fresh.length) {
+      const kept = [...((store.get('chat.upTo') as Errand[] | undefined) ?? []), ...fresh].slice(-6);
+      store.set('chat.upTo', kept);
+      console.log(`[told] they are off to ${fresh.map(errand => errand.what).join(', ')}`);
+    }
+  }
   const spot = messages.at(-1)?.role === 'user' ? placeToldFrom(latest, new Date().toISOString()) : null;
   if (spot) {
     store.set('told', spot);
@@ -7490,7 +7500,13 @@ async function boredNudge(): Promise<string | null> {
     const spot = where.enabled && where.last && nowMs - Date.parse(where.last.at) <= SPOT_STALE_MS ? placeAt(where.places, where.last)?.name : undefined;
     return spot ?? getTold()?.where;
   })();
-  const askAbout = !ignoring && !task && whereNow && !askedRecently(getAsides(), nowMs) && Math.random() < 0.6 ? `what they are doing at ${whereNow}` : null;
+  // What they said they were off to do beats where their phone is: "how was
+  // that shower" is a conversation, "still at home?" is a question she already
+  // knows the answer to.
+  const errand = errandToAskAfter((store.get('chat.upTo') as Errand[] | undefined) ?? [], nowMs);
+  const askAbout = ignoring || task || askedRecently(getAsides(), nowMs) ? null
+    : errand ? `how the ${errand.what} they said they were off to do went`
+    : whereNow && Math.random() < 0.6 ? `what they are doing at ${whereNow}` : null;
   const thing = ignoring || askAbout ? null : task ?? pickToBringUp(raisable, getSessions(), broughtUp, todayKey);
   // Counted from when the quiet ended, not from their last word: eight hours
   // of sleep is not eight hours of ignoring her.
@@ -7510,7 +7526,7 @@ async function boredNudge(): Promise<string | null> {
     // "playing ghost for an hour" and "10 minutes of silence" in the same line.
     quietHours !== null && quietHours >= 1 ? `They have not said a word to you in ${quietHours} hour${quietHours === 1 ? '' : 's'}. That is the length of the silence — name no other.`
       : quietMinutes !== null ? `They last wrote to you ${Math.max(1, quietMinutes)} minutes ago. That is the length of the silence — do not call it longer or shorter.` : '',
-    askAbout ? `Ask them ${askAbout} right now — one real question, in your way ("So what are you actually doing at ${whereNow}, huh?"), the kind that gets an answer. Not the weather, not anything you have already remarked on: their day. What they say back is worth remembering.`
+    askAbout ? `Ask them ${askAbout} right now — one real question, in your way, the kind that gets an answer. Not the weather, not where they are (you know that), not anything you have already remarked on: the thing itself. What they say back is worth remembering.`
       : thing ? `Bring up this in particular, as though it has been on your mind: ${thing.text} — this, not the weather and not anything you already remarked on.`
       : ignoring ? 'You are not speaking to them properly right now, and they know why. One cold line that makes it plain you noticed the silence — no warmth, no question, no help.'
       : 'Nothing in particular to bring up: the silence itself is the subject.',

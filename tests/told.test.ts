@@ -2,7 +2,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { describeTold, placeToldFrom, toldStillStands, toldTheyAreBusy, TOLD_STALE_MS } from '../electron/told';
+import { describeTold, placeToldFrom, toldStillStands, toldTheyAreBusy, TOLD_STALE_MS, errandsToldFrom, errandToAskAfter, ERRAND_FRESH_MS } from '../electron/told';
 
 const now = '2026-08-30T04:46:00.000Z';
 const tell = (text: string) => placeToldFrom(text, now);
@@ -55,3 +55,24 @@ test('at work or on the road is busy, at home is not', () => {
   assert.equal(toldTheyAreBusy(tell('I’m home'), t), false);
   assert.equal(toldTheyAreBusy(undefined, t), false);
 });
+
+test('what they said they were off to do is kept, so she has something to ask after', () => {
+  const at = '2026-08-31T13:48:00.000Z';
+  assert.deepEqual(errandsToldFrom("Alright I'll be right back. I'm going to eat dinner and have a shower", at).map(e => e.what), ['eat dinner', 'have a shower']);
+  assert.deepEqual(errandsToldFrom('gonna go play some chainsaw man', at).map(e => e.what), ['go play some chainsaw man']);
+  assert.deepEqual(errandsToldFrom("I'm going to be honest with you", at), [], 'being honest is not an errand');
+  assert.deepEqual(errandsToldFrom("I'll let you know", at), []);
+  assert.deepEqual(errandsToldFrom('no plans at all', at), []);
+  const errands = errandsToldFrom("I'm about to have a shower", at);
+  const now = Date.parse(at);
+  assert.equal(errandToAskAfter(errands, now + 40 * 60_000)?.what, 'have a shower');
+  assert.equal(errandToAskAfter(errands, now + ERRAND_FRESH_MS + 1), null, 'stale after three hours');
+  assert.equal(errandToAskAfter([], now), null);
+});
+
+test('a place they told her about is not a question to ask again', () => {
+  const said = describeTold({ where: 'home', at: '2026-08-31T11:32:00.000Z' }, Date.parse('2026-08-31T11:40:00.000Z'), () => '7:32 pm');
+  assert.match(said, /do not open by asking whether they are still there/);
+  assert.doesNotMatch(said, /"still at home\?"/, 'the example sentence went out verbatim as a notification, twice');
+});
+
