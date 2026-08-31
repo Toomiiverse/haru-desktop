@@ -19,7 +19,13 @@ export type VoiceEngine = 'off' | 'windows' | 'openai' | 'gpt-sovits';
 /** A clip to clone from, and what it says. The two travel together because a
  *  transcript that does not match its clip drags the cloned timbre off target —
  *  it does not merely get the words wrong. */
-export type VoiceReference = { clip: string; text: string };
+export type VoiceReference = { clip: string; text: string;
+  /** More clips of the same voice in the same mood (GPT-SoVITS v2+ `aux_ref_audio_paths`): the timbre is fused across them, so one clip's quirk does not colour every line. */
+  aux?: string[] };
+
+/** GPT-SoVITS sampling. The server's defaults, except a cooler temperature: on a small English fine-tune it steadies pitch and drops fewer words. */
+export type VoiceSampling = { topK: number; topP: number; temperature: number; repetitionPenalty: number; fragmentInterval: number };
+export const DEFAULT_SAMPLING: VoiceSampling = { topK: 15, topP: 1, temperature: 0.85, repetitionPenalty: 1.35, fragmentInterval: 0.3 };
 
 export type VoiceConfig = {
   engine: VoiceEngine;
@@ -49,6 +55,8 @@ export type VoiceConfig = {
   webEnabled: boolean;
   /** The desk window speaking her replies aloud. Off on a headless box, where it is a synthesis per reply for nobody. */
   desktopEnabled: boolean;
+  /** GPT-SoVITS only; anything unset is DEFAULT_SAMPLING. */
+  sampling?: Partial<VoiceSampling>;
 };
 
 export const DEFAULT_VOICE: VoiceConfig = {
@@ -302,15 +310,30 @@ export async function synthesise(text: string, config: VoiceConfig, reference: V
     // GPT-SoVITS api_v2.py. The reference clip is what the voice is cloned from,
     // and its transcript has to match or the output drifts badly off-target.
     case 'gpt-sovits':
-      return post(`${endpoint}/tts`, {
+      return post(`${endpoint}/tts`, sovitsRequest(config, reference, text), auth);
+  }
+}
+
+/** The api_v2 /tts body: reference, its fellows, and the sampling that shapes the take. */
+export function sovitsRequest(config: VoiceConfig, reference: VoiceReference, text: string) {
+  const sampling = { ...DEFAULT_SAMPLING, ...(config.sampling ?? {}) };
+  return {
         text,
         text_lang: config.language,
         ref_audio_path: reference.clip,
         prompt_text: reference.text,
         prompt_lang: config.language,
+        aux_ref_audio_paths: (reference.aux ?? []).filter(Boolean),
         media_type: 'wav',
         streaming_mode: false,
         speed_factor: config.speed,
+        top_k: sampling.topK,
+        top_p: sampling.topP,
+        temperature: sampling.temperature,
+        repetition_penalty: sampling.repetitionPenalty,
+        // The pause between the fragments the server makes of one chunk — with
+        // cut0 that is one, so this is the breath at a sentence end inside it.
+        fragment_interval: sampling.fragmentInterval,
         // The server's own default is cut5, which splits on every comma — its
         // punctuation set literally contains "," — and synthesises each fragment
         // as a separate utterance. That is why she stopped dead at every comma:
@@ -321,8 +344,7 @@ export async function synthesise(text: string, config: VoiceConfig, reference: V
         // splitForSpeech. Left to the server it was being cut twice, and the
         // second cut was the one nobody asked for.
         text_split_method: 'cut0',
-      }, auth);
-  }
+  };
 }
 
 /** Reads a stored config forward, so a partial or older record still starts up. */
@@ -339,6 +361,7 @@ export function readVoiceConfig(saved: unknown): VoiceConfig {
     speed: typeof record.speed === 'number' && record.speed > 0 ? Math.min(2, record.speed) : DEFAULT_VOICE.speed,
     volume: typeof record.volume === 'number' ? Math.max(0, Math.min(1, record.volume)) : DEFAULT_VOICE.volume,
     emotionVoices: readEmotionVoices(record.emotionVoices),
+    ...(record.sampling && typeof record.sampling === 'object' ? { sampling: readSampling(record.sampling as Record<string, unknown>) } : {}),
     shoutVoice: readReference(record.shoutVoice),
     webEnabled: record.webEnabled !== false,
     desktopEnabled: record.desktopEnabled !== false,
@@ -355,6 +378,15 @@ function readReference(saved: unknown): VoiceReference | undefined {
 
 /** Keeps only entries naming a real emotion and carrying an actual clip, so a
  *  half-filled row cannot become a request with an empty path in it. */
+function readSampling(saved: Record<string, unknown>): Partial<VoiceSampling> {
+  const out: Partial<VoiceSampling> = {};
+  for (const key of Object.keys(DEFAULT_SAMPLING) as (keyof VoiceSampling)[]) {
+    const value = saved[key];
+    if (typeof value === 'number' && Number.isFinite(value)) out[key] = value;
+  }
+  return out;
+}
+
 function readEmotionVoices(saved: unknown): Partial<Record<EmotionName, VoiceReference>> {
   if (!saved || typeof saved !== 'object') return {};
   const source = saved as Record<string, unknown>;
@@ -364,7 +396,8 @@ function readEmotionVoices(saved: unknown): Partial<Record<EmotionName, VoiceRef
     if (!entry || typeof entry !== 'object') continue;
     const { clip, text } = entry as Partial<VoiceReference>;
     if (typeof clip !== 'string' || !clip.trim()) continue;
-    result[emotion] = { clip, text: typeof text === 'string' ? text : '' };
+    const { aux } = entry as Partial<VoiceReference>;
+    result[emotion] = { clip, text: typeof text === 'string' ? text : '', ...(Array.isArray(aux) && aux.some(a => typeof a === 'string' && a.trim()) ? { aux: aux.filter((a): a is string => typeof a === 'string' && a.trim().length > 0) } : {}) };
   }
   return result;
 }

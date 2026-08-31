@@ -13,8 +13,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   DEFAULT_VOICE, hasShout, isSilent, readVoiceConfig, referenceFor, shoutReference,
-  speakableText, splitForSpeech, spokenCase, type VoiceConfig,
-} from '../electron/voice';
+  speakableText, splitForSpeech, spokenCase, type VoiceConfig, sovitsRequest, DEFAULT_SAMPLING } from '../electron/voice';
 
 const config = (overrides: Partial<VoiceConfig> = {}): VoiceConfig => ({ ...DEFAULT_VOICE, ...overrides });
 
@@ -315,3 +314,16 @@ test('the desk can be told to keep quiet without silencing the phone', () => {
   assert.equal(readVoiceConfig({ desktopEnabled: false }).desktopEnabled, false);
   assert.equal(readVoiceConfig({ desktopEnabled: false }).webEnabled, true);
 });
+
+test('the GPT-SoVITS request carries the fellows of the reference and the sampling, defaults unless set', () => {
+  const config = readVoiceConfig({ ...DEFAULT_VOICE, engine: 'gpt-sovits', voice: '/c/neutral.wav', referenceText: 'Hi.', emotionVoices: { happy: { clip: '/c/h.wav', text: 'Ha.', aux: ['/c/h2.wav', '', 3] } }, sampling: { temperature: 0.7, topK: 'x' } });
+  assert.deepEqual(config.emotionVoices.happy, { clip: '/c/h.wav', text: 'Ha.', aux: ['/c/h2.wav'] }, 'only real paths ride along');
+  assert.deepEqual(config.sampling, { temperature: 0.7 }, 'a number is read, a string is not');
+  const body = sovitsRequest(config, config.emotionVoices.happy!, 'Go.');
+  assert.deepEqual(body.aux_ref_audio_paths, ['/c/h2.wav']);
+  assert.equal(body.temperature, 0.7); assert.equal(body.top_k, DEFAULT_SAMPLING.topK); assert.equal(body.fragment_interval, 0.3);
+  assert.equal(body.text_split_method, 'cut0');
+  const plain = sovitsRequest(readVoiceConfig({ ...DEFAULT_VOICE, engine: 'gpt-sovits', voice: '/c/n.wav' }), { clip: '/c/n.wav', text: '' }, 'Go.');
+  assert.deepEqual(plain.aux_ref_audio_paths, []); assert.equal(plain.temperature, 0.85);
+});
+
