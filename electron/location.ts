@@ -153,11 +153,18 @@ export type FoundPlace = { name: string; lat: number; lon: number };
  * With nowhere to bias from, a configured search place is added to the words.
  */
 export async function searchPlaces(query: string, fetchImpl: Fetcher, near: { lat: number; lon: number } | null, fallbackPlace = '', { bounded = false } = {}): Promise<FoundPlace[]> {
-  const q = near || !fallbackPlace ? query : `${query}, ${fallbackPlace}`;
+  // Localised whenever there is a place to localise to — not only when they
+  // are nowhere in particular. With the phone's position known, a bare
+  // "Rockingham" went out with a 13 km preference box Nominatim was free to
+  // ignore, and it ranked Rockingham County, Virginia first.
+  const region = fallbackPlace.split(',').map(part => part.trim().toLowerCase()).filter(Boolean);
+  const alreadyPlaced = region.some(part => query.toLowerCase().includes(part)) || /\b(?:wa|nsw|vic|qld|sa|tas|nt|act|australia)\b/i.test(query);
+  const q = !fallbackPlace || alreadyPlaced ? query : `${query}, ${fallbackPlace}`;
+  const country = /\baustralia\b/i.test(fallbackPlace) ? '&countrycodes=au' : '';
   // Bounded for "the nearest": only what is inside the box counts, and the
   // caller picks the closest of it. Otherwise the box merely ranks.
   const box = near ? `&viewbox=${(near.lon - 0.12).toFixed(3)},${(near.lat + 0.12).toFixed(3)},${(near.lon + 0.12).toFixed(3)},${(near.lat - 0.12).toFixed(3)}&bounded=${bounded ? 1 : 0}` : '';
-  const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&q=${encodeURIComponent(q)}&limit=5&addressdetails=1${box}`;
+  const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&q=${encodeURIComponent(q)}&limit=5&addressdetails=1${box}${country}`;
   const response = await fetchImpl(url, {
     headers: { 'User-Agent': 'haru-desktop (personal desktop companion)', 'Accept': 'application/json' },
     signal: AbortSignal.timeout(12_000),
