@@ -117,5 +117,9 @@ test('the order she signs a conversation about herself off with is cut, and the 
   assert.equal(dropClosingOrder('Reze is better written. Denji never learns.'), 'Reze is better written. Denji never learns.', 'nothing to cut');
   assert.doesNotMatch(dropClosingOrder('One is a lecture, the other is a story.\n\nNow stop nitpicking and go to bed.'), /nitpicking/);
   assert.match(dropClosingOrder('One is a lecture, the other is a story.\n\nNow stop nitpicking and go to bed.'), /lecture/);
+  const withEmoji = "It's brutal and quiet.\n\nNow stop asking me and go to sleep. You have a website to build tomorrow. 😤";
+  assert.match(dropClosingOrder(withEmoji), /It's brutal and quiet\./);
+  assert.doesNotMatch(dropClosingOrder(withEmoji), /website|go to sleep/, 'a trailing emoji must not shield the order in front of it');
+  assert.equal(dropClosingOrder('Reze is better written. 😏'), 'Reze is better written. 😏', 'and her emoji survives when there is no order');
 });
 

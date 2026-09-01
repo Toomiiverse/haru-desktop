@@ -705,9 +705,15 @@ export function dropClosingOrder(reply: string): string {
   const paragraphs = (reply ?? '').split(/\n\s*\n/);
   const last = paragraphs.at(-1) ?? '';
   const sentences = last.split(/(?<=[.!?…])\s+/);
+  const lexical = (part: string) => /[\p{Letter}\p{Number}]/u.test(part);
   let end = sentences.length;
+  // "…slack off. 😤" splits the emoji off as its own sentence, and it matches
+  // nothing, so the walk stopped before it reached the order in front of it.
+  while (end > 0 && !lexical(sentences[end - 1])) end--;
+  const beforeOrders = end;
   while (end > 0 && CLOSING_ORDER.test(sentences[end - 1].trim())) end--;
-  if (end === sentences.length) return reply;
+  // Nothing was an order, so her emoji is hers to keep and the reply stands.
+  if (end === beforeOrders) return reply;
   const kept = sentences.slice(0, end).join(' ').trim();
   const rest = kept ? [...paragraphs.slice(0, -1), kept] : paragraphs.slice(0, -1);
   const out = rest.join('\n\n').trim();
