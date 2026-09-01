@@ -44,7 +44,7 @@ import { HANGING_COOLDOWN_MS, isClosing, leftHanging, saidTheyWereLeaving } from
 import { awakeHoursSince, theyAreUp, awakeMinutesSince } from './awake';
 import { describeTold, placeToldFrom, toldTheyAreBusy, type Told, errandsToldFrom, errandToAskAfter, type Errand } from './told';
 import { markMentioned, upcomingToMention } from './upcoming';
-import { directionsAskFrom, directionsNote, dropRouteTalk, matchNamedPlace, startingPoint, withDirections, withoutMapsLinks, type DirectionsAsk } from './directions';
+import { directionsAskFrom, directionsNote, dropRouteTalk, matchNamedPlace, startingPoint, withDirections, withoutMapsLinks, type DirectionsAsk, claimsTraffic } from './directions';
 import { absorb, describeWhereabouts, distanceM, forgetPlace, namePlace, placeAt, readSpot, readWhereabouts, whereForPage, type Whereabouts, SPOT_STALE_MS, saidTheyWereGoing, unannouncedArrivalNote, type Arrival } from './whereabouts';
 import { convertImage, normaliseFormat, FORMATS } from './convert';
 import { cancelPower, closeApp, findApps, isCancellable, launch, listRunning, matchApp, matchRunning, normalisePower, POWER_DELAY_S, readDesktopConfig, runPower, supportedDesktop, type DesktopConfig } from './desktop';
@@ -6268,7 +6268,13 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // Stirling Hwy" for an address she never looked up is cut the same way.
   // With a route in hand her numbers are made Google's — her own guess from
   // an hour earlier, still in the history, outweighed the brief.
-  const routeless = directions?.route ? fixStatedRoute(herLine, directions.route) : directions && !directions.about && !fromSearch ? dropRouteTalk(herLine) : herLine;
+  // And with no journey looked up at all, a claim about the roads is invented
+  // whole: "traffic's already thick, you'll hit the main drag" for a trip
+  // nobody asked the map about.
+  const routeless = directions?.route ? fixStatedRoute(herLine, directions.route)
+    : directions && !directions.about && !fromSearch ? dropRouteTalk(herLine)
+    : !directions && !fromSearch && claimsTraffic(herLine) ? dropRouteTalk(herLine)
+    : herLine;
   if (routeless !== herLine && directions?.route) console.log('[maps] corrected the minutes, distance or roads she stated to the route');
   const content = directions?.found ? withDirections(routeless, directions.found) : routeless;
   if (herLine !== said) console.log(`[ai] dropped ${said.length - content.length} chars she had already said`);

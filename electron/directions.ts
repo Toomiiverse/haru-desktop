@@ -76,7 +76,8 @@ export function dropRouteTalk(reply: string): string {
   const paragraphs = reply.split(/\n\s*\n/);
   const kept = paragraphs.map(paragraph => {
     if (/^\s*(?:[-*•]|\d+[.)])\s/.test(paragraph)) return '';
-    return paragraph.split(/(?<=[.!?])\s+/).filter(sentence => !ROUTE_TALK.test(sentence)).join(' ');
+    // Traffic claims go with the route talk: both are things she cannot see.
+    return paragraph.split(/(?<=[.!?])\s+/).filter(sentence => !ROUTE_TALK.test(sentence) && !TRAFFIC_CLAIM.test(sentence)).join(' ');
   }).filter(p => p.trim());
   const out = kept.join('\n\n').trim();
   if (out) return out;
@@ -105,6 +106,27 @@ export function streetAddress(text: string): string | null {
   return `${m[1]}${rest}`.replace(/\s+/g, ' ').replace(/\s*,\s*/g, ', ').trim();
 }
 
+// A claim about the roads right now. She cannot see them, and with no route in
+// hand every word of it is invented — "traffic's already thick, you'll hit the
+// main drag, then the inner loop" was written for a trip nobody looked up.
+const TRAFFIC_CLAIM = /\btraffic(?:'s| is| was)?\s*(?:already\s+|pretty\s+|a bit\s+)?(?:bad|thick|heavy|light|fine|clear|moving|backed up|jammed|slow|quiet)\b|\b(?:roads?|it)(?:'s| is| are|'re)\s*(?:pretty\s+)?(?:clear|busy|jammed|backed up|chaos)\b|\byou'?ll (?:hit|be stuck|get stuck)\b/i;
+
+/** Whether her reply claims to know what the roads are doing. */
+export function claimsTraffic(reply: string): boolean {
+  return TRAFFIC_CLAIM.test(reply ?? '');
+}
+
+// "how long will that take?", "is traffic bad?" — a journey question with the
+// place left in the sentence before it, or in the same breath: "I'm going to
+// Starbucks in Murdoch then work, so how long will that take?"
+const BARE_JOURNEY = new RegExp(String.raw`^(?:.*\b)?(?:so\s+)?(?:how long (?:will|would|does|is) (?:that|it|this)(?: take| be)?|is (?:the )?traffic (?:bad|heavy|ok|okay|alright|any good)|how(?:'s| is) (?:the )?traffic|what(?:'s| is) (?:the )?traffic like)` + TAIL, 'i');
+/** Where they said they were off to, in their own words: "going to X", "stopping by X", "off to X". */
+export function destinationNamed(text: string): string | null {
+  const m = new RegExp(String.raw`\b(?:going|heading|off|driving|walking|nipping|popping|stopping(?: by| in| at)?|on my way)\s+(?:to|by|at|into|over to|down to|round to)?\s*([A-Z][\w'&-]*(?:\s+(?:in|at|on)\s+[A-Z][\w'&-]*|\s+[A-Z][\w'&-]*){0,3})`, '').exec(text ?? '');
+  const named = m?.[1]?.trim().replace(/\s+(?:then|and|so|but)$/i, '').trim();
+  return named && named.length > 2 ? named.slice(0, 60) : null;
+}
+
 /** "pick up the cpu", "the Dianella address" — a thing to do, not a place; the place is an address they gave. */
 const ERRAND = /^(?:(?:to )?(?:pick|pick up|grab|collect|fetch|drop off|drop off at|drop)\b|.*\baddress\b)/i;
 /** The ask with no place in it: "give me the directions", "directions please", "how do I get there". */
@@ -131,6 +153,14 @@ export function directionsAskFrom(latest: string, recentUser: string[]): Directi
     return address ? { destination: address, nearest: false } : null;
   }
   const line = (latest ?? '').trim();
+  // A journey question with the place named in the same message or a recent one.
+  if (BARE_JOURNEY.test(line)) {
+    const named = destinationNamed(line) ?? (() => {
+      for (const earlier of [...recentUser].reverse()) { const found = destinationNamed(earlier); if (found) return found; }
+      return null;
+    })();
+    if (named) return { destination: named, nearest: false };
+  }
   if (BARE_ASK.test(line)) {
     const address = remembered();
     return address ? { destination: address, nearest: false } : null;

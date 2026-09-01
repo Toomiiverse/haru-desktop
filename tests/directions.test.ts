@@ -2,7 +2,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { cleanDestination, directionsAsk, directionsAskFrom, directionsNote, streetAddress, withoutMapsLinks, dropRouteTalk, googleMapsLink, mapsLink, matchNamedPlace, startingPoint, withDirections } from '../electron/directions';
+import { cleanDestination, directionsAsk, directionsAskFrom, directionsNote, streetAddress, withoutMapsLinks, claimsTraffic, destinationNamed, dropRouteTalk, googleMapsLink, mapsLink, matchNamedPlace, startingPoint, withDirections } from '../electron/directions';
 import { absorb, namePlace, readSpot, readWhereabouts, type Whereabouts } from '../electron/whereabouts';
 
 const NOW = new Date('2026-08-28T10:00:00Z');
@@ -154,3 +154,21 @@ test('a maps link is taken out of the text, hers or the app\'s, and plain words 
   assert.equal(withoutMapsLinks('Here: https://www.google.com/maps/dir/?api=1&destination=-32.1,115.8 go.'), 'Here: go.');
   assert.equal(withoutMapsLinks('Get that CPU mounted.'), 'Get that CPU mounted.');
 });
+
+test('a journey question takes the place from the same breath, or the message before it', () => {
+  assert.equal(destinationNamed("I'm going to Starbucks in Murdoch then work"), 'Starbucks in Murdoch');
+  assert.equal(destinationNamed('stopping by Bunnings on the way'), 'Bunnings');
+  assert.equal(destinationNamed('going to the shops'), null, 'no name, nothing to look up');
+  assert.deepEqual(directionsAskFrom("I'm going to Starbucks in Murdoch then work so how long will that take? Is traffic bad this morning?", []), { destination: 'Starbucks in Murdoch', nearest: false });
+  assert.deepEqual(directionsAskFrom('is traffic bad this morning?', ['heading to Murdoch University shortly']), { destination: 'Murdoch University', nearest: false });
+  assert.equal(directionsAskFrom('how long will that take?', ['what a day']), null, 'nothing named, nothing invented');
+});
+
+test('a claim about the roads is recognised, so it can be cut when nothing was looked up', () => {
+  assert.equal(claimsTraffic("Traffic's already thick. Don't dawdle."), true);
+  assert.equal(claimsTraffic("You'll hit the main drag, then the inner loop"), true);
+  assert.equal(claimsTraffic('the roads are clear'), true);
+  assert.equal(claimsTraffic('Eat your dinner and stop stalling.'), false);
+  assert.equal(dropRouteTalk("Traffic's already thick. Get moving.").includes('thick'), false, 'and cut');
+});
+
