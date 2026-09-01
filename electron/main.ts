@@ -8833,6 +8833,10 @@ function webDeps(): WebDeps {
       const reference = referenceFor(voice, emotion && (EMOTIONS as readonly string[]).includes(emotion) ? emotion as EmotionName : null);
       const chosen = hasShout(text) ? shoutReference(voice, reference) : reference;
       try {
+        // Logged here as the desk path logs it: with desk speech off, nothing
+        // said which clip the phone had spoken a line with, and "she sounds
+        // high-pitched" could not be traced to the reference that caused it.
+        console.log(`[voice] the phone speaks as ${emotion ?? 'her usual'} using ${path.basename(chosen.clip)}`);
         return await synthesise(spokenCase(speakableText(text)), voice, chosen, remoteAuth(voice.endpoint));
       } catch (error) {
         // A mood clip the server will not take — four of hers ran over the
