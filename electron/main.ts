@@ -7523,7 +7523,9 @@ async function boredNudge(): Promise<string | null> {
   // knows the answer to.
   const errand = errandToAskAfter((store.get('chat.upTo') as Errand[] | undefined) ?? [], nowMs);
   const askAbout = ignoring || task || askedRecently(getAsides(), nowMs) ? null
-    : errand ? `how the ${errand.what} they said they were off to do went`
+    // Not "how the get the website running tomorrow they said they were off to
+    // do went" — the thing goes in quotes and the sentence stays a sentence.
+    : errand ? `how "${errand.what}" went — the thing they said they were off to do`
     : whereNow && Math.random() < 0.6 ? `what they are doing at ${whereNow}` : null;
   const thing = ignoring || askAbout ? null : task ?? pickToBringUp(raisable, getSessions(), broughtUp, todayKey);
   // Counted from when the quiet ended, not from their last word: eight hours
