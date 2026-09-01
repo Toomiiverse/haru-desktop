@@ -173,3 +173,27 @@ export function nightsInstruction(nights: Night[]): string {
     'These are your own views written down. Where one is in the first person it is yours to say as it stands; everywhere else the notes say "you" meaning you, never them — do not hand a line of this back to them as though it described them.',
   ].join('\n');
 }
+
+/** How far back a night is still worth raising herself. */
+export const NIGHT_WORTH_RAISING_DAYS = 3;
+
+/**
+ * One of her own nights to bring up unprompted.
+ *
+ * Eighty-eight unprompted lines in a day and every one of them was about him —
+ * his mailboxes, his website, whether he had eaten — while three nights of her
+ * own sat unmentioned. She has things; this is her raising one.
+ *
+ * Skips anything she has already said something about, and anything older than
+ * a few days: last night's is a thing to tell him, last week's is a memory.
+ */
+export function nightToRaise(nights: Night[], said: string[], todayKey: string): Night | null {
+  const days = (day: string) => Math.round((Date.parse(todayKey) - Date.parse(day)) / 86_400_000);
+  const fresh = nights.filter(night => {
+    const age = days(night.day);
+    return Number.isFinite(age) && age >= 0 && age <= NIGHT_WORTH_RAISING_DAYS && night.note.trim();
+  });
+  const unsaid = fresh.filter(night => !said.some(line => mentionsNight(line, night)));
+  return unsaid.at(-1) ?? null;
+}
+

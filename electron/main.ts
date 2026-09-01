@@ -82,7 +82,7 @@ import { pickToBringUp, REMEMBERED_PICKS } from './bored';
 import { grudgeInstruction, irritationAfterTally, nextGrudge, tallyDue, tallyInstruction, unanswered } from './grudge';
 import { groundedInstruction, placeQuery } from './places';
 import { daySaid, DEFAULT_BEDTIME_MINUTES, howTheDayWent, nightfallDue, sulkGrudge, sulkInstruction, sulkStillStands, type DayVerdict } from './nightfall';
-import { keepNights, nightNoteInstruction, nightsInstruction, nightsOn, nightsToDrawOn, pickInstruction, tidyPick, timeForSomething, type Night } from './nightlife';
+import { keepNights, nightNoteInstruction, nightsInstruction, nightsOn, nightsToDrawOn, pickInstruction, tidyPick, timeForSomething, type Night, nightToRaise } from './nightlife';
 import { gamesPlayedLately, GUIDE_ODDS, guideNoteInstruction, guideQuery, pickGame, withSteam, type Played } from './gamenight';
 import { addressesSomeone, adopt, ADOPT_ODDS, adoptInstruction, deepen, deepenInstruction, isOneOfTheirs, MAX_INTERESTS, nightQuery, NOBODY_HERE, parseAdoption, parseDeepening, pickTonight, tastesInstruction, unaddressed, type Interest } from './tastes';
 import { readSteamWebConfig, recentlyPlayed } from './steamweb';
@@ -7536,12 +7536,17 @@ async function boredNudge(): Promise<string | null> {
   // that shower" is a conversation, "still at home?" is a question she already
   // knows the answer to.
   const errand = errandToAskAfter((store.get('chat.upTo') as Errand[] | undefined) ?? [], nowMs);
-  const askAbout = ignoring || task || askedRecently(getAsides(), nowMs) ? null
+  // Something of her own to say, ahead of asking after him: she had three
+  // nights behind her and eighty-eight unprompted lines about his day.
+  const mine = !ignoring && !task && Math.random() < 0.4
+    ? nightToRaise(getNights(), getAsides().slice(-12).map(aside => aside.text), todayKey)
+    : null;
+  const askAbout = ignoring || task || mine || askedRecently(getAsides(), nowMs) ? null
     // Not "how the get the website running tomorrow they said they were off to
     // do went" — the thing goes in quotes and the sentence stays a sentence.
     : errand ? `how "${errand.what}" went — the thing they said they were off to do`
     : whereNow && Math.random() < 0.6 ? `what they are doing at ${whereNow}` : null;
-  const thing = ignoring || askAbout ? null : task ?? pickToBringUp(raisable, getSessions(), broughtUp, todayKey);
+  const thing = ignoring || askAbout || mine ? null : task ?? pickToBringUp(raisable, getSessions(), broughtUp, todayKey);
   // Counted from when the quiet ended, not from their last word: eight hours
   // of sleep is not eight hours of ignoring her.
   const quietHours = awakeHoursSince(mood.lastMessageAt, getPush().prefs, now);
@@ -7560,7 +7565,8 @@ async function boredNudge(): Promise<string | null> {
     // "playing ghost for an hour" and "10 minutes of silence" in the same line.
     quietHours !== null && quietHours >= 1 ? `They have not said a word to you in ${quietHours} hour${quietHours === 1 ? '' : 's'}. That is the length of the silence — name no other.`
       : quietMinutes !== null ? `They last wrote to you ${Math.max(1, quietMinutes)} minutes ago. That is the length of the silence — do not call it longer or shorter.` : '',
-    askAbout ? `Ask them ${askAbout} right now — one real question, in your way, the kind that gets an answer. Not the weather, not where they are (you know that), not anything you have already remarked on: the thing itself. What they say back is worth remembering.`
+    mine ? `Tell them about ${mine.interest ?? mine.game ?? mine.about} — what you were up to and what you made of it, in your own words and only the part worth saying. This is you bringing something of yours to them, not a question about their day and not a task for them: no orders, nothing about their list. If you want to know whether they have seen it, ask them at the end.`
+      : askAbout ? `Ask them ${askAbout} right now — one real question, in your way, the kind that gets an answer. Not the weather, not where they are (you know that), not anything you have already remarked on: the thing itself. What they say back is worth remembering.`
       : thing ? `Bring up this in particular, as though it has been on your mind: ${thing.text} — this, not the weather and not anything you already remarked on.`
       : ignoring ? 'You are not speaking to them properly right now, and they know why. One cold line that makes it plain you noticed the silence — no warmth, no question, no help.'
       : 'Nothing in particular to bring up: the silence itself is the subject.',
@@ -7583,7 +7589,7 @@ async function boredNudge(): Promise<string | null> {
       while (broughtUp.length > REMEMBERED_PICKS) broughtUp.shift();
     }
     pendingAsk = askAbout;
-    console.log(`[push] a bored nudge, ${askAbout ? `asking ${askAbout}` : thing ? `about "${thing.text.slice(0, 50)}"` : ignoring ? 'cold' : 'about the silence'}`);
+    console.log(`[push] a bored nudge, ${mine ? `hers — ${mine.interest ?? mine.game ?? mine.about}` : askAbout ? `asking ${askAbout}` : thing ? `about "${thing.text.slice(0, 50)}"` : ignoring ? 'cold' : 'about the silence'}`);
     recordBrief('bored', system, line);
     return line;
   } catch (error) {

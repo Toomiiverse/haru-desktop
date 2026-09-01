@@ -2,7 +2,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { keepNights, MAX_PER_NIGHT, mentionsNight, NIGHT_GAP_MS, NIGHTS_KEPT, nightNoteInstruction, nightsInstruction, nightsOn, nightsToDrawOn, pickInstruction, tidyPick, timeForSomething, type Night, unlabel } from '../electron/nightlife';
+import { keepNights, MAX_PER_NIGHT, mentionsNight, NIGHT_GAP_MS, NIGHTS_KEPT, nightNoteInstruction, nightsInstruction, nightsOn, nightsToDrawOn, pickInstruction, tidyPick, timeForSomething, type Night, unlabel, nightToRaise } from '../electron/nightlife';
 
 const night = (day: string, about: string): Night => ({ day, at: `${day}T18:40:00.000Z`, about, note: 'It was all right.', sources: ['https://example.com'] });
 
@@ -93,5 +93,14 @@ test('the labels a night was written with are said as sentences, not read out as
   assert.match(said, /The bit I rate above the rest is David's Sandevistan slow-mo\./);
   assert.match(said, /What I would like out of it is a brutal ending\./);
   assert.equal(unlabel('Just a plain note.'), 'Just a plain note.');
+});
+
+test('she has a night of her own to raise, unless she has raised it already or it has gone stale', () => {
+  const night = (day: string, about: string) => ({ day, at: `${day}T15:00:00.000Z`, about, note: `I watched ${about} and it was something.`, sources: [] });
+  const nights = [night('2026-08-28', 'Cyberpunk'), night('2026-08-31', 'Chainsaw Man')];
+  assert.equal(nightToRaise(nights, [], '2026-09-01')?.about, 'Chainsaw Man', 'the freshest she has not mentioned');
+  assert.equal(nightToRaise(nights, ['So I watched Chainsaw Man last night and Power is the best of them'], '2026-09-01'), null, 'already said something about it');
+  assert.equal(nightToRaise([night('2026-08-20', 'Old thing')], [], '2026-09-01'), null, 'last week is a memory, not news');
+  assert.equal(nightToRaise([], [], '2026-09-01'), null);
 });
 
