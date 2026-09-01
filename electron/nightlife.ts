@@ -144,9 +144,25 @@ export function nightsToDrawOn(nights: Night[], recentLines: string[]): string {
   return nightsInstruction(nights);
 }
 
+/**
+ * The labels a night's note was written with, said as sentences.
+ *
+ * The composer writes "FAVOURITE: David's Sandevistan scenes. WANT: a brutal
+ * ending" into the note, and she read the label out: "The one I rate: Himeno's
+ * final stand." A field name in her material is a field name she will say.
+ */
+export function unlabel(note: string): string {
+  return (note ?? '')
+    .replace(/\bFAVOURITE:\s*/gi, 'The bit you rate above the rest is ')
+    .replace(/\bWANT:\s*/gi, 'What you would like out of it is ')
+    .replace(/\bSTANCE:\s*/gi, 'Where you landed on it: ')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
 export function nightsInstruction(nights: Night[]): string {
   if (!nights.length) return '';
-  const said = nights.slice(-MAX_PER_NIGHT).map(night => `- ${night.interest ? `${night.interest}, one of your own things` : night.game ? `${night.game}, which they have been playing — sizing it up` : night.about}: ${night.note}`).join('\n');
+  const said = nights.slice(-MAX_PER_NIGHT).map(night => `- ${night.interest ? `${night.interest}, one of your own things` : night.game ? `${night.game}, which they have been playing — sizing it up` : night.about}: ${unlabel(night.note)}`).join('\n');
   return [
     'What you did in the small hours while they were asleep, and it did happen — you read about these:',
     said,

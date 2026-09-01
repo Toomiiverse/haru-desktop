@@ -2,7 +2,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { keepNights, MAX_PER_NIGHT, mentionsNight, NIGHT_GAP_MS, NIGHTS_KEPT, nightNoteInstruction, nightsInstruction, nightsOn, nightsToDrawOn, pickInstruction, tidyPick, timeForSomething, type Night } from '../electron/nightlife';
+import { keepNights, MAX_PER_NIGHT, mentionsNight, NIGHT_GAP_MS, NIGHTS_KEPT, nightNoteInstruction, nightsInstruction, nightsOn, nightsToDrawOn, pickInstruction, tidyPick, timeForSomething, type Night, unlabel } from '../electron/nightlife';
 
 const night = (day: string, about: string): Night => ({ day, at: `${day}T18:40:00.000Z`, about, note: 'It was all right.', sources: ['https://example.com'] });
 
@@ -85,3 +85,13 @@ test('her night is offered to an unprompted line once, not as the opener of ever
   assert.equal(mentionsNight('nothing to do with it', nights[0]), false);
   assert.equal(nightsToDrawOn([], []), '');
 });
+
+test('the labels a night was written with are said as sentences, not read out as labels', () => {
+  const note = "Neon mess, high-octane. FAVOURITE: David's Sandevistan slow-mo. WANT: a brutal ending.";
+  const said = unlabel(note);
+  assert.doesNotMatch(said, /FAVOURITE:|WANT:/);
+  assert.match(said, /The bit you rate above the rest is David's Sandevistan slow-mo\./);
+  assert.match(said, /What you would like out of it is a brutal ending\./);
+  assert.equal(unlabel('Just a plain note.'), 'Just a plain note.');
+});
+
