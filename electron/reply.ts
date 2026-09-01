@@ -701,8 +701,23 @@ export function oneEmojiAtMost(reply: string, emoji: readonly string[]): string 
  */
 const CLOSING_ORDER = /^(?:now,?\s+)?(?:and\s+)?(?:go (?:to )?(?:bed|sleep)|get (?:to bed|some sleep|going)|sleep|stop (?:asking|nitpicking|stalling|talking|whining|arguing|pestering)|put (?:the|your) phone down|get off (?:your|the) phone|go do something|get on with it|don'?t stay up|you'?re tired\b|you have (?:a|the|an)\b.{0,40}\bto (?:build|do|finish|make)\b)/i;
 
+// A sentence aimed at him: an order, or a remark about what he is. Listing the
+// orders themselves was whack-a-mole — "don't make me come over there and
+// unplug your router" is not on any list and does the same job.
+const AT_HIM = /^(?:now,?\s+|and\s+|but\s+|so\s+)*(?:go|stop|get|put|don't|do|dont|sleep|build|finish|eat|move|quit|leave|start|try|make sure|you're|youre|you\b|your\b)/i;
+
 export function dropClosingOrder(reply: string): string {
   const paragraphs = (reply ?? '').split(/\n\s*\n/);
+  // A whole last paragraph that is nothing but him — what he is, what he should
+  // do — is the pivot itself, not a sentence of it. It goes, if what is above it
+  // stands on its own.
+  if (paragraphs.length > 1) {
+    const tail = (paragraphs.at(-1) ?? '').split(/(?<=[.!?…])\s+/).map(part => part.replace(/[‘’]/g, "'").trim()).filter(part => /[\p{Letter}\p{Number}]/u.test(part));
+    if (tail.length && tail.every(sentence => AT_HIM.test(sentence))) {
+      const kept = paragraphs.slice(0, -1).join('\n\n').trim();
+      if (/[\p{Letter}\p{Number}]/u.test(kept)) return kept;
+    }
+  }
   const last = paragraphs.at(-1) ?? '';
   const sentences = last.split(/(?<=[.!?…])\s+/);
   const lexical = (part: string) => /[\p{Letter}\p{Number}]/u.test(part);

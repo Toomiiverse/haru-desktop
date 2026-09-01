@@ -124,5 +124,10 @@ test('the order she signs a conversation about herself off with is cut, and the 
   const curly = "It's the only real moment.\n\nNow stop asking me and go to sleep. You\u2019re tired, you\u2019re scrolling, and you have work tomorrow. 😒";
   assert.match(dropClosingOrder(curly), /the only real moment/);
   assert.doesNotMatch(dropClosingOrder(curly), /tired|go to sleep/, 'a typographic apostrophe is still an apostrophe');
+  const threat = "That's real character growth. Not your press X to cry nonsense.\n\nNow go to bed. You\u2019re tired, and you have a website to build tomorrow. Don\u2019t make me come over there and unplug your router.";
+  assert.match(dropClosingOrder(threat), /real character growth/);
+  assert.doesNotMatch(dropClosingOrder(threat), /router|go to bed/, 'a closing paragraph that is nothing but him goes whole');
+  const mixed = "Himeno's final stand. She burns out to give Denji a chance.\n\nDetroit? Everyone gets a hug and a monologue. Boring.";
+  assert.equal(dropClosingOrder(mixed), mixed, 'a closing paragraph still about her subject stays');
 });
 
