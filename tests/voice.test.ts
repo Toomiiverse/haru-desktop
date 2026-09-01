@@ -11,9 +11,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {
-  DEFAULT_VOICE, hasShout, isSilent, readVoiceConfig, referenceFor, shoutReference,
-  speakableText, splitForSpeech, spokenCase, type VoiceConfig, sovitsRequest, DEFAULT_SAMPLING } from '../electron/voice';
+import { DEFAULT_VOICE, hasShout, isSilent, readVoiceConfig, referenceFor, shoutReference, speakableText, splitForSpeech, spokenCase, type VoiceConfig, sovitsRequest, DEFAULT_SAMPLING, looksClipped, SPOKEN_CHARS_PER_SECOND } from '../electron/voice';
 
 const config = (overrides: Partial<VoiceConfig> = {}): VoiceConfig => ({ ...DEFAULT_VOICE, ...overrides });
 
@@ -325,5 +323,15 @@ test('the GPT-SoVITS request carries the fellows of the reference and the sampli
   assert.equal(body.text_split_method, 'cut4', 'split where a person breathes');
   const plain = sovitsRequest(readVoiceConfig({ ...DEFAULT_VOICE, engine: 'gpt-sovits', voice: '/c/n.wav' }), { clip: '/c/n.wav', text: '' }, 'Go.');
   assert.deepEqual(plain.aux_ref_audio_paths, []); assert.equal(plain.temperature, 1); assert.equal(plain.fragment_interval, 0.45);
+});
+
+test('audio far shorter than the line it was given reads as cut off', () => {
+  const wav = (seconds: number) => new Uint8Array(44 + Math.round(seconds * 32000 * 2));
+  const line = "Himeno's final stand. She doesn't get a speech. She just burns herself out to give Denji a chance.";
+  assert.equal(looksClipped(wav(9.4), line), false, 'a full reading');
+  assert.equal(looksClipped(wav(2.7), line), true, 'the one that stopped mid-sentence');
+  assert.equal(looksClipped(wav(0.4), 'Night.'), false, 'too short a line to judge');
+  assert.equal(looksClipped(new Uint8Array(0), line), false, 'nothing to measure');
+  assert.equal(Math.round(line.length / SPOKEN_CHARS_PER_SECOND), 7, 'about seven seconds of speech');
 });
 

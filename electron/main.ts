@@ -63,7 +63,7 @@ import { chatTools, coerceKnowledgeCategory, runChatTool, type ToolAvailability,
 import { createMemoryStore } from './memorystore';
 import { createKnowledgeStore } from './knowledgestore';
 import { chatSystemPrompt, freshStartInstruction, type FreshStart, type RatedReply, LENGTH_RULE_LOCAL, LENGTH_RULE_HOSTED } from './prompt';
-import { hasShout, readVoiceConfig, referenceFor, shoutReference, spokenCase, speakableText, splitForSpeech, synthesise, type SpeechClip, type VoiceConfig } from './voice';
+import { hasShout, readVoiceConfig, referenceFor, shoutReference, spokenCase, speakableText, splitForSpeech, synthesise, type SpeechClip, type VoiceConfig, looksClipped } from './voice';
 import { applyDecay, DEEP_RECALL_LIMIT, eventCandidates, eventsPrompt, findSuperseded, formatMemoryPrompt, isExplicitRecall, closeEvents, isWorthAnEvent, isWorthKeeping, isWorthRemembering, MEMORY_KINDS, migrateMemories, pruneMemories, readsAsSecondPerson, rememberInto, retrieveMemories, semanticSimilarities, summaryPrompt, supersede, THIRD_PERSON_AGAIN, vectorSimilarity, type ForgettingEntry, type MemoryKind, type MemoryRecord, type MemorySource, type RetrievalFactors, type ScoredMemory, type SessionSummary } from './memory';
 import { consolidateMemories, type ConsolidationChange } from './consolidation';
 import { appendToBlockValue, canEditBlock, findBlock, formatMemoryBlocks, replaceInBlockValue, resolveBlockValue, resetBlockToDerived, withEditedValue, type BlockSources, type MemoryBlock } from './blocks';
@@ -8840,7 +8840,17 @@ function webDeps(): WebDeps {
         // said which clip the phone had spoken a line with, and "she sounds
         // high-pitched" could not be traced to the reference that caused it.
         console.log(`[voice] the phone speaks as ${emotion ?? 'her usual'} using ${path.basename(chosen.clip)}`);
-        return await synthesise(spokenCase(speakableText(text)), voice, chosen, remoteAuth(voice.endpoint));
+        const say = spokenCase(speakableText(text));
+        const clip = await synthesise(say, voice, chosen, remoteAuth(voice.endpoint));
+        // Ended early — see looksClipped. One more go; the sampling that cut it
+        // is the same sampling that will not, next time.
+        if (clip && looksClipped(clip.audio, say)) {
+          console.warn('[voice] that came back cut short — saying it again');
+          const again = await synthesise(say, voice, chosen, remoteAuth(voice.endpoint));
+          if (again && !looksClipped(again.audio, say)) return again;
+          if (again && again.audio.length > clip.audio.length) return again;
+        }
+        return clip;
       } catch (error) {
         // A mood clip the server will not take — four of hers ran over the
         // 3-10 second limit — costs the mood, not the line: her usual voice.

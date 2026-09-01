@@ -402,3 +402,26 @@ function readEmotionVoices(saved: unknown): Partial<Record<EmotionName, VoiceRef
   }
   return result;
 }
+
+/**
+ * Whether what came back is too short to be the line she was given.
+ *
+ * The model ends on its own token, and now and then it ends early: the same
+ * hundred-and-forty characters that took nine and a half seconds came back
+ * once as two and a half, mid-sentence. Nothing in the request says so and
+ * nothing errors — the clip is simply short. Measured across her own renders
+ * she speaks at about fifteen characters a second, so anything under half of
+ * what the text needs was cut off rather than said.
+ *
+ * PCM only, which is what the wav these servers return always is: bytes after
+ * the 44-byte header, over the rate times the width.
+ */
+export const SPOKEN_CHARS_PER_SECOND = 15;
+export function looksClipped(audio: Uint8Array, text: string, rate = 32000, bytesPerSample = 2): boolean {
+  const said = (text ?? '').replace(/\s+/g, ' ').trim();
+  // Too short to judge: a two-word answer has no reliable length.
+  if (said.length < 40 || audio.length <= 44) return false;
+  const seconds = (audio.length - 44) / (rate * bytesPerSample);
+  return seconds < (said.length / SPOKEN_CHARS_PER_SECOND) * 0.5;
+}
+
