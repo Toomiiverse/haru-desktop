@@ -232,6 +232,17 @@ export const RANT_COOLDOWN_MS = 90 * 60_000;
  * A chance rather than a rule, because a rant on demand is a format too. The
  * roll is passed in so this stays pure and the caller owns the randomness.
  */
+// A message that is only a greeting or only filler: "morning", "hey", "lol",
+// "ok". There is nothing in it to answer, and a five-line opinion about last
+// night's anime landing on "Morning Haru" reads as her having waited up to
+// deliver it.
+const NOTHING_IN_IT = /^(?:hi|hey|heya|hiya|hello|yo|sup|wassup|morning|good morning|good afternoon|good evening|afternoon|evening|night|goodnight|gn|bye|later|cya|ok|okay|k|kk|kay|lol|lmao|haha|hehe|sure|fine|yeah|yep|yup|nah|nope|no|thanks|thank you|ty|cheers|cool|nice|right|alright|aight|hmm|hm|mhm|oh|ah|wow|damn|true|same|fair|w|ez)(?:\s+(?:haru|there|then|mate|man))?[\s!.?,😊🙂👍🙄😒😏]*$|^(?:what'?s up|whats up|you (?:there|around|up|good|ok|okay)|how are you|how'?s it going|hows things|what'?s new|whats new|anything (?:new|happen))[\s!.?,]*$/i;
+
+/** Nothing in their message to answer — see NOTHING_IN_IT. */
+export function nothingInIt(text: string): boolean {
+  return NOTHING_IN_IT.test((text ?? '').trim());
+}
+
 export function roomToRant(input: {
   /** 0..1 */ energy: number; curiosity: number;
   /** 0..9 */ irritation: number;
@@ -241,8 +252,11 @@ export function roomToRant(input: {
   /** Since she was last given the room, or null if never. */
   sinceLastMs: number | null;
   /** 0..1 */ roll: number;
+  /** What they just said, so a greeting does not get a five-line opinion back. */
+  latest?: string;
 }): string {
   if (input.sinceLastMs !== null && input.sinceLastMs < RANT_COOLDOWN_MS) return '';
+  if (nothingInIt(input.latest ?? '')) return '';
   let score = 0;
   if (input.energy >= 0.7) score += 0.25;
   if (input.curiosity >= 0.6) score += 0.25;

@@ -5876,7 +5876,7 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // they were going" would be a complaint the conversation above disproves,
   // and told both she believed the conversation, rightly.
   // Her own reason to talk at length, weighed once for this turn — see rantRoom.
-  const rantRoomNow = messages.at(-1)?.role === 'user' ? rantRoom() : '';
+  const rantRoomNow = messages.at(-1)?.role === 'user' ? rantRoom(latest) : '';
   let turnedUp = messages.at(-1)?.role === 'user' ? arrivalNote() : '';
   const arrival = getArrival();
   if (turnedUp && arrival && saidTheyWereGoing(arrival.place, [latest])) {
@@ -7141,7 +7141,7 @@ function recordBrief(kind: string, brief: string, line: string): void {
  * subject is last night's, or the thing of hers she has spent the most nights
  * on — "she played her favourite game, so she will want to talk about it".
  */
-function rantRoom(): string {
+function rantRoom(latest: string): string {
   const mood = getMood();
   const lastNight = nightsOn(getNights(), lastNightKey())[0];
   const deepest = [...getInterests()].sort((a, b) => b.nights - a.nights)[0];
@@ -7153,6 +7153,7 @@ function rantRoom(): string {
     subject: subject.slice(0, 80),
     sinceLastMs: grantedAt ? Date.now() - grantedAt : null,
     roll: Math.random(),
+    latest,
   });
   if (room) {
     store.set('chat.rantAt', Date.now());
