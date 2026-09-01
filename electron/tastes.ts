@@ -174,7 +174,9 @@ export function tastesInstruction(interests: Interest[]): string {
     const sentence = (text: string) => text.replace(/[.!?]+$/, '');
     // Not "The one you rate:" — a label in her material is a label she says.
     if (interest.favourite) bits.push(`The bit of it I rate above the rest is ${sentence(interest.favourite)}.`);
-    if (interest.wants) { const want = sentence(interest.wants); bits.push(`You want ${/^to\b/i.test(want) ? want : `to ${want}`}.`); }
+    // First person, like the rest of her own views: written as "You want to see
+    // Denji learn something" she said it straight back to him.
+    if (interest.wants) { const want = sentence(interest.wants); bits.push(`I want ${/^to\b/i.test(want) ? want : `to ${want}`}.`); }
     return `- ${bits.join(' ')}`;
   });
   return [
