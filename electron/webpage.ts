@@ -1036,15 +1036,22 @@ function primeVoice(){ player.play().catch(()=>{}); player.pause(); }
 // reply is five seconds of silence before a word — asked for a sentence at a
 // time it is closer to one, and she is talking while the rest arrives.
 function sayable(text){
-  const parts=[]; let current='';
-  for(const sentence of String(text||'').split(/(?<=[.!?\u2026])\\s+/)){
-    if(!sentence.trim()) continue;
-    if(!current) current=sentence;
-    else if(current.length+sentence.length+1<=180) current+=' '+sentence;
-    else { parts.push(current); current=sentence; }
+  const out=[];
+  for(const para of String(text||'').split(/\\n\\s*\\n/)){
+    const parts=[]; let current='';
+    for(const sentence of para.split(/(?<=[.!?\u2026])\\s+/)){
+      if(!sentence.trim()) continue;
+      if(!current) current=sentence;
+      else if(current.length+sentence.length+1<=180) current+=' '+sentence;
+      else { parts.push(current); current=sentence; }
+    }
+    if(current) parts.push(current);
+    // A breath between sentences and a longer one where she changed the
+    // subject: run together they were a person reading, not talking.
+    parts.forEach((part,i)=>{ if(/[\\p{Letter}\\p{Number}]/u.test(part)) out.push({ text: part, pause: i===parts.length-1 ? 520 : 260 }); });
   }
-  if(current) parts.push(current);
-  return parts.filter(part=>/[\\p{Letter}\\p{Number}]/u.test(part));
+  if(out.length) out[out.length-1].pause=0;
+  return out;
 }
 function fetchClip(text,emotion){
   return fetch('/api/speak',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(emotion?{text,emotion}:{text})})
@@ -1058,19 +1065,21 @@ async function speak(text,emotion){
     if(!parts.length) return false;
     // The next one is asked for the moment this one starts playing, so the gap
     // between sentences is the render that was already happening.
-    let pending=fetchClip(parts[0],emotion);
+    let pending=fetchClip(parts[0].text,emotion);
     let started=false;
     for(let i=0;i<parts.length;i++){
       const blob=await pending;
       if(mine!==speaking) return started;
       if(!blob) return started;
-      pending=i+1<parts.length?fetchClip(parts[i+1],emotion):null;
+      pending=i+1<parts.length?fetchClip(parts[i+1].text,emotion):null;
       const url=URL.createObjectURL(blob);
       const done=new Promise(resolve=>{ player.onended=player.onerror=()=>{ URL.revokeObjectURL(url); resolve(); }; });
       player.src=url;
       await player.play();
       started=true;
       await done;
+      if(mine!==speaking) return true;
+      if(parts[i].pause) await new Promise(r=>setTimeout(r,parts[i].pause));
       if(mine!==speaking) return true;
     }
     return started;

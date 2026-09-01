@@ -25,7 +25,7 @@ export type VoiceReference = { clip: string; text: string;
 
 /** GPT-SoVITS sampling, sent rather than left to the server. Temperature stays at 1: at 0.85 the smug reference cut every line off at half length — the cooler sampling reaches the end-of-speech token early. */
 export type VoiceSampling = { topK: number; topP: number; temperature: number; repetitionPenalty: number; fragmentInterval: number };
-export const DEFAULT_SAMPLING: VoiceSampling = { topK: 15, topP: 1, temperature: 1, repetitionPenalty: 1.35, fragmentInterval: 0.3 };
+export const DEFAULT_SAMPLING: VoiceSampling = { topK: 15, topP: 1, temperature: 1, repetitionPenalty: 1.35, fragmentInterval: 0.45 };
 
 export type VoiceConfig = {
   engine: VoiceEngine;
@@ -334,16 +334,17 @@ export function sovitsRequest(config: VoiceConfig, reference: VoiceReference, te
         // The pause between the fragments the server makes of one chunk — with
         // cut0 that is one, so this is the breath at a sentence end inside it.
         fragment_interval: sampling.fragmentInterval,
-        // The server's own default is cut5, which splits on every comma — its
-        // punctuation set literally contains "," — and synthesises each fragment
-        // as a separate utterance. That is why she stopped dead at every comma:
-        // not a pause in her delivery but the seam between two takes.
+        // Not cut5, the server's default, which splits on every comma — its
+        // punctuation set literally contains "," — so she stopped dead
+        // mid-clause: the seam between two takes rather than a pause in her
+        // delivery.
         //
-        // cut0 does not split at all, which is right because the text arriving
-        // here has already been cut into sentence-sized pieces by
-        // splitForSpeech. Left to the server it was being cut twice, and the
-        // second cut was the one nobody asked for.
-        text_split_method: 'cut0',
+        // cut4 splits on sentence ends, which is where a person breathes, and
+        // fragment_interval is the length of that breath. It was cut0 — no
+        // split at all — back when a chunk was one sentence anyway; now a chunk
+        // can be a short paragraph and running its sentences together is what
+        // made her sound like someone reading rather than talking.
+        text_split_method: 'cut4',
   };
 }
 

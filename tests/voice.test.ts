@@ -321,9 +321,9 @@ test('the GPT-SoVITS request carries the fellows of the reference and the sampli
   assert.deepEqual(config.sampling, { temperature: 0.7 }, 'a number is read, a string is not');
   const body = sovitsRequest(config, config.emotionVoices.happy!, 'Go.');
   assert.deepEqual(body.aux_ref_audio_paths, ['/c/h2.wav']);
-  assert.equal(body.temperature, 0.7); assert.equal(body.top_k, DEFAULT_SAMPLING.topK); assert.equal(body.fragment_interval, 0.3);
-  assert.equal(body.text_split_method, 'cut0');
+  assert.equal(body.temperature, 0.7); assert.equal(body.top_k, DEFAULT_SAMPLING.topK); assert.equal(body.fragment_interval, 0.45);
+  assert.equal(body.text_split_method, 'cut4', 'split where a person breathes');
   const plain = sovitsRequest(readVoiceConfig({ ...DEFAULT_VOICE, engine: 'gpt-sovits', voice: '/c/n.wav' }), { clip: '/c/n.wav', text: '' }, 'Go.');
-  assert.deepEqual(plain.aux_ref_audio_paths, []); assert.equal(plain.temperature, 1);
+  assert.deepEqual(plain.aux_ref_audio_paths, []); assert.equal(plain.temperature, 1); assert.equal(plain.fragment_interval, 0.45);
 });
 
