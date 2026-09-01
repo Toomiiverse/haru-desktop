@@ -1031,18 +1031,49 @@ let speaking=0;
 function primeVoice(){ player.play().catch(()=>{}); player.pause(); }
 // With the mood the line was said in, when known: the voice side picks the
 // clip for it. Resolves to whether she actually started to say it.
+// Sentence-sized, so the first one can be spoken while the rest is still being
+// made. The server renders about a fifth of realtime, which for a four-sentence
+// reply is five seconds of silence before a word — asked for a sentence at a
+// time it is closer to one, and she is talking while the rest arrives.
+function sayable(text){
+  const parts=[]; let current='';
+  for(const sentence of String(text||'').split(/(?<=[.!?\u2026])\\s+/)){
+    if(!sentence.trim()) continue;
+    if(!current) current=sentence;
+    else if(current.length+sentence.length+1<=180) current+=' '+sentence;
+    else { parts.push(current); current=sentence; }
+  }
+  if(current) parts.push(current);
+  return parts.filter(part=>/[\\p{Letter}\\p{Number}]/u.test(part));
+}
+function fetchClip(text,emotion){
+  return fetch('/api/speak',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(emotion?{text,emotion}:{text})})
+    .then(r=>r.ok?r.blob():null).catch(()=>null);
+}
 async function speak(text,emotion){
   const mine=++speaking;
   try{
     player.pause();
-    const r=await fetch('/api/speak',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(emotion?{text,emotion}:{text})});
-    if(!r.ok||mine!==speaking) return false;
-    const url=URL.createObjectURL(await r.blob());
-    const previous=player.src;
-    player.src=url;
-    player.onended=player.onerror=()=>{ URL.revokeObjectURL(url); if(previous) URL.revokeObjectURL(previous); };
-    await player.play();
-    return true;
+    const parts=sayable(text);
+    if(!parts.length) return false;
+    // The next one is asked for the moment this one starts playing, so the gap
+    // between sentences is the render that was already happening.
+    let pending=fetchClip(parts[0],emotion);
+    let started=false;
+    for(let i=0;i<parts.length;i++){
+      const blob=await pending;
+      if(mine!==speaking) return started;
+      if(!blob) return started;
+      pending=i+1<parts.length?fetchClip(parts[i+1],emotion):null;
+      const url=URL.createObjectURL(blob);
+      const done=new Promise(resolve=>{ player.onended=player.onerror=()=>{ URL.revokeObjectURL(url); resolve(); }; });
+      player.src=url;
+      await player.play();
+      started=true;
+      await done;
+      if(mine!==speaking) return true;
+    }
+    return started;
   }catch(e){ console.warn('[voice] '+(e&&e.message||e)); return false; }
 }
 // A tap on her. Mid-sentence it is a hand over her mouth: whatever she is
