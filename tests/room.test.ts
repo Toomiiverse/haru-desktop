@@ -92,7 +92,8 @@ test('a question about one of her things, or about what she makes of something, 
   assert.equal(askingAboutHer('', subjects), '');
   const note = herSubjectNote('Chainsaw Man');
   assert.match(note, /Stay on it/);
-  assert.match(note, /do not end it with an order/);
+  assert.match(note, /No telling them to go to bed/);
+  assert.match(note, /not one order, not even at the end/);
   assert.match(note, /about you, not about them/);
 });
 

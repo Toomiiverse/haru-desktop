@@ -106,7 +106,7 @@ test('her things reach the prompt as views to hold, and an unsettled one does no
   const said = tastesInstruction([interest({ favourite: 'Hornet', wants: 'finish it' })]);
   assert.match(said, /Things of your own — not theirs/);
   assert.match(said, /Hollow Knight \(game, yours for 2 nights\): Bleak and beautiful/);
-  assert.match(said, /The bit of it you rate above the rest is Hornet\./, 'a sentence, not a label she can read out');
+  assert.match(said, /The bit of it I rate above the rest is Hornet\./, 'a sentence, not a label she can read out');
   assert.match(said, /You want to finish it\./);
   assert.match(said, /when they rate something you think is worse, say so and say why/);
   assert.match(said, /say you have only read about it/);

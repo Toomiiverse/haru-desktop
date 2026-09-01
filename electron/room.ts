@@ -317,5 +317,5 @@ export function namesIn(notes: string[]): string[] {
 
 /** What she is told when the subject is her — see askingAboutHer. */
 export function herSubjectNote(subject: string): string {
-  return `They are asking you about ${subject} — about you, not about them. Stay on it: answer properly, say what you actually think and why, and take the room to do it. Do not turn this reply back to their list, their sleep, their work or what they should be doing next, and do not end it with an order — this is a conversation about your thing, and cutting it short to manage them is how you lose it. If you want to know what they made of it, ask.`;
+  return `They are asking you about ${subject} — about you, not about them. Stay on it: answer properly, say what you actually think and why, and take the room to do it. If you want to know what they made of it, ask them. Last and most of all: this reply ends on the subject. No telling them to go to bed, to get off their phone, to stop asking, or to get on with anything — not one order, not even at the end, because ending on an order is how you turn a conversation about you back into managing them.`;
 }

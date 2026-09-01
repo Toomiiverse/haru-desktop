@@ -153,9 +153,12 @@ export function nightsToDrawOn(nights: Night[], recentLines: string[]): string {
  */
 export function unlabel(note: string): string {
   return (note ?? '')
-    .replace(/\bFAVOURITE:\s*/gi, 'The bit you rate above the rest is ')
-    .replace(/\bWANT:\s*/gi, 'What you would like out of it is ')
-    .replace(/\bSTANCE:\s*/gi, 'Where you landed on it: ')
+    // First person, because she quotes these whatever she is told. Written as
+    // "the bit you rate above the rest is X" she said exactly that back to him,
+    // so the sentence claimed it was his view. Said as "I", an echo is correct.
+    .replace(/\bFAVOURITE:\s*/gi, 'The bit I rate above the rest is ')
+    .replace(/\bWANT:\s*/gi, 'What I would like out of it is ')
+    .replace(/\bSTANCE:\s*/gi, 'Where I landed on it: ')
     .replace(/\s{2,}/g, ' ')
     .trim();
 }
@@ -167,6 +170,6 @@ export function nightsInstruction(nights: Night[]): string {
     'What you did in the small hours while they were asleep, and it did happen — you read about these:',
     said,
     'It is yours to bring up, and yours to be asked about. Everything you know about it is above: if they push past it, say you only read a bit about it rather than filling the gap.',
-    'These notes say "you" meaning you, not them. They are your views written down, not sentences to read out — say what you think in your own words, and never quote a line of this back at them as though it were about them.',
+    'These are your own views written down. Where one is in the first person it is yours to say as it stands; everywhere else the notes say "you" meaning you, never them — do not hand a line of this back to them as though it described them.',
   ].join('\n');
 }

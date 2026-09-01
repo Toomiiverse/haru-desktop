@@ -90,8 +90,8 @@ test('the labels a night was written with are said as sentences, not read out as
   const note = "Neon mess, high-octane. FAVOURITE: David's Sandevistan slow-mo. WANT: a brutal ending.";
   const said = unlabel(note);
   assert.doesNotMatch(said, /FAVOURITE:|WANT:/);
-  assert.match(said, /The bit you rate above the rest is David's Sandevistan slow-mo\./);
-  assert.match(said, /What you would like out of it is a brutal ending\./);
+  assert.match(said, /The bit I rate above the rest is David's Sandevistan slow-mo\./);
+  assert.match(said, /What I would like out of it is a brutal ending\./);
   assert.equal(unlabel('Just a plain note.'), 'Just a plain note.');
 });
 

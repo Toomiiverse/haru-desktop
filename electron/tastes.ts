@@ -173,7 +173,7 @@ export function tastesInstruction(interests: Interest[]): string {
     const bits = [`${interest.name} (${interest.kind}, yours for ${interest.nights} night${interest.nights === 1 ? '' : 's'}): ${interest.stance}`];
     const sentence = (text: string) => text.replace(/[.!?]+$/, '');
     // Not "The one you rate:" — a label in her material is a label she says.
-    if (interest.favourite) bits.push(`The bit of it you rate above the rest is ${sentence(interest.favourite)}.`);
+    if (interest.favourite) bits.push(`The bit of it I rate above the rest is ${sentence(interest.favourite)}.`);
     if (interest.wants) { const want = sentence(interest.wants); bits.push(`You want ${/^to\b/i.test(want) ? want : `to ${want}`}.`); }
     return `- ${bits.join(' ')}`;
   });
