@@ -77,7 +77,7 @@ import { placeAsk, placeNote, placeWords, searchGooglePlaces, type GooglePlace }
 import { addAside, alreadySaidRecently, asideContext, asidesOn, markReached, pruneAsides, readAsides, type Aside, type AsideSource, markAsked, openAsk, answerAsk, askedRecently, unansweredAsksNote } from './asides';
 import { attachmentsInPlay, describeAttached, READ_IT_ALL_PROMPT, readAttachments, type Attachment, type Opened } from './attachments';
 import { forOllama, withoutOldest } from './ollamaturns';
-import { seedEmoji } from './seed';
+import { seedEmoji, seedOffTheOrders } from './seed';
 import { pickToBringUp, REMEMBERED_PICKS } from './bored';
 import { grudgeInstruction, irritationAfterTally, nextGrudge, tallyDue, tallyInstruction, unanswered } from './grudge';
 import { groundedInstruction, placeQuery } from './places';
@@ -6083,7 +6083,11 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // the measurement. The stored transcript is not touched; only what is sent.
   // The length rule fits the brain answering — see LENGTH_RULE_HOSTED.
   const sized = (brain.hosted ? system.replace(LENGTH_RULE_LOCAL, LENGTH_RULE_HOSTED) : system) + (answering ? ` ${answering}` : '');
-  const conversation: OllamaMessage[] = [{ role: 'system', content: brief ? `${sized} ${BREVITY}` : sized }, ...seedEmoji(markTimeGaps(withoutStaleDenials(withFiles, hasItems), CHAT_TIMEZONE))];
+  // On a turn about her, the sign-off comes off her recent replies as she is
+  // shown them — see seedOffTheOrders. She copies the history over the rule.
+  const history = markTimeGaps(withoutStaleDenials(withFiles, hasItems), CHAT_TIMEZONE);
+  const shown = hers ? seedOffTheOrders(history, dropClosingOrder) : history;
+  const conversation: OllamaMessage[] = [{ role: 'system', content: brief ? `${sized} ${BREVITY}` : sized }, ...seedEmoji(shown)];
   // The last thing she reads before she speaks — see LAST_WORD for the
   // measurement. A system message just before their last turn: the Ollama
   // shaper folds it into that turn, an OpenAI-shaped endpoint takes it as it
@@ -6268,10 +6272,7 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // fixed (EXPRESSIVE), and this catches what the wording does not.
   // herRecentReplies, not `recent`: that holds the last two she said, one fewer
   // than the filter asked for, so it never once fired.
-  // On a turn about her, the order she signs off with goes — see dropClosingOrder.
-  const unordered = hers ? dropClosingOrder(cleaned) : cleaned;
-  if (unordered !== cleaned) console.log('[ai] cut the order she signed off a conversation about herself with');
-  const varied = oneEmojiAtMost(dropOverusedEmoji(unordered, herRecentReplies, HER_EMOJI), HER_EMOJI);
+  const varied = oneEmojiAtMost(dropOverusedEmoji(cleaned, herRecentReplies, HER_EMOJI), HER_EMOJI);
   if (varied !== cleaned) console.log('[ai] thinned the emoji in that reply');
   const herLine = reminder?.time ? fixStatedReminderTime(varied, reminder.time) : varied;
   // The maps button goes under her words, not into her mouth: what is herLine

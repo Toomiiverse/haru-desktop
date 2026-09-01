@@ -39,3 +39,33 @@ export function seedEmoji<T extends Turn>(conversation: T[], count = SEEDED_REPL
   }
   return out;
 }
+
+/**
+ * Her recent replies with the sign-off taken off them, for a turn that is
+ * about her.
+ *
+ * The same finding as the emoji above, in the other direction: forty of her
+ * replies in the history end by turning back to him — go to bed, get off your
+ * phone, you have a website to build — and asked about the Reze arc she wrote
+ * one more, whatever the brief said. Four wordings failed against it. What
+ * changed her was not being able to see the pattern: the last few of her own
+ * replies are shown with that ending removed, so the example she copies is one
+ * that stays on the subject.
+ *
+ * In the prompt only. What she actually said is stored untouched, and `strip`
+ * is a no-op on any reply that did not end that way — so on an ordinary
+ * conversation this does nothing at all.
+ */
+export function seedOffTheOrders<T extends Turn>(conversation: T[], strip: (text: string) => string, count = SEEDED_REPLIES): T[] {
+  const out = conversation.map(turn => ({ ...turn }));
+  let touched = 0;
+  for (let at = out.length - 1; at >= 0 && touched < count; at--) {
+    const turn = out[at];
+    if (turn.role !== 'assistant' || typeof turn.content !== 'string' || !turn.content.trim()) continue;
+    touched++;
+    const without = strip(turn.content);
+    if (without && without !== turn.content) turn.content = without;
+  }
+  return out;
+}
+
