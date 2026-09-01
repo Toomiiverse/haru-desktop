@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { emojiRut, EXPRESSIVE, HER_EMOJI, LAST_WORD, NATURAL, roomToRant, RANT_COOLDOWN_MS, nothingInIt, askingAboutHer, herSubjectNote, namesIn } from '../electron/room';
-import { dropOverusedEmoji, oneEmojiAtMost } from '../electron/reply';
+import { dropOverusedEmoji, oneEmojiAtMost, dropClosingOrder } from '../electron/reply';
 
 test('the eye-roll is no longer named first or named as the default', () => {
   assert.equal(HER_EMOJI[0], '😏');
@@ -106,5 +106,16 @@ test('the names inside her own notes count as her subject, and so does asking wh
   assert.equal(askingAboutHer('so whats good about the Reze arc then', ['Chainsaw Man', ...found]), 'Reze');
   assert.equal(askingAboutHer("what's so good about it", ['Chainsaw Man']), 'what you are into');
   assert.equal(askingAboutHer('why do you rate it over Detroit', ['Chainsaw Man']), 'what you are into');
+});
+
+test('the order she signs a conversation about herself off with is cut, and the rest stands', () => {
+  const said = "Himeno's final stand. She burns herself out to give Denji a chance.\n\nIt's brutal and quiet. Now stop asking me to explain art to you and go to sleep.";
+  const out = dropClosingOrder(said);
+  assert.match(out, /It's brutal and quiet\./);
+  assert.doesNotMatch(out, /go to sleep/);
+  assert.equal(dropClosingOrder('Go to bed.'), 'Go to bed.', 'never left with nothing');
+  assert.equal(dropClosingOrder('Reze is better written. Denji never learns.'), 'Reze is better written. Denji never learns.', 'nothing to cut');
+  assert.doesNotMatch(dropClosingOrder('One is a lecture, the other is a story.\n\nNow stop nitpicking and go to bed.'), /nitpicking/);
+  assert.match(dropClosingOrder('One is a lecture, the other is a story.\n\nNow stop nitpicking and go to bed.'), /lecture/);
 });
 

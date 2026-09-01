@@ -688,3 +688,29 @@ export function oneEmojiAtMost(reply: string, emoji: readonly string[]): string 
   return /[\p{Letter}\p{Number}]/u.test(out) ? out : reply;
 }
 
+/**
+ * The order she signs off with, cut from a reply that was about her.
+ *
+ * A filter, and deliberately so: the wording was tried three times — told to
+ * stay on the subject, told not to end on an order, and finally handed a brief
+ * with his list left out of it — and she still closed a conversation about the
+ * Reze arc with "now stop asking me to explain art to you and go to sleep."
+ * Forty of her recent replies end that way and she imitates her own history
+ * before she obeys a rule. Only the trailing run of them goes, and only on a
+ * turn that was about her; anything she said before it stands.
+ */
+const CLOSING_ORDER = /^(?:now,?\s+)?(?:and\s+)?(?:go (?:to )?(?:bed|sleep)|get (?:to bed|some sleep|going)|sleep|stop (?:asking|nitpicking|stalling|talking|whining|arguing|pestering)|put (?:the|your) phone down|get off (?:your|the) phone|go do something|get on with it|don'?t stay up|you'?re tired\b|you have (?:a|the|an)\b.{0,40}\bto (?:build|do|finish|make)\b)/i;
+
+export function dropClosingOrder(reply: string): string {
+  const paragraphs = (reply ?? '').split(/\n\s*\n/);
+  const last = paragraphs.at(-1) ?? '';
+  const sentences = last.split(/(?<=[.!?…])\s+/);
+  let end = sentences.length;
+  while (end > 0 && CLOSING_ORDER.test(sentences[end - 1].trim())) end--;
+  if (end === sentences.length) return reply;
+  const kept = sentences.slice(0, end).join(' ').trim();
+  const rest = kept ? [...paragraphs.slice(0, -1), kept] : paragraphs.slice(0, -1);
+  const out = rest.join('\n\n').trim();
+  return /[\p{Letter}\p{Number}]/u.test(out) ? out : reply;
+}
+
