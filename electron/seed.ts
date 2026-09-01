@@ -56,7 +56,14 @@ export function seedEmoji<T extends Turn>(conversation: T[], count = SEEDED_REPL
  * is a no-op on any reply that did not end that way — so on an ordinary
  * conversation this does nothing at all.
  */
-export function seedOffTheOrders<T extends Turn>(conversation: T[], strip: (text: string) => string, count = SEEDED_REPLIES): T[] {
+/**
+ * Further back than the emoji seeding reaches. Six was enough to teach her a
+ * face; the sign-off is in nearly every reply she has ever sent, and six
+ * rewritten still left about forty examples of it in front of her.
+ */
+export const UNSIGNED_REPLIES = 24;
+
+export function seedOffTheOrders<T extends Turn>(conversation: T[], strip: (text: string) => string, count = UNSIGNED_REPLIES): T[] {
   const out = conversation.map(turn => ({ ...turn }));
   let touched = 0;
   for (let at = out.length - 1; at >= 0 && touched < count; at--) {
