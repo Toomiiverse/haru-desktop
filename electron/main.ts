@@ -6227,7 +6227,11 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // their names from the list she gave ten minutes earlier because that is the
   // answer, and its length is the world's. Asked to compare Qwen and Gemma she
   // came back with 930 characters and these two left 107 — the opening dig.
-  const trimmed = dropRoleHeader(dropInventedContact(dropStageDirections(dropInventedScreenTalk(brain.escalated || fromSearch ? deduped : dropRepeatedParagraphs(deduped, recent), grounded))));
+  // A rant is about the subject she has been on, so it echoes it by design —
+  // the repetition cuts are exactly wrong for the one reply she was given the
+  // room for. Five hundred characters of her own opinion came back as eighty.
+  const ranting = Boolean(rantRoomNow);
+  const trimmed = dropRoleHeader(dropInventedContact(dropStageDirections(dropInventedScreenTalk(brain.escalated || fromSearch || ranting ? deduped : dropRepeatedParagraphs(deduped, recent), grounded))));
   // Last, on the reply that survives everything else: a signature opener is
   // only a signature against what she said last time.
   // The echo first, then the signature: with "A keyboard?" gone, "Fine," is
@@ -6238,7 +6242,7 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // question twice she should give the same names twice, and the first time
   // this ran, 843 of her 890 characters were thrown away as "already said".
   const body = dropTackedOnParagraphs(trimmed, brain.escalated || fromSearch || ran.has('search_web') || ran.has('read_web_page') || ran.has('read_video_transcript'), brain.hosted ? HOSTED_PARAGRAPHS : undefined);
-  const cleaned = fixStatedClock(dropRepeatedOpener(dropEchoOpener(fromSearch ? body : dropRepeatedSentences(body, recent), latest), recent), clock.getHours(), clock.getMinutes());
+  const cleaned = fixStatedClock(dropRepeatedOpener(dropEchoOpener(fromSearch || ranting ? body : dropRepeatedSentences(body, recent), latest), recent), clock.getHours(), clock.getMinutes());
   // The reminder read from their message is the truth about its time, whatever she says.
   // Her promise, kept: "I'll set the reminder at 6:54 AM" with nothing written
   // is a reminder that exists only in the conversation. See reminderPromised.
@@ -6283,6 +6287,13 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // change of brain is read from these.
   const handed = Math.round(conversation.reduce((sum, message) => sum + (typeof message.content === 'string' ? message.content.length : 0), 0) / 4);
   const brainName = brain.hosted ? (spilledHome ? `hosted:${config.model}->home` : `hosted:${config.model}`) : brain.escalated ? `escalated:${config.model}` : 'local';
+  // Which stage took it, when a hosted reply loses most of itself: replaying the
+  // filters afterwards did not reproduce a 535-character answer coming back as
+  // eighty, so the run says so at the time.
+  if (brain.hosted && routeless.trim().length < said.trim().length * 0.6) {
+    const at = [['said', said], ['unlinked', unlinked], ['deduped', deduped], ['trimmed', trimmed], ['body', body], ['cleaned', cleaned], ['varied', varied], ['herLine', herLine], ['routeless', routeless]];
+    console.log(`[ai] most of that reply went: ${at.map(([name, text]) => `${name} ${text.trim().length}`).join(' -> ')}`);
+  }
   const touched = said.trim() !== routeless.trim();
   // What the filters took from a hosted reply, kept beside what survived: the
   // bake-off is judged on these, and a number alone says nothing about whether
