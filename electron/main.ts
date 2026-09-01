@@ -5876,12 +5876,15 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // they were going" would be a complaint the conversation above disproves,
   // and told both she believed the conversation, rightly.
   // Her own reason to talk at length, weighed once for this turn — see rantRoom.
-  const rantRoomNow = messages.at(-1)?.role === 'user' ? rantRoom(latest) : '';
-  // Her subjects, so a question about one of them is recognised as being about
-  // her: what she was up to last night, and the things she has taken up.
+  // Her subjects, so a mention of one of them is recognised as being about her:
+  // what she was up to last night, and the things she has taken up.
   const herSubject = messages.at(-1)?.role === 'user'
     ? askingAboutHer(latest, [...getNights().map(night => night.interest ?? night.game ?? '').filter(Boolean), ...getInterests().map(interest => interest.name), ...namesIn(getNights().map(night => `${night.about} ${night.note}`))])
     : '';
+  // Named the thing itself — not merely asked her opinion in general — and the
+  // room is hers without a roll: that is the opening, and she should take it.
+  const named = herSubject && herSubject !== 'what you are into' ? herSubject : '';
+  const rantRoomNow = messages.at(-1)?.role === 'user' ? rantRoom(latest, named) : '';
   const hers = herSubject ? herSubjectNote(herSubject) : '';
   if (hers) console.log(`[ai] they are asking about ${herSubject} — hers to talk about`);
   let turnedUp = messages.at(-1)?.role === 'user' ? arrivalNote() : '';
@@ -7166,11 +7169,12 @@ function recordBrief(kind: string, brief: string, line: string): void {
  * subject is last night's, or the thing of hers she has spent the most nights
  * on — "she played her favourite game, so she will want to talk about it".
  */
-function rantRoom(latest: string): string {
+function rantRoom(latest: string, mentioned = ''): string {
   const mood = getMood();
   const lastNight = nightsOn(getNights(), lastNightKey())[0];
   const deepest = [...getInterests()].sort((a, b) => b.nights - a.nights)[0];
-  const subject = lastNight?.interest ?? lastNight?.about ?? deepest?.name ?? '';
+  // What they just named beats what she was up to: they are talking about it now.
+  const subject = mentioned || lastNight?.interest || lastNight?.about || deepest?.name || '';
   const grantedAt = Number(store.get('chat.rantAt') ?? 0);
   const room = roomToRant({
     energy: vitals.energy, curiosity: vitals.curiosity,
@@ -7179,10 +7183,11 @@ function rantRoom(latest: string): string {
     sinceLastMs: grantedAt ? Date.now() - grantedAt : null,
     roll: Math.random(),
     latest,
+    mentioned: Boolean(mentioned),
   });
   if (room) {
     store.set('chat.rantAt', Date.now());
-    console.log(`[ai] she has the room to go on${subject ? ` about ${subject}` : ''}`);
+    console.log(`[ai] she has the room to go on${subject ? ` about ${subject}` : ''}${mentioned ? ' — they brought it up' : ''}`);
   }
   return room;
 }

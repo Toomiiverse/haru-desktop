@@ -2,7 +2,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { emojiRut, EXPRESSIVE, HER_EMOJI, LAST_WORD, NATURAL, roomToRant, RANT_COOLDOWN_MS, nothingInIt, askingAboutHer, herSubjectNote, namesIn } from '../electron/room';
+import { emojiRut, EXPRESSIVE, HER_EMOJI, LAST_WORD, NATURAL, roomToRant, RANT_COOLDOWN_MS, MENTION_COOLDOWN_MS, nothingInIt, askingAboutHer, herSubjectNote, namesIn } from '../electron/room';
 import { dropOverusedEmoji, oneEmojiAtMost, dropClosingOrder } from '../electron/reply';
 
 test('the eye-roll is no longer named first or named as the default', () => {
@@ -129,5 +129,14 @@ test('the order she signs a conversation about herself off with is cut, and the 
   assert.doesNotMatch(dropClosingOrder(threat), /router|go to bed/, 'a closing paragraph that is nothing but him goes whole');
   const mixed = "Himeno's final stand. She burns out to give Denji a chance.\n\nDetroit? Everyone gets a hug and a monologue. Boring.";
   assert.equal(dropClosingOrder(mixed), mixed, 'a closing paragraph still about her subject stays');
+});
+
+test('when they name her thing themselves she takes the room without a roll, and sooner', () => {
+  const flat = { energy: 0.2, curiosity: 0.2, irritation: 0, ego: 0, subject: 'Chainsaw Man', sinceLastMs: null, roll: 0.99, latest: 'I watched some Chainsaw Man earlier' };
+  assert.equal(roomToRant(flat), '', 'a bad roll and nothing in her: no room');
+  assert.match(roomToRant({ ...flat, mentioned: true }), /You have been on Chainsaw Man/, 'they brought it up, so the roll does not decide');
+  assert.equal(roomToRant({ ...flat, mentioned: true, sinceLastMs: MENTION_COOLDOWN_MS - 1 }), '', 'not twice in a quarter of an hour');
+  assert.match(roomToRant({ ...flat, mentioned: true, sinceLastMs: MENTION_COOLDOWN_MS + 1 }), /Chainsaw Man/, 'and free again after');
+  assert.equal(roomToRant({ ...flat, sinceLastMs: RANT_COOLDOWN_MS - 1, roll: 0.01, energy: 0.9, curiosity: 0.9 }), '', 'unmentioned still waits the full ninety minutes');
 });
 

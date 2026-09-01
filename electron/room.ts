@@ -219,6 +219,8 @@ export const NATURAL = [
 
 /** Not oftener than this, however wound up she is: a rant every message is a lecture. */
 export const RANT_COOLDOWN_MS = 90 * 60_000;
+/** When they brought her subject up themselves, though — much sooner, because that is a conversation and she is in it. */
+export const MENTION_COOLDOWN_MS = 15 * 60_000;
 
 /**
  * Whether she has enough in her, right now, to go on about something.
@@ -254,8 +256,19 @@ export function roomToRant(input: {
   /** 0..1 */ roll: number;
   /** What they just said, so a greeting does not get a five-line opinion back. */
   latest?: string;
+  /**
+   * They named one of her things themselves.
+   *
+   * No roll then: someone mentioning the thing you spent last night on is the
+   * opening, and waiting for a dice throw to take it is how she ended up with
+   * three subjects she never once raised. The wait between them is shorter too
+   * — a conversation about her thing may have two of these in it, not one
+   * every ninety minutes.
+   */
+  mentioned?: boolean;
 }): string {
-  if (input.sinceLastMs !== null && input.sinceLastMs < RANT_COOLDOWN_MS) return '';
+  const wait = input.mentioned ? MENTION_COOLDOWN_MS : RANT_COOLDOWN_MS;
+  if (input.sinceLastMs !== null && input.sinceLastMs < wait) return '';
   if (nothingInIt(input.latest ?? '')) return '';
   let score = 0;
   if (input.energy >= 0.7) score += 0.25;
@@ -264,7 +277,7 @@ export function roomToRant(input: {
   if (input.ego >= 4) score += 0.2;
   if (input.subject) score += 0.35;
   const chance = Math.min(score, 0.5);
-  if (!(input.roll < chance)) return '';
+  if (!input.mentioned && !(input.roll < chance)) return '';
   const about = input.subject
     ? `You have been on ${input.subject}, you have things to say about it that you have not said, and this is the reply where you say them. Open on it — they have not asked, and you are not waiting to be asked.`
     : 'There is something you actually want to get off your chest, and this is the reply where it comes out.';
