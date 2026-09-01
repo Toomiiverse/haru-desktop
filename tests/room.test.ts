@@ -121,5 +121,8 @@ test('the order she signs a conversation about herself off with is cut, and the 
   assert.match(dropClosingOrder(withEmoji), /It's brutal and quiet\./);
   assert.doesNotMatch(dropClosingOrder(withEmoji), /website|go to sleep/, 'a trailing emoji must not shield the order in front of it');
   assert.equal(dropClosingOrder('Reze is better written. 😏'), 'Reze is better written. 😏', 'and her emoji survives when there is no order');
+  const curly = "It's the only real moment.\n\nNow stop asking me and go to sleep. You\u2019re tired, you\u2019re scrolling, and you have work tomorrow. 😒";
+  assert.match(dropClosingOrder(curly), /the only real moment/);
+  assert.doesNotMatch(dropClosingOrder(curly), /tired|go to sleep/, 'a typographic apostrophe is still an apostrophe');
 });
 

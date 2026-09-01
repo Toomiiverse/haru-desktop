@@ -711,7 +711,10 @@ export function dropClosingOrder(reply: string): string {
   // nothing, so the walk stopped before it reached the order in front of it.
   while (end > 0 && !lexical(sentences[end - 1])) end--;
   const beforeOrders = end;
-  while (end > 0 && CLOSING_ORDER.test(sentences[end - 1].trim())) end--;
+  // She types a typographic apostrophe, so "You’re tired" never matched a
+  // pattern written with the ASCII one — the same trap told.ts already had.
+  const plain = (part: string) => part.replace(/[‘’]/g, "'").trim();
+  while (end > 0 && CLOSING_ORDER.test(plain(sentences[end - 1]))) end--;
   // Nothing was an order, so her emoji is hers to keep and the reply stands.
   if (end === beforeOrders) return reply;
   const kept = sentences.slice(0, end).join(' ').trim();
