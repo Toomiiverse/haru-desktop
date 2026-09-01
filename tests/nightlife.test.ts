@@ -92,6 +92,7 @@ test('the labels a night was written with are said as sentences, not read out as
   assert.doesNotMatch(said, /FAVOURITE:|WANT:/);
   assert.match(said, /The bit I rate above the rest is David's Sandevistan slow-mo\./);
   assert.match(said, /What I would like out of it is a brutal ending\./);
+  assert.match(unlabel('WANT: To see Denji learn something.'), /is to see Denji learn something\./, "the label's own capital does not survive mid-sentence");
   assert.equal(unlabel('Just a plain note.'), 'Just a plain note.');
 });
 

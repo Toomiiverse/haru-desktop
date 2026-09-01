@@ -159,6 +159,11 @@ export function unlabel(note: string): string {
     .replace(/\bFAVOURITE:\s*/gi, 'The bit I rate above the rest is ')
     .replace(/\bWANT:\s*/gi, 'What I would like out of it is ')
     .replace(/\bSTANCE:\s*/gi, 'Where I landed on it: ')
+    // The label's own text starts with a capital — "WANT: To see Denji learn
+    // something" became "What I would like out of it is To see…".
+    // Only words that are never names: lowercasing anything capitalised turned
+    // "the rest is David's Sandevistan" into "david's".
+    .replace(/\b(is|is: ?|on it:) (To|A|An|The|That|This|For|Of|In|On|With|Just|Not|Something|Someone|Seeing|Watching)\b/g, (_, lead, word) => `${lead} ${word.toLowerCase()}`)
     .replace(/\s{2,}/g, ' ')
     .trim();
 }
