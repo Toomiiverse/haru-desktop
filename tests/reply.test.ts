@@ -434,3 +434,16 @@ test('the paragraph ceiling is the caller\'s: four for a hosted brain, two by de
   assert.equal(dropTackedOnParagraphs(five, false, 4), 'One.\n\nTwo.\n\nThree.\n\nFour.');
   assert.equal(dropTackedOnParagraphs(five, true, 4), five, 'looked up: untouched at any ceiling');
 });
+
+test('a finished errand does not own its words, and one word of a title is not a mention', () => {
+  const para = 'Most people miss it. They see the chainsaws and think it is noise.\n\nTake a look at what Denji actually wants.';
+  const said = ['earlier I told you to take a look at the phone'];
+  assert.equal(dropRepeatedAgendaMentions(para, said, ['Take medication'], 'whats good about it'), para,
+    '"take" is not what that errand is about');
+  assert.equal(dropRepeatedAgendaMentions(para, ['go and look at it'], ['Look at it'], 'whats good about it'), para,
+    'nor is "look"');
+  const parcel = 'Tuesday, and you know it.\n\nYour parcel pickup reminder is set for tomorrow at 9am.';
+  assert.equal(dropRepeatedAgendaMentions(parcel, ['At least your parcel will arrive on time tomorrow.'], ['Parcel pickup'], 'what day is it'),
+    'Tuesday, and you know it.', 'a real errand word raised twice still goes');
+});
+

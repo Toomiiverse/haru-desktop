@@ -248,7 +248,16 @@ function normalise(text: string) {
  * answering is the whole job.
  */
 function distinctiveWords(title: string): string[] {
-  const common = new Set(['the', 'a', 'an', 'my', 'your', 'and', 'for', 'get', 'to', 'of', 'up', 'off', 'out', 'on', 'in', 'at', 'do', 'go']);
+  // Ordinary verbs and fillers are not what an errand is about, and a majority
+  // match means one of them is enough on its own: "Take medication" and "Look
+  // at the phone" between them owned take and look, and any paragraph using
+  // either was deleted as a repeated errand — half of what she said about the
+  // Reze arc went that way.
+  const common = new Set(['the', 'a', 'an', 'my', 'your', 'and', 'for', 'get', 'to', 'of', 'up', 'off', 'out', 'on', 'in', 'at', 'do', 'go',
+    'take', 'look', 'make', 'made', 'give', 'come', 'back', 'keep', 'need', 'want', 'check', 'call', 'send', 'find', 'help', 'work', 'time',
+    'thing', 'things', 'that', 'this', 'with', 'from', 'into', 'over', 'down', 'about', 'some', 'more', 'just', 'very', 'good', 'well',
+    'tell', 'said', 'know', 'like', 'when', 'what', 'where', 'then', 'than', 'they', 'them', 'their', 'will', 'would', 'should', 'could',
+    'have', 'been', 'does', 'done', 'again', 'still', 'only', 'also', 'create', 'start', 'finish', 'sort', 'put']);
   return title.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/)
     .filter(word => word.length > 3 && !common.has(word));
 }
@@ -263,6 +272,12 @@ function mentions(passage: string, words: string[]): boolean {
   return hits >= Math.max(1, Math.ceil(words.length / 2));
 }
 
+/**
+ * `titles` must be the *open* items. Handed everything ever kept, thirty-odd
+ * finished errands from weeks back were still guarding their words: "Take
+ * medication", "Look at the phone", "Go shopping" between them own take, look
+ * and shopping, and any paragraph using one of those went.
+ */
 export function dropRepeatedAgendaMentions(reply: string, previousReplies: string[], titles: string[], askedAbout: string): string {
   const subjects = titles.map(distinctiveWords).filter(words => words.length);
   if (!subjects.length) return reply;

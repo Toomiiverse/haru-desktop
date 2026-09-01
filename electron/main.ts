@@ -6225,14 +6225,17 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // Agenda repeats first: it works on whole paragraphs and knows what the
   // subject is, so it should get its say before the blunter filters start
   // counting words.
-  const onList = getKept().map(item => item.title);
+  // Only what is still open: a finished errand has no claim on the words in it.
+  const onList = getKept().filter(item => !item.done).map(item => item.title);
   // Not on a grounded answer: with "eat breakfast" on the list, every paragraph
   // of a restaurant list reads as her nagging about breakfast again, and the
   // list is what they asked for.
   // Any maps link she typed is a made-up one — the app attaches the real button below.
   const unlinked = withoutMapsLinks(said);
   if (unlinked !== said) console.log('[maps] dropped a link she wrote herself');
-  const deduped = fromSearch ? unlinked : dropRepeatedAgendaMentions(unlinked, recent, onList, latest);
+  // And not at all on a turn about her: the words of his errands have no
+  // business cutting what she says about her own things.
+  const deduped = fromSearch || hers ? unlinked : dropRepeatedAgendaMentions(unlinked, recent, onList, latest);
   // Outermost on purpose: it counts paragraphs, so it has to see the ones
   // that survive everything else rather than the ones about to be dropped.
   // "ran" is what she actually reached for this turn, which is a fact about
