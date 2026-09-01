@@ -2,7 +2,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { emojiRut, EXPRESSIVE, HER_EMOJI, LAST_WORD, NATURAL, roomToRant, RANT_COOLDOWN_MS, nothingInIt, askingAboutHer, herSubjectNote } from '../electron/room';
+import { emojiRut, EXPRESSIVE, HER_EMOJI, LAST_WORD, NATURAL, roomToRant, RANT_COOLDOWN_MS, nothingInIt, askingAboutHer, herSubjectNote, namesIn } from '../electron/room';
 import { dropOverusedEmoji, oneEmojiAtMost } from '../electron/reply';
 
 test('the eye-roll is no longer named first or named as the default', () => {
@@ -94,5 +94,16 @@ test('a question about one of her things, or about what she makes of something, 
   assert.match(note, /Stay on it/);
   assert.match(note, /do not end it with an order/);
   assert.match(note, /about you, not about them/);
+});
+
+test('the names inside her own notes count as her subject, and so does asking what is good about one', () => {
+  const notes = ['Power. Obviously. Reze is the better written one though, and Denji never learns.'];
+  const found = namesIn(notes);
+  assert.ok(found.includes('Reze') && found.includes('Denji'), found.join(','));
+  assert.ok(found.includes('Power'), 'a name that opens a sentence is still a name — Power is a character');
+  assert.ok(!found.includes('Obviously') && !found.includes('This'), 'ordinary sentence openers are not names');
+  assert.equal(askingAboutHer('so whats good about the Reze arc then', ['Chainsaw Man', ...found]), 'Reze');
+  assert.equal(askingAboutHer("what's so good about it", ['Chainsaw Man']), 'what you are into');
+  assert.equal(askingAboutHer('why do you rate it over Detroit', ['Chainsaw Man']), 'what you are into');
 });
 

@@ -277,7 +277,7 @@ export function roomToRant(input: {
 
 // Asked about herself: her evening, her things, what she makes of something.
 // Not "are you there" — that is about her being available, which is his subject.
-const ABOUT_HER = /\b(?:what (?:did|do|are|were) you (?:think|reckon|make of|watch|watching|read|reading|playing|play|up to|doing)|what(?:'s| is) your (?:take|opinion|favourite|favorite)|have you (?:seen|watched|read|played)|do you (?:like|rate|enjoy|actually like)|why (?:do|did) you (?:like|rate|think)|which (?:part|bit|arc|episode)|what part|tell me (?:about|more)|go on then|and (?:then )?what happened)\b/i;
+const ABOUT_HER = /\b(?:what (?:did|do|are|were) you (?:think|reckon|make of|watch|watching|read|reading|playing|play|up to|doing)|what(?:'s| is) your (?:take|opinion|favourite|favorite)|have you (?:seen|watched|read|played)|do you (?:like|rate|enjoy|actually like)|why (?:do|did) you (?:like|rate|think|rate it)|which (?:part|bit|arc|episode)|what part|tell me (?:about|more)|go on then|and (?:then )?what happened|what(?:'s| is)(?: so)? good about|why is .{2,30} (?:good|better|any good)|what(?:'s| is) it about)\b/i;
 
 /**
  * Whether they are asking about her rather than about themselves.
@@ -294,6 +294,25 @@ export function askingAboutHer(latest: string, subjects: string[]): string {
     .find(subject => new RegExp(`\\b${subject.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(said));
   if (named) return named;
   return ABOUT_HER.test(said) ? 'what you are into' : '';
+}
+
+/** The names inside her own notes — Reze, Denji — so "what's good about the Reze arc" counts as her subject. */
+// Skipping the first word of each sentence loses as many names as it saves —
+// "Reze is the better written one" opens with the name, and "Power" is a
+// character rather than a noun. So every capitalised word counts except the
+// ones that open English sentences.
+const NOT_A_NAME = new Set(['this','that','these','those','there','then','they','their','them','when','what','where','which','while','would','could','should','because','after','before','every','most','some','just','only','even','still','also','both','yeah','well','fine','okay','look','stop','sure','honestly','anyway','maybe','probably','actually','nothing','something','everyone','nobody','your','yours','you','the','and','but','for','with','from','have','been','about','over','into','than','then','more','less','best','better','worst','worse']);
+
+export function namesIn(notes: string[]): string[] {
+  const seen = new Set<string>();
+  for (const note of notes) {
+    for (const word of (note ?? '').split(/\s+/)) {
+      const name = word.replace(/[^A-Za-z'-]/g, '');
+      // No adverb is a name, and they open sentences constantly — Obviously, Honestly, Frankly.
+      if (name.length >= 4 && /^[A-Z][a-z]/.test(name) && !/ly$/i.test(name) && !NOT_A_NAME.has(name.toLowerCase())) seen.add(name);
+    }
+  }
+  return [...seen].slice(0, 40);
 }
 
 /** What she is told when the subject is her — see askingAboutHer. */

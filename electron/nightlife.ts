@@ -167,5 +167,6 @@ export function nightsInstruction(nights: Night[]): string {
     'What you did in the small hours while they were asleep, and it did happen — you read about these:',
     said,
     'It is yours to bring up, and yours to be asked about. Everything you know about it is above: if they push past it, say you only read a bit about it rather than filling the gap.',
+    'These notes say "you" meaning you, not them. They are your views written down, not sentences to read out — say what you think in your own words, and never quote a line of this back at them as though it were about them.',
   ].join('\n');
 }
