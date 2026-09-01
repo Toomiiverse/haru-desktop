@@ -51,7 +51,7 @@ import { cancelPower, closeApp, findApps, isCancellable, launch, listRunning, ma
 import { looksLikeScreenshot, maySpeak, readScreenshotConfig, screenshotPrompt, SETTLE_MS, SETTLE_TRIES, type ScreenshotConfig } from './screenshots';
 import { look, photoName, readVisionConfig, whileLooking, type VisionConfig } from './vision';
 import { CAPTION_MAX_CHARS, describedShots, forgetCaptions, moreThanOnePass, noteCaption, noteFailure, readCaptions, shotsNeedingALook } from './seen';
-import { EXPRESSIVE, LAST_WORD, NO_INVENTED_HISTORY, NO_NON_SEQUITURS, readsAsRough, roomInstruction, HER_EMOJI, emojiRut, roomToRant } from './room';
+import { EXPRESSIVE, LAST_WORD, NO_INVENTED_HISTORY, NO_NON_SEQUITURS, readsAsRough, roomInstruction, HER_EMOJI, emojiRut, roomToRant, askingAboutHer, herSubjectNote } from './room';
 import { journalStance } from './journal';
 import { haruNote, rangeStats, type HaruNote, type RangeName, type RangeStats } from './journal';
 import { describeRating, entryFor, journalPrompt, readEntries, readJournalConfig, readRating, recentTrend, shouldAsk, upsertEntry, SCALE_MAX, type JournalConfig, type JournalEntry } from './journal';
@@ -5877,6 +5877,13 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // and told both she believed the conversation, rightly.
   // Her own reason to talk at length, weighed once for this turn — see rantRoom.
   const rantRoomNow = messages.at(-1)?.role === 'user' ? rantRoom(latest) : '';
+  // Her subjects, so a question about one of them is recognised as being about
+  // her: what she was up to last night, and the things she has taken up.
+  const herSubject = messages.at(-1)?.role === 'user'
+    ? askingAboutHer(latest, [...getNights().map(night => night.interest ?? night.game ?? '').filter(Boolean), ...getInterests().map(interest => interest.name)])
+    : '';
+  const hers = herSubject ? herSubjectNote(herSubject) : '';
+  if (hers) console.log(`[ai] they are asking about ${herSubject} — hers to talk about`);
   let turnedUp = messages.at(-1)?.role === 'user' ? arrivalNote() : '';
   const arrival = getArrival();
   if (turnedUp && arrival && saidTheyWereGoing(arrival.place, [latest])) {
@@ -6085,7 +6092,7 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // The complaint about turning up unannounced goes here rather than into the
   // system prompt: at the end of six thousand tokens she read the fact and
   // answered "you're home" three times running without once minding it.
-  if (lastUser > 0) conversation.splice(lastUser, 0, ...[aside, turnedUp, rantRoomNow, emojiRut(herRecentReplies), LAST_WORD].filter(Boolean).map(content => ({ role: 'system', content })));
+  if (lastUser > 0) conversation.splice(lastUser, 0, ...[aside, turnedUp, hers, rantRoomNow, emojiRut(herRecentReplies), LAST_WORD].filter(Boolean).map(content => ({ role: 'system', content })));
   // For tuning, when the environment asks for it: the prompt exactly as sent.
   // A rule that works on its own and fails in place can only be bisected by
   // replaying what she was actually told, and nothing else shows that.
@@ -6230,7 +6237,8 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // A rant is about the subject she has been on, so it echoes it by design —
   // the repetition cuts are exactly wrong for the one reply she was given the
   // room for. Five hundred characters of her own opinion came back as eighty.
-  const ranting = Boolean(rantRoomNow);
+  // Talking about her own thing echoes it too — the same reason a rant does.
+  const ranting = Boolean(rantRoomNow || hers);
   const trimmed = dropRoleHeader(dropInventedContact(dropStageDirections(dropInventedScreenTalk(brain.escalated || fromSearch || ranting ? deduped : dropRepeatedParagraphs(deduped, recent), grounded))));
   // Last, on the reply that survives everything else: a signature opener is
   // only a signature against what she said last time.

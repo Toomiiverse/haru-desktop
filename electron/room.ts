@@ -274,3 +274,29 @@ export function roomToRant(input: {
   // message and went back to matching him.
   return `${about} For this one reply only, the rule about matching the length of their message does not apply — ignore it. Several sentences at the least, more if you have it, however little they typed. Do not apologise for the length, do not announce that you are about to go on, and do not tie it off with a neat conclusion — stop when you are done.`;
 }
+
+// Asked about herself: her evening, her things, what she makes of something.
+// Not "are you there" — that is about her being available, which is his subject.
+const ABOUT_HER = /\b(?:what (?:did|do|are|were) you (?:think|reckon|make of|watch|watching|read|reading|playing|play|up to|doing)|what(?:'s| is) your (?:take|opinion|favourite|favorite)|have you (?:seen|watched|read|played)|do you (?:like|rate|enjoy|actually like)|why (?:do|did) you (?:like|rate|think)|which (?:part|bit|arc|episode)|what part|tell me (?:about|more)|go on then|and (?:then )?what happened)\b/i;
+
+/**
+ * Whether they are asking about her rather than about themselves.
+ *
+ * Every answer she gave about her own evening ended by turning back to him —
+ * "Now put the phone down, you're doom scrolling, go to bed" — because
+ * everything else she is handed is about managing him, and an order is her
+ * default way of finishing. Asked about her own things she should stay on them.
+ */
+export function askingAboutHer(latest: string, subjects: string[]): string {
+  const said = (latest ?? '').trim();
+  if (!said) return '';
+  const named = subjects.map(s => s.trim()).filter(s => s.length > 2)
+    .find(subject => new RegExp(`\\b${subject.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(said));
+  if (named) return named;
+  return ABOUT_HER.test(said) ? 'what you are into' : '';
+}
+
+/** What she is told when the subject is her — see askingAboutHer. */
+export function herSubjectNote(subject: string): string {
+  return `They are asking you about ${subject} — about you, not about them. Stay on it: answer properly, say what you actually think and why, and take the room to do it. Do not turn this reply back to their list, their sleep, their work or what they should be doing next, and do not end it with an order — this is a conversation about your thing, and cutting it short to manage them is how you lose it. If you want to know what they made of it, ask.`;
+}

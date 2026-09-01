@@ -2,7 +2,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { emojiRut, EXPRESSIVE, HER_EMOJI, LAST_WORD, NATURAL, roomToRant, RANT_COOLDOWN_MS, nothingInIt } from '../electron/room';
+import { emojiRut, EXPRESSIVE, HER_EMOJI, LAST_WORD, NATURAL, roomToRant, RANT_COOLDOWN_MS, nothingInIt, askingAboutHer, herSubjectNote } from '../electron/room';
 import { dropOverusedEmoji, oneEmojiAtMost } from '../electron/reply';
 
 test('the eye-roll is no longer named first or named as the default', () => {
@@ -79,5 +79,20 @@ test('a plain greeting gets no five-line opinion about last night', () => {
   assert.equal(roomToRant({ ...wound, latest: 'Morning Haru' }), '', 'nothing in the message, nothing to launch at');
   assert.match(roomToRant({ ...wound, latest: 'morning, what did you get up to last night' }), /You have been on Chainsaw Man/);
   assert.match(roomToRant(wound), /You have been on Chainsaw Man/, 'no message given, unchanged');
+});
+
+test('a question about one of her things, or about what she makes of something, is about her', () => {
+  const subjects = ['Chainsaw Man', 'Cyberpunk Edgerunners'];
+  assert.equal(askingAboutHer('Oh the Reze arc? I think I finished Chainsaw Man awhile ago', subjects), 'Chainsaw Man');
+  assert.equal(askingAboutHer('what part are you up to?', subjects), 'what you are into');
+  assert.equal(askingAboutHer('what did you think of it', subjects), 'what you are into');
+  assert.equal(askingAboutHer('have you seen the new one', subjects), 'what you are into');
+  assert.equal(askingAboutHer('you there?', subjects), '', 'being available is his subject, not hers');
+  assert.equal(askingAboutHer('remind me at 6', subjects), '');
+  assert.equal(askingAboutHer('', subjects), '');
+  const note = herSubjectNote('Chainsaw Man');
+  assert.match(note, /Stay on it/);
+  assert.match(note, /do not end it with an order/);
+  assert.match(note, /about you, not about them/);
 });
 
