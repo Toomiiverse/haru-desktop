@@ -5997,6 +5997,8 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
     latestMessage: latest,
     fresh,
     herRecentReplies,
+    // Her list is left out when the subject is her — see PromptState.aboutHer.
+    aboutHer: Boolean(hers),
     movedJustNow,
     vitals,
     pushback: store.get('pushback') as Pushback | undefined,

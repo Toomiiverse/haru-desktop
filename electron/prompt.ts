@@ -156,6 +156,15 @@ export type PromptState = {
   latestMessage: string;
   fresh: FreshStart | null;
   herRecentReplies: string[];
+  /**
+   * They are asking about her, not about themselves (askingAboutHer).
+   *
+   * Her list is left out of the brief for that turn. Told not to end on an
+   * order she still finished a conversation about the Reze arc with "you have
+   * a website to build tomorrow" — the list was in front of her and reaching
+   * for it is what she does. Nothing to reach for, nothing to reach.
+   */
+  aboutHer?: boolean;
   /** Set when she has already moved something this turn, which is a different
    *  admission from being asked to move it. */
   movedJustNow: { title: string; to: string } | null;
@@ -239,8 +248,8 @@ export function chatSystemPrompt(state: PromptState): string {
     // day is archived and then turns up in the summary.
     asideContext(state.asides, nowMs),
     feedbackSummary(state.rated),
-    formatAgenda(state.kept, now, today),
-    'Answer questions about what is coming up from that list, and never say nothing is saved without checking it first.',
+    state.aboutHer ? '' : formatAgenda(state.kept, now, today),
+    state.aboutHer ? '' : 'Answer questions about what is coming up from that list, and never say nothing is saved without checking it first.',
     // She had none of this spelled out, and filled the gap herself: she reported
     // that the user's girlfriend had texted her about a birthday present, naming
     // a gift she said she had suggested weeks before. She had merged a person
@@ -318,7 +327,7 @@ export function chatSystemPrompt(state: PromptState): string {
     freshStartInstruction(state.fresh),
     // After the mood lines: an admission earns the same treatment whether she was
     // already annoyed or perfectly cheerful when it landed.
-    missedInstruction(latestMessage),
+    state.aboutHer ? '' : missedInstruction(latestMessage),
     // Beside it rather than inside it: not doing something and saying when you
     // will are different admissions, and only one of them changes the list.
     state.movedJustNow
@@ -327,7 +336,7 @@ export function chatSystemPrompt(state: PromptState): string {
       // put-off reading: the disagreement is the thing worth saying.
       : whenMismatchInstruction(latestMessage, state.kept, now, today) || putOffInstruction(latestMessage),
     // The backstop for everything tickOffSpoken cannot be sure enough of.
-    tickOffInstruction(latestMessage, openTasks.length > 0, findItem(openTasks, latestMessage)?.title ?? null),
+    state.aboutHer ? '' : tickOffInstruction(latestMessage, openTasks.length > 0, findItem(openTasks, latestMessage)?.title ?? null),
     // Last but one, so it outranks the agenda and the nagging above it. Being
     // told to drop something has to beat every reason she had to raise it.
     pushbackInstruction(state.pushback, nowMs),

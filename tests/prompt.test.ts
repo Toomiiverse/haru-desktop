@@ -276,3 +276,12 @@ test('the way she writes is read after the persona and after the emoji rule', ()
   assert.ok(natural > prompt.indexOf('the smirk, the side-eye, the huff'), 'and after the emoji rule');
 });
 
+test('asked about her own things, her list is not in front of her', () => {
+  const withList = chatSystemPrompt(state({ irritation: 1 }));
+  const kept = withList.indexOf('Answer questions about what is coming up');
+  assert.notEqual(kept, -1, 'the list is normally there');
+  const hers = chatSystemPrompt({ ...state({ irritation: 1 }), aboutHer: true });
+  assert.equal(hers.indexOf('Answer questions about what is coming up'), -1, 'and gone when the subject is her');
+  assert.match(hers, /Emoji are part of how you talk/, 'the rest of the brief is untouched');
+});
+
