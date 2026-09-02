@@ -126,6 +126,30 @@ type KeptItem = { id: string; title: string; date: string; time?: string; kind: 
 type Profile = { nickname: string; occupation: string; about: string };
 type Memory = { id: string; text: string; createdAt: string };
 
+/**
+ * Whether we are on the way out, which changes what a thrown error costs — and
+ * what it means. Declared up here because the helper below is the main reader
+ * of it, and that one is called from the top of the file downwards.
+ */
+let quitting = false;
+
+/**
+ * A failure in words, told apart from the app being shut out from under it.
+ *
+ * Every net::ERR_FAILED in the log — eighty-eight of them, from the emotion
+ * classifier, the screenshot reader and the calendar sync — sat within a few
+ * lines of a restart. Chromium's network stack goes away when before-quit
+ * fires, and anything still in flight dies with it. Reported as a network
+ * fault it reads as a model that cannot be reached and sends the next reader
+ * to Setup, which is the one place the fault is not: nothing was wrong, she
+ * was interrupted mid-thought. Said plainly, it is one line nobody chases.
+ */
+const TORN_DOWN = /net::ERR_(?:FAILED|ABORTED|CONNECTION_(?:ABORTED|CLOSED|RESET))|Network service crashed|The operation was aborted/i;
+function whyItFailed(error: unknown): string {
+  const detail = error instanceof Error ? error.message : String(error);
+  return quitting && TORN_DOWN.test(detail) ? 'she was interrupted — the app was shutting down' : detail;
+}
+
 const COMPANION_DEFAULT_WIDTH = 300;
 const COMPANION_ASPECT = 360 / 300;
 const COMPANION_MIN_WIDTH = 140;
@@ -242,7 +266,7 @@ async function lookAtSyncedShots() {
       if (attached !== store.getActivityLog()) store.setActivityLog(attached);
       console.log(`[shot] ${shot.day}/${shot.name}: ${text.slice(0, 90)}`);
     } catch (error) {
-      const why = error instanceof Error ? error.message : String(error);
+      const why = whyItFailed(error);
       console.warn(`[shot] could not look at ${shot.day}/${shot.name}:`, why);
       // A refusal about this picture — too large for the window, a format it
       // cannot read — is about this picture. Left as a break it stalled the
@@ -1703,7 +1727,7 @@ async function remarkOnScreenshot() {
     // Spoken only if it was also written down — see interject.
     if (interject(line, { source: 'screenshot' })) void speak(line, classifyEmotion(line, provider));
   } catch (error) {
-    console.warn('[shot] could not react:', error instanceof Error ? error.message : error);
+    console.warn('[shot] could not react:', whyItFailed(error));
   }
 }
 
@@ -3425,7 +3449,7 @@ async function performSync() {
   // failure on one side is recorded and the other still runs.
   let tasksProblem: string | null = null;
   const noteTaskFailure = (error: unknown) => {
-    tasksProblem ??= error instanceof Error ? error.message : String(error);
+    tasksProblem ??= whyItFailed(error);
     console.error('[google] tasks unavailable:', tasksProblem);
   };
 
@@ -3519,7 +3543,7 @@ async function performSync() {
 // retry on the next tick, not surface a dialog or leave the timer dead.
 function backgroundSync() {
   if (!googleStatus(store).connected) return;
-  syncFromGoogle().catch(error => console.error('[google] background sync failed:', error instanceof Error ? error.message : error));
+  syncFromGoogle().catch(error => console.error('[google] background sync failed:', whyItFailed(error)));
 }
 
 function scheduleBackgroundSync() {
@@ -4456,6 +4480,10 @@ function attribute(config: ProviderConfig, error: unknown): Error {
   const detail = error instanceof Error ? error.message : String(error);
   // Already attributed by an inner call; do not wrap it twice.
   if (/^\S+ at \S+ —/.test(detail)) return error instanceof Error ? error : new Error(detail);
+  // Naming a model and an address and pointing at Setup is right for a refusal
+  // and wrong for a shutdown, where the address was fine and the app is simply
+  // no longer there to hear the answer.
+  if (quitting && TORN_DOWN.test(detail)) return new Error(whyItFailed(error));
   let host = config.endpoint;
   try { host = new URL(config.endpoint).host; } catch { /* keep it as written */ }
   const where = isOpenAIShaped(config.provider) ? 'Setup → A second model for the hard ones' : 'Setup → Where she thinks';
@@ -10068,11 +10096,6 @@ app.whenReady().then(() => {
 // Put the machine's volume back before going anywhere. Leaving a user's audio
 // at a third of where they set it, with the app that did it now gone, is the
 // worst failure this feature could have.
-/**
- * Whether we are on the way out, which changes what a thrown error costs.
- */
-let quitting = false;
-
 /**
  * Somewhere to read afterwards.
  *
