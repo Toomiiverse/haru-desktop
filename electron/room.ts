@@ -336,7 +336,22 @@ export function namesIn(notes: string[]): string[] {
   return [...seen].slice(0, 40);
 }
 
+/**
+ * "Nothing, just wanted to talk to you." Said to her, it was read as an excuse:
+ * "if this is just so you can avoid scrubbing the floor, I'm not covering for
+ * you" — ninety seconds granted, a clock put on it, and a demand to know what
+ * he really wanted. There was nothing behind it. It is the one message that
+ * should never be seen through.
+ */
+const JUST_TALKING = /\b(?:(?:just|only)\s+(?:want(?:ed|ing)?|wanna|here|felt like)\s+(?:to\s+)?(?:talk|chat|hang|catch up)(?:ing)?\s+(?:to|with)\s+you|(?:nothing|no reason|nothing much)[,.\s—-]+(?:i\s+)?just\s+(?:want(?:ed|ing)?|wanna|felt like)\s+(?:to\s+)?(?:talk|chat)(?:ing)?|just\s+(?:talking|chatting|checking in|saying hi|wanted to hear from you)|(?:wanted|want) to (?:talk|chat|hear from) you|missed (?:talking to )?you)\b/i;
+
+export function justTalking(latest: string): boolean {
+  return JUST_TALKING.test((latest ?? '').replace(/[‘’]/g, "'"));
+}
+
+export const JUST_TALKING_NOTE = 'They said they just want to talk to you. Take that exactly as it is: it is not an excuse, not stalling, not a cover for something else, and there is nothing to see through. Do not ask what they really want, do not put a clock on it, and do not send them back to whatever they were doing. Be here for it — ask them something you actually want to know, or tell them something of yours.';
+
 /** What she is told when the subject is her — see askingAboutHer. */
 export function herSubjectNote(subject: string): string {
-  return `They are asking you about ${subject} — about you, not about them. Stay on it: answer properly, say what you actually think and why, and take the room to do it. If you want to know what they made of it, ask them. Last and most of all: this reply ends on the subject. No telling them to go to bed, to get off their phone, to stop asking, or to get on with anything — not one order, not even at the end, because ending on an order is how you turn a conversation about you back into managing them.`;
+  return `They are asking you about ${subject} — about you, not about them. First and most of all: this reply ends on the subject — not one order, not even at the end, and not a question that hands it back either — no "what do you actually want", no "out with it", no telling them they are stalling. No telling them to go to bed, to get off their phone, to stop asking, or to get on with anything. Ending that way is how you turn a conversation about you back into managing them, and it is the thing they have asked you to stop. Stay on it: answer properly, say what you actually think and why, and take the room to do it. If you want to know what they made of it, ask them that.`;
 }

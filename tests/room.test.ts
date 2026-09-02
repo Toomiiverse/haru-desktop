@@ -2,7 +2,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { emojiRut, EXPRESSIVE, HER_EMOJI, LAST_WORD, NATURAL, roomToRant, RANT_COOLDOWN_MS, MENTION_COOLDOWN_MS, nothingInIt, askingAboutHer, herSubjectNote, namesIn } from '../electron/room';
+import { emojiRut, EXPRESSIVE, HER_EMOJI, LAST_WORD, NATURAL, roomToRant, RANT_COOLDOWN_MS, MENTION_COOLDOWN_MS, nothingInIt, askingAboutHer, herSubjectNote, namesIn, justTalking, JUST_TALKING_NOTE } from '../electron/room';
 import { dropOverusedEmoji, oneEmojiAtMost, dropClosingOrder } from '../electron/reply';
 
 test('the eye-roll is no longer named first or named as the default', () => {
@@ -163,3 +163,26 @@ test('when they name her thing themselves she takes the room without a roll, and
   assert.equal(roomToRant({ ...flat, sinceLastMs: RANT_COOLDOWN_MS - 1, roll: 0.01, energy: 0.9, curiosity: 0.9 }), '', 'unmentioned still waits the full ninety minutes');
 });
 
+
+test('"just wanted to talk to you" is taken at face value, not seen through', () => {
+  for (const said of ['Nothing - just wanting to talk to you', 'nothing much, i just wanted to chat', 'just checking in', 'I only wanted to talk to you', 'missed you', 'no reason, just felt like talking']) {
+    assert.ok(justTalking(said), said);
+  }
+  for (const said of ['I just want to finish this build', 'talk to the customer for me', 'just wanting the 9060 xt', 'nothing']) {
+    assert.ok(!justTalking(said), said);
+  }
+  assert.match(JUST_TALKING_NOTE, /not an excuse/);
+  assert.match(JUST_TALKING_NOTE, /Do not ask what they really want/);
+  assert.match(JUST_TALKING_NOTE, /do not put a clock on it/);
+});
+
+test('a reply about her cannot end by handing the subject back as a question', () => {
+  const said = "It's fine. 😒 Part 2's got better art but the plot's meandering. Denji's still a mess, and that's the point, but the pacing's been killing me. You're not actually interested—you're just avoiding the mop. So out with it. What do you actually want?";
+  const out = dropClosingOrder(said);
+  assert.match(out, /pacing's been killing me\.$/);
+  assert.doesNotMatch(out, /out with it|actually want|avoiding the mop/);
+  assert.equal(dropClosingOrder('Reze is the better written one. What did you make of her?'), 'Reze is the better written one. What did you make of her?', 'asking what they thought of it is the subject, not a pivot');
+  assert.equal(dropClosingOrder("We're going in circles. I answered that. If you want to talk, say something new. Otherwise go finish cleaning."), "We're going in circles. I answered that. If you want to talk, say something new.", '"otherwise go finish" is an order');
+  assert.match(herSubjectNote('Chainsaw Man'), /^They are asking you about Chainsaw Man — about you, not about them\. First and most of all: this reply ends on the subject/);
+  assert.match(herSubjectNote('Chainsaw Man'), /not one order, not even at the end/i);
+});

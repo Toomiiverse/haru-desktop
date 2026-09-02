@@ -54,13 +54,13 @@ import { cancelPower, closeApp, findApps, isCancellable, launch, listRunning, ma
 import { looksLikeScreenshot, maySpeak, readScreenshotConfig, screenshotPrompt, SETTLE_MS, SETTLE_TRIES, type ScreenshotConfig } from './screenshots';
 import { look, photoName, readVisionConfig, whileLooking, type VisionConfig } from './vision';
 import { CAPTION_MAX_CHARS, describedShots, forgetCaptions, moreThanOnePass, noteCaption, noteFailure, readCaptions, shotsNeedingALook } from './seen';
-import { EXPRESSIVE, LAST_WORD, NO_INVENTED_HISTORY, NO_NON_SEQUITURS, readsAsRough, roomInstruction, HER_EMOJI, emojiRut, roomToRant, askingAboutHer, herSubjectNote, namesIn } from './room';
+import { EXPRESSIVE, LAST_WORD, NO_INVENTED_HISTORY, NO_NON_SEQUITURS, readsAsRough, roomInstruction, HER_EMOJI, emojiRut, roomToRant, askingAboutHer, herSubjectNote, namesIn, justTalking, JUST_TALKING_NOTE } from './room';
 import { journalStance } from './journal';
 import { haruNote, rangeStats, type HaruNote, type RangeName, type RangeStats } from './journal';
 import { describeRating, entryFor, journalPrompt, readEntries, readJournalConfig, readRating, recentTrend, shouldAsk, upsertEntry, SCALE_MAX, type JournalConfig, type JournalEntry } from './journal';
 import { formatList, formatMedia, formatMissing, lookUp, readAniListConfig, userList, type AniListConfig, type ListEntry, type MediaKind } from './anilist';
 import { createDesktopShortcut, desktopShortcutPath, isAutoStartEnabled, setAutoStart, startedHidden } from './startup';
-import { answersThePrompt, CUE_NOTE, isCue, stageNote, dropRoleHeader, dropTackedOnParagraphs, dropInventedContact, dropInventedScreenTalk, dropRepeatedAgendaMentions, dropRepeatedParagraphs, dropStageDirections, dropRepeatedOpener, dropEchoOpener, dropRepeatedSentences, fixStatedClock, fixStatedReminderTime, fixStatedMinutes, dropOverusedEmoji, oneEmojiAtMost, dropClosingOrder } from './reply';
+import { answersThePrompt, CUE_NOTE, isCue, stageNote, dropRoleHeader, dropMetaPreamble, dropTackedOnParagraphs, dropInventedContact, dropInventedScreenTalk, dropRepeatedAgendaMentions, dropRepeatedParagraphs, dropStageDirections, dropRepeatedOpener, dropEchoOpener, dropRepeatedSentences, fixStatedClock, fixStatedReminderTime, fixStatedMinutes, dropOverusedEmoji, oneEmojiAtMost, dropClosingOrder } from './reply';
 import { runToolLoop } from './toolloop';
 import { chatTools, coerceKnowledgeCategory, runChatTool, type ToolAvailability, type ToolDeps } from './tools';
 import { createMemoryStore } from './memorystore';
@@ -6019,6 +6019,8 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   const rantRoomNow = messages.at(-1)?.role === 'user' ? rantRoom(latest, named) : '';
   const hers = herSubject ? herSubjectNote(herSubject) : '';
   if (hers) console.log(`[ai] they are asking about ${herSubject} — hers to talk about`);
+  const talking = messages.at(-1)?.role === 'user' && justTalking(latest) ? JUST_TALKING_NOTE : '';
+  if (talking) console.log('[ai] they just want to talk — taken at face value');
   let turnedUp = messages.at(-1)?.role === 'user' ? arrivalNote() : '';
   const arrival = getArrival();
   if (turnedUp && arrival && saidTheyWereGoing(arrival.place, [latest])) {
@@ -6256,7 +6258,7 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // The complaint about turning up unannounced goes here rather than into the
   // system prompt: at the end of six thousand tokens she read the fact and
   // answered "you're home" three times running without once minding it.
-  if (lastUser > 0) conversation.splice(lastUser, 0, ...[aside, turnedUp, hers, rantRoomNow, emojiRut(herRecentReplies), LAST_WORD].filter(Boolean).map(content => ({ role: 'system', content })));
+  if (lastUser > 0) conversation.splice(lastUser, 0, ...[aside, turnedUp, hers, talking, rantRoomNow, emojiRut(herRecentReplies), LAST_WORD].filter(Boolean).map(content => ({ role: 'system', content })));
   // For tuning, when the environment asks for it: the prompt exactly as sent.
   // A rule that works on its own and fails in place can only be bisected by
   // replaying what she was actually told, and nothing else shows that.
@@ -6407,7 +6409,9 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // room for. Five hundred characters of her own opinion came back as eighty.
   // Talking about her own thing echoes it too — the same reason a rant does.
   const ranting = Boolean(rantRoomNow || hers);
-  const trimmed = dropRoleHeader(dropInventedContact(dropStageDirections(dropInventedScreenTalk(brain.escalated || fromSearch || ranting ? deduped : dropRepeatedParagraphs(deduped, recent), grounded))));
+  const META_TELL = /the (?:instructions?|note|rules?) (?:say|says)|let me (?:actually )?engage|i(?:'m| am) (?:told|supposed) to/i;
+  const trimmed = dropMetaPreamble(dropRoleHeader(dropInventedContact(dropStageDirections(dropInventedScreenTalk(brain.escalated || fromSearch || ranting ? deduped : dropRepeatedParagraphs(deduped, recent), grounded)))));
+  if (META_TELL.test(cleaned ?? '') && !META_TELL.test(trimmed)) console.log('[ai] she read her instructions out loud — that part is gone');
   // Last, on the reply that survives everything else: a signature opener is
   // only a signature against what she said last time.
   // The echo first, then the signature: with "A keyboard?" gone, "Fine," is
@@ -6434,8 +6438,14 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // fixed (EXPRESSIVE), and this catches what the wording does not.
   // herRecentReplies, not `recent`: that holds the last two she said, one fewer
   // than the filter asked for, so it never once fired.
-  const varied = oneEmojiAtMost(dropOverusedEmoji(cleaned, herRecentReplies, HER_EMOJI), HER_EMOJI);
-  if (varied !== cleaned) console.log('[ai] thinned the emoji in that reply');
+  const thinned = oneEmojiAtMost(dropOverusedEmoji(cleaned, herRecentReplies, HER_EMOJI), HER_EMOJI);
+  if (thinned !== cleaned) console.log('[ai] thinned the emoji in that reply');
+  // On a turn that was hers, or one where they only wanted to talk, the closing
+  // order or the pivot back to him goes. The note against it stood in the
+  // splice and the hosted model ended on "So out with it. What do you actually
+  // want?" regardless — see dropClosingOrder for why this is a filter.
+  const varied = hers || talking ? dropClosingOrder(thinned) : thinned;
+  if (varied !== thinned) console.log('[ai] took the closing order off a reply that was about her');
   const herLine = reminder?.time ? fixStatedReminderTime(varied, reminder.time) : varied;
   // The maps button goes under her words, not into her mouth: what is herLine
   // and what her mood is read from is the line she said.

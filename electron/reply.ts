@@ -214,6 +214,36 @@ export function readsLikeAssistant(reply: string): boolean {
  */
 const ROLE_HEADER = /^\s*(assistant|user|system|model)\s*:?\s*\n+/i;
 
+/**
+ * Her instructions, read out as though they were her thoughts.
+ *
+ * "The instructions say to be here for it — ask something I actually want to
+ * know, or tell something of mine. But I also shouldn't repeat what I just
+ * said. Let me actually engage." Then the reply. A hosted model, handed the
+ * notes spliced beside his message, narrated them before answering — once in
+ * her whole history, and once is enough, because it went out as her. Only the
+ * front of a reply, only sentences about the instructions themselves, and only
+ * when something of her own follows.
+ */
+const META = /\b(?:the (?:instructions?|note|notes|rules?|system prompt|prompt|guidelines?) (?:say|says|said|tell|tells|want|wants|ask|asks)|(?:i(?:'m| am) (?:told|supposed|instructed|asked) to)|as instructed|per (?:the|my) (?:instructions?|note)|let me (?:actually )?(?:engage|respond|answer|comply)|i (?:should|shouldn'?t|need to|must) (?:not )?(?:repeat|follow|stick to|comply|engage)|(?:that|this) (?:note|instruction|rule) (?:says|is))/i;
+
+export function dropMetaPreamble(reply: string): string {
+  const text = (reply ?? '').replace(/[‘’]/g, "'");
+  const lexical = (part: string) => /[\p{Letter}\p{Number}]/u.test(part);
+  const paragraphs = text.split(/\n\s*\n/);
+  // A whole first paragraph of it, with her own answer below.
+  if (paragraphs.length > 1 && META.test(paragraphs[0]) && lexical(paragraphs.slice(1).join(' '))) {
+    return paragraphs.slice(1).join('\n\n').trim();
+  }
+  // Or a run of it at the front of one paragraph.
+  const sentences = paragraphs[0].split(/(?<=[.!?…])\s+/);
+  let start = 0;
+  while (start < sentences.length && META.test(sentences[start])) start++;
+  if (start === 0) return reply;
+  const rest = [sentences.slice(start).join(' '), ...paragraphs.slice(1)].join('\n\n').trim();
+  return lexical(rest) ? rest : reply;
+}
+
 export function dropRoleHeader(reply: string): string {
   const withoutHeader = reply.replace(ROLE_HEADER, '');
   // An opening quote with no closing one is the other half of the same leak.
@@ -734,12 +764,18 @@ export function oneEmojiAtMost(reply: string, emoji: readonly string[]): string 
  * before she obeys a rule. Only the trailing run of them goes, and only on a
  * turn that was about her; anything she said before it stands.
  */
-const CLOSING_ORDER = /^(?:now,?\s+)?(?:and\s+)?(?:go (?:to )?(?:bed|sleep)|get (?:to bed|some sleep|going)|sleep|stop (?:asking|nitpicking|stalling|talking|whining|arguing|pestering)|put (?:the|your) phone down|get off (?:your|the) phone|go do something|get on with it|don'?t stay up|you'?re tired\b|you have (?:a|the|an)\b.{0,40}\bto (?:build|do|finish|make)\b)/i;
+const CLOSING_ORDER = /^(?:now,?\s+|otherwise,?\s+|then,?\s+|and\s+)*(?:go (?:finish|do|clean|get on with|back to|deal with|sort)\b|finish (?:cleaning|the|your|that|it)\b|go (?:to )?(?:bed|sleep)|get (?:to bed|some sleep|going)|sleep|stop (?:asking|nitpicking|stalling|talking|whining|arguing|pestering)|put (?:the|your) phone down|get off (?:your|the) phone|go do something|get on with it|don'?t stay up|you'?re tired\b|you have (?:a|the|an)\b.{0,40}\bto (?:build|do|finish|make)\b)/i;
 
 // A sentence aimed at him: an order, or a remark about what he is. Listing the
 // orders themselves was whack-a-mole — "don't make me come over there and
 // unplug your router" is not on any list and does the same job.
 const AT_HIM = /^(?:now,?\s+|and\s+|but\s+|so\s+)*(?:go|stop|get|put|don't|do|dont|sleep|build|finish|eat|move|quit|leave|start|try|make sure|you're|youre|you\b|your\b)/i;
+
+// The pivot back to him, as a question. "So out with it. What do you actually
+// want?" ended a real answer about Chainsaw Man on the hosted model with the
+// note against ending on an order in front of it; a question that hands the
+// subject back is the same move without the imperative.
+const PIVOT_BACK = /^(?:so,?\s+|now,?\s+|anyway,?\s+)*(?:out with it|spit it out|what (?:do|did) you (?:actually |really )?(?:want|need|come (?:here )?for)|what (?:is|was) it,? then|what'?s this (?:really |actually )?about|you'?re (?:not actually|just|only) (?:interested|stalling|avoiding|dodging|putting off|procrastinating)|(?:stop|quit) (?:stalling|dodging|avoiding))/i;
 
 export function dropClosingOrder(reply: string): string {
   const paragraphs = (reply ?? '').split(/\n\s*\n/);
@@ -764,7 +800,7 @@ export function dropClosingOrder(reply: string): string {
   // She types a typographic apostrophe, so "You’re tired" never matched a
   // pattern written with the ASCII one — the same trap told.ts already had.
   const plain = (part: string) => part.replace(/[‘’]/g, "'").trim();
-  while (end > 0 && CLOSING_ORDER.test(plain(sentences[end - 1]))) end--;
+  while (end > 0 && (CLOSING_ORDER.test(plain(sentences[end - 1])) || PIVOT_BACK.test(plain(sentences[end - 1])))) end--;
   // Nothing was an order, so her emoji is hers to keep and the reply stands.
   if (end === beforeOrders) return reply;
   const kept = sentences.slice(0, end).join(' ').trim();
