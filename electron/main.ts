@@ -5788,7 +5788,13 @@ type Brain = { config: ProviderConfig; escalated: boolean; because: string; sees
  * voice, on a stronger model, for what they say to her. Unprompted lines —
  * nudges, weather, the diary — never come through here.
  */
-const HOSTED_FIRST_WORD_MS = 8_000;
+// Fifteen seconds, up from eight. A tool round has no first word — the whole
+// tool call has to land inside the deadline — and on Qwen 3.8 27B, with a
+// 12k-token prompt and the tools offered, a round is 2.5 to 4.3 seconds with a
+// tail that once passed eight. That one miss handed the turn to the local
+// model, which announced a search instead of running one. Fifteen still reads
+// as her being slow rather than absent, and the local answer is still behind it.
+const HOSTED_FIRST_WORD_MS = 15_000;
 /** The phone's leash, on a hosted model: room for a real answer rather than a cut-off one. */
 const HOSTED_AWAY_MAX_TOKENS = 700;
 const HOSTED_PARAGRAPHS = 4;
