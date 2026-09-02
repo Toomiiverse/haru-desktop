@@ -2780,12 +2780,88 @@ function ourFiles(attachments: Attachment[] | undefined): Attachment[] {
  */
 const openedFiles = new Map<string, string>();
 
+/**
+ * Reads that failed, and when. A success is cached above; a failure was not,
+ * and a picture stays in play for half an hour — so a read that timed out was
+ * tried again on every turn for thirty minutes, at two minutes a turn, with
+ * the reply waiting behind it each time. Remembered for ten minutes: long
+ * enough that one bad picture costs one turn, short enough that a vision
+ * server that was merely restarting gets another go.
+ */
+const failedOpens = new Map<string, number>();
+const FAILED_OPEN_MEMORY_MS = 10 * 60_000;
+
 async function readAttachment(attachment: Attachment, vision: VisionConfig, provider: ProviderConfig): Promise<string> {
   const already = openedFiles.get(attachment.id);
   if (already !== undefined) return already;
-  const opened = await openFile(attachment, vision, provider);
-  openedFiles.set(attachment.id, opened);
-  return opened;
+  const failedAt = failedOpens.get(attachment.id);
+  if (failedAt && Date.now() - failedAt < FAILED_OPEN_MEMORY_MS) {
+    console.log(`[attach] ${attachment.name} could not be opened ${Math.max(1, Math.round((Date.now() - failedAt) / 60_000))} min ago — not trying again yet`);
+    return '';
+  }
+  try {
+    const opened = await openFile(attachment, vision, provider);
+    openedFiles.set(attachment.id, opened);
+    failedOpens.delete(attachment.id);
+    return opened;
+  } catch (error) {
+    failedOpens.set(attachment.id, Date.now());
+    throw error;
+  }
+}
+
+/** Which local models can see, as they answered /api/show. Asked once per model. */
+const modelEyes = new Map<string, boolean>();
+
+async function localModelSees(config: ProviderConfig): Promise<boolean> {
+  const endpoint = trimEndpoint(config.endpoint);
+  if (!config.model || isRemote(endpoint) || isOpenAIShaped(config.provider)) return false;
+  const key = `${endpoint} ${config.model}`;
+  const known = modelEyes.get(key);
+  if (known !== undefined) return known;
+  try {
+    const response = await net.fetch(`${endpoint}/api/show`, { method: 'POST', headers: modelHeaders(endpoint), body: JSON.stringify({ model: config.model }), signal: AbortSignal.timeout(5_000) });
+    if (!response.ok) { console.warn(`[attach] ${endpoint} would not say whether ${config.model} can see: ${response.status}`); return false; }
+    const body = await response.json() as { capabilities?: string[] };
+    const sees = Array.isArray(body.capabilities) && body.capabilities.includes('vision');
+    console.log(`[attach] ${config.model} ${sees ? 'can see — pictures are read through her own eyes' : 'cannot see — pictures go to the vision server'}`);
+    modelEyes.set(key, sees);
+    return sees;
+  } catch (error) {
+    console.warn(`[attach] could not ask ${endpoint} whether ${config.model} can see:`, error instanceof Error ? error.message : error);
+    return false;
+  }
+}
+
+/**
+ * A look somebody is waiting on. Through her own eyes when she has them, and
+ * on a budget.
+ *
+ * The vision server on the second card was set up for the screenshot batch,
+ * where nothing waits: with 1.9 GB free on that card it offloads no layers at
+ * all, and it forgets the model between requests. Measured on a real photo he
+ * sent, a read there is 221 seconds — 17 to load, 198 of prompt-eval on 4,047
+ * image tokens on the CPU, 6 to answer — against a 120-second budget it can
+ * never meet. The chat model beside it on the 3060 has vision, is already
+ * resident, and reads the same photo in 13.6 seconds cold and 6.1 warm, better.
+ * So a follow-up about a picture is read by her, and only falls back to the
+ * batch server when she is running on a model without eyes.
+ */
+const IN_TURN_LOOK_MS = 45_000;
+/**
+ * Enough for a full description — about 1,800 characters — and no more. Left
+ * unbounded, the read of one photo came back as 5,342 characters: 41 seconds
+ * of writing for a turn somebody was waiting on, and 1,200 tokens added to
+ * every prompt for the next half hour.
+ */
+const IN_TURN_READ_TOKENS = 450;
+
+async function eyesForReading(vision: VisionConfig, provider: ProviderConfig): Promise<{ config: VisionConfig; endpoint: string; numCtx?: number }> {
+  const local = store.get('ai.config') as ProviderConfig | undefined;
+  if (local && await localModelSees(local)) {
+    return { config: { ...vision, model: local.model }, endpoint: trimEndpoint(local.endpoint), numCtx: chatNumCtx() };
+  }
+  return { config: vision, endpoint: visionEndpoint(provider, vision) };
 }
 
 /**
@@ -2815,11 +2891,13 @@ async function openFile(attachment: Attachment, vision: VisionConfig, provider: 
       return text;
     }
     if (attachment.kind === 'image') {
+      const started = Date.now();
       // Only ever reached when she cannot be sent the picture itself — see
       // eyesFor. A far fuller read than the glance prompt, because this text is
       // now the only thing standing in for the image.
-      const sighting = await look(imageForSending(source), vision, visionEndpoint(provider, vision), modelHeaders(visionEndpoint(provider, vision)), net.fetch, { ask: READ_IT_ALL_PROMPT });
-      console.log(`[attach] ${vision.model} read ${name} into ${sighting.description.length} chars`);
+      const eyes = await eyesForReading(vision, provider);
+      const sighting = await look(imageForSending(source), eyes.config, eyes.endpoint, modelHeaders(eyes.endpoint), net.fetch, { ask: READ_IT_ALL_PROMPT, timeoutMs: IN_TURN_LOOK_MS, numPredict: IN_TURN_READ_TOKENS, ...(eyes.numCtx ? { numCtx: eyes.numCtx } : {}) });
+      console.log(`[attach] ${eyes.config.model} read ${name} into ${sighting.description.length} chars in ${Math.round((Date.now() - started) / 1000)}s`);
       return sighting.description;
     }
     if (!tools) throw new Error('that needs ffmpeg, which is not installed');

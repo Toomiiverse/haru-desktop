@@ -89,6 +89,10 @@ export type LookOptions = {
   keepAlive?: string;
   /** Room for the image plus the answer. Raise for very large screens. */
   numCtx?: number;
+  /** How long this look may take. The default is sized for a background pass; a look somebody is waiting on should say less. */
+  timeoutMs?: number;
+  /** How much it may write. Unbounded, a 9B asked for a full read of a photo wrote 1,300 tokens at 36 a second. */
+  numPredict?: number;
 };
 
 export async function look(imageBase64: string | string[], config: VisionConfig, endpoint: string, headers: Record<string, string>, fetchImpl: Fetcher, options: LookOptions = {}): Promise<Sighting> {
@@ -96,7 +100,7 @@ export async function look(imageBase64: string | string[], config: VisionConfig,
   const response = await fetchImpl(`${endpoint.replace(/\/+$/, '')}/api/chat`, {
     method: 'POST',
     headers,
-    signal: AbortSignal.timeout(LOOK_TIMEOUT_MS),
+    signal: AbortSignal.timeout(options.timeoutMs ?? LOOK_TIMEOUT_MS),
     body: JSON.stringify({
       model: config.model,
       messages: [
@@ -120,7 +124,7 @@ export async function look(imageBase64: string | string[], config: VisionConfig,
       // tokens against Ollama's 4096, and every shot of that size failed with a
       // 400 until this was raised. Cheap on a small model, and the alternative
       // is a size limit on what she is allowed to look at.
-      options: { temperature: options.temperature ?? 0.2, num_ctx: options.numCtx ?? 8192 },
+      options: { temperature: options.temperature ?? 0.2, num_ctx: options.numCtx ?? 8192, ...(options.numPredict ? { num_predict: options.numPredict } : {}) },
     }),
   });
   if (!response.ok) {
