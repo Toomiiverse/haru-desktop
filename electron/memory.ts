@@ -129,7 +129,7 @@ export function isExplicitRecall(text: string): boolean {
 }
 
 /** How many memories a turn gets when they've explicitly asked her to recall something, instead of the usual `selectMemories` default. */
-export const DEEP_RECALL_LIMIT = 30;
+export const DEEP_RECALL_LIMIT = 36;
 
 // Identity-defining records are always in the prompt; the rest compete for room.
 const ALWAYS_INCLUDED: MemoryKind[] = ['preference', 'relationship'];
@@ -620,7 +620,9 @@ export type ScoredMemory = {
 
 export function retrieveMemories(memories: MemoryRecord[], message: string, options: RetrieveOptions = {}): ScoredMemory[] {
   const now = options.now ?? new Date();
-  const limit = options.limit ?? 14;
+  // Fourteen was the budget when an eight-thousand-token local model answered
+  // every turn. She holds fifty-odd records and the window is a million.
+  const limit = options.limit ?? 22;
   const asked = keywords(message);
   const always: ScoredMemory[] = [];
   const scored: ScoredMemory[] = [];

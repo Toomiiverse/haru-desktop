@@ -156,6 +156,8 @@ export type PromptState = {
   latestMessage: string;
   fresh: FreshStart | null;
   herRecentReplies: string[];
+  /** Older exchanges found for this message — see recall.ts. Background, not an instruction. */
+  recalled?: string;
   /**
    * They are asking about her, not about themselves (askingAboutHer).
    *
@@ -221,6 +223,7 @@ export function chatSystemPrompt(state: PromptState): string {
     state.tastes ?? '',
     state.nights ?? '',
     state.diary ?? '',
+    state.recalled ?? '',
     state.profile,
     // Beside the profile rather than behind the lookup tool, for the reason the
     // agenda is: asked what they are in the middle of, a model that would have

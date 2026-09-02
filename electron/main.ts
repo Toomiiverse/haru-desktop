@@ -34,6 +34,7 @@ import { buildGameIndex, gameFor } from './steam';
 import { pdfPrompt, readPdf } from './pdf';
 import { classify, discard, extractAudio, extractFrames, findFfmpeg, OPENABLE, readText, type FileKind } from './attach';
 import { markTimeGaps, sinceLast, earlierTurns, DAYS_OF_HISTORY } from './history';
+import { exchangesFrom, pickRecalled, recallNote, RECALL_DAYS, type Exchange } from './recall';
 import { correct, noteUsed, readHearing, remember } from './hearing';
 import { assumeItIsTheirs, identifyWork, noteWork, readFollowing, recogniseNow, summariseFollowing } from './following';
 import { lookUpPlace, readWindowsLocation, searchPlaces, type FoundPlace } from './location';
@@ -5973,6 +5974,12 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   const semantic = queryVector && memoryStore.vectors().size
     ? semanticSimilarities(getMemories(), queryVector, memoryStore.vectors())
     : undefined;
+  // Further back than the days in front of her: the closest few exchanges from
+  // the archive, or nothing when none of them is really about this. See recall.ts.
+  const recalled = queryVector && recallVectors.size
+    ? pickRecalled(olderExchanges(localDateKey(zonedNow(CHAT_TIMEZONE))), recallVectors, queryVector)
+    : [];
+  if (recalled.length) console.log(`[recall] ${recalled.map(entry => `${entry.exchange.day} (${entry.score.toFixed(2)})`).join(', ')}`);
   const promptNow = zonedNow(CHAT_TIMEZONE);
   const system = chatSystemPrompt({
     ...mood,
@@ -6000,6 +6007,7 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
     latestMessage: latest,
     fresh,
     herRecentReplies,
+    recalled: recallNote(recalled, new Intl.DateTimeFormat('en-AU', { weekday: 'long', timeZone: 'UTC' })),
     // Her list is left out when the subject is her — see PromptState.aboutHer.
     aboutHer: Boolean(hers),
     movedJustNow,
@@ -7179,6 +7187,54 @@ function recordBrief(kind: string, brief: string, line: string): void {
  * subject is last night's, or the thing of hers she has spent the most nights
  * on — "she played her favourite game, so she will want to talk about it".
  */
+/**
+ * The archive, embedded once so it can be searched.
+ *
+ * Kept beside the app's own data rather than in the store: it is derived from
+ * archive.json and can be thrown away and rebuilt at any time, and it is large
+ * enough that putting it in the config would make every config write expensive.
+ */
+const recallVectors = new Map<string, number[]>();
+const RECALL_CACHE = () => path.join(app.getPath('userData'), 'recall-vectors.json');
+/** Embedded a chunk at a time, so a first run does not hold the GPU for a minute. */
+const RECALL_BATCH = 150;
+
+/** The days that are already in front of her whole (history.ts) — no point finding those again. */
+function daysAlreadyShown(todayKey: string): string[] {
+  return Object.keys(store.getArchive()).filter(day => day < todayKey).sort().slice(-DAYS_OF_HISTORY);
+}
+
+function olderExchanges(todayKey: string): Exchange[] {
+  return exchangesFrom(store.getArchive() as unknown as Record<string, { role?: string; content?: string }[]>, daysAlreadyShown(todayKey), todayKey, RECALL_DAYS);
+}
+
+function loadRecallVectors(): void {
+  try {
+    const saved = JSON.parse(readFileSync(RECALL_CACHE(), 'utf8')) as Record<string, number[]>;
+    for (const [id, vector] of Object.entries(saved)) if (Array.isArray(vector)) recallVectors.set(id, vector);
+    console.log(`[recall] ${recallVectors.size} older exchanges already embedded`);
+  } catch { /* nothing embedded yet, which is the state on a first run */ }
+}
+
+async function refreshRecallVectors(): Promise<void> {
+  const todayKey = localDateKey(zonedNow(CHAT_TIMEZONE));
+  const all = olderExchanges(todayKey);
+  const missing = all.filter(exchange => !recallVectors.has(exchange.id)).slice(0, RECALL_BATCH);
+  if (!missing.length) return;
+  let done = 0;
+  for (const exchange of missing) {
+    const vector = await tryEmbedQuery(exchange.text);
+    if (vector) { recallVectors.set(exchange.id, vector); done++; }
+  }
+  if (!done) return;
+  try {
+    writeFileSync(RECALL_CACHE(), JSON.stringify(Object.fromEntries(recallVectors)), 'utf8');
+    console.log(`[recall] embedded ${done} more — ${recallVectors.size} of ${all.length} older exchanges searchable`);
+  } catch (error) {
+    console.warn(`[recall] could not save what was embedded: ${error instanceof Error ? error.message : error}`);
+  }
+}
+
 function rantRoom(latest: string, mentioned = ''): string {
   const mood = getMood();
   const lastNight = nightsOn(getNights(), lastNightKey())[0];
@@ -9190,6 +9246,9 @@ app.whenReady().then(() => {
   setTimeout(() => { void autoSyncVault(); }, 60_000);
   setInterval(() => { void autoSyncVault(); }, 60 * 60_000);
   // And her own folder in it, the other way round.
+  loadRecallVectors();
+  setTimeout(() => { void refreshRecallVectors(); }, 90_000);
+  setInterval(() => { void refreshRecallVectors(); }, 15 * 60_000);
   setTimeout(() => publishToVault('startup'), 30_000);
   setInterval(() => publishToVault('tick'), VAULT_PUBLISH_MS);
   // A first pass shortly after boot so a backlog the desk sent overnight is
