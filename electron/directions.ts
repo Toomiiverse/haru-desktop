@@ -246,8 +246,13 @@ export function withoutMapsLinks(text: string): string {
 }
 
 /** Her words with the button's link under them, as a markdown link the page and the desktop both render. */
-export function withDirections(reply: string, found: Found): string {
-  const label = `Directions to ${found.name.split(',')[0].trim() || 'there'}`;
+export function withDirections(reply: string, found: Found, route?: { minutes: number; typicalMinutes: number; km: number; via: string }): string {
+  // The numbers on the button, in the app's hand rather than hers: whatever
+  // she says about the road, the live time and the roads are under it, right.
+  const road = route
+    ? ` · ${route.minutes} min now${route.typicalMinutes !== route.minutes ? ` (${route.typicalMinutes} usual)` : ''} · ${route.km} km${route.via ? ` via ${route.via}` : ''}`
+    : '';
+  const label = `Directions to ${found.name.split(',')[0].trim() || 'there'}${road}`;
   return `${reply.trim()}\n\n[${label}](${mapsLink(found)})`;
 }
 

@@ -197,3 +197,10 @@ test('once a route is in hand, her replies saying she cannot see the road are no
   assert.equal(withoutTrafficDenials(history, false).length, history.length, 'with no route behind her a denial was true, and stands');
   assert.equal(withoutTrafficDenials([{ role: 'user', content: "I can't check traffic on this phone" }], true).length, 1, 'only her words');
 });
+
+test('with a route in hand the live time and the roads ride on the button, whatever she said', () => {
+  const out = withDirections('Go then. 😒', { name: 'home', lat: -32.0673, lon: 115.8287 }, { minutes: 30, typicalMinutes: 16, km: 17.2, via: 'State Route 2' });
+  assert.match(out, /\[Directions to home · 30 min now \(16 usual\) · 17\.2 km via State Route 2\]\(https:\/\/maps\.apple\.com/);
+  const same = withDirections('Go.', { name: 'home', lat: 0, lon: 0 }, { minutes: 16, typicalMinutes: 16, km: 17.2, via: '' });
+  assert.match(same, /\[Directions to home · 16 min now · 17\.2 km\]/, 'no "usual" when it is the usual');
+});

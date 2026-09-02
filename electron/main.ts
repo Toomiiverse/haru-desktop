@@ -6308,6 +6308,10 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
     ...(forwardChunk && !brain.escalated ? { onChunk: forwardChunk } : {}),
   };
   const { content: spoken, ran } = await runToolLoop(conversation, {
+    // With the route in hand there is nothing to look up: offered tools, she
+    // searched the web for the traffic, got three American states back, and
+    // guessed — while the live number sat in the note beside his message.
+    ...(directions?.route ? { maxRounds: 1 } : {}),
     ask: async (sending, { tools }) => {
       // The conversation route: a deadline on the first word, and the local
       // model answering when it passes or the call fails — she must never go
@@ -6465,7 +6469,7 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
     : !directions && !fromSearch && claimsTraffic(herLine) ? dropRouteTalk(herLine)
     : herLine;
   if (routeless !== herLine && directions?.route) console.log('[maps] corrected the minutes, distance or roads she stated to the route');
-  const content = directions?.found ? withDirections(routeless, directions.found) : routeless;
+  const content = directions?.found ? withDirections(routeless, directions.found, directions.route ?? undefined) : routeless;
   if (herLine !== said) console.log(`[ai] dropped ${said.length - content.length} chars she had already said`);
   // The turn's ledger, one line: who answered, how much she was handed, and
   // whether the filters had to touch what she said. The before-and-after of a
