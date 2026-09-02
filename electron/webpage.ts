@@ -1053,9 +1053,11 @@ function sayable(text){
   if(out.length) out[out.length-1].pause=0;
   return out;
 }
-function fetchClip(text,emotion){
+function fetchClip(text,emotion,tries){
   return fetch('/api/speak',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(emotion?{text,emotion}:{text})})
-    .then(r=>r.ok?r.blob():null).catch(()=>null);
+    .then(r=>r.ok?r.blob():null)
+    .catch(()=>null)
+    .then(blob=>blob||((tries||0)<1?fetchClip(text,emotion,(tries||0)+1):null));
 }
 async function speak(text,emotion){
   const mine=++speaking;
@@ -1070,14 +1072,19 @@ async function speak(text,emotion){
     for(let i=0;i<parts.length;i++){
       const blob=await pending;
       if(mine!==speaking) return started;
-      if(!blob) return started;
+      // One sentence failing is not a reason to swallow the rest of what she
+      // said: it used to return here, so a single hiccup halfway through left
+      // her cut off mid-thought with no sign anything had gone wrong.
       pending=i+1<parts.length?fetchClip(parts[i+1].text,emotion):null;
+      if(!blob){ console.warn('[voice] no audio for one sentence — carrying on'); continue; }
       const url=URL.createObjectURL(blob);
       const done=new Promise(resolve=>{ player.onended=player.onerror=()=>{ URL.revokeObjectURL(url); resolve(); }; });
-      player.src=url;
-      await player.play();
-      started=true;
-      await done;
+      try{
+        player.src=url;
+        await player.play();
+        started=true;
+        await done;
+      }catch(e){ URL.revokeObjectURL(url); console.warn('[voice] a sentence would not play — carrying on'); }
       if(mine!==speaking) return true;
       if(parts[i].pause) await new Promise(r=>setTimeout(r,parts[i].pause));
       if(mine!==speaking) return true;
