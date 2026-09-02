@@ -24,7 +24,7 @@
 // reported rather than looped on.
 
 import type { ChatMessage, ToolCall } from './provider';
-import { claimsDesktopAction, claimsTickOff, readsLikeAssistant } from './reply';
+import { claimsDesktopAction, claimsTickOff, readsLikeAssistant, deniesItExists } from './reply';
 
 /** How many rounds a single reply may spend before it has to settle. */
 export const MAX_TOOL_ROUNDS = 4;
@@ -54,6 +54,8 @@ export type ToolLoopDeps = {
    * invite her to invent something to tick.
    */
   hasOpenTask(): boolean;
+  /** Whether she can actually look something up — a retry that tells her to search is wasted otherwise. */
+  canSearch(): boolean;
   /**
    * Take back whatever has been streamed this round. Called before every
    * discarded round: words already shown to the reader become a lie the moment
@@ -104,6 +106,7 @@ export async function runToolLoop(conversation: ChatMessage[], deps: ToolLoopDep
   let emptyRetried = false;
   let claimRetried = false;
   let tickRetried = false;
+  let existenceRetried = false;
   let voiceRetried = false;
 
   for (let round = 0; round < maxRounds; round++) {
@@ -204,6 +207,22 @@ export async function runToolLoop(conversation: ChatMessage[], deps: ToolLoopDep
       conversation.push({
         role: 'user',
         content: 'You just said that is ticked off, but it is still on their list — saying so does not change it, calling complete_kept_item does. Call it now for the task you meant. If you did not mean any of the ones actually on the list, say plainly that it is not ticked off rather than implying it is.',
+      });
+      continue;
+    }
+
+    // Certain that something is not real, without having looked. Her training
+    // stopped at some point and everything released since looks invented; she
+    // told him an RX 9060 XT did not exist while he was standing in the shop.
+    // Only once, and only when she could have checked and did not.
+    if (deniesItExists(message.content) && !existenceRetried && !ran.has('search_web') && deps.canSearch()) {
+      existenceRetried = true;
+      resetStream();
+      warn('[ai] she said something does not exist without looking — asking her to check');
+      conversation.push(message);
+      conversation.push({
+        role: 'user',
+        content: 'You just said that is not real. You do not know that: your training stopped a while ago and anything released since looks invented to you. Search for it with search_web before you say it does not exist. If the search shows it is real, say so plainly and answer the actual question; if it genuinely is not, then say so and you will have earned it.',
       });
       continue;
     }

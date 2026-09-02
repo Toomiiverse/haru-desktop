@@ -37,6 +37,7 @@ function harness(script: ChatMessage[], options: Partial<{
   pageReadAfter: string;
   handsAllowed: boolean;
   hasOpenTask: boolean;
+  canSearch: boolean;
   runTool: (call: ToolCall) => Promise<string>;
 }> = {}): Harness {
   const offered: boolean[] = [];
@@ -68,6 +69,7 @@ function harness(script: ChatMessage[], options: Partial<{
     handsAllowed: () => hands,
     withdrawHands: () => { hands = false; },
     hasOpenTask: () => options.hasOpenTask ?? true,
+    canSearch: () => options.canSearch ?? true,
     resetStream: () => { resets += 1; },
     log: line => say.push(line),
     warn: line => say.push(line),
@@ -223,3 +225,24 @@ test('her own voice is never pressed', async () => {
   assert.equal(result.rounds, 1);
   assert.equal(h.resets, 0);
 });
+
+test('certain something is not real without having looked, she is sent to check once', async () => {
+  const h = harness([says("That card doesn't exist. AMD hasn't even announced it."), calls('search_web'), says('Fine, it exists. Go and get it.')]);
+  const result = await runToolLoop(h.conversation, h.deps);
+  assert.equal(result.content, 'Fine, it exists. Go and get it.');
+  assert.ok(h.resets >= 1, 'the denial was taken back off the stream before she looked');
+  assert.match(h.conversation.map(turn => String(turn.content ?? '')).join(' '), /Search for it with search_web before you say it does not exist/);
+  assert.ok(result.rounds >= 2);
+});
+
+test('she is only sent to check once, and never when she cannot look or already did', async () => {
+  const denial = "There's no such thing. You're making that up.";
+  const cannot = harness([says(denial)], { canSearch: false });
+  assert.equal((await runToolLoop(cannot.conversation, cannot.deps)).content, denial, 'no search tool, no point asking');
+  assert.equal(cannot.resets, 0);
+  const looked = harness([calls('search_web'), says(denial)]);
+  assert.equal((await runToolLoop(looked.conversation, looked.deps)).content, denial, 'she looked and stands by it');
+  const twice = harness([says(denial), says(denial)]);
+  assert.equal((await runToolLoop(twice.conversation, twice.deps)).content, denial, 'asked once, then taken at her word');
+});
+

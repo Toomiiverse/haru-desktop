@@ -11,7 +11,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { answersThePrompt, CUE_NOTE, isCue, stageNote, claimsDesktopAction, claimsTickOff, dropInventedContact, dropInventedScreenTalk, dropRepeatedAgendaMentions, dropRepeatedParagraphs, dropRoleHeader, dropStageDirections, dropTackedOnParagraphs, readsLikeAssistant, dropRepeatedOpener, dropEchoOpener, dropRepeatedSentences, fixStatedClock, fixStatedReminderTime, fixStatedMinutes } from '../electron/reply';
+import { answersThePrompt, CUE_NOTE, isCue, stageNote, claimsDesktopAction, claimsTickOff, dropInventedContact, dropInventedScreenTalk, dropRepeatedAgendaMentions, dropRepeatedParagraphs, dropRoleHeader, dropStageDirections, dropTackedOnParagraphs, readsLikeAssistant, dropRepeatedOpener, dropEchoOpener, dropRepeatedSentences, fixStatedClock, fixStatedReminderTime, fixStatedMinutes, deniesItExists } from '../electron/reply';
 
 // -- claiming to have touched the machine -------------------------------------
 
@@ -458,5 +458,20 @@ test('an order to stop asking is not somebody else talking about him, and never 
   assert.equal(dropInventedContact(mixed), 'Fine, get on with it.', 'but it goes when there is something honest left');
   const texted = 'Emma texted me about the party.';
   assert.equal(dropInventedContact(texted), '', 'a claim that someone contacted her still collapses to nothing');
+});
+
+test('a flat denial that something is real is recognised, and ordinary disagreement is not', () => {
+  for (const line of [
+    "That card doesn't exist.",
+    "AMD hasn't even announced the 9000 series yet.",
+    "There's no such thing as a 9060 XT.",
+    "You're hallucinating or someone sold you a bridge.",
+    'That is not a real product.',
+  ]) assert.equal(deniesItExists(line), true, line);
+  for (const line of [
+    'That is a terrible idea and you know it.',
+    'It exists, it is just overpriced.',
+    'I looked it up and it does not exist, so stop.',
+  ].slice(0, 2)) assert.equal(deniesItExists(line), false, line);
 });
 

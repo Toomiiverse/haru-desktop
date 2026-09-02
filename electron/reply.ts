@@ -768,3 +768,19 @@ export function dropClosingOrder(reply: string): string {
   return /[\p{Letter}\p{Number}]/u.test(out) ? out : reply;
 }
 
+/**
+ * A flat denial that something is real.
+ *
+ * He said he was off to pick up an RX 9060 XT and she told him twice it did not
+ * exist — "AMD hasn't even announced the 9000 series" — then folded the moment
+ * he sent the shop page. Her training stopped before the card shipped, so
+ * anything released since looks invented to her, and she has a search tool she
+ * did not think to use. The point is not that she was wrong; it is that she was
+ * certain without checking.
+ */
+const DENIES_IT_EXISTS = /\b(?:does(?:n'?t| not) exist|do(?:n'?t| not) exist|there(?:'?s| is) no such\b|no such (?:thing|card|product|model|game|show)\b|is ?n'?t (?:a )?(?:real|thing)\b|not a real\b|never (?:been )?announced|has(?:n'?t| not) (?:even )?(?:been )?announced|you'?re (?:hallucinating|making (?:that|it) up)|made (?:that|it) up|that'?s not a (?:thing|real)\b)/i;
+
+export function deniesItExists(reply: string): boolean {
+  return DENIES_IT_EXISTS.test((reply ?? '').replace(/[‘’]/g, "'"));
+}
+

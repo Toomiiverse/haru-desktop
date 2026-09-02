@@ -6217,6 +6217,7 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
     handsAllowed: () => handsAllowed,
     withdrawHands: () => { handsAllowed = false; },
     hasOpenTask: () => getKept().some(item => item.kind === 'task' && !item.done),
+    canSearch: () => readSearchConfig(store.get('search')).enabled && handsAllowed,
     resetStream: () => { if (roundStreamed) { roundStreamed = ''; onChunkReset?.(); } },
     log: line => console.log(line),
     warn: line => console.warn(line),
