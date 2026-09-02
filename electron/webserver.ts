@@ -125,6 +125,11 @@ export type WebDeps = {
     /** One real push, now, preferences ignored. True if a push service took it. */
     test(): Promise<boolean>;
   };
+  /** The background re-voicing pass (revoice.ts): run one now, or see where it stands. */
+  revoice: {
+    run(): Promise<unknown>;
+    status(): unknown;
+  };
   /** Where their phone says they are — kept here, named by them, told to her in words. */
   where: {
     get(): { enabled: boolean; at: string | null; fresh: boolean; net: string | null; places: string[] };
@@ -744,6 +749,9 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
     if (!deps.where.name(name)) return json(res, 409, { error: 'The phone has not said where it is yet.' });
     return json(res, 200, deps.where.get());
   }
+
+  if (req.method === 'GET' && path === '/api/revoice') return json(res, 200, deps.revoice.status());
+  if (req.method === 'POST' && path === '/api/revoice') return json(res, 200, await deps.revoice.run());
 
   if (req.method === 'POST' && path === '/api/where/forget') {
     const body = await readBody(req) as { name?: unknown };

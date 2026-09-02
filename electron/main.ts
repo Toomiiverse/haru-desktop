@@ -26,6 +26,7 @@ import { discoverWardrobe, type ParameterRange, type WardrobeControl } from './w
 import { looksLikeNothing, readListenConfig, transcribe, type ListenConfig } from './listen';
 import { spokenVocabulary } from './vocabulary';
 import { herNameFrom } from './hername';
+import { applyRevoices, dueForRevoice, exchangesFrom as revoiceExchanges, grounded, parseRevoices, readRevoiceState, revoicePrompt, withRewrites, REVOICE_EVERY, type Revoice } from './revoice';
 import { decide, readEscalateConfig, type EscalateConfig } from './escalate';
 import { describeFailure, fromOpenAIReply, isOpenAIShaped, toOpenAIBody, DEFAULT_ENDPOINTS, type ChatTool, type Provider } from './provider';
 import { formatPage, formatResults, readSearchConfig, lookItUpInstruction, readWebPage, SearchBlocked, searchWeb, type SearchConfig, type SearchResult } from './search';
@@ -54,7 +55,7 @@ import { cancelPower, closeApp, findApps, isCancellable, launch, listRunning, ma
 import { looksLikeScreenshot, maySpeak, readScreenshotConfig, screenshotPrompt, SETTLE_MS, SETTLE_TRIES, type ScreenshotConfig } from './screenshots';
 import { look, photoName, readVisionConfig, whileLooking, type VisionConfig } from './vision';
 import { CAPTION_MAX_CHARS, describedShots, forgetCaptions, moreThanOnePass, noteCaption, noteFailure, readCaptions, shotsNeedingALook } from './seen';
-import { EXPRESSIVE, LAST_WORD, NO_INVENTED_HISTORY, NO_NON_SEQUITURS, readsAsRough, roomInstruction, HER_EMOJI, emojiRut, roomToRant, askingAboutHer, herSubjectNote, namesIn, justTalking, JUST_TALKING_NOTE } from './room';
+import { EXPRESSIVE, LAST_WORD, NATURAL, NO_INVENTED_HISTORY, NO_NON_SEQUITURS, readsAsRough, roomInstruction, HER_EMOJI, emojiRut, roomToRant, askingAboutHer, herSubjectNote, namesIn, justTalking, JUST_TALKING_NOTE } from './room';
 import { journalStance } from './journal';
 import { haruNote, rangeStats, type HaruNote, type RangeName, type RangeStats } from './journal';
 import { describeRating, entryFor, journalPrompt, readEntries, readJournalConfig, readRating, recentTrend, shouldAsk, upsertEntry, SCALE_MAX, type JournalConfig, type JournalEntry } from './journal';
@@ -1022,6 +1023,7 @@ function lifeTick() {
   // Reminders outrank idle chatter: something she was asked to chase beats
   // something she thought of, and both at once would be two voices at once.
   void considerReminding(environment).then(reminded => { if (!reminded) void considerPipingUp(environment); });
+  considerRevoicing();
   // Rescheduled each time rather than set on an interval, so the gap itself
   // varies with how alert she is.
   tickTimer = setTimeout(lifeTick, nextTickDelayMs(vitals));
@@ -5798,6 +5800,84 @@ const HOSTED_FIRST_WORD_MS = 15_000;
 /** The phone's leash, on a hosted model: room for a real answer rather than a cut-off one. */
 const HOSTED_AWAY_MAX_TOKENS = 700;
 const HOSTED_PARAGRAPHS = 4;
+/**
+ * The re-voicing pass — see revoice.ts.
+ *
+ * Every `ai.revoice.every` of their messages (500 unless set), a model with a
+ * better voice than the live one reads her last forty exchanges and rewrites
+ * the ones that fell short; the rewrites stand in for those replies in the
+ * history as shown to her. Aion, by default: the voice that was too slow and
+ * too dear to answer live is neither in the background. Runs on the life beat,
+ * never in a reply, and can be asked for from the web door to see a pass now.
+ */
+type RevoiceSetting = { every?: number; model?: string };
+function revoiceSetting(): Required<RevoiceSetting> {
+  const saved = (store.get('ai.revoice') ?? {}) as RevoiceSetting;
+  return { every: typeof saved.every === 'number' ? saved.every : REVOICE_EVERY, model: typeof saved.model === 'string' && saved.model.trim() ? saved.model.trim() : 'aion-labs-aion-3-0' };
+}
+function revoiceState() { return readRevoiceState(store.get('revoice')); }
+
+/** Their messages since the last pass, today and in the archive. */
+function messagesSinceRevoice(): number {
+  const since = revoiceState().lastAt;
+  const count = (turns: { role?: string; at?: string }[]) => turns.filter(turn => turn.role === 'user' && (!since || (turn.at ?? '') > since)).length;
+  const archive = store.getArchive() as unknown as Record<string, { role?: string; at?: string }[]>;
+  return count((store.get('chat.messages') as { role?: string; at?: string }[] | undefined) ?? []) + Object.values(archive).reduce((sum, day) => sum + count(Array.isArray(day) ? day : []), 0);
+}
+
+let revoicing = false;
+let revoiceRetryAt = 0;
+async function runRevoice(why: string): Promise<{ shown: number; rewritten: number; kept: number; dropped: number; model: string } | { error: string }> {
+  if (revoicing) return { error: 'a pass is already running' };
+  const route = conversationRoute();
+  if (!route) return { error: 'no hosted route to run it on' };
+  const setting = revoiceSetting();
+  const config: ProviderConfig = { ...route, model: setting.model };
+  const todayKey = localDateKey(zonedNow(CHAT_TIMEZONE));
+  const before = earlierTurns(store.getArchive() as unknown as Record<string, { id?: string; role: string; content: string; at?: string }[]>, todayKey);
+  const today = ((store.get('chat.messages') as { id?: string; role: string; content: string; at?: string }[] | undefined) ?? []);
+  const exchanges = revoiceExchanges([...before, ...today]);
+  if (exchanges.length < 5) return { error: `only ${exchanges.length} exchanges to read` };
+  revoicing = true;
+  const startedAt = Date.now();
+  try {
+    const character = getActiveCharacter();
+    const { system, user } = revoicePrompt({ identity: character.identity, style: character.style }, NATURAL, exchanges);
+    console.log(`[revoice] pass (${why}): ${exchanges.length} exchanges to ${setting.model}`);
+    const answer = await sendToProvider([{ role: 'system', content: system }, { role: 'user', content: user }], config, { tools: false, temperature: 0.7, maxTokens: 3000 });
+    const parsed = parseRevoices(answer.content ?? '', exchanges);
+    const allowed = [herNameFrom(character.identity), getProfile().nickname].filter(Boolean);
+    const now = new Date().toISOString();
+    const fresh: Revoice[] = [];
+    let dropped = 0;
+    for (const { id, text } of parsed) {
+      const exchange = exchanges.find(candidate => candidate.id === id)!;
+      if (grounded(exchange.hers, exchange.theirs, text, allowed)) fresh.push({ id, original: exchange.hers, text, at: now });
+      else { dropped++; console.log(`[revoice] dropped a rewrite that changed more than the voice: ${JSON.stringify(text.slice(0, 80))}`); }
+    }
+    const next = withRewrites(revoiceState(), fresh, now);
+    store.set('revoice', next);
+    revoiceRetryAt = 0;
+    console.log(`[revoice] ${fresh.length} of her replies re-voiced (${parsed.length} offered, ${dropped} dropped) in ${Math.round((Date.now() - startedAt) / 1000)}s — ${Object.keys(next.rewrites).length} kept`);
+    for (const rewrite of fresh) console.log(`[revoice]   was: ${JSON.stringify(rewrite.original.slice(0, 90))}\n[revoice]   now: ${JSON.stringify(rewrite.text.slice(0, 90))}`);
+    return { shown: exchanges.length, rewritten: fresh.length, kept: Object.keys(next.rewrites).length, dropped, model: setting.model };
+  } catch (error) {
+    revoiceRetryAt = Date.now() + 60 * 60_000;
+    const why = error instanceof Error ? error.message : String(error);
+    console.warn(`[revoice] the pass failed: ${why}`);
+    return { error: why };
+  } finally {
+    revoicing = false;
+  }
+}
+
+function considerRevoicing() {
+  if (revoicing || Date.now() < revoiceRetryAt) return;
+  const every = revoiceSetting().every;
+  const since = messagesSinceRevoice();
+  if (dueForRevoice(since, every)) void runRevoice(`${since} messages since the last pass, every ${every}`);
+}
+
 function conversationRoute(): ProviderConfig | null {
   const route = store.get('ai.conversation') as ProviderConfig | undefined;
   if (!route?.model || !isOpenAIShaped(route.provider) || !hasKeyFor(route.endpoint)) return null;
@@ -6243,10 +6323,14 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // markTimeGaps writes the seam between them, so she can tell yesterday from
   // now rather than reading it all as one flat conversation.
   const before = earlierTurns(store.getArchive() as unknown as Record<string, { role: string; content: string; at?: string }[]>, localDateKey(zonedNow(CHAT_TIMEZONE)))
-    .map(turn => ({ role: turn.role, content: turn.content, ...(turn.at ? { at: turn.at } : {}) })) as OllamaMessage[];
+    .map(turn => ({ role: turn.role, content: turn.content, ...(turn.at ? { at: turn.at } : {}), ...((turn as { id?: string }).id ? { id: (turn as { id?: string }).id } : {}) })) as OllamaMessage[];
   if (before.length) console.log(`[ai] ${before.length} turns from the last ${DAYS_OF_HISTORY} days go in front of today's`);
   const history = markTimeGaps(withoutTrafficDenials([...before, ...withoutStaleDenials(withFiles, hasItems)] as unknown as { role: string; content: string; at?: string }[], Boolean(directions?.route)), CHAT_TIMEZONE) as unknown as OllamaMessage[];
-  const shown = hers ? seedOffTheOrders(history, dropClosingOrder) : history;
+  // Her replies as re-voiced by the background pass (revoice.ts), before the
+  // other seeds: a rewrite that still ends on an order loses it like any other.
+  const revoiced = applyRevoices(history as unknown as { id?: string; role: string; content: string }[], revoiceState().rewrites);
+  if (revoiced.applied) console.log(`[revoice] ${revoiced.applied} of her replies shown as re-voiced`);
+  const shown = hers ? seedOffTheOrders(revoiced.shown as unknown as OllamaMessage[], dropClosingOrder) : revoiced.shown as unknown as OllamaMessage[];
   const conversation: OllamaMessage[] = [{ role: 'system', content: brief ? `${sized} ${BREVITY}` : sized }, ...seedEmoji(shown)];
   // The last thing she reads before she speaks — see LAST_WORD for the
   // measurement. A system message just before their last turn: the Ollama
@@ -8926,6 +9010,10 @@ function webDeps(): WebDeps {
       return checkInsOn(getCheckIns(), localDateKey(now));
     },
     nudge: () => nudgeForPhone(),
+    revoice: {
+      run: () => runRevoice('asked from the web door'),
+      status: () => { const state = revoiceState(); return { lastAt: state.lastAt, kept: Object.keys(state.rewrites).length, since: messagesSinceRevoice(), every: revoiceSetting().every, model: revoiceSetting().model }; },
+    },
     where: {
       get: () => whereForPage(getWhereabouts()),
       enable(on) {
