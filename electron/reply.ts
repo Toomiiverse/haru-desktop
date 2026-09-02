@@ -320,7 +320,19 @@ const HEARD_FROM = /\bI (?:just )?(?:heard from|got a (?:text|message|call|email
  * to remind you" is already covered above, while "you said Emma wanted one" is
  * the user's own words coming back and must survive.
  */
+// The subject has to be a person, and a capitalised word at the start of a
+// sentence is usually a verb: "Stop asking me to do things I can't do" and
+// "Try saying I'm done" were both read as somebody else talking about him, and
+// because the whole reply was that one paragraph she said nothing at all. Six
+// replies went out empty before this was noticed.
+const NOT_A_PERSON = /^(?:stop|try|go|get|keep|start|quit|just|don't|dont|now|fine|look|tell|say|take|make|put|come|leave|move|finish|answer|check|stay|sit|eat|sleep|hurry|maybe|either|instead|anyway|honestly|obviously|seriously|nothing|something|everyone|nobody|good|great|whatever|please)$/i;
 const THIRD_PARTY_TALK = /\b(?!You\b|They\b|We\b|I\b|She\b|He\b|It\b)([A-Z][a-z]+)(?:'s|’s| has| had| have)?\s+(?:been\s+)?(asking|wondering|saying|telling everyone|on about|keeps asking|wants to know|was asking|says|reckons|mentioned)\b/;
+
+/** Somebody with a name talking about him, as opposed to her telling him to stop asking. */
+function thirdPartyTalk(paragraph: string): boolean {
+  const found = THIRD_PARTY_TALK.exec(paragraph);
+  return Boolean(found && !NOT_A_PERSON.test(found[1]));
+}
 
 /** Their own words coming back is not an invention, so a paragraph that credits
  *  the user as the source keeps its third-party talk. */
@@ -328,13 +340,16 @@ const CREDITED = /\byou (said|told me|mentioned|reckoned|were saying)\b/i;
 
 export function dropInventedContact(reply: string): string {
   const paragraphs = reply.split(/\n{2,}/).map(part => part.trim()).filter(Boolean);
+  const invented = (paragraph: string) => GOT_IN_TOUCH.test(paragraph) || HEARD_FROM.test(paragraph);
   const kept = paragraphs.filter(paragraph =>
-    !GOT_IN_TOUCH.test(paragraph)
-    && !HEARD_FROM.test(paragraph)
-    && !(THIRD_PARTY_TALK.test(paragraph) && !CREDITED.test(paragraph)));
+    !invented(paragraph)
+    && !(thirdPartyTalk(paragraph) && !CREDITED.test(paragraph)));
   if (kept.length === paragraphs.length) return reply;
-  // If the whole reply was the invention there is nothing honest left to say, so
-  // it collapses to nothing and the caller falls back rather than shipping it.
+  // If the whole reply was somebody claiming to have contacted her there is
+  // nothing honest left to say, so it collapses to nothing and the caller falls
+  // back rather than shipping it. That only holds for the two precise patterns:
+  // emptying a reply on the loose one is how she came to say nothing at all.
+  if (!kept.length && !paragraphs.some(invented)) return reply;
   return kept.join('\n\n');
 }
 

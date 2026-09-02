@@ -447,3 +447,16 @@ test('a finished errand does not own its words, and one word of a title is not a
     'Tuesday, and you know it.', 'a real errand word raised twice still goes');
 });
 
+test('an order to stop asking is not somebody else talking about him, and never empties the reply', () => {
+  const stop = "I'm always good. You're the one who needs checking on. Stop asking stupid questions and tell me what you're actually doing.";
+  assert.equal(dropInventedContact(stop), stop, '"Stop asking" is her, not a third party');
+  const trying = 'Try saying "I\'m done" instead of whining about it.';
+  assert.equal(dropInventedContact(trying), trying);
+  const named = 'Emma keeps asking about the birthday present.';
+  assert.equal(dropInventedContact(named), named, 'alone it is all there was, so it stands rather than leaving nothing');
+  const mixed = 'Fine, get on with it.\n\nEmma keeps asking about the birthday present.';
+  assert.equal(dropInventedContact(mixed), 'Fine, get on with it.', 'but it goes when there is something honest left');
+  const texted = 'Emma texted me about the party.';
+  assert.equal(dropInventedContact(texted), '', 'a claim that someone contacted her still collapses to nothing');
+});
+
