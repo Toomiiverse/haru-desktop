@@ -688,10 +688,15 @@ export function fixStatedMinutes(line: string, minutes: number): string {
  * thirty-five of forty replies can be in half of them at the very most — and
  * only when the reply still says something without it.
  */
-export function dropOverusedEmoji(reply: string, previousReplies: string[], emoji: readonly string[], checked = 1): string {
+export function dropOverusedEmoji(reply: string, previousReplies: string[], emoji: readonly string[], checked = 4, need = 2): string {
   const recent = previousReplies.slice(-checked);
-  if (recent.length < checked) return reply;
-  const stuck = emoji.find(one => recent.every(previous => previous.includes(one)) && reply.includes(one));
+  const last = previousReplies[previousReplies.length - 1] ?? '';
+  // Two tests, because there are two ways to wear one out. Back to back is the
+  // obvious one and was the only one checked, which is why she stopped doing it
+  // and started doing the other: 😒 every second reply, nine times in an
+  // afternoon, each one legal against a memory one reply deep.
+  const stuck = emoji.find(one => reply.includes(one)
+    && (last.includes(one) || recent.filter(previous => previous.includes(one)).length >= need));
   if (!stuck) return reply;
   const without = reply.split(stuck).join('').replace(/[ \t]{2,}/g, ' ').replace(/ +([.,!?…])/g, '$1').replace(/[ \t]+$/gm, '').trim();
   // Never leave her with nothing, and never strip the only thing carrying the tone.

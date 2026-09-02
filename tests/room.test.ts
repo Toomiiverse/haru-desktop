@@ -24,6 +24,21 @@ test('an emoji in three of her last four replies is named back to her, with the 
   assert.equal(emojiRut(['Fine. 🙄', 'Yes. 🙄']), '', 'too few replies to call it a habit');
 });
 
+test('a tic that skips every other reply is still a tic, and four replies was too short a memory to see it', () => {
+  // Exactly what she did: 😒, nothing, 😒, nothing, 😒 — never three in four,
+  // and so never once named back to her across a whole afternoon.
+  const alternating = ['Fine. 😒', 'Sure.', 'Right. 😒', 'Go on.', 'Told you. 😒', 'Hm.'];
+  assert.equal(emojiRut(alternating.slice(-4)), '', 'the old window saw nothing wrong with it');
+  assert.match(emojiRut(alternating), /You have put 😒 in 3 of your last 6 replies/);
+  assert.match(emojiRut(alternating), /Do not use 😒 in this reply at all/);
+  assert.equal(emojiRut(['a 😒', 'b', 'c', 'd 😒', 'e', 'f']), '', 'twice in six is use, not habit');
+});
+
+test('she is told not to reach for one she has used lately, not merely the one she used last', () => {
+  assert.match(LAST_WORD, /not one you have used in your last few replies/);
+  assert.doesNotMatch(LAST_WORD, /not the one you used last time/, 'a one-reply memory is what she alternated against');
+});
+
 test('the backstop takes the stuck emoji out, so the same one twice running is not something she can do', () => {
   const two = ['a 🙄', 'b 🙄'];
   assert.equal(dropOverusedEmoji('Get on with it. 🙄', two, HER_EMOJI), 'Get on with it.');
@@ -34,6 +49,14 @@ test('the backstop takes the stuck emoji out, so the same one twice running is n
   assert.equal(dropOverusedEmoji('Fine. 🙄', ['a 🙄'], HER_EMOJI), 'Fine.', 'the one she used last time is gone from this one');
   assert.equal(dropOverusedEmoji('Fine. 🙄', ['a 😏'], HER_EMOJI), 'Fine. 🙄', 'a different one last time leaves this one alone');
   assert.equal(dropOverusedEmoji('Fine. 🙄', [], HER_EMOJI), 'Fine. 🙄', 'nothing to compare with');
+});
+
+test('the backstop also catches the one she reaches for every other reply', () => {
+  const alternating = ['Fine. 😒', 'Sure.', 'Right. 😒', 'Go on.'];
+  assert.equal(dropOverusedEmoji('Told you. 😒', alternating, HER_EMOJI), 'Told you.', 'twice in the last four is enough');
+  assert.equal(dropOverusedEmoji('Told you. 😏', alternating, HER_EMOJI), 'Told you. 😏', 'one she has not worn out is hers');
+  assert.equal(dropOverusedEmoji('Told you. 😒', ['a 😒', 'b', 'c', 'd'], HER_EMOJI), 'Told you. 😒', 'once in four is not a habit');
+  assert.equal(dropOverusedEmoji('😒', alternating, HER_EMOJI), '😒', 'never left with nothing, however worn out');
 });
 
 test('how she writes is about the shape of the message, and does not soften what she is', () => {

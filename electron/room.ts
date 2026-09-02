@@ -161,12 +161,19 @@ export const HER_EMOJI = ['😏', '👀', '😤', '💢', '😒', '🔥', '🙄'
 /**
  * The one she has fallen into using, named back to her.
  *
+ * Six replies, not four: told only not to repeat the last one, she used 😒 in
+ * nine of twenty-one replies and never once in three of four — 😒, nothing,
+ * 😒, nothing, all afternoon. Alternating satisfies a one-reply memory
+ * perfectly, so a one-reply memory is what produced it. Over six the same
+ * habit is plain, and the window is still short enough that using one twice
+ * in a good run is not a tic.
+ *
  * The openers rule (notTwiceInstruction) exists because a model cannot see the
  * pattern it is making; an emoji is the same thing in one character. Counted
  * over her last few replies, and only raised once it is a habit rather than a
  * coincidence.
  */
-export function emojiRut(replies: string[], checked = 4, need = 3): string {
+export function emojiRut(replies: string[], checked = 6, need = 3): string {
   const recent = replies.slice(-checked);
   if (recent.length < need) return '';
   let worst = '', count = 0;
@@ -191,7 +198,7 @@ export function emojiRut(replies: string[], checked = 4, need = 3): string {
  * said again here, short, and placed by ollamaChat just before their last
  * message — where a time-gap marker goes, and by the same route.
  */
-export const LAST_WORD = '[Before you answer: an emoji of yours may go in this reply — 😏 👀 😤 💢 😒 🔥 🙄 — only where it bites, and not the one you used last time; never 😊 🌟 ✨. Do not open the way your last few replies opened. If their message continues nothing above, ask what they meant rather than building on it; if they ask what you meant, answer from what you actually said.]';
+export const LAST_WORD = '[Before you answer: an emoji of yours may go in this reply — 😏 👀 😤 💢 😒 🔥 🙄 — only where it bites, and not one you have used in your last few replies; never 😊 🌟 ✨. Do not open the way your last few replies opened. If their message continues nothing above, ask what they meant rather than building on it; if they ask what you meant, answer from what you actually said.]';
 
 /**
  * How she writes, as opposed to what she is like.
