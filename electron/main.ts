@@ -6201,7 +6201,16 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   const home = config;
   const route = !brain.escalated && !brief && !choices && messages.at(-1)?.role === 'user' ? conversationRoute() : null;
   if (route) {
-    const allowed = conversationMayLeave([...messages], pageWasRead);
+    // A page she fetched last turn does not keep this turn at home. The flag
+    // is set when a page is read and only cleared below, after this gate — so
+    // what it said here was "the turn after any look-up answers on the local
+    // model", a visible dip in her right after she checked something. His
+    // call, 2026-09-02: a public page she went and read may ride along to the
+    // conversation model. What still keeps a turn home is the content scan
+    // over the last dozen messages, page text included — a key, a card number,
+    // a password with a value beside it — and reading a page still takes her
+    // tools away for the rest of that turn. Escalation keeps the stricter rule.
+    const allowed = conversationMayLeave([...messages]);
     if (allowed.safe) brain = { config: { ...route, temperature: config.temperature }, escalated: false, because: 'the conversation route', sees: false, hosted: true };
     else console.log(`[router] the conversation route stays home this turn — ${allowed.because}`);
   }
