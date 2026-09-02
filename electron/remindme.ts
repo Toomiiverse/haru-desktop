@@ -45,9 +45,23 @@ function tidy(task: string): string {
  * The reminder in a message, if it is one. `now` is in the user's timezone
  * (zonedNow), so "in 20 minutes" and a bare "at 5" resolve against their clock.
  */
+/**
+ * "Remind me what happened with that motherboard" is not a reminder. It is a
+ * question with the word remind in front of it, and read as an errand it
+ * became an all-day task called "What happened with that motherboard from
+ * Umart" that she then told him to tick off.
+ *
+ * A reminder is always about doing a thing — "remind me to", "remind me at
+ * six", "remind me about the parcel". Followed by what, who, where, when, why,
+ * how or whether, it is him asking to be told something now.
+ */
+const ASKING_NOT_SCHEDULING = /^\s*(?:again\s+)?(?:what|whats|what's|who|whose|where|when(?:\s+(?:did|do|does|was|were|is|are|had|have))|why|how|whether|if\s+(?:i|we|you|he|she|they)\b)\b/i;
+
 export function reminderAsk(text: string, now: Date): ReminderAsk | null {
   const line = (text ?? '').trim().replace(/\s+/g, ' ');
   if (!line || line.length > 240 || line.includes('?')) return null;
+  const asking = line.match(TRIGGER);
+  if (asking && ASKING_NOT_SCHEDULING.test(asking[1] ?? '')) return null;
   const m = line.match(TRIGGER);
   if (!m) return null;
   let rest = m[1].trim();

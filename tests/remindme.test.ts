@@ -89,3 +89,19 @@ test('her offer and their yes, read together, are a reminder', () => {
   assert.equal(acceptedOffer('what?', offer, theirs, now), null);
   assert.equal(acceptedOffer('Yes please', undefined, theirs, now), null);
 });
+
+test('"remind me what happened" is a question, not an errand', () => {
+  const now = new Date(2026, 8, 2, 14, 0);
+  for (const line of [
+    'remind me what happened with that motherboard from Umart',
+    'remind me who that customer was',
+    'remind me where I put the screwdriver',
+    'remind me when did we order those mailboxes',
+    'remind me how the family sharing thing works',
+    'remind me whether I paid that invoice',
+  ]) assert.equal(reminderAsk(line, now), null, line);
+  assert.notEqual(reminderAsk('remind me to pick up the parcel tomorrow', now), null, 'a real errand still is one');
+  assert.notEqual(reminderAsk('remind me at 6pm about the venice route', now), null, 'and so is a time');
+  assert.notEqual(reminderAsk('remind me about the parcel tomorrow', now), null, 'and a thing, without "to"');
+});
+
