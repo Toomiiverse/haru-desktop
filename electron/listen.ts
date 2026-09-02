@@ -93,11 +93,37 @@ const PROMPT_ECHOES = [
   'haru a casual spoken message to a desktop companion',
 ];
 
-export function looksLikeNothing(text: string) {
+const bare = (text: string) => text.toLowerCase().replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ').trim();
+
+/**
+ * The hotwords, read back as though they were said.
+ *
+ * Sent the names to listen for, Whisper holds them as the text that came
+ * before, and on near-silence it carries that text on — so the failure that
+ * kept this file prompt-free comes back in a new coat, and it is caught the
+ * same way: a transcript that is two or more of the terms in the order they
+ * were sent, or four words of the list run together, is the list, not speech.
+ * One term alone is left through; "Chainsaw Man?" is a thing a person says.
+ */
+export function echoesVocabulary(text: string, vocabulary: string[]): boolean {
+  const terms = vocabulary.map(bare).filter(Boolean);
+  const said = bare(text);
+  if (!said || terms.length < 2) return false;
+  for (let start = 0; start < terms.length - 1; start++) {
+    let run = terms[start];
+    for (let end = start + 1; end < terms.length; end++) {
+      run += ` ${terms[end]}`;
+      if (said === run) return true;
+      if (!run.startsWith(said)) break;
+    }
+  }
+  return said.split(' ').length >= 4 && terms.join(' ').includes(said);
+}
+
+export function looksLikeNothing(text: string, vocabulary: string[] = []) {
   const trimmed = text.trim();
   if (!trimmed || HALLUCINATED.test(trimmed)) return true;
-  const bare = trimmed.toLowerCase().replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ').trim();
-  return PROMPT_ECHOES.includes(bare);
+  return PROMPT_ECHOES.includes(bare(trimmed)) || echoesVocabulary(trimmed, vocabulary);
 }
 
 /**
@@ -117,6 +143,7 @@ export async function transcribe(
   config: ListenConfig,
   fetchImpl: PostAudio,
   auth: Record<string, string> = {},
+  vocabulary: string[] = [],
 ): Promise<string> {
   if (config.engine === 'off') throw new Error('Speech to text is switched off.');
   if (!audio.length) throw new Error('The recording was empty.');
@@ -127,11 +154,13 @@ export async function transcribe(
   const extension = mime.includes('wav') ? 'wav' : mime.includes('ogg') ? 'ogg' : 'webm';
   form.append('file', new Blob([audio as unknown as BlobPart], { type: mime }), `speech.${extension}`);
   form.append('language', config.language);
-  // Deliberately no prompt. Priming the model biases it toward the words it was
-  // primed with, which sounds like a free accuracy win and is not: given silence
-  // it returns the prompt itself, word for word, and that goes to her as though
-  // somebody said it. Her name being misheard is the matcher's problem, and the
-  // matcher was written expecting exactly that.
+  // Still no prompt — a sentence to continue is what came back verbatim on
+  // silence. Hotwords instead: the names in play, as a list. faster-whisper
+  // holds them in the same place, so the same echo is possible and is caught
+  // twice, by the server refusing a take with no speech in it and by
+  // looksLikeNothing above knowing the list. See vocabulary.ts for where the
+  // list comes from.
+  if (vocabulary.length) form.append('hotwords', vocabulary.join(', '));
 
   // No Content-Type: the boundary belongs to the FormData and setting it by hand
   // breaks the upload. Only the bearer goes in, and only when there is one.

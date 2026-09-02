@@ -44,6 +44,8 @@ DEVICE = os.environ.get("HARU_ASR_DEVICE", "cuda")
 # float16 compute, which on this card is both the smallest and the quickest.
 COMPUTE = os.environ.get("HARU_ASR_COMPUTE", "int8_float16" if DEVICE == "cuda" else "int8")
 PORT = int(os.environ.get("HARU_ASR_PORT", "9881"))
+# Under this much speech in a take there was no take. A spoken "no" is 0.3s.
+MIN_SPEECH_SECONDS = float(os.environ.get("HARU_ASR_MIN_SPEECH", "0.25"))
 
 app = FastAPI()
 model = None
@@ -73,7 +75,7 @@ def health():
 
 
 @app.post("/v1/audio/transcriptions")
-async def transcribe(file: UploadFile = File(...), language: str = Form("en"), prompt: str = Form("")):
+async def transcribe(file: UploadFile = File(...), language: str = Form("en"), prompt: str = Form(""), hotwords: str = Form("")):
     raw = await file.read()
     if not raw:
         return JSONResponse({"error": "empty audio"}, status_code=400)
@@ -96,8 +98,21 @@ async def transcribe(file: UploadFile = File(...), language: str = Form("en"), p
             # The spelling it was there to fix is handled by the wake matcher,
             # which expects to be given the name wrong.
             initial_prompt=prompt or None,
+            # The names in play, from the app — see vocabulary.ts. Held by the
+            # decoder as previous text, which is the prompt by another door, so
+            # the floor below and the app's echo check both stand guard.
+            hotwords=hotwords.strip() or None,
             condition_on_previous_text=False,
         )
+        # Nothing to decode. The VAD has already run by here and the generator
+        # has not: a take with less speech in it than a short word is a bumped
+        # key or a closing door, and decoding it is exactly when Whisper invents
+        # a sentence — or, primed, reads the hotwords back. It is refused before
+        # the decoder sees it, which is also faster than the alternative.
+        spoken = getattr(info, "duration_after_vad", None)
+        if spoken is not None and spoken < MIN_SPEECH_SECONDS:
+            print(f"[asr] {len(raw)} bytes -> {spoken:.2f}s of speech after the VAD, nothing said", flush=True)
+            return {"text": "", "duration": getattr(info, "duration", None), "seconds": round(time.time() - started, 3)}
         text = " ".join(segment.text.strip() for segment in segments).strip()
         took = time.time() - started
         print(f"[asr] {len(raw)} bytes -> {len(text)} chars in {took:.2f}s", flush=True)

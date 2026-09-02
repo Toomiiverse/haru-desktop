@@ -24,6 +24,8 @@ import { activityInstruction, isJustATool, isNotable, readActivity, type Activit
 import { belongsToPlace, expireHaunts, familiarity, markRemembered, noteExchange, noteVisit, readHaunts, rememberSaid, worthRemembering } from './familiar';
 import { discoverWardrobe, type ParameterRange, type WardrobeControl } from './wardrobe';
 import { looksLikeNothing, readListenConfig, transcribe, type ListenConfig } from './listen';
+import { spokenVocabulary } from './vocabulary';
+import { herNameFrom } from './hername';
 import { decide, readEscalateConfig, type EscalateConfig } from './escalate';
 import { describeFailure, fromOpenAIReply, isOpenAIShaped, toOpenAIBody, DEFAULT_ENDPOINTS, type ChatTool, type Provider } from './provider';
 import { formatPage, formatResults, readSearchConfig, lookItUpInstruction, readWebPage, SearchBlocked, searchWeb, type SearchConfig, type SearchResult } from './search';
@@ -3639,6 +3641,23 @@ function keptSummary(now: Date) {
   return formatAgenda(getKept(), now, localDateKey(now));
 }
 
+/**
+ * The names the ear is told to expect, gathered from what she already knows —
+ * see vocabulary.ts. Built per take rather than cached: it is a few string
+ * scans, and the conversation it reads from changes with every message.
+ */
+function wordsToListenFor(): string[] {
+  const herName = herNameFrom(getActiveCharacter().identity);
+  const chat = ((store.get('chat.messages') as { content?: string }[] | undefined) ?? []).slice(-40).map(message => message.content ?? '');
+  return spokenVocabulary({
+    names: [herName, getProfile().nickname].filter(Boolean),
+    taught: readHearing(store.get('hearing')).corrections.map(correction => correction.meant),
+    places: getWhereabouts().places.map(place => place.name),
+    kept: getKept().filter(item => !item.done).map(item => item.title),
+    chat,
+  });
+}
+
 function getProfile(): Profile {
   const saved = store.get('profile') as Partial<Profile> | undefined;
   return { nickname: saved?.nickname ?? '', occupation: saved?.occupation ?? '', about: saved?.about ?? '' };
@@ -6802,7 +6821,7 @@ function quickHit(text: string, history: { role?: string; content?: string }[]) 
     .filter(item => item.date === date)
     .map(item => ({ title: item.title, time: item.time, done: item.done }));
   const character = getActiveCharacter();
-  const herName = /You are ([^.,!?]+)/.exec(character.identity)?.[1]?.trim() ?? 'Haru';
+  const herName = herNameFrom(character.identity);
   const hit = quickAnswer(text, {
     now,
     todayKey,
@@ -8956,8 +8975,9 @@ function webDeps(): WebDeps {
     },
     async hear(audio, mime) {
       const listen = readListenConfig(store.get('listen'));
-      const said = await transcribe(audio, mime, listen, net.fetch as never, remoteAuth(listen.endpoint));
-      if (looksLikeNothing(said)) return '';
+      const vocabulary = wordsToListenFor();
+      const said = await transcribe(audio, mime, listen, net.fetch as never, remoteAuth(listen.endpoint), vocabulary);
+      if (looksLikeNothing(said, vocabulary)) return '';
       // Through the same corrections she has been taught at the desk. A name she
       // keeps mishearing is misheard the same way down a phone.
       const heard = readHearing(store.get('hearing'));
@@ -9478,8 +9498,9 @@ app.whenReady().then(() => {
   // of everything said near this machine is not what was asked for.
   ipcMain.handle('listen:transcribe', async (_e, audio: Uint8Array, mime: string) => {
     const config = readListenConfig(store.get('listen'));
-    const text = await transcribe(audio, mime, config, net.fetch, remoteAuth(config.endpoint));
-    if (looksLikeNothing(text)) {
+    const vocabulary = wordsToListenFor();
+    const text = await transcribe(audio, mime, config, net.fetch, remoteAuth(config.endpoint), vocabulary);
+    if (looksLikeNothing(text, vocabulary)) {
       console.log(`[listen] ${audio.length} bytes -> nothing worth sending`);
       return '';
     }
