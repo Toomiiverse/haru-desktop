@@ -70,6 +70,9 @@ test('a reminder she promised in her own reply is read back off it', () => {
 test('what the reminder is for comes from what they said, not from her', () => {
   assert.equal(promisedTitle(['Kinda sucks because I have to be at the shop tomorrow by 7am as we have some electricians coming in to change the lights', 'Yes please', 'You can set a reminder for me can’t you Haru?']), 'Be at the shop tomorrow by 7am');
   assert.equal(promisedTitle(['yes']), 'What you asked her to remind you about');
+  assert.equal(promisedTitle(['what happened with that motherboard from Umart', 'yes']), 'What you asked her to remind you about', 'a question without its mark is still a question, not a promise');
+  assert.equal(promisedTitle(['remind me what happened with that motherboard from Umart', 'sure']), 'What you asked her to remind you about');
+  assert.equal(promisedTitle(['I have to pick up the motherboard from Umart', 'what happened with the other one', 'yes']), 'Pick up the motherboard from Umart', 'the promise behind the question is still found');
 });
 
 test('her offer and their yes, read together, are a reminder', () => {

@@ -154,8 +154,18 @@ export function reminderPromised(herReply: string, now: Date): { time: string; d
 }
 
 /** What the reminder is for, from what they said: the last thing with a time or an obligation in it. */
+/** A question, with or without its question mark: "what happened with that motherboard from Umart" is asking, not promising. */
+const ASKS_NOT_PROMISES = /^\s*(?:(?:hey|so|and|but|also|haru)[,\s]+)*(?:remind me\s+)?(?:what|whats|what's|who|whose|where|when|why|how|which|did|do|does|is|are|was|were|can|could|have|has|had)\b/i;
+
 export function promisedTitle(theirRecent: string[]): string {
-  const said = [...theirRecent].reverse().find(text => text.trim().split(/\s+/).length >= 4 && !/^(?:yes|yeah|yep|sure|ok(?:ay)?|please|do it|go on|thanks)\b/i.test(text.trim()) && !/\?\s*$/.test(text.trim()));
+  const said = [...theirRecent].reverse().find(text => text.trim().split(/\s+/).length >= 4
+    && !/^(?:yes|yeah|yep|sure|ok(?:ay)?|please|do it|go on|thanks)\b/i.test(text.trim())
+    && !/\?\s*$/.test(text.trim())
+    // Their yes to her offer makes a reminder out of the last thing they said
+    // with an obligation in it. "What happened with that motherboard from
+    // Umart" has none: it is a question they forgot the mark on, and it went
+    // on the list as a task, to Google, and into a nudge about it being done.
+    && !ASKS_NOT_PROMISES.test(text));
   if (!said) return 'What you asked her to remind you about';
   const cut = said.replace(/^(?:kinda sucks because |it sucks because |well,? |so,? |anyway,? )/i, '').replace(/^i (?:have|need|\'ve got|got|ve got) to /i, '').replace(/\s+as we have .*$/i, '').replace(/\s+because .*$/i, '').trim();
   const title = cut.charAt(0).toUpperCase() + cut.slice(1);
