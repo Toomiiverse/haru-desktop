@@ -6409,9 +6409,9 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // room for. Five hundred characters of her own opinion came back as eighty.
   // Talking about her own thing echoes it too — the same reason a rant does.
   const ranting = Boolean(rantRoomNow || hers);
-  const META_TELL = /the (?:instructions?|note|rules?) (?:say|says)|let me (?:actually )?engage|i(?:'m| am) (?:told|supposed) to/i;
-  const trimmed = dropMetaPreamble(dropRoleHeader(dropInventedContact(dropStageDirections(dropInventedScreenTalk(brain.escalated || fromSearch || ranting ? deduped : dropRepeatedParagraphs(deduped, recent), grounded)))));
-  if (META_TELL.test(cleaned ?? '') && !META_TELL.test(trimmed)) console.log('[ai] she read her instructions out loud — that part is gone');
+  const headed = dropRoleHeader(dropInventedContact(dropStageDirections(dropInventedScreenTalk(brain.escalated || fromSearch || ranting ? deduped : dropRepeatedParagraphs(deduped, recent), grounded))));
+  const trimmed = dropMetaPreamble(headed);
+  if (trimmed !== headed) console.log('[ai] she read her instructions out loud — that part is gone');
   // Last, on the reply that survives everything else: a signature opener is
   // only a signature against what she said last time.
   // The echo first, then the signature: with "A keyboard?" gone, "Fine," is
