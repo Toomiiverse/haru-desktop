@@ -111,7 +111,7 @@ test('corrections are read after the mood that causes them, not before', () => {
   const mood = at(prompt, 'thoroughly fed up');
   assert.ok(mood !== -1);
   assert.ok(at(prompt, 'Something is wrong for them right now') > mood, 'reading the room outranks her mood');
-  assert.ok(at(prompt, 'clears the chat each morning') > mood, 'the empty history is not something to be annoyed about');
+  assert.ok(at(prompt, 'cleared each morning') > mood, 'the empty history is not something to be annoyed about');
 });
 
 test('she is never told she can search when searching is switched off', () => {
@@ -201,7 +201,8 @@ test('a cleared conversation is explained as housekeeping, not as a telling-off'
   assert.ok(manual.includes('You may ask once'), 'there was something to clear, so the reason is worth asking about');
 
   const daily = freshStartInstruction({ at: NOW.toISOString(), hadMessages: false, reason: 'daily' });
-  assert.ok(daily.includes('clears the chat each morning'));
+  assert.ok(daily.includes('cleared each morning'));
+  assert.ok(!/\bthe app\b|shutting you down|running on/.test(daily), 'nothing in it tells her she is software');
   assert.ok(!daily.includes('You may ask once'), 'no decision of theirs to be curious about');
 });
 
