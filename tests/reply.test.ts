@@ -11,7 +11,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { answersThePrompt, CUE_NOTE, isCue, stageNote, claimsDesktopAction, claimsTickOff, dropInventedContact, dropInventedScreenTalk, dropRepeatedAgendaMentions, dropRepeatedParagraphs, dropRoleHeader, dropStageDirections, dropTackedOnParagraphs, readsLikeAssistant, dropRepeatedOpener, dropEchoOpener, dropRepeatedSentences, fixStatedClock, fixStatedReminderTime, fixStatedMinutes, deniesItExists, dropMetaPreamble } from '../electron/reply';
+import { answersThePrompt, CUE_NOTE, isCue, stageNote, claimsDesktopAction, claimsTickOff, dropInventedContact, dropInventedScreenTalk, dropRepeatedAgendaMentions, dropRepeatedParagraphs, dropRoleHeader, dropStageDirections, dropTackedOnParagraphs, readsLikeAssistant, dropRepeatedOpener, dropEchoOpener, dropRepeatedSentences, fixStatedClock, fixStatedReminderTime, fixStatedMinutes, deniesItExists } from '../electron/reply';
 
 // -- claiming to have touched the machine -------------------------------------
 
@@ -473,14 +473,4 @@ test('a flat denial that something is real is recognised, and ordinary disagreem
     'It exists, it is just overpriced.',
     'I looked it up and it does not exist, so stop.',
   ].slice(0, 2)) assert.equal(deniesItExists(line), false, line);
-});
-
-
-test('her instructions read out loud at the front of a reply are not her, and go', () => {
-  const narrated = "The instructions say to be here for it—ask something I actually want to know, or tell something of mine. But I also shouldn't repeat what I just said. Let me actually engage.\n\nYou keep saying that. Just wanting to talk. Fine. Then tell me something real—how's the store actually doing? 😏";
-  assert.equal(dropMetaPreamble(narrated), "You keep saying that. Just wanting to talk. Fine. Then tell me something real—how's the store actually doing? 😏");
-  assert.equal(dropMetaPreamble("I'm told to stay on the subject. Fine. Reze is the better written one."), 'Fine. Reze is the better written one.', 'a run at the front of one paragraph');
-  assert.equal(dropMetaPreamble('Reze is the better written one. The rules say otherwise but I disagree.'), 'Reze is the better written one. The rules say otherwise but I disagree.', 'only the front; she may talk about rules');
-  assert.equal(dropMetaPreamble('Let me actually engage.'), 'Let me actually engage.', 'never left with nothing');
-  assert.equal(dropMetaPreamble('Go to bed.'), 'Go to bed.');
 });

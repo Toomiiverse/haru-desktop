@@ -214,36 +214,6 @@ export function readsLikeAssistant(reply: string): boolean {
  */
 const ROLE_HEADER = /^\s*(assistant|user|system|model)\s*:?\s*\n+/i;
 
-/**
- * Her instructions, read out as though they were her thoughts.
- *
- * "The instructions say to be here for it — ask something I actually want to
- * know, or tell something of mine. But I also shouldn't repeat what I just
- * said. Let me actually engage." Then the reply. A hosted model, handed the
- * notes spliced beside his message, narrated them before answering — once in
- * her whole history, and once is enough, because it went out as her. Only the
- * front of a reply, only sentences about the instructions themselves, and only
- * when something of her own follows.
- */
-const META = /\b(?:the (?:instructions?|note|notes|rules?|system prompt|prompt|guidelines?) (?:say|says|said|tell|tells|want|wants|ask|asks)|(?:i(?:'m| am) (?:told|supposed|instructed|asked) to)|as instructed|per (?:the|my) (?:instructions?|note)|let me (?:actually )?(?:engage|respond|answer|comply)|i (?:should|shouldn'?t|need to|must) (?:not )?(?:repeat|follow|stick to|comply|engage)|(?:that|this) (?:note|instruction|rule) (?:says|is))/i;
-
-export function dropMetaPreamble(reply: string): string {
-  const text = (reply ?? '').replace(/[‘’]/g, "'");
-  const lexical = (part: string) => /[\p{Letter}\p{Number}]/u.test(part);
-  const paragraphs = text.split(/\n\s*\n/);
-  // A whole first paragraph of it, with her own answer below.
-  if (paragraphs.length > 1 && META.test(paragraphs[0]) && lexical(paragraphs.slice(1).join(' '))) {
-    return paragraphs.slice(1).join('\n\n').trim();
-  }
-  // Or a run of it at the front of one paragraph.
-  const sentences = paragraphs[0].split(/(?<=[.!?…])\s+/);
-  let start = 0;
-  while (start < sentences.length && META.test(sentences[start])) start++;
-  if (start === 0) return reply;
-  const rest = [sentences.slice(start).join(' '), ...paragraphs.slice(1)].join('\n\n').trim();
-  return lexical(rest) ? rest : reply;
-}
-
 export function dropRoleHeader(reply: string): string {
   const withoutHeader = reply.replace(ROLE_HEADER, '');
   // An opening quote with no closing one is the other half of the same leak.
