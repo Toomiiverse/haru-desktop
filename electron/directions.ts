@@ -250,3 +250,21 @@ export function withDirections(reply: string, found: Found): string {
   const label = `Directions to ${found.name.split(',')[0].trim() || 'there'}`;
   return `${reply.trim()}\n\n[${label}](${mapsLink(found)})`;
 }
+
+// Her saying she cannot see the road, kept in the history and copied.
+//
+// Asked the traffic three times in a row she said three times that she
+// could not check it, had no GPS, and that he should open Waze. When the
+// route was then put in front of her — 29 minutes, live, with the roads
+// named — she said it a fourth time, word for word, because the three were
+// in the conversation and she copies what she can see over what she is told.
+// The same finding as the reminder denials (withoutStaleDenials in main.ts):
+// only replies the route now contradicts are dropped, and only while a route
+// is in hand, so a denial made with no route behind it stands.
+const CANT_SEE_THE_ROAD = /\b(?:can'?t|cannot|don'?t|do not|unable to|no way to) (?:check|see|access|pull|get|have|look at|track)\b[^.!?\n]{0,40}\b(?:traffic|roads?|drive time|journey time|gps|location|maps? app|live)|\bdon'?t have (?:access to )?(?:live |real[- ]time )?traffic|\bno (?:live |real[- ]time )?traffic (?:data|access|feed)|\bopen (?:waze|google maps|apple maps|your (?:own )?(?:damn |bloody )?(?:phone|maps?( app)?))/i;
+
+/** The history without her claims that she cannot see the road, once she can. */
+export function withoutTrafficDenials<T extends { role: string; content: string }>(messages: T[], hasRoute: boolean): T[] {
+  if (!hasRoute) return messages;
+  return messages.filter(message => !(message.role === 'assistant' && CANT_SEE_THE_ROAD.test(message.content.replace(/[‘’]/g, "'"))));
+}

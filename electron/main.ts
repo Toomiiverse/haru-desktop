@@ -47,7 +47,7 @@ import { HANGING_COOLDOWN_MS, isClosing, leftHanging, saidTheyWereLeaving } from
 import { awakeHoursSince, theyAreUp, awakeMinutesSince } from './awake';
 import { describeTold, placeToldFrom, toldTheyAreBusy, type Told, errandsToldFrom, errandToAskAfter, type Errand } from './told';
 import { markMentioned, upcomingToMention } from './upcoming';
-import { directionsAskFrom, directionsNote, dropRouteTalk, matchNamedPlace, startingPoint, withDirections, withoutMapsLinks, type DirectionsAsk, claimsTraffic } from './directions';
+import { directionsAskFrom, directionsNote, dropRouteTalk, matchNamedPlace, startingPoint, withDirections, withoutMapsLinks, type DirectionsAsk, claimsTraffic, withoutTrafficDenials } from './directions';
 import { absorb, describeWhereabouts, distanceM, forgetPlace, namePlace, placeAt, readSpot, readWhereabouts, whereForPage, type Whereabouts, SPOT_STALE_MS, saidTheyWereGoing, unannouncedArrivalNote, type Arrival } from './whereabouts';
 import { convertImage, normaliseFormat, FORMATS } from './convert';
 import { cancelPower, closeApp, findApps, isCancellable, launch, listRunning, matchApp, matchRunning, normalisePower, POWER_DELAY_S, readDesktopConfig, runPower, supportedDesktop, type DesktopConfig } from './desktop';
@@ -6245,7 +6245,7 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   const before = earlierTurns(store.getArchive() as unknown as Record<string, { role: string; content: string; at?: string }[]>, localDateKey(zonedNow(CHAT_TIMEZONE)))
     .map(turn => ({ role: turn.role, content: turn.content, ...(turn.at ? { at: turn.at } : {}) })) as OllamaMessage[];
   if (before.length) console.log(`[ai] ${before.length} turns from the last ${DAYS_OF_HISTORY} days go in front of today's`);
-  const history = markTimeGaps([...before, ...withoutStaleDenials(withFiles, hasItems)] as unknown as { role: string; content: string; at?: string }[], CHAT_TIMEZONE) as unknown as OllamaMessage[];
+  const history = markTimeGaps(withoutTrafficDenials([...before, ...withoutStaleDenials(withFiles, hasItems)] as unknown as { role: string; content: string; at?: string }[], Boolean(directions?.route)), CHAT_TIMEZONE) as unknown as OllamaMessage[];
   const shown = hers ? seedOffTheOrders(history, dropClosingOrder) : history;
   const conversation: OllamaMessage[] = [{ role: 'system', content: brief ? `${sized} ${BREVITY}` : sized }, ...seedEmoji(shown)];
   // The last thing she reads before she speaks — see LAST_WORD for the

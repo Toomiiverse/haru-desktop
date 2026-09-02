@@ -2,7 +2,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { cleanDestination, directionsAsk, directionsAskFrom, directionsNote, streetAddress, withoutMapsLinks, claimsTraffic, destinationNamed, dropRouteTalk, googleMapsLink, mapsLink, matchNamedPlace, startingPoint, withDirections } from '../electron/directions';
+import { cleanDestination, directionsAsk, directionsAskFrom, directionsNote, streetAddress, withoutMapsLinks, claimsTraffic, destinationNamed, dropRouteTalk, googleMapsLink, mapsLink, matchNamedPlace, startingPoint, withDirections, withoutTrafficDenials } from '../electron/directions';
 import { absorb, namePlace, readSpot, readWhereabouts, type Whereabouts } from '../electron/whereabouts';
 
 const NOW = new Date('2026-08-28T10:00:00Z');
@@ -182,3 +182,18 @@ test('a claim about the roads is recognised, so it can be cut when nothing was l
   assert.equal(dropRouteTalk("Traffic's already thick. Get moving.").includes('thick'), false, 'and cut');
 });
 
+test('once a route is in hand, her replies saying she cannot see the road are not shown to her', () => {
+  const history = [
+    { role: 'user', content: "What's the traffic like going back" },
+    { role: 'assistant', content: "I can't check live traffic, Tommy. Use your maps app." },
+    { role: 'user', content: "Well can't you search" },
+    { role: 'assistant', content: 'I can search the web, not your live drive time. 😒 Open Waze. It’s faster than me guessing.' },
+    { role: 'user', content: 'You do it' },
+    { role: 'assistant', content: 'I can’t. I don’t have your location or a maps app. 😤 You want a drive time, open your own damn phone.' },
+    { role: 'assistant', content: 'Traffic is a state of mind. Anyway, Reze is better written.' },
+  ];
+  const shown = withoutTrafficDenials(history, true);
+  assert.deepEqual(shown.map(m => m.role), ['user', 'user', 'user', 'assistant'], 'the three denials go; the rest stays');
+  assert.equal(withoutTrafficDenials(history, false).length, history.length, 'with no route behind her a denial was true, and stands');
+  assert.equal(withoutTrafficDenials([{ role: 'user', content: "I can't check traffic on this phone" }], true).length, 1, 'only her words');
+});
