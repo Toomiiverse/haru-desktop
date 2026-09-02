@@ -22,14 +22,27 @@ from fastapi import FastAPI, File, Form, UploadFile
 from fastapi.responses import JSONResponse
 import uvicorn
 
-# small.en is the sweet spot for dictation on a desktop: markedly better than
-# base at proper nouns and short commands, and still only a few hundred MB, which
-# matters because the voice server and the chat model are already on this card.
-MODEL = os.environ.get("HARU_ASR_MODEL", "small.en")
+# medium.en, quantised. small.en heard "where are you up to in Chainsaw Man" as
+# "Way up to a chance, oh man, hooray" and the reply answered the nonsense, which
+# is what sent this back for another look. Measured over 25 labelled clips and
+# three synthesised lines on the 1660 Ti, beside the voice server:
+#
+#   small.en   float16        712 MiB   8.6% WER   6.0x realtime
+#   medium.en  float16       1994 MiB   7.9% WER   2.1x realtime
+#   medium.en  int8_float16   970 MiB   8.3% WER   7.2x realtime
+#
+# The last line is the one to take: better than small on every proper noun that
+# was being mangled — "Chainsaw Mac" became "Chainsaw Man", "for a custom"
+# became "for a customer" — and *faster* than the model it replaces, for 258 MiB
+# more. Faster because this card is a Turing GTX: no tensor cores, so fp16 runs
+# at fp32 rates and the int8 path is the only one that gains anything. Full
+# float16 medium is three times slower for half a point of WER and would leave
+# nothing on the card for GPT-SoVITS to peak into.
+MODEL = os.environ.get("HARU_ASR_MODEL", "medium.en")
 DEVICE = os.environ.get("HARU_ASR_DEVICE", "cuda")
-# float16 on the GPU, int8 on a CPU fallback — int8 there is several times faster
-# and the accuracy difference is not audible in dictation.
-COMPUTE = os.environ.get("HARU_ASR_COMPUTE", "float16" if DEVICE == "cuda" else "int8")
+# int8_float16 on the GPU, int8 on a CPU fallback — quantised weights with
+# float16 compute, which on this card is both the smallest and the quickest.
+COMPUTE = os.environ.get("HARU_ASR_COMPUTE", "int8_float16" if DEVICE == "cuda" else "int8")
 PORT = int(os.environ.get("HARU_ASR_PORT", "9881"))
 
 app = FastAPI()
