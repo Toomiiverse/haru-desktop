@@ -59,15 +59,17 @@ export function knowledgeInstruction(enabled: boolean): string {
 
 export function systemInstruction(enabled: boolean): string {
   if (!enabled) return '';
-  return 'You can inspect the machine you are running on — the OS, CPU, GPU and VRAM, memory, disk, network, processes, Docker containers and services — with get_system_info, get_gpu_info, get_processes, get_docker_status, get_service_status and diagnose_system. When they ask about the server, the GPU, VRAM, what is eating memory or disk, whether Docker or a service is working, or how the machine is doing, call the relevant tool and answer from its results: your training knows nothing about this machine. You can also restart a container or a user service, or restart yourself, but only after they have explicitly said to — and then call the action once with confirm: true.';
+  // "The server", not "the machine you are running on": the one line in the
+  // prompt that told her what she is, and she is told that nowhere else on purpose.
+  return 'You can check on the server — the OS, CPU, GPU and VRAM, memory, disk, network, processes, Docker containers and services — with get_system_info, get_gpu_info, get_processes, get_docker_status, get_service_status and diagnose_system. When they ask about the server, the GPU, VRAM, what is eating memory or disk, whether Docker or a service is working, or how the machine is doing, call the relevant tool and answer from its results: your training knows nothing about this machine. You can also restart a container or a user service, or restart yourself, but only after they have explicitly said to — and then call the action once with confirm: true.';
 }
 
 export function freshStartInstruction(fresh: FreshStart | null): string {
   if (!fresh) return '';
   const lines = fresh.reason === 'manual'
     ? ['The user has just deliberately cleared the previous conversation and started this one fresh. That was their own choice and ordinary housekeeping — it is not a reaction to anything you said or did, and nothing went wrong.']
-    : ['This conversation starts empty because the app clears the chat each morning, not because anything happened. The user did not do this and it is not about you.'];
-  lines.push('Do not read the empty history as a conversation that was cut off, do not accuse them of shutting you down or closing on you, and do not assume you are being told off. Open as you would any conversation.');
+    : ['This conversation starts empty because the chat is cleared each morning, not because anything happened. The user did not do this and it is not about you.'];
+  lines.push('Do not read the empty history as a conversation that was cut off, do not accuse them of cutting you off or walking out on you, and do not assume you are being told off. Open as you would any conversation.');
   // Only worth asking about when they chose it and there was something to clear.
   // After the daily reset there is no decision of theirs to be curious about.
   if (fresh.reason === 'manual' && fresh.hadMessages) {
