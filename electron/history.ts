@@ -116,3 +116,35 @@ export function sinceLast(messages: Dated[], now: Date, timeZone: string): strin
   }
   return '';
 }
+
+/** Days of finished conversation put in front of today's. */
+export const DAYS_OF_HISTORY = 3;
+/**
+ * What those days may take, in characters.
+ *
+ * The model's window is a million tokens and she was being handed six and a
+ * half thousand, of which the conversation itself was one thousand — everything
+ * said before this morning left the prompt at the five o'clock rollover and was
+ * replaced by a one-line summary of the day. Thirty days and two and a half
+ * thousand messages sat on disk unread.
+ *
+ * The ceiling is not the hosted model's window but the local one's, which
+ * answers when the hosted route is down: twenty thousand tokens for everything,
+ * so this takes about five and leaves room for the brief and for the day itself.
+ */
+export const HISTORY_BUDGET_CHARS = 20_000;
+
+/**
+ * The finished days before today, newest last, trimmed from the oldest end to
+ * fit the budget. Whole exchanges only — half a conversation reads worse than
+ * none — so the trim drops from the front and never mid-day.
+ */
+export function earlierTurns<T extends Dated>(archive: Record<string, T[]>, todayKey: string, days = DAYS_OF_HISTORY, budget = HISTORY_BUDGET_CHARS): T[] {
+  const wanted = Object.keys(archive).filter(day => day < todayKey).sort().slice(-days);
+  const byDay = wanted.map(day => (archive[day] ?? []).filter(message => message.role === 'user' || message.role === 'assistant'));
+  const size = (turns: T[]) => turns.reduce((sum, turn) => sum + String(turn.content ?? '').length, 0);
+  // Oldest first out, so what survives is what was said most recently.
+  while (byDay.length && byDay.reduce((sum, turns) => sum + size(turns), 0) > budget) byDay.shift();
+  return byDay.flat();
+}
+

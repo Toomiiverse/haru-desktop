@@ -16,7 +16,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { describeGap, markTimeGaps, sinceLast, GAP_MINUTES } from '../electron/history';
+import { describeGap, markTimeGaps, sinceLast, GAP_MINUTES, earlierTurns, HISTORY_BUDGET_CHARS } from '../electron/history';
 
 const PERTH = 'Australia/Perth';   // UTC+8
 const UTC = 'UTC';
@@ -105,4 +105,21 @@ test('sinceLast is silent while the conversation is still warm', () => {
   const at = new Date('2026-09-03T01:00:00.000Z');
   const soon = new Date(at.getTime() + (GAP_MINUTES - 1) * 60_000);
   assert.equal(sinceLast([{ role: 'user', content: 'x', at: at.toISOString() }], soon, PERTH), '');
+});
+
+test('the days before today come through newest last, trimmed from the oldest end, whole days only', () => {
+  const turn = (role: string, content: string) => ({ role, content, at: '2026-08-30T10:00:00.000Z' });
+  const archive = {
+    '2026-08-29': [turn('user', 'oldest'), turn('assistant', 'a')],
+    '2026-08-30': [turn('user', 'middle'), turn('assistant', 'b')],
+    '2026-08-31': [turn('user', 'newest'), turn('assistant', 'c')],
+    '2026-09-01': [turn('user', 'today is not archived yet'), turn('assistant', 'd')],
+  };
+  assert.deepEqual(earlierTurns(archive, '2026-09-01', 3, 10_000).map(t => t.content),
+    ['oldest', 'a', 'middle', 'b', 'newest', 'c'], 'the three finished days, oldest of them first, today left out');
+  assert.deepEqual(earlierTurns(archive, '2026-09-01', 1, 10_000).map(t => t.content), ['newest', 'c'], 'one day means the day before');
+  assert.deepEqual(earlierTurns(archive, '2026-09-02', 3, 30).map(t => t.content), ['today is not archived yet', 'd'],
+    'the budget drops whole days from the oldest end, never half of one');
+  assert.deepEqual(earlierTurns({}, '2026-09-01'), []);
+  assert.ok(HISTORY_BUDGET_CHARS >= 10_000, 'room for a few real days');
 });

@@ -33,7 +33,7 @@ import { CAPTURE_HEIGHT, CAPTURE_WIDTH, glancePrompt, readWatchingConfig, should
 import { buildGameIndex, gameFor } from './steam';
 import { pdfPrompt, readPdf } from './pdf';
 import { classify, discard, extractAudio, extractFrames, findFfmpeg, OPENABLE, readText, type FileKind } from './attach';
-import { markTimeGaps, sinceLast } from './history';
+import { markTimeGaps, sinceLast, earlierTurns, DAYS_OF_HISTORY } from './history';
 import { correct, noteUsed, readHearing, remember } from './hearing';
 import { assumeItIsTheirs, identifyWork, noteWork, readFollowing, recogniseNow, summariseFollowing } from './following';
 import { lookUpPlace, readWindowsLocation, searchPlaces, type FoundPlace } from './location';
@@ -6088,7 +6088,14 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   const sized = (brain.hosted ? system.replace(LENGTH_RULE_LOCAL, LENGTH_RULE_HOSTED) : system) + (answering ? ` ${answering}` : '');
   // On a turn about her, the sign-off comes off her recent replies as she is
   // shown them — see seedOffTheOrders. She copies the history over the rule.
-  const history = markTimeGaps(withoutStaleDenials(withFiles, hasItems), CHAT_TIMEZONE);
+  // The days before this one, in front of today's: everything said before the
+  // five o'clock rollover used to leave the prompt entirely — see earlierTurns.
+  // markTimeGaps writes the seam between them, so she can tell yesterday from
+  // now rather than reading it all as one flat conversation.
+  const before = earlierTurns(store.getArchive() as unknown as Record<string, { role: string; content: string; at?: string }[]>, localDateKey(zonedNow(CHAT_TIMEZONE)))
+    .map(turn => ({ role: turn.role, content: turn.content, ...(turn.at ? { at: turn.at } : {}) })) as OllamaMessage[];
+  if (before.length) console.log(`[ai] ${before.length} turns from the last ${DAYS_OF_HISTORY} days go in front of today's`);
+  const history = markTimeGaps([...before, ...withoutStaleDenials(withFiles, hasItems)] as unknown as { role: string; content: string; at?: string }[], CHAT_TIMEZONE) as unknown as OllamaMessage[];
   const shown = hers ? seedOffTheOrders(history, dropClosingOrder) : history;
   const conversation: OllamaMessage[] = [{ role: 'system', content: brief ? `${sized} ${BREVITY}` : sized }, ...seedEmoji(shown)];
   // The last thing she reads before she speaks — see LAST_WORD for the
