@@ -113,6 +113,10 @@ test('the note carries the road when Google has answered, the straight line othe
   const found = { name: 'Rockingham WA', lat: -32.29, lon: 115.74 };
   const ask = directionsAsk('how long to Rockingham')!;
   assert.match(directionsNote(ask, found, where, Date.now(), 'By car it is 31 minutes from where they are right now.'), /By car it is 31 minutes/);
+  const withRoad = directionsNote(ask, found, where, Date.now(), 'By car it is 31 minutes from where they are right now.');
+  assert.match(withRoad, /yours to say/, 'with the route in hand the numbers are hers');
+  assert.match(withRoad, /Do not say you cannot check the traffic/);
+  assert.doesNotMatch(withRoad, /made up and will be cut/, 'the old line contradicted the numbers above it');
   assert.match(directionsNote(ask, found, where), /It is about \d+(\.\d)? km from where they are\./);
 });
 
@@ -142,6 +146,12 @@ test('an errand takes the address they gave a message earlier; an address alone,
   assert.deepEqual(directionsAskFrom('Give me the directions please', ['This one: 40 Boddington Circuit']), { destination: '40 Boddington Circuit', nearest: false });
   assert.deepEqual(directionsAskFrom('how do I get there?', ['This one: 40 Boddington Circuit']), { destination: '40 Boddington Circuit', nearest: false });
   assert.equal(directionsAskFrom('Give me directions to pick up the cpu', ['no address anywhere']), null, 'an errand with no address is not searched for as a place');
+  // Home is not a place they name, and "back" is how they say it.
+  assert.deepEqual(directionsAskFrom("What's the traffic like going back", []), { destination: 'home', nearest: false });
+  assert.deepEqual(directionsAskFrom('hows the traffic heading home', []), { destination: 'home', nearest: false });
+  assert.deepEqual(directionsAskFrom('how long will it take', ['alright, on my way back']), { destination: 'home', nearest: false }, 'said just before');
+  assert.deepEqual(directionsAskFrom("what's the traffic like", ['heading to Umart then']), { destination: 'Umart', nearest: false }, 'a named place still wins');
+  assert.equal(directionsAskFrom("what's the traffic like", []), null, 'nowhere named and nowhere implied is still nowhere');
   assert.equal(directionsAskFrom('This one: 40 Boddington Circuit', ['what a day']), null, 'an address with no question before it is just an address');
   assert.equal(directionsAskFrom('Give me the directions please', []), null);
   assert.deepEqual(directionsAskFrom('directions to Bunnings Rockingham', before), { destination: 'Bunnings Rockingham', nearest: false }, 'a real place is still itself');

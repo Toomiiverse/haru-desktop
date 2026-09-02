@@ -15,7 +15,7 @@ export type Found = { name: string; lat: number; lon: number };
 
 // Everything a question can trail off with that is not part of the place: "from
 // here right now?", "this morning?", "please". Repeated, because they stack.
-const TAIL = String.raw`(?:\s+(?:from here|from where i am|from home|right now|at the moment|this (?:morning|afternoon|evening|arvo)|today|tonight|currently|please|pls|now|thanks))*\s*[?.!]*\s*$`;
+const TAIL = String.raw`(?:\s+(?:from here|from where i am|from home|right now|at the moment|this (?:morning|afternoon|evening|arvo)|today|tonight|currently|please|pls|now|thanks|(?:going|heading|driving|on (?:my|the) way)?\s*(?:back(?: home)?|home)))*\s*[?.!]*\s*$`;
 const ASKS: { pattern: RegExp; nearest?: boolean }[] = [
   { pattern: new RegExp(String.raw`\b(?:directions?|the way|a route|route|navigat(?:e|ion))\s+(?:to|for|towards?)\s+(.+?)` + TAIL, 'i') },
   { pattern: new RegExp(String.raw`\bhow (?:do|can|would|should|did) (?:i|we) get (?:back )?(?:to|home to)\s+(.+?)` + TAIL, 'i') },
@@ -119,7 +119,7 @@ export function claimsTraffic(reply: string): boolean {
 // "how long will that take?", "is traffic bad?" — a journey question with the
 // place left in the sentence before it, or in the same breath: "I'm going to
 // Starbucks in Murdoch then work, so how long will that take?"
-const BARE_JOURNEY = new RegExp(String.raw`^(?:.*\b)?(?:so\s+)?(?:how long (?:will|would|does|is) (?:that|it|this)(?: take| be)?|is (?:the )?traffic (?:bad|heavy|ok|okay|alright|any good)|how(?:'s| is) (?:the )?traffic|what(?:'s| is) (?:the )?traffic like)` + TAIL, 'i');
+const BARE_JOURNEY = new RegExp(String.raw`^(?:.*\b)?(?:so\s+)?(?:how long (?:will|would|does|is) (?:that|it|this)(?: take| be)?|is (?:the )?traffic (?:bad|heavy|ok|okay|alright|any good)|how(?:'s|’s|s| is) (?:the )?traffic|what(?:'s|’s|s| is) (?:the )?traffic like)` + TAIL, 'i');
 /** Where they said they were off to, in their own words: "going to X", "stopping by X", "off to X". */
 export function destinationNamed(text: string): string | null {
   const m = new RegExp(String.raw`\b(?:going|heading|off|driving|walking|nipping|popping|stopping(?: by| in| at)?|on my way)\s+(?:to|by|at|into|over to|down to|round to)?\s*([A-Z][\w'&-]*(?:\s+(?:in|at|on)\s+[A-Z][\w'&-]*|\s+[A-Z][\w'&-]*){0,3})`, '').exec(text ?? '');
@@ -129,6 +129,9 @@ export function destinationNamed(text: string): string | null {
 
 /** "pick up the cpu", "the Dianella address" — a thing to do, not a place; the place is an address they gave. */
 const ERRAND = /^(?:(?:to )?(?:pick|pick up|grab|collect|fetch|drop off|drop off at|drop)\b|.*\baddress\b)/i;
+/** Going home, however they put it: "going back", "heading home", "the way back", "back home". */
+const HOMEWARD = /\b(?:(?:going|heading|driving|getting|get|head|go|come|coming|on (?:my|the) way|(?:the |my )?(?:way|drive|trip|run))\s+(?:back(?: home)?|home)|back home)\b/i;
+
 /** The ask with no place in it: "give me the directions", "directions please", "how do I get there". */
 const BARE_ASK = /^(?:(?:can|could|would|will) you )?(?:(?:give|send|show|get|shoot) me )?(?:the |some |those |a )?(?:directions?|route|way there)(?: there| to (?:it|that|there|the place))?(?: please| pls| again| now| thanks)*[?.!\s]*$|^how (?:do|can|would) (?:i|we) get there(?: from here)?[?.!\s]*$/i;
 
@@ -160,6 +163,11 @@ export function directionsAskFrom(latest: string, recentUser: string[]): Directi
       return null;
     })();
     if (named) return { destination: named, nearest: false };
+    // "What's the traffic like going back" — no place named, because home is
+    // not a name they use. Asked that from the shop, with her holding live
+    // traffic and their position, she said she could not check and told him
+    // to open Waze. "Back" and "home" are the place she knows as home.
+    if (HOMEWARD.test(line) || recentUser.slice(-3).some(earlier => HOMEWARD.test(earlier))) return { destination: 'home', nearest: false };
   }
   if (BARE_ASK.test(line)) {
     const address = remembered();
@@ -217,7 +225,14 @@ export function directionsNote(ask: DirectionsAsk, found: Found | null, where: W
   // What Google knows about the place itself (places.ts) — the door, the rating
   // — so "how long to Bunnings" can also say it shuts in twenty minutes.
   const about = facts ? ` ${facts}` : '';
-  return `They asked the way to "${ask.destination}". Found: ${found.name}.${distance}${there}${about} The app is attaching a button under your words that opens their maps with the route. You do not know the roads, buses or journey times there, so anything you say about the route would be made up and will be cut; one or two lines of yours, in your voice, about them going, is all that is wanted.`;
+  // With Google's numbers in hand the old closing line — "you do not know the
+  // journey times, anything you say will be cut" — contradicted them, and the
+  // hosted model resolved it by telling him to open Waze. The numbers are hers
+  // to say; what she still does not know is everything else about the road.
+  const limits = road
+    ? 'The minutes, the distance and the roads named above are Google\'s, live, and are yours to say — say them plainly. Do not say you cannot check the traffic, and do not send them to a maps app; the app is attaching a button under your words that opens theirs with the route. Beyond those numbers you do not know the route, so nothing else about roads, turns or buses.'
+    : 'The app is attaching a button under your words that opens their maps with the route. You do not know the roads, buses or journey times there, so anything you say about the route would be made up and will be cut; one or two lines of yours, in your voice, about them going, is all that is wanted.';
+  return `They asked the way to "${ask.destination}". Found: ${found.name}.${distance}${there}${about} ${limits}`;
 }
 
 // A maps link, as the app writes one under her words — and as she then copied

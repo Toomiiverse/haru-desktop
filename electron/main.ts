@@ -6258,7 +6258,7 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // The complaint about turning up unannounced goes here rather than into the
   // system prompt: at the end of six thousand tokens she read the fact and
   // answered "you're home" three times running without once minding it.
-  if (lastUser > 0) conversation.splice(lastUser, 0, ...[aside, turnedUp, hers, talking, rantRoomNow, emojiRut(herRecentReplies), LAST_WORD].filter(Boolean).map(content => ({ role: 'system', content })));
+  if (lastUser > 0) conversation.splice(lastUser, 0, ...[aside, turnedUp, directions?.note ?? '', hers, talking, rantRoomNow, emojiRut(herRecentReplies), LAST_WORD].filter(Boolean).map(content => ({ role: 'system', content })));
   // For tuning, when the environment asks for it: the prompt exactly as sent.
   // A rule that works on its own and fails in place can only be bisected by
   // replaying what she was actually told, and nothing else shows that.
