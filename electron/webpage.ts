@@ -939,7 +939,9 @@ function bubbles(list){
   const last=[...list].reverse().find(m=>m.role==='assistant'&&m.id&&!m.aside);
   $('chat').innerHTML = list.map(m=>{
     const cls = m.role==='user'?'me':m.role==='assistant'?(m.aside?'them aside':'them'):'sys';
-    let html='<div class="msg '+cls+'">'+md(esc(m.content))+'</div>';
+    // Her replies come as the messages she sent them as — one bubble a paragraph.
+    const parts=(m.role==='assistant'&&!m.aside)?String(m.content).split('\\n\\n').map(p=>p.trim()).filter(Boolean):[];
+    let html=(parts.length?parts:[m.content]).map(p=>'<div class="msg '+cls+'">'+md(esc(p))+'</div>').join('');
     // A line she said on her own is not a reply: nothing to rate or ask again.
     if(m.role==='assistant'&&m.id&&!m.aside) html+=acts(m,m===last);
     return html;
@@ -1116,6 +1118,24 @@ let waiting=0;
 // One reader for both ways a reply arrives — a send and a retry. Words land
 // through show() as the stream delivers them; a U+FFFD means the round was
 // thrown away and the bubble goes back to waiting.
+// Paragraphs are messages. A rant used to land as one wall; now it lands as
+// the two or three bubbles she would actually have sent, the first in the
+// waiting bubble and the rest after it as the stream reaches each blank line.
+function paint(id,t){
+  const first=document.getElementById(id); if(!first) return false;
+  let parts=String(t).split('\\n\\n').map(p=>p.trim()).filter(Boolean);
+  if(!parts.length) parts=[String(t)];
+  first.textContent=parts[0];
+  let prev=first;
+  parts.slice(1).forEach((p,n)=>{
+    let el=document.getElementById(id+'-'+(n+1));
+    if(!el){ el=document.createElement('div'); el.className='msg them'; el.id=id+'-'+(n+1); prev.insertAdjacentElement('afterend',el); }
+    el.textContent=p; prev=el;
+  });
+  let extra=parts.length, stale;
+  while((stale=document.getElementById(id+'-'+extra))){ stale.remove(); extra++; }
+  $('chat').scrollTop=$('chat').scrollHeight; return true;
+}
 async function readStream(r,show){
   const reader=r.body.getReader(); const dec=new TextDecoder();
   let buf='',said='',reply=null,ignored=false,error=null;
@@ -1161,12 +1181,12 @@ async function deliver(text,sent,{interrupted=false}={}){
   $('chat').scrollTop=$('chat').scrollHeight;
   // Your message drops her into the thinking state while she works on the answer.
   if(window.haruAvatar) window.haruAvatar.think();
-  const stopWaiting=()=>{const bubble=document.getElementById(id); if(bubble) bubble.remove();};
+  const stopWaiting=()=>{const bubble=document.getElementById(id); if(bubble) bubble.remove(); document.querySelectorAll('[id^="'+id+'-"]').forEach(e=>e.remove());};
   // The waiting bubble doubles as the reply bubble: words land in it as the
   // stream delivers them, and the final processed reply replaces them when the
   // stream ends. textContent rather than innerHTML — her words are text, not
   // markup, and the model is not a source we escape from, it is the source.
-  const show=t=>{const bubble=document.getElementById(id); if(!bubble) return false; bubble.textContent=t; $('chat').scrollTop=$('chat').scrollHeight; return true;};
+  const show=t=>paint(id,t);
   try{
     const r=await window.haruNet.fetch('/api/chat/stream',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(Object.assign(sent.length?{text,attachments:sent}:{text},interrupted?{interrupted:true}:{}))});
     if(!r.ok) throw r;
@@ -1208,6 +1228,11 @@ async function deliver(text,sent,{interrupted=false}={}){
     // The desk files the reply and hands it an id a moment later; re-read so
     // the bubble gets its row.
     setTimeout(load,1000);
+    // She may have more to say a minute or two after a reply of hers — a
+    // second thought, sent on its own — and the four-minute poll is too slow
+    // to hear it. A few looks in the minutes after, only while the page is
+    // up and she is not mid-answer.
+    [25,60,120,180].forEach(sec=>setTimeout(()=>{ if(!document.hidden) refreshIfIdle(); },sec*1000));
   }
 }
 
@@ -1245,7 +1270,7 @@ async function askAgain(){
   $('cb').disabled=true;
   primeVoice();
   if(window.haruAvatar) window.haruAvatar.think();
-  const show=t=>{const bubble=document.getElementById(id); if(!bubble) return false; bubble.textContent=t; $('chat').scrollTop=$('chat').scrollHeight; return true;};
+  const show=t=>paint(id,t);
   show('…');
   try{
     const r=await fetch('/api/chat/retry',{method:'POST',headers:{'content-type':'application/json'},body:'{}'});

@@ -293,7 +293,7 @@ export function roomToRant(input: {
   // back", which is right nearly always and is exactly what this is for. Told
   // only that it "may" run long, she wrote a hundred characters at a two-word
   // message and went back to matching him.
-  return `${about} For this one reply only, the rule about matching the length of their message does not apply — ignore it. Several sentences at the least, more if you have it, however little they typed. Do not apologise for the length, do not announce that you are about to go on, and do not tie it off with a neat conclusion — stop when you are done.`;
+  return `${about} For this one reply only, the rule about matching the length of their message does not apply — ignore it. Several sentences at the least, more if you have it, however little they typed. If it runs long, send it the way you would actually send it: two or three messages one after another, a blank line between them, not one block. Do not apologise for the length, do not announce that you are about to go on, and do not tie it off with a neat conclusion — stop when you are done.`;
 }
 
 // Asked about herself: her evening, her things, what she makes of something.

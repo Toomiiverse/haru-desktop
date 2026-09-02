@@ -26,6 +26,7 @@ import { discoverWardrobe, type ParameterRange, type WardrobeControl } from './w
 import { looksLikeNothing, readListenConfig, transcribe, type ListenConfig } from './listen';
 import { spokenVocabulary } from './vocabulary';
 import { herNameFrom } from './hername';
+import { parseSecondThought, secondThoughtDelay, secondThoughtNote, wantsSecondThought, SECOND_THOUGHT_GAP_MS } from './secondthought';
 import { applyRevoices, dueForRevoice, exchangesFrom as revoiceExchanges, grounded, parseRevoices, readRevoiceState, revoicePrompt, withRewrites, REVOICE_EVERY, type Revoice } from './revoice';
 import { decide, readEscalateConfig, type EscalateConfig } from './escalate';
 import { describeFailure, fromOpenAIReply, isOpenAIShaped, toOpenAIBody, DEFAULT_ENDPOINTS, type ChatTool, type Provider } from './provider';
@@ -5878,6 +5879,62 @@ function considerRevoicing() {
   if (dueForRevoice(since, every)) void runRevoice(`${since} messages since the last pass, every ${every}`);
 }
 
+/**
+ * The thing she says a minute later — see secondthought.ts.
+ *
+ * Armed after a reply about her or one she was given room to rant in (and
+ * now and then after an ordinary one); disarmed by anything he says in
+ * between. Asked of the same model that answered, with the conversation as it
+ * stands and a note that this is not a reply; a dash means she had nothing.
+ * What she says goes out as an aside — the phone paints it into the day, the
+ * desk shows it, a push carries it if the page is closed — and she remembers
+ * it the way she remembers every other unprompted line.
+ */
+let secondThoughtTimer: ReturnType<typeof setTimeout> | undefined;
+let lastSecondThoughtAt = 0;
+
+function scheduleSecondThought(input: { hers: boolean; ranting: boolean; latest: string; reply: string; config: ProviderConfig }) {
+  clearTimeout(secondThoughtTimer);
+  if (!wantsSecondThought({ hers: input.hers, ranting: input.ranting, replyLength: input.reply.length })) return;
+  if (Date.now() - lastSecondThoughtAt < SECOND_THOUGHT_GAP_MS) return;
+  const repliedAt = Date.now();
+  const delay = secondThoughtDelay();
+  console.log(`[followup] she may have more to say in ${Math.round(delay / 1000)}s`);
+  secondThoughtTimer = setTimeout(() => { void secondThought(repliedAt, input); }, delay);
+}
+
+async function secondThought(repliedAt: number, input: { latest: string; reply: string; config: ProviderConfig }) {
+  const now = Date.now();
+  if (lastUserActivityAt > repliedAt) { console.log('[followup] they answered first — nothing to add'); return; }
+  if (isSilenced(store.get('pushback') as Pushback | undefined, now)) { console.log('[followup] held — she has been told to stop'); return; }
+  if (inQuietHours(getPush().prefs, zonedNow(CHAT_TIMEZONE))) { console.log('[followup] held — quiet hours'); return; }
+  const messages = ((store.get('chat.messages') as { role: string; content: string }[] | undefined) ?? []).slice(-14);
+  if (messages.at(-1)?.role !== 'assistant' || !messages.at(-1)?.content?.includes(input.reply.slice(0, 40))) { console.log('[followup] the conversation moved on — nothing to add'); return; }
+  const character = getActiveCharacter();
+  const route = conversationRoute() ?? input.config;
+  const system = [character.identity, character.style, NATURAL, NO_INVENTED_HISTORY].join('\n\n');
+  const conversation: OllamaMessage[] = [
+    { role: 'system', content: system },
+    ...messages.map(message => ({ role: message.role as OllamaMessage['role'], content: message.content })),
+    { role: 'system', content: secondThoughtNote(Math.round((now - repliedAt) / 1000)) },
+  ];
+  try {
+    const answer = await Promise.race([
+      sendToProvider(conversation, route, { tools: false, temperature: 0.8, maxTokens: 220 }),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('no answer in 40s')), 40_000)),
+    ]);
+    const line = parseSecondThought(oneEmojiAtMost(dropOverusedEmoji(dropRoleHeader(dropStageDirections(answer.content ?? '')), [input.reply], HER_EMOJI), HER_EMOJI));
+    if (!line) { console.log('[followup] she had nothing to add'); return; }
+    if (lastUserActivityAt > repliedAt) { console.log('[followup] they answered while she was thinking — kept to herself'); return; }
+    lastSecondThoughtAt = Date.now();
+    lastInterjectionAt = Date.now();
+    noteAside(line, 'followup', input.latest.slice(0, 80));
+    console.log(`[followup] a beat later: ${JSON.stringify(line.slice(0, 120))}`);
+  } catch (error) {
+    console.warn(`[followup] did not come: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
 function conversationRoute(): ProviderConfig | null {
   const route = store.get('ai.conversation') as ProviderConfig | undefined;
   if (!route?.model || !isOpenAIShaped(route.provider) || !hasKeyFor(route.endpoint)) return null;
@@ -6573,6 +6630,7 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // the cut was a repeat or a real sentence.
   if (touched && brain.hosted) recordBrief(`chat filtered (${brainName}) — as she wrote it, then as sent`, said, routeless);
   console.log(`[ai] chat reply in ${Date.now() - started}ms, ${content.length} chars — brain=${brainName} handed≈${handed}tok filters=${touched ? `touched(${said.trim().length - routeless.trim().length >= 0 ? '-' : '+'}${Math.abs(said.trim().length - routeless.trim().length)})` : 'untouched'}`);
+  if (messages.at(-1)?.role === 'user' && !brief && !choices) scheduleSecondThought({ hers: Boolean(hers), ranting, latest, reply: content, config });
   // Cleared only once a reply actually exists, so a failed or unreachable turn
   // leaves the note in place for the retry rather than losing it.
   if (fresh) store.delete('chat.freshStart');
