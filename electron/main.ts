@@ -3750,8 +3750,10 @@ function chatNumCtx(): number {
 // How long the local model is kept resident after a request. Without this, an
 // idle machine's model is evicted and the next phone message pays a cold start
 // on top of everything else — which is exactly the wait this whole change is
-// about. Thirty minutes of VRAM is the price of a reply that starts talking.
-const OLLAMA_KEEP_ALIVE = 30 * 60;
+// about. Forever: this box does nothing else with that VRAM, and thirty
+// minutes meant the first word after any longer silence cost eight seconds.
+// Game time still unloads her explicitly (keep_alive: 0, below).
+const OLLAMA_KEEP_ALIVE = -1;
 // What that costs, measured on this box: the model is 11 GB of the 3060's 12,
 // and loading it takes 9.8s against 0.4s warm. So the thirty minutes buys a
 // reply that starts talking, at the price of the card being unavailable for
