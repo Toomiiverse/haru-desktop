@@ -11,7 +11,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { DEFAULT_VOICE, hasShout, isSilent, readVoiceConfig, referenceFor, shoutReference, speakableText, splitForSpeech, spokenCase, type VoiceConfig, sovitsRequest, DEFAULT_SAMPLING, looksClipped, SPOKEN_CHARS_PER_SECOND } from '../electron/voice';
+import { DEFAULT_VOICE, hasShout, isSilent, readVoiceConfig, referenceFor, shoutReference, speakableText, splitForSpeech, spokenCase, type VoiceConfig, sovitsRequest, DEFAULT_SAMPLING, looksClipped, SPOKEN_CHARS_PER_SECOND, pickSigh } from '../electron/voice';
 
 const config = (overrides: Partial<VoiceConfig> = {}): VoiceConfig => ({ ...DEFAULT_VOICE, ...overrides });
 
@@ -335,3 +335,11 @@ test('audio far shorter than the line it was given reads as cut off', () => {
   assert.equal(Math.round(line.length / SPOKEN_CHARS_PER_SECOND), 7, 'about seven seconds of speech');
 });
 
+test('a sigh is one of hers, picked by mood: grunts for an edge, sighs for the flat moods', () => {
+  const files = ['/s/sigh-iso-02.wav', '/s/sigh-iso-05.wav', '/s/grunt-iso-03.wav', '/s/grunt-better-01.wav'];
+  assert.equal(pickSigh(files, 'annoyed', () => 0), '/s/grunt-iso-03.wav');
+  assert.equal(pickSigh(files, 'sleepy', () => 0), '/s/sigh-iso-02.wav');
+  assert.ok(files.includes(pickSigh(files, 'happy', () => 0.99)!), 'any of them for a mood with no lean');
+  assert.equal(pickSigh([], 'annoyed'), null, 'none recorded, none played');
+  assert.equal(pickSigh(['/s/sigh-iso-02.wav'], 'annoyed', () => 0), '/s/sigh-iso-02.wav', 'no grunts means a sigh will do');
+});

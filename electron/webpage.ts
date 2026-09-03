@@ -1050,16 +1050,22 @@ function sayable(text){
     if(current) parts.push(current);
     // A breath between sentences and a longer one where she changed the
     // subject: run together they were a person reading, not talking.
+    // Where she changed the subject she may sigh first — one of her own recorded
+    // breaths, played in the gap — and now and then before she starts at all.
+    if(out.length&&parts.length&&Math.random()<0.55) out.push({ sigh:true, pause: 140 });
+    else if(!out.length&&parts.length>1&&Math.random()<0.12) out.push({ sigh:true, pause: 120 });
     parts.forEach((part,i)=>{ if(/[\\p{Letter}\\p{Number}]/u.test(part)) out.push({ text: part, pause: i===parts.length-1 ? 520 : 260 }); });
   }
   if(out.length) out[out.length-1].pause=0;
   return out;
 }
-function fetchClip(text,emotion,tries){
-  return fetch('/api/speak',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(emotion?{text,emotion}:{text})})
+function fetchClip(part,emotion,tries){
+  // A part is a sentence to synthesise, or a sigh to fetch by name.
+  const body=part.sigh?{sigh:true,emotion:emotion||null}:(emotion?{text:part.text,emotion}:{text:part.text});
+  return fetch('/api/speak',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)})
     .then(r=>r.ok?r.blob():null)
     .catch(()=>null)
-    .then(blob=>blob||((tries||0)<1?fetchClip(text,emotion,(tries||0)+1):null));
+    .then(blob=>blob||(!part.sigh&&(tries||0)<1?fetchClip(part,emotion,(tries||0)+1):null));
 }
 async function speak(text,emotion){
   const mine=++speaking;
@@ -1069,7 +1075,7 @@ async function speak(text,emotion){
     if(!parts.length) return false;
     // The next one is asked for the moment this one starts playing, so the gap
     // between sentences is the render that was already happening.
-    let pending=fetchClip(parts[0].text,emotion);
+    let pending=fetchClip(parts[0],emotion);
     let started=false;
     for(let i=0;i<parts.length;i++){
       const blob=await pending;
@@ -1077,8 +1083,8 @@ async function speak(text,emotion){
       // One sentence failing is not a reason to swallow the rest of what she
       // said: it used to return here, so a single hiccup halfway through left
       // her cut off mid-thought with no sign anything had gone wrong.
-      pending=i+1<parts.length?fetchClip(parts[i+1].text,emotion):null;
-      if(!blob){ console.warn('[voice] no audio for one sentence — carrying on'); continue; }
+      pending=i+1<parts.length?fetchClip(parts[i+1],emotion):null;
+      if(!blob){ if(!parts[i].sigh) console.warn('[voice] no audio for one sentence — carrying on'); continue; }
       const url=URL.createObjectURL(blob);
       const done=new Promise(resolve=>{ player.onended=player.onerror=()=>{ URL.revokeObjectURL(url); resolve(); }; });
       try{

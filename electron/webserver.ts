@@ -154,6 +154,8 @@ export type WebDeps = {
   emotionsFolder(): string | null;
   /** Her voice for a line — in the mood it was said in, when told — or nothing if she has none set up. */
   speak(text: string, emotion?: string | null): Promise<{ audio: Uint8Array; mime: string } | null>;
+  /** One of her recorded sighs, for the gap between paragraphs; null when she has none. */
+  sigh(emotion?: string | null): Promise<{ audio: Uint8Array; mime: string } | null>;
   /** Her word when they only said her name. */
   wake(): { line: string; emotion: string };
   /** What they just said, through the same ears and the same corrections as the desktop. */
@@ -635,11 +637,19 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
   }
 
   if (req.method === 'POST' && path === '/api/speak') {
-    const body = await readBody(req) as { text?: unknown; emotion?: unknown };
+    const body = await readBody(req) as { text?: unknown; emotion?: unknown; sigh?: unknown };
     const text = typeof body.text === 'string' ? body.text.trim() : '';
-    if (!text) return json(res, 400, { error: 'Nothing to say.' });
     // The mood is a word off the wire; the voice side only honours one it has a clip for.
     const emotion = typeof body.emotion === 'string' ? body.emotion.slice(0, 30) : null;
+    // A sigh is asked for by name, not synthesised: the page wants one of her
+    // recorded breaths for the gap between two paragraphs.
+    if (body.sigh === true) {
+      const breath = await deps.sigh(emotion);
+      if (!breath) return json(res, 404, { error: 'She has no sighs recorded.' });
+      res.writeHead(200, { 'Content-Type': breath.mime || 'audio/wav', 'Content-Length': breath.audio.length, 'Content-Security-Policy': "default-src 'none'", 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'no-store' });
+      return res.end(Buffer.from(breath.audio));
+    }
+    if (!text) return json(res, 400, { error: 'Nothing to say.' });
     const clip = await deps.speak(text.slice(0, 2000), emotion);
     if (!clip) return json(res, 503, { error: 'Her voice is not set up.' });
     res.writeHead(200, {

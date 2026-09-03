@@ -90,6 +90,7 @@ function deps(overrides: Partial<WebDeps> = {}): WebDeps {
       discard: () => {},
     },
     wake: () => ({ line: 'What.', emotion: 'annoyed' }),
+    sigh: async () => null,
     revoice: { run: async () => ({ shown: 0, rewritten: 0, kept: 0, dropped: 0, model: 'test' }), status: () => ({ lastAt: null, kept: 0, since: 0, every: 500, model: 'test' }) },
     where: {
       get: () => ({ enabled: whereOn, at: whereAt, fresh: whereAt !== null, net: null, places: whereAt ? [whereAt] : [] }),

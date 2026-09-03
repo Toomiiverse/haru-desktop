@@ -44,6 +44,8 @@ export type VoiceConfig = {
    * so one good reference is a complete configuration and the rest is optional.
    */
   emotionVoices: Partial<Record<EmotionName, VoiceReference>>;
+  /** Her recorded sighs and grunts, for the gaps between paragraphs — see pickSigh. */
+  sighs: string[];
   /** Optional clip for shouted lines. Falls back to the annoyed clip. */
   shoutVoice?: VoiceReference;
   /**
@@ -68,6 +70,7 @@ export const DEFAULT_VOICE: VoiceConfig = {
   speed: 1,
   volume: 0.9,
   emotionVoices: {},
+  sighs: [],
   webEnabled: true,
   desktopEnabled: true,
 };
@@ -214,6 +217,25 @@ export function speakableText(reply: string): string {
  * whole rather than cut at an arbitrary character — a clause broken in half
  * sounds worse than one long chunk takes to arrive.
  */
+/**
+ * A sigh or a grunt of hers, for the gap between paragraphs.
+ *
+ * Cut from the reel he recorded, not synthesised: a model asked to say "ugh"
+ * says the word. Louder ones are grunts and go with a mood that has an edge
+ * to it — annoyed, smug, determined — quieter ones are sighs and go with the
+ * flat moods; anything else takes whichever comes. `files` is voice.sighs.
+ */
+export function pickSigh(files: readonly string[], emotion: string | null | undefined, random: () => number = Math.random): string | null {
+  const all = files.filter(Boolean);
+  if (!all.length) return null;
+  const grunts = all.filter(file => /grunt|hmph|loud/i.test(file));
+  const sighs = all.filter(file => !/grunt|hmph|loud/i.test(file));
+  const edge = emotion === 'annoyed' || emotion === 'smug' || emotion === 'determined' || emotion === 'surprised';
+  const flat = emotion === 'sleepy' || emotion === 'bored' || emotion === 'worried' || emotion === 'neutral';
+  const pool = edge && grunts.length ? grunts : flat && sighs.length ? sighs : all;
+  return pool[Math.floor(random() * pool.length) % pool.length] ?? null;
+}
+
 export function splitForSpeech(text: string, maxChars = MAX_CHUNK_CHARS): string[] {
   const sentences = text.split(/(?<=[.!?…])\s+/).filter(part => part.trim().length);
   const chunks: string[] = [];
@@ -362,6 +384,7 @@ export function readVoiceConfig(saved: unknown): VoiceConfig {
     speed: typeof record.speed === 'number' && record.speed > 0 ? Math.min(2, record.speed) : DEFAULT_VOICE.speed,
     volume: typeof record.volume === 'number' ? Math.max(0, Math.min(1, record.volume)) : DEFAULT_VOICE.volume,
     emotionVoices: readEmotionVoices(record.emotionVoices),
+    sighs: Array.isArray(record.sighs) ? (record.sighs as unknown[]).filter((file): file is string => typeof file === 'string' && file.trim().length > 0) : [],
     ...(record.sampling && typeof record.sampling === 'object' ? { sampling: readSampling(record.sampling as Record<string, unknown>) } : {}),
     shoutVoice: readReference(record.shoutVoice),
     webEnabled: record.webEnabled !== false,

@@ -47,10 +47,10 @@ import { acceptedOffer, promisedTitle, reminderAsk, reminderPromised, reminderSa
 import { describeWeather, readForecast, weatherEvents, weatherToDrawOn, weatherUrl, WEATHER_POLL_MS, type WeatherSample, disputesRain } from './weather';
 import { HANGING_COOLDOWN_MS, isClosing, leftHanging, saidTheyWereLeaving } from './hanging';
 import { awakeHoursSince, theyAreUp, awakeMinutesSince } from './awake';
-import { describeTold, placeToldFrom, toldTheyAreBusy, type Told, errandsToldFrom, errandToAskAfter, type Errand } from './told';
+import { describeTold, placeToldFrom, toldTheyAreBusy, toldStillStands, type Told, errandsToldFrom, errandToAskAfter, type Errand } from './told';
 import { markMentioned, upcomingToMention } from './upcoming';
 import { directionsAskFrom, directionsNote, dropRouteTalk, matchNamedPlace, startingPoint, withDirections, withoutMapsLinks, type DirectionsAsk, claimsTraffic, withoutTrafficDenials } from './directions';
-import { absorb, describeWhereabouts, distanceM, forgetPlace, namePlace, placeAt, readSpot, readWhereabouts, whereForPage, type Whereabouts, SPOT_STALE_MS, saidTheyWereGoing, unannouncedArrivalNote, type Arrival } from './whereabouts';
+import { absorb, describeWhereabouts, distanceM, forgetPlace, homeOf, namePlace, placeAt, readSpot, readWhereabouts, whereForPage, type Whereabouts, SPOT_STALE_MS, saidTheyWereGoing, unannouncedArrivalNote, type Arrival } from './whereabouts';
 import { convertImage, normaliseFormat, FORMATS } from './convert';
 import { cancelPower, closeApp, findApps, isCancellable, launch, listRunning, matchApp, matchRunning, normalisePower, POWER_DELAY_S, readDesktopConfig, runPower, supportedDesktop, type DesktopConfig } from './desktop';
 import { looksLikeScreenshot, maySpeak, readScreenshotConfig, screenshotPrompt, SETTLE_MS, SETTLE_TRIES, type ScreenshotConfig } from './screenshots';
@@ -68,7 +68,7 @@ import { chatTools, coerceKnowledgeCategory, runChatTool, type ToolAvailability,
 import { createMemoryStore } from './memorystore';
 import { createKnowledgeStore } from './knowledgestore';
 import { chatSystemPrompt, freshStartInstruction, type FreshStart, type RatedReply, LENGTH_RULE_LOCAL, LENGTH_RULE_HOSTED } from './prompt';
-import { hasShout, readVoiceConfig, referenceFor, shoutReference, spokenCase, speakableText, splitForSpeech, synthesise, type SpeechClip, type VoiceConfig, looksClipped } from './voice';
+import { hasShout, readVoiceConfig, referenceFor, shoutReference, spokenCase, speakableText, splitForSpeech, synthesise, type SpeechClip, type VoiceConfig, looksClipped, pickSigh } from './voice';
 import { applyDecay, DEEP_RECALL_LIMIT, eventCandidates, eventsPrompt, findSuperseded, formatMemoryPrompt, isExplicitRecall, closeEvents, isWorthAnEvent, isWorthKeeping, isWorthRemembering, MEMORY_KINDS, migrateMemories, pruneMemories, readsAsSecondPerson, rememberInto, retrieveMemories, semanticSimilarities, summaryPrompt, supersede, THIRD_PERSON_AGAIN, vectorSimilarity, type ForgettingEntry, type MemoryKind, type MemoryRecord, type MemorySource, type RetrievalFactors, type ScoredMemory, type SessionSummary } from './memory';
 import { consolidateMemories, type ConsolidationChange } from './consolidation';
 import { appendToBlockValue, canEditBlock, findBlock, formatMemoryBlocks, replaceInBlockValue, resolveBlockValue, resetBlockToDerived, withEditedValue, type BlockSources, type MemoryBlock } from './blocks';
@@ -79,7 +79,7 @@ import { standingFrom } from './standing';
 import { herFrom } from './her';
 import { computeRoute, fixStatedRoute, routeWords, type Route } from './routes';
 import { placeAsk, placeNote, placeWords, searchGooglePlaces, type GooglePlace } from './placeinfo';
-import { addAside, alreadySaidRecently, asideContext, asidesOn, markReached, pruneAsides, readAsides, type Aside, type AsideSource, markAsked, openAsk, answerAsk, askedRecently, unansweredAsksNote } from './asides';
+import { addAside, alreadySaidRecently, echoesAside, asideContext, asidesOn, markReached, pruneAsides, readAsides, type Aside, type AsideSource, markAsked, openAsk, answerAsk, askedRecently, unansweredAsksNote } from './asides';
 import { attachmentsInPlay, describeAttached, READ_IT_ALL_PROMPT, readAttachments, type Attachment, type Opened } from './attachments';
 import { forOllama, withoutOldest } from './ollamaturns';
 import { seedEmoji, seedOffTheOrders } from './seed';
@@ -1414,6 +1414,12 @@ function interject(line: string, { aboutTheGame = false, source = 'other' as Asi
   if (invented) { console.log(`[interject] dropped — it gave "${invented.title}" a time, and it has none saved`); return false; }
   if (stale) {
     console.log(`[interject] dropped — it named "${stale.title}", which is ${stale.done ? 'done' : 'long past'}`);
+    return false;
+  }
+  // A line she has already said, or one copied out of the list of them
+  // ("9:36 PM — “...”"), is not a new line: see echoesAside.
+  if (echoesAside(line, getAsides(), now)) {
+    console.log('[interject] dropped — it repeats a line she already said');
     return false;
   }
   lastInterjectionAt = now;
@@ -7917,10 +7923,17 @@ async function boredNudge(): Promise<string | null> {
   // couple of hours, the nudge is a real question rather than a jab from
   // memory — "so what are you actually doing at The PC Project?" — and the
   // next thing they say answers it (openAsk).
+  // Only where the phone put them, and never home, and not while their own
+  // word stands: describeTold already tells her not to ask what they are doing
+  // there, and told both at once — "ask what they are doing at home" beside
+  // "do not ask what they are doing there" — she asked whether he was still
+  // eating a steak he had said an hour earlier was finished.
   const whereNow = (() => {
+    if (toldStillStands(getTold(), nowMs)) return undefined;
     const where = getWhereabouts();
     const spot = where.enabled && where.last && nowMs - Date.parse(where.last.at) <= SPOT_STALE_MS ? placeAt(where.places, where.last)?.name : undefined;
-    return spot ?? getTold()?.where;
+    if (!spot || homeOf(where.places)?.name === spot) return undefined;
+    return spot;
   })();
   // What they said they were off to do beats where their phone is: "how was
   // that shower" is a conversation, "still at home?" is a question she already
@@ -9251,6 +9264,14 @@ function webDeps(): WebDeps {
       if (!theyAreUpNow() || Date.now() - last < WAKE_ACK_GAP_MS) return { line: '', emotion: 'neutral' as const };
       store.set('wake.lastAckAt', Date.now());
       return wakeAck();
+    },
+    async sigh(emotion) {
+      const voice = readVoiceConfig(store.get('voice'));
+      if (voice.engine === 'off' || !voice.webEnabled) return null;
+      const file = pickSigh(voice.sighs, emotion);
+      if (!file) return null;
+      try { return { audio: new Uint8Array(readFileSync(file)), mime: 'audio/wav' }; }
+      catch (error) { console.warn(`[voice] the sigh could not be read: ${error instanceof Error ? error.message : error}`); return null; }
     },
     async speak(text, emotion) {
       // The same voice, the same reference clip, the same server the desktop
