@@ -6860,7 +6860,9 @@ function createCompanionWindow() {
   else companionWindow.loadURL(`${pathToFileURL(path.join(__dirname, '../dist/index.html')).toString()}?view=companion`);
 
   companionWindow.once('ready-to-show', () => {
-    if (store.get('live2d.model')) companionWindow?.show();
+    // Not when she was hidden on purpose: a headless box registers her model
+    // for the phone's stage and has no display worth drawing her on.
+    if (store.get('live2d.model') && !store.get('companion.hidden', false)) companionWindow?.show();
   });
 
   let persistTimer: ReturnType<typeof setTimeout> | undefined;
@@ -10277,6 +10279,7 @@ app.whenReady().then(() => {
     const model = modelResult(modelPath);
     store.set('live2d.model', { path: model.path, name: model.name });
     broadcastLive2DChange(model);
+    store.set('companion.hidden', false);
     companionWindow?.show();
     return model;
   });
@@ -10390,7 +10393,7 @@ app.whenReady().then(() => {
     if (expressions.length) {
       template.push({ label: 'Expression', submenu: expressions.map(name => ({ label: name, click: () => companionWindow?.webContents.send('companion:setExpression', name) })) });
     }
-    template.push({ type: 'separator' }, { label: 'Hide character', click: () => companionWindow?.hide() }, { label: 'Quit', click: () => app.quit() });
+    template.push({ type: 'separator' }, { label: 'Hide character', click: () => { store.set('companion.hidden', true); companionWindow?.hide(); } }, { label: 'Quit', click: () => app.quit() });
     Menu.buildFromTemplate(template).popup({ window: companionWindow ?? undefined });
   });
   // Started at login she is only the character on the desktop, and the chat
