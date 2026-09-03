@@ -289,3 +289,32 @@ export function alreadySaidRecently(asides: Aside[], timeZone: string, now: numb
     'Do not make any of these points again, and do not open on a subject you have already remarked on. The subjects of those remarks — the weather, the time, whatever they were about — are closed: do not raise them again in any form, however fresh they look in the conversation.',
   ].filter(Boolean).join('\n');
 }
+
+/** The text of a line, with the trappings of a copied log row taken off. */
+function asideEchoText(line: string): string {
+  const text = line.replace(/^\s*\d{1,2}:\d{2}(?::\d{2})?\s*(?:am|pm)?\s*[—-]\s*/i, '');
+  return text.toLowerCase().replace(/\s+/g, ' ').replace(/["“”']/g, '').trim();
+}
+
+/**
+ * Whether a line she is about to say unprompted is really one she has already
+ * said.
+ *
+ * alreadySaidRecently catches the honest way of repeating herself: fresh words
+ * about the same subject. It does not catch the dishonest way, which is copying
+ * the line back out of her own log — the Asides page prints each line as a
+ * clock time over its text, and a model told to quote what it said will hand
+ * the whole row back, "9:36 PM — "…"", verbatim, so comparing phrasing never
+ * catches it. The row's time and quoting are stripped off so the text
+ * underneath can be compared with what she has already said.
+ */
+export function echoesAside(line: string, asides: Aside[], now: number): boolean {
+  const candidate = asideEchoText(line);
+  if (!candidate) return false;
+  return asides.some(aside => {
+    const at = Date.parse(aside.at);
+    if (!Number.isFinite(at) || now - at < 0 || now - at > ALREADY_SAID_MS) return false;
+    const said = asideEchoText(aside.text);
+    return Boolean(said) && (candidate === said || candidate.includes(said) || said.includes(candidate));
+  });
+}

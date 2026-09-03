@@ -28,11 +28,11 @@ export const ollamaProvider: AIProvider = {
   },
 };
 
-export function getProvider(config: ProviderConfig): AIProvider {
-  switch (config.provider) {
-    case 'ollama': return ollamaProvider;
-    default: return demoProvider;
-  }
+export function getProvider(_config: ProviderConfig): AIProvider {
+  // Every provider — Ollama, OpenAI, xAI, Venice — is spoken to through the main
+  // process, which translates to whichever dialect the endpoint wants. Only a
+  // window with no bridge (a plain browser tab) falls back to the echo stub.
+  return ollamaProvider;
 }
 
 export async function testConnection(endpoint: string, provider?: string): Promise<string[]> {
