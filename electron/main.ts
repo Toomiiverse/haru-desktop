@@ -6461,6 +6461,16 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // it a second time.
   const withFiles = await withAttachments(vetted, inPlay, brain.sees, vision, config);
   if (carried.length) console.log(`[attach] ${carried.length} in play — ${carried.map(file => `${file.name}${file.kind === 'image' && brain.sees ? ' (sent)' : ' (read)'}`).join(', ')}`);
+  // A picture a seeing brain was handed is read through her own eyes in the
+  // background as well. The follow-up goes to the conversation route, which
+  // cannot see, and waited twenty seconds for that reading in the turn —
+  // done now, it is in the cache by the time they ask.
+  if (brain.sees) {
+    for (const file of carried) {
+      if (file.kind !== 'image') continue;
+      void readAttachment(file, vision, config).catch(() => { /* the follow-up tries again, as before */ });
+    }
+  }
   // Her recent replies as she should believe she said them — see seed.ts for
   // the measurement. The stored transcript is not touched; only what is sent.
   // The length rule fits the brain answering — see LENGTH_RULE_HOSTED.
