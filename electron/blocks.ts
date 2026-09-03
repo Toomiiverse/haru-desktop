@@ -49,6 +49,13 @@ export type BlockSources = {
   following?: { title: string; kind: string; progress?: number }[];
   /** Today's agenda, for the working-state block. */
   agenda?: { title: string; kind: string; done: boolean }[];
+  /**
+   * Her own life, already framed: what she is into and what she thinks of it,
+   * what she read in the small hours, what she wrote in her diary (tastes.ts,
+   * nightlife.ts, diary.ts). Rendered as a block so the same content lives in
+   * one place rather than as scattered lines in the prompt.
+   */
+  herOwn?: string;
   /** The message being answered — makes the human block message-aware the
    *  same way the deterministic engine always was. */
   query?: string;
@@ -129,6 +136,13 @@ export function defaultMemoryBlocks(): MemoryBlock[] {
       label: 'working_state',
       description: 'What is going on right now — recent days, today\'s agenda, current context. Use it to stay aware of the present without re-asking.',
       limit: 2000,
+      read_only: false,
+    },
+    {
+      id: blockIdFor('her_own'),
+      label: 'her_own',
+      description: 'What Haru has been up to on her own — the things she is into and the views she holds on them, what she read in the small hours, what she wrote in her diary. These are hers, not the user\'s: hold them, bring one up when it fits, and disagree when you mean it.',
+      limit: 8000,
       read_only: false,
     },
   ];
@@ -309,6 +323,9 @@ export function resolveBlockValue(block: MemoryBlock, sources: BlockSources, sho
       }
       return lines.join('\n');
     }
+    case 'her_own': {
+      return sources.herOwn?.trim() ?? '';
+    }
     default:
       return typeof block.value === 'string' ? block.value : '';
   }
@@ -325,19 +342,20 @@ export function blockMetadata(value: string, block: MemoryBlock): string {
  * never silent (the caller logs what was cut). Returns the value and whether
  * it was cut.
  */
-export function fitToLimit(value: string, block: MemoryBlock): { value: string; cut: boolean } {
-  if (value.length <= block.limit) return { value, cut: false };
+export function fitToLimit(value: string, block: MemoryBlock, scale = 1): { value: string; cut: boolean } {
+  const limit = Math.floor(block.limit * scale);
+  if (value.length <= limit) return { value, cut: false };
   const lines = value.split('\n');
   const kept: string[] = [];
   let used = 0;
   for (const line of lines) {
     const candidate = used + line.length + (kept.length ? 1 : 0);
-    if (candidate > block.limit && kept.length) break;
+    if (candidate > limit && kept.length) break;
     kept.push(line);
     used = candidate;
   }
   const tail = '\n…';
-  if (used + tail.length <= block.limit && kept.length) {
+  if (used + tail.length <= limit && kept.length) {
     return { value: [...kept, tail].join('\n'), cut: true };
   }
   return { value: kept.join('\n'), cut: true };
@@ -443,6 +461,14 @@ export type BlockRenderOptions = {
    * were ~1,700 characters a turn that told the model nothing it acts on.
    */
   compact?: boolean;
+  /**
+   * The fraction of each block's budget this render may use, 0..1. A phone
+   * reply reads on a screen where every token is time before the first word,
+   * and the memory blocks are the biggest single chunk the hosted brain
+   * re-processes each turn — so away replies get the recent, high-priority
+   * lines within a smaller budget, and the desk keeps the full blocks.
+   */
+  scale?: number;
 };
 
 /** The compact shape: the label as the tag, then the value. */
@@ -466,6 +492,8 @@ export function formatMemoryBlocks(blocks: MemoryBlock[], sources: BlockSources,
   const parts: string[] = [];
   const cut: BlockRenderResult['cut'] = [];
   const omitted = new Set(options.omit ?? []);
+  // The fraction of each block's budget this render may use (see scale above).
+  const scale = options.scale !== undefined ? Math.max(0.2, Math.min(1, options.scale)) : 1;
   // Threaded through the blocks in order, so a record shown by one is not
   // shown again by the next.
   const shown = new Set<string>();
@@ -473,7 +501,7 @@ export function formatMemoryBlocks(blocks: MemoryBlock[], sources: BlockSources,
     if (omitted.has(block.label)) continue;
     const value = resolveBlockValue(block, sources, shown);
     if (!value.trim()) continue;
-    const fitted = fitToLimit(value, block);
+    const fitted = fitToLimit(value, block, scale);
     if (fitted.cut) cut.push({ label: block.label, before: value.length, after: fitted.value.length });
     parts.push(options.compact ? renderBlockCompact(block, fitted.value) : renderBlock(block, fitted.value));
   }

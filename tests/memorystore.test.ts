@@ -66,6 +66,7 @@ function harness(options: Partial<{
     profile: () => ({ nickname: 'Tom', occupation: '', about: '' }),
     following: () => [],
     agenda: () => [],
+    herOwnLife: () => '',
   };
   const store = createMemoryStore(deps);
   return {

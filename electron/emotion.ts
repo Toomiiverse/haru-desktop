@@ -1,3 +1,5 @@
+import { readTone, isHeated } from './tone';
+
 // The emotion engine. The model reports what it meant by a reply; the behaviour
 // engine turns that into movement. Semantic labels rather than animation names,
 // so the same reading works on any model.
@@ -67,6 +69,33 @@ export type Emotion = {
 };
 
 export const NEUTRAL_EMOTION: Emotion = { emotion: 'neutral', confidence: 0.5, energy: 0.5, intent: 'listen', focus: 'user' };
+
+/**
+ * The mood of a line, read from the line itself — no model call.
+ *
+ * The classifier answers "what did she mean", which is a model's job; this
+ * answers "which voice clip and face", which a handful of signals can do well
+ * enough: how hot the line is (tone.ts), the emoji she reached for, and the
+ * words that carry the state. It exists so a phone can start speaking the
+ * reply while it is still being written, where waiting a round trip for the
+ * classifier would defeat the point. Anything it cannot read stays neutral,
+ * which every voice and face can fall back to.
+ */
+export function localEmotion(text: string): EmotionName {
+  const line = (text ?? '').trim();
+  if (!line) return 'neutral';
+  const tone = readTone(line);
+  if (isHeated(tone)) return 'annoyed';
+  if (/[😏]/u.test(line)) return 'smug';
+  if (/[😤💢🔥😒🙄😾]/u.test(line)) return 'annoyed';
+  if (/[👀]/u.test(line)) return 'curious';
+  if (/\b(sleepy|tired|drowsy|yawning|dozing|nodding off|nod off|nap|bed|exhausted)\b/i.test(line)) return 'sleepy';
+  if (/\b(love you|miss you|adore|darling|dear\b)\b/i.test(line)) return 'affectionate';
+  if (/\b(haha|hahaha|heh|lol|hilarious|nice one|love it|made my day)\b/i.test(line)) return 'happy';
+  if (/\b(ugh|whatever|damn|seriously|really now)\b/i.test(line)) return 'annoyed';
+  if (/\?/.test(line)) return 'curious';
+  return 'neutral';
+}
 
 // Handed to Ollama as `format`, which constrains generation to match — far more
 // reliable than asking for JSON in the prompt and hoping.

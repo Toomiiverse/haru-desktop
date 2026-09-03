@@ -13,7 +13,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { chatTools, runChatTool, type ToolAvailability, type ToolDeps } from '../electron/tools';
+import { chatTools, machineRelevant, runChatTool, type ToolAvailability, type ToolDeps } from '../electron/tools';
 import type { ToolCall } from '../electron/provider';
 
 const EVERYTHING: ToolAvailability = {
@@ -70,6 +70,8 @@ function deps(overrides: Partial<ToolDeps> = {}): ToolDeps {
     blockSources: () => ({ character: { identity: '', style: '' }, profile: { nickname: '', occupation: '', about: '' }, memories: [], sessions: [] }),
     getWardrobeControls: () => [],
     sendToWindows: () => {},
+    getInterests: () => [],
+    setInterests: () => {},
     readSystemConfig: () => ({ enabled: false, level: 0, allowlist: [] }),
     getKnowledgeConfig: () => ({ enabled: false, contextChunks: 4, threshold: 0.2, contextChars: 2000 }),
     getKnowledgeEmbedder: () => null,
@@ -120,11 +122,11 @@ test('no handler is dead code — every one is reachable from some setting', asy
   const handled = [
     'note_check_in', 'save_journal_entry', 'look_up_anime', 'convert_picture',
     'open_app', 'close_app', 'power', 'read_web_page', 'read_video_transcript', 'offer_choices', 'search_web',
-    'show_wardrobe', 'remember_about_user', 'core_memory_append', 'core_memory_replace',
+    'show_wardrobe', 'remember_about_user', 'core_memory_append', 'core_memory_replace', 'core_memory_rethink',
     'create_kept_item', 'complete_kept_item', 'update_kept_item', 'delete_kept_item',
     'get_system_info', 'get_gpu_info', 'get_processes', 'get_docker_status',
     'get_service_status', 'diagnose_system', 'restart_docker_container',
-    'start_service', 'stop_service', 'restart_haru', 'look_up_knowledge',
+    'start_service', 'stop_service', 'restart_haru', 'look_up_knowledge', 'adopt_interest',
   ];
   for (const name of handled) {
     assert.ok(reachable.has(name), `${name} has a handler but is never offered to anyone`);
@@ -305,4 +307,90 @@ test('a miss on complete only offers items on the right side of done', async () 
   const reply = await run('complete_kept_item', { title: 'zzz nothing zzz' }, '', { getKept: () => kept });
   assert.match(reply, /Dentist/, 'the open item is a candidate');
   assert.ok(!reply.includes('Bins'), 'the finished one is not — it cannot be ticked off again');
+});
+
+test('adopt_interest takes up a show they told her about, and refuses a duplicate', async () => {
+  let interests: unknown[] = [];
+  const withInterests = (over: Partial<ToolDeps> = {}) => deps({
+    getInterests: () => interests as { id: string; kind: 'game' | 'anime'; name: string; because: string; since: string; nights: number; lastAt: string; stance: string }[],
+    setInterests: (next) => { interests = next; },
+    ...over,
+  });
+  const reply = await runChatTool(call('adopt_interest', { title: 'Frieren', kind: 'anime' }), 'have you seen frieren, you would love it', withInterests());
+  assert.match(reply, /Taken up: Frieren/);
+  assert.equal(interests.length, 1);
+  assert.equal((interests[0] as { name: string }).name, 'Frieren');
+  assert.match((interests[0] as { because: string }).because, /they told you about it/);
+  // A second adoption of the same title is refused.
+  const again = await runChatTool(call('adopt_interest', { title: 'frieren', kind: 'anime' }), 'did you try frieren', withInterests());
+  assert.match(again, /already one of yours/);
+  assert.equal(interests.length, 1, 'nothing was added');
+  // Manga is not one of hers yet.
+  const manga = await runChatTool(call('adopt_interest', { title: 'Vinland Saga', kind: 'manga' }), 'read vinland saga', withInterests());
+  assert.match(manga, /kind/);
+  assert.equal(interests.length, 1);
+});
+
+test('machineRelevant is broad enough to keep the heavy tools for machine and app talk', () => {
+  for (const said of ['check the server', 'is the gpu ok', 'why is the ram full', 'docker up?', 'is the disk nearly full', 'my pc is slow', 'open discord', 'shut the computer down', 'make this an icon', 'what services are running', 'how is the machine doing']) {
+    assert.equal(machineRelevant(said), true, `should keep tools for: ${said}`);
+  }
+  for (const said of ['morning', "how's your day", 'what did you do last night', 'tell me about chainsaw man', "let's get lunch"]) {
+    assert.equal(machineRelevant(said), false, `should drop tools for: ${said}`);
+  }
+});
+
+test('the tool table drops the machine and app groups on turns that are not about them', () => {
+  const onTable = (latest: string) => chatTools(EVERYTHING, latest).map(tool => tool.function.name);
+  const chat = onTable("what's up");
+  assert.ok(!chat.includes('get_gpu_info'), 'no system tools on a chat turn');
+  assert.ok(!chat.includes('diagnose_system'));
+  assert.ok(!chat.includes('open_app') && !chat.includes('power') && !chat.includes('convert_picture'));
+  assert.ok(chat.includes('create_kept_item') && chat.includes('adopt_interest') && chat.includes('remember_about_user'), 'the thinking tools stay');
+  const machine = onTable('why is the gpu at 100%');
+  assert.ok(machine.includes('get_gpu_info') && machine.includes('diagnose_system') && machine.includes('open_app') && machine.includes('power') && machine.includes('convert_picture'), 'machine talk keeps them');
+  // Empty latest (no user turn yet) offers everything — the safe default.
+  const bare = onTable('');
+  assert.ok(bare.includes('get_gpu_info') && bare.includes('power'));
+});
+
+test('core_memory_rethink rewrites a block and supersedes the lines it replaced', async () => {
+  const records: Record<string, unknown>[] = [
+    { id: 'r1', text: 'Does not like being nagged', kind: 'preference', createdAt: 'd', mentions: 3 },
+    { id: 'r2', text: 'Prefers longer, more substantive replies', kind: 'preference', createdAt: 'd', mentions: 2 },
+  ];
+  let memories = records as never[];
+  const mem = {
+    getMemories: () => memories,
+    setMemories: (next: never[]) => { memories = next; },
+    addMemory: (text: string, kind: string) => {
+      const record = { id: 'new', text, kind, createdAt: 'd', mentions: 0 };
+      memories = [...memories, record as never];
+      return { record, created: true };
+    },
+  };
+  const blockOverrides: Partial<ToolDeps> = {
+    getMemories: mem.getMemories,
+    setMemories: mem.setMemories,
+    addMemory: mem.addMemory as never,
+    blockSources: () => ({ character: { identity: '', style: '' }, profile: { nickname: 'Tommy', occupation: '', about: '' }, memories: memories as never[], sessions: [] }),
+  };
+  // The default block set, with preferences editable and persona read-only.
+  const blocks = [
+    { id: 'block-persona', label: 'persona', description: '', limit: 5000, read_only: true },
+    { id: 'block-preferences', label: 'preferences', description: '', limit: 5000, read_only: false },
+  ];
+  const d = deps({
+    ...blockOverrides,
+    store: { get: () => undefined, getBlocks: () => blocks, transaction: (run) => run() },
+  });
+  const reply = await runChatTool(call('core_memory_rethink', { label: 'preferences', new_value: 'Dislikes nagging; wants substantive replies.' }), 'rewrite it', d);
+  assert.match(reply, /Rewrote the preferences block/);
+  // The rewrite itself was proposed to the engine, and the old lines are superseded.
+  assert.ok(memories.some(m => (m as { id: string }).id === 'new'), 'the rewrite went through the engine');
+  assert.equal((memories.find(m => (m as { id: string }).id === 'r1') as { supersededBy?: string } | undefined)?.supersededBy, 'new');
+  assert.equal((memories.find(m => (m as { id: string }).id === 'r2') as { supersededBy?: string } | undefined)?.supersededBy, 'new');
+  // The persona block is read-only.
+  const refused = await runChatTool(call('core_memory_rethink', { label: 'persona', new_value: 'anything' }), 'rewrite it', d);
+  assert.match(refused, /read-only/);
 });

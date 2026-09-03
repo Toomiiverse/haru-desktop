@@ -24,7 +24,7 @@ function record(overrides: Partial<MemoryRecord> & { id: string; text: string; k
 
 test('defaultMemoryBlocks has the standard set with unique lowercase labels', () => {
   const blocks = defaultMemoryBlocks();
-  assert.deepEqual(blocks.map(b => b.label), ['persona', 'human', 'preferences', 'relationship', 'current_project', 'working_state']);
+  assert.deepEqual(blocks.map(b => b.label), ['persona', 'human', 'preferences', 'relationship', 'current_project', 'working_state', 'her_own']);
   assert.equal(new Set(blocks.map(b => b.label)).size, blocks.length);
   for (const block of blocks) {
     assert.equal(blockLabelValid(block.label), true);
@@ -56,7 +56,7 @@ test('mergeBlockDefaults keeps custom blocks and adds missing defaults', () => {
   const merged = mergeBlockDefaults(saved);
   assert.ok(findBlock(merged, 'custom'));
   assert.equal(findBlock(merged, 'custom')!.limit, 1234);
-  for (const label of ['persona', 'human', 'preferences', 'relationship', 'current_project', 'working_state']) {
+  for (const label of ['persona', 'human', 'preferences', 'relationship', 'current_project', 'working_state', 'her_own']) {
     assert.ok(findBlock(merged, label), `missing default ${label}`);
   }
 });
@@ -362,4 +362,14 @@ test('withEditedValue marks the block edited; resetBlockToDerived clears it', ()
   assert.equal(reset.edited, undefined);
   assert.equal(reset.value, undefined);
   assert.deepEqual(reset, human);
+});
+test('fitToLimit scale shrinks the effective budget', () => {
+  const long = Array.from({ length: 40 }, (_, i) => `line number ${i} with some padding words`).join('\n');
+  const block = { ...defaultMemoryBlocks()[0], limit: 400 };
+  const full = fitToLimit(long, block);
+  const scaled = fitToLimit(long, block, 0.5);
+  assert.equal(full.cut, true);
+  assert.equal(scaled.cut, true);
+  assert.ok(scaled.value.length < full.value.length, 'half the budget means fewer lines survive');
+  assert.ok(scaled.value.length <= 200 + 2);
 });

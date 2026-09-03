@@ -12,6 +12,8 @@
 // record that already exists, so a topic that keeps coming up is simply one that
 // has been mentioned often — no classifier, no guessing.
 
+import { EMOTIONS, localEmotion, type EmotionName } from './emotion';
+
 export const MEMORY_KINDS = ['preference', 'relationship', 'event', 'fact'] as const;
 export type MemoryKind = typeof MEMORY_KINDS[number];
 
@@ -79,6 +81,16 @@ export type MemoryRecord = {
   /** Optional triple slots so relational memories can later become a graph. */
   predicate?: string;
   object?: string;
+  /**
+   * The mood the user was in when this was written, and how strongly — stamped
+   * at write time from their message by localEmotion/readTone. Retrieval
+   * favours a memory that matched how the moment felt, not just what was said:
+   * an irritated "never mind" should surface the memory that was made the last
+   * time it stung, even when the words do not overlap. Untagged records fall
+   * back to the neutral baseline, so this never hurts what has none.
+   */
+  emotion?: EmotionName;
+  emotionIntensity?: number;
   /** The observed moments behind this memory, oldest first. */
   evidence?: EvidenceEntry[];
   /** Ids of memories folded into this one by consolidation. */
@@ -307,7 +319,7 @@ export function isWorthRemembering(text: string): boolean {
  */
 export function rememberInto(
   memories: MemoryRecord[],
-  incoming: { text: string; kind: MemoryKind; subject?: string; id: string; now: string; source?: MemorySource; predicate?: string; object?: string; evidenceDetail?: string },
+  incoming: { text: string; kind: MemoryKind; subject?: string; id: string; now: string; source?: MemorySource; predicate?: string; object?: string; evidenceDetail?: string; emotion?: EmotionName; emotionIntensity?: number },
 ): { memories: MemoryRecord[]; created: boolean; record: MemoryRecord } {
   const text = incoming.text.trim();
   const existing = memories.find(memory => isSameMemory(memory.text, text));
@@ -320,6 +332,10 @@ export function rememberInto(
       subject: existing.subject ?? incoming.subject,
       predicate: existing.predicate ?? incoming.predicate,
       object: existing.object ?? incoming.object,
+      // The first sighting's mood stands; a repeat in a fresh mood is new
+      // evidence for the same claim, not a relabel.
+      emotion: existing.emotion ?? incoming.emotion,
+      emotionIntensity: Math.max(existing.emotionIntensity ?? 0, incoming.emotionIntensity ?? 0),
       lastSeenAt: incoming.now,
       mentions: existing.mentions + 1,
       // A consistent repeat is fresh evidence for the same claim.
@@ -339,6 +355,8 @@ export function rememberInto(
     subject: incoming.subject,
     predicate: incoming.predicate,
     object: incoming.object,
+    emotion: incoming.emotion,
+    emotionIntensity: incoming.emotionIntensity,
     createdAt: incoming.now,
     lastSeenAt: incoming.now,
     mentions: 1,
@@ -594,6 +612,65 @@ function typeWeight(kind: MemoryKind): number {
  *  content word out of three is enough to argue with. */
 const DORMANT_ADMISSION = 0.25;
 
+// -- entity signal -------------------------------------------------------------
+//
+// The triples (subject/predicate/object) are written by the model and read
+// nowhere — this is the read side. A memory's entities are the proper nouns of
+// its text plus the words of its triple; a query's are the proper nouns of the
+// message. A shared entity boosts a memory the keywords would miss: "They run
+// the shop together" (subject: PC Project) surfaces for "how is the PC Project
+// doing" even though the two share no content words. The same signal Graphiti
+// and Mem0 buy with a graph database, done with what is already on the record.
+
+/**
+ * Proper-noun candidates in a line. A capitalised word is an entity only when
+ * every occurrence of it is capitalised — "The bins go out. The shop…" has
+ * "the" lowercase twice, so neither capital is a name; "Emma", capitalised
+ * every time, is.
+ */
+export function entityTerms(text: string): Set<string> {
+  const words = String(text ?? '').split(/\s+/)
+    .map(word => word.replace(/[^a-zA-Z'’]/g, ''))
+    .filter(word => word.length >= 3);
+  const lower = new Map<string, number>();
+  for (const word of words) {
+    const key = word.toLowerCase();
+    lower.set(key, (lower.get(key) ?? 0) + 1);
+  }
+  const capped = new Map<string, number>();
+  for (const word of words) {
+    if (!/^[A-Z][a-z'’]*$/.test(word)) continue;
+    const key = word.toLowerCase();
+    capped.set(key, (capped.get(key) ?? 0) + 1);
+  }
+  const out = new Set<string>();
+  for (const [key, count] of capped) {
+    if (STOP_WORDS.has(key)) continue;
+    if (lower.get(key) === count) out.add(key);
+  }
+  return out;
+}
+
+/** Everything a memory can be named by: its proper nouns plus its triple's words. */
+export function memoryEntities(memory: MemoryRecord): Set<string> {
+  const out = entityTerms(memory.text);
+  for (const part of [memory.subject, memory.object, memory.predicate]) {
+    if (!part) continue;
+    for (const word of keywords(part)) out.add(word);
+  }
+  return out;
+}
+
+/** How much of what the query names this memory is named by, 0..1. Nothing on
+ *  either side to compare means no signal at all. */
+export function entityScore(query: string, memory: MemoryRecord): number {
+  const asked = entityTerms(query);
+  const held = memoryEntities(memory);
+  if (!asked.size || !held.size) return 0;
+  const shared = [...asked].filter(word => held.has(word)).length;
+  return Math.min(1, shared / asked.size);
+}
+
 export type RetrieveOptions = {
   limit?: number;
   /** id → semantic similarity (0..1), computed by the caller with an embedder.
@@ -606,6 +683,8 @@ export type RetrievalFactors = {
   semantic: number;
   keyword: number;
   relevance: number;
+  entity: number;
+  emotion: number;
   importance: number;
   confidence: number;
   recency: number;
@@ -624,6 +703,10 @@ export function retrieveMemories(memories: MemoryRecord[], message: string, opti
   // every turn. She holds fifty-odd records and the window is a million.
   const limit = options.limit ?? 22;
   const asked = keywords(message);
+  // The mood of the message, for the emotion signal: a memory written in the
+  // same mood gets a small boost, so what stung before surfaces when it stings
+  // again. Heuristic and cheap — localEmotion is pure text work.
+  const queryEmotion = localEmotion(message);
   const always: ScoredMemory[] = [];
   const scored: ScoredMemory[] = [];
 
@@ -634,13 +717,21 @@ export function retrieveMemories(memories: MemoryRecord[], message: string, opti
     const confidence = memory.confidence ?? 0.5;
     const keyword = asked.size ? keywordSimilarity(message, memory.text) : 0;
     const semantic = options.semantic?.get(memory.id) ?? keyword;
-    const relevance = 0.45 * semantic + 0.35 * keyword + 0.2 * typeWeight(memory.kind);
+    // The two new signals share a tenth of the relevance, so neither can move
+    // a ranking the words disagree with — they settle the ties the words leave.
+    const entity = entityScore(message, memory);
+    const affinity = memory.emotion && memory.emotion === queryEmotion
+      ? 0.5 + 0.5 * (memory.emotionIntensity ?? 0.5)
+      : 0.15;
+    const relevance = 0.4 * semantic + 0.3 * keyword + 0.2 * typeWeight(memory.kind) + 0.05 * entity + 0.05 * affinity;
     const recency = memoryRecency(memory.lastSeenAt, now, memoryHalfLifeDays(importance));
     const entry: ScoredMemory = {
       memory,
       score: relevance * (0.4 + 0.6 * importance) * (0.5 + 0.5 * confidence) * recency,
       factors: {
         semantic, keyword, relevance,
+        entity,
+        emotion: affinity,
         importance: 0.4 + 0.6 * importance,
         confidence: 0.5 + 0.5 * confidence,
         recency,
@@ -976,6 +1067,10 @@ export function migrateMemories(saved: unknown, now: string): MemoryRecord[] {
       memoryType: MEMORY_TYPES.includes(record.memoryType as MemoryType) ? record.memoryType as MemoryType : guessMemoryType(kind, text),
       predicate: typeof record.predicate === 'string' ? record.predicate : undefined,
       object: typeof record.object === 'string' ? record.object : undefined,
+      emotion: EMOTIONS.includes(record.emotion as EmotionName) ? record.emotion as EmotionName : undefined,
+      emotionIntensity: typeof record.emotionIntensity === 'number' && Number.isFinite(record.emotionIntensity)
+        ? Math.min(1, Math.max(0, record.emotionIntensity))
+        : undefined,
       evidence: Array.isArray(record.evidence)
         ? record.evidence.filter(entry => entry && typeof entry.at === 'string' && EVIDENCE_KINDS.includes(entry.kind))
         : [{ at: createdAt, kind: 'statement', source: 'conversation' }],

@@ -245,19 +245,11 @@ const ALREADY_SAID_LIMIT = 6;
  */
 export const ALREADY_SAID_MS = 12 * 60 * 60_000;
 
-/**
- * What she has already come out with lately, for the next time she speaks first.
- *
- * Moving these out of the transcript took something with it. "What has already
- * been said today" was the one thing stopping her making the same observation
- * about the same game three times in an afternoon, and with her half of it gone
- * she had no way to know she had said anything at all.
- *
- * So they come back, but only here — on the paths where she is composing another
- * unprompted line, which is the only place the answer to "have I already said
- * this" changes what she writes. A reply to something they typed does not need
- * it, and is measurably worse for having it.
- */
+/** A clock stamp where a line should start: the shape of the list above, not of anything she says. */
+const CLOCK_STAMP_OPENING = /^\s*\d{1,2}(?::\d{2})?\s*(?:am|pm)?\s*[—–-]/i;
+
+const bare = (text: string) => text.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ').replace(/\s+/g, ' ').trim();
+
 export function alreadySaidRecently(asides: Aside[], timeZone: string, now: number, theirLastAt?: number, limit = ALREADY_SAID_LIMIT): string {
   const said = asides
     .filter(aside => {

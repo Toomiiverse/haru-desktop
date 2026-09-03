@@ -28,6 +28,7 @@ import { consolidateMemories, type ConsolidationChange } from './consolidation';
 import { mergeMemories, type MergeReport } from './memorysync';
 import { formatMemoryBlocks, type BlockSources, type MemoryBlock } from './blocks';
 import type { Embedder } from './embeddings';
+import type { EmotionName } from './emotion';
 
 /** Capped so the prompt cannot grow without bound as memories accumulate; the
  *  oldest fall away once the list is full. */
@@ -61,6 +62,8 @@ export type MemoryStoreDeps = {
   profile(): Profile;
   following(): { title: string; kind: string; progress?: number }[];
   agenda(): { title: string; kind: string; done: boolean }[];
+  /** Her own life, framed — interests, nights, diary (tastes.ts, nightlife.ts, diary.ts). */
+  herOwnLife(): string;
 };
 
 /** What the inspector shows when asked why something was recalled. */
@@ -97,7 +100,7 @@ export function createMemoryStore(deps: MemoryStoreDeps) {
     text: string,
     kind: MemoryKind = 'fact',
     subject?: string,
-    extra: { source?: MemorySource; predicate?: string; object?: string; evidenceDetail?: string } = {},
+    extra: { source?: MemorySource; predicate?: string; object?: string; evidenceDetail?: string; emotion?: EmotionName; emotionIntensity?: number } = {},
   ) {
     const fact = text.trim();
     if (!fact) return null;
@@ -112,6 +115,7 @@ export function createMemoryStore(deps: MemoryStoreDeps) {
     const { memories, created, record } = rememberInto(getMemories(), {
       text: fact, kind, subject, id: randomUUID(), now: new Date().toISOString(),
       source: extra.source, predicate: extra.predicate, object: extra.object, evidenceDetail: extra.evidenceDetail,
+      emotion: extra.emotion, emotionIntensity: extra.emotionIntensity,
     });
     const pruned = pruneMemories(memories, MAX_MEMORIES);
     if (pruned.evicted.length) {
@@ -253,6 +257,7 @@ export function createMemoryStore(deps: MemoryStoreDeps) {
       sessions: getSessions(),
       following: deps.following(),
       agenda: deps.agenda(),
+      herOwn: deps.herOwnLife(),
       query,
       semantic,
       now: new Date(),
@@ -265,7 +270,7 @@ export function createMemoryStore(deps: MemoryStoreDeps) {
     broadcast('blocks:changed', items);
   }
 
-  function profileSummary(message: string, recentContext = '', semantic?: Map<string, number>): string {
+  function profileSummary(message: string, recentContext = '', semantic?: Map<string, number>, scale?: number): string {
     const query = recentContext ? `${recentContext} ${message}` : message;
     const limit = isExplicitRecall(message) ? DEEP_RECALL_LIMIT : undefined;
     const picked = retrieveMemories(getMemories(), query, { limit, semantic });
@@ -281,8 +286,10 @@ export function createMemoryStore(deps: MemoryStoreDeps) {
     // decides what the human block shows — so the blocks can never drift from
     // the authoritative records. The persona block is left out here: the
     // prompt ends on the same text, and it was going in twice. Compact, for
-    // the reason given on BlockRenderOptions.
-    const blocks = formatMemoryBlocks(store.getBlocks(), blockSources(query, semantic), { omit: ['persona'], compact: true });
+    // the reason given on BlockRenderOptions. `scale` shrinks every block's
+    // budget for an away reply, which re-processes this whole section each
+    // turn — see BlockRenderOptions.scale.
+    const blocks = formatMemoryBlocks(store.getBlocks(), blockSources(query, semantic), { omit: ['persona'], compact: true, ...(scale !== undefined ? { scale } : {}) });
     for (const entry of blocks.cut) {
       console.warn(`[blocks] ${entry.label} cut from ${entry.before} to ${entry.after} chars to fit its budget — selection was tighter than this; raise the block limit if it keeps happening`);
     }

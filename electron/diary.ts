@@ -27,7 +27,7 @@ export type Dream = {
   at: string;
   /** The evening the night belongs to. */
   day: string;
-  kind: 'adopt' | 'deepen' | 'guide' | 'free' | 'nothing';
+  kind: 'adopt' | 'deepen' | 'guide' | 'free' | 'nothing' | 'day' | 'want';
   /** What she went looking for. */
   about: string;
   interest?: string;

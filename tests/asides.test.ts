@@ -10,7 +10,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { addAside, markReached, readAsides, markAsked, openAsk, answerAsk, askedRecently, unansweredAsks, unansweredAsksNote, ASK_OPEN_MS, type Aside, type AsideSource, asideContext } from '../electron/asides';
+import { addAside, markReached, readAsides, markAsked, openAsk, answerAsk, askedRecently, unansweredAsks, unansweredAsksNote, echoesAside, ASK_OPEN_MS, type Aside, type AsideSource, asideContext } from '../electron/asides';
 
 // Every member of AsideSource. This is a Record over the union, so adding a
 // source without adding it here fails to compile.
@@ -93,3 +93,17 @@ test('a line that chased something off the list says so, so "what\'s this about?
   assert.doesNotMatch(asideContext(plain, now), /chasing/, 'a line about nothing on the list says nothing about one');
 });
 
+
+test('a nudge that repeats a recent remark, or is a list entry with its clock stamp, is an echo', () => {
+  const now = Date.parse('2026-09-02T14:51:00.000Z');
+  const said = '33 minutes and you’re just sitting there. 🙄 So? Still eating the steak or do I need to send the National Guard?';
+  const asides: Aside[] = [{ id: 'a', at: '2026-09-02T13:36:40.000Z', day: '2026-09-02', source: 'idle', text: said }];
+  assert.equal(echoesAside(`9:36 PM — “${said}`, asides, now), true);
+  assert.equal(echoesAside(said, asides, now), true);
+  assert.equal(echoesAside('9:36 PM — anything at all', [], now), true);
+  assert.equal(echoesAside('So what did your mum make of the place?', asides, now), false);
+  // An old remark is not held against her.
+  assert.equal(echoesAside(said, asides, now + 13 * 60 * 60_000), false);
+  // A short remark inside a longer new line is not an echo: "😒" is in half of them.
+  assert.equal(echoesAside('Fine. 😒 Go to bed.', [{ id: 'b', at: '2026-09-02T14:00:00.000Z', day: '2026-09-02', source: 'idle', text: 'Fine. 😒' }], now), false);
+});

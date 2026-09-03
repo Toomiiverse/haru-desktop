@@ -250,6 +250,33 @@ export function splitForSpeech(text: string, maxChars = MAX_CHUNK_CHARS): string
   return chunks.filter(chunk => /[\p{Letter}\p{Number}]/u.test(chunk));
 }
 
+/**
+ * Sentences cut out of a reply as it streams in, so her voice can start on the
+ * first one while the model is still writing the rest.
+ *
+ * A sentence is a run ending in a terminator that is followed by whitespace —
+ * and nothing else. A terminator at the very end of the buffer is left in
+ * `rest` because it may be gaining more ("it's 2." is a decimal until "50"
+ * arrives), and the caller flushes what is left when the stream ends: the
+ * reply's final sentence arrives without the space the splitter waits for.
+ * Emoji between sentences keep the splitter honest: the engine is given the
+ * sentence raw, and speakableText strips them at /api/speak.
+ */
+export function streamedSentences(buffer: string): { sentences: string[]; rest: string } {
+  const sentences: string[] = [];
+  let rest = buffer ?? '';
+  // /s: a paragraph break must not freeze the cut — a sentence ending in the
+  // paragraph before it is still a sentence, and her replies change paragraphs.
+  const re = /^.*?[.!?…]+\s/s;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(rest))) {
+    const sentence = match[0].trim();
+    rest = rest.slice(match[0].length);
+    if (/[\p{Letter}\p{Number}]/u.test(sentence)) sentences.push(sentence);
+  }
+  return { sentences, rest };
+}
+
 async function post(url: string, body: unknown, auth: Record<string, string> = {}) {
   const response = await net.fetch(url, {
     method: 'POST',

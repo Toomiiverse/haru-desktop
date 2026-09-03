@@ -11,7 +11,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { DEFAULT_VOICE, hasShout, isSilent, readVoiceConfig, referenceFor, shoutReference, speakableText, splitForSpeech, spokenCase, type VoiceConfig, sovitsRequest, DEFAULT_SAMPLING, looksClipped, SPOKEN_CHARS_PER_SECOND, pickSigh } from '../electron/voice';
+import { DEFAULT_VOICE, hasShout, isSilent, readVoiceConfig, referenceFor, shoutReference, speakableText, splitForSpeech, streamedSentences, spokenCase, type VoiceConfig, sovitsRequest, DEFAULT_SAMPLING, looksClipped, SPOKEN_CHARS_PER_SECOND, pickSigh } from '../electron/voice';
 
 const config = (overrides: Partial<VoiceConfig> = {}): VoiceConfig => ({ ...DEFAULT_VOICE, ...overrides });
 
@@ -342,4 +342,51 @@ test('a sigh is one of hers, picked by mood: grunts for an edge, sighs for the f
   assert.ok(files.includes(pickSigh(files, 'happy', () => 0.99)!), 'any of them for a mood with no lean');
   assert.equal(pickSigh([], 'annoyed'), null, 'none recorded, none played');
   assert.equal(pickSigh(['/s/sigh-iso-02.wav'], 'annoyed', () => 0), '/s/sigh-iso-02.wav', 'no grunts means a sigh will do');
+});
+
+// ---- streamedSentences: the progressive voice splitter ----
+
+test('streamedSentences cuts completed sentences and keeps the rest', () => {
+  const { sentences, rest } = streamedSentences('Well, that explains it. The bins go out.');
+  assert.deepEqual(sentences, ['Well, that explains it.']);
+  assert.equal(rest, 'The bins go out.');
+});
+
+test('a decimal point is not a sentence end', () => {
+  const { sentences, rest } = streamedSentences('It costs 2.50 now.');
+  assert.deepEqual(sentences, []);
+  assert.equal(rest, 'It costs 2.50 now.');
+});
+
+test('the final sentence is left for the flush when the stream ends', () => {
+  const { sentences, rest } = streamedSentences('That is all I had.');
+  assert.deepEqual(sentences, []);
+  assert.equal(rest, 'That is all I had.');
+});
+
+test('streamedSentences drops fragments with nothing to say', () => {
+  const { sentences, rest } = streamedSentences('Fine. ... ...');
+  assert.deepEqual(sentences, ['Fine.']);
+  assert.equal(rest, '...');
+});
+
+test('streamedSentences cuts a run of sentences one at a time', () => {
+  let buffer = '';
+  const said = [];
+  const feed = (chunk: string) => {
+    buffer += chunk;
+    const { sentences, rest } = streamedSentences(buffer);
+    buffer = rest;
+    said.push(...sentences);
+  };
+  for (const chunk of ['One. Two', '. Three!', ' Done.']) feed(chunk);
+  const tail = buffer.trim();
+  if (tail) said.push(tail);
+  assert.deepEqual(said, ['One.', 'Two.', 'Three!', 'Done.']);
+});
+
+test('streamedSentences cuts across paragraph breaks', () => {
+  const { sentences, rest } = streamedSentences('First bit. And then\n\nSecond bit, with more. And the rest.');
+  assert.deepEqual(sentences, ['First bit.', 'And then\n\nSecond bit, with more.']);
+  assert.equal(rest, 'And the rest.');
 });

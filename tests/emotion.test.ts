@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  localEmotion,
   parseEmotion,
   faceForEmotion,
   emotionToVitals,
@@ -111,4 +112,28 @@ test('emotionToVitals leaves neutral readings with no effect', () => {
   assert.equal(next.curiosity, vitals.curiosity);
   assert.equal(next.affection, vitals.affection);
   assert.equal(next.stress, vitals.stress);
+});
+
+test('localEmotion reads a heated line as annoyed, matching the sharpen override', () => {
+  assert.equal(localEmotion('Are you serious. Shut up and move it.'), 'annoyed');
+});
+
+test('localEmotion reads her emoji', () => {
+  assert.equal(localEmotion('Dishes. 😒'), 'annoyed');
+  assert.equal(localEmotion('Oh, the drama. 😏'), 'smug');
+  assert.equal(localEmotion('Wait, actually? 👀'), 'curious');
+});
+
+test('localEmotion reads a question as curious', () => {
+  assert.equal(localEmotion('What are you doing with that?'), 'curious');
+});
+
+test('localEmotion reads tiredness and delight in the words', () => {
+  assert.equal(localEmotion('Honestly, I could nod off right here.'), 'sleepy');
+  assert.equal(localEmotion('Haha, that made my day.'), 'happy');
+});
+
+test('localEmotion stays neutral when nothing is felt', () => {
+  assert.equal(localEmotion('The bins go out on Tuesday.'), 'neutral');
+  assert.equal(localEmotion(''), 'neutral');
 });

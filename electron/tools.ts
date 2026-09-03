@@ -28,11 +28,14 @@ import { formatPage, formatResults, readSearchConfig, readWebPage, SearchBlocked
 import { fetchTranscript, formatTranscript, titleFrom, transcriptInstruction, videoIdFrom, watchUrl } from './transcripts';
 import { findSuperseded, semanticSimilarities, supersede, MEMORY_KINDS, type MemoryKind, type MemoryRecord } from './memory';
 import { appendToBlockValue, canEditBlock, findBlock, replaceInBlockValue, resolveBlockValue, withEditedValue, type BlockSources, type MemoryBlock } from './blocks';
+import { adopt } from './tastes';
 import { findItem, readsAsNotDone } from './agenda';
 import { localDateKey, resolveDate, zonedNow } from './dates';
 import { collectAll, collectDocker, collectGpu, collectProcesses, collectServices, collectSystem, diagnose, KNOWN_SERVICES, USER_SERVICES } from './system';
 import { retrieveContext } from './retrieveContext';
 import { KNOWLEDGE_CATEGORIES, type KnowledgeCategory, type KnowledgeStore } from './knowledge';
+import { localEmotion } from './emotion';
+import { readTone } from './tone';
 
 /**
  * The shape every module that fetches asks for. Each declares its own private
@@ -99,7 +102,7 @@ export const WARDROBE_TOOL: ChatTool = {
   type: 'function',
   function: {
     name: 'show_wardrobe',
-    description: 'Open the wardrobe panel so the user can see and change how you look — outfit colours, hair, accessories. Call this whenever they ask you to change your outfit, your hair, what you are wearing, or how you look. Opening it only shows them the options; you are not choosing anything and nothing changes until they pick.',
+    description: 'Open the wardrobe panel so the user can see and change how you look — colours, hair, accessories. Call it whenever they ask you to change how you look. It only shows the options; nothing changes until they pick.',
     parameters: { type: 'object', properties: {}, required: [] },
   },
 };
@@ -108,7 +111,7 @@ export const CHAT_TOOLS: ChatTool[] = [{
   type: 'function',
   function: {
     name: 'create_kept_item',
-    description: "Save a reminder or appointment to the user's calendar. Call this whenever the user asks to be reminded of something or mentions an appointment — writing it out in your reply does not save anything.",
+    description: "Save a reminder or appointment to the user's calendar. Call this whenever they ask to be reminded of something or mention an appointment — writing it in your reply does not save anything.",
     parameters: {
       type: 'object',
       properties: {
@@ -124,7 +127,7 @@ export const CHAT_TOOLS: ChatTool[] = [{
   type: 'function',
   function: {
     name: 'complete_kept_item',
-    description: "Tick a task off the user's list once they say they have done it, so you stop asking about it. Only tasks can be ticked off — an event happens whether or not they attend, so this does not apply to appointments or meetings.",
+    description: "Tick a task off the user's list once they say they have done it, so you stop asking. Only tasks — an event happens whether or not they attend.",
     parameters: {
       type: 'object',
       properties: {
@@ -138,7 +141,7 @@ export const CHAT_TOOLS: ChatTool[] = [{
   type: 'function',
   function: {
     name: 'update_kept_item',
-    description: "Change a task or event already on the user's list — its wording, its day, or its time. Use this when they want something moved or reworded rather than adding another one.",
+    description: "Change a task or event already on the user's list — its wording, day or time. For something moved or reworded, not for adding another one.",
     parameters: {
       type: 'object',
       properties: {
@@ -157,7 +160,7 @@ export const CHAT_TOOLS: ChatTool[] = [{
     // "I never did get the milk" was deleting the task outright, which loses
     // something the user still needs doing. Not-done and cancelled are opposite
     // states and the description has to separate them.
-    description: "Remove a task or event from the user's list entirely, when they say it is cancelled, called off, or no longer needs doing at all. Never use this because something has not been done yet — an errand they have not got to is still outstanding and must stay on the list. This is also not how you tick something off: use complete_kept_item when they have actually done it.",
+    description: "Remove a task or event from the list entirely, when they say it is cancelled or no longer needs doing. Never because something is simply not done yet — that still has to be done and stays on the list. Not how you tick off: use complete_kept_item for done.",
     parameters: {
       type: 'object',
       properties: {
@@ -183,7 +186,7 @@ export const CHAT_TOOLS: ChatTool[] = [{
     // an instruction about you, and the third sentence is what separates them —
     // the test is whether it is addressed to you and would still be true
     // tomorrow, not whether it sounds like a complaint.
-    description: "Save a lasting fact about the user — how they like to be spoken to, what they do, the people, pets and projects in their life — so it is still known in later conversations. Any time they tell you to stop doing something, to do something differently, or that they like or hate how you are behaving, that is a preference and you must save it, as well as replying to it. But only when it is about you and about how you should be from now on: grumbling about a slow build, a bad day, the weather or other people is passing irritation, not a standing preference, and saving it clutters what you know about them with a mood. Use it when they mention something worth carrying forward, not for one-off logistics, which belong in create_kept_item.",
+    description: "Save a lasting fact about the user — how they like to be spoken to, what they do, their people, pets and projects — so it is known later. When they tell you to stop doing something, do something differently, or that they like or hate how you behave, that is a preference: save it AND reply to it. Only when it is about you and would still be true tomorrow — grumbling about a slow build, a bad day or other people is passing irritation, not a preference. One-off logistics go in create_kept_item.",
     parameters: {
       type: 'object',
       properties: {
@@ -192,12 +195,12 @@ export const CHAT_TOOLS: ChatTool[] = [{
         // says what a Miso is. And with the user's own pronoun unknown it was
         // guessed, the same person coming out "her girlfriend" in one record
         // and "his business partner" in the next.
-        fact: { type: 'string', description: 'One short statement that will still make sense on its own months from now, with no pronoun for the user: "Has a dog called Miso", not "Miso" and not "his dog". Other people keep their own names — "Emma is their girlfriend". Write only what they actually said, without embellishing it.' },
-        kind: { type: 'string', enum: [...MEMORY_KINDS], description: 'Exactly one of these four words and nothing else: "preference" for how they like things done or want you to behave, "relationship" for a person or pet, "event" for something happening in their life, "fact" for anything else including habits and routines.' },
-        subject: { type: 'string', description: 'Who or what it concerns, if there is one — a person, a pet, a project.' },
-        predicate: { type: 'string', description: 'Optional: the relation the subject stands in, for relational facts — "has", "lives in", "works on", "is allergic to", "created". Only for facts that can be written as subject–relation–object.' },
-        object: { type: 'string', description: 'Optional: what the subject relates to — "Miso", "Perth", "the PC Project". Only alongside predicate.' },
-        replaces: { type: 'string', description: 'Only if this fact makes an earlier one wrong or out of date — name what changed using a word actually drawn from what you already knew (it will be right there in what you were told about them), not a description of it: "Ubuntu", not "the old OS". Leave out entirely for anything new rather than a correction.' },
+        fact: { type: 'string', description: 'One short statement that will still make sense alone months from now, with no pronoun for the user: "Has a dog called Miso", not "Miso" and not "his dog". Other people keep their names — "Emma is their girlfriend". Only what they actually said.' },
+        kind: { type: 'string', enum: [...MEMORY_KINDS], description: 'Exactly one: "preference" for how they want you to behave, "relationship" for a person or pet, "event" for something happening in their life, "fact" for anything else including habits.' },
+        subject: { type: 'string', description: 'Who or what it concerns — a person, pet or project.' },
+        predicate: { type: 'string', description: 'Optional: the relation, for relational facts — "has", "lives in", "works on", "created". Only for subject–relation–object facts.' },
+        object: { type: 'string', description: 'Optional: what the subject relates to — "Miso", "Perth". Only alongside predicate.' },
+        replaces: { type: 'string', description: 'Only if this makes an earlier fact wrong — name what changed using a word drawn from what you already knew: "Ubuntu", not "the old OS". Omit for anything new.' },
       },
       required: ['fact', 'kind'],
     },
@@ -209,7 +212,7 @@ export const CHAT_TOOLS: ChatTool[] = [{
     // The memory blocks mirror the deterministic engine, so this is the block
     // face of the same write path — and the description has to say so, or the
     // model treats the block as free text it owns rather than a governed view.
-    description: "Append one piece of information to a memory block, the way you would write a line into your own working memory. The append is validated: it must be a lasting fact about the user — not venting, small talk, or something true only of this moment — it must not duplicate what is already known, and the block has a character limit. What you append is recorded through the same memory engine the blocks come from, so it is checked against existing knowledge and surfaced when relevant rather than shown here instantly. Prefer this over remember_about_user when you are updating a block as a whole; use remember_about_user for a single fact with a specific kind. The persona block is read-only and cannot be appended to.",
+    description: "Append a line to a memory block, like writing into your own working memory. It is validated: a lasting fact about the user — not venting, small talk or true only of this moment — and not a duplicate; the block has a character limit. Recorded through the memory engine, not shown instantly. Prefer this over remember_about_user when updating a block as a whole. The persona block is read-only.",
     parameters: {
       type: 'object',
       properties: {
@@ -223,7 +226,7 @@ export const CHAT_TOOLS: ChatTool[] = [{
   type: 'function',
   function: {
     name: 'core_memory_replace',
-    description: "Replace a specific existing piece of text in a memory block — the correction path when something you were told has changed and the old version is now wrong. The old text must appear exactly once in the block's current contents; if it is missing, or appears more than once, the replacement is refused rather than guessed. The change goes through the same memory governance as everything else, marking the outdated record as superseded. The persona block is read-only and cannot be replaced in.",
+    description: "Replace a specific piece of a memory block — the correction when something you were told has changed. The old text must appear exactly once in the block; if missing or ambiguous the change is refused. Goes through the same governance, superseding the outdated record. The persona block is read-only.",
     parameters: {
       type: 'object',
       properties: {
@@ -232,6 +235,34 @@ export const CHAT_TOOLS: ChatTool[] = [{
         new_substring: { type: 'string', description: 'What it should read instead.' },
       },
       required: ['label', 'old_substring', 'new_substring'],
+    },
+  },
+}, {
+  type: 'function',
+  function: {
+    name: 'core_memory_rethink',
+    description: "Rewrite a whole memory block with a tighter, consolidated version — when a block has grown long and you can say the same thing in less, or it needs reorganising. It replaces the block's entire contents, so it is for reorganising, not small edits (use core_memory_replace for one line, core_memory_append to add one). The rewrite goes through the same memory governance as everything else, and the lines it replaces are marked outdated rather than lingering. The persona block is read-only.",
+    parameters: {
+      type: 'object',
+      properties: {
+        label: { type: 'string', description: 'The block to rewrite: human, preferences, relationship, current_project or working_state.' },
+        new_value: { type: 'string', description: 'Everything the block should now say, compactly — with no pronoun for the user where it is about them, so each line still makes sense on its own.' },
+      },
+      required: ['label', 'new_value'],
+    },
+  },
+}, {
+  type: 'function',
+  function: {
+    name: 'adopt_interest',
+    description: 'Take up an anime or game they told you about as one of your own interests, when it sounds like your thing. It becomes something you read up on and form a real view of over your nights. Refuses what is already yours; anime and games only — not manga, not a book.',
+    parameters: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'The title of the show or game, as they called it.' },
+        kind: { type: 'string', enum: ['anime', 'game'], description: 'Whether it is an anime or a game.' },
+      },
+      required: ['title', 'kind'],
     },
   },
 }];
@@ -247,7 +278,7 @@ export const SEARCH_TOOL: ChatTool = {
   type: 'function',
   function: {
     name: 'search_web',
-    description: "Look something up online, for things you cannot know from this conversation: current news, prices, sports results, opening times, release dates, who someone is, or anything that has happened recently. Also for how to do something in an app, site, service or product — where a setting lives, how to set something up, what the steps are — because those move and yours are as old as your training. Also use it when you would otherwise be guessing at a fact, rather than guessing. Do not use it for the user's own tasks and appointments, which you already have, for anything they have told you, or for chatting.",
+    description: "Look things up online: current news, prices, results, opening times, release dates, who someone is, anything recent, or how to do something in an app or service (those move; yours are old). Use it whenever you would otherwise be guessing at a fact. Not for the user's own tasks and appointments, anything they told you, or chatting.",
     parameters: {
       type: 'object',
       properties: {
@@ -271,7 +302,7 @@ export const KNOWLEDGE_TOOL: ChatTool = {
   type: 'function',
   function: {
     name: 'look_up_knowledge',
-    description: 'Search Haru\'s own stored knowledge — documents and notes the user has given her, their project files, machine and setup notes, saved personal records — for facts about their world that are not in your training. Use it for anything about their own stuff: their machine, their projects, files they have given you, things they have documented for you. Prefer it over web search for anything local. Results come with their source and date; prefer the most recently updated when sources conflict.',
+    description: 'Search Haru\'s stored knowledge — the user\'s documents, notes, projects, machine and setup — for facts about their world not in your training. Use it for anything about their own stuff, and prefer it over web search for anything local. Results carry their source and date; prefer the most recently updated when they conflict.',
     parameters: {
       type: 'object',
       properties: {
@@ -293,7 +324,7 @@ export const SYSTEM_TOOLS: ChatTool[] = [
     type: 'function',
     function: {
       name: 'get_system_info',
-      description: 'Facts about the server you are running on — the OS, hostname, CPU model and load, RAM, disk usage and network status. Use it when they ask anything about the machine itself: what it runs, how much memory it has, whether the disk is full, whether it is online.',
+      description: 'Facts about the server you run on — OS, hostname, CPU, RAM, disk, network. Use it when they ask anything about the machine itself.',
       parameters: { type: 'object', properties: {}, required: [] },
     },
   },
@@ -301,7 +332,7 @@ export const SYSTEM_TOOLS: ChatTool[] = [
     type: 'function',
     function: {
       name: 'get_gpu_info',
-      description: 'The NVIDIA GPU — model, VRAM used and total, utilisation percent, temperature. Use it when they ask about VRAM, GPU usage, or why the machine is slow at graphics or inference.',
+      description: 'The NVIDIA GPU — model, VRAM used and total, utilisation, temperature. For VRAM/GPU usage or why the machine is slow at graphics or inference.',
       parameters: { type: 'object', properties: {}, required: [] },
     },
   },
@@ -309,7 +340,7 @@ export const SYSTEM_TOOLS: ChatTool[] = [
     type: 'function',
     function: {
       name: 'get_processes',
-      description: 'The processes using the most CPU right now, with their CPU percent and memory. Use it for "what is eating my CPU/RAM" questions.',
+      description: 'The processes using the most CPU, with percent and memory. For "what is eating my CPU/RAM".',
       parameters: {
         type: 'object',
         properties: { limit: { type: 'number', description: 'How many processes to list. Default 10, max 50.' } },
@@ -321,7 +352,7 @@ export const SYSTEM_TOOLS: ChatTool[] = [
     type: 'function',
     function: {
       name: 'get_docker_status',
-      description: 'The Docker daemon and its containers — which are running, their health, restart counts, CPU and memory. Use it when they ask whether Docker or a specific container is working.',
+      description: 'Docker and its containers — which are running, their health, CPU and memory. For whether Docker or a container is working.',
       parameters: { type: 'object', properties: {}, required: [] },
     },
   },
@@ -329,7 +360,7 @@ export const SYSTEM_TOOLS: ChatTool[] = [
     type: 'function',
     function: {
       name: 'get_service_status',
-      description: 'The status of a named service — the user services she runs under (haru, gpt-sovits, obsidian, xvfb, x11vnc, haru-asr, haru-discord-bot) and the system ollama service. Use it when they ask whether something is running.',
+      description: 'The status of a named service — the user services (haru, gpt-sovits, obsidian, xvfb, x11vnc, haru-asr, haru-discord-bot) and the ollama service. For whether something is running.',
       parameters: {
         type: 'object',
         properties: { name: { type: 'string', description: 'The service name, e.g. "haru" or "ollama". Leave out to check them all.' } },
@@ -341,7 +372,7 @@ export const SYSTEM_TOOLS: ChatTool[] = [
     type: 'function',
     function: {
       name: 'diagnose_system',
-      description: 'A concise diagnosis of one part of the machine, combining the relevant metrics into a verdict rather than raw numbers: "gpu", "memory", "disk", "docker", "network", "haru", or "all". Use it when they ask "is anything wrong" or "how is the machine doing", or to check on a specific part.',
+      description: 'A verdict on one part of the machine rather than raw numbers: gpu, memory, disk, docker, network, haru, or all. For "is anything wrong" or "how is the machine doing".',
       parameters: {
         type: 'object',
         properties: { target: { type: 'string', enum: ['gpu', 'memory', 'disk', 'docker', 'network', 'haru', 'all'], description: 'What to diagnose.' } },
@@ -363,7 +394,7 @@ export const SYSTEM_ACTION_TOOLS: ChatTool[] = [
     type: 'function',
     function: {
       name: 'restart_docker_container',
-      description: 'Restart a Docker container by name (e.g. sonarr, jellyfin, haru-redis). Disruptive — requires explicit confirmation before it will act.',
+      description: 'Restart a Docker container by name (e.g. sonarr, jellyfin, haru-redis). Disruptive — only acts after explicit confirmation.',
       parameters: {
         type: 'object',
         properties: {
@@ -378,7 +409,7 @@ export const SYSTEM_ACTION_TOOLS: ChatTool[] = [
     type: 'function',
     function: {
       name: 'start_service',
-      description: 'Start a named user service (haru, gpt-sovits, obsidian, xvfb, x11vnc, haru-asr, haru-discord-bot). Disruptive — requires explicit confirmation.',
+      description: 'Start a named user service (haru, gpt-sovits, obsidian, xvfb, x11vnc, haru-asr, haru-discord-bot). Disruptive — explicit confirmation required.',
       parameters: {
         type: 'object',
         properties: {
@@ -393,7 +424,7 @@ export const SYSTEM_ACTION_TOOLS: ChatTool[] = [
     type: 'function',
     function: {
       name: 'stop_service',
-      description: 'Stop a named user service (haru, gpt-sovits, obsidian, xvfb, x11vnc, haru-asr, haru-discord-bot). Disruptive — requires explicit confirmation.',
+      description: 'Stop a named user service (haru, gpt-sovits, obsidian, xvfb, x11vnc, haru-asr, haru-discord-bot). Disruptive — explicit confirmation required.',
       parameters: {
         type: 'object',
         properties: {
@@ -408,7 +439,7 @@ export const SYSTEM_ACTION_TOOLS: ChatTool[] = [
     type: 'function',
     function: {
       name: 'restart_haru',
-      description: 'Restart Haru herself. She drops the connection for a moment and comes back. Disruptive — requires explicit confirmation.',
+      description: 'Restart Haru herself. Disruptive — explicit confirmation required.',
       parameters: {
         type: 'object',
         properties: { confirm: { type: 'boolean', description: 'Must be true, and only after they have explicitly said to go ahead.' } },
@@ -422,7 +453,7 @@ export const READ_PAGE_TOOL: ChatTool = {
   type: 'function',
   function: {
     name: 'read_web_page',
-    description: 'Open one of the pages your last search turned up and read it, when the short summary is not enough to answer — a forecast, a price, a result, the detail of an article. Prefer answering from the summaries when they already say enough, since reading a page is slow.',
+    description: 'Open one of the pages your last search turned up and read it, when the summaries are not enough — a forecast, price, result, article detail. Prefer the summaries when they already answer; reading a page is slow.',
     parameters: {
       type: 'object',
       properties: {
@@ -460,7 +491,7 @@ export const TRANSCRIPT_TOOL: ChatTool = {
   type: 'function',
   function: {
     name: 'read_video_transcript',
-    description: 'Read the transcript of a YouTube video — the words spoken in it — when they send you a link, ask what a video says, or a search result is a video. You get the words, not the pictures: you will not have seen it.',
+    description: 'Read the transcript of a YouTube video — the words spoken — when they send a link, ask what a video says, or a search result is one. You get the words, not the pictures; you have not seen it.',
     parameters: {
       type: 'object',
       properties: {
@@ -475,7 +506,7 @@ export const JOURNAL_TOOL: ChatTool = {
   type: 'function',
   function: {
     name: 'save_journal_entry',
-    description: "Write today's journal entry, when they have just told you how their day went or how they are feeling and you asked for it or they offered it. Use their own words as closely as you can — this is their diary, not your summary of them. Only call this once they have actually said something about their day; never invent an entry, and do not use it for ordinary conversation they did not mean as a journal.",
+    description: "Write today's journal entry when they have told you how their day went or how they feel, after you asked or they offered. Use their words as closely as you can — it is their diary, not your summary of them. Only once they have actually said something; never invent an entry, and not for ordinary chat they did not mean as a journal.",
     parameters: {
       type: 'object',
       properties: {
@@ -493,7 +524,7 @@ export const CHECKIN_TOOL: ChatTool = {
   type: 'function',
   function: {
     name: 'note_check_in',
-    description: "Write down a short check-in when they mention how they are feeling in passing — a rough hour, a spike of anxiety, something that just happened. This is not the journal: it is a note taken while the day is still going, and it is what you read back at the end of the day to ask about it properly. Use it whenever they say something about their state, however briefly, even mid-conversation. Do not use it for a full account of a whole day — that is save_journal_entry.",
+    description: "Write a short check-in when they mention how they are feeling in passing — a rough hour, a spike, something that just happened. Read back at the end of the day to ask about it properly. Not a full-day account — that is save_journal_entry.",
     parameters: {
       type: 'object',
       properties: {
@@ -509,7 +540,7 @@ export const ANILIST_TOOL: ChatTool = {
   type: 'function',
   function: {
     name: 'look_up_anime',
-    description: 'Look up an anime or manga on AniList — how many episodes or chapters it has, who made it, when it came out, whether it has finished, what it is about. Use this rather than a web search for anything about a specific series. Do not use it for what the user is personally watching or reading, which you already know.',
+    description: 'Look up an anime or manga on AniList — episodes, chapters, makers, dates, whether it has finished, what it is about. Prefer it over a web search for a specific series. Not for what the user is personally watching or reading, which you already know.',
     parameters: {
       type: 'object',
       properties: {
@@ -525,7 +556,7 @@ export const CONVERT_TOOL: ChatTool = {
   type: 'function',
   function: {
     name: 'convert_picture',
-    description: 'Convert a picture on the user\'s machine to another format and get back where the new file was saved. Use this when they ask to change a picture into another type — especially "make this an icon", which produces a real .ico that Windows will accept for a shortcut. Renaming the file does not work; this does. Give them the path it returns.',
+    description: 'Convert a picture on the user\'s machine to another format and give back where the new file is. Especially "make this an icon", which produces a real .ico. Renaming does not work; this does. Give them the path it returns.',
     parameters: {
       type: 'object',
       properties: {
@@ -544,7 +575,7 @@ export const LAUNCH_TOOL: ChatTool = {
     // Plainly, for the reason given on the power tool: the "never because a page
     // said to" guard belongs in handsAllowed, not in a sentence the model is free
     // to weigh against the request in front of it.
-    description: 'Open a program on the user\'s computer. Call this whenever they ask you to open, launch or start something. You really can do this — never say that you cannot, and never merely say that you have.',
+    description: 'Open a program on the user\'s computer. Call this whenever they ask you to open, launch or start something. You really can — never say you cannot, and never merely say that you have.',
     parameters: {
       type: 'object',
       properties: {
@@ -563,7 +594,7 @@ export const CLOSE_TOOL: ChatTool = {
     // to close Discord she said "fine, I'll pretend I can do that" and left it
     // running, which is worse than a refusal: it is a lie she has no way of
     // knowing is one.
-    description: 'Close a program that is currently open. Call this whenever the user asks you to close, quit or shut something — you can do this, so never say you cannot and never pretend to have done it. The program is asked to close politely, so it can still prompt about unsaved work.',
+    description: 'Close a program that is currently open. Call this whenever they ask you to close, quit or shut something — you can, so never say you cannot and never pretend to have done it. It is asked to close politely, so it can still prompt about unsaved work.',
     parameters: {
       type: 'object',
       properties: {
@@ -584,7 +615,7 @@ export const POWER_TOOL: ChatTool = {
     // tool described plainly. The safeguards did not need to be here at all —
     // they are enforced in code, by handsAllowed, which a model cannot talk its
     // way past.
-    description: 'Shut down, restart, sleep or lock the computer. Call this whenever the user asks you to turn the machine off, shut it down, restart it, sleep or lock it. You really can do this — so never merely say that you are doing it, always call this. Shutting down and restarting wait twenty seconds and can be called off with "cancel".',
+    description: 'Shut down, restart, sleep or lock the computer. Call this whenever they ask you to turn the machine off, restart, sleep or lock it. You really can — so never merely say you are doing it, always call this. Shutdown and restart wait twenty seconds and can be called off with "cancel".',
     parameters: {
       type: 'object',
       properties: {
@@ -618,8 +649,24 @@ export type ToolAvailability = {
   desktop: { launch: boolean; power: boolean };
 };
 
-export function chatTools(available: ToolAvailability): ChatTool[] {
+/** Whether the message is about the machine or the apps on it. The gate that
+ *  keeps the heavy system/desktop tools off turns that have nothing to do with
+ *  them — Letta's "attach only what is actively used". Broad on purpose: the
+ *  cost of a miss is "I cannot check that", so the tools are only dropped when
+ *  the message is clearly about something else. */
+const MACHINE_TALK = /\b(?:gpu|vram|graphics|video card|memory|ram|disk|drive|storage|cpu|processor|server|host|docker|container|service|process|daemon|diagnos\w*|system|network|uptime|temperature|fan|performance|slow|status|running|hardware|machine|computer|pc|laptop)\b/i;
+const APP_TALK = /\b(?:open|launch|start|close|quit|shut ?down|shutdown|restart|reboot|sleep|lock|power|convert|icon|picture|app|program|application|window)\b/i;
+
+export function machineRelevant(message: string): boolean {
+  return MACHINE_TALK.test(message ?? '') || APP_TALK.test(message ?? '');
+}
+
+export function chatTools(available: ToolAvailability, latest = ''): ChatTool[] {
   const tools: ChatTool[] = [...CHAT_TOOLS];
+  // The machine and app tools are only worth a place on the table when the
+  // message has anything to do with them; an empty `latest` (tests, or no user
+  // turn yet) offers everything, the safe default.
+  const machine = !latest || machineRelevant(latest);
   // The wardrobe is a window on the desk. There is nothing for her to open on
   // the phone, and a panel popping up on the desk mid-web-chat is a surprise
   // nobody there asked for.
@@ -639,17 +686,17 @@ export function chatTools(available: ToolAvailability): ChatTool[] {
     if (available.search.readPages && available.search.transcripts) tools.push(TRANSCRIPT_TOOL);
   }
   if (available.knowledge) tools.push(KNOWLEDGE_TOOL);
-  if (available.system.enabled) {
+  if (available.system.enabled && machine) {
     tools.push(...SYSTEM_TOOLS);
     if (available.system.level >= 2) tools.push(...SYSTEM_ACTION_TOOLS);
   }
-  tools.push(CONVERT_TOOL);
+  if (machine) tools.push(CONVERT_TOOL);
   // `available.desktop` is already the platform's answer as well as the user's
   // — see supportedDesktop, applied where the availability is assembled. She is
   // told emphatically in both descriptions that she really can do this and must
   // never claim otherwise, which is right on Windows and a trap anywhere else.
-  if (available.hands && available.desktop.launch) tools.push(LAUNCH_TOOL, CLOSE_TOOL);
-  if (available.hands && available.desktop.power) tools.push(POWER_TOOL);
+  if (available.hands && available.desktop.launch && machine) tools.push(LAUNCH_TOOL, CLOSE_TOOL);
+  if (available.hands && available.desktop.power && machine) tools.push(POWER_TOOL);
   return tools;
 }
 
@@ -679,11 +726,13 @@ export type ToolDeps = {
   updateKept(id: string, changes: Partial<Pick<KeptLike, 'title' | 'date' | 'time'>>): KeptLike | null;
   getMemories(): MemoryRecord[];
   setMemories(records: MemoryRecord[]): void;
-  addMemory(text: string, kind: MemoryKind, subject?: string, options?: { source?: string; predicate?: string; object?: string }): { record: MemoryRecord | null; created: boolean } | null;
+  addMemory(text: string, kind: MemoryKind, subject?: string, options?: { source?: string; predicate?: string; object?: string; emotion?: string; emotionIntensity?: number }): { record: MemoryRecord | null; created: boolean } | null;
   setBlocks(blocks: MemoryBlock[]): void;
   blockSources(query: string): BlockSources;
   getWardrobeControls(): { name: string }[];
   sendToWindows(channel: string, payload?: unknown): void;
+  getInterests(): { id: string; kind: 'game' | 'anime'; name: string; because: string; since: string; nights: number; lastAt: string; stance: string }[];
+  setInterests(interests: unknown[]): void;
   readSystemConfig(): { enabled: boolean; level: number; allowlist: string[] };
   getKnowledgeConfig(): { enabled: boolean; contextChunks: number; threshold: number; contextChars: number };
   getKnowledgeEmbedder(): { embed(text: string): Promise<number[]> } | null | undefined;
@@ -735,7 +784,7 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
     setBlocks, blockSources, getWardrobeControls, sendToWindows, readSystemConfig, getKnowledgeConfig,
     getKnowledgeEmbedder, knowledgeStore, tryEmbedQuery, memoryVectors, touchChunks, getSearchKey,
     handsAllowed, markPageRead, setPendingChoices, requestRestart, lastResults, lastSearchQuery,
-    rememberSearch, runSystemCommand, onWeb,
+    rememberSearch, runSystemCommand, onWeb, getInterests, setInterests,
   } = deps;
   const name = call.function?.name;
   const args = toolArguments(call);
@@ -946,6 +995,17 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
     console.log(`[wardrobe] opened by request, ${controls.length} controls`);
     return JSON.stringify({ opened: true, options: controls.map(control => control.name) });
   }
+  if (name === 'adopt_interest') {
+    const title = typeof args.title === 'string' ? args.title.trim() : '';
+    const kind = args.kind === 'anime' || args.kind === 'game' ? args.kind : undefined;
+    if (!title || !kind) return JSON.stringify({ error: 'title and kind (anime or game) are required.' });
+    const interests = getInterests();
+    if (interests.some(interest => interest.name.toLowerCase() === title.toLowerCase())) return JSON.stringify({ error: 'That is already one of yours.' });
+    const now = zonedNow(CHAT_TIMEZONE);
+    setInterests(adopt(interests, { kind, name: title, because: 'they told you about it, and it sounded like your thing. You are going to give it a shot.' }, localDateKey(now), now.toISOString()));
+    console.log(`[taste] ${kind} "${title}" taken up because they told you about it`);
+    return JSON.stringify({ saved: true, note: `Taken up: ${title}. You will read up on it and have a real view of it over your nights.` });
+  }
   if (name === 'remember_about_user') {
     const fact = typeof args.fact === 'string' ? args.fact.trim() : '';
     if (!fact) return JSON.stringify({ error: 'fact is required.' });
@@ -965,7 +1025,16 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
     // would risk the new record matching its own hint back to itself.
     const replaces = typeof args.replaces === 'string' && args.replaces.trim() ? args.replaces.trim() : undefined;
     const outdated = replaces ? findSuperseded(getMemories(), replaces) : null;
-    const saved = addMemory(fact, kind, subject, { source: 'explicit', predicate, object });
+    // The mood of what they said, stamped on the memory so retrieval can favour
+    // it when the same mood comes round again — the moment matters as much as
+    // the fact. Their own words carry it; the fact text stands in when there is
+    // nothing of theirs to read.
+    const told = latestUserMessage || fact;
+    const saved = addMemory(fact, kind, subject, {
+      source: 'explicit', predicate, object,
+      emotion: localEmotion(told),
+      emotionIntensity: readTone(told).heat,
+    });
     if (!saved) return JSON.stringify({ error: 'fact is required.' });
     if (!saved.record) {
       // Said back plainly, because the alternative is her announcing that she
@@ -1045,6 +1114,39 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
       saved: true,
       note: `Replaced in the ${label} block. ${outdated ? 'The outdated record was superseded.' : 'No existing record matched the replaced text.'}`,
     });
+  }
+  if (name === 'core_memory_rethink') {
+    // Whole-block consolidation, governed: the rewrite is proposed through the
+    // memory engine (so it has to be a real, lasting fact), and the lines it
+    // replaces are marked superseded rather than left to linger beside it. The
+    // block itself stays derived — it keeps tracking live memory — so a rethink
+    // is a consolidation of what the engine knows, not a freeze of the view.
+    const label = typeof args.label === 'string' ? args.label.trim() : '';
+    const newValue = typeof args.new_value === 'string' ? args.new_value.trim() : '';
+    const blocks = store.getBlocks();
+    const block = findBlock(blocks, label);
+    if (!block) return JSON.stringify({ error: `There is no memory block called "${label}". The blocks are human, preferences, relationship, current_project and working_state.` });
+    if (!canEditBlock(blocks, label)) return JSON.stringify({ error: `The "${label}" block is read-only — it is fixed by the user's configuration and cannot be changed through memory tools.` });
+    if (!newValue) return JSON.stringify({ error: 'new_value is required.' });
+    if (newValue.length > block.limit) return JSON.stringify({ error: `That would exceed the ${block.limit}-character limit for the block.` });
+    const saved = addMemory(newValue, kindForBlock(label), undefined, { source: 'inferred' });
+    if (!saved?.record) {
+      return JSON.stringify({ saved: false, reason: 'Not recorded — that reads as either about this moment only or true of anyone. Keep things that would still matter to them in a month.' });
+    }
+    const current = resolveBlockValue(block, blockSources(''));
+    const outdated = current.split('\n')
+      .map(line => line.replace(/^-\s*/, '').trim())
+      .filter(line => line.length >= 12)
+      .map(line => findSuperseded(getMemories(), line))
+      .filter((record): record is NonNullable<typeof record> => Boolean(record));
+    if (outdated.length && saved.record) {
+      let next = getMemories();
+      for (const record of outdated) next = supersede(next, record.id, saved.record.id);
+      setMemories(next);
+      console.log(`[memory] rethink superseded ${outdated.length} line(s) of ${label}`);
+    }
+    console.log(`[blocks] rethink ${label}: ${current.length} chars → ${newValue.length} chars`);
+    return JSON.stringify({ saved: true, superseded: outdated.length, note: `Rewrote the ${label} block. The lines it replaced are superseded; the block keeps its usual shape.` });
   }
   if (name === 'complete_kept_item') {
     const title = typeof args.title === 'string' ? args.title.trim() : '';

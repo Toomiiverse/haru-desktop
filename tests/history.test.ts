@@ -132,3 +132,33 @@ test('a small budget keeps the evening of the last day, from a message of theirs
   assert.deepEqual(earlierTurns(archive, '2026-09-01', 3, 24).map(t => t.content), ['afternoon', 'b', 'evening', 'c'], 'the tail that fits, opening on their turn');
   assert.deepEqual(earlierTurns(archive, '2026-09-01', 3, 3).map(t => t.content), [], 'nothing fits, nothing goes');
 });
+
+// ---- the finished days, from her own notes ----
+
+import { earlierDayNotes, earlierDaysContext } from '../electron/history';
+
+test('earlierDayNotes lists finished days newest last', () => {
+  const notes = earlierDayNotes([
+    { day: '2026-08-29', summary: 'quiet day' },
+    { day: '2026-08-30', summary: 'the store crashed' },
+    { day: '2026-08-31', summary: 'fixed the store' },
+  ], '2026-09-01', 7);
+  assert.deepEqual(notes.map(note => note.day), ['2026-08-29', '2026-08-30', '2026-08-31']);
+  assert.ok(notes.every(note => note.day < '2026-09-01'), 'today is never a note');
+});
+
+test('earlierDaysContext uses notes where they exist and raw turns where they do not', () => {
+  const turn = (role: string, content: string) => ({ role, content, at: '2026-08-30T10:00:00.000Z' });
+  const archive = {
+    '2026-08-29': [turn('user', 'old day raw')],
+    '2026-08-30': [turn('user', 'yesterday, never distilled'), turn('assistant', 'y')],
+    '2026-08-31': [turn('user', 'today, not finished yet')],
+  };
+  const sessions = [{ day: '2026-08-29', summary: 'a distilled day', createdAt: '2026-09-01T00:00:00.000Z' }];
+  const { notes, turns } = earlierDaysContext(sessions, archive, '2026-08-31', { days: 7 });
+  assert.deepEqual(notes, ['[Day 2026-08-29] a distilled day']);
+  assert.deepEqual(turns.map(turn => turn.content), ['yesterday, never distilled', 'y'], 'the undistilled day falls back to raw turns');
+  const empty = earlierDaysContext([], archive, '2026-08-31', { days: 7 });
+  assert.deepEqual(empty.notes, []);
+  assert.ok(empty.turns.length >= 2, 'no sessions at all means the raw path as before');
+});

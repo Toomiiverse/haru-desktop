@@ -43,15 +43,23 @@ export type WebDeps = {
    * taken back. One exception: a round that is thrown away at the last moment
    * (a tool call was coming, a retry was pressed) signals itself by handing a
    * single U+FFFD — the reader clears what it has and waits for the next chunk.
+   *
+   * `onSentence` is called as each complete sentence of the reply arrives,
+   * with the mood read from the line so far (no model call). The phone speaks
+   * these while the rest is still being written, so her voice follows the
+   * words instead of waiting for them; the last sentence is always delivered
+   * before the stream ends. The same U+FFFD that clears the text clears the
+   * voice: nothing of a thrown-away round may be spoken.
    */
-  sayStream(text: string, onChunk: (chunk: string) => void, attachments?: unknown[], options?: { interrupted?: boolean }): Promise<{ reply: string; ignored?: boolean }>;
+  sayStream(text: string, onChunk: (chunk: string) => void, attachments?: unknown[], options?: { interrupted?: boolean }, onSentence?: (sentence: string, emotion: string) => void): Promise<{ reply: string; ignored?: boolean }>;
   /**
    * Her last reply, done again. The message that prompted it is asked once
    * more with that reply left out of the history, and the new one takes its
    * place — on the phone and on the desktop, which owns the conversation.
-   * Same stream contract as sayStream. Null when she has nothing to redo.
+   * Same stream contract as sayStream, sentences included.
+   * Null when she has nothing to redo.
    */
-  retryStream(onChunk: (chunk: string) => void): Promise<{ reply: string; ignored?: boolean } | null>;
+  retryStream(onChunk: (chunk: string) => void, onSentence?: (sentence: string, emotion: string) => void): Promise<{ reply: string; ignored?: boolean } | null>;
   /** Files that ride the next message, staged the way a desktop paste is. */
   attach: {
     /** Copies the bytes into her keeping; returns the staged record the page
@@ -579,7 +587,7 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
     });
     const emit = (value: unknown) => { if (!res.destroyed) res.write(`data: ${JSON.stringify(value)}\n\n`); };
     try {
-      const answer = await deps.sayStream(text, chunk => emit({ text: chunk }), files, { interrupted });
+      const answer = await deps.sayStream(text, chunk => emit({ text: chunk }), files, { interrupted }, (sentence, emotion) => emit({ sentence, emotion }));
       emit({ done: true, reply: answer.reply, ignored: Boolean(answer.ignored) });
     } catch (error) {
       console.error('[web] ' + (error instanceof Error ? error.message : String(error)));
@@ -612,7 +620,7 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
     });
     const emit = (value: unknown) => { if (!res.destroyed) res.write(`data: ${JSON.stringify(value)}\n\n`); };
     try {
-      const answer = await deps.retryStream(chunk => emit({ text: chunk }));
+      const answer = await deps.retryStream(chunk => emit({ text: chunk }), (sentence, emotion) => emit({ sentence, emotion }));
       if (!answer) emit({ error: 'There is nothing of hers to do again.' });
       else emit({ done: true, reply: answer.reply, ignored: Boolean(answer.ignored) });
     } catch (error) {

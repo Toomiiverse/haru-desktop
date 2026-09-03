@@ -159,3 +159,48 @@ export function earlierTurns<T extends Dated>(archive: Record<string, T[]>, toda
   return byDay.flat();
 }
 
+/** The one-line note a finished day was distilled into (summariseSession). */
+export type DayNote = { day: string; summary: string };
+
+/**
+ * The finished days before today, from her own one-line notes — newest last.
+ *
+ * Each day is distilled once at the five o'clock roll, so a note exists for
+ * every day that was actually over while she was running. They are compact,
+ * byte-stable per day (which keeps the cached head stable), and written in
+ * her voice, so the prompt can hold a week of them for a tenth of what three
+ * days of raw turns cost.
+ */
+export function earlierDayNotes(sessions: DayNote[], todayKey: string, days = 7): DayNote[] {
+  return sessions
+    .filter(session => session.day < todayKey)
+    .sort((a, b) => a.day.localeCompare(b.day))
+    .slice(-days);
+}
+
+/**
+ * The earlier-days context for the chat prompt: her one-line notes for the
+ * days that have them, and raw turns (via earlierTurns) for the days that do
+ * not — a day is only distilled once it is actually over, so yesterday can
+ * still be raw before the roll, or raw for ever if the model was down that
+ * night. Notes become a single system message in the prompt; raw turns flow
+ * through the same seams as today's.
+ */
+export function earlierDaysContext(
+  sessions: DayNote[],
+  archive: Record<string, unknown[]>,
+  todayKey: string,
+  opts: { days?: number; budget?: number; turnsDays?: number } = {},
+): { notes: string[]; turns: Dated[] } {
+  const days = opts.days ?? DAYS_OF_HISTORY;
+  const budget = opts.budget ?? HISTORY_BUDGET_CHARS;
+  const turnsDays = opts.turnsDays ?? DAYS_OF_HISTORY;
+  const noted = new Set(earlierDayNotes(sessions, todayKey, days).map(note => note.day));
+  const notes = earlierDayNotes(sessions, todayKey, days).map(note => `[Day ${note.day}] ${note.summary}`);
+  const wanted = Object.keys(archive).filter(day => day < todayKey && !noted.has(day)).sort().slice(-turnsDays);
+  const subset: Record<string, unknown[]> = {};
+  for (const day of wanted) subset[day] = archive[day] ?? [];
+  const turns = earlierTurns(subset as Record<string, Dated[]>, todayKey, turnsDays, budget);
+  return { notes, turns };
+}
+

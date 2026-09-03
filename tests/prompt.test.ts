@@ -7,7 +7,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { chatSystemPrompt, feedbackSummary, freshStartInstruction, knowledgeInstruction, screenContext, searchInstruction, systemInstruction, NO_GUESSING, type PromptState, LENGTH_RULE_LOCAL, LENGTH_RULE_HOSTED } from '../electron/prompt';
+import { chatSystemPrompt, chatDynamicContext, feedbackSummary, freshStartInstruction, knowledgeInstruction, screenContext, searchInstruction, systemInstruction, NO_GUESSING, FIRST_PERSON_NOTE, type PromptState, LENGTH_RULE_LOCAL, LENGTH_RULE_HOSTED } from '../electron/prompt';
 import { readSearchConfig } from '../electron/search';
 
 const NOW = new Date('2026-08-20T19:30:00.000Z');
@@ -228,7 +228,7 @@ test('a short follow-up is read as continuing the thread, and never echoed back 
 
 test('her emoji are named, as hers, beside the persona', () => {
   const prompt = chatSystemPrompt(state({ irritation: 5 }));
-  const expressive = prompt.indexOf('the smirk, the side-eye, the huff');
+  const expressive = prompt.indexOf('Emoji are part of how you talk');
   assert.notEqual(expressive, -1, 'the emoji rule never made it into the prompt');
   assert.ok(expressive > prompt.indexOf(STYLE), 'it is part of her voice, so it follows her style');
   assert.ok(expressive > prompt.indexOf('thoroughly fed up'), 'and after the mood and ego, which read as "no cheer" — before them the emoji were dropped as cheer');
@@ -248,6 +248,20 @@ test('the way somewhere sits beside the machine facts, when they asked for it', 
   assert.doesNotMatch(chatSystemPrompt(state()), /They asked the way/);
   const asked = chatSystemPrompt(state({ directionsNote: 'They asked the way to "Coles". Found: Coles, Wembley. It is about 6.1 km from where they are. The app is attaching a button under your words.' }));
   assert.match(asked, /Found: Coles, Wembley/);
+});
+
+test('her replies are always her first person — the note sits with the persona', () => {
+  const prompt = chatSystemPrompt(state());
+  const note = at(prompt, FIRST_PERSON_NOTE.slice(0, 30));
+  assert.notEqual(note, -1, 'the first-person note never made it into the prompt');
+  assert.ok(note > at(prompt, STYLE), 'read after her identity and style, so it binds with who she is');
+});
+
+test('she is allowed to hedge and to catch herself being wrong', () => {
+  const prompt = chatSystemPrompt(state());
+  assert.match(prompt, /genuinely unsure/);
+  assert.match(prompt, /wait, no, that was Tuesday/);
+  assert.match(prompt, /never defend a wrong memory with a new invention/);
 });
 
 test('the weather where they are sits with their whereabouts, when she has a reading', () => {
@@ -274,7 +288,7 @@ test('the way she writes is read after the persona and after the emoji rule', ()
   const natural = prompt.indexOf('Write the way a person texts');
   assert.notEqual(natural, -1, 'it never made it into the prompt');
   assert.ok(natural > prompt.indexOf(STYLE), 'after her style, which tells her to be bitchy in every reply');
-  assert.ok(natural > prompt.indexOf('the smirk, the side-eye, the huff'), 'and after the emoji rule');
+  assert.ok(natural > prompt.indexOf('Emoji are part of how you talk'), 'and after the emoji rule');
 });
 
 test('asked about her own things, her list is not in front of her', () => {
@@ -286,3 +300,59 @@ test('asked about her own things, her list is not in front of her', () => {
   assert.match(hers, /Emoji are part of how you talk/, 'the rest of the brief is untouched');
 });
 
+
+// ---- cachedHead: the hosted-brain split, where the cacheable head comes first ----
+
+const CLOCK = "in the user's timezone";
+
+test('cachedHead keeps only the invariant blocks, persona and rules', () => {
+  const prompt = chatSystemPrompt(state({ irritation: 5, latestMessage: 'what is the weather in leeds' }), true);
+  assert.ok(at(prompt, IDENTITY) !== -1);
+  assert.ok(at(prompt, STYLE) !== -1);
+  assert.ok(at(prompt, LENGTH_RULE_LOCAL) !== -1);
+  // The changing context has left the system message entirely.
+  assert.equal(at(prompt, CLOCK), -1, 'the clock must not be in the cached head');
+  assert.equal(at(prompt, PROFILE), -1, 'the query-selected memory must not be in the cached head');
+  assert.equal(at(prompt, 'thoroughly fed up'), -1, 'her mood must not be in the cached head');
+});
+
+test('the cachedHead head is byte-identical however the turn changes', () => {
+  const a = chatSystemPrompt(state({ now: new Date('2026-08-20T09:00:00.000Z'), latestMessage: 'hello', irritation: 0, machineNote: '' }), true);
+  const b = chatSystemPrompt(state({ now: new Date('2026-08-20T23:59:00.000Z'), latestMessage: 'why are you ignoring me', irritation: 7, machineNote: MACHINE, goodnight: 'said' }), true);
+  assert.ok(a.length > 500, 'the stable head should still be the bulk of her rules');
+  assert.equal(a, b);
+});
+
+test('the changing context lives in chatDynamicContext, in the original order', () => {
+  const extra = chatDynamicContext(state({ irritation: 5, latestMessage: 'what is the weather in leeds' }));
+  assert.ok(extra.includes(CLOCK));
+  assert.ok(extra.includes(PROFILE));
+  assert.ok(extra.includes('thoroughly fed up'));
+  // The clock opens it, the memory profile follows, her mood is read last —
+  // the order she was always told them in.
+  assert.ok(at(extra, CLOCK) < at(extra, PROFILE));
+  assert.ok(at(extra, PROFILE) < at(extra, 'thoroughly fed up'));
+});
+
+test('chatSystemPrompt default still opens with the clock and holds the mood', () => {
+  const prompt = chatSystemPrompt(state({ irritation: 5 }));
+  assert.ok(at(prompt, CLOCK) < at(prompt, IDENTITY), 'the local-brain order is unchanged');
+  assert.ok(prompt.includes('thoroughly fed up'));
+});
+
+test('the default order still opens with the clock', () => {
+  const prompt = chatSystemPrompt(state());
+  assert.ok(at(prompt, CLOCK) < at(prompt, IDENTITY), 'the local-brain order is unchanged');
+});
+
+// ---- away: the phone trims its own system prompt ----
+
+test('away drops the machine-tools description but keeps the lookup tools', () => {
+  const desk = chatSystemPrompt(state({ search: readSearchConfig({ enabled: true }), knowledgeEnabled: true, systemEnabled: true }), true, false);
+  assert.ok(desk.includes('get_gpu_info'), 'the desk is told about the machine tools');
+  const phone = chatSystemPrompt(state({ search: readSearchConfig({ enabled: true }), knowledgeEnabled: true, systemEnabled: true }), true, true);
+  assert.ok(!phone.includes('get_gpu_info'), 'a phone is never offered the machine tools');
+  assert.ok(phone.includes('search_web'), 'a phone still gets the lookup tools');
+  assert.ok(phone.includes('look_up_knowledge'));
+  assert.ok(phone.includes(IDENTITY), 'her persona stays on the phone');
+});
