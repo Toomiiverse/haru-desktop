@@ -33,7 +33,8 @@ import { describeFailure, fromOpenAIReply, isOpenAIShaped, toOpenAIBody, DEFAULT
 import { formatPage, formatResults, readSearchConfig, lookItUpInstruction, readWebPage, SearchBlocked, searchWeb, type SearchConfig, type SearchResult } from './search';
 import { mayWander, pickDestination, readRoamConfig, refugeFrom, speedFor, step, nextWanderDelay, type Point, type RoamConfig } from './roam';
 import { angleFor, mayNotice, noteNoticed, readNotices, type Page as NoticedPage, type PageState } from './noticing';
-import { CAPTURE_HEIGHT, CAPTURE_WIDTH, glancePrompt, readWatchingConfig, shouldLook, splitGlance, worthMentioning, type WatchingConfig } from './watching';
+import { CAPTURE_HEIGHT, CAPTURE_WIDTH, readWatchingConfig, recentScene, sceneAsk, shouldLook, watchingPrompt, worthMentioning, type WatchingConfig } from './watching';
+import { gameMemoryForPrompt, noteInGameMemory, openGameMemory, timesThisWeek, welcomePrompt } from './games';
 import { buildGameIndex, gameFor } from './steam';
 import { pdfPrompt, readPdf } from './pdf';
 import { classify, discard, extractAudio, extractFrames, findFfmpeg, OPENABLE, readText, type FileKind } from './attach';
@@ -1540,6 +1541,57 @@ function visionEndpoint(provider: ProviderConfig | undefined, vision?: VisionCon
 
 let lastLookAt = 0;
 let lastSceneSeen = '';
+let lastSceneAt = 0;
+/** What she last saw on their screen, while it is still what they are looking at. */
+function sceneNow(): string {
+  return recentScene(lastSceneSeen, lastSceneAt, Date.now());
+}
+
+/** The game that is up, and her file on it. Stays open until another game boots. */
+let currentGame: { name: string; memory: string } | null = null;
+let lastGamingPollAt = 0;
+/** A game seen again after this long away is a boot, not an alt-tab back. */
+const GAME_BOOT_GAP_MS = 60 * 60_000;
+function gamesRoot() { return path.join(app.getPath('userData'), 'games'); }
+/** Her notes on the game, while it is running. */
+function gameMemoryNow(): string {
+  return currentGame && gameIsRunning() ? gameMemoryForPrompt(currentGame.memory) : '';
+}
+
+/**
+ * The game has come up: open its folder, make one if it is new, and say hello.
+ *
+ * The folder is seeded with whatever she had already read about the game on a
+ * night pass, so a game she has notes on is not a stranger the first time it
+ * gets a file. The welcome goes through interject like every other unprompted
+ * line, so the rules about when she may speak still hold.
+ */
+async function bootGame(name: string) {
+  const now = Date.now();
+  const booted = currentGame?.name !== name || now - lastGamingPollAt > GAME_BOOT_GAP_MS;
+  lastGamingPollAt = now;
+  if (!name.trim() || !booted) return;
+  const seed = getNights().filter(night => night.game?.toLowerCase() === name.toLowerCase()).map(night => `${night.day}: ${night.note}`);
+  const opened = openGameMemory(gamesRoot(), name, seed, new Date());
+  currentGame = { name, memory: opened.text };
+  console.log(`[game] ${opened.isNew ? 'new game — started a folder for' : 'opened the folder for'} ${name} (${opened.text.length} chars)`);
+  const provider = store.get('ai.config') as ProviderConfig | undefined;
+  if (!provider?.model) return;
+  const refusal = whyNotInterject({ aboutTheGame: true });
+  if (refusal) { console.log(`[game] no welcome — ${refusal}`); return; }
+  try {
+    const character = getActiveCharacter();
+    const work = Object.values(getFollowing()).find(entry => entry.kind === 'game' && entry.title.toLowerCase() === name.toLowerCase());
+    const line = toLength(await ollamaQuip(
+      [character.identity, character.style, rightNow()].join(' '),
+      welcomePrompt(name, timesThisWeek(work, localDateKey(zonedNow(CHAT_TIMEZONE))), gameMemoryForPrompt(opened.text), opened.isNew),
+      provider,
+    ), 220);
+    if (line.trim() && interject(line, { aboutTheGame: true, source: 'screen', about: name })) void speak(line, classifyEmotion(line, provider));
+  } catch (error) {
+    console.warn('[game] no welcome:', error instanceof Error ? error.message : error);
+  }
+}
 let watchTimer: ReturnType<typeof setInterval> | null = null;
 /**
  * The monitor they are actually looking at.
@@ -1612,11 +1664,26 @@ async function glanceAtScreen() {
     const frame = activeScreen(sources)?.thumbnail;
     if (!frame || frame.isEmpty()) return;
     const encoded = frame.toPNG().toString('base64');
-    const character = getActiveCharacter();
-    // One call: it looks and reacts together, and keeps its place in memory so
-    // the next glance is not another model load. See glancePrompt.
+    const title = gameNow() || watchingTitle || currentActivity?.label || '';
+    // The eyes report game state, plainly; she reacts to the report in her own
+    // voice with the chat model, and the report stays in her context so a
+    // question about the fight is answered from the screen. See sceneAsk.
     const sighting = await look(encoded, vision, visionEndpoint(provider, vision), modelHeaders(visionEndpoint(provider, vision)), net.fetch, {
-      system: [
+      ask: sceneAsk(title),
+      keepAlive: '30m',
+      numPredict: 160,
+    });
+    const scene = sighting.description;
+    const mentionable = worthMentioning(scene, lastSceneSeen);
+    // The scene is logged, never the frame. Kept whether or not she speaks:
+    // what is on screen is context either way.
+    lastSceneSeen = scene;
+    lastSceneAt = Date.now();
+    console.log(`[watch] saw: ${toLength(scene, 160)} (${Date.now() - startedAt}ms)`);
+    if (!mentionable) return;
+    const character = getActiveCharacter();
+    const line = toLength(await ollamaQuip(
+      [
         character.identity,
         character.style,
         // She is looking at a game she may have watched them play for a week.
@@ -1624,22 +1691,12 @@ async function glanceAtScreen() {
         recogniseNow(getFollowing(), currentActivity ? identifyWork(currentActivity, gameNow()) : null),
         assumeItIsTheirs(getFollowing(), Date.now()),
       ].filter(Boolean).join(' '),
-      ask: glancePrompt(gameNow() || watchingTitle || currentActivity?.label || ''),
-      // Hot, because the same game produces much the same scene for an hour and
-      // convergence on one phrase is what makes a companion feel canned.
-      temperature: 1,
-      keepAlive: '30m',
-    });
-    const { scene, say } = splitGlance(sighting.description);
-    // The scene is logged, never the frame.
-    if (!scene || !worthMentioning(scene, lastSceneSeen)) {
-      console.log(`[watch] nothing worth mentioning (${Date.now() - startedAt}ms)`);
-      if (scene) lastSceneSeen = scene;
-      return;
-    }
-    lastSceneSeen = scene;
-    const line = toLength(say, 220);
+      watchingPrompt(scene, title),
+      provider,
+    ), 220);
     if (!line.trim()) return;
+    // Into the game's own file, so the next boot remembers this one.
+    if (currentGame) currentGame.memory = noteInGameMemory(gamesRoot(), currentGame.name, `${scene} You said: "${line}"`, new Date());
     console.log(`[watch] remarked on what is on screen (${line.length} chars, ${Date.now() - startedAt}ms)`);
     // Spoken only if it was also written down — see interject.
     if (interject(line, { aboutTheGame: true, source: 'screen' })) void speak(line, classifyEmotion(line, provider));
@@ -2184,6 +2241,8 @@ function handleHelperLine(line: string) {
     if (activity.kind === 'gaming') { const provider = store.get('ai.config') as ProviderConfig | undefined; if (provider?.model) void releaseModelForGame(provider); }
     else if (!watchingTitle) evictedFor = null;
     noteFollowing(activity, steamName ?? '');
+    // After noteFollowing, so today already counts among the days it was opened.
+    if (activity.kind === 'gaming') void bootGame(steamName || activity.label);
     // Written here rather than in reactToActivity, which is where the reacting
     // is decided: that returns early on a cooldown, a mood, a tool window she
     // is silent about — and a day she spent quietly is still a day she spent.
@@ -6296,7 +6355,7 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
     journalConfig: readJournalConfig(store.get('journal.config')),
     journal: getJournal(),
     checkInsToday: checkInsOn(getCheckIns(), localDateKey(promptNow)),
-    screen: { label: currentActivity?.label, haunt: currentPlace ? getHaunts()[currentPlace] : undefined },
+    screen: { label: currentActivity?.label, haunt: currentPlace ? getHaunts()[currentPlace] : undefined, scene: sceneNow(), memory: gameMemoryNow() },
     asides: getAsides(),
     rated: (store.get('chat.messages') as RatedReply[] | undefined) ?? [],
     kept: getKept(),
@@ -8496,6 +8555,8 @@ async function haveANight(config: ProviderConfig) {
       sources: found.slice(0, 3).map(result => result.url).filter(Boolean),
       ...(game ? { game: game.name } : {}),
     }));
+    // Into the game's own folder too, so the next boot has it without a night pass.
+    if (game) noteInGameMemory(gamesRoot(), game.name, `Read a guide to it ("${about}"): ${note}`, new Date());
     appendDream(app.getPath('userData'), dream({ kind: game ? 'guide' : 'free', game: game?.name, reading, transcript: watched, wrote: note }));
     console.log(`[night] ${game ? `read a guide to ${game.name}` : watched ? 'went through a video transcript' : 'read'} — "${about}" (${found.length} result(s)) -> ${note.length} chars`);
   } catch (error) {

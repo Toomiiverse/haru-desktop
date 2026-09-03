@@ -93,49 +93,39 @@ export function worthMentioning(description: string, previous: string): boolean 
  * she has already seen rather than as the subject.
  */
 /**
- * Seeing and reacting in one call.
+ * Seeing and saying are two calls again.
  *
- * It used to be two: the vision model described the screen, then the chat model
- * wrote the line. Measured end to end that was eleven seconds, and only about a
- * second of it was work — gemma4 and the chat model are 8.5GB and 10GB against a
- * 16GB card, so each glance evicted one to load the other and then evicted it
- * back. A glance that arrives eleven seconds late is not a reaction to anything;
- * the scene has moved on and she is talking about the last room.
+ * They were one for a while: gemma4 and a 14B chat model could not both sit on
+ * the card, so each glance evicted one to load the other and the remark landed
+ * eleven seconds after the scene it was about. The chat model is hosted now
+ * (or a 7B that fits beside a 4B pair of eyes), so the split costs nothing —
+ * and it is the split that lets the scene go anywhere besides one remark: into
+ * her context, so "how am I doing" mid-fight is answered from the screen.
  *
- * One model, one call, and it holds its place in memory between glances: about a
- * second, measured.
- *
- * Both lines are needed. The description is not decoration — it is what decides
- * whether she speaks at all, since the dull-screen and same-scene filters run on
- * it. Asking for it first turned out to help the remark too: made to name what
- * it was looking at before reacting, the model stopped falling back on a stock
- * phrase, and distinct lines over eight runs went from 5/8 to 10/10.
+ * What the eyes are asked for is game state, not a caption. "A character
+ * fighting in a city" is what a vision model says unprompted; "Anby, 12% HP,
+ * two enemies left" is what she can react to and answer from.
  */
-export function glancePrompt(title: string): string {
+export function sceneAsk(title: string): string {
   return [
-    `They are playing something${title ? ` — it is ${title}` : ''}, and you have just looked over at their screen.`,
-    'Reply with exactly two lines and nothing else:',
-    'SCENE: what is actually on screen, one plain sentence, no opinion.',
-    'SAY: one short line — the thing you would say out loud watching this.',
-    'The SAY line reacts, it does not narrate. They are looking at the same screen you are, so telling them what is on it is worse than saying nothing — have an opinion, take a side, wind them up, be unimpressed, worry at them about it.',
-    'React to the scene in front of you, not to the name of the game. Never mention screenshots, captures, images or descriptions, and never ask them to explain the plot.',
+    `This is a frame of a game${title ? ` — ${title}` : ''}.`,
+    'Say plainly what is on screen in two sentences: which characters or enemies, any health, stamina or resource bars and what they read, what is happening right now, and any readable text.',
+    'Name things rather than hedging about what they might be. If it is a menu, loading screen, map or inventory, say so in a few words and stop.',
+    'No preamble, no "this image shows", no opinion.',
   ].join(' ');
 }
 
 /**
- * Pulls the two lines back apart.
- *
- * Deliberately forgiving about spacing, case and quoting, and deliberately
- * unforgiving about a missing SAY: a half-parsed reply would have her read the
- * scene description out loud, which is the exact failure the prompt is for. No
- * SAY means she says nothing.
+ * How long a glance stays true. A fight at the top of the hour is not what is
+ * on screen at ten past; the interval between looks is bounded at 30 minutes,
+ * so a scene older than this is one she has not looked at since.
  */
-export function splitGlance(reply: string): { scene: string; say: string } {
-  const find = (label: string) => new RegExp(`^\\s*${label}\\s*:\\s*(.+)$`, 'im').exec(reply)?.[1]?.trim() ?? '';
-  return {
-    scene: find('SCENE'),
-    say: find('SAY').replace(/^["'“”]+|["'“”]+$/g, '').trim(),
-  };
+export const SCENE_HOLDS_MS = 10 * 60_000;
+
+/** The last scene, if it is still recent enough to be what they are looking at. */
+export function recentScene(scene: string, at: number, now: number): string {
+  if (!scene.trim() || !at) return '';
+  return now - at <= SCENE_HOLDS_MS ? scene.trim() : '';
 }
 
 export function watchingPrompt(description: string, title: string): string {

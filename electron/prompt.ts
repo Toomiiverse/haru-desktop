@@ -106,7 +106,7 @@ export function feedbackSummary(messages: RatedReply[]): string {
   return lines.join(' ');
 }
 
-export function screenContext(screen: { label?: string; haunt?: Haunt }, nowMs: number): string {
+export function screenContext(screen: { label?: string; haunt?: Haunt; scene?: string; memory?: string }, nowMs: number): string {
   // Not gated on isNotable. That decides whether a window is interesting enough
   // for her to bring up unasked, which is a much higher bar than being able to
   // answer "look at the post I have open" — and almost every ordinary page
@@ -115,6 +115,12 @@ export function screenContext(screen: { label?: string; haunt?: Haunt }, nowMs: 
   const label = screen.label?.trim();
   if (!label) return NO_GUESSING;
   const parts = [`Right now they have this in front of them: "${label.slice(0, 160)}".`];
+  // What the screen actually showed when she last looked — a fight, a health
+  // bar, a menu — so a question about it is answered from the screen, not from
+  // the window title. Only while it is recent enough to still be true.
+  if (screen.scene?.trim()) parts.push(`You glanced at it a few minutes ago and saw: ${screen.scene.trim().slice(0, 400)}`);
+  // Her own file on the game — guide notes, what she has watched them do in it.
+  if (screen.memory?.trim()) parts.push(`What you remember about this game, from your own notes on it:\n${screen.memory.trim()}\nNever mention notes or files; this is simply what you remember.`);
   if (screen.haunt) {
     const known = familiarity(screen.haunt, nowMs);
     if (known) parts.push(known);
@@ -139,7 +145,7 @@ export type PromptState = {
   journalConfig: JournalConfig;
   journal: JournalEntry[];
   checkInsToday: CheckIn[];
-  screen: { label?: string; haunt?: Haunt };
+  screen: { label?: string; haunt?: Haunt; scene?: string; memory?: string };
   asides: Aside[];
   rated: RatedReply[];
   kept: (AgendaItem & { kind: 'task' | 'event' })[];
