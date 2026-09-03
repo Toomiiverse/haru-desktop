@@ -21,6 +21,7 @@ export type HerThing = {
   stance: string;
   favourite?: string;
   wants?: string;
+  stands?: string;
 };
 
 export type Adventure = {
@@ -50,7 +51,7 @@ export function herFrom(input: { interests: Interest[]; nights: Night[]; diary: 
   const interests = [...input.interests].sort((a, b) => b.nights - a.nights || a.since.localeCompare(b.since));
   const things: HerThing[] = interests.map(i => ({
     name: i.name, kind: i.kind, since: i.since, nights: i.nights, because: i.because, stance: i.stance,
-    ...(i.favourite ? { favourite: i.favourite } : {}), ...(i.wants ? { wants: i.wants } : {}),
+    ...(i.favourite ? { favourite: i.favourite } : {}), ...(i.wants ? { wants: i.wants } : {}), ...(i.stands ? { stands: i.stands } : {}),
   }));
   const adventures: Adventure[] = [...input.nights].sort((a, b) => b.at.localeCompare(a.at)).map(n => ({
     day: n.day, at: n.at, about: n.about,

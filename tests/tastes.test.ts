@@ -124,3 +124,25 @@ test('a note that opens by addressing someone is a message, and the addressed pa
   assert.equal(unaddressed("You idiot. You never listen."), "You idiot. You never listen.");
   assert.match(NOBODY_HERE, /note to yourself/);
 });
+
+test('a night says where it stands, and the labels run on one line still parse', () => {
+  const got = parseDeepening('Anyone who ranks Pochita above that is missing the point: the boy is the only thing that changes. FAVOURITE: the way Denji hesitates WANT: to argue the ending with him STANDS: the manga ended at chapter 232; the anime is still being made');
+  assert.equal(got?.stance, 'Anyone who ranks Pochita above that is missing the point: the boy is the only thing that changes.');
+  assert.equal(got?.favourite, 'the way Denji hesitates');
+  assert.equal(got?.wants, 'to argue the ending with him');
+  assert.equal(got?.stands, 'the manga ended at chapter 232; the anime is still being made');
+  const lines = parseDeepening('Still bleak, still beautiful, and the review agreed the map is a crime.\nFAVOURITE: Hornet\nWANT: finish the Path of Pain\nSTANDS: unclear');
+  assert.equal(lines?.stance, 'Still bleak, still beautiful, and the review agreed the map is a crime.');
+  assert.equal(lines?.stands, undefined);
+});
+
+test('where it stands is asked for, kept, dated and shown', () => {
+  assert.match(deepenInstruction(interest(), 'q', 'f'), /STANDS: where it stands/);
+  assert.match(deepenInstruction(interest(), 'q', 'f'), /wanting to see it through is off the table/);
+  const kept = deepen([interest()], 'a', { stance: 'A view that is long enough to count as one.', stands: 'finished in 2017' }, '2026-09-03T10:00:00.000Z');
+  assert.equal(kept[0].stands, 'finished in 2017');
+  const again = deepen(kept, 'a', { stance: 'Another view that is long enough to count as one.' }, '2026-09-04T10:00:00.000Z');
+  assert.equal(again[0].stands, 'finished in 2017');
+  assert.match(tastesInstruction(again), /Where it stands, as I last read \(2026-09-04\): finished in 2017\./);
+  assert.equal(tastesInstruction([interest()]).includes('Where it stands'), false);
+});

@@ -37,6 +37,13 @@ export type Interest = {
   favourite?: string;
   /** Something she would like to do about it, when she has said so. */
   wants?: string;
+  /**
+   * Where it stands, from the reading: finished or still going, how far, and
+   * when — the one fact a view is allowed to rest on. Without it a want "to
+   * see the finale" written on a first night outlived the finale, and she
+   * told him the manga was unfinished from a prompt that said so every turn.
+   */
+  stands?: string;
 };
 
 /** Enough to have a personality; more and none of them get any depth. */
@@ -121,21 +128,33 @@ export function deepenInstruction(interest: Interest, query: string, found: stri
     before,
     'Write your view of it now, as yourself, in the first person: two or three sentences, with an actual position — what is good, what is not, what you would defend against somebody who rates something else. It may sharpen, soften, or turn on what you read.',
     'Then on its own line: FAVOURITE: the character, moment or part you rate above the rest, or "none yet".',
-    'Then on its own line: WANT: one thing you would like about it — to see it through, to argue it with them, even something you cannot do yourself, like playing it. A wish is allowed; a claim to have done it is not. Or "nothing".',
+    'Then on its own line: STANDS: where it stands, only as the reading says it — finished (and when, if said), still going (and how far it has got), or "unclear". Say which part: a manga that has ended is not the anime that is still being made.',
+    'Then on its own line: WANT: one thing you would like about it — to see it through if it is still going, to argue it with them, even something you cannot do yourself, like playing it. If STANDS says it has ended, wanting to see it through is off the table; want something about the ending you read. A wish is allowed; a claim to have done it is not. Or "nothing".',
     'Only from what is above and what you thought before. No invented details, nothing you happen to remember from elsewhere, no saying you played, watched or went anywhere — you read.',
   ].join('\n');
 }
 
-export function parseDeepening(raw: string): { stance: string; favourite?: string; wants?: string } | null {
+export function parseDeepening(raw: string): { stance: string; favourite?: string; wants?: string; stands?: string } | null {
   const text = (raw ?? '').replace(/\r/g, '').trim();
   if (!text) return null;
-  const take = (key: string) => new RegExp(`^[ \\t]*${key}[ \\t]*:[ \\t]*(.+?)[ \\t]*$`, 'im').exec(text)?.[1]?.trim() ?? '';
+  // On its own line as asked, or run on after the view on the same line, which
+  // a small model does: "…changes. FAVOURITE: … WANT: …" once went into her
+  // stance whole, labels and all, and she said the labels.
+  const take = (key: string) => new RegExp(`(?:^|\\s)${key}[ \\t]*:[ \\t]*(.+?)(?=\\s+(?:FAVOURITE|WANT|STANDS)[ \\t]*:|[ \\t]*$)`, 'im').exec(text)?.[1]?.trim() ?? '';
   const favourite = take('FAVOURITE');
   const wants = take('WANT');
-  const stance = text.split('\n').filter(line => !/^\s*(FAVOURITE|WANT)\s*:/i.test(line)).join(' ').replace(/\s+/g, ' ').trim().slice(0, 600);
+  const stands = take('STANDS');
+  const stance = text.split('\n')
+    .map(line => line.replace(/(?:^|\s)(?:FAVOURITE|WANT|STANDS)\s*:.*$/i, ''))
+    .join(' ').replace(/\s+/g, ' ').trim().slice(0, 600);
   if (stance.length < 20) return null;
-  const none = (value: string) => !value || /^(none|nothing|n\/a|-)( yet)?\.?$/i.test(value);
-  return { stance, favourite: none(favourite) ? undefined : favourite.slice(0, 120), wants: none(wants) ? undefined : wants.slice(0, 160) };
+  const none = (value: string) => !value || /^(none|nothing|n\/a|-|unclear|unknown)( yet)?\.?$/i.test(value);
+  return {
+    stance,
+    favourite: none(favourite) ? undefined : favourite.slice(0, 120),
+    wants: none(wants) ? undefined : wants.slice(0, 160),
+    stands: none(stands) ? undefined : stands.slice(0, 200),
+  };
 }
 
 /** Which of hers to spend tonight on: the one left longest, and not last night's. */
@@ -153,9 +172,9 @@ export function adopt(interests: Interest[], picked: { kind: InterestKind; name:
   return [...interests, interest].slice(-MAX_INTERESTS);
 }
 
-export function deepen(interests: Interest[], id: string, next: { stance: string; favourite?: string; wants?: string }, nowIso: string): Interest[] {
+export function deepen(interests: Interest[], id: string, next: { stance: string; favourite?: string; wants?: string; stands?: string }, nowIso: string): Interest[] {
   return interests.map(interest => interest.id === id
-    ? { ...interest, nights: interest.nights + 1, lastAt: nowIso, stance: next.stance, favourite: next.favourite ?? interest.favourite, wants: next.wants ?? interest.wants }
+    ? { ...interest, nights: interest.nights + 1, lastAt: nowIso, stance: next.stance, favourite: next.favourite ?? interest.favourite, wants: next.wants ?? interest.wants, stands: next.stands ?? interest.stands }
     : interest);
 }
 
@@ -177,6 +196,9 @@ export function tastesInstruction(interests: Interest[]): string {
     // First person, like the rest of her own views: written as "You want to see
     // Denji learn something" she said it straight back to him.
     if (interest.wants) { const want = sentence(interest.wants); bits.push(`I want ${/^to\b/i.test(want) ? want : `to ${want}`}.`); }
+    // The fact under the view, dated, so "not finished" is never said from an
+    // old want when the reading has since said otherwise.
+    if (interest.stands) bits.push(`Where it stands, as I last read (${interest.lastAt.slice(0, 10)}): ${sentence(interest.stands)}.`);
     return `- ${bits.join(' ')}`;
   });
   return [
