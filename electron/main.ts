@@ -26,6 +26,7 @@ import { discoverWardrobe, type ParameterRange, type WardrobeControl } from './w
 import { looksLikeNothing, readListenConfig, transcribe, type ListenConfig } from './listen';
 import { spokenVocabulary } from './vocabulary';
 import { herNameFrom } from './hername';
+import { apnsPayload, apnsSigner, readApnsConfig, readApnsDevices, sendApns, type ApnsDevice } from './apns';
 import { parseSecondThought, secondThoughtDelay, secondThoughtNote, wantsSecondThought, SECOND_THOUGHT_GAP_MS } from './secondthought';
 import { applyRevoices, dueForRevoice, exchangesFrom as revoiceExchanges, grounded, parseRevoices, readRevoiceState, revoicePrompt, withRewrites, REVOICE_EVERY, type Revoice } from './revoice';
 import { decide, readEscalateConfig, type EscalateConfig } from './escalate';
@@ -69,8 +70,10 @@ import { chatTools, coerceKnowledgeCategory, runChatTool, type ToolAvailability,
 import { createMemoryStore } from './memorystore';
 import { createKnowledgeStore } from './knowledgestore';
 import { chatSystemPrompt, chatDynamicContext, FIRST_PERSON_NOTE, freshStartInstruction, type FreshStart, type RatedReply, LENGTH_RULE_LOCAL, LENGTH_RULE_HOSTED } from './prompt';
-import { hasShout, readVoiceConfig, referenceFor, shoutReference, spokenCase, speakableText, splitForSpeech, streamedSentences, synthesise, type SpeechClip, type VoiceConfig, looksClipped, pickSigh } from './voice';
-import { applyDecay, DEEP_RECALL_LIMIT, eventCandidates, eventsPrompt, findSuperseded, formatMemoryPrompt, isExplicitRecall, closeEvents, isWorthAnEvent, isWorthKeeping, isWorthRemembering, MEMORY_KINDS, migrateMemories, pruneMemories, readsAsSecondPerson, rememberInto, retrieveMemories, semanticSimilarities, summaryPrompt, supersede, THIRD_PERSON_AGAIN, vectorSimilarity, type ForgettingEntry, type MemoryKind, type MemoryRecord, type MemorySource, type RetrievalFactors, type ScoredMemory, type SessionSummary } from './memory';
+import { hasShout, readVoiceConfig, referenceFor, shoutReference, spokenCase, speakableText, splitForSpeech, streamedSentences, synthesise, type SpeechClip, type VoiceConfig, looksClipped, pickSigh, HUME_DESCRIPTIONS, HUME_STREAM_URL } from './voice';
+import { hearVoice, readHumeConfig, readingFrom } from './hume';
+import { readBrowserControlConfig } from './browserctl';
+import { applyDecay, DEEP_RECALL_LIMIT, eventCandidates, eventsPrompt, findSuperseded, formatMemoryPrompt, isExplicitRecall, closeEvents, isWorthAnEvent, isWorthKeeping, isWorthRemembering, MEMORY_KINDS, migrateMemories, monthFoldPrompt, pruneMemories, readsAsSecondPerson, rememberInto, retrieveMemories, semanticSimilarities, summaryPrompt, supersede, THIRD_PERSON_AGAIN, vectorSimilarity, type ForgettingEntry, type MemoryKind, type MemoryRecord, type MemorySource, type RetrievalFactors, type ScoredMemory, type SessionSummary } from './memory';
 import { consolidateMemories, type ConsolidationChange } from './consolidation';
 import { appendToBlockValue, canEditBlock, findBlock, formatMemoryBlocks, replaceInBlockValue, resolveBlockValue, resetBlockToDerived, withEditedValue, type BlockSources, type MemoryBlock } from './blocks';
 import { forgetDevice, forgetEveryDevice, readWebAccess, setPassword, weakPassword, type WebAccess } from './web';
@@ -612,6 +615,47 @@ function summariseSession(messages: { role?: string; content?: string }[], day: 
   }).catch(error => console.warn('[memory] could not summarise session:', error instanceof Error ? error.message : error));
 }
 
+/** How many month folds are kept before the oldest goes. */
+const MONTH_NOTES_KEPT = 24;
+
+/**
+ * The L1 fold: a finished month's day notes, condensed to one line of her own.
+ *
+ * Runs when the rollover crosses a month boundary (and on startup for any
+ * completed month that never got one), so "what happened at the start of the
+ * month" is answerable from context rather than from the raw archive. Nothing
+ * is discarded: the day notes stay in sessions, the raw days stay in the
+ * archive, and recall still searches both — this is the compact layer the
+ * prompt reads for anything older than the recent-day window.
+ */
+function foldMonth(month: string, config: ProviderConfig, { attempt = 0 } = {}) {
+  const notes = getSessions()
+    .filter(session => session.day.slice(0, 7) === month)
+    .map(session => session.summary.trim())
+    .filter(Boolean);
+  if (!notes.length) return;
+  const transcript = notes.join('\n').slice(0, 4000);
+  ollamaPost(
+    [{ role: 'system', content: attempt ? `${monthFoldPrompt(month)} ${THIRD_PERSON_AGAIN}` : monthFoldPrompt(month) }, { role: 'user', content: transcript }],
+    config,
+    { tools: false, temperature: 0.2, maxTokens: 60 },
+  ).then(message => {
+    const summary = (message.content ?? '').trim().replace(/^["']|["']$/g, '');
+    if (!isWorthKeeping(summary)) { console.log(`[memory] nothing worth keeping from the fold of ${month}`); return; }
+    if (readsAsSecondPerson(summary)) {
+      if (attempt) { console.warn(`[memory] ${month} fold stayed in the second person, dropping it: ${summary}`); return; }
+      console.log(`[memory] ${month} fold came back addressed to somebody — asking again`);
+      foldMonth(month, config, { attempt: 1 });
+      return;
+    }
+    const kept = [...getMonthNotes().filter(note => note.month !== month), { month, summary, createdAt: new Date().toISOString() }]
+      .sort((a, b) => a.month.localeCompare(b.month))
+      .slice(-MONTH_NOTES_KEPT);
+    setMonthNotes(kept);
+    console.log(`[memory] folded ${month} from ${notes.length} day notes: ${summary}`);
+  }).catch(error => console.warn('[memory] could not fold the month:', error instanceof Error ? error.message : error));
+}
+
 /**
  * The second pass over a finished day: ask what happened that matters, gate the
  * answer, and promote it. Runs after the summary lands, in the same quiet
@@ -772,6 +816,24 @@ function mergeArchiveFragments() {
     setTimeout(() => summariseSession(transcript as { role?: string; content?: string }[], day, { replace: true }), delay);
   }
   if (delay) console.log(`[memory] backfilling ${delay / 20_000} day summaries in the background`);
+  // The same for months: a month completed while she was down never folded.
+  // Each fold waits for the day summaries of its month to land first — the
+  // backfills above run sequentially at 20s apart, so the month folds follow
+  // on the same clock.
+  const todayKey = localDateKey(zonedNow(CHAT_TIMEZONE));
+  const currentMonth = todayKey.slice(0, 7);
+  const monthsWithNotes = new Set(getMonthNotes().map(note => note.month));
+  const monthDays = (month: string) => sessions.filter(session => session.day.slice(0, 7) === month);
+  const config = store.get('ai.config') as ProviderConfig | undefined;
+  for (const session of sessions) {
+    const month = session.day.slice(0, 7);
+    if (month >= currentMonth || monthsWithNotes.has(month)) continue;
+    if (!monthDays(month).length) continue;
+    monthsWithNotes.add(month);
+    delay += 20_000;
+    setTimeout(() => { if (config?.model) foldMonth(month, config); }, delay);
+  }
+  if (delay) console.log(`[memory] backfilling ${Math.round(delay / 20_000)} day summaries and month folds in the background`);
 }
 
 function startNewConversation() {
@@ -809,6 +871,13 @@ function performChatResetIfDue() {
       summariseSession(whole as { role?: string; content?: string }[], previousKey, { replace: true });
     } catch (error) {
       console.warn('[memory] could not start the day summary:', error instanceof Error ? error.message : error);
+    }
+    // A rollover that crosses a month boundary closes the month: its day notes
+    // fold into one line, the L1 layer the prompt reads for anything older
+    // than the recent-day window.
+    if (previousKey.slice(0, 7) !== key.slice(0, 7)) {
+      const config = store.get('ai.config') as ProviderConfig | undefined;
+      if (config?.model) foldMonth(previousKey.slice(0, 7), config);
     }
   }
   // The day is counted once more before its lines are trimmed — see settleTally.
@@ -1886,7 +1955,7 @@ async function speak(reply: string, mood?: Promise<Emotion | null>) {
       const voice = shouting ? shoutReference(config, reference) : reference;
       let clip;
       try {
-        clip = await synthesise(spokenCase(chunk), config, voice, remoteAuth(config.endpoint));
+        clip = await synthesise(spokenCase(chunk), config, voice, voiceAuth(config), emotion?.emotion);
       } catch (first) {
         // One retry, and only for a timeout.
         //
@@ -1901,7 +1970,7 @@ async function speak(reply: string, mood?: Promise<Emotion | null>) {
         // request will fail identically the second time and only doubles the wait.
         if (!/timeout|aborted/i.test(first instanceof Error ? first.message : String(first))) throw first;
         console.warn('[voice] synthesis timed out — trying once more, the model should be warm now');
-        clip = await synthesise(spokenCase(chunk), config, voice, remoteAuth(config.endpoint));
+        clip = await synthesise(spokenCase(chunk), config, voice, voiceAuth(config), emotion?.emotion);
       }
       // Checked after the await, not before: the wait is where a newer reply
       // lands, and a stale chunk arriving mid-sentence is the audible bug.
@@ -2410,6 +2479,16 @@ function saveSearchKey(apiKey: string) {
 
 function getSearchKey(): string {
   return decryptSecret(store.get('searchApiKey') as string | undefined);
+}
+
+function saveHumeKey(apiKey: string) {
+  const key = apiKey.trim();
+  if (!key) { store.delete('humeApiKey' as never); return; }
+  store.set('humeApiKey', encryptSecret(key));
+}
+
+function getHumeKey(): string {
+  return decryptSecret(store.get('humeApiKey') as string | undefined);
 }
 
 /** Google Maps Platform key — routes with traffic, places, geocoding. See routes.ts. */
@@ -3931,7 +4010,7 @@ const memoryStore = createMemoryStore({
   },
 });
 
-const { getMemories, setMemories, addMemory, mergeIn, getSessions, blockSources, setBlocks, profileSummary } = memoryStore;
+const { getMemories, setMemories, addMemory, mergeIn, getSessions, getMonthNotes, setMonthNotes, blockSources, setBlocks, profileSummary } = memoryStore;
 const tryEmbedQuery = memoryStore.embedQuery;
 const refreshMemoryVectors = memoryStore.refreshVectors;
 const scheduleMemoryVectorRefresh = memoryStore.scheduleVectorRefresh;
@@ -4464,6 +4543,7 @@ function availableTools(): ToolAvailability {
     web: talkingOnWeb,
     search: { enabled: search.enabled, readPages: search.readPages, transcripts: transcriptsAvailable() },
     knowledge: getKnowledgeConfig().enabled,
+    browser: readBrowserControlConfig(store.get('browser')).enabled,
     system: { enabled: systemConfig.enabled, level: systemConfig.level },
     hands: handsAllowed,
     desktop: supportedDesktop(readDesktopConfig(store.get('desktop'))),
@@ -4502,6 +4582,11 @@ function toolDeps(): ToolDeps {
     lastSearchQuery: () => lastSearchQuery,
     rememberSearch: (query, results) => { lastSearchQuery = query; lastResults = results; },
     runSystemCommand,
+    browserPort: () => readBrowserControlConfig(store.get('browser')).port,
+    browserShotDir: () => {
+      const saved = store.get('screenshots') as { folder?: string } | undefined;
+      return typeof saved?.folder === 'string' && saved.folder ? saved.folder : path.join(app.getPath('userData'), 'browser-shots');
+    },
   };
 }
 
@@ -4577,6 +4662,12 @@ function remoteAuth(endpoint: string): Record<string, string> {
   if (!isRemote(endpoint)) return {};
   const key = keyFor(endpoint);
   return key ? { Authorization: `Bearer ${key}` } : {};
+}
+
+/** The auth a synthesis call needs: the Hume key for the Hume engine, nothing
+ *  for the local ones (remoteAuth already handles a far GPT-SoVITS). */
+function voiceAuth(config: VoiceConfig): Record<string, string> {
+  return config.engine === 'hume' ? { 'X-Hume-Api-Key': getHumeKey() } : remoteAuth(config.endpoint);
 }
 
 /**
@@ -6599,10 +6690,10 @@ const promptState = {
   // the raw day and byte-stable, so the cached head shrinks and stretches.
   // markTimeGaps writes the seam between today and any raw turns, so she can
   // tell yesterday from now rather than reading it all as one flat conversation.
-  const earlier = earlierDaysContext(getSessions(), store.getArchive(), localDateKey(zonedNow(CHAT_TIMEZONE)), { days: summaryDays(), budget: historyBudgetChars() });
+  const earlier = earlierDaysContext(getSessions(), getMonthNotes(), store.getArchive(), localDateKey(zonedNow(CHAT_TIMEZONE)), { days: summaryDays(), budget: historyBudgetChars() });
   const before = earlier.turns
     .map(turn => ({ role: turn.role, content: turn.content, ...(turn.at ? { at: turn.at } : {}), ...((turn as { id?: string }).id ? { id: (turn as { id?: string }).id } : {}) })) as OllamaMessage[];
-  if (earlier.notes.length) console.log(`[ai] ${earlier.notes.length} day note(s) go in front of today's`);
+  if (earlier.notes.length) console.log(`[ai] ${earlier.notes.length} note(s) — months and days — go in front of today's`);
   if (before.length) console.log(`[ai] ${before.length} turns from un-distilled days go in front of today's`);
   const history = markTimeGaps(withoutTrafficDenials([...before, ...withoutStaleDenials(withFiles, hasItems)] as unknown as { role: string; content: string; at?: string }[], Boolean(directions?.route)), CHAT_TIMEZONE) as unknown as OllamaMessage[];
   // Her replies as re-voiced by the background pass (revoice.ts), before the
@@ -6623,6 +6714,10 @@ const promptState = {
   // What he sent while she slept, read where the rest of the turn's asides
   // are — the last thing before she speaks, where a small model still has it.
   const wakeNow = wakeNoteNow();
+  // How he sounded, from the audio he uploaded — consumed once, the next time
+  // she speaks. The same room-reading as readsAsRough, from his voice instead
+  // of his words.
+  const voiceRoomNow = takeVoiceRoom();
   // An aside about this turn — they spoke over her — goes in the same place,
   // read just before LAST_WORD; the Ollama shaper folds both into their turn.
   // The complaint about turning up unannounced goes here rather than into the
@@ -6634,7 +6729,7 @@ const promptState = {
   // LAST_WORD still comes last of all, whichever brain is answering.
   const preTurnSystem = [
     ...(brain.hosted ? [chatDynamicContext(promptState, Boolean(away)), answering] : []),
-    aside, turnedUp, directions?.note ?? '', hers, talking, rantRoomNow, wakeNow, emojiRut(herRecentReplies), LAST_WORD,
+    aside, turnedUp, directions?.note ?? '', hers, talking, rantRoomNow, wakeNow, voiceRoomNow, emojiRut(herRecentReplies), LAST_WORD,
   ].filter(Boolean);
   if (lastUser > 0) conversation.splice(lastUser, 0, ...preTurnSystem.map(content => ({ role: 'system', content })));
   // For tuning, when the environment asks for it: the prompt exactly as sent.
@@ -8015,15 +8110,60 @@ const PUSH_TITLE = 'Haru 🌸';
  * refusal is logged and left alone, because a transient failure is not consent
  * to forget a phone.
  */
+/**
+ * The native app's devices, and the sender for them — see apns.ts. The key
+ * file, its id and the team live under `apns` in config; the devices beside
+ * them. Nothing is sent until all three are set.
+ */
+function getApns(): { config: ReturnType<typeof readApnsConfig>; devices: ApnsDevice[] } {
+  const saved = (store.get('apns') ?? {}) as Record<string, unknown>;
+  return { config: readApnsConfig(saved), devices: readApnsDevices(saved.devices) };
+}
+function saveApnsDevices(devices: ApnsDevice[]) {
+  store.set('apns', { ...((store.get('apns') ?? {}) as Record<string, unknown>), devices });
+}
+let apnsBearer: (() => string) | null = null;
+function apnsBearerFor(config: NonNullable<ReturnType<typeof readApnsConfig>>) {
+  return (apnsBearer ??= apnsSigner(config));
+}
+
+async function pushThroughApple(kind: string, text: string, url: string, topic: string): Promise<boolean> {
+  const { config, devices } = getApns();
+  if (!config || !devices.length) return false;
+  let delivered = false;
+  const payload = apnsPayload(PUSH_TITLE, text.slice(0, 500), url, topic);
+  for (const device of devices) {
+    try {
+      const result = await sendApns(device, payload, config, apnsBearerFor(config)(), topic);
+      if (result.gone) {
+        saveApnsDevices(getApns().devices.filter(d => d.token !== device.token));
+        console.log(`[push] "${device.name}" is gone from Apple — dropped its token`);
+      } else if (result.status !== 200) {
+        console.warn(`[push] Apple refused for "${device.name}": ${result.status} ${result.reason ?? ''}`.trim());
+        if (result.status === 403) apnsBearer = null;
+      } else {
+        delivered = true;
+        console.log(`[push] delivered a ${kind} push through Apple to "${device.name.slice(0, 40)}"`);
+        savePush({ lastReachedAt: Date.now() });
+      }
+    } catch (error) {
+      console.warn('[push] could not reach Apple:', error instanceof Error ? error.message : error);
+    }
+  }
+  return delivered;
+}
+
 async function pushToPhone(kind: 'random' | 'events' | 'system' | 'weather', text: string, url = '/', force = false, topic = `haru-${kind}`): Promise<boolean> {
   const { devices, prefs } = getPush();
-  if (!devices.length) return false;
+  if (!devices.length && !getApns().devices.length) return false;
   // force is the sheet's proof button: being asked to prove itself is the one
   // time a refusal for preferences or quiet hours reads as broken.
   if (!force && (!prefs[kind] || inQuietHours(prefs, zonedNow(CHAT_TIMEZONE)))) return false;
+  // The native app, through Apple, alongside the page's Web Push.
+  let delivered = await pushThroughApple(kind, text, url, topic);
+  if (!devices.length) return delivered;
   const keys = vapidKeys();
   const payload = JSON.stringify({ title: PUSH_TITLE, body: text.slice(0, 500), url });
-  let delivered = false;
   for (const device of devices) {
     try {
       const request = pushRequest(device, payload, keys, {}, topic);
@@ -8699,6 +8839,19 @@ function wakeNoteNow(): string {
   const note = wakeNote(count, clockMinutes(state.wake));
   if (note) console.log(`[her-sleep] first reply after waking: ${count} messages overnight`);
   return note;
+}
+
+/**
+ * The voice reading, consumed once: the note she is handed when he sounded
+ * rough. Fresh only — a reading older than a few minutes is stale, and a
+ * message in between means the moment is gone.
+ */
+function takeVoiceRoom(): string {
+  const reading = store.get('hume.reading') as { rough?: boolean; why?: string; at?: string } | undefined;
+  if (!reading?.why) return '';
+  store.delete('hume.reading' as never);
+  if (Date.now() - Date.parse(reading.at ?? '') > 10 * 60_000) return '';
+  return `When they said that, ${reading.why}. Read the room: still you — still dry, still short — but no needling, nothing about their list, and do not bring it up unless it fits.`;
 }
 
 function getInterests(): Interest[] {
@@ -9782,6 +9935,14 @@ function webDeps(): WebDeps {
       },
     },
     push: {
+      subscribeApns: (token, name, sandbox) => {
+        const devices = getApns().devices.filter(d => d.token !== token);
+        devices.push({ token, name, at: new Date().toISOString(), sandbox });
+        saveApnsDevices(devices);
+        console.log(`[push] "${name}" registered with Apple${sandbox ? ' (sandbox)' : ''} — ${devices.length} device(s)`);
+      },
+      unsubscribeApns: token => saveApnsDevices(getApns().devices.filter(d => d.token !== token)),
+      apnsReady: () => Boolean(getApns().config),
       key: () => vapidKeys().publicKey,
       subscribe(device, name) {
         const { devices } = getPush();
@@ -9874,18 +10035,21 @@ function webDeps(): WebDeps {
       // actually comes from. A mood she has no clip for is her usual voice.
       const reference = referenceFor(voice, emotion && (EMOTIONS as readonly string[]).includes(emotion) ? emotion as EmotionName : null);
       const chosen = hasShout(text) ? shoutReference(voice, reference) : reference;
+      // Narrowed the same way referenceFor does: a string from the phone that is
+      // not one of her emotions means her usual voice.
+      const mood = emotion && (EMOTIONS as readonly string[]).includes(emotion) ? emotion as EmotionName : null;
       try {
         // Logged here as the desk path logs it: with desk speech off, nothing
         // said which clip the phone had spoken a line with, and "she sounds
         // high-pitched" could not be traced to the reference that caused it.
         console.log(`[voice] the phone speaks as ${emotion ?? 'her usual'} using ${path.basename(chosen.clip)}`);
         const say = spokenCase(speakableText(text));
-        const clip = await synthesise(say, voice, chosen, remoteAuth(voice.endpoint));
+        const clip = await synthesise(say, voice, chosen, voiceAuth(voice), mood);
         // Ended early — see looksClipped. One more go; the sampling that cut it
         // is the same sampling that will not, next time.
         if (clip && looksClipped(clip.audio, say)) {
           console.warn('[voice] that came back cut short — saying it again');
-          const again = await synthesise(say, voice, chosen, remoteAuth(voice.endpoint));
+          const again = await synthesise(say, voice, chosen, voiceAuth(voice), mood);
           if (again && !looksClipped(again.audio, say)) return again;
           if (again && again.audio.length > clip.audio.length) return again;
         }
@@ -9896,15 +10060,58 @@ function webDeps(): WebDeps {
         const why = error instanceof Error ? error.message : String(error);
         if (chosen.clip !== voice.voice && /3-10 second|reference audio/i.test(why)) {
           console.warn(`[voice] the clip for "${emotion}" was refused (${chosen.clip.split('/').pop()}) — speaking in her usual voice instead`);
-          return synthesise(spokenCase(speakableText(text)), voice, referenceFor(voice), remoteAuth(voice.endpoint));
+          return synthesise(spokenCase(speakableText(text)), voice, referenceFor(voice), voiceAuth(voice), null);
         }
         throw error;
+      }
+    },
+    // The streaming half of the voice door: Hume generates MP3 progressively,
+    // so the phone's <audio> element starts on the first bytes instead of
+    // waiting for the whole clip. Any other engine returns null and the page
+    // falls back to the buffered clip.
+    async speakStream(text, emotion) {
+      const voice = readVoiceConfig(store.get('voice'));
+      if (voice.engine !== 'hume' || !voice.webEnabled) return null;
+      const key = getHumeKey();
+      if (!key || !voice.voice) return null;
+      const mood = emotion && (EMOTIONS as readonly string[]).includes(emotion) ? emotion as EmotionName : null;
+      const directions = [mood ? HUME_DESCRIPTIONS[mood] : '', hasShout(text) ? 'loud, shouting' : ''].filter(Boolean).join(', ');
+      try {
+        const response = await net.fetch(HUME_STREAM_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Hume-Api-Key': key },
+          body: JSON.stringify({
+            utterances: [{ text, voice: { id: voice.voice }, ...(directions ? { description: directions } : {}) }],
+            format: { type: 'mp3' },
+            instant_mode: true,
+          }),
+        });
+        if (!response.ok || !response.body) return null;
+        return { mime: 'audio/mpeg', body: response.body };
+      } catch {
+        return null;
       }
     },
     async hear(audio, mime) {
       const listen = readListenConfig(store.get('listen'));
       const vocabulary = wordsToListenFor();
       const said = await transcribe(audio, mime, listen, net.fetch as never, remoteAuth(listen.endpoint), vocabulary);
+      // Hear him too, off the reply path: the same audio, for how he sounded.
+      // The reading lands on the next turn, the way an aside does — she reacts
+      // to his voice, not just his words.
+      const humeKey = getHumeKey();
+      if (readHumeConfig(store.get('hume')).expressionsEnabled && humeKey) {
+        void hearVoice(audio, mime, humeKey, net.fetch as never)
+          .then(prosody => {
+            if (!prosody) return;
+            const reading = readingFrom(prosody);
+            if (reading.rough) {
+              store.set('hume.reading', { ...reading, at: new Date().toISOString() });
+              console.log(`[hume] heard him — ${reading.why}`);
+            }
+          })
+          .catch(error => console.warn('[hume] could not read his voice:', error instanceof Error ? error.message : error));
+      }
       if (looksLikeNothing(said, vocabulary)) return '';
       // Through the same corrections she has been taught at the desk. A name she
       // keeps mishearing is misheard the same way down a phone.
@@ -10868,7 +11075,7 @@ app.whenReady().then(() => {
       sendToWindows('speech:clip', { turn, text: line } satisfies SpeechClip);
       return 'Speaking through the built-in Windows voice.';
     }
-    const clip = await synthesise(line, candidate, referenceFor(candidate), remoteAuth(candidate.endpoint));
+    const clip = await synthesise(line, candidate, referenceFor(candidate), voiceAuth(candidate), null);
     sendToWindows('speech:clip', { turn, text: line, ...(clip ?? {}) } satisfies SpeechClip);
     return `Connected — ${Math.round((clip?.audio.byteLength ?? 0) / 1024)} KB of audio came back.`;
   });

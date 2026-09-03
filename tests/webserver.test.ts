@@ -101,7 +101,8 @@ function deps(overrides: Partial<WebDeps> = {}): WebDeps {
       forget() { whereAt = null; },
       lookUp: async () => 'Wembley, Perth, Western Australia',
     },
-    push: {
+push: {
+      subscribeApns: () => {}, unsubscribeApns: () => {}, apnsReady: () => false,
       key: () => 'B'.repeat(87),
       subscribe: () => {},
       unsubscribe: () => {},
@@ -413,7 +414,8 @@ test('a subscription is held to the shape a push service actually hands out', as
   // place a signed-in phone could point her at somewhere arbitrary.
   const taken: { endpoint: string; name: string }[] = [];
   const web = await door({
-    push: {
+push: {
+      subscribeApns: () => {}, unsubscribeApns: () => {}, apnsReady: () => false,
       key: () => 'k', unsubscribe: () => {}, prefs: () => readPushPrefs({}), savePrefs: () => {}, test: async () => true,
       subscribe: (device, name) => { taken.push({ endpoint: device.endpoint, name }); },
     },
@@ -437,7 +439,8 @@ test('a subscription is held to the shape a push service actually hands out', as
 test('the worker and the public key are served to a signed-in phone, and preferences read back sane', async () => {
   let prefs = readPushPrefs({});
   const web = await door({
-    push: {
+push: {
+      subscribeApns: () => {}, unsubscribeApns: () => {}, apnsReady: () => false,
       key: () => 'k', subscribe: () => {}, unsubscribe: () => {},
       prefs: () => prefs, savePrefs: (next) => { prefs = next; },
       test: async () => true,

@@ -23,6 +23,7 @@ import {
 } from './web';
 import { loginPage, appPage, serviceWorker } from './webpage';
 import { readPushPrefs, type PushPrefs } from './push';
+import { isDeviceToken } from './apns';
 import { emotionFile } from './emotions';
 import type { CheckIn } from './checkins';
 import { MAX_SHOT_BYTES, type HeldShots } from './shotstore';
@@ -124,6 +125,11 @@ export type WebDeps = {
   /** Being told about her when nothing of hers is open. The keys stored are the
    *  phone's own; the one secret — the signing key — never appears here. */
   push: {
+    /** The native app's device token, from Apple. `sandbox` for a build run from Xcode; TestFlight and the store are production. */
+    subscribeApns(token: string, name: string, sandbox: boolean): void;
+    unsubscribeApns(token: string): void;
+    /** Whether the Apple sender has a key to sign with. */
+    apnsReady(): boolean;
     /** The public half of the VAPID pair, for the page to subscribe with. */
     key(): string;
     subscribe(device: { endpoint: string; p256dh: string; auth: string }, name: string): void;
@@ -168,6 +174,9 @@ export type WebDeps = {
   emotionsFolder(): string | null;
   /** Her voice for a line — in the mood it was said in, when told — or nothing if she has none set up. */
   speak(text: string, emotion?: string | null): Promise<{ audio: Uint8Array; mime: string } | null>;
+  /** The same line as a stream the page can play as it arrives — the Hume path,
+   *  which generates audio progressively. Null when the engine does not stream. */
+  speakStream?(text: string, emotion?: string | null): Promise<{ mime: string; body: ReadableStream<Uint8Array> } | null>;
   /** One of her recorded sighs, for the gap between paragraphs; null when she has none. */
   sigh(emotion?: string | null): Promise<{ audio: Uint8Array; mime: string } | null>;
   /** Her word when they only said her name. */
@@ -693,6 +702,40 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
     return res.end(Buffer.from(clip.audio));
   }
 
+  // The streaming half of the same door. A GET the page's <audio> element can
+  // play directly, so the first sound is the first bytes instead of the whole
+  // clip. Hume streams MP3 as it generates; any other engine falls back to the
+  // buffered clip and sends it whole — identical sound, just not progressive.
+  if (req.method === 'GET' && path === '/api/speak') {
+    const url = new URL(req.url ?? '/', 'http://localhost');
+    const text = (url.searchParams.get('text') ?? '').trim().slice(0, 2000);
+    const emotion = (url.searchParams.get('emotion') ?? '').slice(0, 30) || null;
+    if (!text) return json(res, 400, { error: 'Nothing to say.' });
+    const streamed = deps.speakStream ? await deps.speakStream(text, emotion) : null;
+    if (streamed?.body) {
+      res.writeHead(200, {
+        'Content-Type': streamed.mime || 'audio/mpeg',
+        'Content-Security-Policy': "default-src 'none'",
+        'X-Content-Type-Options': 'nosniff',
+        'Cache-Control': 'no-store',
+      });
+      try {
+        for await (const chunk of streamed.body) res.write(Buffer.from(chunk));
+      } catch { /* a stalled stream ends the reply, not the connection */ }
+      return res.end();
+    }
+    const clip = await deps.speak(text, emotion);
+    if (!clip) return json(res, 503, { error: 'Her voice is not set up.' });
+    res.writeHead(200, {
+      'Content-Type': clip.mime || 'audio/wav',
+      'Content-Length': clip.audio.length,
+      'Content-Security-Policy': "default-src 'none'",
+      'X-Content-Type-Options': 'nosniff',
+      'Cache-Control': 'no-store',
+    });
+    return res.end(Buffer.from(clip.audio));
+  }
+
   // Her ears. The body is a recording rather than JSON, so it is read raw and
   // capped far higher — the JSON limit is sized for a message, not for a minute
   // of audio.
@@ -828,6 +871,20 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
       return json(res, 400, { error: 'Those are not subscription keys.' });
     }
     deps.push.subscribe({ endpoint, p256dh, auth }, me.device?.name ?? 'a phone');
+    return json(res, 200, { ok: true });
+  }
+
+  if (req.method === 'POST' && path === '/api/push/apns') {
+    const body = await readBody(req) as { token?: unknown; sandbox?: unknown };
+    if (!isDeviceToken(body.token)) return json(res, 400, { error: 'That is not a device token.' });
+    deps.push.subscribeApns(body.token.toLowerCase(), me.device?.name ?? 'an iPhone', body.sandbox === true);
+    return json(res, 200, { ok: true, ready: deps.push.apnsReady() });
+  }
+
+  if (req.method === 'POST' && path === '/api/push/apns/unsubscribe') {
+    const body = await readBody(req) as { token?: unknown };
+    if (!isDeviceToken(body.token)) return json(res, 400, { error: 'Which one?' });
+    deps.push.unsubscribeApns(body.token.toLowerCase());
     return json(res, 200, { ok: true });
   }
 
