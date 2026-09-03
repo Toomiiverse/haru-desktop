@@ -162,6 +162,9 @@ export function earlierTurns<T extends Dated>(archive: Record<string, T[]>, toda
 /** The one-line note a finished day was distilled into (summariseSession). */
 export type DayNote = { day: string; summary: string };
 
+/** A finished month, folded from its day notes (foldMonth). */
+export type MonthNote = { month: string; summary: string; createdAt?: string };
+
 /**
  * The finished days before today, from her own one-line notes — newest last.
  *
@@ -179,24 +182,44 @@ export function earlierDayNotes(sessions: DayNote[], todayKey: string, days = 7)
 }
 
 /**
+ * The finished months before the current one, from her own folds — newest
+ * last. Each is the whole of a month in one line, so the prompt can hold six
+ * of them for the price of a single day's raw turns.
+ */
+export function earlierMonthNotes(monthNotes: MonthNote[], todayKey: string, count = 6): MonthNote[] {
+  const current = todayKey.slice(0, 7);
+  return monthNotes
+    .filter(note => note.month < current)
+    .sort((a, b) => a.month.localeCompare(b.month))
+    .slice(-count);
+}
+
+/**
  * The earlier-days context for the chat prompt: her one-line notes for the
- * days that have them, and raw turns (via earlierTurns) for the days that do
- * not — a day is only distilled once it is actually over, so yesterday can
- * still be raw before the roll, or raw for ever if the model was down that
- * night. Notes become a single system message in the prompt; raw turns flow
- * through the same seams as today's.
+ * days that have them, her folded notes for the months before them, and raw
+ * turns (via earlierTurns) for the days that have neither — a day is only
+ * distilled once it is actually over, so yesterday can still be raw before the
+ * roll, or raw for ever if the model was down that night. Notes become a
+ * single system message in the prompt; raw turns flow through the same seams
+ * as today's.
  */
 export function earlierDaysContext(
   sessions: DayNote[],
+  monthNotes: MonthNote[],
   archive: Record<string, unknown[]>,
   todayKey: string,
-  opts: { days?: number; budget?: number; turnsDays?: number } = {},
+  opts: { days?: number; months?: number; budget?: number; turnsDays?: number } = {},
 ): { notes: string[]; turns: Dated[] } {
   const days = opts.days ?? DAYS_OF_HISTORY;
+  const months = opts.months ?? 6;
   const budget = opts.budget ?? HISTORY_BUDGET_CHARS;
   const turnsDays = opts.turnsDays ?? DAYS_OF_HISTORY;
   const noted = new Set(earlierDayNotes(sessions, todayKey, days).map(note => note.day));
-  const notes = earlierDayNotes(sessions, todayKey, days).map(note => `[Day ${note.day}] ${note.summary}`);
+  // The months come first, the recent days after — oldest to newest.
+  const notes = [
+    ...earlierMonthNotes(monthNotes, todayKey, months).map(note => `[Month ${note.month}] ${note.summary}`),
+    ...earlierDayNotes(sessions, todayKey, days).map(note => `[Day ${note.day}] ${note.summary}`),
+  ];
   const wanted = Object.keys(archive).filter(day => day < todayKey && !noted.has(day)).sort().slice(-turnsDays);
   const subset: Record<string, unknown[]> = {};
   for (const day of wanted) subset[day] = archive[day] ?? [];

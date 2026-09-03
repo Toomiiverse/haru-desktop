@@ -34,6 +34,7 @@ import {
   type MemoryRecord,
   entityTerms,
   entityScore,
+  monthFoldPrompt,
 } from '../electron/memory';
 
 const fixture = (overrides: Partial<MemoryRecord> & { id: string; text: string; kind: MemoryRecord['kind'] }): MemoryRecord => ({
@@ -606,4 +607,13 @@ test('entityScore matches the query against the memory triple', () => {
   const score = entityScore('how is the PC Project doing', memory);
   assert.ok(score > 0, 'the subject of the triple answers the query');
   assert.equal(entityScore('what is for dinner', memory), 0, 'no shared entity, no signal');
+});
+
+// ---- the month fold: her L1 prompt ----
+
+test('monthFoldPrompt names the month and forbids the second person', () => {
+  const prompt = monthFoldPrompt('2026-08');
+  assert.ok(prompt.includes('2026-08'));
+  assert.ok(prompt.includes('third person'));
+  assert.ok(prompt.includes('nothing invented'));
 });

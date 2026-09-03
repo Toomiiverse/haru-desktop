@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, writeFileSync, existsSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { HaruStore, SCHEMA_VERSION, MIGRATIONS } from '../electron/store';
+import { HaruStore, SCHEMA_VERSION, MIGRATIONS, normalizeMemoryFile } from '../electron/store';
 
 function makeStore(extra: { maxBackups?: number } = {}): { store: HaruStore; dir: string; configName: string; knowledgeFile: string } {
   const dir = mkdtempSync(path.join(tmpdir(), 'haru-store-test-'));
@@ -169,6 +169,7 @@ test('a half-written forgetting entry is skipped rather than handed back', () =>
   store.writeMemoryFile({
     memories: [],
     sessions: [],
+    monthNotes: [],
     forgettingLog: [
       { id: 'good', text: 'gone', at: '2026-08-20T00:00:00.000Z', reason: 'decay' },
       { text: 'no id', at: '2026-08-20T00:00:00.000Z' },
@@ -393,4 +394,11 @@ test('a transaction that succeeds keeps what it wrote', () => {
   const memories = [{ id: 'm1', text: 'Allergic to shellfish', kind: 'fact' as const, createdAt: '2026-08-01T00:00:00.000Z', lastSeenAt: '2026-08-01T00:00:00.000Z', mentions: 1 }];
   store.transaction(() => { store.setMemories(memories); });
   assert.deepEqual(store.getMemories(), memories);
+});
+
+test('normalizeMemoryFile carries monthNotes when present and defaults when not', () => {
+  const withNotes = normalizeMemoryFile({ memories: [], sessions: [], monthNotes: [{ month: '2026-08', summary: 'the fold' }], forgettingLog: [] });
+  assert.deepEqual(withNotes.monthNotes, [{ month: '2026-08', summary: 'the fold' }]);
+  const legacy = normalizeMemoryFile({ memories: [], sessions: [], forgettingLog: [] });
+  assert.deepEqual(legacy.monthNotes, [], 'a file from before monthNotes existed still loads');
 });

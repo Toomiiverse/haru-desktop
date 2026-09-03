@@ -44,7 +44,7 @@ import { emptyKnowledge, loadKnowledge, saveKnowledge, type KnowledgeStore } fro
 import { loadArchive, normalizeArchive, saveArchive, type Archive } from './archive';
 import { normalizeActivityLog, type ActivityLog } from './activitylog';
 import { mergeBlockDefaults, type MemoryBlock } from './blocks';
-import { migrateMemories, type ForgettingEntry, type MemoryRecord, type SessionSummary } from './memory';
+import { migrateMemories, type ForgettingEntry, type MemoryRecord, type MonthNote, type SessionSummary } from './memory';
 
 /** The current schema version of the store. Bumped by each schema migration. */
 export const SCHEMA_VERSION = 5;
@@ -127,6 +127,8 @@ export const MIGRATIONS: MigrationStep[] = [
         haruStore.writeMemoryFile({
           memories: moved.memories.length ? moved.memories : held.memories,
           sessions: moved.sessions.length ? moved.sessions : held.sessions,
+          // monthNotes never lived in config.json — carried across untouched.
+          monthNotes: held.monthNotes,
           forgettingLog: moved.forgettingLog.length ? moved.forgettingLog : held.forgettingLog,
         });
         console.log(`[store] moved ${moved.memories.length} memor(ies) out of config.json`);
@@ -144,10 +146,11 @@ export const MIGRATIONS: MigrationStep[] = [
 export type MemoryFile = {
   memories: MemoryRecord[];
   sessions: SessionSummary[];
+  monthNotes: MonthNote[];
   forgettingLog: ForgettingEntry[];
 };
 
-const EMPTY_MEMORY_FILE: MemoryFile = { memories: [], sessions: [], forgettingLog: [] };
+const EMPTY_MEMORY_FILE: MemoryFile = { memories: [], sessions: [], monthNotes: [], forgettingLog: [] };
 
 /** Arrays where arrays belong and nothing else. A file somebody has edited by
  *  hand, or half-written by a machine that lost power, comes back usable rather
@@ -159,6 +162,7 @@ export function normalizeMemoryFile(value: unknown): MemoryFile {
   return {
     memories: list<MemoryRecord>(held.memories),
     sessions: list<SessionSummary>(held.sessions),
+    monthNotes: list<MonthNote>(held.monthNotes),
     forgettingLog: list<ForgettingEntry>(held.forgettingLog),
   };
 }
@@ -304,6 +308,14 @@ export class HaruStore {
 
   setSessions(items: SessionSummary[]): void {
     this.writeMemoryFile({ ...this.memories(), sessions: items });
+  }
+
+  getMonthNotes(): MonthNote[] {
+    return this.memories().monthNotes;
+  }
+
+  setMonthNotes(items: MonthNote[]): void {
+    this.writeMemoryFile({ ...this.memories(), monthNotes: items });
   }
 
   /** The trail of what she forgot and why — bounded so the log itself cannot

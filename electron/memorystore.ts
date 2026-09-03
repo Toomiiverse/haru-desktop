@@ -21,7 +21,7 @@ import { randomUUID } from 'node:crypto';
 import {
   applyDecay, DEEP_RECALL_LIMIT, isExplicitRecall, isWorthRemembering, migrateMemories,
   pruneMemories, rememberInto, retrieveMemories, vectorSimilarity,
-  type ForgettingEntry, type MemoryKind, type MemoryRecord, type MemorySource,
+  type ForgettingEntry, type MemoryKind, type MemoryRecord, type MemorySource, type MonthNote,
   type RetrievalFactors, type SessionSummary,
 } from './memory';
 import { consolidateMemories, type ConsolidationChange } from './consolidation';
@@ -48,6 +48,8 @@ export type MemoryStoreDeps = {
     getMemories(): MemoryRecord[];
     setMemories(records: MemoryRecord[]): void;
     getSessions(): SessionSummary[];
+    getMonthNotes(): MonthNote[];
+    setMonthNotes(notes: MonthNote[]): void;
     getBlocks(): MemoryBlock[];
     setBlocks(blocks: MemoryBlock[]): void;
     getForgettingLog(): ForgettingEntry[];
@@ -94,6 +96,15 @@ export function createMemoryStore(deps: MemoryStoreDeps) {
 
   function getSessions(): SessionSummary[] {
     return store.getSessions();
+  }
+
+  function getMonthNotes(): MonthNote[] {
+    return store.getMonthNotes();
+  }
+
+  function setMonthNotes(items: MonthNote[]): void {
+    store.setMonthNotes(items);
+    broadcast('memory:changed', items);
   }
 
   function addMemory(
@@ -302,7 +313,7 @@ export function createMemoryStore(deps: MemoryStoreDeps) {
   }
 
   return {
-    getMemories, setMemories, addMemory, mergeIn, getSessions,
+    getMemories, setMemories, addMemory, mergeIn, getSessions, getMonthNotes, setMonthNotes,
     refreshVectors, scheduleVectorRefresh, embedQuery,
     /** The vectors as they stand. A function because they are replaced wholesale. */
     vectors: () => vectors,

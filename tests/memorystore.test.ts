@@ -10,7 +10,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createMemoryStore, QUERY_CACHE_MAX, type MemoryStoreDeps } from '../electron/memorystore';
-import type { MemoryRecord, SessionSummary, ForgettingEntry } from '../electron/memory';
+import type { MemoryRecord, SessionSummary, ForgettingEntry, MonthNote } from '../electron/memory';
 import type { MemoryBlock } from '../electron/blocks';
 import type { Embedder } from '../electron/embeddings';
 
@@ -33,6 +33,7 @@ function record(overrides: Partial<MemoryRecord> & { id: string; text: string })
 function harness(options: Partial<{
   memories: MemoryRecord[];
   sessions: SessionSummary[];
+  monthNotes: MonthNote[];
   blocks: MemoryBlock[];
   embedder: Embedder | null;
 }> = {}) {
@@ -48,6 +49,8 @@ function harness(options: Partial<{
       getMemories: () => saved,
       setMemories: (records) => { saved = records; },
       getSessions: () => options.sessions ?? [],
+      getMonthNotes: () => options.monthNotes ?? [],
+      setMonthNotes: (items) => { options.monthNotes = items; },
       getBlocks: () => blocks,
       setBlocks: (next) => { blocks = next; },
       getForgettingLog: () => forgotten,

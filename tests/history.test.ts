@@ -155,10 +155,44 @@ test('earlierDaysContext uses notes where they exist and raw turns where they do
     '2026-08-31': [turn('user', 'today, not finished yet')],
   };
   const sessions = [{ day: '2026-08-29', summary: 'a distilled day', createdAt: '2026-09-01T00:00:00.000Z' }];
-  const { notes, turns } = earlierDaysContext(sessions, archive, '2026-08-31', { days: 7 });
+  const { notes, turns } = earlierDaysContext(sessions, [], archive, '2026-08-31', { days: 7 });
   assert.deepEqual(notes, ['[Day 2026-08-29] a distilled day']);
   assert.deepEqual(turns.map(turn => turn.content), ['yesterday, never distilled', 'y'], 'the undistilled day falls back to raw turns');
-  const empty = earlierDaysContext([], archive, '2026-08-31', { days: 7 });
+  const empty = earlierDaysContext([], [], archive, '2026-08-31', { days: 7 });
   assert.deepEqual(empty.notes, []);
   assert.ok(empty.turns.length >= 2, 'no sessions at all means the raw path as before');
+});
+
+// ---- the L1 layer: her months, folded from her day notes ----
+
+import { earlierMonthNotes } from '../electron/history';
+
+test('earlierMonthNotes lists finished months newest last, current month excluded', () => {
+  const notes = earlierMonthNotes([
+    { month: '2026-06', summary: 'quiet month' },
+    { month: '2026-07', summary: 'the shop opened' },
+    { month: '2026-08', summary: 'the shop survived' },
+    { month: '2026-09', summary: 'still running', createdAt: '2026-09-04T00:00:00.000Z' },
+  ], '2026-09-04', 6);
+  assert.deepEqual(notes.map(note => note.month), ['2026-06', '2026-07', '2026-08'], 'the current month is never a fold');
+});
+
+test('earlierMonthNotes caps to the window, newest kept', () => {
+  const notes = earlierMonthNotes([
+    { month: '2026-01', summary: 'a' },
+    { month: '2026-02', summary: 'b' },
+    { month: '2026-03', summary: 'c' },
+  ], '2026-09-01', 2);
+  assert.deepEqual(notes.map(note => note.month), ['2026-02', '2026-03']);
+});
+
+test('earlierDaysContext puts the months before the days, and falls back without them', () => {
+  const turn = (role: string, content: string) => ({ role, content, at: '2026-09-02T10:00:00.000Z' });
+  const archive = { '2026-09-02': [turn('user', 'yesterday')] };
+  const sessions = [{ day: '2026-09-02', summary: 'yesterday note' }];
+  const monthNotes = [{ month: '2026-08', summary: 'the whole month' }, { month: '2026-07', summary: 'july' }];
+  const { notes } = earlierDaysContext(sessions, monthNotes, archive, '2026-09-03', { days: 7 });
+  assert.deepEqual(notes, ['[Month 2026-07] july', '[Month 2026-08] the whole month', '[Day 2026-09-02] yesterday note'], 'months first, days after, oldest to newest');
+  const plain = earlierDaysContext(sessions, [], archive, '2026-09-03', { days: 7 });
+  assert.deepEqual(plain.notes, ['[Day 2026-09-02] yesterday note'], 'no month notes, no month lines');
 });

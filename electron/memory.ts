@@ -106,6 +106,17 @@ export type SessionSummary = {
   createdAt: string;
 };
 
+/** A finished month, folded from its day notes — the L1 layer. Nothing is
+ *  discarded by the fold: the day notes stay in sessions, the raw days stay in
+ *  the archive, and recall still searches both. This is the compact layer the
+ *  prompt reads for anything older than the recent-day window. */
+export type MonthNote = {
+  /** The month this covers, YYYY-MM. */
+  month: string;
+  summary: string;
+  createdAt: string;
+};
+
 /** Raised on this many separate days or more and it is something they keep returning to. */
 export const RECURRING_THRESHOLD = 3;
 
@@ -895,6 +906,21 @@ export function summaryPrompt() {
     'Record what they were doing or dealing with, not what you said back.',
     'Skip greetings and small talk. If nothing of substance happened, reply with exactly: nothing notable.',
     'Reply with the sentence only.',
+  ].join(' ');
+}
+
+/**
+ * The L1 fold: a finished month's day notes, condensed to one line of her own.
+ *
+ * The day notes are already third-person and factual, so the fold has less to
+ * be careful about than a raw transcript — it keeps what held, drops what
+ * passed, and must not invent a name or number the days never carried.
+ */
+export function monthFoldPrompt(month: string) {
+  return [
+    `These are her own one-line notes on the days of ${month}.`,
+    'Fold them into one sentence, under 30 words, as a note to her future self: what happened that held, what is still open, and nothing invented — every name, place, number and outcome must already be in the notes.',
+    'The notes are in the third person; stay that way. Reply with the sentence only.',
   ].join(' ');
 }
 
