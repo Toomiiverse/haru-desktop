@@ -11,7 +11,8 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { DEFAULT_VOICE, hasShout, isSilent, readVoiceConfig, referenceFor, shoutReference, speakableText, splitForSpeech, streamedSentences, spokenCase, type VoiceConfig, sovitsRequest, DEFAULT_SAMPLING, looksClipped, SPOKEN_CHARS_PER_SECOND, pickSigh } from '../electron/voice';
+import { DEFAULT_VOICE, hasShout, isSilent, readVoiceConfig, referenceFor, shoutReference, speakableText, splitForSpeech, streamedSentences, spokenCase, type VoiceConfig, sovitsRequest, DEFAULT_SAMPLING, looksClipped, SPOKEN_CHARS_PER_SECOND, pickSigh, HUME_DESCRIPTIONS, HUME_TTS_URL } from '../electron/voice';
+import { EMOTIONS } from '../electron/emotion';
 
 const config = (overrides: Partial<VoiceConfig> = {}): VoiceConfig => ({ ...DEFAULT_VOICE, ...overrides });
 
@@ -389,4 +390,15 @@ test('streamedSentences cuts across paragraph breaks', () => {
   const { sentences, rest } = streamedSentences('First bit. And then\n\nSecond bit, with more. And the rest.');
   assert.deepEqual(sentences, ['First bit.', 'And then\n\nSecond bit, with more.']);
   assert.equal(rest, 'And the rest.');
+});
+
+test('hume is a recognised engine and every emotion has acting directions', () => {
+  const config = readVoiceConfig({ engine: 'hume', voice: 'voice-123' });
+  assert.equal(config.engine, 'hume');
+  assert.equal(config.voice, 'voice-123');
+  // One clone + a description per emotion replaces the reference clips.
+  for (const emotion of EMOTIONS) {
+    assert.ok(HUME_DESCRIPTIONS[emotion]?.trim(), `no acting direction for ${emotion}`);
+  }
+  assert.match(HUME_TTS_URL, /\/v0\/tts\/file$/);
 });

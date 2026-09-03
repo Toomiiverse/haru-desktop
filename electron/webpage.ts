@@ -1060,12 +1060,21 @@ function sayable(text){
   return out;
 }
 function fetchClip(part,emotion,tries){
-  // A part is a sentence to synthesise, or a sigh to fetch by name.
-  const body=part.sigh?{sigh:true,emotion:emotion||null}:(emotion?{text:part.text,emotion}:{text:part.text});
-  return fetch('/api/speak',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)})
+  // A sigh is asked for by name and fetched whole.
+  if(part.sigh) return fetch('/api/speak',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({sigh:true,emotion:emotion||null})})
     .then(r=>r.ok?r.blob():null)
-    .catch(()=>null)
-    .then(blob=>blob||(!part.sigh&&(tries||0)<1?fetchClip(part,emotion,(tries||0)+1):null));
+    .catch(()=>null);
+  // Speech streams: a GET the <audio> element plays progressively, so the first
+  // sound is the first bytes Hume sends rather than the whole clip.
+  const q='/api/speak?text='+encodeURIComponent(part.text)+(emotion?'&emotion='+encodeURIComponent(emotion):'');
+  return Promise.resolve({stream:q});
+}
+// A clip to point the player at: a stream URL plays as it arrives, a blob gets
+// an object URL that must be revoked when done.
+function clipUrl(clip){
+  if(!clip) return null;
+  if(clip.stream) return { url: clip.stream, blob: false };
+  return { url: URL.createObjectURL(clip), blob: true };
 }
 async function speak(text,emotion){
   const mine=++speaking;
@@ -1078,21 +1087,21 @@ async function speak(text,emotion){
     let pending=fetchClip(parts[0],emotion);
     let started=false;
     for(let i=0;i<parts.length;i++){
-      const blob=await pending;
+      const clip=await pending;
       if(mine!==speaking) return started;
       // One sentence failing is not a reason to swallow the rest of what she
       // said: it used to return here, so a single hiccup halfway through left
       // her cut off mid-thought with no sign anything had gone wrong.
       pending=i+1<parts.length?fetchClip(parts[i+1],emotion):null;
-      if(!blob){ if(!parts[i].sigh) console.warn('[voice] no audio for one sentence — carrying on'); continue; }
-      const url=URL.createObjectURL(blob);
-      const done=new Promise(resolve=>{ player.onended=player.onerror=()=>{ URL.revokeObjectURL(url); resolve(); }; });
+      const made=clipUrl(clip);
+      if(!made){ if(!parts[i].sigh) console.warn('[voice] no audio for one sentence — carrying on'); continue; }
+      const done=new Promise(resolve=>{ player.onended=player.onerror=()=>{ if(made.blob) URL.revokeObjectURL(made.url); resolve(); }; });
       try{
-        player.src=url;
+        player.src=made.url;
         await player.play();
         started=true;
         await done;
-      }catch(e){ URL.revokeObjectURL(url); console.warn('[voice] a sentence would not play — carrying on'); }
+      }catch(e){ if(made.blob) URL.revokeObjectURL(made.url); console.warn('[voice] a sentence would not play — carrying on'); }
       if(mine!==speaking) return true;
       if(parts[i].pause) await new Promise(r=>setTimeout(r,parts[i].pause));
       if(mine!==speaking) return true;
@@ -1126,18 +1135,18 @@ async function drainVoice(){
     while(voiceQueue.length){
       const part=voiceQueue.shift();
       const mine=speaking;
-      const blob=await pending;
+      const clip=await pending;
       if(mine!==speaking) return;
       pending=voiceQueue.length?fetchClip(voiceQueue[0],voiceEmotion):null;
-      if(!blob){ console.warn('[voice] no audio for a streamed sentence — carrying on'); continue; }
-      const url=URL.createObjectURL(blob);
-      const done=new Promise(resolve=>{ player.onended=player.onerror=()=>{ URL.revokeObjectURL(url); resolve(); }; });
+      const made=clipUrl(clip);
+      if(!made){ console.warn('[voice] no audio for a streamed sentence — carrying on'); continue; }
+      const done=new Promise(resolve=>{ player.onended=player.onerror=()=>{ if(made.blob) URL.revokeObjectURL(made.url); resolve(); }; });
       try{
-        player.src=url;
+        player.src=made.url;
         await player.play();
         started=true;
         await done;
-      }catch(e){ URL.revokeObjectURL(url); console.warn('[voice] a streamed sentence would not play — carrying on'); }
+      }catch(e){ if(made.blob) URL.revokeObjectURL(made.url); console.warn('[voice] a streamed sentence would not play — carrying on'); }
       if(mine!==speaking) return;
     }
   } finally { voiceDraining=false; }

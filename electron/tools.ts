@@ -17,6 +17,7 @@
 // and this is the half that actually runs.
 
 import path from 'node:path';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import type { ChatTool, ToolCall } from './provider';
 import { addCheckIn, checkInsOn, type CheckInStore } from './checkins';
 import { CHOICES_TOOL, readChoices } from './choices';
@@ -29,6 +30,7 @@ import { fetchTranscript, formatTranscript, titleFrom, transcriptInstruction, vi
 import { findSuperseded, semanticSimilarities, supersede, MEMORY_KINDS, type MemoryKind, type MemoryRecord } from './memory';
 import { appendToBlockValue, canEditBlock, findBlock, replaceInBlockValue, resolveBlockValue, withEditedValue, type BlockSources, type MemoryBlock } from './blocks';
 import { adopt } from './tastes';
+import { activateTab, closeTab, listTargets, navigate, openTab, pageText, screenshot } from './browserctl';
 import { findItem, readsAsNotDone } from './agenda';
 import { localDateKey, resolveDate, zonedNow } from './dates';
 import { collectAll, collectDocker, collectGpu, collectProcesses, collectServices, collectSystem, diagnose, KNOWN_SERVICES, USER_SERVICES } from './system';
@@ -627,6 +629,29 @@ export const POWER_TOOL: ChatTool = {
 };
 
 
+/**
+ * Driving the browser she lives next to. Chrome runs with a debug port; the
+ * tool opens, navigates, reads and screenshots the actual pages, so "check
+ * this site" is something she does rather than something she pretends to have
+ * done. Desk-only, like the other hands-on tools.
+ */
+export const BROWSER_TOOL: ChatTool = {
+  type: 'function',
+  function: {
+    name: 'browser_control',
+    description: 'Drive the browser on this machine — open a page, navigate a tab, list what is open, read what is actually on a page, screenshot it, or close a tab. Use it whenever they ask you to open a website, check a page, look something up in a browser, or want a screenshot of a site. You really can do this — never say you cannot and never pretend you have.',
+    parameters: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', enum: ['open', 'navigate', 'list', 'read', 'screenshot', 'close', 'activate'], description: 'What to do. "list" first to get a tab id; "read" and "screenshot" work on the current page when no tab is given.' },
+        url: { type: 'string', description: 'The address to open or navigate to — a full URL, or a name you can search for when opening (e.g. "youtube.com", "the weather in perth").' },
+        tab: { type: 'string', description: 'The tab id from a list call. Leave out to act on the current page.' },
+      },
+      required: ['action'],
+    },
+  },
+};
+
 /** The shape of an agenda entry the dispatcher touches. */
 type KeptLike = { id: string; title: string; date: string; time?: string; kind: 'task' | 'event'; done: boolean };
 
@@ -643,6 +668,8 @@ export type ToolAvailability = {
     transcripts: boolean;
   };
   knowledge: boolean;
+  /** Whether she can drive the browser on this machine (browser.control). */
+  browser: boolean;
   system: { enabled: boolean; level: number };
   /** False for anything that did not come from the user's own mouth or keyboard. */
   hands: boolean;
@@ -697,6 +724,7 @@ export function chatTools(available: ToolAvailability, latest = ''): ChatTool[] 
   // never claim otherwise, which is right on Windows and a trap anywhere else.
   if (available.hands && available.desktop.launch && machine) tools.push(LAUNCH_TOOL, CLOSE_TOOL);
   if (available.hands && available.desktop.power && machine) tools.push(POWER_TOOL);
+  if (available.browser && available.hands) tools.push(BROWSER_TOOL);
   return tools;
 }
 
@@ -755,6 +783,10 @@ export type ToolDeps = {
   rememberSearch(query: string, results: SearchResult[]): void;
   /** Also used by the caller after a reply lands, so it is injected rather than moved. */
   runSystemCommand(file: string, args: string[]): Promise<{ ok: boolean; error?: string }>;
+  /** The CDP port of the browser she controls (browser.control). */
+  browserPort(): number;
+  /** Where a browser screenshot lands — the screenshots folder or a fallback. */
+  browserShotDir(): string;
 };
 
 
@@ -784,7 +816,7 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
     setBlocks, blockSources, getWardrobeControls, sendToWindows, readSystemConfig, getKnowledgeConfig,
     getKnowledgeEmbedder, knowledgeStore, tryEmbedQuery, memoryVectors, touchChunks, getSearchKey,
     handsAllowed, markPageRead, setPendingChoices, requestRestart, lastResults, lastSearchQuery,
-    rememberSearch, runSystemCommand, onWeb, getInterests, setInterests,
+    rememberSearch, runSystemCommand, onWeb, getInterests, setInterests, browserPort, browserShotDir,
   } = deps;
   const name = call.function?.name;
   const args = toolArguments(call);
@@ -1005,6 +1037,74 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
     setInterests(adopt(interests, { kind, name: title, because: 'they told you about it, and it sounded like your thing. You are going to give it a shot.' }, localDateKey(now), now.toISOString()));
     console.log(`[taste] ${kind} "${title}" taken up because they told you about it`);
     return JSON.stringify({ saved: true, note: `Taken up: ${title}. You will read up on it and have a real view of it over your nights.` });
+  }
+  if (name === 'browser_control') {
+    const action = typeof args.action === 'string' ? args.action : '';
+    const url = typeof args.url === 'string' ? args.url.trim() : '';
+    const tab = typeof args.tab === 'string' ? args.tab.trim() : '';
+    const port = browserPort();
+    const fetchImpl = deps.net.fetch as (url: string, init?: unknown) => Promise<{ ok: boolean; json(): Promise<unknown> }>;
+    const currentTab = async (): Promise<string | null> => {
+      if (tab) return tab;
+      const targets = await listTargets(port, fetchImpl);
+      return targets[0]?.id ?? null;
+    };
+    try {
+      if (action === 'list') {
+        const targets = await listTargets(port, fetchImpl);
+        if (!targets.length) return JSON.stringify({ tabs: [], note: 'No tabs are open.' });
+        return JSON.stringify({ tabs: targets.slice(0, 20).map(target => ({ id: target.id, title: target.title || '(untitled)', url: target.url })) });
+      }
+      if (action === 'open') {
+        if (!url) return JSON.stringify({ error: 'url is required to open a page.' });
+        const id = await openTab(port, url, fetchImpl);
+        console.log(`[browser] opened ${url} (${id})`);
+        return JSON.stringify({ opened: true, tab: id, note: `Opened ${url}.` });
+      }
+      if (action === 'navigate') {
+        if (!url) return JSON.stringify({ error: 'url is required to navigate.' });
+        const id = await currentTab();
+        if (!id) return JSON.stringify({ error: 'no tab to navigate — open one first.' });
+        await navigate(port, id, url, fetchImpl);
+        console.log(`[browser] navigated ${id} to ${url}`);
+        return JSON.stringify({ navigated: true, note: `Navigated to ${url}.` });
+      }
+      if (action === 'read') {
+        const id = await currentTab();
+        if (!id) return JSON.stringify({ error: 'no tab to read.' });
+        const text = await pageText(port, id, fetchImpl);
+        return JSON.stringify({ text: text.slice(0, 3000), note: 'This is what is on the page right now — answer from it, not from memory.' });
+      }
+      if (action === 'screenshot') {
+        const id = await currentTab();
+        if (!id) return JSON.stringify({ error: 'no tab to screenshot.' });
+        const png = await screenshot(port, id, fetchImpl);
+        if (!png) return JSON.stringify({ error: 'the screenshot came back empty.' });
+        const dir = browserShotDir();
+        mkdirSync(dir, { recursive: true });
+        const name = `browser-${Date.now().toString(36)}.png`;
+        writeFileSync(path.join(dir, name), Buffer.from(png));
+        console.log(`[browser] screenshotted the page to ${path.join(dir, name)}`);
+        return JSON.stringify({ saved: path.join(dir, name), note: 'Saved a screenshot of the page.' });
+      }
+      if (action === 'close') {
+        const id = await currentTab();
+        if (!id) return JSON.stringify({ error: 'no tab to close.' });
+        await closeTab(port, id, fetchImpl);
+        console.log(`[browser] closed ${id}`);
+        return JSON.stringify({ closed: true, note: 'Closed the tab.' });
+      }
+      if (action === 'activate') {
+        const id = await currentTab();
+        if (!id) return JSON.stringify({ error: 'no tab to activate.' });
+        await activateTab(port, id, fetchImpl);
+        return JSON.stringify({ activated: true });
+      }
+      return JSON.stringify({ error: 'Unknown action — use open, navigate, list, read, screenshot, close or activate.' });
+    } catch (error) {
+      console.warn('[browser] could not control the browser:', error instanceof Error ? error.message : error);
+      return JSON.stringify({ error: `The browser is not reachable (${error instanceof Error ? error.message : error}). Say so plainly rather than pretending you looked.` });
+    }
   }
   if (name === 'remember_about_user') {
     const fact = typeof args.fact === 'string' ? args.fact.trim() : '';

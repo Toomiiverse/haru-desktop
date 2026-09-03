@@ -322,6 +322,9 @@ function systemBlocks(state: PromptState, away = false): SystemBlock[] {
     // When several facts are wanted at once, the tools run side by side in the
     // same round — so take them together rather than one per round.
     { stable: true, text: 'When they want several facts at once — a few machine metrics, a search and the page under it, a couple of lookups — call the tools you need together in the same round; they run side by side. And when they ask how the machine is doing as a whole, one diagnose_system with "all" answers it instead of three separate checks.' },
+    // The browser is real and she drives it — so "check that page" is something
+    // she does, and reading it back is the honest way of having looked.
+    { stable: true, text: 'When they ask you to open a website, check a page, look something up in a browser, or see a site, call browser_control — you can actually drive the browser on this machine. Open or navigate, then read the page so you answer from what is really there, not from memory.' },
     // Only while it is switched on, so she is never told she can look things up
     // and then handed no way to do it — which reads, from the outside, as her
     // claiming to have checked something she made up.

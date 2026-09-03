@@ -14,7 +14,7 @@ import { EMOTIONS, type EmotionName } from './emotion';
 
 // 'windows' has no adapter here — it is spoken by the renderer through the
 // built-in SAPI voices, which are reachable from a window and nowhere else.
-export type VoiceEngine = 'off' | 'windows' | 'openai' | 'gpt-sovits';
+export type VoiceEngine = 'off' | 'windows' | 'openai' | 'gpt-sovits' | 'hume';
 
 /** A clip to clone from, and what it says. The two travel together because a
  *  transcript that does not match its clip drags the cloned timbre off target —
@@ -59,6 +59,33 @@ export type VoiceConfig = {
   desktopEnabled: boolean;
   /** GPT-SoVITS only; anything unset is DEFAULT_SAMPLING. */
   sampling?: Partial<VoiceSampling>;
+};
+
+/** Hume's TTS endpoint: one utterance in, a WAV file out. */
+export const HUME_TTS_URL = 'https://api.hume.ai/v0/tts/file';
+/** The streaming half — audio arrives as it is generated, so a phone can start
+ *  speaking on the first bytes instead of waiting for the whole clip. */
+export const HUME_STREAM_URL = 'https://api.hume.ai/v0/tts/stream/file';
+
+/**
+ * Haru's emotions, as short acting directions for Octave. With a voice already
+ * chosen, the `description` field steers delivery — the docs recommend keeping
+ * it to a few words. This is what replaces the twelve per-emotion reference
+ * clips: one cloned voice, the mood carried by how it says the line.
+ */
+export const HUME_DESCRIPTIONS: Record<EmotionName, string> = {
+  neutral: 'dry, flat, matter-of-fact',
+  happy: 'bright, pleased',
+  curious: 'interested, light, wondering',
+  smug: 'smug, self-satisfied, teasing',
+  annoyed: 'annoyed, clipped, testy',
+  bored: 'bored, flat, unimpressed',
+  sleepy: 'sleepy, slow, low energy',
+  surprised: 'surprised, sharp',
+  affectionate: 'warm, fond, soft',
+  embarrassed: 'embarrassed, sheepish, deflecting',
+  determined: 'determined, firm, pushing',
+  worried: 'worried, soft, uncertain',
 };
 
 export const DEFAULT_VOICE: VoiceConfig = {
@@ -336,9 +363,11 @@ export function isSilent(bytes: Uint8Array): boolean {
 
 /**
  * One chunk of speech as audio bytes. Returns null for engines the renderer
- * speaks itself, so callers can treat every engine the same way.
+ * speaks itself, so callers can treat every engine the same way. `emotion` is
+ * what the clip-based engines select on and what Hume steers delivery with;
+ * the other engines ignore it.
  */
-export async function synthesise(text: string, config: VoiceConfig, reference: VoiceReference = referenceFor(config), auth: Record<string, string> = {}): Promise<{ audio: Uint8Array; mime: string } | null> {
+export async function synthesise(text: string, config: VoiceConfig, reference: VoiceReference = referenceFor(config), auth: Record<string, string> = {}, emotion?: EmotionName | null): Promise<{ audio: Uint8Array; mime: string } | null> {
   const endpoint = trimEndpoint(config.endpoint);
   switch (config.engine) {
     case 'off':
@@ -360,6 +389,35 @@ export async function synthesise(text: string, config: VoiceConfig, reference: V
     // and its transcript has to match or the output drifts badly off-target.
     case 'gpt-sovits':
       return post(`${endpoint}/tts`, sovitsRequest(config, reference, text), auth);
+    // Hume Octave, with a cloned voice. The reference clips mean nothing here —
+    // the voice is one clone and the mood is acting directions in the request.
+    case 'hume': {
+      const key = auth['X-Hume-Api-Key'];
+      if (!key) throw new Error('Hume is selected but no Hume API key is saved.');
+      if (!config.voice) throw new Error('Hume is selected but no Hume voice is saved.');
+      const directions = [emotion ? HUME_DESCRIPTIONS[emotion] : '', hasShout(text) ? 'loud, shouting' : ''].filter(Boolean).join(', ');
+      const response = await net.fetch(HUME_TTS_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Hume-Api-Key': key },
+        body: JSON.stringify({
+          utterances: [{
+            text,
+            voice: { id: config.voice },
+            ...(directions ? { description: directions } : {}),
+            ...(config.speed !== 1 ? { speed: config.speed } : {}),
+          }],
+          format: { type: 'wav' },
+        }),
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      });
+      if (!response.ok) {
+        const detail = await response.text().catch(() => '');
+        throw new Error(`${response.status}${detail ? `: ${detail.slice(0, 300)}` : ''}`);
+      }
+      const audio = new Uint8Array(await response.arrayBuffer());
+      if (isSilent(audio)) throw new Error('the server returned silence — inference probably failed part-way.');
+      return { audio, mime: 'audio/wav' };
+    }
   }
 }
 
@@ -401,7 +459,7 @@ export function sovitsRequest(config: VoiceConfig, reference: VoiceReference, te
 export function readVoiceConfig(saved: unknown): VoiceConfig {
   if (!saved || typeof saved !== 'object') return DEFAULT_VOICE;
   const record = saved as Partial<VoiceConfig>;
-  const engines: VoiceEngine[] = ['off', 'windows', 'openai', 'gpt-sovits'];
+  const engines: VoiceEngine[] = ['off', 'windows', 'openai', 'gpt-sovits', 'hume'];
   return {
     engine: engines.includes(record.engine as VoiceEngine) ? record.engine as VoiceEngine : DEFAULT_VOICE.engine,
     endpoint: typeof record.endpoint === 'string' ? record.endpoint : DEFAULT_VOICE.endpoint,

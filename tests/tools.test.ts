@@ -23,6 +23,7 @@ const EVERYTHING: ToolAvailability = {
   web: false,
   search: { enabled: true, readPages: true, transcripts: true },
   knowledge: true,
+  browser: true,
   system: { enabled: true, level: 2 },
   hands: true,
   desktop: { launch: true, power: true },
@@ -35,6 +36,7 @@ const NOTHING: ToolAvailability = {
   web: false,
   search: { enabled: false, readPages: false, transcripts: false },
   knowledge: false,
+  browser: false,
   system: { enabled: false, level: 0 },
   hands: false,
   desktop: { launch: false, power: false },
@@ -72,6 +74,8 @@ function deps(overrides: Partial<ToolDeps> = {}): ToolDeps {
     sendToWindows: () => {},
     getInterests: () => [],
     setInterests: () => {},
+    browserPort: () => 9222,
+    browserShotDir: () => '/tmp',
     readSystemConfig: () => ({ enabled: false, level: 0, allowlist: [] }),
     getKnowledgeConfig: () => ({ enabled: false, contextChunks: 4, threshold: 0.2, contextChars: 2000 }),
     getKnowledgeEmbedder: () => null,
@@ -126,7 +130,7 @@ test('no handler is dead code — every one is reachable from some setting', asy
     'create_kept_item', 'complete_kept_item', 'update_kept_item', 'delete_kept_item',
     'get_system_info', 'get_gpu_info', 'get_processes', 'get_docker_status',
     'get_service_status', 'diagnose_system', 'restart_docker_container',
-    'start_service', 'stop_service', 'restart_haru', 'look_up_knowledge', 'adopt_interest',
+    'start_service', 'stop_service', 'restart_haru', 'look_up_knowledge', 'adopt_interest', 'browser_control',
   ];
   for (const name of handled) {
     assert.ok(reachable.has(name), `${name} has a handler but is never offered to anyone`);
@@ -393,4 +397,14 @@ test('core_memory_rethink rewrites a block and supersedes the lines it replaced'
   // The persona block is read-only.
   const refused = await runChatTool(call('core_memory_rethink', { label: 'persona', new_value: 'anything' }), 'rewrite it', d);
   assert.match(refused, /read-only/);
+});
+
+test('browser_control validates before it touches a browser', async () => {
+  const d = deps();
+  const noAction = await runChatTool(call('browser_control', {}), 'open youtube', d);
+  assert.match(noAction, /Unknown action/);
+  const noUrl = await runChatTool(call('browser_control', { action: 'open' }), 'open youtube', d);
+  assert.match(noUrl, /url is required/);
+  // list hits the network in this test (the browser is real), so it is covered
+  // by the live smoke test rather than here — the gate above is the pure half.
 });
