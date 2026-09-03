@@ -144,7 +144,7 @@ export function earlierTurns<T extends Dated>(archive: Record<string, T[]>, toda
   const byDay = wanted.map(day => (archive[day] ?? []).filter(message => message.role === 'user' || message.role === 'assistant'));
   const size = (turns: T[]) => turns.reduce((sum, turn) => sum + String(turn.content ?? '').length, 0);
   // Oldest first out, so what survives is what was said most recently.
-  while (byDay.length && byDay.reduce((sum, turns) => sum + size(turns), 0) > budget) byDay.shift();
+  while (byDay.length > 1 && byDay.reduce((sum, turns) => sum + size(turns), 0) > budget) byDay.shift();
   // One day left and still too much: its evening, from a message of theirs,
   // rather than nothing. A small budget — a phone that wants her first word
   // in a second — should still see how yesterday ended.
