@@ -125,6 +125,12 @@ export type WebDeps = {
     /** One real push, now, preferences ignored. True if a push service took it. */
     test(): Promise<boolean>;
   };
+  /** Google Calendar and Tasks: where the connection stands, and a consent page to reconnect from another machine. */
+  google: {
+    status(): unknown;
+    /** Starts a sign-in and hands back the consent page and the loopback port the answer must reach. */
+    connect(): Promise<{ url: string; port: number }>;
+  };
   /** The background re-voicing pass (revoice.ts): run one now, or see where it stands. */
   revoice: {
     run(): Promise<unknown>;
@@ -760,6 +766,11 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
     return json(res, 200, deps.where.get());
   }
 
+  if (req.method === 'GET' && path === '/api/google') return json(res, 200, deps.google.status());
+  if (req.method === 'POST' && path === '/api/google/connect') {
+    try { return json(res, 200, await deps.google.connect()); }
+    catch (error) { return json(res, 500, { error: error instanceof Error ? error.message : 'Could not start the sign-in.' }); }
+  }
   if (req.method === 'GET' && path === '/api/revoice') return json(res, 200, deps.revoice.status());
   if (req.method === 'POST' && path === '/api/revoice') return json(res, 200, await deps.revoice.run());
 

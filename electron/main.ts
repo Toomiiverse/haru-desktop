@@ -5962,6 +5962,10 @@ async function secondThought(repliedAt: number, input: { latest: string; reply: 
   }
 }
 
+/** A fixed loopback port for the Google consent answer, so the ssh forward can be written down once. */
+const GOOGLE_CONSENT_PORT = 8790;
+let pendingGoogleConsent: Promise<{ url: string; port: number }> | null = null;
+
 function conversationRoute(): ProviderConfig | null {
   const route = store.get('ai.conversation') as ProviderConfig | undefined;
   if (!route?.model || !isOpenAIShaped(route.provider) || !hasKeyFor(route.endpoint)) return null;
@@ -9148,6 +9152,22 @@ function webDeps(): WebDeps {
       return checkInsOn(getCheckIns(), localDateKey(now));
     },
     nudge: () => nudgeForPhone(),
+    google: {
+      status: () => googleStatus(store),
+      // The consent page, for signing in from a laptop that forwards the
+      // loopback port over ssh. One at a time: a second ask while one is
+      // waiting gets the same page back.
+      connect: () => {
+        if (pendingGoogleConsent) return pendingGoogleConsent;
+        pendingGoogleConsent = new Promise<{ url: string; port: number }>((resolve, reject) => {
+          void connectGoogle(store, { port: GOOGLE_CONSENT_PORT, timeoutMs: 15 * 60_000, onUrl: (url, port) => resolve({ url, port }) })
+            .then(() => { broadcastGoogleStatus(); console.log('[google] reconnected through the web door'); })
+            .catch(error => { console.warn(`[google] the sign-in did not complete: ${error instanceof Error ? error.message : error}`); reject(error); })
+            .finally(() => { pendingGoogleConsent = null; });
+        });
+        return pendingGoogleConsent;
+      },
+    },
     revoice: {
       run: () => runRevoice('asked from the web door'),
       status: () => { const state = revoiceState(); return { lastAt: state.lastAt, kept: Object.keys(state.rewrites).length, since: messagesSinceRevoice(), every: revoiceSetting().every, model: revoiceSetting().model }; },

@@ -109,7 +109,16 @@ async function postForm(url: string, body: Record<string, string>) {
 
 // Binds the loopback listener first, because the redirect URI (and so the
 // consent URL) cannot be built until the OS has handed us a port.
-export async function connectGoogle(store: StoreLike) {
+/**
+ * `onUrl`: hand the consent page's address back instead of opening it here.
+ * On a headless box there is no display worth opening it on — the popup sat
+ * hidden behind her window last time and took an X11 hack to raise — and the
+ * loopback redirect only lands where the browser is. Given the URL and a fixed
+ * port, a laptop can forward that port over ssh and sign in from there.
+ */
+export type ConnectOptions = { port?: number; onUrl?: (url: string, port: number) => void; timeoutMs?: number };
+
+export async function connectGoogle(store: StoreLike, options: ConnectOptions = {}) {
   const { clientId, clientSecret } = credentials(store);
   const verifier = base64url(randomBytes(48));
   const challenge = base64url(createHash('sha256').update(verifier).digest());
@@ -117,8 +126,13 @@ export async function connectGoogle(store: StoreLike) {
 
   const server = createServer();
   const port = await new Promise<number>((resolve, reject) => {
-    server.on('error', reject);
-    server.listen(0, '127.0.0.1', () => resolve((server.address() as { port: number }).port));
+    server.on('error', () => {
+      // The asked-for port is taken: any free one, as before.
+      const fallback = createServer();
+      fallback.on('error', reject);
+      fallback.listen(0, '127.0.0.1', () => { const free = (fallback.address() as { port: number }).port; fallback.close(); resolve(free); });
+    });
+    server.listen(options.port ?? 0, '127.0.0.1', () => resolve((server.address() as { port: number }).port));
   });
   server.close();
 
@@ -141,7 +155,7 @@ export async function connectGoogle(store: StoreLike) {
     });
     callback.on('error', reject);
     callback.listen(port, '127.0.0.1');
-    const timer = setTimeout(() => { callback.close(); reject(new Error('Timed out waiting for Google sign-in.')); }, CONSENT_TIMEOUT_MS);
+    const timer = setTimeout(() => { callback.close(); reject(new Error('Timed out waiting for Google sign-in.')); }, options.timeoutMs ?? CONSENT_TIMEOUT_MS);
     callback.on('close', () => clearTimeout(timer));
   });
 
@@ -153,7 +167,8 @@ export async function connectGoogle(store: StoreLike) {
     // refresh token; without them a reconnect yields only an access token.
     access_type: 'offline', prompt: 'consent', state,
   }).toString();
-  await shell.openExternal(authUrl.toString());
+  if (options.onUrl) { console.log(`[google] consent page handed out; the sign-in comes back to 127.0.0.1:${port}`); options.onUrl(authUrl.toString(), port); }
+  else await shell.openExternal(authUrl.toString());
 
   const code = await waiting;
   const tokens = await postForm(TOKEN_ENDPOINT, {
