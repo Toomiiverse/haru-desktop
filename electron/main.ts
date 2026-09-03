@@ -38,7 +38,7 @@ import { gameMemoryForPrompt, noteInGameMemory, openGameMemory, timesThisWeek, w
 import { buildGameIndex, gameFor } from './steam';
 import { pdfPrompt, readPdf } from './pdf';
 import { classify, discard, extractAudio, extractFrames, findFfmpeg, OPENABLE, readText, type FileKind } from './attach';
-import { markTimeGaps, sinceLast, earlierTurns, DAYS_OF_HISTORY } from './history';
+import { markTimeGaps, sinceLast, earlierTurns, DAYS_OF_HISTORY, HISTORY_BUDGET_CHARS } from './history';
 import { exchangesFrom, pickRecalled, recallNote, RECALL_DAYS, type Exchange } from './recall';
 import { correct, noteUsed, readHearing, remember } from './hearing';
 import { assumeItIsTheirs, identifyWork, noteWork, readFollowing, recogniseNow, summariseFollowing } from './following';
@@ -3743,6 +3743,17 @@ type OllamaMessage = { role: string; content?: string; tool_calls?: ToolCall[]; 
  * Qwen3.5's refuses outright. Measured on Qwen3.5-9B Q4_K_M: 32768 costs 7.8GB
  * of VRAM, 65536 costs 8.9GB, both fully on a 12GB card.
  */
+/**
+ * How much of the days before today goes in front of it, in characters.
+ * ai.historyChars in config, else the code's default. Smaller is faster: the
+ * hosted model reads the whole prompt before its first word, and yesterday
+ * was a quarter of it.
+ */
+function historyBudgetChars(): number {
+  const wanted = store.get('ai.historyChars');
+  return typeof wanted === 'number' && Number.isFinite(wanted) && wanted >= 500 ? Math.round(wanted) : HISTORY_BUDGET_CHARS;
+}
+
 function chatNumCtx(): number {
   const wanted = store.get('ai.numCtx');
   return typeof wanted === 'number' && Number.isFinite(wanted) && wanted >= 2048 ? Math.min(Math.round(wanted), 262144) : 8192;
@@ -6481,7 +6492,7 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // five o'clock rollover used to leave the prompt entirely — see earlierTurns.
   // markTimeGaps writes the seam between them, so she can tell yesterday from
   // now rather than reading it all as one flat conversation.
-  const before = earlierTurns(store.getArchive() as unknown as Record<string, { role: string; content: string; at?: string }[]>, localDateKey(zonedNow(CHAT_TIMEZONE)))
+  const before = earlierTurns(store.getArchive() as unknown as Record<string, { role: string; content: string; at?: string }[]>, localDateKey(zonedNow(CHAT_TIMEZONE)), DAYS_OF_HISTORY, historyBudgetChars())
     .map(turn => ({ role: turn.role, content: turn.content, ...(turn.at ? { at: turn.at } : {}), ...((turn as { id?: string }).id ? { id: (turn as { id?: string }).id } : {}) })) as OllamaMessage[];
   if (before.length) console.log(`[ai] ${before.length} turns from the last ${DAYS_OF_HISTORY} days go in front of today's`);
   const history = markTimeGaps(withoutTrafficDenials([...before, ...withoutStaleDenials(withFiles, hasItems)] as unknown as { role: string; content: string; at?: string }[], Boolean(directions?.route)), CHAT_TIMEZONE) as unknown as OllamaMessage[];

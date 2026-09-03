@@ -123,3 +123,12 @@ test('the days before today come through newest last, trimmed from the oldest en
   assert.deepEqual(earlierTurns({}, '2026-09-01'), []);
   assert.ok(HISTORY_BUDGET_CHARS >= 10_000, 'room for a few real days');
 });
+
+test('a small budget keeps the evening of the last day, from a message of theirs', () => {
+  const turn = (role: string, content: string) => ({ role, content, at: '2026-08-30T10:00:00.000Z' });
+  const archive = {
+    '2026-08-31': [turn('user', 'morning, long enough to blow the budget'), turn('assistant', 'a'), turn('user', 'afternoon'), turn('assistant', 'b'), turn('user', 'evening'), turn('assistant', 'c')],
+  };
+  assert.deepEqual(earlierTurns(archive, '2026-09-01', 3, 24).map(t => t.content), ['afternoon', 'b', 'evening', 'c'], 'the tail that fits, opening on their turn');
+  assert.deepEqual(earlierTurns(archive, '2026-09-01', 3, 3).map(t => t.content), [], 'nothing fits, nothing goes');
+});
