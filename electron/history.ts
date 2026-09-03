@@ -91,7 +91,9 @@ export function markTimeGaps<T extends Dated>(messages: T[], timeZone: string, g
     if (usable && previous && usable.getTime() - previous.getTime() >= gapMinutes * MINUTE) {
       out.push({
         role: 'system',
-        content: `[Time passed here — what follows was said ${describeGap(previous, usable, timeZone)}. Everything above this line is from before that gap: it is background, not something still going on. Do not carry a plan, a mood or a time of day across this line, and do not refer to anything above it as though it were still happening unless they bring it up.]`,
+        // Short: five of these sat in one prompt at eighty tokens each, read by
+        // the hosted model before every first word. The rule is the same.
+        content: `[Time passed — what follows was said ${describeGap(previous, usable, timeZone)}. What is above is background, not still going on: carry no plan, mood or time of day across this line.]`,
       });
     }
     if (usable) previous = usable;

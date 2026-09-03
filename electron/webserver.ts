@@ -642,6 +642,23 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
     return json(res, 200, deps.wake());
   }
 
+  // A recorded sigh or grunt of hers, in a mood, for the gap between two
+  // paragraphs — the desktop breathes there and the phone can too. Bytes, so
+  // the phone plays it like a line.
+  if (req.method === 'GET' && path === '/api/sigh') {
+    const emotion = (url.searchParams.get('emotion') ?? '').slice(0, 30) || null;
+    const clip = await deps.sigh(emotion);
+    if (!clip) return json(res, 404, { error: 'No sigh for that.' });
+    res.writeHead(200, {
+      'Content-Type': clip.mime || 'audio/wav',
+      'Content-Length': clip.audio.length,
+      'Content-Security-Policy': "default-src 'none'",
+      'X-Content-Type-Options': 'nosniff',
+      'Cache-Control': 'no-store',
+    });
+    return res.end(Buffer.from(clip.audio));
+  }
+
   if (req.method === 'POST' && path === '/api/speak') {
     const body = await readBody(req) as { text?: unknown; emotion?: unknown; sigh?: unknown };
     const text = typeof body.text === 'string' ? body.text.trim() : '';
