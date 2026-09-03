@@ -56,6 +56,10 @@ test('what she writes from is facts, laid out, with the rule that it is only tho
   assert.match(note, /They got on your nerves today\./);
   assert.match(note, /1 of your messages to them got no answer\./);
   assert.match(note, /You messaged them first 5 times\./);
+  // A zero that was counted is a clean day, and she is told so; one that was never counted is nothing.
+  assert.match(diaryInstruction({ ...m, ignoredToday: 0, counted: true }), /You messaged them first 5 times\. Every one of them got an answer\./);
+  assert.doesNotMatch(diaryInstruction({ ...m, ignoredToday: 0 }), /got an answer/);
+  assert.doesNotMatch(diaryInstruction({ ...m, ignoredToday: 0, counted: true, herUnprompted: 0 }), /got an answer/);
   assert.match(note, /They got done: Rental Inspection\./);
   assert.match(note, /spent the night on Elden Ring, one of your own things: brilliant and cruel/);
   assert.match(note, /Elden Ring — A masterpiece that hates you\./);

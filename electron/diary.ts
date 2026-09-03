@@ -91,6 +91,8 @@ export type DayMaterial = {
   irritation: number;
   grudge: number;
   ignoredToday: number;
+  /** Whether the day's unanswered lines were actually counted (grudge.ts); a zero that was never counted is not a clean day. */
+  counted?: boolean;
   /** How the bedtime check went, when it ran. */
   went: 'silent' | 'thin' | 'fine' | null;
   ticked: string[];
@@ -112,10 +114,13 @@ export function diaryInstruction(m: DayMaterial): string {
   const said = m.theySaid.length ? `WHAT HE SAID TO YOU today (${m.theirMessages} messages in all):\n${m.theySaid.map(text => `- "${text}"`).join('\n')}` : `He said nothing to you today.`;
   const feeling = [
     m.irritation >= 7 ? 'By tonight you were not speaking to them properly.' : m.irritation >= 4 ? 'They got on your nerves today.' : m.irritation >= 1 ? 'They tried your patience a little.' : '',
-    m.ignoredToday > 0 ? `${m.ignoredToday} of your messages to them got no answer.` : '',
-    m.grudge > 3 ? `You are carrying a grudge — ${m.grudge} unanswered messages and counting.` : '',
     m.went === 'silent' ? 'They went to bed without telling you a single thing about their day.' : m.went === 'thin' ? 'They barely told you anything about their day before bed.' : '',
     m.herUnprompted ? `You messaged them first ${m.herUnprompted} time${m.herUnprompted === 1 ? '' : 's'}.` : '',
+    // Said either way once the count exists. Given only the number of times she
+    // had messaged first, she wrote every one of them down as ignored — "fourteen
+    // texts from me bouncing off nothing" on a day they answered all fourteen.
+    m.ignoredToday > 0 ? `${m.ignoredToday} of your messages to them got no answer.` : m.counted && m.herUnprompted ? 'Every one of them got an answer.' : '',
+    m.grudge > 3 ? `You are carrying a grudge — ${m.grudge} unanswered messages and counting.` : '',
   ].filter(Boolean).join(' ');
   const ticked = m.ticked.length ? `They got done: ${m.ticked.join(', ')}.` : '';
   const nights = m.nights.length

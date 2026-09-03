@@ -84,7 +84,7 @@ import { attachmentsInPlay, describeAttached, READ_IT_ALL_PROMPT, readAttachment
 import { forOllama, withoutOldest } from './ollamaturns';
 import { seedEmoji, seedOffTheOrders } from './seed';
 import { pickToBringUp, REMEMBERED_PICKS } from './bored';
-import { grudgeInstruction, irritationAfterTally, nextGrudge, tallyDue, tallyInstruction, unanswered } from './grudge';
+import { grudgeInstruction, irritationAfterTally, nextGrudge, tallyDue, tallyInstruction, unanswered, type Said } from './grudge';
 import { groundedInstruction, placeQuery } from './places';
 import { daySaid, DEFAULT_BEDTIME_MINUTES, howTheDayWent, nightfallDue, sulkGrudge, sulkInstruction, sulkStillStands, type DayVerdict } from './nightfall';
 import { keepNights, nightNoteInstruction, nightsInstruction, nightsOn, nightsToDrawOn, pickInstruction, tidyPick, timeForSomething, type Night, nightToRaise } from './nightlife';
@@ -808,6 +808,8 @@ function performChatResetIfDue() {
       console.warn('[memory] could not start the day summary:', error instanceof Error ? error.message : error);
     }
   }
+  // The day is counted once more before its lines are trimmed — see settleTally.
+  if (previousKey) settleTally(previousKey, (previousMessages ?? []) as { role: string; at?: string }[]);
   // Her log is trimmed rather than cleared. The conversation starts fresh every
   // day because a conversation is a thing you are in the middle of; the log is a
   // record, and a record you can only ever see today's page of is not one. A few
@@ -1316,6 +1318,9 @@ function unpromptedContext(): string {
   const today = localDateKey(zonedNow(CHAT_TIMEZONE));
   const asides = getAsides();
   const spokenToday = asidesOn(asides, today);
+  // When they last said anything to her, from any device: what she has remarked
+  // since then is still hanging; what she remarked before it is not.
+  const theirLastWordAt = () => { const at = Date.parse(getMood().lastMessageAt ?? ''); return Number.isFinite(at) ? at : undefined; };
   // Her own remarks, beside the conversation rather than mixed into it. They are
   // not part of what was said between them and printing them as though they were
   // is how she came to answer her own asides — but she does have to know she has
@@ -1325,7 +1330,7 @@ function unpromptedContext(): string {
   // not repeat at one in the morning is what she said at half eleven.
   // Where their phone says they are rides along too: a nudge that knows they
   // are at the shops has something to needle with.
-  const parts = [summariseFollowing(getFollowing(), Date.now()), todaySoFar(), alreadySaidRecently(asides, CHAT_TIMEZONE, Date.now()), stillWaiting(), describeWhereabouts(getWhereabouts()), toldNow(), arrivalNote(), unansweredAsksNote(asides, CHAT_TIMEZONE, Date.now()), weatherToDrawOn(getWeather().last, weatherWhere(), asides.map(aside => aside.text), Date.now(), getWeather().disputedAt), nightsToDrawOn(nightsOn(getNights(), lastNightKey()), asides.map(aside => aside.text)), tastesInstruction(getInterests())].filter(Boolean);
+  const parts = [summariseFollowing(getFollowing(), Date.now()), todaySoFar(), alreadySaidRecently(asides, CHAT_TIMEZONE, Date.now(), theirLastWordAt()), stillWaiting(), describeWhereabouts(getWhereabouts()), toldNow(), arrivalNote(), unansweredAsksNote(asides, CHAT_TIMEZONE, Date.now()), weatherToDrawOn(getWeather().last, weatherWhere(), asides.map(aside => aside.text), Date.now(), getWeather().disputedAt), nightsToDrawOn(nightsOn(getNights(), lastNightKey()), asides.map(aside => aside.text)), tastesInstruction(getInterests())].filter(Boolean);
   if (!parts.length) return '';
   // "Do not repeat a point you have already made" was read as "change the
   // subject": once a thread was answered and settled she abandoned the day
@@ -3941,6 +3946,8 @@ function getActiveCharacter() {
 type Mood = { irritation: number; ego: number; lastMessageAt?: string; goodnightDay?: string; awaitingApology?: boolean;
   /** Being left on read, kept: see grudge.ts. */
   grudge?: number; ignoredToday?: number; talliedDay?: string;
+  /** What the grudge was before the day was counted, so the count can be redone at the roll from the same start. */
+  grudgeBeforeTally?: number;
   /**
    * talliedDay is the day the counting was banked, which must happen exactly
    * once. toldDay is the day she actually got the line out, which is a separate
@@ -3959,6 +3966,7 @@ function getMood(): Mood {
   const saved = store.get('mood') as Partial<Mood> | undefined;
   return { irritation: Number(saved?.irritation ?? 0), ego: Number(saved?.ego ?? 0), lastMessageAt: saved?.lastMessageAt, goodnightDay: saved?.goodnightDay, awaitingApology: Boolean(saved?.awaitingApology),
     grudge: Number(saved?.grudge ?? 0), ignoredToday: Number(saved?.ignoredToday ?? 0), talliedDay: saved?.talliedDay,
+    grudgeBeforeTally: typeof saved?.grudgeBeforeTally === 'number' ? saved.grudgeBeforeTally : undefined,
     toldDay: saved?.toldDay, ignoredSamples: Array.isArray(saved?.ignoredSamples) ? saved.ignoredSamples.map(String) : [],
     nightfallDay: saved?.nightfallDay, owedMorning: saved?.owedMorning, diaryDay: saved?.diaryDay };
 }
@@ -4135,6 +4143,9 @@ function dueTodayCount(items: KeptItem[], statuses: ItemStatus[], todayKey: stri
   return items.filter((item, index) => item.date === todayKey && (statuses[index] === 'upcoming' || statuses[index] === 'now') && !raised.includes(item)).length;
 }
 
+/** Nobody has touched the machine in this long, so nobody is at it — the same five minutes shouldPipeUp keeps. */
+const AT_THE_DESK_SECONDS = 300;
+
 async function composeOpening(): Promise<string | null> {
   const config = store.get('ai.config') as ProviderConfig | undefined;
   if (!config?.model) return null;
@@ -4159,6 +4170,16 @@ async function composeOpening(): Promise<string | null> {
   // away reads as a scheduler, not a companion — see RETURN_AFTER_MINUTES.
   if (kind === 'return' && !invited && isRelaunchNotReturn(messages as { role: string; at?: string }[], Date.now())) {
     console.log('[chat] no opening — they were here less than two hours ago; a relaunch is not a return');
+    return null;
+  }
+  // Nor is the clock. The day rolls at five, the window is told the
+  // conversation is fresh and asks for an opening, and she opened one — "Still
+  // awake, or finally dead?" at 5:00 AM, into a room they were asleep in —
+  // which then sat at the top of the day as something she had said to them.
+  // With no sign of them being up and nobody at the machine, a rolled day
+  // opens nothing; the first word of the day is theirs.
+  if (kind === 'fresh' && fresh?.reason === 'daily' && !invited && !theyAreUpNow() && powerMonitor.getSystemIdleTime() >= AT_THE_DESK_SECONDS) {
+    console.log('[chat] no opening — the day rolled over, but they are not up yet');
     return null;
   }
   const now = zonedNow(CHAT_TIMEZONE);
@@ -8248,23 +8269,54 @@ async function tallyIgnored(config: ProviderConfig) {
   const todayKey = localDateKey(now);
   const mood = getMood();
   if (tallyDue(now.getHours() * 60 + now.getMinutes(), mood.talliedDay, todayKey)) {
-    const pushed = new Set(Object.keys(PUSH_KIND));
     const heard = (store.get('chat.messages') as { role: string; at?: string }[] | undefined) ?? [];
-    // Nothing before their first word of the day counts: they cannot ignore
-    // what they have not been up to see.
-    const firstWord = heard.filter(turn => turn.role === 'user' && turn.at).map(turn => Date.parse(turn.at!)).filter(Number.isFinite).sort((a, b) => a - b)[0] ?? 0;
-    const ignored = unanswered(
-      asidesOn(getAsides(), todayKey).map(aside => ({ at: aside.at, source: aside.source, text: aside.text, reached: aside.reached })),
-      heard, pushed, Date.now(), firstWord);
+    const ignored = countIgnored(todayKey, heard);
     const grudge = nextGrudge(mood.grudge ?? 0, ignored.length);
     const irritation = irritationAfterTally(mood.irritation, ignored.length, IRRITATION_MAX);
     // Banked here and nowhere else, so a day is counted exactly once however
-    // many times the telling below has to be attempted.
-    setMood({ ...mood, irritation, grudge, ignoredToday: ignored.length, talliedDay: todayKey,
+    // many times the telling below has to be attempted. What it was before is
+    // kept beside it, so the roll can count the whole day from the same start.
+    setMood({ ...mood, irritation, grudge, grudgeBeforeTally: mood.grudge ?? 0, ignoredToday: ignored.length, talliedDay: todayKey,
       ignoredSamples: ignored.slice(0, 2).map(line => (line.text ?? '').slice(0, 80)) });
     console.log(`[grudge] ${todayKey}: ${ignored.length} of her lines went unanswered — grudge ${mood.grudge ?? 0} -> ${grudge}, irritation ${mood.irritation} -> ${irritation}`);
   }
   await tellThemTheTally(config, todayKey);
+}
+
+/** The lines of hers on a day that got nothing back, from what was heard that day (grudge.ts). */
+function countIgnored(day: string, heard: { role: string; at?: string }[]): Said[] {
+  const pushed = new Set(Object.keys(PUSH_KIND));
+  // Nothing before their first word of the day counts: they cannot ignore
+  // what they have not been up to see.
+  const firstWord = heard.filter(turn => turn.role === 'user' && turn.at).map(turn => Date.parse(turn.at!)).filter(Number.isFinite).sort((a, b) => a - b)[0] ?? 0;
+  return unanswered(
+    asidesOn(getAsides(), day).map(aside => ({ at: aside.at, source: aside.source, text: aside.text, reached: aside.reached })),
+    heard, pushed, Date.now(), firstWord);
+}
+
+/**
+ * The day counted again at its end.
+ *
+ * The count at eight leaves two kinds of line out: anything said in the
+ * ninety minutes before it, whose window was still open, and everything said
+ * after it — and the day was never counted again. A nudge at half nine that
+ * they slept through was never held against them, which is how four evenings
+ * of "0 of her lines went unanswered" sat beside diary entries about being
+ * ignored. The roll is the last moment the day's messages are all in one
+ * place, so the whole day is counted here from the same starting grudge and
+ * the difference banked. Nothing is said about it: the telling was the
+ * evening's, and by now they are asleep.
+ */
+function settleTally(day: string, heard: { role: string; at?: string }[]) {
+  const mood = getMood();
+  const counted = mood.talliedDay === day;
+  const ignored = countIgnored(day, heard);
+  if (ignored.length <= (counted ? mood.ignoredToday ?? 0 : 0)) return;
+  const before = counted ? mood.grudgeBeforeTally ?? mood.grudge ?? 0 : mood.grudge ?? 0;
+  const grudge = nextGrudge(before, ignored.length);
+  setMood({ ...mood, grudge, grudgeBeforeTally: before, ignoredToday: ignored.length, talliedDay: day,
+    ignoredSamples: ignored.slice(0, 2).map(line => (line.text ?? '').slice(0, 80)) });
+  console.log(`[grudge] ${day}, counted again at the roll: ${ignored.length} of her lines went unanswered${counted ? ` (${mood.ignoredToday ?? 0} at eight)` : ' (never counted at eight)'} — grudge ${mood.grudge ?? 0} -> ${grudge}`);
 }
 
 // ---- Her own night -------------------------------------------------------
@@ -8440,6 +8492,14 @@ function diaryExamples(): string[] {
   } catch { return []; }
 }
 
+/** A day's transcript, wherever the roll has left it: archived once the day is over, live until then. */
+function messagesOn(day: string): { role: string; content?: string; at?: string }[] {
+  type Line = { role: string; content?: string; at?: string };
+  const archived = (store.getArchive()[day] ?? []) as Line[];
+  const live = store.get('chat.dayKey') === day ? ((store.get('chat.messages') as Line[] | undefined) ?? []) : [];
+  return [...archived, ...live];
+}
+
 /**
  * Her diary: one entry a night, about the day with them and the night without.
  *
@@ -8454,7 +8514,12 @@ async function writeDiary(config: ProviderConfig) {
   const due = diaryDueFor(now, prefs, at => nightKey(at));
   const mood = getMood();
   if (!due || mood.diaryDay === due) return;
-  const messages = (store.get('chat.messages') as { role: string; content?: string; at?: string }[] | undefined) ?? [];
+  // The day's transcript, wherever the roll has left it. With the quiet ending
+  // at six the entry is due after five, and the day rolls at five: the live
+  // list was already empty every night, so every entry opened on "he said
+  // nothing to you today" over days of forty and fifty messages — and, with
+  // nothing else to go on, counted every line she had sent as one he ignored.
+  const messages = messagesOn(due);
   const theirs = messages.filter(message => message.role === 'user').map(message => String(message.content ?? '').trim()).filter(Boolean);
   const substantial = theirs.filter(text => text.split(/\s+/).length >= 4);
   const theySaid = [...substantial.slice(-3), ...substantial.slice(0, 1)].filter((text, index, all) => all.indexOf(text) === index).map(text => text.slice(0, 140));
@@ -8463,7 +8528,7 @@ async function writeDiary(config: ProviderConfig) {
     day: due,
     theySaid, theirMessages: theirs.length,
     herUnprompted: asidesOn(getAsides(), due).length,
-    irritation: mood.irritation, grudge: mood.grudge ?? 0, ignoredToday: mood.ignoredToday ?? 0,
+    irritation: mood.irritation, grudge: mood.grudge ?? 0, ignoredToday: mood.talliedDay === due ? mood.ignoredToday ?? 0 : 0, counted: mood.talliedDay === due,
     went: mood.owedMorning?.day === due ? mood.owedMorning.went : mood.nightfallDay === due ? 'fine' : null,
     ticked: getKept().filter(item => item.done && item.completedAt?.startsWith(due)).map(item => item.title),
     nights: tonight.map(night => ({ about: night.about, note: night.note, interest: night.interest, game: night.game })),

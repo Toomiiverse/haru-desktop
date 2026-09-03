@@ -258,7 +258,7 @@ export const ALREADY_SAID_MS = 12 * 60 * 60_000;
  * this" changes what she writes. A reply to something they typed does not need
  * it, and is measurably worse for having it.
  */
-export function alreadySaidRecently(asides: Aside[], timeZone: string, now: number, limit = ALREADY_SAID_LIMIT): string {
+export function alreadySaidRecently(asides: Aside[], timeZone: string, now: number, theirLastAt?: number, limit = ALREADY_SAID_LIMIT): string {
   const said = asides
     .filter(aside => {
       const at = Date.parse(aside.at);
@@ -266,10 +266,26 @@ export function alreadySaidRecently(asides: Aside[], timeZone: string, now: numb
     })
     .slice(-limit);
   if (!said.length) return '';
-  const lines = said.map(aside => `${clock(aside.at, timeZone)} — "${aside.text.replace(/\s+/g, ' ').slice(0, 200)}"`);
+  const line = (aside: Aside) => `${clock(aside.at, timeZone)} — "${aside.text.replace(/\s+/g, ' ').slice(0, 200)}"`;
+  // "They went unanswered" was said of every line on the list, including the
+  // ones they had long since come back and talked past. Told at half nine that
+  // "text me when you've finished chewing" went unanswered — with "I'm back
+  // home, it was a good dinner" sitting in the conversation from an hour
+  // before — she asked whether he was still eating the steak. A remark made
+  // before their last message is not waiting on anything; only what she has
+  // said since they last spoke is.
+  const spokenSince = (aside: Aside) => theirLastAt !== undefined && Number.isFinite(theirLastAt) && Date.parse(aside.at) <= theirLastAt;
+  const overtaken = said.filter(spokenSince);
+  const hanging = said.filter(aside => !spokenSince(aside));
   return [
-    'You have already said these, off your own back. They are not in the conversation because nobody said them to you — they were remarks, and they went unanswered:',
-    lines.join('\n'),
+    overtaken.length ? [
+      'You have already said these, off your own back, before they last spoke to you. They are not in the conversation because nobody said them to you — they were remarks, and the conversation has moved on since: whatever they were waiting on has been overtaken by what they have told you, and none of them says anything about what they are doing now.',
+      overtaken.map(line).join('\n'),
+    ].join('\n') : '',
+    hanging.length ? [
+      'You have already said these, off your own back, since they last spoke. They are not in the conversation because nobody said them to you — they were remarks, and they went unanswered:',
+      hanging.map(line).join('\n'),
+    ].join('\n') : '',
     'Do not make any of these points again, and do not open on a subject you have already remarked on. The subjects of those remarks — the weather, the time, whatever they were about — are closed: do not raise them again in any form, however fresh they look in the conversation.',
-  ].join('\n');
+  ].filter(Boolean).join('\n');
 }
