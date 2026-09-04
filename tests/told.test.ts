@@ -17,7 +17,16 @@ test("the afternoon that went wrong, in their own words", () => {
   assert.equal(plan.until, '4:30 PM');
   const soon = tell('Finishing work in about 14 minutes! Then heading straight there')!;
   assert.equal(soon.where, 'at work');
-  assert.match(soon.until ?? '', /^(1:00|12:5\d|1:0\d) PM$/, String(soon.until));
+  // The until is the host's local time for now+14min, run through the same
+  // clock() the code uses — asserted against that rather than a fixed TZ, so
+  // this test passes on any runner (CI runs UTC; the box runs AWST).
+  // clock() adds 12 to a bare hour of 1-7 ("finish at 4:30 is the afternoon"),
+  // so the expectation has to apply that too.
+  const soonAt = new Date(Date.parse(now) + 14 * 60_000);
+  let soonHour = soonAt.getHours(); const soonMin = String(soonAt.getMinutes()).padStart(2, '0');
+  if (soonHour >= 1 && soonHour <= 7) soonHour += 12;
+  const soonPm = soonHour >= 12; const soonH12 = soonHour % 12 === 0 ? 12 : soonHour % 12;
+  assert.equal(soon.until, `${soonH12}:${soonMin} ${soonPm ? 'PM' : 'AM'}`, String(soon.until));
   const off = tell('Alright I finished work, heading to mum’s now')!;
   assert.equal(off.where, "mum's house");
   assert.equal(off.enRoute, true);
