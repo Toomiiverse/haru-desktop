@@ -196,6 +196,8 @@ export type PromptState = {
   whereabouts?: string;
   /** The weather where they are, already in words (weather.ts), or nothing. */
   weather?: string;
+  /** How they slept and how far they have walked, from the phone, when it says so. */
+  body?: string;
   /** The way somewhere, when they asked for it: what was found and what the app will attach (directions.ts). */
   directionsNote?: string;
 };
@@ -260,6 +262,7 @@ function systemBlocks(state: PromptState, away = false): SystemBlock[] {
     // is the same kind of fact: background she may use, never a thing to recite.
     { stable: false, text: state.whereabouts ?? '' },
     { stable: false, text: state.weather ?? '' },
+    { stable: false, text: state.body ?? '' },
     { stable: false, text: state.recalled ?? '' },
     // Query-selected memory, rendered per message (profileSummary in main.ts):
     // the human block shows what is relevant to this turn, so this is the

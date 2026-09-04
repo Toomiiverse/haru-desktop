@@ -53,6 +53,7 @@ import { describeTold, placeToldFrom, toldTheyAreBusy, toldStillStands, type Tol
 import { markMentioned, upcomingToMention } from './upcoming';
 import { directionsAskFrom, directionsNote, dropRouteTalk, matchNamedPlace, startingPoint, withDirections, withoutMapsLinks, type DirectionsAsk, claimsTraffic, withoutTrafficDenials } from './directions';
 import { absorb, describeWhereabouts, distanceM, forgetPlace, homeOf, namePlace, placeAt, readSpot, readWhereabouts, whereForPage, type Whereabouts, SPOT_STALE_MS, saidTheyWereGoing, unannouncedArrivalNote, type Arrival } from './whereabouts';
+import { bodyForPage, describeBody, readBody as readBodyState, readBodyReport, type Body } from './body';
 import { convertImage, normaliseFormat, FORMATS } from './convert';
 import { cancelPower, closeApp, findApps, isCancellable, launch, listRunning, matchApp, matchRunning, normalisePower, POWER_DELAY_S, readDesktopConfig, runPower, supportedDesktop, type DesktopConfig } from './desktop';
 import { looksLikeScreenshot, maySpeak, readScreenshotConfig, screenshotPrompt, SETTLE_MS, SETTLE_TRIES, type ScreenshotConfig } from './screenshots';
@@ -1161,8 +1162,11 @@ function classifyEmotion(reply: string, config: ProviderConfig): Promise<Emotion
     [{ role: 'system', content: system }, { role: 'user', content: `The line she just said: "${reply.slice(0, 600)}"` }],
     config,
     // Low temperature because this is a label, not writing; the schema is what
-    // guarantees it comes back parseable.
-    { tools: false, temperature: 0.1, format: EMOTION_SCHEMA, maxTokens: 120 },
+    // guarantees it comes back parseable. The classifier reads a 600-char line
+    // and nothing else, so it gets 2048 context, not the 20K the chat window
+    // wants — a 20K KV cache is what pushed the Q6_K off the card and left
+    // classification running at CPU speed (9 tok/s, 5.5s a line).
+    { tools: false, temperature: 0.1, format: EMOTION_SCHEMA, maxTokens: 120, numCtx: 2048 },
   ).then(message => {
     const parsed = parseEmotion(message.content ?? '');
     if (!parsed) { console.warn(`[emotion] unparseable classification, keeping previous: ${JSON.stringify(message.content ?? '')}`); return null; }
@@ -1936,13 +1940,26 @@ async function speak(reply: string, mood?: Promise<Emotion | null>) {
   // smaller call than the synthesis it precedes, so it has almost always landed
   // by the time the first chunk would have been sent anyway. The timeout is
   // there so a stalled classifier costs the right clip, never her voice.
-  const emotion = mood ? await withTimeout(mood, EMOTION_WAIT_MS) : null;
-  const reference = referenceFor(config, emotion?.emotion);
+  const classified = mood ? await withTimeout(mood, EMOTION_WAIT_MS) : null;
+  // The classifier can be down, or past its deadline, and a line spoken with no
+  // mood fell back to the neutral clip — flat delivery no matter how she said
+  // it. localEmotion reads the line itself (no model call), so the clip still
+  // matches the mood even when classification never landed.
+  const emotion = classified ?? { emotion: localEmotion(text), confidence: 0, energy: 0.5, intent: 'reply' as const, focus: 'user' as const };
+  const reference = referenceFor(config, emotion.emotion);
   const turnStillCurrent = turn === speechTurn;
   if (!turnStillCurrent) return;
   const chunks = splitForSpeech(text);
-  console.log(`[voice] speaking ${chunks.length} chunk(s) via ${config.engine}${emotion ? ` as ${emotion.emotion}` : ''}${reference.clip ? ` using ${path.basename(reference.clip)}` : ''}`);
+  console.log(`[voice] speaking ${chunks.length} chunk(s) via ${config.engine} as ${emotion.emotion}${classified ? '' : ' (heuristic)'}${reference.clip ? ` using ${path.basename(reference.clip)}` : ''}`);
   let shoutedChunks = 0;
+  let prepMs = 0;
+  let synthMs = 0;
+  // Serial on purpose, one request at a time: breeze-server holds a single
+  // model slot and rejects a second concurrent request with 409 busy, so a
+  // prefetched chunk would be refused rather than overlapped. The serial loop
+  // already overlaps in practice — the engine synthesises at ~1.2x realtime,
+  // so the next chunk is always ready before the previous one has finished
+  // playing — which is what the synthMs total below records.
   for (const chunk of chunks) {
     try {
       // Decided per chunk on the text as written, before the capitals are
@@ -1954,8 +1971,12 @@ async function speak(reply: string, mood?: Promise<Emotion | null>) {
       if (shouting) shoutedChunks++;
       const voice = shouting ? shoutReference(config, reference) : reference;
       let clip;
+      const prepStarted = Date.now();
+      const say = spokenCase(chunk);
+      prepMs += Date.now() - prepStarted;
+      const chunkSynthStarted = Date.now();
       try {
-        clip = await synthesise(spokenCase(chunk), config, voice, voiceAuth(config), emotion?.emotion);
+        clip = await synthesise(say, config, voice, voiceAuth(config), emotion.emotion);
       } catch (first) {
         // One retry, and only for a timeout.
         //
@@ -1970,11 +1991,12 @@ async function speak(reply: string, mood?: Promise<Emotion | null>) {
         // request will fail identically the second time and only doubles the wait.
         if (!/timeout|aborted/i.test(first instanceof Error ? first.message : String(first))) throw first;
         console.warn('[voice] synthesis timed out — trying once more, the model should be warm now');
-        clip = await synthesise(spokenCase(chunk), config, voice, voiceAuth(config), emotion?.emotion);
+        clip = await synthesise(say, config, voice, voiceAuth(config), emotion.emotion);
       }
       // Checked after the await, not before: the wait is where a newer reply
       // lands, and a stale chunk arriving mid-sentence is the audible bug.
       if (turn !== speechTurn) return;
+      synthMs += Date.now() - chunkSynthStarted;
       sendToWindows('speech:clip', { turn, text: chunk, ...(clip ?? {}) } satisfies SpeechClip);
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
@@ -1995,6 +2017,10 @@ async function speak(reply: string, mood?: Promise<Emotion | null>) {
     const shouted = shoutReference(config, reference).clip;
     console.log(`[voice] ${shoutedChunks} chunk(s) shouted using ${shouted ? path.basename(shouted) : 'the default clip'}`);
   }
+  // Prep is pure string work and must stay off the critical path; the synth
+  // total across chunks is what the serial loop's overlap claim is checked
+  // against — it should be close to the wall time, not a multiple of it.
+  console.log(`[voice] spoke ${chunks.length} chunk(s) — prep ${prepMs}ms, synthesis ${synthMs}ms total`);
 }
 
 let pokeCount = 0;
@@ -4739,7 +4765,10 @@ type PostOptions = { tools?: boolean; temperature?: number; format?: unknown; ma
   /** A deadline for a hosted answer, after which the local model speaks instead. */
   signal?: AbortSignal;
   /** The endpoint's prompt-cache key for this conversation. */
-  cacheKey?: string };
+  cacheKey?: string;
+  /** A context window smaller than the chat default — for label jobs (emotion)
+   *  that a 20K KV cache would push off the card. */
+  numCtx?: number };
 
 /** The last thing the user actually said — what the tool table should be laid for. */
 function latestUserText(conversation: { role?: string; content?: string }[]): string {
@@ -4920,10 +4949,10 @@ function capacitySpill(config: ProviderConfig): ProviderConfig | null {
  * silently becoming eight times slower with no explanation, which reads as
  * something being wrong with her rather than with the pod.
  */
-async function ollamaPost(conversation: OllamaMessage[], config: ProviderConfig, { tools = true, temperature = config.temperature, format, maxTokens, onChunk }: PostOptions = {}) {
+async function ollamaPost(conversation: OllamaMessage[], config: ProviderConfig, { tools = true, temperature = config.temperature, format, maxTokens, onChunk, numCtx }: PostOptions = {}) {
   // One place, so chat, quips, openings and remarks all follow the same rule.
   config = modelForNow(config);
-  const options = { tools, temperature, format, maxTokens, onChunk };
+  const options = { tools, temperature, format, maxTokens, onChunk, numCtx };
   const home = homeTwin(config);
   const address = trimEndpoint(config.endpoint);
 
@@ -4953,7 +4982,7 @@ async function ollamaPost(conversation: OllamaMessage[], config: ProviderConfig,
   }
 }
 
-async function sendToProvider(conversation: OllamaMessage[], config: ProviderConfig, { tools = true, temperature = config.temperature, format, maxTokens, onChunk, signal, cacheKey }: PostOptions = {}) {
+async function sendToProvider(conversation: OllamaMessage[], config: ProviderConfig, { tools = true, temperature = config.temperature, format, maxTokens, onChunk, signal, cacheKey, numCtx }: PostOptions = {}) {
   // Routed here rather than at every call site: there are a dozen composers in
   // this file and none of them should know which provider is answering.
   if (isOpenAIShaped(config.provider)) return openAIPost(conversation, config, { tools, temperature, format, maxTokens, onChunk, signal, cacheKey });
@@ -4995,7 +5024,7 @@ async function sendToProvider(conversation: OllamaMessage[], config: ProviderCon
           // expiry, then sixty seconds exactly when it moved out here.
           // releaseModelForGame had it in the right place all along.
           keep_alive: OLLAMA_KEEP_ALIVE,
-          options: { temperature, num_ctx: chatNumCtx(), ...(maxTokens ? { num_predict: maxTokens } : {}) },
+          options: { temperature, num_ctx: numCtx ?? chatNumCtx(), ...(maxTokens ? { num_predict: maxTokens } : {}) },
         }),
       });
     } catch (error) {
@@ -6664,6 +6693,7 @@ const promptState = {
     // said "you're home" as though that were fine.
     whereabouts: [turnedUp ? '' : describeWhereabouts(getWhereabouts()), toldNow()].filter(Boolean).join(' '),
     weather: describeWeather(getWeather().last, weatherWhere(), Date.now(), getWeather().disputedAt),
+    body: describeBody(getBody(), Date.now(), clockAt, localDateKey(zonedNow(CHAT_TIMEZONE))),
     // So "what did you get up to last night?" has a true answer. Without this
     // the only record of her night is on disk and she invents one instead.
     nights: nightsInstruction(nightsOn(getNights(), lastNightKey())),
@@ -8059,6 +8089,14 @@ function getWhereabouts(): Whereabouts {
 
 function saveWhereabouts(next: Whereabouts) {
   store.set('whereabouts', next);
+}
+
+function getBody(): Body {
+  return readBodyState(store.get('body'));
+}
+
+function saveBody(next: Body) {
+  store.set('body', next);
 }
 
 function getPush(): { devices: PushDevice[]; prefs: PushPrefs; nextNudgeAt: number; lastReachedAt: number } {
@@ -10009,6 +10047,26 @@ function webDeps(): WebDeps {
       },
       discard(attachment) { discardStaged((attachment ?? {}) as { saved?: string }); },
     },
+    body: {
+      get: () => bodyForPage(getBody()),
+      enable(on) {
+        const state = getBody();
+        if (state.enabled === on) return;
+        // Off forgets the last figures too: off means she stops knowing.
+        saveBody({ enabled: on, last: on ? state.last : null });
+        console.log(`[body] the phone ${on ? 'now says' : 'no longer says'} how they slept`);
+      },
+      report(body) {
+        const state = getBody();
+        if (!state.enabled) return false;
+        const report = readBodyReport(body);
+        if (!report) return false;
+        saveBody({ ...state, last: report });
+        const bits = [report.sleepMinutes !== null ? `${report.sleepMinutes} min asleep` : '', report.steps !== null ? `${report.steps} steps` : ''].filter(Boolean).join(', ');
+        if (!state.last || state.last.day !== report.day || state.last.sleepMinutes !== report.sleepMinutes) console.log(`[body] ${report.day}: ${bits}`);
+        return true;
+      },
+    },
     portrait: () => {
       // The app icon doubles as her face on the phone. Read each time rather than
       // held: it is 1.5MB, wanted about once a day, and the browser caches it.
@@ -10066,16 +10124,20 @@ function webDeps(): WebDeps {
       // The clip for the mood the line was said in, as the desktop chooses it —
       // and her angry clip for a line she is shouting, which is where the volume
       // actually comes from. A mood she has no clip for is her usual voice.
-      const reference = referenceFor(voice, emotion && (EMOTIONS as readonly string[]).includes(emotion) ? emotion as EmotionName : null);
+      // The phone sends the mood the page read from the line; when it sends
+      // none (or one she has not got), the line is read here instead of falling
+      // flat to neutral — localEmotion, no model call.
+      const felt = emotion && (EMOTIONS as readonly string[]).includes(emotion) ? emotion as EmotionName : localEmotion(text);
+      const reference = referenceFor(voice, felt);
       const chosen = hasShout(text) ? shoutReference(voice, reference) : reference;
       // Narrowed the same way referenceFor does: a string from the phone that is
       // not one of her emotions means her usual voice.
-      const mood = emotion && (EMOTIONS as readonly string[]).includes(emotion) ? emotion as EmotionName : null;
+      const mood = felt;
       try {
         // Logged here as the desk path logs it: with desk speech off, nothing
         // said which clip the phone had spoken a line with, and "she sounds
         // high-pitched" could not be traced to the reference that caused it.
-        console.log(`[voice] the phone speaks as ${emotion ?? 'her usual'} using ${path.basename(chosen.clip)}`);
+        console.log(`[voice] the phone speaks as ${mood} using ${path.basename(chosen.clip)}`);
         const say = spokenCase(speakableText(text));
         const clip = await synthesise(say, voice, chosen, voiceAuth(voice), mood);
         // Ended early — see looksClipped. One more go; the sampling that cut it
@@ -10108,7 +10170,7 @@ function webDeps(): WebDeps {
       // Breeze streams its own PCM; wrapped in a WAV here so the phone can play
       // it progressively. Same clone + instruction as the buffered path.
       if (voice.engine === 'breeze') {
-        const mood = emotion && (EMOTIONS as readonly string[]).includes(emotion) ? emotion as EmotionName : null;
+        const mood = emotion && (EMOTIONS as readonly string[]).includes(emotion) ? emotion as EmotionName : localEmotion(text);
         return synthesiseBreezeStream(voice, referenceFor(voice, mood), spokenCase(speakableText(text)), mood);
       }
       if (voice.engine !== 'hume') return null;

@@ -44,6 +44,7 @@ let shotRoot = '';
 function deps(overrides: Partial<WebDeps> = {}): WebDeps {
   let stored = access();
   let whereOn = false, whereAt: string | null = null; const reported: unknown[] = [];
+  let bodyOn = false;
   return {
     readAccess: () => stored,
     saveAccess: (next) => { stored = next; },
@@ -100,6 +101,11 @@ function deps(overrides: Partial<WebDeps> = {}): WebDeps {
       name(name) { if (!reported.length) return false; whereAt = name; return true; },
       forget() { whereAt = null; },
       lookUp: async () => 'Wembley, Perth, Western Australia',
+    },
+    body: {
+      get: () => ({ enabled: bodyOn, at: null, fresh: false, day: null, sleepMinutes: null, steps: null }),
+      enable(on) { bodyOn = on; },
+      report(report) { const r = report as { day?: unknown }; return typeof r.day === 'string'; },
     },
 push: {
       subscribeApns: () => {}, unsubscribeApns: () => {}, apnsReady: () => false,

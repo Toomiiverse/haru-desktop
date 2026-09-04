@@ -162,6 +162,13 @@ export type WebDeps = {
     /** What the last fix's surroundings are called, asked once of the map service. Throws when there is nothing to ask about or no answer. */
     lookUp(): Promise<string>;
   };
+  /** How they slept and how far they walked, from the phone's Health app — see body.ts. */
+  body: {
+    get(): { enabled: boolean; at: string | null; fresh: boolean; day: string | null; sleepMinutes: number | null; steps: number | null };
+    enable(on: boolean): void;
+    /** The phone's latest figures. Refused (false) while the switch is off or the report is not one. */
+    report(report: unknown): boolean;
+  };
   /** Her picture, or nothing if this build has none. */
   portrait(): Buffer | null;
   /** The Live2D model to stand on the stage: the folder it lives in and its entry file. */
@@ -810,6 +817,22 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
   // Where they are. The page holds the coordinates; this side holds names and
   // a yes or no. Nothing is taken while sharing is off, so a phone that kept
   // watching after the switch was thrown here changes nothing.
+  // Their body, from the phone: last night's sleep and today's steps, while
+  // the switch says so. Two numbers a day, for one background sentence.
+  if (req.method === 'GET' && path === '/api/body') return json(res, 200, deps.body.get());
+
+  if (req.method === 'POST' && path === '/api/body/prefs') {
+    const body = await readBody(req) as { enabled?: unknown };
+    deps.body.enable(body.enabled === true);
+    return json(res, 200, deps.body.get());
+  }
+
+  if (req.method === 'POST' && path === '/api/body') {
+    if (!deps.body.get().enabled) return json(res, 409, { error: 'That is switched off.' });
+    if (!deps.body.report(await readBody(req))) return json(res, 400, { error: 'That is not a report.' });
+    return json(res, 200, deps.body.get());
+  }
+
   if (req.method === 'GET' && path === '/api/where') {
     return json(res, 200, deps.where.get());
   }
