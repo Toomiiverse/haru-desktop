@@ -12,6 +12,8 @@
 import { createPrivateKey, sign } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import http2 from 'node:http2';
+import { execFile } from 'node:child_process';
+import { join } from 'node:path';
 
 export type ApnsConfig = { keyPath: string; keyId: string; teamId: string; bundleId: string };
 export type ApnsDevice = { token: string; name: string; at: string; sandbox: boolean };
@@ -75,6 +77,46 @@ export function tokenIsGone(status: number, reason?: string): boolean {
  * bookkeeping.
  */
 export function sendApns(device: ApnsDevice, payload: string, config: ApnsConfig, jwt: string, collapseId?: string): Promise<ApnsResult> {
+  // Under Electron the send goes to a plain Node child (below); anywhere else,
+  // straight from here.
+  if (process.versions.electron) return sendApnsFromNode({ device, payload, config, jwt, collapseId });
+  return sendApnsHere(device, payload, config, jwt, collapseId);
+}
+
+export type ApnsJob = { device: ApnsDevice; payload: string; config: ApnsConfig; jwt: string; collapseId?: string };
+
+/**
+ * Electron's Node is built against BoringSSL, and Apple's gateway asks the
+ * client for an (optional) certificate during the TLS handshake. Under
+ * Electron that exchange tears the HTTP/2 session down before the request is
+ * sent — "The pending stream has been canceled (caused by: )", every time —
+ * while the system Node, on OpenSSL, carries on without a certificate.
+ * Chromium's own stack (net.fetch) is no way round it either: it refuses with
+ * ERR_SSL_CLIENT_AUTH_CERT_NEEDED and the select-client-certificate event never
+ * fires for main-process requests. So the app runs apns-send.js in `node`
+ * (2026-09-04). No node on the machine: the in-process attempt, for the log.
+ */
+const NODE_CANDIDATES = ['node', '/usr/bin/node', '/usr/local/bin/node', '/opt/homebrew/bin/node'];
+export function sendApnsFromNode(job: ApnsJob, attempt = 0): Promise<ApnsResult> {
+  const bin = NODE_CANDIDATES[attempt];
+  if (!bin) return sendApnsHere(job.device, job.payload, job.config, job.jwt, job.collapseId);
+  return new Promise(resolve => {
+    const child = execFile(bin, [join(__dirname, 'apns-send.js')], { timeout: 25_000, env: { ...process.env, ELECTRON_RUN_AS_NODE: undefined } as NodeJS.ProcessEnv }, (error, stdout) => {
+      if (error && (error as NodeJS.ErrnoException).code === 'ENOENT') { resolve(sendApnsFromNode(job, attempt + 1)); return; }
+      try {
+        const parsed = JSON.parse(String(stdout)) as Partial<ApnsResult>;
+        if (typeof parsed.status !== 'number') throw new Error('no status');
+        resolve({ status: parsed.status, reason: parsed.reason, gone: parsed.gone === true });
+      } catch {
+        resolve({ status: 0, reason: error ? `${bin}: ${error.message}` : `${bin} gave no answer`, gone: false });
+      }
+    });
+    child.stdin?.on('error', () => { /* the child died before reading; the callback reports it */ });
+    child.stdin?.end(JSON.stringify(job));
+  });
+}
+
+function sendApnsHere(device: ApnsDevice, payload: string, config: ApnsConfig, jwt: string, collapseId?: string): Promise<ApnsResult> {
   return new Promise(resolve => {
     const host = device.sandbox ? APNS_SANDBOX_HOST : APNS_HOST;
     const client = http2.connect(host);
