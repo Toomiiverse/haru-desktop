@@ -7260,7 +7260,7 @@ function nudgeBrain(): ProviderConfig | null {
  * ladder, the same attempt counts, the same spacing. Chased on one device, she
  * does not immediately chase on the other, because both write the same record.
  */
-async function nudgeForPhone(): Promise<{ line: string; about: string } | null> {
+async function nudgeForPhone(): Promise<{ line: string; about: string; eventId: string } | null> {
   if (herAsleepNow()) return null;
   if (chasing || Date.now() - lastRemindedAt < REMINDER_SPACING_MS) return null;
   // Told to drop something, she drops it here too. Silencing the chat and then
@@ -7313,7 +7313,7 @@ async function nudgeForPhone(): Promise<{ line: string; about: string } | null> 
     const line = await ollamaQuip(system, 'Remind them.', config);
     recordBrief(`reminder ${tier}`, system, line);
     console.log(`[web] nudged about "${target.item.title}" (attempt ${attempts + 1}, ${tier})`);
-    return { line, about: target.item.title };
+    return { line, about: target.item.title, eventId: target.item.id };
   } catch (error) {
     console.warn('[web] could not compose a nudge:', error instanceof Error ? error.message : error);
     return null;
@@ -8145,11 +8145,11 @@ function apnsBearerFor(config: NonNullable<ReturnType<typeof readApnsConfig>>) {
   return (apnsBearer ??= apnsSigner(config));
 }
 
-async function pushThroughApple(kind: string, text: string, url: string, topic: string): Promise<boolean> {
+async function pushThroughApple(kind: string, text: string, url: string, topic: string, eventId?: string): Promise<boolean> {
   const { config, devices } = getApns();
   if (!config || !devices.length) return false;
   let delivered = false;
-  const payload = apnsPayload(PUSH_TITLE, text.slice(0, 500), url, topic);
+  const payload = apnsPayload(PUSH_TITLE, text.slice(0, 500), url, topic, { kind, eventId });
   for (const device of devices) {
     try {
       const result = await sendApns(device, payload, config, apnsBearerFor(config)(), topic);
@@ -8171,17 +8171,17 @@ async function pushThroughApple(kind: string, text: string, url: string, topic: 
   return delivered;
 }
 
-async function pushToPhone(kind: 'random' | 'events' | 'system' | 'weather', text: string, url = '/', force = false, topic = `haru-${kind}`): Promise<boolean> {
+async function pushToPhone(kind: 'random' | 'events' | 'system' | 'weather', text: string, url = '/', force = false, topic = `haru-${kind}`, eventId?: string): Promise<boolean> {
   const { devices, prefs } = getPush();
   if (!devices.length && !getApns().devices.length) return false;
   // force is the sheet's proof button: being asked to prove itself is the one
   // time a refusal for preferences or quiet hours reads as broken.
   if (!force && (!prefs[kind] || inQuietHours(prefs, zonedNow(CHAT_TIMEZONE)))) return false;
   // The native app, through Apple, alongside the page's Web Push.
-  let delivered = await pushThroughApple(kind, text, url, topic);
+  let delivered = await pushThroughApple(kind, text, url, topic, eventId);
   if (!devices.length) return delivered;
   const keys = vapidKeys();
-  const payload = JSON.stringify({ title: PUSH_TITLE, body: text.slice(0, 500), url });
+  const payload = JSON.stringify({ title: PUSH_TITLE, body: text.slice(0, 500), url, kind, eventId });
   for (const device of devices) {
     try {
       const request = pushRequest(device, payload, keys, {}, topic);
@@ -8223,6 +8223,20 @@ const PUSH_KIND: Partial<Record<AsideSource, 'random' | 'events' | 'system' | 'w
   system: 'system',
 };
 
+/**
+ * The list item a reminder line is about, so "Done" under the notification
+ * can tick it off. The chase records what it just chased (reminders.lastChased)
+ * right before the line is said, so a fresh record is the answer; failing
+ * that, the title the line names (aside.about). Nothing for lines about
+ * nothing on the list.
+ */
+function eventIdForAside(aside: Aside): string | undefined {
+  const open = getKept().filter(item => !item.done);
+  const chased = store.get('reminders.lastChased') as { id?: string; at?: number } | undefined;
+  if (chased?.id && typeof chased.at === 'number' && Date.now() - chased.at < 2 * 60_000 && open.some(item => item.id === chased.id)) return chased.id;
+  return aside.about ? open.find(item => item.title === aside.about)?.id : undefined;
+}
+
 /** Forwards an aside to the phones, when it is one of the ones worth a buzz. */
 async function forwardAsideToPush(aside: Aside) {
   const kind = PUSH_KIND[aside.source];
@@ -8246,7 +8260,8 @@ async function forwardAsideToPush(aside: Aside) {
   // lines against them and a line that never left the building is not one of
   // theirs to answer. Re-read rather than closed over: this runs after the
   // await, and the log has moved on.
-  const reached = await pushToPhone(kind, aside.text, '/', false, kind === 'events' ? `ev-${aside.id}` : `haru-${kind}`);
+  const eventId = kind === 'events' ? eventIdForAside(aside) : undefined;
+  const reached = await pushToPhone(kind, aside.text, '/', false, kind === 'events' ? `ev-${aside.id}` : `haru-${kind}`, eventId);
   store.set('chat.asides', markReached(getAsides(), aside.id, reached));
 }
 

@@ -20,8 +20,18 @@ test('the bearer token is ES256 over header.claims, with the key id and the team
 
 test('the payload is an alert with a sound, threaded by kind, carrying the page to open', () => {
   const parsed = JSON.parse(apnsPayload('Haru', 'Where are you?', '/', 'haru-random'));
-  assert.deepEqual(parsed, { aps: { alert: { title: 'Haru', body: 'Where are you?' }, sound: 'default', 'thread-id': 'haru-random' }, url: '/' });
+  assert.deepEqual(parsed, { aps: { alert: { title: 'Haru', body: 'Where are you?' }, sound: 'default', 'thread-id': 'haru-random', category: 'HARU_LINE' }, url: '/', haru: { kind: 'random', url: '/' } });
   assert.equal(JSON.parse(apnsPayload('Haru', 'x'.repeat(2000), '/', 't')).aps.alert.body.length, 1000);
+});
+
+test('a reminder about a list item is an event with the item id, so the lock screen can tick it off', () => {
+  const parsed = JSON.parse(apnsPayload('Haru', 'Dentist in ten.', '/', 'ev-a1', { kind: 'events', eventId: 'k1' }));
+  assert.equal(parsed.aps.category, 'HARU_EVENT');
+  assert.deepEqual(parsed.haru, { kind: 'events', url: '/', eventId: 'k1' });
+  // Nothing on the list to tick off — a journal line, the sheet's test — is a plain line with only the reply.
+  const plain = JSON.parse(apnsPayload('Haru', 'Reminder', '/', 'ev-a2', { kind: 'events' }));
+  assert.equal(plain.aps.category, 'HARU_LINE');
+  assert.equal(plain.haru.eventId, undefined);
 });
 
 test('a device token is 64 hex characters, and a dead one is told from a refusal', () => {

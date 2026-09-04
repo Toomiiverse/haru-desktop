@@ -57,9 +57,26 @@ export function apnsJwt(keyPem: string, keyId: string, teamId: string, nowMs = D
   return `${header}.${claims}.${base64url(signature)}`;
 }
 
-/** The notification as Apple reads it, and the page the app should open. */
-export function apnsPayload(title: string, body: string, url: string, topic: string): string {
-  return JSON.stringify({ aps: { alert: { title, body: body.slice(0, 1000) }, sound: 'default', 'thread-id': topic }, url });
+/**
+ * Which buttons the app hangs on the notification: every line takes a reply
+ * from the lock screen; a reminder about a thing on the list takes "Done" too.
+ * Decided by whether there is an item to tick off, not by the kind of line —
+ * a journal line and the sheet's test push are "events" with nothing to tick.
+ */
+export type ApnsCategory = 'HARU_LINE' | 'HARU_EVENT';
+export type ApnsExtra = { kind: string; eventId?: string };
+
+/**
+ * The notification as Apple reads it, and — under `haru` — what the app needs
+ * to act on it without opening: the kind of line, the list item a reminder is
+ * about, and the page to open on a tap. Older app builds registered no
+ * categories and ignore all of it.
+ */
+export function apnsPayload(title: string, body: string, url: string, topic: string, extra: ApnsExtra = { kind: 'random' }): string {
+  const category: ApnsCategory = extra.eventId ? 'HARU_EVENT' : 'HARU_LINE';
+  const haru: Record<string, string> = { kind: extra.kind, url };
+  if (extra.eventId) haru.eventId = extra.eventId;
+  return JSON.stringify({ aps: { alert: { title, body: body.slice(0, 1000) }, sound: 'default', 'thread-id': topic, category }, url, haru });
 }
 
 export type ApnsResult = { status: number; reason?: string; gone: boolean };

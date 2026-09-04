@@ -121,7 +121,7 @@ export type WebDeps = {
   /** Jot one down. Returns today's, including the new one. */
   addCheckIn(note: string, anxiety: number | undefined): CheckIn[];
   /** Anything she would say first, unprompted, or nothing. */
-  nudge(): Promise<{ line: string; about: string } | null>;
+  nudge(): Promise<{ line: string; about: string; eventId?: string } | null>;
   /** Being told about her when nothing of hers is open. The keys stored are the
    *  phone's own; the one secret — the signing key — never appears here. */
   push: {
