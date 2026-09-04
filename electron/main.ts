@@ -70,7 +70,7 @@ import { chatTools, coerceKnowledgeCategory, runChatTool, type ToolAvailability,
 import { createMemoryStore } from './memorystore';
 import { createKnowledgeStore } from './knowledgestore';
 import { chatSystemPrompt, chatDynamicContext, FIRST_PERSON_NOTE, freshStartInstruction, type FreshStart, type RatedReply, LENGTH_RULE_LOCAL, LENGTH_RULE_HOSTED } from './prompt';
-import { hasShout, readVoiceConfig, referenceFor, shoutReference, spokenCase, speakableText, splitForSpeech, streamedSentences, synthesise, type SpeechClip, type VoiceConfig, looksClipped, pickSigh, HUME_DESCRIPTIONS, HUME_STREAM_URL } from './voice';
+import { hasShout, readVoiceConfig, referenceFor, shoutReference, spokenCase, speakableText, splitForSpeech, streamedSentences, synthesise, synthesiseBreezeStream, type SpeechClip, type VoiceConfig, looksClipped, pickSigh, HUME_DESCRIPTIONS, HUME_STREAM_URL } from './voice';
 import { hearVoice, readHumeConfig, readingFrom } from './hume';
 import { readBrowserControlConfig } from './browserctl';
 import { applyDecay, DEEP_RECALL_LIMIT, eventCandidates, eventsPrompt, findSuperseded, formatMemoryPrompt, isExplicitRecall, closeEvents, isWorthAnEvent, isWorthKeeping, isWorthRemembering, MEMORY_KINDS, migrateMemories, monthFoldPrompt, pruneMemories, readsAsSecondPerson, rememberInto, retrieveMemories, semanticSimilarities, summaryPrompt, supersede, THIRD_PERSON_AGAIN, vectorSimilarity, type ForgettingEntry, type MemoryKind, type MemoryRecord, type MemorySource, type RetrievalFactors, type ScoredMemory, type SessionSummary } from './memory';
@@ -7230,6 +7230,24 @@ function saveWebAccess(access: WebAccess) {
 }
 
 /**
+ * The brain for her one-liners: nudges, spontaneous pings and check-in quips.
+ *
+ * These are short, frequent, and want a tiny model that is always resident —
+ * the nudge ollama on the 1660 Ti (127.0.0.1:11437) or a hosted one like
+ * Venice. Without this, a parked ai.config (the 9B evicted for the voice
+ * server) means she stops nudging entirely: every call throws at a dead
+ * endpoint and is caught into silence.
+ *
+ * Falls back to ai.config when no nudge provider is set, so when the 9B is
+ * resident again she nudges with it as before.
+ */
+function nudgeBrain(): ProviderConfig | null {
+  const nudge = store.get('ai.nudge') as ProviderConfig | undefined;
+  if (!nudge?.model || !nudge.endpoint) return null;
+  return nudge;
+}
+
+/**
  * What she would say first, unprompted, to someone holding their phone.
  *
  * The whole point of her being on a phone is that she is a companion rather than
@@ -7248,7 +7266,7 @@ async function nudgeForPhone(): Promise<{ line: string; about: string } | null> 
   // Told to drop something, she drops it here too. Silencing the chat and then
   // being nagged by the phone is the same complaint wearing a different hat.
   if (isSilenced(store.get('pushback') as Pushback | undefined, Date.now())) return null;
-  const config = store.get('ai.config') as ProviderConfig | undefined;
+  const config = nudgeBrain() ?? (store.get('ai.config') as ProviderConfig | undefined);
   if (!config?.model) return null;
 
   const now = zonedNow(CHAT_TIMEZONE);
@@ -7461,7 +7479,7 @@ async function answerOnDiscord(text: string, channelId = '') {
       'Answer in one short line. Take it seriously without making a fuss of it, and do not ask them to elaborate unless it sounds bad.',
     ].filter(Boolean).join(' ');
     try {
-      const line = await ollamaQuip(system, `They wrote: "${text.slice(0, 500)}"`, config);
+      const line = await ollamaQuip(system, `They wrote: "${text.slice(0, 500)}"`, nudgeBrain() ?? config);
       return { reply: line, ignored: false };
     } catch {
       // The note is what matters and it is already saved. Silence beats an error.
@@ -7640,7 +7658,7 @@ async function reactedOnDiscord(emoji: string, custom: boolean, herLine: string,
  * machine has been touched recently.
  */
 async function spontaneousDiscordNudge(): Promise<string | null> {
-  const config = store.get('ai.config') as ProviderConfig | undefined;
+  const config = nudgeBrain() ?? (store.get('ai.config') as ProviderConfig | undefined);
   if (!config?.model) return null;
   const mood = getMood();
   // Stonewalling means stonewalling here too.
@@ -10071,7 +10089,14 @@ function webDeps(): WebDeps {
     // falls back to the buffered clip.
     async speakStream(text, emotion) {
       const voice = readVoiceConfig(store.get('voice'));
-      if (voice.engine !== 'hume' || !voice.webEnabled) return null;
+      if (!voice.webEnabled) return null;
+      // Breeze streams its own PCM; wrapped in a WAV here so the phone can play
+      // it progressively. Same clone + instruction as the buffered path.
+      if (voice.engine === 'breeze') {
+        const mood = emotion && (EMOTIONS as readonly string[]).includes(emotion) ? emotion as EmotionName : null;
+        return synthesiseBreezeStream(voice, referenceFor(voice, mood), spokenCase(speakableText(text)), mood);
+      }
+      if (voice.engine !== 'hume') return null;
       const key = getHumeKey();
       if (!key || !voice.voice) return null;
       const mood = emotion && (EMOTIONS as readonly string[]).includes(emotion) ? emotion as EmotionName : null;

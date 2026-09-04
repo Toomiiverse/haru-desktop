@@ -639,7 +639,7 @@ export function SettingsDrawer({ config, onSave, onTest, onClose }: { config: Pr
       <input type="password" value={modelKey} placeholder={hasModelKey ? `A key is saved for ${KEY_SLOT_NAME[slot]} — type a new one to replace it` : `Bearer token for ${KEY_SLOT_NAME[slot]}`} onChange={event => setModelKey(event.target.value)}/>
       <button className="ghost" disabled={!modelKey.trim()} onClick={saveModelKey}>Save key</button>
     </div>
-  </>}{status.state !== 'idle' && <p className={status.state === 'error' ? 'status-error' : 'status-ok'}>{status.state === 'testing' ? 'Testing…' : status.message}</p>}</div><VoiceField registerSave={registerVoiceSave}/><ListenField/><SearchField/><AniListField/><SecondBrainField/><ThemeField/><VisionField/><AttachmentsField/><ScreenshotField/><WatchingField/><DesktopField/><GamingField/><RoamField/><GoogleCalendarField/><DiscordField/><WebField/><CheckInSourceField/><JellyfinField/><StartupField/><div className="drawer-foot"><button className="ghost" onClick={test} disabled={status.state === 'testing'}>{status.state === 'testing' ? 'Testing…' : 'Test connection'}</button><button className="ghost">Enable alerts</button>{saved && <span className="saved"><Check size={13}/> Saved</span>}<button className="solid" onClick={() => void save()}>Save setup</button></div></section>;
+  </>}{status.state !== 'idle' && <p className={status.state === 'error' ? 'status-error' : 'status-ok'}>{status.state === 'testing' ? 'Testing…' : status.message}</p>}</div><VoiceField registerSave={registerVoiceSave}/><ListenField/><SearchField/><AniListField/><SecondBrainField/><NudgeField/><ThemeField/><VisionField/><AttachmentsField/><ScreenshotField/><WatchingField/><DesktopField/><GamingField/><RoamField/><GoogleCalendarField/><DiscordField/><WebField/><CheckInSourceField/><JellyfinField/><StartupField/><div className="drawer-foot"><button className="ghost" onClick={test} disabled={status.state === 'testing'}>{status.state === 'testing' ? 'Testing…' : 'Test connection'}</button><button className="ghost">Enable alerts</button>{saved && <span className="saved"><Check size={13}/> Saved</span>}<button className="solid" onClick={() => void save()}>Save setup</button></div></section>;
 }
 
 // What each engine calls the thing it clones or selects a voice with. The label
@@ -650,6 +650,7 @@ const VOICE_ENGINES: { value: VoiceEngine; label: string; hint: string; voiceLab
   { value: 'windows', label: 'Windows built-in', hint: 'No setup, but the voice is the stock Microsoft one and her mouth can only be approximated — there is no audio to measure, so it is an animated flap rather than real lip sync.' },
   { value: 'openai', label: 'Local server (OpenAI API)', hint: 'Anything speaking the /v1/audio/speech shape — openedai-speech wrapping an XTTS clone, Kokoro-FastAPI, LocalAI. Point it at the base URL including /v1.', voiceLabel: 'Voice name' },
   { value: 'gpt-sovits', label: 'GPT-SoVITS', hint: 'Clones a voice from one short reference clip, and can be fine-tuned further on your own recordings. Run api_v2.py and point this at it.', voiceLabel: 'Reference clip (full path to a .wav)' },
+  { value: 'breeze', label: 'Breeze TTS 2', hint: 'Self-hosted voice clone + natural-language acting directions, streaming. Run python -m breeze_infer.api ~/breeze-tts-2 and point this at it (default http://127.0.0.1:7860).', voiceLabel: 'Reference clip (full path to a .wav)' },
 ];
 
 /**
@@ -815,7 +816,7 @@ function VoiceField({ registerSave }: { registerSave?(save: () => Promise<void>)
 
   if (!window.haru || !config) return null;
   const engine = VOICE_ENGINES.find(entry => entry.value === config.engine) ?? VOICE_ENGINES[0];
-  const remote = config.engine === 'openai' || config.engine === 'gpt-sovits';
+  const remote = config.engine === 'openai' || config.engine === 'gpt-sovits' || config.engine === 'breeze';
   const update = (changes: Partial<VoiceConfig>) => setConfig({ ...config, ...changes });
 
   async function run(kind: 'saving' | 'testing', action: () => Promise<unknown>, done?: string) {
@@ -839,7 +840,7 @@ function VoiceField({ registerSave }: { registerSave?(save: () => Promise<void>)
       <select value={config.engine} onChange={event => update({ engine: event.target.value as VoiceEngine })}>
         {VOICE_ENGINES.map(entry => <option key={entry.value} value={entry.value}>{entry.label}</option>)}
       </select>
-      {remote && <input value={config.endpoint} onChange={event => update({ endpoint: event.target.value })} placeholder={config.engine === 'gpt-sovits' ? 'http://127.0.0.1:9880' : 'http://127.0.0.1:8000/v1'}/>}
+      {remote && <input value={config.endpoint} onChange={event => update({ endpoint: event.target.value })} placeholder={config.engine === 'gpt-sovits' ? 'http://127.0.0.1:9880' : config.engine === 'breeze' ? 'http://127.0.0.1:7860' : 'http://127.0.0.1:8000/v1'}/>}
     </div>
     {/* A name the server already knows, so this one stays a plain text field. */}
     {config.engine === 'openai' && <div className="row-actions"><input value={config.voice} onChange={event => update({ voice: event.target.value })} placeholder={engine.voiceLabel}/></div>}
@@ -855,12 +856,15 @@ function VoiceField({ registerSave }: { registerSave?(save: () => Promise<void>)
         typo shows up as a failed synthesis rather than as an obviously wrong path.
         The transcript has to match its clip or the cloned voice drifts off target,
         which is the single most common way a GPT-SoVITS setup sounds wrong. */}
-    {config.engine === 'gpt-sovits' && <>
+    {(config.engine === 'gpt-sovits' || config.engine === 'breeze') && <>
       <div className="row-actions">
         <button className="ghost" onClick={async () => { const picked = await window.haru!.voice.pickClip(); if (picked) update({ voice: picked }); }}>{config.voice ? clipName(config.voice) : 'Choose reference clip…'}</button>
         <input value={config.referenceText} onChange={event => update({ referenceText: event.target.value })} placeholder="Exactly what that clip says"/>
       </div>
-      <EmotionVoices config={config} onChange={update}/>
+      {config.engine === 'gpt-sovits' && <EmotionVoices config={config} onChange={update}/>}
+      {config.engine === 'breeze' && <div className="row-actions">
+        <input value={config.voiceId ?? ''} onChange={event => update({ voiceId: event.target.value.trim() })} placeholder="Saved voice id (optional — skips the per-line reference encode)"/>
+      </div>}
     </>}
     {config.engine !== 'off' && <div className="row-actions">
       {remote && <input value={config.language} onChange={event => update({ language: event.target.value })} placeholder="Language (en, ja, zh)"/>}
@@ -1237,6 +1241,71 @@ function SecondBrainField() {
       {models.length > 0 && <p className="status-note">Available: {models.slice(0, 8).join(', ')}{models.length > 8 ? '…' : ''}</p>}
       <p className="status-note">Uses the same API key as the connection above. What she sends is the whole prompt — the conversation, what she remembers about you, your profile, your list and your journal ratings. Her memory is still stored only on this machine; it is the copy in each question that travels. The log names every question that goes out and why.</p>
     </>}
+    {message && <p className={message.error ? 'status-error' : 'status-ok'}>{message.text}</p>}
+  </div>;
+}
+
+/**
+ * Who composes her one-liners — nudges, spontaneous pings, check-in quips.
+ *
+ * These are short and frequent, and a parked main model (the 9B evicted to
+ * make room for the voice server) otherwise silences them entirely: every call
+ * throws at a dead endpoint and is caught into nothing. The nudge provider is
+ * a tiny always-resident local model (the nudge ollama on :11437) or a hosted
+ * one like Venice, which answers in about a second.
+ */
+function NudgeField() {
+  const [config, setConfig] = useState<ProviderConfig | null>(null);
+  const [models, setModels] = useState<string[]>([]);
+  const [checking, setChecking] = useState(false);
+  const [message, setMessage] = useState<{ text: string; error?: boolean } | null>(null);
+  useEffect(() => {
+    window.haru?.settings.get('ai.nudge').then((saved: unknown) => {
+      const p = saved as ProviderConfig | null | undefined;
+      setConfig(p ?? null);
+    });
+  }, []);
+  if (!window.haru) return null;
+
+  const nudge = config ?? { provider: 'venice' as const, model: 'qwen3-6-35b-a3b', endpoint: 'https://api.venice.ai/api/v1', temperature: 0.9 };
+  const save = (next: ProviderConfig) => {
+    setConfig(next);
+    void window.haru!.settings.set('ai.nudge', next);
+  };
+  const clear = () => {
+    setConfig(null);
+    void window.haru!.settings.set('ai.nudge', null);
+  };
+
+  async function list() {
+    setChecking(true); setMessage(null);
+    try {
+      const result = await window.haru!.ai.verify(nudge.endpoint, nudge.provider, nudge.model);
+      setModels(result.models);
+      setMessage({ text: result.models.length ? `The key works — ${result.models.length} models available.` : (result.note || 'The key works.') });
+    } catch (error) {
+      setMessage({ text: error instanceof Error ? error.message.replace(/^Error invoking remote method '[^']+':\s*(Error:\s*)?/, '') : 'Could not reach it.', error: true });
+    } finally { setChecking(false); }
+  }
+
+  return <div className="field"><h2>Nudges</h2>
+    <p>Who writes her unprompted lines — nudges, spontaneous pings and check-in quips. A tiny local model on the 1660 Ti (127.0.0.1:11437) or a hosted one like Venice keeps them working while the main model is parked for the voice.</p>
+    {config ? <>
+      <div className="form-grid">
+        <select value={nudge.provider} onChange={event => save({ ...nudge, provider: event.target.value as ProviderConfig['provider'], endpoint: event.target.value === 'openai' ? 'https://api.openai.com/v1' : event.target.value === 'venice' ? 'https://api.venice.ai/api/v1' : event.target.value === 'ollama' ? 'http://127.0.0.1:11437' : 'https://api.x.ai/v1' })}>
+          <option value="venice">Venice AI</option>
+          <option value="ollama">Local (1660 Ti nudge instance)</option>
+          <option value="openai">OpenAI</option>
+          <option value="xai">xAI — Grok</option>
+        </select>
+        <input value={nudge.model} placeholder="qwen3-6-35b-a3b" onChange={event => save({ ...nudge, model: event.target.value })}/>
+      </div>
+      <div className="row-actions">
+        <button className="ghost" onClick={() => void list()} disabled={checking}>{checking ? 'Checking…' : 'Check the key and list models'}</button>
+        <button className="ghost" onClick={clear}>Use the main model instead</button>
+      </div>
+      {models.length > 0 && <p className="status-note">Available: {models.slice(0, 8).join(', ')}{models.length > 8 ? '…' : ''}</p>}
+    </> : <button className="ghost" onClick={() => save(nudge)}>Nudge with Venice by default</button>}
     {message && <p className={message.error ? 'status-error' : 'status-ok'}>{message.text}</p>}
   </div>;
 }

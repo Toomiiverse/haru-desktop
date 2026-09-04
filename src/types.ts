@@ -110,11 +110,11 @@ export interface MemoryBlock { id: string; label: string; description: string; v
 export interface ProviderConfig { provider: 'ollama' | 'openai' | 'xai' | 'venice'; model: string; endpoint: string; temperature: number; }
 // 'windows' is spoken by the renderer through the built-in SAPI voices; the rest
 // are synthesised in main and arrive as audio. See electron/voice.ts.
-export type VoiceEngine = 'off' | 'windows' | 'openai' | 'gpt-sovits';
+export type VoiceEngine = 'off' | 'windows' | 'openai' | 'gpt-sovits' | 'hume' | 'breeze';
 // A clip and what it says, kept together because a transcript that does not match
 // its clip changes the cloned voice, not just the words.
 export interface VoiceReference { clip: string; text: string; }
-export interface VoiceConfig { engine: VoiceEngine; voice: string; referenceText: string; endpoint: string; language: string; speed: number; volume: number; emotionVoices: Partial<Record<EmotionName, VoiceReference>>; }
+export interface VoiceConfig { engine: VoiceEngine; voice: string; referenceText: string; endpoint: string; language: string; speed: number; volume: number; emotionVoices: Partial<Record<EmotionName, VoiceReference>>; voiceId?: string; }
 // turn identifies which reply this belongs to, so clips left over from a reply
 // she has been interrupted out of can be dropped instead of played.
 export interface SpeechClip { turn: number; text: string; audio?: Uint8Array; mime?: string; }
