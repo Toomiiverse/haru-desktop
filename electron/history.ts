@@ -214,13 +214,19 @@ export function earlierDaysContext(
   const months = opts.months ?? 6;
   const budget = opts.budget ?? HISTORY_BUDGET_CHARS;
   const turnsDays = opts.turnsDays ?? DAYS_OF_HISTORY;
-  const noted = new Set(earlierDayNotes(sessions, todayKey, days).map(note => note.day));
+  // Distilled means it has a note at all — or its whole month is folded —
+  // not that its note is inside the window shown. Before this, a day just
+  // past the window (its note dropped, its month folded) read as never
+  // distilled and its raw turns came back into the prompt: 42 turns of a
+  // day three weeks gone, in front of today's, on every turn.
+  const folded = new Set(monthNotes.map(note => note.month));
+  const noted = new Set(sessions.map(note => note.day));
   // The months come first, the recent days after — oldest to newest.
   const notes = [
     ...earlierMonthNotes(monthNotes, todayKey, months).map(note => `[Month ${note.month}] ${note.summary}`),
     ...earlierDayNotes(sessions, todayKey, days).map(note => `[Day ${note.day}] ${note.summary}`),
   ];
-  const wanted = Object.keys(archive).filter(day => day < todayKey && !noted.has(day)).sort().slice(-turnsDays);
+  const wanted = Object.keys(archive).filter(day => day < todayKey && !noted.has(day) && !folded.has(day.slice(0, 7))).sort().slice(-turnsDays);
   const subset: Record<string, unknown[]> = {};
   for (const day of wanted) subset[day] = archive[day] ?? [];
   const turns = earlierTurns(subset as Record<string, Dated[]>, todayKey, turnsDays, budget);

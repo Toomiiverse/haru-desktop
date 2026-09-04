@@ -163,6 +163,26 @@ test('earlierDaysContext uses notes where they exist and raw turns where they do
   assert.ok(empty.turns.length >= 2, 'no sessions at all means the raw path as before');
 });
 
+test('earlierDaysContext never brings back raw turns for a day that was distilled, however old its note', () => {
+  const turn = (day: string, content: string) => ({ role: 'user', content, at: `${day}T10:00:00.000Z` });
+  const archive = {
+    '2026-08-20': [turn('2026-08-20', 'three weeks ago, distilled, note outside the window')],
+    '2026-08-10': [turn('2026-08-10', 'inside a folded month, no day note of its own')],
+    '2026-09-02': [turn('2026-09-02', 'yesterday, never distilled')],
+    '2026-09-03': [turn('2026-09-03', 'today')],
+  };
+  // Seven newer notes push the 2026-08-20 note out of a 7-day window.
+  const sessions = [
+    { day: '2026-08-20', summary: 'an old distilled day', createdAt: '2026-08-21T00:00:00.000Z' },
+    ...[25, 26, 27, 28, 29, 30, 31].map(d => ({ day: `2026-08-${d}`, summary: `day ${d}`, createdAt: '2026-09-01T00:00:00.000Z' })),
+  ];
+  const monthNotes = [{ month: '2026-08', summary: 'August, folded', createdAt: '2026-09-01T00:00:00.000Z' }];
+  const { notes, turns } = earlierDaysContext(sessions, monthNotes, archive, '2026-09-03', { days: 7 });
+  assert.equal(notes[0], '[Month 2026-08] August, folded');
+  assert.ok(!notes.some(note => note.includes('2026-08-20')), 'the old note is outside the window — the month covers it');
+  assert.deepEqual(turns.map(turn => turn.content), ['yesterday, never distilled'], 'only the genuinely undistilled day is raw');
+});
+
 // ---- the L1 layer: her months, folded from her day notes ----
 
 import { earlierMonthNotes } from '../electron/history';
