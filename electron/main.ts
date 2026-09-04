@@ -10081,7 +10081,9 @@ function webDeps(): WebDeps {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'X-Hume-Api-Key': key },
           body: JSON.stringify({
-            utterances: [{ text, voice: { id: voice.voice }, ...(directions ? { description: directions } : {}) }],
+            // The same pace as the desk path: the phone was speaking at 1.0
+            // while voice.speed said 0.9.
+            utterances: [{ text, voice: { id: voice.voice }, ...(directions ? { description: directions } : {}), ...(voice.speed !== 1 ? { speed: voice.speed } : {}) }],
             format: { type: 'mp3' },
             instant_mode: true,
           }),

@@ -1059,14 +1059,20 @@ function sayable(text){
   if(out.length) out[out.length-1].pause=0;
   return out;
 }
-function fetchClip(part,emotion,tries){
+function fetchClip(part,emotion,prefetch){
   // A sigh is asked for by name and fetched whole.
   if(part.sigh) return fetch('/api/speak',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({sigh:true,emotion:emotion||null})})
     .then(r=>r.ok?r.blob():null)
     .catch(()=>null);
-  // Speech streams: a GET the <audio> element plays progressively, so the first
-  // sound is the first bytes Hume sends rather than the whole clip.
   const q='/api/speak?text='+encodeURIComponent(part.text)+(emotion?'&emotion='+encodeURIComponent(emotion):'');
+  // Asked for while the sentence before it plays, the clip is pulled whole
+  // now, so Hume renders it under her previous sentence and the seam is a
+  // beat rather than the first-byte wait again. Handing back a URL here did
+  // nothing until the player was pointed at it, which was only ever after the
+  // last sentence had ended — every break paid the whole wait.
+  if(prefetch) return fetch(q).then(r=>r.ok?r.blob():null).catch(()=>null);
+  // Asked for on the spot, it streams: a GET the <audio> element plays
+  // progressively, so the first sound is the first bytes Hume sends.
   return Promise.resolve({stream:q});
 }
 // A clip to point the player at: a stream URL plays as it arrives, a blob gets
@@ -1092,7 +1098,7 @@ async function speak(text,emotion){
       // One sentence failing is not a reason to swallow the rest of what she
       // said: it used to return here, so a single hiccup halfway through left
       // her cut off mid-thought with no sign anything had gone wrong.
-      pending=i+1<parts.length?fetchClip(parts[i+1],emotion):null;
+      pending=i+1<parts.length?fetchClip(parts[i+1],emotion,true):null;
       const made=clipUrl(clip);
       if(!made){ if(!parts[i].sigh) console.warn('[voice] no audio for one sentence — carrying on'); continue; }
       const done=new Promise(resolve=>{ player.onended=player.onerror=()=>{ if(made.blob) URL.revokeObjectURL(made.url); resolve(); }; });
@@ -1131,13 +1137,20 @@ async function drainVoice(){
   let started=false;
   try{
     if(!voiceQueue.length) return;
-    let pending=fetchClip(voiceQueue[0],voiceEmotion);
+    // What is in flight, and which sentence it is for. A sentence that
+    // arrived while the one before it was playing has nothing in flight —
+    // it used to be played as nothing at all, "no audio for a streamed
+    // sentence", and dropped — so it is asked for on the spot, streaming.
+    let pending=null, pendingFor=null;
+    const ask=(part,prefetch)=>{ pendingFor=part; pending=fetchClip(part,voiceEmotion,prefetch); };
+    ask(voiceQueue[0],false);
     while(voiceQueue.length){
       const part=voiceQueue.shift();
       const mine=speaking;
+      if(pendingFor!==part) ask(part,false);
       const clip=await pending;
       if(mine!==speaking) return;
-      pending=voiceQueue.length?fetchClip(voiceQueue[0],voiceEmotion):null;
+      if(voiceQueue.length) ask(voiceQueue[0],true); else { pending=null; pendingFor=null; }
       const made=clipUrl(clip);
       if(!made){ console.warn('[voice] no audio for a streamed sentence — carrying on'); continue; }
       const done=new Promise(resolve=>{ player.onended=player.onerror=()=>{ if(made.blob) URL.revokeObjectURL(made.url); resolve(); }; });
