@@ -557,12 +557,16 @@ async function runCall(ws: CallSocket, deviceId: string, evi: NonNullable<WebDep
  */
 async function brainHook(req: IncomingMessage, res: ServerResponse, deps: WebDeps, url: URL, now: Date) {
   if (!deps.evi) return json(res, 404, { error: 'Nothing here.' });
-  const from = String(req.headers['cf-connecting-ip'] ?? req.socket.remoteAddress ?? 'unknown');
-  const attempts = attemptsBy.get(from) ?? clearFailures();
-  const wait = lockedFor(attempts, now.getTime());
-  if (wait > 0) return json(res, 429, { error: `Too many tries. Wait ${Math.ceil(wait / 1000)}s.` });
+  // The bearer is checked before the lockout, not after: through the tunnel
+  // every caller shares one address, so a stranger guessing at the door must
+  // slow only strangers down. A right bearer cannot be guessed, and Hume's
+  // calls go through however many wrong ones came before.
   const given = /^Bearer\s+(\S+)$/i.exec(req.headers.authorization ?? '')?.[1] ?? '';
   if (!sameSecret(given, deps.evi.secret())) {
+    const from = String(req.headers['x-forwarded-for'] ?? req.headers['cf-connecting-ip'] ?? req.socket.remoteAddress ?? 'unknown').split(',')[0].trim();
+    const attempts = attemptsBy.get(from) ?? clearFailures();
+    const wait = lockedFor(attempts, now.getTime());
+    if (wait > 0) return json(res, 429, { error: `Too many tries. Wait ${Math.ceil(wait / 1000)}s.` });
     attemptsBy.set(from, noteFailure(attempts, now.getTime()));
     console.warn(`[evi] refused a brain-hook call from ${from}`);
     return json(res, 401, { error: 'That is not right.' });

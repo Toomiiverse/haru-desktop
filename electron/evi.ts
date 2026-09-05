@@ -143,7 +143,7 @@ export function clmTurnFrom(body: unknown): ClmTurn | null {
   for (let i = messages.length - 1; i >= 0; i--) {
     const message = messages[i] as { role?: unknown; content?: unknown; models?: { prosody?: { scores?: unknown } } } | null;
     if (!message || message.role !== 'user') continue;
-    const text = contentText(message.content);
+    const text = withoutExpressionNote(contentText(message.content));
     if (!text) return null;
     const scores = message.models?.prosody?.scores;
     let prosody: Record<string, number> | null = null;
@@ -157,6 +157,17 @@ export function clmTurnFrom(body: unknown): ClmTurn | null {
     return { text, prosody };
   }
   return null;
+}
+
+/**
+ * EVI writes how they sounded into the words themselves — "… whatever.
+ * {extremely contemptuous, quite disappointed}" — for a language model that
+ * reads nothing else. Hers reads the scores beside the message instead, so
+ * the note comes off: it is not something they said, and it must not be
+ * answered as if it were, or written into the day as their words.
+ */
+export function withoutExpressionNote(text: string): string {
+  return text.replace(/\s*\{[^{}]*\}\s*$/, '').trim();
 }
 
 /** OpenAI lets content be a string or a list of parts; EVI sends a string, but a list is read too. */

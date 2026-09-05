@@ -888,6 +888,10 @@ test('the brain hook answers Hume by bearer, never by cookie, and locks out gues
     }
     const locked = await web.call(HOOK, { method: 'POST', body: hookBody('hello'), anonymous: true, headers: { authorization: 'Bearer nope' } });
     assert.equal(locked.status, 429, 'the fifth wrong bearer waits, like the fifth wrong password');
+    // Through the tunnel every caller shares an address, so the lockout a
+    // stranger earned must not stand between Hume and her words.
+    const hume = await web.call(HOOK, { method: 'POST', body: hookBody('hello'), anonymous: true, headers: { authorization: 'Bearer hook-secret' } });
+    assert.equal(hume.status, 200, 'a right bearer is never locked out');
   } finally { await web.stop(); }
 });
 

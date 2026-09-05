@@ -7,7 +7,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   readEviConfig, DEFAULT_EVI, sessionSettingsFor, newSessionId, deviceFromSession, audioInput,
-  relay, clmTurnFrom, sseChunk, sseStop, SSE_DONE, secondsUsedToday, noteUsage, underCap,
+  relay, clmTurnFrom, withoutExpressionNote, sseChunk, sseStop, SSE_DONE, secondsUsedToday, noteUsage, underCap,
 } from '../electron/evi';
 import { openEviSession } from '../electron/evibridge';
 
@@ -89,6 +89,18 @@ test('the hook takes the newest thing they said, with how it sounded, and nothin
   assert.ok(turn);
   assert.equal(turn.text, 'Are you even listening?');
   assert.deepEqual(turn.prosody, { Anger: 0.42, Irritation: 0.31 }, 'scores that are not numbers are left out');
+});
+
+test('the note EVI writes about how they sounded is not something they said', () => {
+  // Seen on the wire 2026-09-05: the expression summary rides inside the text.
+  assert.equal(withoutExpressionNote('You are aware of that fine whatever. {extremely contemptuous, extremely angry, quite disappointed}'), 'You are aware of that fine whatever.');
+  assert.equal(withoutExpressionNote('Fine. {calm}'), 'Fine.');
+  assert.equal(withoutExpressionNote('Plain words.'), 'Plain words.');
+  assert.equal(withoutExpressionNote('braces {in the middle} stay'), 'braces {in the middle} stay');
+  assert.equal(withoutExpressionNote('{only a note}'), '', 'a note with no words is nothing said');
+  const turn = clmTurnFrom({ messages: [{ role: 'user', content: 'Hey. {quite amused}', models: { prosody: { scores: { Amusement: 0.7 } } } }] });
+  assert.deepEqual(turn, { text: 'Hey.', prosody: { Amusement: 0.7 } });
+  assert.equal(clmTurnFrom({ messages: [{ role: 'user', content: '{extremely calm}' }] }), null);
 });
 
 test('the hook reads a parts list, and refuses a body with nothing said', () => {
