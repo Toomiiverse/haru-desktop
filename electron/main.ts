@@ -6397,7 +6397,7 @@ async function withAttachments<T extends { role: string; content: string; at?: s
   return out;
 }
 
-async function ollamaChat(messages: { role: string; content: string; at?: string; attachments?: Attachment[] }[], config: ProviderConfig, { hands = true, web = false, brief = false, choices = false, away = '', aside = '', onChunk, onChunkReset, onToolCall, onSending, traceId }: { hands?: boolean; web?: boolean; brief?: boolean; choices?: boolean; away?: string; aside?: string; onChunk?: (text: string) => void; onChunkReset?: () => void; onToolCall?: (name: string) => void; onSending?: () => void; traceId?: string } = {}) {
+async function ollamaChat(messages: { role: string; content: string; at?: string; attachments?: Attachment[] }[], config: ProviderConfig, { hands = true, web = false, brief = false, choices = false, call = false, away = '', aside = '', onChunk, onChunkReset, onToolCall, onSending, traceId }: { hands?: boolean; web?: boolean; brief?: boolean; choices?: boolean; call?: boolean; away?: string; aside?: string; onChunk?: (text: string) => void; onChunkReset?: () => void; onToolCall?: (name: string) => void; onSending?: () => void; traceId?: string } = {}) {
   const latest = messages.at(-1)?.content ?? '';
   // A message from outside the desk — a phone, Discord — gets a short leash on
   // the conversation as well as on the reply: a long day's thread is most of
@@ -6634,7 +6634,12 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // and not the transcript, and answers from what a YouTube link usually is —
   // it described Rick Astley for a clip of elephants, with the words in hand.
   const video = messages.at(-1)?.role === 'user' && videoIdFrom(latest.match(/https?:\/\/\S+/)?.[0] ?? '') !== null;
-  let brain: Brain = directions ? { config, escalated: false, because: 'the way somewhere is answered at home', sees: false }
+  // A call never goes out to the second model: its answer is not streamed,
+  // and the rewrite that says it as herself is a second wait on top — one
+  // spoken question with two question marks in it was sent out as "several
+  // questions at once" and took 16 s to come back.
+  let brain: Brain = call ? { config, escalated: false, because: 'a call is answered at home', sees: false }
+    : directions ? { config, escalated: false, because: 'the way somewhere is answered at home', sees: false }
     : video ? { config, escalated: false, because: 'a video is read at home, where the transcript tool is', sees: false }
     : brainFor(latest, config, messages, { pictures, files: arrived.length > 0 });
   if (brain.escalated) console.log(`[ai] sent out to ${brain.config.model} — ${brain.because}`);
@@ -9846,6 +9851,7 @@ function webDeps(): WebDeps {
         const trace = newTrace();
         onChunk(ASLEEP_AWAY_LINE);
         voice.feed(ASLEEP_AWAY_LINE);
+        voice.flush();
         sendToWindows('chat:fromPhone', { text, reply: ASLEEP_AWAY_LINE, ignored: false, ...(files.length ? { attachments: files } : {}) });
         console.log(`[web] asleep — not answering (${text.length} chars stored)`);
         trace.done('web', { tier: 'asleep', chars: ASLEEP_AWAY_LINE.length });
@@ -9856,7 +9862,10 @@ function webDeps(): WebDeps {
       trace.mark('intent');
       if (quick) {
         onChunk(quick.reply);
+        // Fed whole and flushed: a quick line has no stream behind it to end
+        // the last sentence, and unflushed it was never voiced on a call.
         voice.feed(quick.reply);
+        voice.flush();
         announceQuick(quick, text);
         trace.done('web', { tier: quick.tier, chars: quick.reply.length });
         return { reply: quick.reply, ignored: false };
@@ -9867,7 +9876,7 @@ function webDeps(): WebDeps {
         hands: false,
         web: true,
         away: 'it came in from the phone',
-        ...(options?.call ? { aside: callAside(Boolean(options.interrupted)) } : options?.interrupted ? { aside: INTERRUPTED_ASIDE } : {}),
+        ...(options?.call ? { aside: callAside(Boolean(options.interrupted)), call: true } : options?.interrupted ? { aside: INTERRUPTED_ASIDE } : {}),
         ...(options?.onToolCall ? { onToolCall: options.onToolCall } : {}),
         onSending: () => trace.mark('sending'),
         traceId: trace.id,
