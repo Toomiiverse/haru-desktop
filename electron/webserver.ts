@@ -18,7 +18,7 @@ import { timingSafeEqual } from 'node:crypto';
 import type { Duplex } from 'node:stream';
 import filePath from 'node:path';
 import { WebSocketServer, type WebSocket as CallSocket } from 'ws';
-import { clmTurnFrom, sseChunk, sseStop, SSE_DONE } from './evi';
+import { clmTurnFrom, spokenReply, sseChunk, sseStop, SSE_DONE } from './evi';
 import type { Standing } from './standing';
 import type { Her } from './her';
 import {
@@ -56,7 +56,7 @@ export type WebDeps = {
    * before the stream ends. The same U+FFFD that clears the text clears the
    * voice: nothing of a thrown-away round may be spoken.
    */
-  sayStream(text: string, onChunk: (chunk: string) => void, attachments?: unknown[], options?: { interrupted?: boolean }, onSentence?: (sentence: string, emotion: string) => void): Promise<{ reply: string; ignored?: boolean }>;
+  sayStream(text: string, onChunk: (chunk: string) => void, attachments?: unknown[], options?: { interrupted?: boolean; call?: boolean }, onSentence?: (sentence: string, emotion: string) => void): Promise<{ reply: string; ignored?: boolean }>;
   /**
    * Her last reply, done again. The message that prompted it is asked once
    * more with that reply left out of the history, and the new one takes its
@@ -578,42 +578,29 @@ async function brainHook(req: IncomingMessage, res: ServerResponse, deps: WebDep
   const turn = clmTurnFrom(body);
   if (!turn) return json(res, 400, { error: 'Nothing was said.' });
 
-  // The stream starts with her first word, not before: a session that turns
-  // out not to be ours still gets a plain refusal rather than an empty stream.
+  // The reply goes out whole, once it is the reply that counts. Measured on
+  // the wire (2026-09-05): EVI says nothing until the stream has ended,
+  // whatever arrives first, so streaming her words as they come bought
+  // nothing and cost two things — a round thrown away at the last moment had
+  // already been spoken, and the reply the filters settled on differed from
+  // the one she said. Waiting for the end fixes both, and lets the text be
+  // made speakable as one piece: no markdown, no emoji, no shouting.
   const id = `haru-${now.getTime().toString(36)}`;
   const created = Math.floor(now.getTime() / 1000);
-  let started = false;
-  let sent = 0;
-  const begin = () => {
-    if (started) return;
-    started = true;
-    res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-store', 'Connection': 'keep-alive' });
-  };
-  const write = (chunk: string) => { if (!res.destroyed) res.write(chunk); };
+  let answer: { reply: string; ignored?: boolean } | null;
   try {
-    const answer = await deps.evi.turn(sessionId, turn.text, turn.prosody, chunk => {
-      // A round thrown away at the last moment cannot be taken back once
-      // spoken. What went out went out; the reply that counts follows it.
-      if (chunk === '\uFFFD') { if (sent) console.warn(`[evi] a round was thrown away after ${sent} chars had gone out`); return; }
-      if (!chunk) return;
-      begin();
-      sent += chunk.length;
-      write(sseChunk(chunk, id, created));
-    });
-    if (!answer) {
-      if (!started) return json(res, 403, { error: 'Not a call of ours.' });
-    } else if (answer.ignored) {
-      console.log(`[evi] ${sessionId} — she is not answering that`);
-    }
-    begin();
-    write(sseStop(id, created));
-    write(SSE_DONE);
+    answer = await deps.evi.turn(sessionId, turn.text, turn.prosody, () => {});
   } catch (error) {
     console.error('[evi] the brain hook failed: ' + (error instanceof Error ? error.message : String(error)));
-    if (!started) return json(res, 500, { error: 'Something went wrong.' });
-    write(sseStop(id, created));
-    write(SSE_DONE);
+    return json(res, 500, { error: 'Something went wrong.' });
   }
+  if (!answer) return json(res, 403, { error: 'Not a call of ours.' });
+  const said = answer.ignored ? '' : spokenReply(answer.reply);
+  if (answer.ignored) console.log(`[evi] ${sessionId} — she is not answering that`);
+  res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-store', 'Connection': 'keep-alive' });
+  if (said) res.write(sseChunk(said, id, created));
+  res.write(sseStop(id, created));
+  res.write(SSE_DONE);
   return res.end();
 }
 

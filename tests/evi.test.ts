@@ -8,7 +8,9 @@ import assert from 'node:assert/strict';
 import {
   readEviConfig, DEFAULT_EVI, sessionSettingsFor, newSessionId, deviceFromSession, audioInput,
   relay, clmTurnFrom, withoutExpressionNote, sseChunk, sseStop, SSE_DONE, secondsUsedToday, noteUsage, underCap,
+  callAside, CALL_ASIDE, spokenReply,
 } from '../electron/evi';
+import { INTERRUPTED_ASIDE } from '../electron/wake';
 import { openEviSession } from '../electron/evibridge';
 
 // -- config ----------------------------------------------------------------------
@@ -126,6 +128,19 @@ test('what streams back is an OpenAI chunk per stretch, a stop, and DONE', () =>
   assert.equal(stop.choices[0].finish_reason, 'stop');
   assert.deepEqual(stop.choices[0].delta, {});
   assert.equal(SSE_DONE, 'data: [DONE]\n\n');
+});
+
+test('a call turn asks for spoken sentences, and says so after being cut off too', () => {
+  assert.equal(callAside(false), CALL_ASIDE);
+  assert.ok(callAside(true).startsWith(INTERRUPTED_ASIDE));
+  assert.ok(callAside(true).endsWith(CALL_ASIDE));
+  // Nothing in the aside she could say back as a line of her own.
+  assert.doesNotMatch(CALL_ASIDE, /["“”]/);
+});
+
+test('what goes to her voice is the reply made speakable', () => {
+  assert.equal(spokenReply('**Fine.** Check the CPU, not the *fans*. 😒 See [this](https://x.y).'), 'Fine. Check the CPU, not the fans. See this.');
+  assert.equal(spokenReply('HELLO there.'), 'Hello there.', 'a shouted word is lowered, not spelled');
 });
 
 // -- the cap -----------------------------------------------------------------------------

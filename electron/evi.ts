@@ -18,6 +18,9 @@
 // Speech to speech is a call, not a setting: it runs only while the mic is on.
 // Typed messages keep their own voice engine. Nothing here touches that path.
 
+import { INTERRUPTED_ASIDE } from './wake';
+import { speakableText, spokenCase } from './voice';
+
 export type EviConfig = {
   enabled: boolean;
   /** The EVI configuration on Hume's side — her voice, the hook's URL, the timeouts. */
@@ -120,6 +123,24 @@ export function relay(event: unknown): Record<string, unknown> | null {
 }
 
 // -- the brain hook -----------------------------------------------------------------
+
+/**
+ * Said to her brain on every call turn. Measured 2026-09-05: EVI says nothing
+ * until the whole reply has arrived, so every character of a long answer is
+ * silence on the line — and a phone call is not a place for five sentences
+ * and a list anyway. No quotable lines in here: anything she could repeat,
+ * she would.
+ */
+export const CALL_ASIDE = 'They are on a voice call with you: what you say is spoken aloud, not read. Answer the way you would out loud — one or two short sentences, then let them talk. No lists, no headings, no emoji, nothing typed like a message. Ask one thing at a time.';
+
+export function callAside(interrupted: boolean): string {
+  return [interrupted ? INTERRUPTED_ASIDE : '', CALL_ASIDE].filter(Boolean).join(' ');
+}
+
+/** The reply as it should be said: markdown, links and emoji off, initialisms kept, shouting lowered. */
+export function spokenReply(reply: string): string {
+  return spokenCase(speakableText(reply));
+}
 
 export type ClmTurn = {
   /** What EVI heard them say, this turn. */

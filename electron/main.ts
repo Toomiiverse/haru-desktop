@@ -73,7 +73,7 @@ import { createKnowledgeStore } from './knowledgestore';
 import { chatSystemPrompt, chatDynamicContext, FIRST_PERSON_NOTE, freshStartInstruction, type FreshStart, type RatedReply, LENGTH_RULE_LOCAL, LENGTH_RULE_HOSTED } from './prompt';
 import { hasShout, readVoiceConfig, referenceFor, shoutReference, spokenCase, speakableText, splitForSpeech, streamedSentences, synthesise, synthesiseBreezeStream, type SpeechClip, type VoiceConfig, looksClipped, pickSigh, HUME_DESCRIPTIONS, HUME_STREAM_URL } from './voice';
 import { hearVoice, readHumeConfig, readingFrom } from './hume';
-import { readEviConfig, newSessionId, secondsUsedToday, noteUsage, underCap } from './evi';
+import { readEviConfig, newSessionId, secondsUsedToday, noteUsage, underCap, callAside } from './evi';
 import { openEviSession } from './evibridge';
 import { setDefaultAutoSelectFamilyAttemptTimeout } from 'node:net';
 import { readBrowserControlConfig } from './browserctl';
@@ -9859,7 +9859,7 @@ function webDeps(): WebDeps {
         hands: false,
         web: true,
         away: 'it came in from the phone',
-        ...(options?.interrupted ? { aside: INTERRUPTED_ASIDE } : {}),
+        ...(options?.call ? { aside: callAside(Boolean(options.interrupted)) } : options?.interrupted ? { aside: INTERRUPTED_ASIDE } : {}),
         traceId: trace.id,
         onChunk: chunk => { trace.mark('first'); onChunk(chunk); voice.feed(chunk); },
         // The reader sees only what survives, but a round that ends in a tool
@@ -10421,7 +10421,7 @@ function webDeps(): WebDeps {
       const interrupted = state.interrupted;
       state.interrupted = false;
       console.log(`[evi] ${sessionId} heard "${fixed.text.slice(0, 60)}"${interrupted ? ' — over her' : ''}`);
-      return deps.sayStream(fixed.text, onChunk, [], { interrupted }, () => {});
+      return deps.sayStream(fixed.text, onChunk, [], { interrupted, call: true }, () => {});
     },
   };
   return deps;

@@ -847,11 +847,12 @@ function eviDeps(overrides: Partial<Evi> = {}): Evi {
     open: async (_device, handlers) => ({ sendAudio: () => {}, close: reason => handlers.onClose(reason ?? 'hung up') }),
     turn: async (sessionId, text, _prosody, onChunk) => {
       if (sessionId !== 'dev.live') return null;
+      // The stream is what the phone would read; Hume gets the reply that
+      // counts, once, made speakable — so the marker and the markdown stay here.
       onChunk('Fine, ');
-      // A thrown-away round: the marker must not reach Hume.
       onChunk('�');
       onChunk(text.toUpperCase());
-      return { reply: 'Fine, ' + text.toUpperCase() };
+      return { reply: '**Fine,** ' + text.toUpperCase() + ' 😒' };
     },
     ...overrides,
   };
@@ -895,7 +896,7 @@ test('the brain hook answers Hume by bearer, never by cookie, and locks out gues
   } finally { await web.stop(); }
 });
 
-test('the brain hook streams her words as OpenAI chunks and ends with DONE', async () => {
+test('the brain hook answers with her whole reply as one OpenAI chunk, then DONE', async () => {
   const web = await door({ evi: eviDeps() });
   try {
     const right = { authorization: 'Bearer hook-secret' };
@@ -913,8 +914,8 @@ test('the brain hook streams her words as OpenAI chunks and ends with DONE', asy
     assert.equal(lines.at(-1), '[DONE]');
     const chunks = lines.slice(0, -1).map(line => JSON.parse(line) as { object: string; choices: { delta: { content?: string }; finish_reason: string | null }[] });
     assert.ok(chunks.every(chunk => chunk.object === 'chat.completion.chunk'));
-    assert.deepEqual(chunks.map(chunk => chunk.choices[0].delta.content ?? ''), ['Fine, ', 'HELLO', ''], 'the thrown-away marker never goes out');
-    assert.deepEqual(chunks.map(chunk => chunk.choices[0].finish_reason), [null, null, 'stop']);
+    assert.deepEqual(chunks.map(chunk => chunk.choices[0].delta.content ?? ''), ['Fine, Hello', ''], 'the reply that counts, speakable, in one piece');
+    assert.deepEqual(chunks.map(chunk => chunk.choices[0].finish_reason), [null, 'stop']);
   } finally { await web.stop(); }
 });
 
