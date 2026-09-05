@@ -112,7 +112,7 @@ import { reactedPrompt, readReaction, REACTION_COOLDOWN_MS } from './reacted';
 import { startWebServer, type WebDeps } from './webserver';
 import { ASLEEP_AWAY_LINE, dayAfter, decideTimesSystem, fallbackSchedule, goodnightDue, herAsleep, messagesWhileAsleep, parseDecidedTimes, readHerSleep, readHerSleepState, wakeIrritation, wakeNote, clockMinutes, type HerSleepSchedule } from './hersleep';
 import { advanceWant, dayNote, dayNoteInstruction, dayPassDue, dayPickInstruction, firstsNote, keepDay, markRecFollowed, noteRecommendation, pickRecommend, pickWantToWork, readDays, readRecs, readWants, readWeek, recDueForFollowUp, reconcileWants, wantInstruction, wantOutcome, wantQuery, wantsNote, weekKey, weekNote, weekReflectionInstruction, weekSummaryDue, WANT_ODDS, type HerDay, type HerWeek, type Rec, type Want } from './ownlife';
-import { inQuietHours, newVapidKeys, pushRequest, readPushDevices, readPushPrefs, type PushDevice, type PushPrefs, nextNudgeDelay, NUDGE_GAP_MS, NUDGE_RETRY_MS, nudgeOverdue, PUSH_BREATHER_MS, tooSoonToPush } from './push';
+import { inQuietHours, newVapidKeys, pushRequest, readPushDevices, readPushPrefs, type PushDevice, type PushPrefs, nextNudgeDelay, NUDGE_GAP_MS, NUDGE_RETRY_MS, nudgeOverdue, PUSH_BREATHER_MS, tooSoonToPush, heldBack } from './push';
 import { CHECK_EVERY_MS, describeUpdate, progressStep, whyNotCheck, type UpdateState } from './updates';
 import { BREVITY, summonedLine } from './summoned';
 import { CHOICES_TOOL, readChoices } from './choices';
@@ -4015,6 +4015,10 @@ const knowledge = createKnowledgeStore({
   store,
   fetch: net.fetch,
   apiKeyFor: keyFor,
+  // The vault pages become standing memories. Wired after the memory store
+  // exists below — the knowledge store is created first because the memory
+  // store embeds through it, so this is a mutable ref, not a direct call.
+  remember: draft => admitVaultMemory?.(draft) ?? null,
 });
 
 const getKnowledgeConfig = knowledge.config;
@@ -4058,6 +4062,15 @@ const memoryStore = createMemoryStore({
 });
 
 const { getMemories, setMemories, addMemory, mergeIn, getSessions, getMonthNotes, setMonthNotes, blockSources, setBlocks, profileSummary } = memoryStore;
+
+// The vault-memory seam from above, now that the memory store exists: vault
+// pages are admitted exactly like things she was told, but marked explicit so
+// they are never treated as guesses.
+let admitVaultMemory: ((draft: { text: string; kind: 'relationship' | 'preference' | 'fact'; subject?: string }) => { created: boolean } | null) | undefined = undefined;
+admitVaultMemory = draft => {
+  const result = addMemory(draft.text, draft.kind, draft.subject, { source: 'explicit' });
+  return result ? { created: result.created } : null;
+};
 const tryEmbedQuery = memoryStore.embedQuery;
 const refreshMemoryVectors = memoryStore.refreshVectors;
 const scheduleMemoryVectorRefresh = memoryStore.scheduleVectorRefresh;
@@ -8235,7 +8248,7 @@ async function pushToPhone(kind: 'random' | 'events' | 'system' | 'weather', tex
   if (!devices.length && !getApns().devices.length) return false;
   // force is the sheet's proof button: being asked to prove itself is the one
   // time a refusal for preferences or quiet hours reads as broken.
-  if (!force && (!prefs[kind] || inQuietHours(prefs, zonedNow(CHAT_TIMEZONE)))) return false;
+  if (!force && (!prefs[kind] || heldBack(prefs, zonedNow(CHAT_TIMEZONE)))) return false;
   // The native app, through Apple, alongside the page's Web Push.
   let delivered = await pushThroughApple(kind, text, url, topic, eventId);
   if (!devices.length) return delivered;

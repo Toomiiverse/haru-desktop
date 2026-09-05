@@ -9,7 +9,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createPublicKey, verify } from 'node:crypto';
-import { inQuietHours, newVapidKeys, pushRequest, readPushDevices, readPushPrefs, sealPayload, vapidToken, nextNudgeDelay, NUDGE_GAP_MS, NUDGE_FLOOR_MS, nudgeOverdue, LAST_CALL_MS, untilQuiet, PUSH_BREATHER_MS, tooSoonToPush } from '../electron/push';
+import { heldBack, inQuietHours, newVapidKeys, pushRequest, readPushDevices, readPushPrefs, sealPayload, vapidToken, nextNudgeDelay, NUDGE_GAP_MS, NUDGE_FLOOR_MS, nudgeOverdue, LAST_CALL_MS, untilQuiet, PUSH_BREATHER_MS, tooSoonToPush } from '../electron/push';
 
 // -- RFC 8291 Appendix A, verbatim -------------------------------------------
 
@@ -205,4 +205,13 @@ test('a push carries a topic, made safe for the header', () => {
   assert.equal(topped.headers['Topic'], 'haru-random');
   assert.equal(pushRequest(device, '{"a":1}', keys, {}, 'ev-abc/def!').headers['Topic'], 'ev-abcdef');
   assert.equal('Topic' in pushRequest(device, '{"a":1}', keys).headers, false);
+});
+
+test('a Focus on the phone holds her, in or out of quiet hours; the reader defaults it off', () => {
+  const noon = new Date('2026-09-05T12:00:00');
+  const prefs = readPushPrefs({ quietFrom: '23:00', quietTo: '08:00' });
+  assert.equal(prefs.held, false);
+  assert.equal(heldBack(prefs, noon), false);
+  assert.equal(heldBack({ ...prefs, held: true }, noon), true);
+  assert.equal(heldBack(readPushPrefs({ held: 'yes' }), noon), false, 'only a real boolean counts');
 });

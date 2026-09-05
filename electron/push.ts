@@ -50,6 +50,12 @@ export type PushPrefs = {
    * means she waits for a sign of life however long it takes.
    */
   upBy: string;
+  /**
+   * Her nudges held for now: a Focus on the phone has said so, through the
+   * app's Focus filter. Nothing timed about it — it lifts when the Focus does,
+   * because the phone calls again with the default (false) then.
+   */
+  held: boolean;
 };
 
 export function readPushDevices(saved: unknown): PushDevice[] {
@@ -84,7 +90,13 @@ export function readPushPrefs(saved: unknown): PushPrefs {
     quietFrom: time(record.quietFrom, '23:00'),
     quietTo: time(record.quietTo, '08:00'),
     upBy: typeof record.upBy === 'string' && (record.upBy === '' || TIME.test(record.upBy)) ? record.upBy : '09:00',
+    held: flag(record.held, false),
   };
+}
+
+/** Whether the phone is being left alone right now: quiet hours, or a Focus holding her. */
+export function heldBack(prefs: Pick<PushPrefs, 'quietFrom' | 'quietTo' | 'held'>, now: Date): boolean {
+  return prefs.held || inQuietHours(prefs, now);
 }
 
 /** Whether the phone is being left alone right now. Uses the clock it is given. */

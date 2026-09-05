@@ -1115,8 +1115,12 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
   }
 
   if (req.method === 'POST' && path === '/api/push/prefs') {
-    // The reader, not the body, decides what a preference is allowed to be.
-    deps.push.savePrefs(readPushPrefs(await readBody(req)));
+    // The reader, not the body, decides what a preference is allowed to be;
+    // a body that names only some of them leaves the rest as they were, so
+    // the Focus filter's one flag does not reset the sheet's switches.
+    const current = deps.push.prefs() as unknown as Record<string, unknown>;
+    const wanted = await readBody(req) as Record<string, unknown>;
+    deps.push.savePrefs(readPushPrefs({ ...current, ...wanted }));
     return json(res, 200, { prefs: deps.push.prefs() });
   }
 
