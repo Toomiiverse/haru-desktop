@@ -548,17 +548,34 @@ async function postBreeze(config: VoiceConfig, reference: VoiceReference, text: 
     const clip = await readFile(reference.clip);
     form.append('ref_audio', new Blob([clip as unknown as BlobPart], { type: 'audio/wav' }), basename(reference.clip));
   }
-  const response = await net.fetch(`${trimEndpoint(config.endpoint)}${BREEZE_SPEECH_URL}`, {
-    method: 'POST',
-    body: form,
-    signal: AbortSignal.timeout(BREEZE_TIMEOUT_MS),
-  });
-  if (!response.ok) {
+  // Breeze takes one request at a time and answers a second with 409. The
+  // slot above keeps ours in line, but a line the phone abandoned mid-stream
+  // gives the slot back while Breeze is still finishing it — so the next line
+  // was refused and, on the phone, silently skipped (55 times on 2026-09-05).
+  // A busy Breeze is a Breeze about to be free: wait a little and ask again.
+  const started = Date.now();
+  for (let attempt = 0; ; attempt++) {
+    const response = await net.fetch(`${trimEndpoint(config.endpoint)}${BREEZE_SPEECH_URL}`, {
+      method: 'POST',
+      body: form,
+      signal: AbortSignal.timeout(BREEZE_TIMEOUT_MS),
+    });
+    if (response.ok) {
+      if (attempt) console.log(`[voice] breeze was busy — waited ${Date.now() - started}ms`);
+      return response;
+    }
     const detail = await response.text().catch(() => '');
+    if (response.status === 409 && attempt < BREEZE_BUSY_TRIES) {
+      await new Promise(resolve => setTimeout(resolve, BREEZE_BUSY_WAIT_MS));
+      continue;
+    }
     throw new Error(`${response.status}${detail ? `: ${detail.slice(0, 300)}` : ''}`);
   }
-  return response;
 }
+
+/** How often, and how long apart, a busy Breeze is asked again: about two seconds in all. */
+const BREEZE_BUSY_TRIES = 6;
+const BREEZE_BUSY_WAIT_MS = 350;
 
 /** Wraps Breeze's 24 kHz s16le PCM stream in a WAV the phone's <audio> element
  *  can play progressively. The data length is unknown while it streams, so the
