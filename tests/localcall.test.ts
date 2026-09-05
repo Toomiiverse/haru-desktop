@@ -44,7 +44,7 @@ function harness(overrides: Partial<LocalCallDeps> = {}) {
   const closes: [string, number][] = [];
   const heard: number[] = [];
   const answered: { text: string; interrupted: boolean }[] = [];
-  const spoken: { text: string; emotion: string | null }[] = [];
+  const spoken: { text: string; emotion: string | null; seed: number }[] = [];
   const voices: ReturnType<typeof voice>[] = [];
   let clock = 1_000_000;
   const deps: LocalCallDeps = {
@@ -57,8 +57,9 @@ function harness(overrides: Partial<LocalCallDeps> = {}) {
       options.onSentence('Second thing.', 'smug');
       return { reply: 'First thing. Second thing.' };
     },
-    speak: async () => { const v = voice(3); voices.push(v); return { stream: v.stream, sampleRate: 24000 }; },
+    speak: async (text, emotion, seed) => { spoken.push({ text, emotion, seed }); const v = voice(3); voices.push(v); return { stream: v.stream, sampleRate: 24000 }; },
     filler: () => 'Hang on.',
+    moodNow: () => 'annoyed',
     now: () => clock,
     vad: { endAfterMs: 500 },
     log: () => {},
@@ -90,9 +91,11 @@ test('an utterance is heard, answered, and voiced a sentence at a time', async (
     'assistant_message', 'audio_start', 'audio_end',
     'assistant_end',
   ]);
-  assert.equal(h.audio.length, 6, 'three chunks per sentence went down');
-  assert.equal((h.events.at(-1) as { emotion?: string }).emotion, 'smug', 'the face at the end is the mood of her last line');
-  assert.equal((h.events[1] as { text: string }).text, 'First thing. ');
+  assert.equal(h.audio.length, 6, 'three chunks per line went down');
+  assert.equal((h.events.at(-1) as { emotion?: string }).emotion, 'annoyed', 'the face at the end is the mood the reply was said in');
+  assert.equal((h.events[1] as { text: string }).text, 'First thing.');
+  assert.deepEqual(h.spoken.map(s => s.emotion), ['annoyed', 'annoyed'], 'one register for the whole reply, not a mood per sentence');
+  assert.equal(h.spoken[0].seed, h.spoken[1].seed, 'one take: the same seed for every piece');
   assert.equal((h.events[2] as { sampleRate: number }).sampleRate, 24000);
 });
 
@@ -146,6 +149,24 @@ test('what reads as unfinished', () => {
   assert.equal(looksUnfinished(''), false);
 });
 
+test('the first sentence goes out at once; the rest of the reply is said in stretches', async () => {
+  const h = harness({
+    answer: async (_text, options) => {
+      // Sentences arrive without their trailing space, as the streamer hands them.
+      const parts = ['One.', 'Two, which is a bit longer.', 'Three.', '\n\nFour, after a paragraph.', 'Five.'];
+      for (const part of parts) { await tick(); options.onSentence(part, 'smug'); }
+      return { reply: parts.join(' ') };
+    },
+  });
+  h.feed(0.002, 2000); h.feed(0.3, 600); h.feed(0.002, 700);
+  await settle(80);
+  assert.deepEqual(h.spoken.map(s => s.text), ['One.', 'Two, which is a bit longer. Three.', 'Four, after a paragraph. Five.']);
+  assert.equal(new Set(h.spoken.map(s => s.seed)).size, 1);
+  assert.deepEqual(h.spoken.map(s => s.emotion), ['smug', 'smug', 'smug'], 'the first sentence names the register; her resting mood only when it reads as nothing');
+  assert.equal((h.events.at(-1) as { emotion?: string }).emotion, 'smug');
+  assert.equal(h.types().at(-1), 'assistant_end');
+});
+
 test('nothing worth answering is nothing said', async () => {
   const h = harness({ hear: async () => '' });
   h.feed(0.002, 2000); h.feed(0.3, 600); h.feed(0.002, 700);
@@ -196,6 +217,7 @@ test('talking over her drops her voice, tells the phone, and the next turn knows
     hear: async () => (answers.length ? 'Second thing, stop.' : 'First thing.'),
     // The line she is cut off in goes on and on; her answer to the interruption is short.
     speak: async text => { const v = voice(text.startsWith('A long') ? 200 : 3); h.voices.push(v); return { stream: v.stream, sampleRate: 24000 }; },
+    moodNow: () => null,
   });
   h.feed(0.002, 2000); h.feed(0.3, 600); h.feed(0.002, 700);
   await settle(30);

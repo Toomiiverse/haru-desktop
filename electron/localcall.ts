@@ -36,6 +36,14 @@ const HER_ECHO_MS = 500;
 const OVER_HER_RATIO = 7;
 /** How long a sentence that reads as unfinished waits for its other half. */
 export const UNFINISHED_HOLD_MS = 700;
+/**
+ * After the first sentence, which goes out at once for the sake of the wait,
+ * the rest of a reply is voiced in stretches of about this many characters,
+ * or a paragraph, or the rest of the reply — whichever comes first. A take
+ * per sentence sounded assembled; the reply is usually finished before the
+ * first sentence has been said anyway.
+ */
+export const STRETCH_CHARS = 240;
 
 export type CallEvent = Record<string, unknown>;
 
@@ -48,8 +56,19 @@ export type LocalCallDeps = {
    * reply that settled, which the brain has already written into the day.
    */
   answer(text: string, options: { interrupted: boolean; onSentence(sentence: string, emotion: string): void; onToolCall(name: string): void }): Promise<{ reply: string; ignored?: boolean }>;
-  /** Her voice for a line: a stream of mono PCM16 with no header, and its rate. Null when she has no voice to give. */
-  speak(text: string, emotion: string | null): Promise<{ stream: ReadableStream<Uint8Array>; sampleRate: number } | null>;
+  /**
+   * Her voice for a line: a stream of mono PCM16 with no header, and its
+   * rate. Null when she has no voice to give. Every line of one reply comes
+   * with the same seed, so the pieces are takes of one performance.
+   */
+  speak(text: string, emotion: string | null, seed: number): Promise<{ stream: ReadableStream<Uint8Array>; sampleRate: number } | null>;
+  /**
+   * Her mood right now, for the whole of a reply. Without it every sentence
+   * would be delivered in the mood read off the reply so far — dry for the
+   * first, sharp for the second, teasing for the third — which is heard as
+   * her switching voices mid-answer.
+   */
+  moodNow?(): string | null;
   /** A line to say while a tool runs. */
   filler(): string;
   vad?: Partial<VadOptions>;
@@ -73,7 +92,7 @@ export type LocalCall = {
   close(reason?: string): void;
 };
 
-type Line = { text: string; emotion: string | null; filler: boolean };
+type Line = { text: string; emotion: string | null; seed: number; filler: boolean };
 
 /** The sample rate a WAV header declares, or 0 when the bytes are not a WAV. */
 export function wavSampleRate(bytes: Uint8Array): number {
@@ -246,22 +265,45 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
     const myGeneration = generation;
     const started = now();
     let firstVoiceAt = 0;
+    // One register and one take for the whole reply. The register is read off
+    // the first sentence — the words know their own tone — and only when that
+    // reads as nothing in particular does her resting mood decide.
+    const resting = deps.moodNow?.() ?? null;
+    let mood = resting;
+    const seed = Math.floor(Math.random() * 2 ** 31);
+    lastEmotion = mood;
+    let sentences = 0;
+    let stretch = '';
+    const flush = () => {
+      const text = stretch.trim();
+      stretch = '';
+      if (text) say({ text, emotion: mood, seed, filler: false });
+    };
     try {
       const answer = await deps.answer(text, {
         interrupted: wasInterrupted,
         onSentence: (sentence, emotion) => {
           if (generation !== myGeneration || turns !== mine) return;
-          lastEmotion = emotion;
-          say({ text: sentence, emotion, filler: false });
+          sentences++;
+          if (sentences === 1) {
+            if (emotion && emotion !== 'neutral') { mood = emotion; lastEmotion = mood; }
+            say({ text: sentence.trim(), emotion: mood, seed, filler: false });
+            return;
+          }
+          // A paragraph is a breath: what came before it is said before it.
+          if (/^\s*\n\s*\n/.test(sentence)) flush();
+          stretch += (stretch && !/\s$/.test(stretch) && !/^\s/.test(sentence) ? ' ' : '') + sentence;
+          if (/\n\s*\n\s*$/.test(stretch) || stretch.length >= STRETCH_CHARS) flush();
         },
         onToolCall: name => {
           if (generation !== myGeneration || turns !== mine || fillerThisTurn || spokeThisTurn) return;
           fillerThisTurn = true;
           log(`[call] a tool is running (${name}) — she says something meanwhile`);
-          say({ text: deps.filler(), emotion: null, filler: true });
+          say({ text: deps.filler(), emotion: mood, seed, filler: true });
         },
       });
       if (turns !== mine) return;
+      if (generation === myGeneration) flush();
       if (answer.ignored) log('[call] she is not answering that');
     } catch (error) {
       log(`[call] her brain failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -275,7 +317,7 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
           // The face goes with the end of the turn, read off her last line, so
           // the phone need not ask a model — that one shares the card with her voice.
           emit({ type: 'assistant_end', ...(lastEmotion ? { emotion: lastEmotion } : {}) });
-          log(`[call] turn ${mine}: ${firstVoiceAt ? `first voice at ${firstVoiceAt - started}ms, ` : 'nothing voiced, '}done in ${now() - started}ms`);
+          log(`[call] turn ${mine}: ${firstVoiceAt ? `first voice at ${firstVoiceAt - started}ms, ` : 'nothing voiced, '}said as ${mood ?? 'her plain self'}, done in ${now() - started}ms`);
         }
       }
     }
@@ -304,7 +346,7 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
         emit(line.filler ? { type: 'filler', text: line.text } : { type: 'assistant_message', text: line.text, id: String(++lineId) });
         if (!line.filler) spokeThisTurn = true;
         let voice: { stream: ReadableStream<Uint8Array>; sampleRate: number } | null = null;
-        try { voice = await deps.speak(line.text, line.emotion); } catch (error) { log(`[call] her voice failed: ${error instanceof Error ? error.message : String(error)}`); }
+        try { voice = await deps.speak(line.text, line.emotion, line.seed); } catch (error) { log(`[call] her voice failed: ${error instanceof Error ? error.message : String(error)}`); }
         if (!voice || generation !== myGeneration || closed) { if (voice) void voice.stream.cancel().catch(() => {}); continue; }
         const id = String(lineId);
         emit({ type: 'audio_start', id, sampleRate: voice.sampleRate || VOICE_RATE });

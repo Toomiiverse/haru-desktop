@@ -10217,14 +10217,14 @@ function webDeps(): WebDeps {
     // so the phone's <audio> element starts on the first bytes instead of
     // waiting for the whole clip. Any other engine returns null and the page
     // falls back to the buffered clip.
-    async speakStream(text, emotion) {
+    async speakStream(text, emotion, options) {
       const voice = readVoiceConfig(store.get('voice'));
       if (!voice.webEnabled) return null;
       // Breeze streams its own PCM; wrapped in a WAV here so the phone can play
       // it progressively. Same clone + instruction as the buffered path.
       if (voice.engine === 'breeze') {
         const mood = emotion && (EMOTIONS as readonly string[]).includes(emotion) ? emotion as EmotionName : localEmotion(text);
-        return synthesiseBreezeStream(voice, referenceFor(voice, mood), spokenCase(speakableText(text)), mood);
+        return synthesiseBreezeStream(voice, referenceFor(voice, mood), spokenCase(speakableText(text)), mood, options?.seed);
       }
       if (voice.engine !== 'hume') return null;
       const key = getHumeKey();
@@ -10418,10 +10418,18 @@ function webDeps(): WebDeps {
         }, {
           hear: wav => deps.hear(wav, 'audio/wav'),
           answer: (text, { interrupted, onSentence, onToolCall }) => deps.sayStream(text, () => {}, [], { interrupted, call: true, onToolCall }, onSentence),
-          speak: async (text, emotion) => {
+          // Her mood as the standing tab reads it — no model call — for a reply
+          // whose first sentence names no register of its own. Only the moods
+          // that change how she sounds pass through; the warm ones would have
+          // a sarcastic line said fondly, and her plain register is dry.
+          moodNow: () => {
+            const resting = deps.standing().emotion;
+            return resting === 'annoyed' || resting === 'sleepy' || resting === 'worried' || resting === 'bored' ? resting : 'neutral';
+          },
+          speak: async (text, emotion, seed) => {
             // Streamed where the engine streams (Breeze: 24 kHz PCM under a
             // WAV header), whole where it does not, at whatever rate it says.
-            const streamed = await deps.speakStream?.(text, emotion);
+            const streamed = await deps.speakStream?.(text, emotion, { seed });
             if (streamed?.mime === 'audio/wav') return { stream: withoutWavHeader(streamed.body), sampleRate: 24000 };
             if (streamed) void streamed.body.cancel().catch(() => {});
             const clip = await deps.speak(text, emotion);

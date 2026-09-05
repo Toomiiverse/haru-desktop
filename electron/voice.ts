@@ -532,7 +532,7 @@ function releasingWhenDone(source: ReadableStream<Uint8Array>, release: () => vo
   });
 }
 
-async function postBreeze(config: VoiceConfig, reference: VoiceReference, text: string, emotion?: EmotionName | null): Promise<Response> {
+async function postBreeze(config: VoiceConfig, reference: VoiceReference, text: string, emotion?: EmotionName | null, seed?: number): Promise<Response> {
   const form = new FormData();
   form.append('text', text);
   form.append('instruction', breezeInstruction(text, emotion));
@@ -541,7 +541,9 @@ async function postBreeze(config: VoiceConfig, reference: VoiceReference, text: 
   // Random per line, not the server's fixed 42: a fixed seed gives the same
   // delivery for the same text every time, which is how a voice starts to
   // sound like a recording of itself. Prosody varies run to run instead.
-  form.append('seed', String(Math.floor(Math.random() * 2 ** 31)));
+  // A caller that voices a reply in several pieces passes one seed for all
+  // of them, so the pieces are takes of the same performance.
+  form.append('seed', String(seed ?? Math.floor(Math.random() * 2 ** 31)));
   if (config.voiceId) {
     form.append('voice_id', config.voiceId);
   } else {
@@ -621,10 +623,10 @@ export function wrapPcmAsWav(body: ReadableStream<Uint8Array>): ReadableStream<U
 
 /** The streaming half of the Breeze door, for the phone's GET /api/speak: the
  *  PCM arrives progressively, and the WAV wrapper keeps the first byte fast. */
-export async function synthesiseBreezeStream(config: VoiceConfig, reference: VoiceReference, text: string, emotion?: EmotionName | null): Promise<{ mime: string; body: ReadableStream<Uint8Array> } | null> {
+export async function synthesiseBreezeStream(config: VoiceConfig, reference: VoiceReference, text: string, emotion?: EmotionName | null, seed?: number): Promise<{ mime: string; body: ReadableStream<Uint8Array> } | null> {
   const release = await breezeSlot();
   try {
-    const response = await postBreeze(config, reference, text, emotion);
+    const response = await postBreeze(config, reference, text, emotion, seed);
     if (!response.body) { release(); return null; }
     return { mime: 'audio/wav', body: wrapPcmAsWav(releasingWhenDone(response.body, release)) };
   } catch {

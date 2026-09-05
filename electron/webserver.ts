@@ -188,7 +188,7 @@ export type WebDeps = {
   speak(text: string, emotion?: string | null): Promise<{ audio: Uint8Array; mime: string } | null>;
   /** The same line as a stream the page can play as it arrives — the Hume path,
    *  which generates audio progressively. Null when the engine does not stream. */
-  speakStream?(text: string, emotion?: string | null): Promise<{ mime: string; body: ReadableStream<Uint8Array> } | null>;
+  speakStream?(text: string, emotion?: string | null, options?: { seed?: number }): Promise<{ mime: string; body: ReadableStream<Uint8Array> } | null>;
   /** One of her recorded sighs, for the gap between paragraphs; null when she has none. */
   sigh(emotion?: string | null): Promise<{ audio: Uint8Array; mime: string } | null>;
   /** Her word when they only said her name. */
