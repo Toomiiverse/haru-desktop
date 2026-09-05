@@ -24,7 +24,8 @@
     "pixi-live2d-display": "0.4.0",
     "pixi.js": "6.5.10",
     "react": "19.2.8",
-    "react-dom": "19.2.8"
+    "react-dom": "19.2.8",
+    "ws": "^8.21.3"
   },
   "devDependencies": {
     "@types/adm-zip": "0.5.7",
@@ -32,6 +33,7 @@
     "@types/react": "19.2.18",
     "@types/react-dom": "19.2.4",
     "@types/three": "^0.180.0",
+    "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "6.0.5",
     "concurrently": "10.0.4",
     "cross-env": "10.1.0",

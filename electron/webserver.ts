@@ -14,7 +14,11 @@
 
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from 'node:http';
 import { createReadStream, existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { timingSafeEqual } from 'node:crypto';
+import type { Duplex } from 'node:stream';
 import filePath from 'node:path';
+import { WebSocketServer, type WebSocket as CallSocket } from 'ws';
+import { clmTurnFrom, sseChunk, sseStop, SSE_DONE } from './evi';
 import type { Standing } from './standing';
 import type { Her } from './her';
 import {
@@ -190,6 +194,23 @@ export type WebDeps = {
   wake(): { line: string; emotion: string };
   /** What they just said, through the same ears and the same corrections as the desktop. */
   hear(audio: Uint8Array, mime: string): Promise<string>;
+  /**
+   * Speech to speech through Hume's EVI — see evi.ts. A call: the phone streams
+   * its microphone up one socket and her voice comes back down it, while her
+   * words are asked of the brain hook below. Absent when this build has none.
+   */
+  evi?: {
+    status(): { enabled: boolean; minutesToday: number; cap: number; reason?: string };
+    /** The bearer Hume must present at the brain hook; '' when none is set. */
+    secret(): string;
+    /** Opens a call for this device. Throws with a reason worth showing when refused. */
+    open(deviceId: string, handlers: { onEvent(event: Record<string, unknown>): void; onClose(reason: string): void }): Promise<{ sendAudio(pcm: Uint8Array): void; close(reason?: string): void }>;
+    /**
+     * One turn of a call: what Hume heard and how it sounded, answered in her
+     * words, streamed. Null when the session is not a call of ours.
+     */
+    turn(sessionId: string, text: string, prosody: Record<string, number> | null, onChunk: (chunk: string) => void): Promise<{ reply: string; ignored?: boolean } | null>;
+  };
   knowledge: {
     search(query: string, category?: string): Promise<{ results: { content: string; source: string; category: string; heading: string | null; version: number; confidence: number; updatedAt: string; score: number }[] }>;
     stats(): Record<string, unknown>;
@@ -377,12 +398,12 @@ function sendFile(res: ServerResponse, file: string, type: string) {
   stream.pipe(res);
 }
 
-async function readBody(req: IncomingMessage): Promise<unknown> {
+async function readBody(req: IncomingMessage, cap = MAX_BODY): Promise<unknown> {
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of req) {
     size += (chunk as Buffer).length;
-    if (size > MAX_BODY) throw new Error('too much');
+    if (size > cap) throw new Error('too much');
     chunks.push(chunk as Buffer);
   }
   if (!chunks.length) return {};
@@ -420,6 +441,18 @@ export function startWebServer(port: number, deps: WebDeps): Promise<{ port: num
     if (!res.headersSent) json(res, 500, { error: 'Something went wrong.' });
   }); });
 
+  // The one socket: a call. Everything else on this server is a request and an
+  // answer; a call is the phone's microphone going up and her voice coming
+  // down for as long as the mic is on, and that is a different shape of
+  // connection. It is gated the same way as every route past the sign-in.
+  const calls = new WebSocketServer({ noServer: true, maxPayload: MAX_CALL_FRAME });
+  server.on('upgrade', (req, socket, head) => {
+    void answerUpgrade(req, socket as Duplex, head, deps, calls).catch(error => {
+      console.error('[web] ' + (error instanceof Error ? error.message : String(error)));
+      socket.destroy();
+    });
+  });
+
   return new Promise((resolve, reject) => {
     server.once('error', reject);
     // Loopback only. This is the line that keeps her off the network.
@@ -428,10 +461,164 @@ export function startWebServer(port: number, deps: WebDeps): Promise<{ port: num
       console.log(`[web] listening on 127.0.0.1:${actual} — reachable only through a tunnel`);
       resolve({
         port: actual,
-        stop: () => new Promise<void>(done => server.close(() => { sessions.clear(); done(); })),
+        stop: () => new Promise<void>(done => {
+          for (const client of calls.clients) client.terminate();
+          calls.close();
+          server.close(() => { sessions.clear(); done(); });
+        }),
       });
     });
   });
+}
+
+/** A frame of the phone's audio. 40 ms of 16 kHz PCM16 is 1.3 KB; a megabyte is somebody else. */
+const MAX_CALL_FRAME = 1024 * 1024;
+/** What Hume posts to the brain hook: the whole call as it holds it, prosody and all. */
+const MAX_HOOK_BODY = 4 * 1024 * 1024;
+
+function refuseUpgrade(socket: Duplex, status: number, reason: string) {
+  socket.write(`HTTP/1.1 ${status} ${reason}\r\nConnection: close\r\n\r\n`);
+  socket.destroy();
+}
+
+/**
+ * The call's door. Same checks as `handle`, in the same order — the door is
+ * closed, the caller is a stranger, the feature is not built — and only then
+ * the socket is taken over. Anything but the one path is refused outright: a
+ * WebSocket handshake that lands anywhere else is not the phone.
+ */
+async function answerUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer, deps: WebDeps, calls: WebSocketServer) {
+  const url = new URL(req.url ?? '/', 'http://127.0.0.1');
+  if (url.pathname !== '/api/evi/session') return refuseUpgrade(socket, 404, 'Not Found');
+  const access = deps.readAccess();
+  if (!access.enabled || !access.hash) return refuseUpgrade(socket, 503, 'Service Unavailable');
+  const me = whoIsThis(req, access, new Date());
+  if (!me.allowed) return refuseUpgrade(socket, 401, 'Unauthorized');
+  if (!deps.evi) return refuseUpgrade(socket, 404, 'Not Found');
+  const evi = deps.evi;
+  const deviceId = me.device?.id ?? 'session';
+  calls.handleUpgrade(req, socket, head, ws => { void runCall(ws, deviceId, evi); });
+}
+
+/**
+ * The call itself. Binary frames up are audio and go straight to Hume; a text
+ * frame up is a request, of which there is one — stop. Everything down is one
+ * JSON event per frame: what Hume heard, what she said, her voice as base64
+ * WAV a sentence at a time, and the two that shape the turn — she was talked
+ * over, she has finished. `ready` first, `ended` last, `refused` instead of
+ * either when the call could not be placed.
+ */
+async function runCall(ws: CallSocket, deviceId: string, evi: NonNullable<WebDeps['evi']>) {
+  const tell = (event: Record<string, unknown>) => { if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(event)); };
+  let call: Awaited<ReturnType<typeof evi.open>> | null = null;
+  let ended = false;
+  try {
+    call = await evi.open(deviceId, {
+      onEvent: tell,
+      onClose: reason => {
+        if (ended) return;
+        ended = true;
+        tell({ type: 'ended', reason });
+        if (ws.readyState === ws.OPEN) ws.close(1000, reason.slice(0, 120));
+      },
+    });
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    console.log(`[evi] refused a call: ${reason}`);
+    tell({ type: 'refused', reason });
+    ws.close(1008, reason.slice(0, 120));
+    return;
+  }
+  const placed = call;
+  tell({ type: 'ready' });
+  ws.on('message', (data, isBinary) => {
+    if (isBinary) {
+      const frame = Array.isArray(data) ? Buffer.concat(data) : Buffer.isBuffer(data) ? data : Buffer.from(data as ArrayBuffer);
+      placed.sendAudio(frame);
+      return;
+    }
+    let request: { type?: unknown } = {};
+    try { request = JSON.parse(String(data)) as typeof request; } catch { return; }
+    if (request.type === 'stop') placed.close('the phone hung up');
+  });
+  ws.on('close', () => { ended = true; placed.close('the phone went away'); });
+  ws.on('error', () => { ended = true; placed.close('the phone\'s socket failed'); });
+}
+
+/**
+ * The brain hook: where Hume asks what she says.
+ *
+ * This is the one route that has to be reachable from the internet — Hume's
+ * servers call it, not the phone — so it stands before the sign-in gate and
+ * has a gate of its own: a bearer only Hume was handed, compared in constant
+ * time, with the sign-in's own lockout behind it. A right bearer with a
+ * session that is not a live call of ours is refused too; the secret opens
+ * the door to the calls, not to her.
+ */
+async function brainHook(req: IncomingMessage, res: ServerResponse, deps: WebDeps, url: URL, now: Date) {
+  if (!deps.evi) return json(res, 404, { error: 'Nothing here.' });
+  const from = String(req.headers['cf-connecting-ip'] ?? req.socket.remoteAddress ?? 'unknown');
+  const attempts = attemptsBy.get(from) ?? clearFailures();
+  const wait = lockedFor(attempts, now.getTime());
+  if (wait > 0) return json(res, 429, { error: `Too many tries. Wait ${Math.ceil(wait / 1000)}s.` });
+  const given = /^Bearer\s+(\S+)$/i.exec(req.headers.authorization ?? '')?.[1] ?? '';
+  if (!sameSecret(given, deps.evi.secret())) {
+    attemptsBy.set(from, noteFailure(attempts, now.getTime()));
+    console.warn(`[evi] refused a brain-hook call from ${from}`);
+    return json(res, 401, { error: 'That is not right.' });
+  }
+  const sessionId = (url.searchParams.get('custom_session_id') ?? '').trim();
+  if (!sessionId) return json(res, 400, { error: 'No session.' });
+  let body: unknown;
+  try { body = await readBody(req, MAX_HOOK_BODY); } catch { return json(res, 400, { error: 'Bad request.' }); }
+  const turn = clmTurnFrom(body);
+  if (!turn) return json(res, 400, { error: 'Nothing was said.' });
+
+  // The stream starts with her first word, not before: a session that turns
+  // out not to be ours still gets a plain refusal rather than an empty stream.
+  const id = `haru-${now.getTime().toString(36)}`;
+  const created = Math.floor(now.getTime() / 1000);
+  let started = false;
+  let sent = 0;
+  const begin = () => {
+    if (started) return;
+    started = true;
+    res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-store', 'Connection': 'keep-alive' });
+  };
+  const write = (chunk: string) => { if (!res.destroyed) res.write(chunk); };
+  try {
+    const answer = await deps.evi.turn(sessionId, turn.text, turn.prosody, chunk => {
+      // A round thrown away at the last moment cannot be taken back once
+      // spoken. What went out went out; the reply that counts follows it.
+      if (chunk === '\uFFFD') { if (sent) console.warn(`[evi] a round was thrown away after ${sent} chars had gone out`); return; }
+      if (!chunk) return;
+      begin();
+      sent += chunk.length;
+      write(sseChunk(chunk, id, created));
+    });
+    if (!answer) {
+      if (!started) return json(res, 403, { error: 'Not a call of ours.' });
+    } else if (answer.ignored) {
+      console.log(`[evi] ${sessionId} — she is not answering that`);
+    }
+    begin();
+    write(sseStop(id, created));
+    write(SSE_DONE);
+  } catch (error) {
+    console.error('[evi] the brain hook failed: ' + (error instanceof Error ? error.message : String(error)));
+    if (!started) return json(res, 500, { error: 'Something went wrong.' });
+    write(sseStop(id, created));
+    write(SSE_DONE);
+  }
+  return res.end();
+}
+
+/** Equal, in time that does not depend on where they differ. */
+function sameSecret(given: string, expected: string): boolean {
+  if (!given || !expected) return false;
+  const a = Buffer.from(given);
+  const b = Buffer.from(expected);
+  return a.length === b.length && timingSafeEqual(a, b);
 }
 
 async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) {
@@ -493,6 +680,10 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
   }
 
   if (req.method === 'POST' && path === '/api/login') return login(req, res, deps, access, now);
+
+  // Hume's servers, asking what she says. Its own gate, above — the phone's
+  // cookie never travels this way.
+  if (req.method === 'POST' && path === '/api/evi/chat/completions') return brainHook(req, res, deps, url, now);
 
   if (!me.allowed) {
     // Her model is not served to strangers. It is 28MB of somebody's paid asset
@@ -572,6 +763,11 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
 
   if (req.method === 'GET' && path === '/api/chat') {
     return json(res, 200, { messages: deps.history().slice(-60) });
+  }
+
+  // Whether a call can be placed, and how much of today's allowance is left.
+  if (req.method === 'GET' && path === '/api/evi/status') {
+    return json(res, 200, deps.evi ? deps.evi.status() : { enabled: false, minutesToday: 0, cap: 0, reason: 'not built' });
   }
 
   if (req.method === 'POST' && path === '/api/chat') {

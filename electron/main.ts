@@ -73,6 +73,9 @@ import { createKnowledgeStore } from './knowledgestore';
 import { chatSystemPrompt, chatDynamicContext, FIRST_PERSON_NOTE, freshStartInstruction, type FreshStart, type RatedReply, LENGTH_RULE_LOCAL, LENGTH_RULE_HOSTED } from './prompt';
 import { hasShout, readVoiceConfig, referenceFor, shoutReference, spokenCase, speakableText, splitForSpeech, streamedSentences, synthesise, synthesiseBreezeStream, type SpeechClip, type VoiceConfig, looksClipped, pickSigh, HUME_DESCRIPTIONS, HUME_STREAM_URL } from './voice';
 import { hearVoice, readHumeConfig, readingFrom } from './hume';
+import { readEviConfig, newSessionId, secondsUsedToday, noteUsage, underCap } from './evi';
+import { openEviSession } from './evibridge';
+import { setDefaultAutoSelectFamilyAttemptTimeout } from 'node:net';
 import { readBrowserControlConfig } from './browserctl';
 import { applyDecay, DEEP_RECALL_LIMIT, eventCandidates, eventsPrompt, findSuperseded, formatMemoryPrompt, isExplicitRecall, closeEvents, isWorthAnEvent, isWorthKeeping, isWorthRemembering, MEMORY_KINDS, migrateMemories, monthFoldPrompt, pruneMemories, readsAsSecondPerson, rememberInto, retrieveMemories, semanticSimilarities, summaryPrompt, supersede, THIRD_PERSON_AGAIN, vectorSimilarity, type ForgettingEntry, type MemoryKind, type MemoryRecord, type MemorySource, type RetrievalFactors, type ScoredMemory, type SessionSummary } from './memory';
 import { consolidateMemories, type ConsolidationChange } from './consolidation';
@@ -2515,6 +2518,24 @@ function saveHumeKey(apiKey: string) {
 
 function getHumeKey(): string {
   return decryptSecret(store.get('humeApiKey') as string | undefined);
+}
+
+/** The bearer Hume presents at the speech-to-speech brain hook. Made by scripts/install-evi.sh; see evi.ts. */
+function getEviSecret(): string {
+  return decryptSecret(store.get('eviClmSecret') as string | undefined);
+}
+
+/**
+ * The calls that are open right now, by the session id Hume hands back at the
+ * brain hook. A call's one piece of state between turns is whether she was
+ * talked over — the hook reads it into the next turn the way the phone's
+ * `interrupted` flag does, and clears it.
+ */
+const eviSessions = new Map<string, { deviceId: string; interrupted: boolean; startedAt: number }>();
+
+/** The chat's day, which rolls at five in the morning, not midnight. */
+function chatDayKey(): string {
+  return (store.get('chat.dayKey') as string | undefined) ?? localDateKey(zonedNow(CHAT_TIMEZONE));
 }
 
 /** Google Maps Platform key — routes with traffic, places, geocoding. See routes.ts. */
@@ -9692,7 +9713,7 @@ function sentenceStreamer(onSentence?: (sentence: string, emotion: string) => vo
 }
 
 function webDeps(): WebDeps {
-  return {
+  const deps: WebDeps = {
     readAccess: getWebAccess,
     saveAccess: saveWebAccess,
     history: () => {
@@ -10323,6 +10344,74 @@ function webDeps(): WebDeps {
       },
     },
   };
+  // Speech to speech: a call through Hume's EVI, her words from the same place
+  // the phone's typed messages go. See evi.ts for the shape; the mic button on
+  // the phone is the only thing that opens one.
+  deps.evi = {
+    status() {
+      const evi = readEviConfig(store.get('evi'));
+      const today = chatDayKey();
+      const minutesToday = Math.round(secondsUsedToday(store.get('evi.usage'), today) / 60);
+      const reason = !evi.enabled || !evi.configId ? 'off'
+        : !getHumeKey() || !getEviSecret() ? 'not set up'
+        : herAsleepNow() ? 'asleep'
+        : !underCap(store.get('evi.usage'), today, evi.dailyMinutesCap) ? 'cap'
+        : undefined;
+      return { enabled: !reason, minutesToday, cap: evi.dailyMinutesCap, ...(reason ? { reason } : {}) };
+    },
+    secret: getEviSecret,
+    async open(deviceId, handlers) {
+      const evi = readEviConfig(store.get('evi'));
+      if (!evi.enabled || !evi.configId) throw new Error('Speech to speech is switched off.');
+      const apiKey = getHumeKey();
+      const secret = getEviSecret();
+      if (!apiKey || !secret) throw new Error('Speech to speech is not set up: no Hume key or no hook secret.');
+      if (herAsleepNow()) throw new Error('She is asleep.');
+      const today = chatDayKey();
+      if (!underCap(store.get('evi.usage'), today, evi.dailyMinutesCap)) throw new Error(`That is enough for today — ${evi.dailyMinutesCap} minutes of calls is the cap.`);
+      const sessionId = newSessionId(deviceId, randomUUID().replace(/-/g, '').slice(0, 12));
+      const state = { deviceId, interrupted: false, startedAt: Date.now() };
+      eviSessions.set(sessionId, state);
+      console.log(`[evi] call ${sessionId} placed`);
+      return openEviSession({
+        apiKey, configId: evi.configId, sessionId, secret,
+        onEvent: event => {
+          if (event.type === 'user_interruption') state.interrupted = true;
+          handlers.onEvent(event);
+        },
+        onClose: (reason, seconds) => {
+          eviSessions.delete(sessionId);
+          store.set('evi.usage', noteUsage(store.get('evi.usage'), chatDayKey(), seconds));
+          console.log(`[evi] call ${sessionId} ended after ${seconds}s — ${reason}`);
+          handlers.onClose(reason);
+        },
+      });
+    },
+    async turn(sessionId, text, prosody, onChunk) {
+      const state = eviSessions.get(sessionId);
+      if (!state) return null;
+      // Through the same corrections as the phone's ear: a name she keeps
+      // mishearing is misheard the same way on a call.
+      const heard = readHearing(store.get('hearing'));
+      const fixed = correct(heard, text);
+      if (fixed.applied.length) store.set('hearing', noteUsed(heard, fixed.applied));
+      // How he sounded, from the same clip he was heard in — on this turn, not
+      // the next: the reading is written before the brain runs, and
+      // takeVoiceRoom reads it into the room she is about to answer in.
+      if (prosody) {
+        const reading = readingFrom(prosody);
+        if (reading.rough) {
+          store.set('hume.reading', { ...reading, at: new Date().toISOString() });
+          console.log(`[evi] heard him — ${reading.why}`);
+        }
+      }
+      const interrupted = state.interrupted;
+      state.interrupted = false;
+      console.log(`[evi] ${sessionId} heard "${fixed.text.slice(0, 60)}"${interrupted ? ' — over her' : ''}`);
+      return deps.sayStream(fixed.text, onChunk, [], { interrupted }, () => {});
+    },
+  };
+  return deps;
 }
 
 /** Why the door is shut, in words, for the panel that has to explain it. */
@@ -10395,6 +10484,8 @@ async function startWebDoor() {
   try {
     webServer = await startWebServer(DEFAULT_WEB_PORT, webDeps());
     webTrouble = '';
+    const evi = readEviConfig(store.get('evi'));
+    if (evi.enabled) console.log(`[evi] ready — config ${evi.configId || '(none)'}, hook at ${evi.publicUrl || '(unset)'}, cap ${evi.dailyMinutesCap} min/day${getHumeKey() && getEviSecret() ? '' : ' — but no Hume key or hook secret'}`);
     // Started once and left running: each tick re-checks the door and the
     // subscriptions itself, so closing the door silences it with no bookkeeping.
     if (!pushPesterTimer) scheduleNextPush(true);
@@ -10498,6 +10589,12 @@ function watchForUpdates() {
 }
 
 app.whenReady().then(() => {
+  // Node gives up on an address after 250 ms while it tries the next family.
+  // Hume, like Apple, is further than that from here, so every connection
+  // made through Node's own stack — the call socket, not Chromium's fetch —
+  // would time out before it began. apns.ts sets this per connection; a
+  // WebSocket has no such option, so the default is raised once here.
+  setDefaultAutoSelectFamilyAttemptTimeout(5_000);
   // Whatever was said to her elsewhere today. Once at startup, then quietly on
   // the hour — often enough that the evening review has it, rare enough that a
   // sleeping server is not being knocked on constantly.
