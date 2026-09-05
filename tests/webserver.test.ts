@@ -842,7 +842,7 @@ type Evi = NonNullable<WebDeps['evi']>;
 /** A call that can be placed, a hook that answers one live session. */
 function eviDeps(overrides: Partial<Evi> = {}): Evi {
   return {
-    status: () => ({ enabled: true, minutesToday: 3, cap: 60 }),
+    status: () => ({ enabled: true, engine: 'hume', minutesToday: 3, cap: 60 }),
     secret: () => 'hook-secret',
     open: async (_device, handlers) => ({ sendAudio: () => {}, close: reason => handlers.onClose(reason ?? 'hung up') }),
     turn: async (sessionId, text, _prosody, onChunk) => {
@@ -868,12 +868,13 @@ test('the call status is behind the sign-in and says when nothing is built', asy
     await bare.signIn();
     const status = await bare.call('/api/evi/status');
     assert.equal(status.status, 200);
-    assert.deepEqual(await status.json(), { enabled: false, minutesToday: 0, cap: 0, reason: 'not built' });
+    assert.deepEqual(await status.json(), { enabled: false, engine: 'none', minutesToday: 0, cap: 0, reason: 'not built' });
   } finally { await bare.stop(); }
   const built = await door({ evi: eviDeps() });
   try {
     await built.signIn();
-    assert.deepEqual(await (await built.call('/api/evi/status')).json(), { enabled: true, minutesToday: 3, cap: 60 });
+    assert.deepEqual(await (await built.call('/api/evi/status')).json(), { enabled: true, engine: 'hume', minutesToday: 3, cap: 60 });
+    assert.deepEqual(await (await built.call('/api/call/status')).json(), { enabled: true, engine: 'hume', minutesToday: 3, cap: 60 }, 'the same door under its own name');
   } finally { await built.stop(); }
 });
 

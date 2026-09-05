@@ -74,6 +74,8 @@ import { chatSystemPrompt, chatDynamicContext, FIRST_PERSON_NOTE, freshStartInst
 import { hasShout, readVoiceConfig, referenceFor, shoutReference, spokenCase, speakableText, splitForSpeech, streamedSentences, synthesise, synthesiseBreezeStream, type SpeechClip, type VoiceConfig, looksClipped, pickSigh, HUME_DESCRIPTIONS, HUME_STREAM_URL } from './voice';
 import { hearVoice, readHumeConfig, readingFrom } from './hume';
 import { readEviConfig, newSessionId, secondsUsedToday, noteUsage, underCap, callAside } from './evi';
+import { readCallConfig, pickFiller } from './call';
+import { openLocalCall, withoutWavHeader, oneChunk, wavSampleRate } from './localcall';
 import { openEviSession } from './evibridge';
 import { setDefaultAutoSelectFamilyAttemptTimeout } from 'node:net';
 import { readBrowserControlConfig } from './browserctl';
@@ -6395,7 +6397,7 @@ async function withAttachments<T extends { role: string; content: string; at?: s
   return out;
 }
 
-async function ollamaChat(messages: { role: string; content: string; at?: string; attachments?: Attachment[] }[], config: ProviderConfig, { hands = true, web = false, brief = false, choices = false, away = '', aside = '', onChunk, onChunkReset, traceId }: { hands?: boolean; web?: boolean; brief?: boolean; choices?: boolean; away?: string; aside?: string; onChunk?: (text: string) => void; onChunkReset?: () => void; traceId?: string } = {}) {
+async function ollamaChat(messages: { role: string; content: string; at?: string; attachments?: Attachment[] }[], config: ProviderConfig, { hands = true, web = false, brief = false, choices = false, away = '', aside = '', onChunk, onChunkReset, onToolCall, onSending, traceId }: { hands?: boolean; web?: boolean; brief?: boolean; choices?: boolean; away?: string; aside?: string; onChunk?: (text: string) => void; onChunkReset?: () => void; onToolCall?: (name: string) => void; onSending?: () => void; traceId?: string } = {}) {
   const latest = messages.at(-1)?.content ?? '';
   // A message from outside the desk — a phone, Discord — gets a short leash on
   // the conversation as well as on the reply: a long day's thread is most of
@@ -6865,6 +6867,7 @@ const promptState = {
         const cacheKey = `haru-${localDateKey(zonedNow(CHAT_TIMEZONE))}`;
         const onChunkSeen = roundOptions.onChunk ? (text: string) => { if (!firstWordAt) firstWordAt = Date.now(); roundOptions.onChunk!(text); } : undefined;
         try {
+          onSending?.();
           const request = sendToProvider(sending, config, { ...roundOptions, tools, cacheKey, ...(onChunkSeen ? { onChunk: onChunkSeen } : {}) });
           const deadline = new Promise<never>((_, reject) => setTimeout(() => { if (!firstWordAt) reject(new Error(`no first word in ${HOSTED_FIRST_WORD_MS / 1000}s`)); }, HOSTED_FIRST_WORD_MS));
           const answer = await Promise.race([request, deadline]);
@@ -6878,6 +6881,7 @@ const promptState = {
         }
       }
       try {
+        onSending?.();
         return await ollamaPost(sending, config, { ...roundOptions, tools });
       } catch (error) {
         // Only when nothing answered at all — a refused connection, a pod that
@@ -6893,7 +6897,11 @@ const promptState = {
         return sendToProvider(sending, spill, { ...roundOptions, tools });
       }
     },
-    runTool: call => runChatTool(call, latest, toolDeps()),
+    runTool: call => {
+      // A call in progress says something while this runs (localcall.ts).
+      onToolCall?.((call as { function?: { name?: string } }).function?.name ?? 'tool');
+      return runChatTool(call, latest, toolDeps());
+    },
     // Read through rather than passed by value: runChatTool sets these while a
     // round is in flight, and a copy taken before the round would miss it.
     pageWasRead: () => pageWasRead,
@@ -9860,6 +9868,8 @@ function webDeps(): WebDeps {
         web: true,
         away: 'it came in from the phone',
         ...(options?.call ? { aside: callAside(Boolean(options.interrupted)) } : options?.interrupted ? { aside: INTERRUPTED_ASIDE } : {}),
+        ...(options?.onToolCall ? { onToolCall: options.onToolCall } : {}),
+        onSending: () => trace.mark('sending'),
         traceId: trace.id,
         onChunk: chunk => { trace.mark('first'); onChunk(chunk); voice.feed(chunk); },
         // The reader sees only what survives, but a round that ends in a tool
@@ -10362,18 +10372,60 @@ function webDeps(): WebDeps {
   // the phone is the only thing that opens one.
   deps.evi = {
     status() {
+      const engine = readCallConfig(store.get('call')).engine;
       const evi = readEviConfig(store.get('evi'));
       const today = chatDayKey();
       const minutesToday = Math.round(secondsUsedToday(store.get('evi.usage'), today) / 60);
+      if (engine === 'local') {
+        const voice = readVoiceConfig(store.get('voice'));
+        const reason = readListenConfig(store.get('listen')).engine === 'off' ? 'not set up'
+          : !voice.webEnabled || voice.engine === 'off' ? 'not set up'
+          : herAsleepNow() ? 'asleep'
+          : undefined;
+        return { enabled: !reason, engine, minutesToday, cap: 0, ...(reason ? { reason } : {}) };
+      }
       const reason = !evi.enabled || !evi.configId ? 'off'
         : !getHumeKey() || !getEviSecret() ? 'not set up'
         : herAsleepNow() ? 'asleep'
         : !underCap(store.get('evi.usage'), today, evi.dailyMinutesCap) ? 'cap'
         : undefined;
-      return { enabled: !reason, minutesToday, cap: evi.dailyMinutesCap, ...(reason ? { reason } : {}) };
+      return { enabled: !reason, engine, minutesToday, cap: evi.dailyMinutesCap, ...(reason ? { reason } : {}) };
     },
     secret: getEviSecret,
     async open(deviceId, handlers) {
+      const call = readCallConfig(store.get('call'));
+      if (call.engine === 'local') {
+        // Her own ears, brain and voice, streamed a sentence at a time (localcall.ts).
+        if (readListenConfig(store.get('listen')).engine === 'off') throw new Error('Her ears are switched off.');
+        const voice = readVoiceConfig(store.get('voice'));
+        if (!voice.webEnabled || voice.engine === 'off') throw new Error('She has no voice for a call.');
+        if (herAsleepNow()) throw new Error('She is asleep.');
+        let lastFiller = '';
+        console.log(`[call] placed at home, ${call.endAfterMs} ms of quiet ends a turn`);
+        const local = openLocalCall({
+          onEvent: handlers.onEvent,
+          onAudio: handlers.onAudio,
+          onClose: (reason, seconds) => { console.log(`[call] ended after ${seconds}s — ${reason}`); handlers.onClose(reason); },
+        }, {
+          hear: wav => deps.hear(wav, 'audio/wav'),
+          answer: (text, { interrupted, onSentence, onToolCall }) => deps.sayStream(text, () => {}, [], { interrupted, call: true, onToolCall }, onSentence),
+          speak: async (text, emotion) => {
+            // Streamed where the engine streams (Breeze: 24 kHz PCM under a
+            // WAV header), whole where it does not, at whatever rate it says.
+            const streamed = await deps.speakStream?.(text, emotion);
+            if (streamed?.mime === 'audio/wav') return { stream: withoutWavHeader(streamed.body), sampleRate: 24000 };
+            if (streamed) void streamed.body.cancel().catch(() => {});
+            const clip = await deps.speak(text, emotion);
+            if (!clip) return null;
+            const rate = wavSampleRate(clip.audio);
+            return rate ? { stream: oneChunk(clip.audio.subarray(44)), sampleRate: rate } : null;
+          },
+          filler: () => { lastFiller = pickFiller(Math.random(), lastFiller); return lastFiller; },
+          vad: { endAfterMs: call.endAfterMs },
+          log: line => console.log(line),
+        });
+        return { sendAudio: frame => local.feed(frame), close: reason => local.close(reason), herSpeaking: on => local.herSpeaking(on) };
+      }
       const evi = readEviConfig(store.get('evi'));
       if (!evi.enabled || !evi.configId) throw new Error('Speech to speech is switched off.');
       const apiKey = getHumeKey();

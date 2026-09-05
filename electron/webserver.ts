@@ -19,6 +19,7 @@ import type { Duplex } from 'node:stream';
 import filePath from 'node:path';
 import { WebSocketServer, type WebSocket as CallSocket } from 'ws';
 import { clmTurnFrom, spokenReply, sseChunk, sseStop, SSE_DONE } from './evi';
+import { pcmToWav } from './voice';
 import type { Standing } from './standing';
 import type { Her } from './her';
 import {
@@ -56,7 +57,7 @@ export type WebDeps = {
    * before the stream ends. The same U+FFFD that clears the text clears the
    * voice: nothing of a thrown-away round may be spoken.
    */
-  sayStream(text: string, onChunk: (chunk: string) => void, attachments?: unknown[], options?: { interrupted?: boolean; call?: boolean }, onSentence?: (sentence: string, emotion: string) => void): Promise<{ reply: string; ignored?: boolean }>;
+  sayStream(text: string, onChunk: (chunk: string) => void, attachments?: unknown[], options?: { interrupted?: boolean; call?: boolean; onToolCall?: (name: string) => void }, onSentence?: (sentence: string, emotion: string) => void): Promise<{ reply: string; ignored?: boolean }>;
   /**
    * Her last reply, done again. The message that prompted it is asked once
    * more with that reply left out of the history, and the new one takes its
@@ -200,11 +201,16 @@ export type WebDeps = {
    * words are asked of the brain hook below. Absent when this build has none.
    */
   evi?: {
-    status(): { enabled: boolean; minutesToday: number; cap: number; reason?: string };
+    status(): { enabled: boolean; engine: string; minutesToday: number; cap: number; reason?: string };
     /** The bearer Hume must present at the brain hook; '' when none is set. */
     secret(): string;
-    /** Opens a call for this device. Throws with a reason worth showing when refused. */
-    open(deviceId: string, handlers: { onEvent(event: Record<string, unknown>): void; onClose(reason: string): void }): Promise<{ sendAudio(pcm: Uint8Array): void; close(reason?: string): void }>;
+    /**
+     * Opens a call for this device, on whichever engine is configured (call.ts).
+     * Throws with a reason worth showing when refused. `onAudio` carries her
+     * voice as raw PCM between an audio_start and its audio_end (the local
+     * engine); the Hume engine sends whole sentences as audio_output events.
+     */
+    open(deviceId: string, handlers: { onEvent(event: Record<string, unknown>): void; onAudio(pcm: Uint8Array): void; onClose(reason: string): void }): Promise<{ sendAudio(pcm: Uint8Array): void; close(reason?: string): void; herSpeaking?(on: boolean): void }>;
     /**
      * One turn of a call: what Hume heard and how it sounded, answered in her
      * words, streamed. Null when the session is not a call of ours.
@@ -489,7 +495,7 @@ function refuseUpgrade(socket: Duplex, status: number, reason: string) {
  */
 async function answerUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer, deps: WebDeps, calls: WebSocketServer) {
   const url = new URL(req.url ?? '/', 'http://127.0.0.1');
-  if (url.pathname !== '/api/evi/session') return refuseUpgrade(socket, 404, 'Not Found');
+  if (url.pathname !== '/api/call/session' && url.pathname !== '/api/evi/session') return refuseUpgrade(socket, 404, 'Not Found');
   const access = deps.readAccess();
   if (!access.enabled || !access.hash) return refuseUpgrade(socket, 503, 'Service Unavailable');
   const me = whoIsThis(req, access, new Date());
@@ -501,20 +507,44 @@ async function answerUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer,
 }
 
 /**
- * The call itself. Binary frames up are audio and go straight to Hume; a text
- * frame up is a request, of which there is one — stop. Everything down is one
- * JSON event per frame: what Hume heard, what she said, her voice as base64
- * WAV a sentence at a time, and the two that shape the turn — she was talked
- * over, she has finished. `ready` first, `ended` last, `refused` instead of
- * either when the call could not be placed.
+ * The call itself. Binary frames up are the microphone and go to the engine;
+ * text frames up are requests: `stop`, `hello` (what the phone can play), and
+ * `her` (whether she is audible through its speaker, so the engine knows an
+ * echo from an interruption). Down, one JSON event per text frame — what was
+ * heard, what she said, a filler while a tool runs, she was talked over, she
+ * has finished — and her voice either as base64 WAV `audio_output` events
+ * (the Hume engine, and any phone that did not say it plays PCM) or as raw
+ * PCM binary frames between `audio_start` and `audio_end` (the local engine,
+ * to a phone that said `{type:'hello', pcm:true}`). `ready` first, `ended`
+ * last, `refused` instead of either when the call could not be placed.
  */
 async function runCall(ws: CallSocket, deviceId: string, evi: NonNullable<WebDeps['evi']>) {
   const tell = (event: Record<string, unknown>) => { if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(event)); };
   let call: Awaited<ReturnType<typeof evi.open>> | null = null;
   let ended = false;
+  // A phone that plays PCM gets her voice as it is made; one that does not
+  // gets each line whole, as a WAV, once it has all arrived.
+  let pcmPhone = false;
+  let sampleRate = 24000;
+  let held: Uint8Array[] = [];
+  const asWholeWav = (event: Record<string, unknown>): boolean => {
+    if (pcmPhone) return false;
+    if (event.type === 'audio_start') { held = []; sampleRate = typeof event.sampleRate === 'number' ? event.sampleRate : 24000; return true; }
+    if (event.type === 'audio_end') {
+      const pcm = Buffer.concat(held.map(part => Buffer.from(part.buffer, part.byteOffset, part.byteLength)));
+      held = [];
+      if (pcm.byteLength) tell({ type: 'audio_output', data: Buffer.from(pcmToWav(pcm, sampleRate)).toString('base64'), id: String(event.id ?? ''), index: 0 });
+      return true;
+    }
+    return false;
+  };
   try {
     call = await evi.open(deviceId, {
-      onEvent: tell,
+      onEvent: event => { if (!asWholeWav(event)) tell(event); },
+      onAudio: pcm => {
+        if (pcmPhone) { if (ws.readyState === ws.OPEN) ws.send(pcm, { binary: true }); }
+        else held.push(pcm);
+      },
       onClose: reason => {
         if (ended) return;
         ended = true;
@@ -537,9 +567,11 @@ async function runCall(ws: CallSocket, deviceId: string, evi: NonNullable<WebDep
       placed.sendAudio(frame);
       return;
     }
-    let request: { type?: unknown } = {};
+    let request: { type?: unknown; pcm?: unknown; speaking?: unknown } = {};
     try { request = JSON.parse(String(data)) as typeof request; } catch { return; }
     if (request.type === 'stop') placed.close('the phone hung up');
+    else if (request.type === 'hello') pcmPhone = request.pcm === true;
+    else if (request.type === 'her') placed.herSpeaking?.(request.speaking === true);
   });
   ws.on('close', () => { ended = true; placed.close('the phone went away'); });
   ws.on('error', () => { ended = true; placed.close('the phone\'s socket failed'); });
@@ -756,9 +788,9 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
     return json(res, 200, { messages: deps.history().slice(-60) });
   }
 
-  // Whether a call can be placed, and how much of today's allowance is left.
-  if (req.method === 'GET' && path === '/api/evi/status') {
-    return json(res, 200, deps.evi ? deps.evi.status() : { enabled: false, minutesToday: 0, cap: 0, reason: 'not built' });
+  // Whether a call can be placed, on which engine, and how much of today's allowance is left.
+  if (req.method === 'GET' && (path === '/api/call/status' || path === '/api/evi/status')) {
+    return json(res, 200, deps.evi ? deps.evi.status() : { enabled: false, engine: 'none', minutesToday: 0, cap: 0, reason: 'not built' });
   }
 
   if (req.method === 'POST' && path === '/api/chat') {
