@@ -1,6 +1,6 @@
 import { Component, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Paperclip, MicOff, CalendarDays, Check, ChevronDown, CornerDownRight, FileAudio, FileText, FileVideo, Mic, Quote, Reply, SquareCheck, ChevronLeft, ChevronRight, CircleDot, Import, MessageSquarePlus, Plus, NotebookPen, MessageSquare, Square, ImagePlus, Sparkles, ThumbsDown, ThumbsUp, Trash2, X } from 'lucide-react';
-import type { Aside, AsideSource, Attachment, UpdateReport, AniListConfig, Character, DesktopConfig, GamingConfig, ScreenshotConfig, WatchingConfig, VisionConfig, HaruNote, ForgettingEntry, JournalConfig, JournalEntry, JournalField, JournalRange, JournalStats, JournalFieldStats, LastRetrieval, MemoryBlock, RoamConfig, EmotionName, GoogleStatus, KeptItem, ListenConfig, Memory, MemoryKind, Message, Profile, ProviderConfig, Reaction, SearchConfig, SessionSummary, VoiceConfig, VoiceEngine, VoiceReference, WardrobeControl, WebStatus } from './types';
+import type { Aside, AsideSource, Attachment, HeldBack, UpdateReport, AniListConfig, Character, DesktopConfig, GamingConfig, ScreenshotConfig, WatchingConfig, VisionConfig, HaruNote, ForgettingEntry, JournalConfig, JournalEntry, JournalField, JournalRange, JournalStats, JournalFieldStats, LastRetrieval, MemoryBlock, RoamConfig, EmotionName, GoogleStatus, KeptItem, ListenConfig, Memory, MemoryKind, Message, Profile, ProviderConfig, Reaction, SearchConfig, SessionSummary, VoiceConfig, VoiceEngine, VoiceReference, WardrobeControl, WebStatus } from './types';
 import { buildMonthGrid, clockInZone, datesInView, dayLabel, rangeLabel, shiftISODate, todayInZone, toISODate, weekOf, type CalendarView } from './date';
 import { startListening, startRecording, type Listener, type Recorder } from './companion/microphone';
 import { isUsableFollowUp, matchWake, readsAsFarewell } from './companion/wake';
@@ -2071,15 +2071,19 @@ function asideClock(at: string) {
  */
 export function AsidesPage() {
   const [asides, setAsides] = useState<Aside[]>([]);
+  const [held, setHeld] = useState<HeldBack[]>([]);
+  const [showHeld, setShowHeld] = useState(false);
   const [loaded, setLoaded] = useState(false);
   useEffect(() => {
     if (!window.haru) { setLoaded(true); return; }
     void window.haru.chat.getAsides().then(list => { setAsides(list); setLoaded(true); });
+    void window.haru.chat.getHeldBack().then(setHeld);
     // Main owns the list and hands over each line as it happens, so the page
     // fills in while it is open rather than only on the way in.
     const stopAdding = window.haru.chat.onAside(aside => setAsides(current => [...current, aside]));
     const stopClearing = window.haru.chat.onAsidesCleared(() => setAsides([]));
-    return () => { stopAdding(); stopClearing(); };
+    const stopHolding = window.haru.chat.onHeldBack(setHeld);
+    return () => { stopAdding(); stopClearing(); stopHolding(); };
   }, []);
   const today = todayInZone();
   const days = [...new Set(asides.map(aside => aside.day || today))].sort().reverse();
@@ -2089,6 +2093,24 @@ export function AsidesPage() {
       <p>Everything Haru comes out with unprompted — what she makes of your screen, nudges about your list, whatever she says when you poke her. It lives here rather than in the chat so the conversation stays the conversation. She still knows what she has just said: the last quarter of an hour of it reaches her alongside your next message, so answering one of these still makes sense to her. Older than that and it is history she has moved on from. Kept for a week.</p>
     </div>
     {loaded && !asides.length && <p className="nothing">Nothing yet. She has not said anything off her own back.</p>}
+    {/* The other half of the question. A companion that has gone quiet looks
+        exactly like one that is working, and every rule that stops her already
+        explains itself — so the explanations are here rather than only in a
+        log. Folded away, because on a normal evening it is not the point. */}
+    {held.length > 0 && <div className="held-back">
+      <button className="ghost" onClick={() => setShowHeld(!showHeld)}>
+        {showHeld ? 'Hide' : 'Show'} what she bit back ({held.length})
+      </button>
+      {showHeld && <ol className="aside-list">
+        {held.slice().reverse().map(entry => <li className="aside held" key={`${entry.at}-${entry.line.slice(0, 24)}`}>
+          <div className="aside-meta">
+            <time>{asideClock(entry.at)}</time>
+            <span className="aside-why">{entry.why}</span>
+          </div>
+          <p>{entry.line}</p>
+        </li>)}
+      </ol>}
+    </div>}
     {days.map(day => <div className="aside-day" key={day}>
       <h3>{asideDayLabel(day, today)}</h3>
       <ol className="aside-list">

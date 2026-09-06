@@ -664,6 +664,13 @@
 .aside-meta time { color: var(--text-3); font: 11px 'JetBrains Mono', monospace; font-variant-numeric: tabular-nums; }
 /* Why she spoke, kept quiet enough that the line itself still reads first. */
 .aside-why { color: var(--muted-2); font-size: 11px; line-height: 1.35; }
+/* What she bit back. Dimmed and dashed on purpose: these are lines that were
+   never said, and they must not read as things she said. */
+.held-back { max-width: 720px; margin-top: 26px; }
+.held-back .aside-list { margin-top: 10px; }
+.aside.held { border-left-style: dashed; opacity: 0.68; }
+.aside.held:hover { opacity: 1; }
+.aside.held p { font-style: italic; }
 .page.asides .drawer-foot { max-width: 720px; margin-top: 26px; }
 @media (max-width: 900px) {
   .aside { grid-template-columns: minmax(0, 1fr); gap: 3px; }

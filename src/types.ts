@@ -43,6 +43,8 @@ export interface Message { id: string; role: Role; content: string; time: string
  */
 export type AsideSource = 'screen' | 'screenshot' | 'activity' | 'fullscreen' | 'reminder' | 'idle' | 'journal' | 'page' | 'poke' | 'kept' | 'other';
 export interface Aside { id: string; at: string; day: string; source: AsideSource; text: string; }
+/** A line she had ready and did not say. See electron/asides.ts. */
+export interface HeldBack { at: string; why: string; line: string; }
 /**
  * What the app knows about its own next version.
  *

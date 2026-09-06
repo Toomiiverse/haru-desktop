@@ -20,6 +20,7 @@ type Message = { id: string; role: 'user' | 'assistant'; content: string; time: 
 // belonged to the conversation, and giving it that shape is what let it be
 // appended to one. See electron/asides.ts.
 type Aside = { id: string; at: string; day: string; source: string; text: string };
+type HeldBack = { at: string; why: string; line: string };
 // A file that came with a message. A path rather than bytes — see electron/attachments.ts.
 type Attachment = { id: string; kind: string; name: string; saved: string; url: string; bytes: number };
 // What the app knows about its own next version. See electron/updates.ts.
@@ -243,6 +244,14 @@ contextBridge.exposeInMainWorld('haru', {
     // store, kept out of the transcript on purpose — see electron/asides.ts.
     // Main owns the list, so the window asks for it and is told about additions
     // rather than holding a copy it has to save.
+    // The other half of the same question: what she nearly said, and why she
+    // did not. See holdBack in electron/main.ts.
+    getHeldBack: () => ipcRenderer.invoke('chat:getHeldBack') as Promise<HeldBack[]>,
+    onHeldBack: (callback: (held: HeldBack[]) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, held: HeldBack[]) => callback(held);
+      ipcRenderer.on('chat:heldBack', listener);
+      return () => ipcRenderer.removeListener('chat:heldBack', listener);
+    },
     getAsides: () => ipcRenderer.invoke('chat:getAsides') as Promise<Aside[]>,
     clearAsides: () => ipcRenderer.invoke('chat:clearAsides') as Promise<Aside[]>,
     onAside: (callback: (aside: Aside) => void) => {

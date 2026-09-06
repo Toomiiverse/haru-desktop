@@ -81,7 +81,7 @@ import { standingFrom } from './standing';
 import { herFrom } from './her';
 import { computeRoute, fixStatedRoute, routeWords, type Route } from './routes';
 import { placeAsk, placeNote, placeWords, searchGooglePlaces, type GooglePlace } from './placeinfo';
-import { addAside, alreadySaidRecently, echoesAside, asideContext, asidesOn, markReached, pruneAsides, readAsides, type Aside, type AsideSource, markAsked, openAsk, answerAsk, askedRecently, unansweredAsksNote } from './asides';
+import { addAside, alreadySaidRecently, echoesAside, asideContext, asidesOn, keepHeldBack, markReached, pruneAsides, readAsides, type Aside, type AsideSource, type HeldBack, markAsked, openAsk, answerAsk, askedRecently, unansweredAsksNote } from './asides';
 import { attachmentsInPlay, describeAttached, READ_IT_ALL_PROMPT, readAttachments, type Attachment, type Opened } from './attachments';
 import { forOllama, withoutOldest } from './ollamaturns';
 import { seedEmoji, seedOffTheOrders } from './seed';
@@ -1415,30 +1415,35 @@ function whyNotInterject({ aboutTheGame = false } = {}): string | null {
  * not butt in; a version of it that silences only the written half prevents
  * nothing and loses the record.
  */
+/**
+ * The lines she nearly said, newest last.
+ *
+ * Not persisted: "why is she quiet" is a question about this evening, and a
+ * ring buffer in memory answers it without another file to corrupt.
+ */
+let heldBack: HeldBack[] = [];
+function holdBack(line: string, why: string): false {
+  console.log(`[interject] dropped — ${why}`);
+  heldBack = keepHeldBack(heldBack, { at: new Date().toISOString(), why, line });
+  sendToWindows('chat:heldBack', heldBack);
+  return false;
+}
+
 function interject(line: string, { aboutTheGame = false, source = 'other' as AsideSource, about = '' } = {}): boolean {
   const now = Date.now();
   const refusal = whyNotInterject({ aboutTheGame });
-  if (refusal) {
-    console.log(`[interject] dropped — ${refusal}`);
-    return false;
-  }
+  if (refusal) return holdBack(line, refusal);
   // A line off her own back that names something done, or an event long gone,
   // is not said: twenty days after Ammie's party she announced it was tomorrow,
   // and no block in the prompt had named it. Checked on the line, not the
   // prompt — see staleItemNamed.
   const stale = staleItemNamed(line, getKept(), localDateKey(zonedNow(CHAT_TIMEZONE)));
   const invented = inventedTimeFor(line, getKept());
-  if (invented) { console.log(`[interject] dropped — it gave "${invented.title}" a time, and it has none saved`); return false; }
-  if (stale) {
-    console.log(`[interject] dropped — it named "${stale.title}", which is ${stale.done ? 'done' : 'long past'}`);
-    return false;
-  }
+  if (invented) return holdBack(line, `it gave "${invented.title}" a time, and it has none saved`);
+  if (stale) return holdBack(line, `it named "${stale.title}", which is ${stale.done ? 'done' : 'long past'}`);
   // A line she has already said, or one copied out of the list of them
   // ("9:36 PM — “...”"), is not a new line: see echoesAside.
-  if (echoesAside(line, getAsides(), now)) {
-    console.log('[interject] dropped — it repeats a line she already said');
-    return false;
-  }
+  if (echoesAside(line, getAsides(), now)) return holdBack(line, 'it repeats a line she already said');
   lastInterjectionAt = now;
   // Before it goes out, so that whatever she has just demanded an account of is
   // on record by the time they reply.
@@ -1589,7 +1594,17 @@ function reportSetup() {
   const vision = readVisionConfig(store.get('vision'));
   const watching = readWatchingConfig(store.get('watching'));
   const screenshots = readScreenshotConfig(store.get('screenshots'));
-  if (vision.enabled) console.log(`[setup] eyes: ${vision.model} at ${visionEndpoint(provider, vision)}`);
+  if (vision.enabled) {
+    console.log(`[setup] eyes: ${vision.model} at ${visionEndpoint(provider, vision)}`);
+    // Which eye she gets, rather than whether she has one. Both work; the
+    // difference is 1920 against 1280 and whether an exclusive-fullscreen game
+    // comes back black. Said at boot because OBS being shut is invisible
+    // otherwise — the glance just quietly uses the worse frame.
+    const obs = readObsServer(app.getPath('appData'));
+    console.log(obs?.enabled
+      ? `[setup] OBS websocket on at :${obs.port} — glances use its frame while OBS is running, else the ${CAPTURE_WIDTH}px screen capture`
+      : `[setup] OBS websocket off — glances use the ${CAPTURE_WIDTH}px screen capture`);
+  }
   // Only worth a warning where something is actually waiting on them.
   else if (watching.enabled || screenshots.enabled) console.warn(`[setup] eyes are OFF, so ${[watching.enabled && 'watching the screen', screenshots.enabled && 'noticing screenshots'].filter(Boolean).join(' and ')} will do nothing.`);
 }
@@ -9900,6 +9915,7 @@ app.whenReady().then(() => {
   });
   ipcMain.handle('chat:setMessages', (_e, messages) => { store.set('chat.messages', messages); });
   ipcMain.handle('chat:getArchive', () => store.getArchive());
+  ipcMain.handle('chat:getHeldBack', () => heldBack);
   ipcMain.handle('chat:getAsides', () => getAsides());
   ipcMain.handle('chat:clearAsides', () => {
     store.set('chat.asides', []);

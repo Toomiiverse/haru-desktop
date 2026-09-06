@@ -10,7 +10,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { addAside, markReached, readAsides, markAsked, openAsk, answerAsk, askedRecently, unansweredAsks, unansweredAsksNote, ASK_OPEN_MS, type Aside, type AsideSource, asideContext } from '../electron/asides';
+import { addAside, markReached, readAsides, markAsked, openAsk, answerAsk, askedRecently, unansweredAsks, unansweredAsksNote, keepHeldBack, ASK_OPEN_MS, HELD_BACK_KEPT, type Aside, type AsideSource, type HeldBack, asideContext } from '../electron/asides';
 
 // Every member of AsideSource. This is a Record over the union, so adding a
 // source without adding it here fails to compile.
@@ -93,3 +93,12 @@ test('a line that chased something off the list says so, so "what\'s this about?
   assert.doesNotMatch(asideContext(plain, now), /chasing/, 'a line about nothing on the list says nothing about one');
 });
 
+
+test('what she bit back is kept newest-last and bounded', () => {
+  let held: HeldBack[] = [];
+  for (let i = 0; i < HELD_BACK_KEPT + 5; i++) held = keepHeldBack(held, { at: `2026-09-06T0${i % 10}:00:00.000Z`, why: 'she spoke unprompted 40s ago', line: `line ${i}` });
+  assert.equal(held.length, HELD_BACK_KEPT);
+  // The oldest fall off the front, and the newest is the one just added.
+  assert.equal(held[held.length - 1].line, `line ${HELD_BACK_KEPT + 4}`);
+  assert.equal(held[0].line, 'line 5');
+});
