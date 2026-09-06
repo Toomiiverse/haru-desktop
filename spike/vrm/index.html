@@ -20,7 +20,8 @@
   "imports": {
     "three": "../../node_modules/three/build/three.module.js",
     "three/addons/": "../../node_modules/three/examples/jsm/",
-    "@pixiv/three-vrm": "../../node_modules/@pixiv/three-vrm/lib/three-vrm.module.js"
+    "@pixiv/three-vrm": "../../node_modules/@pixiv/three-vrm/lib/three-vrm.module.js",
+    "@pixiv/three-vrm-animation": "../../node_modules/@pixiv/three-vrm-animation/lib/three-vrm-animation.module.js"
   }
 }
 </script>
@@ -29,6 +30,8 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { VRMLoaderPlugin, VRMUtils, MToonMaterial } from '@pixiv/three-vrm';
+import { VRMAnimationLoaderPlugin, VRMLookAtQuaternionProxy, createVRMAnimationClip } from '@pixiv/three-vrm-animation';
+import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
 
 const hud = document.getElementById('hud');
 const say = (line) => { hud.textContent = line; };
@@ -69,6 +72,7 @@ loader.register((parser) => new VRMLoaderPlugin(parser));
 
 const modelPath = params.get('model');
 const forcedAction = params.get('action') || '';
+const bakeTo = params.get('bake') || '';
 const clock = new THREE.Clock();
 let vrm = null;
 let mixer = null;
@@ -170,6 +174,38 @@ loader.load(modelPath, (gltf) => {
   // gaze-and-expression shapes. Nothing else about the flow changes.
   mixer = new THREE.AnimationMixer(vrm.scene);
   clips = buildClips(vrm);
+
+  // ?bake writes the built-in clips out as a .glb, purely so the loading path
+  // above can be tested against a real file before anyone opens Blender. If it
+  // cannot read back what it just wrote, the fault is here and not in Blender.
+  if (bakeTo) {
+    new GLTFExporter().parse(vrm.scene, (gltf) => {
+      window.spike?.bake(gltf, bakeTo);
+      report(`[spike] baked ${Object.keys(clips).length} clips into ${bakeTo}`);
+      setTimeout(() => window.spike?.done(), 400);
+    }, (error) => report(`[spike] bake failed: ${error}`),
+      { binary: true, animations: Object.values(clips), onlyVisible: false });
+    return;
+  }
+
+  const external = params.get('clip');
+  if (external) {
+    clipsFromFile(external, vrm)
+      .then((loaded) => {
+        clips = Object.fromEntries(loaded.map((c, i) => [c.name || `clip${i}`, c]));
+        const bound = loaded.reduce((n, c) => n + c.tracks.length, 0);
+        report(`[spike] loaded from file: ${Object.keys(clips).join(', ')} (${bound} tracks)`);
+        started = performance.now();
+        play(forcedAction && clips[forcedAction] ? forcedAction : Object.keys(clips)[0], 0);
+      })
+      .catch((error) => {
+        report(`[spike] could not load ${external}: ${error.message}`);
+        started = performance.now();
+        play('settle', 0);
+      });
+    return;
+  }
+
   const bound = Object.values(clips).reduce((n, c) => n + c.tracks.length, 0);
   report(`[spike] clips: ${Object.keys(clips).join(', ')} (${bound} tracks bound to the normalized rig)`);
   play(forcedAction && clips[forcedAction] ? forcedAction : 'settle', 0);
@@ -242,6 +278,37 @@ function buildClips(vrm) {
       track('chest', [0, 0.5, 1], [[0.04, 0.05, 0], [0.04, -0.05, 0], [0.04, 0.05, 0]]),
     ]),
   };
+}
+
+/**
+ * Clips from a file, which is the point of all of this.
+ *
+ * Two formats, and the difference is whether retargeting has already happened.
+ * A .vrma addresses the VRM humanoid by role — "leftUpperArm" — so it plays on
+ * any VRM regardless of what the bones are called, which is what makes it the
+ * format worth exporting from Blender. A .glb addresses nodes by name, so it
+ * only plays on the rig it was authored against; fine when Blender exported it
+ * from this very model, useless for anything shared.
+ */
+async function clipsFromFile(url, vrm) {
+  if (/\.vrma(\?|$)/i.test(url)) {
+    const l = new GLTFLoader();
+    l.register((parser) => new VRMAnimationLoaderPlugin(parser));
+    const gltf = await l.loadAsync(url);
+    const animations = gltf.userData.vrmAnimations ?? [];
+    if (!animations.length) throw new Error('no VRM animation inside the .vrma');
+    // Look-at is animated through a proxy object rather than the camera, so it
+    // has to exist before the clip is built or those tracks bind to nothing.
+    if (!vrm.lookAt?.userData?.vrmLookAtQuaternionProxy) {
+      const proxy = new VRMLookAtQuaternionProxy(vrm.lookAt);
+      proxy.name = 'lookAtQuaternionProxy';
+      vrm.scene.add(proxy);
+    }
+    return animations.map((animation) => createVRMAnimationClip(animation, vrm));
+  }
+  const gltf = await new GLTFLoader().loadAsync(url);
+  if (!gltf.animations?.length) throw new Error('no animations inside the .glb');
+  return gltf.animations;
 }
 
 /**

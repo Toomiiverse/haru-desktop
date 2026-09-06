@@ -9,6 +9,7 @@
 // idea holds before any of src/companion is touched.
 
 const { app, BrowserWindow, ipcMain, screen } = require('electron');
+const { writeFileSync } = require('node:fs');
 const path = require('node:path');
 
 const MODEL = process.env.SPIKE_VRM
@@ -42,6 +43,8 @@ function createWindow() {
       premul: process.env.SPIKE_PREMUL ?? '',
       fps: process.env.SPIKE_FPS ?? '',
       action: process.env.SPIKE_ACTION ?? '',
+      clip: process.env.SPIKE_CLIP ?? '',
+      bake: process.env.SPIKE_BAKE ?? '',
     },
   });
   return window_;
@@ -52,6 +55,14 @@ app.whenReady().then(() => {
   // The page reports back rather than being asked, so a run can be read from
   // the terminal without opening devtools over the thing being measured.
   ipcMain.on('spike:report', (_event, line) => console.log(line));
+  ipcMain.on('spike:bake', (_event, bytes, out) => {
+    try {
+      writeFileSync(out, Buffer.from(bytes));
+      console.log(`[spike] wrote ${out} (${(bytes.length / 1048576).toFixed(1)}MB)`);
+    } catch (error) {
+      console.log(`[spike] could not write ${out}: ${error.message}`);
+    }
+  });
   ipcMain.on('spike:done', () => { window_.close(); app.quit(); });
 });
 

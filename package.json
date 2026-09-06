@@ -28,6 +28,7 @@
   },
   "devDependencies": {
     "@pixiv/three-vrm": "^3.5.5",
+    "@pixiv/three-vrm-animation": "^3.5.5",
     "@types/adm-zip": "0.5.7",
     "@types/node": "26.1.2",
     "@types/react": "19.2.18",
