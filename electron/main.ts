@@ -5214,7 +5214,14 @@ const GLOAT_EXAMPLES = [
  */
 async function inHerVoice(answer: string, recent: { role: string; content: string }[], options: { maxTokens?: number; onChunk?: (text: string) => void } = {}): Promise<string> {
   const local = store.get('ai.config') as ProviderConfig | undefined;
-  if (!local?.model || !answer.trim()) return answer;
+  // Her own model says it — the one that knows how she talks. With a
+  // conversation route set, that is the route: it answers as her every other
+  // turn, and it says a page of research back in three seconds where the 9B
+  // took twenty to forty and came back as a list (2026-09-06). The research
+  // has already left the box on the same gate, so nothing new travels. The
+  // local model is the fallback, as it was the only speaker before.
+  const speakers = [conversationRoute(), local].filter((speaker): speaker is ProviderConfig => Boolean(speaker?.model));
+  if (!speakers.length || !answer.trim()) return answer;
   const mood = getMood();
   const character = getActiveCharacter();
   const system = [
@@ -5229,12 +5236,12 @@ async function inHerVoice(answer: string, recent: { role: string; content: strin
     // Given only the answer she opened every reply by naming the subject.
     `What you know, to answer the last thing they said — all of it true. Every fact, number, name, price and recommendation in it stays exactly as given and in the same order: a list of seven things is still a list of the same seven things, none dropped, none added. You change only how it is said, and you add nothing you were not given.\n\n${answer}\n\nSay it to them as yourself, continuing the conversation from where it is. Do not open by repeating their words back at them. Do not call it research, do not say it is correct, do not say where it came from — just say it. About the same length or shorter; a list stays a list, in your words. No quotation marks, no stage directions.`,
   ].filter(Boolean).join(' ');
-  try {
+  for (const speaker of speakers) try {
     const started = Date.now();
     const message = await ollamaPost(
       // The last few turns, as themselves. Six is enough to know what "it" is.
       [{ role: 'system', content: system }, ...seedEmoji(recent.filter(turn => turn.role === 'user' || turn.role === 'assistant').slice(-6).map(turn => ({ role: turn.role, content: turn.content.slice(0, 600) })))],
-      local,
+      speaker,
       // A little room over the hosted cap: her version of a list is rarely
       // shorter than the list.
       // Cool: at 0.8 one sample in two dropped half the list and invented
@@ -5243,12 +5250,13 @@ async function inHerVoice(answer: string, recent: { role: string; content: strin
     );
     const hers = (message.content ?? '').trim();
     if (!hers) throw new Error('nothing came back');
-    console.log(`[ai] said the hosted answer as herself in ${Date.now() - started}ms (${answer.length} -> ${hers.length} chars)`);
+    console.log(`[ai] said the hosted answer as herself in ${Date.now() - started}ms (${answer.length} -> ${hers.length} chars, by ${speaker.model})`);
     return hers;
   } catch (error) {
-    console.warn('[ai] could not say the hosted answer as herself — sending it as it came:', error instanceof Error ? error.message : error);
-    return answer;
+    console.warn(`[ai] ${speaker.model} could not say the hosted answer as herself:`, error instanceof Error ? error.message : error);
   }
+  console.warn('[ai] nobody could say the hosted answer as herself — sending it as it came');
+  return answer;
 }
 
 /** The same call as ollamaQuip, keeping every line — for an answer that comes in a shape. */
