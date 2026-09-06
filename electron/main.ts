@@ -9149,7 +9149,10 @@ function goBackToSleep(input: { pointless: boolean; block: boolean; why: string 
     const capped = Math.min(IGNORE_THRESHOLD - 1, mood.irritation + 2);
     setMood({ ...mood, irritation: Math.max(mood.irritation, capped) });
     const when = state.knockedAt ? clockAt(Date.parse(state.knockedAt)) : 'the small hours';
-    const weekday = new Intl.DateTimeFormat('en-US', { weekday: 'long', timeZone: CHAT_TIMEZONE }).format(new Date(state.knockedAt ?? at));
+    // A knock at 02:48 on Monday is Sunday night: before noon belongs to the evening before.
+    const knocked = new Date(state.knockedAt ?? at);
+    const evening = zonedNow(CHAT_TIMEZONE, knocked).getHours() < 12 ? new Date(knocked.getTime() - 12 * 3_600_000) : knocked;
+    const weekday = new Intl.DateTimeFormat('en-US', { weekday: 'long', timeZone: CHAT_TIMEZONE }).format(evening);
     addMemory(`They woke you up at ${when} on ${weekday} night for nothing — ${state.wokenBy ?? 'a few'} messages and no reason — and you went back to sleep.`, 'event', undefined, { source: 'conversation', emotion: 'annoyed', emotionIntensity: 0.7 });
   }
   console.log(`[her-sleep] back to sleep (${input.why}) — ${input.pointless ? 'woken for nothing' : 'it was something'}${next.blocked ? '; not to be woken again tonight' : ''}; up at ${clockMinutes(next.wake)}`);
