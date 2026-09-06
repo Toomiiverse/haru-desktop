@@ -3995,6 +3995,9 @@ function wordsToListenFor(): string[] {
     taught: readHearing(store.get('hearing')).corrections.map(correction => correction.meant),
     places: getWhereabouts().places.map(place => place.name),
     kept: getKept().filter(item => !item.done).map(item => item.title),
+    // Where they live and who they work with, from the profile: "Perth" was
+    // only a hotword while somebody had typed it in the last forty messages.
+    about: [getProfile().about, getProfile().occupation],
     chat,
   });
 }

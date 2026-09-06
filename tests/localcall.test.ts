@@ -229,6 +229,9 @@ test('talking over her drops her voice, tells the phone, and the next turn knows
   await settle(30);
   assert.ok(h.audio.length > 0, 'her voice is going out');
   assert.deepEqual(h.types().slice(0, 3), ['user_message', 'assistant_message', 'audio_start']);
+  // Two seconds of her line have played by the time they cut in — the bytes
+  // sent run well ahead of that.
+  h.advance(2000);
   // Over her: louder than the room by more than the raised ratio.
   h.feed(0.5, 600);
   await settle(10);
@@ -245,7 +248,8 @@ test('talking over her drops her voice, tells the phone, and the next turn knows
   // The day keeps what she got out: the start of the long line, marked as cut, not the whole draft.
   assert.equal(h.saids.length, 1);
   assert.equal(h.saids[0][0], LONG_LINE);
-  assert.ok(h.saids[0][1].startsWith('A long line') && h.saids[0][1].endsWith('—') && h.saids[0][1].length < LONG_LINE.length, h.saids[0][1]);
+  assert.ok(h.saids[0][1].startsWith('A long line') && h.saids[0][1].endsWith('—'), h.saids[0][1]);
+  assert.ok(h.saids[0][1].length <= 45, `about two seconds' worth, not the twenty seconds that were sent: ${h.saids[0][1]}`);
 });
 
 test('what she got out of a line is measured by how much of it played', () => {

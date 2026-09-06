@@ -398,6 +398,7 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
         const id = String(lineId);
         const rate = voice.sampleRate || VOICE_RATE;
         emit({ type: 'audio_start', id, sampleRate: rate });
+        const playingSince = now();
         sending = true;
         const reader = voice.stream.getReader();
         let bytes = 0;
@@ -414,7 +415,9 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
         }
         if (!line.filler) {
           if (whole && generation === myGeneration) line.take.voiced.push(line.text);
-          else if (!line.take.cut) line.take.cut = { text: line.text, seconds: bytes / (rate * 2) };
+          // Her voice arrives faster than it plays, so the bytes sent overstate
+          // what was heard; the clock since the first of them caps it.
+          else if (!line.take.cut) line.take.cut = { text: line.text, seconds: Math.min(bytes / (rate * 2), (now() - playingSince) / 1000) };
         }
         if (generation === myGeneration) { sending = false; herEchoUntil = now() + HER_ECHO_MS; emit({ type: 'audio_end', id }); }
       }
