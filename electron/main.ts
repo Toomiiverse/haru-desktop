@@ -68,6 +68,7 @@ import { createDesktopShortcut, desktopShortcutPath, isAutoStartEnabled, setAuto
 import { answersThePrompt, CUE_NOTE, isCue, stageNote, dropRoleHeader, dropTackedOnParagraphs, dropInventedContact, dropInventedScreenTalk, dropRepeatedAgendaMentions, dropRepeatedParagraphs, dropStageDirections, dropRepeatedOpener, dropEchoOpener, dropRepeatedSentences, fixStatedClock, fixStatedReminderTime, fixStatedMinutes, dropOverusedEmoji, oneEmojiAtMost, dropClosingOrder, thinksAloud } from './reply';
 import { runToolLoop } from './toolloop';
 import { chatTools, coerceKnowledgeCategory, runChatTool, type ToolAvailability, type ToolDeps } from './tools';
+import { describeMyself, describeSettings, readSelfSnapshot } from './self';
 import { createMemoryStore } from './memorystore';
 import { createKnowledgeStore } from './knowledgestore';
 import { chatSystemPrompt, chatDynamicContext, FIRST_PERSON_NOTE, freshStartInstruction, type FreshStart, type RatedReply, LENGTH_RULE_LOCAL, LENGTH_RULE_HOSTED } from './prompt';
@@ -4673,6 +4674,16 @@ function availableTools(): ToolAvailability {
  * startup: half of these read state that moves during a turn, and a snapshot
  * taken at boot would answer for the wrong moment.
  */
+/** Vault/Haru/Configuration.md, refreshed after she changes something about herself (the hourly cron does the rest). */
+function refreshConfigurationNote() {
+  const script = path.join(__dirname, '..', 'scripts', 'update-haru-config.sh');
+  if (!existsSync(script)) return;
+  execFile('bash', [script], { timeout: 60_000 }, error => {
+    if (error) console.warn('[self] could not refresh the configuration note:', error.message);
+    else console.log('[self] refreshed the configuration note');
+  });
+}
+
 function toolDeps(): ToolDeps {
   return {
     CHAT_TIMEZONE,
@@ -4696,6 +4707,29 @@ function toolDeps(): ToolDeps {
     markPageRead: () => { pageWasRead = true; },
     setPendingChoices: (choices) => { pendingChoices = choices as string[]; },
     requestRestart: () => { pendingHaruRestart = true; },
+    // Herself, and what of herself she may change (self.ts).
+    myself: () => {
+      const snapshot = readSelfSnapshot(key => store.get(key));
+      return { ...snapshot, inWords: describeMyself(snapshot), settings: describeSettings(key => store.get(key)) };
+    },
+    hostedModels: async route => {
+      const config = store.get(`ai.${route}`) as ProviderConfig | undefined;
+      if (!config?.endpoint || !config.provider) return null;
+      try { return await openAIModels(config.endpoint, config.provider as Provider); } catch (error) {
+        console.warn(`[self] could not list the ${route} route's models:`, error instanceof Error ? error.message : error);
+        return null;
+      }
+    },
+    changeMySetting: async plan => {
+      // A backup first, as any hand edit of config.json gets; then the value,
+      // which every reader of these keys picks up on its next look; then the
+      // vault page that says how she runs.
+      store.backup(`her-edit-${plan.name}`);
+      store.set(plan.path, plan.to);
+      console.log(`[self] changed ${plan.name} (${plan.path}): ${JSON.stringify(plan.from)} -> ${JSON.stringify(plan.to)}, at their word`);
+      refreshConfigurationNote();
+      return { ok: true, note: 'In effect now.' };
+    },
     lastResults: () => lastResults,
     lastSearchQuery: () => lastSearchQuery,
     rememberSearch: (query, results) => { lastSearchQuery = query; lastResults = results; },

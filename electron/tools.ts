@@ -17,6 +17,7 @@
 // and this is the half that actually runs.
 
 import path from 'node:path';
+import { planChange, SETTINGS, SETTING_NAMES, type Setting, type SettingPlan } from './self';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import type { ChatTool, ToolCall } from './provider';
 import { addCheckIn, checkInsOn, type CheckInStore } from './checkins';
@@ -265,6 +266,28 @@ export const CHAT_TOOLS: ChatTool[] = [{
         kind: { type: 'string', enum: ['anime', 'game'], description: 'Whether it is an anime or a game.' },
       },
       required: ['title', 'kind'],
+    },
+  },
+}, {
+  type: 'function',
+  function: {
+    name: 'describe_myself',
+    description: 'How you are put together right now: which models answer as you and write your nudges, the local model on the server, your voice, call and listening engines, your sleep hours, what reaches their phone and when, and the handful of settings you can change. Call it when they ask what your system, brain, model, voice or setup is, or what you can change about yourself, and answer from it in your own words.',
+    parameters: { type: 'object', properties: {}, required: [] },
+  },
+}, {
+  type: 'function',
+  function: {
+    name: 'change_setting',
+    description: 'Change one of your own settings — a model, an engine, your hours, what reaches their phone. Only the settings describe_myself lists. Call it once without confirm to see what would change, tell them, and only when they have explicitly said to go ahead call it again with confirm: true.',
+    parameters: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', enum: SETTING_NAMES, description: 'The setting, as describe_myself names it.' },
+        value: { type: 'string', description: 'The new value: a model id, an engine name, a time as HH:MM, a whole number, or on/off.' },
+        confirm: { type: 'boolean', description: 'Must be true, and only after they have explicitly said to go ahead.' },
+      },
+      required: ['name', 'value'],
     },
   },
 }];
@@ -784,6 +807,12 @@ export type ToolDeps = {
   /** Also used by the caller after a reply lands, so it is injected rather than moved. */
   runSystemCommand(file: string, args: string[]): Promise<{ ok: boolean; error?: string }>;
   /** The CDP port of the browser she controls (browser.control). */
+  /** Herself, in facts: readSelfSnapshot + describeSettings (self.ts). */
+  myself(): unknown;
+  /** The model ids a hosted route's endpoint lists, or null when it cannot be asked. */
+  hostedModels(route: 'conversation' | 'nudge'): Promise<string[] | null>;
+  /** Writes one allowlisted setting at their word: a backup first, then the value, then the note that says how she runs. */
+  changeMySetting(plan: SettingPlan): Promise<{ ok: boolean; note: string }>;
   browserPort(): number;
   /** Where a browser screenshot lands — the screenshots folder or a fallback. */
   browserShotDir(): string;
@@ -1037,6 +1066,24 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
     setInterests(adopt(interests, { kind, name: title, because: 'they told you about it, and it sounded like your thing. You are going to give it a shot.' }, localDateKey(now), now.toISOString()));
     console.log(`[taste] ${kind} "${title}" taken up because they told you about it`);
     return JSON.stringify({ saved: true, note: `Taken up: ${title}. You will read up on it and have a real view of it over your nights.` });
+  }
+  if (name === 'describe_myself') {
+    return JSON.stringify(deps.myself());
+  }
+  if (name === 'change_setting') {
+    const settingName = typeof args.name === 'string' ? args.name.trim() : '';
+    if (!settingName) return JSON.stringify({ error: `name is required — one of ${SETTING_NAMES.join(', ')}.` });
+    const setting = (SETTINGS as Record<string, Setting>)[settingName];
+    if (!setting) return JSON.stringify({ error: `"${settingName}" is not a setting you can change. You can change: ${SETTING_NAMES.join(', ')}.` });
+    if (args.value === undefined || args.value === null) return JSON.stringify({ error: `value is required — ${setting.what}.` });
+    const models = setting.kind === 'model' && setting.route ? await deps.hostedModels(setting.route) : null;
+    const verdict = planChange(settingName, args.value, store.get(setting.path), { models });
+    if (!verdict.ok) return JSON.stringify({ error: verdict.error });
+    if (verdict.unchanged) return JSON.stringify({ unchanged: true, note: `${settingName} is already ${JSON.stringify(verdict.plan.to)}.` });
+    // The same handshake as restarting herself: nothing changes until they have said the word.
+    if (args.confirm !== true) return JSON.stringify({ confirm: true, name: settingName, what: setting.what, from: verdict.plan.from, to: verdict.plan.to, note: 'Do not act yet. Tell them what would change, ask them to say the word, then call this again with confirm: true.' });
+    const done = await deps.changeMySetting(verdict.plan);
+    return JSON.stringify(done.ok ? { changed: true, name: settingName, from: verdict.plan.from, to: verdict.plan.to, note: done.note } : { error: done.note });
   }
   if (name === 'browser_control') {
     const action = typeof args.action === 'string' ? args.action : '';

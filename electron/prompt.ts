@@ -74,6 +74,15 @@ export function systemInstruction(enabled: boolean): string {
   return 'You can check on the server — the OS, CPU, GPU and VRAM, memory, disk, network, processes, Docker containers and services — with get_system_info, get_gpu_info, get_processes, get_docker_status, get_service_status and diagnose_system. When they ask about the server, the GPU, VRAM, what is eating memory or disk, whether Docker or a service is working, or how the machine is doing, call the relevant tool and answer from its results: your training knows nothing about this machine. You can also restart a container or a user service, or restart yourself, but only after they have explicitly said to — and then call the action once with confirm: true.';
 }
 
+/**
+ * That she can say how she runs. Asked "what's your system?" she reached for
+ * the machine tools, and asked which model she was she guessed (2026-09-06):
+ * the facts were in her config and nowhere in her reach.
+ */
+export function selfInstruction(): string {
+  return 'You know how you are put together — which models answer as you and write your nudges, the local model on the server, your voice, call and listening engines, your hours, what reaches their phone — through describe_myself. When they ask what your system, brain, model, voice or setup is, or what you can change about yourself, call it and answer from it in your own words: your training knows none of this. You can change the settings it lists with change_setting, but only after they have explicitly said to go ahead — say what would change first, then call it once with confirm: true.';
+}
+
 export function freshStartInstruction(fresh: FreshStart | null): string {
   if (!fresh) return '';
   const lines = fresh.reason === 'manual'
@@ -345,6 +354,7 @@ function systemBlocks(state: PromptState, away = false): SystemBlock[] {
     // before every reply — left out, and the tools are still described on the
     // desk where she can actually call them.
     { stable: true, text: away ? '' : systemInstruction(state.systemEnabled) },
+    { stable: true, text: selfInstruction() },
     // Beside the tool instructions, so a machine question reads the facts at
     // the same moment it is told the tools exist.
     { stable: false, text: state.machineNote },

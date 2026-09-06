@@ -74,6 +74,9 @@ function deps(overrides: Partial<ToolDeps> = {}): ToolDeps {
     sendToWindows: () => {},
     getInterests: () => [],
     setInterests: () => {},
+    myself: () => ({ conversation: null }),
+    hostedModels: async () => null,
+    changeMySetting: async () => ({ ok: true, note: 'In effect now.' }),
     browserPort: () => 9222,
     browserShotDir: () => '/tmp',
     readSystemConfig: () => ({ enabled: false, level: 0, allowlist: [] }),
@@ -131,6 +134,7 @@ test('no handler is dead code — every one is reachable from some setting', asy
     'get_system_info', 'get_gpu_info', 'get_processes', 'get_docker_status',
     'get_service_status', 'diagnose_system', 'restart_docker_container',
     'start_service', 'stop_service', 'restart_haru', 'look_up_knowledge', 'adopt_interest', 'browser_control',
+    'describe_myself', 'change_setting',
   ];
   for (const name of handled) {
     assert.ok(reachable.has(name), `${name} has a handler but is never offered to anyone`);
@@ -407,4 +411,26 @@ test('browser_control validates before it touches a browser', async () => {
   assert.match(noUrl, /url is required/);
   // list hits the network in this test (the browser is real), so it is covered
   // by the live smoke test rather than here — the gate above is the pure half.
+});
+
+test('describe_myself hands back what main knows of her; change_setting checks, asks, and only then writes', async () => {
+  assert.equal(await run('describe_myself', {}, '', { myself: () => ({ conversation: { provider: 'venice', model: 'kimi-k2-5' } }) }), '{"conversation":{"provider":"venice","model":"kimi-k2-5"}}');
+  let written: unknown = null;
+  const over: Partial<ToolDeps> = {
+    store: { get: (key: string) => (key === 'push.prefs.random' ? true : undefined), getBlocks: () => [], transaction: (fn) => fn() },
+    changeMySetting: async plan => { written = plan; return { ok: true, note: 'In effect now.' }; },
+  };
+  const asked = JSON.parse(await run('change_setting', { name: 'random_pushes', value: 'off' }, '', over));
+  assert.equal(asked.confirm, true);
+  assert.equal(asked.from, true);
+  assert.equal(asked.to, false);
+  assert.equal(written, null, 'nothing written before the word');
+  const done = JSON.parse(await run('change_setting', { name: 'random_pushes', value: 'off', confirm: true }, '', over));
+  assert.equal(done.changed, true);
+  assert.deepEqual(written, { name: 'random_pushes', path: 'push.prefs.random', what: 'whether your own unprompted thoughts reach their phone', from: true, to: false });
+  assert.match(JSON.parse(await run('change_setting', { name: 'openai_key', value: 'x' })).error, /not a setting you can change/);
+  assert.match(JSON.parse(await run('change_setting', { name: 'random_pushes', value: 'on', confirm: true }, '', over)).note, /already/);
+  // A model id is checked against what the endpoint lists.
+  const listed: Partial<ToolDeps> = { ...over, hostedModels: async () => ['kimi-k2-5', 'grok-4-20'] };
+  assert.match(JSON.parse(await run('change_setting', { name: 'conversation_model', value: 'grok 4', confirm: true }, '', listed)).error, /Close: grok-4-20/);
 });

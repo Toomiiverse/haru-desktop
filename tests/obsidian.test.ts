@@ -84,9 +84,14 @@ test('walkVault finds markdown, skips housekeeping, and returns relative paths',
     writeFileSync(path.join(vault, '.obsidian', 'workspace.json'), '{}');
     writeFileSync(path.join(vault, '.trash', 'gone.md'), 'gone');
     writeFileSync(path.join(vault, 'templates', 'note.md'), 'template');
+    // Her own folder is hers, not knowledge — except the page that says how she runs.
+    mkdirSync(path.join(vault, 'Haru', 'Diary'), { recursive: true });
+    writeFileSync(path.join(vault, 'Haru', 'Configuration.md'), 'how she runs');
+    writeFileSync(path.join(vault, 'Haru', 'Her.md'), 'her things');
+    writeFileSync(path.join(vault, 'Haru', 'Diary', '2026-09-05.md'), 'dear diary');
     const files = walkVault(vault);
     const relatives = files.map(file => file.relative);
-    assert.deepEqual(relatives, ['Home.md', path.join('Projects', 'App', 'setup.md')]);
+    assert.deepEqual(relatives, [path.join('Haru', 'Configuration.md'), 'Home.md', path.join('Projects', 'App', 'setup.md')]);
   } finally {
     rmSync(vault, { recursive: true, force: true });
   }
