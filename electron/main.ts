@@ -4045,20 +4045,24 @@ const memoryStore = createMemoryStore({
   following: () => Object.values(getFollowing()).map(work => ({ title: work.title, kind: work.kind, progress: work.progress })),
   agenda: () => getKept().map(item => ({ title: item.title, kind: item.kind, done: item.done })),
   // Her own life in one place — the her_own block renders it, so the chat
-  // prompt no longer scatters the same lines separately. Interests, then her
-  // firsts, then the wants she is working on, then the night, the day's own
-  // reading, and her diary. Same framing and order the prompt used.
+  // prompt no longer scatters the same lines separately. What is nearest in
+  // time first: last night, the day's own reading, the week — then the things
+  // she is into and her firsts and wants, and her diary last. The block is
+  // cut to its budget from the top, whole lines kept in order, and on a phone
+  // turn the budget is scaled down: with the interests first, last night fell
+  // off the end on every turn (65 cuts in a day) and two models answered
+  // "what did you do last night" from her interests and diary instead.
   herOwnLife: () => {
     const now = zonedNow(CHAT_TIMEZONE);
     const today = localDateKey(now);
     const interests = getInterests();
     return [
+      nightsInstruction(nightsOn(getNights(), lastNightKey())),
+      dayNote(getDays(), today),
+      weekNote(getWeek(), today),
       tastesInstruction(interests),
       firstsNote(interests, today),
       wantsNote(getWants()),
-      weekNote(getWeek(), today),
-      nightsInstruction(nightsOn(getNights(), lastNightKey())),
-      dayNote(getDays(), today),
       diaryContext(recentEntries(app.getPath('home'), 2)),
     ].filter(Boolean).join('\n');
   },
