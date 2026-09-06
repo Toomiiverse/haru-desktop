@@ -69,10 +69,11 @@ import { answersThePrompt, CUE_NOTE, isCue, stageNote, dropRoleHeader, dropTacke
 import { runToolLoop } from './toolloop';
 import { chatTools, coerceKnowledgeCategory, runChatTool, type ToolAvailability, type ToolDeps } from './tools';
 import { describeMyself, describeSettings, readSelfSnapshot } from './self';
+import { pickBreath } from './breaths';
 import { createMemoryStore } from './memorystore';
 import { createKnowledgeStore } from './knowledgestore';
 import { chatSystemPrompt, chatDynamicContext, FIRST_PERSON_NOTE, freshStartInstruction, type FreshStart, type RatedReply, LENGTH_RULE_LOCAL, LENGTH_RULE_HOSTED } from './prompt';
-import { hasShout, readVoiceConfig, referenceFor, shoutReference, spokenCase, speakableText, splitForSpeech, streamedSentences, synthesise, synthesiseBreezeStream, type SpeechClip, type VoiceConfig, looksClipped, pickSigh, HUME_DESCRIPTIONS, HUME_STREAM_URL } from './voice';
+import { hasShout, readVoiceConfig, referenceFor, shoutReference, spokenCase, speakableText, splitForSpeech, streamedSentences, synthesise, synthesiseBreezeStream, type SpeechClip, type VoiceConfig, looksClipped, HUME_DESCRIPTIONS, HUME_STREAM_URL } from './voice';
 import { hearVoice, readHumeConfig, readingFrom } from './hume';
 import { readEviConfig, newSessionId, secondsUsedToday, noteUsage, underCap, callAside } from './evi';
 import { readCallConfig, pickFiller } from './call';
@@ -10555,8 +10556,9 @@ function webDeps(): WebDeps {
     async sigh(emotion) {
       const voice = readVoiceConfig(store.get('voice'));
       if (voice.engine === 'off' || !voice.webEnabled) return null;
-      const file = pickSigh(voice.sighs, emotion);
+      const file = pickBreath(voice.sighs, emotion);
       if (!file) return null;
+      console.log(`[voice] a breath for ${emotion ?? 'no mood'}: ${path.basename(file)}`);
       try { return { audio: new Uint8Array(readFileSync(file)), mime: 'audio/wav' }; }
       catch (error) { console.warn(`[voice] the sigh could not be read: ${error instanceof Error ? error.message : error}`); return null; }
     },
