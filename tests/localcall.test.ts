@@ -4,7 +4,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { openLocalCall, wavSampleRate, withoutWavHeader, oneChunk, CALL_RATE, type CallEvent, type LocalCallDeps } from '../electron/localcall';
+import { openLocalCall, wavSampleRate, withoutWavHeader, oneChunk, saidOf, CALL_RATE, type CallEvent, type LocalCallDeps } from '../electron/localcall';
 import { pcmToWav } from '../electron/voice';
 import { readCallConfig, DEFAULT_CALL, pickFiller, FILLERS, looksUnfinished } from '../electron/call';
 
@@ -45,6 +45,7 @@ function harness(overrides: Partial<LocalCallDeps> = {}) {
   const heard: number[] = [];
   const answered: { text: string; interrupted: boolean }[] = [];
   const spoken: { text: string; emotion: string | null; seed: number }[] = [];
+  const saids: [string, string][] = [];
   const voices: ReturnType<typeof voice>[] = [];
   let clock = 1_000_000;
   const deps: LocalCallDeps = {
@@ -60,6 +61,7 @@ function harness(overrides: Partial<LocalCallDeps> = {}) {
     speak: async (text, emotion, seed) => { spoken.push({ text, emotion, seed }); const v = voice(3); voices.push(v); return { stream: v.stream, sampleRate: 24000 }; },
     filler: () => 'Hang on.',
     moodNow: () => 'annoyed',
+    said: (reply, said) => saids.push([reply, said]),
     now: () => clock,
     vad: { endAfterMs: 500 },
     log: () => {},
@@ -72,7 +74,7 @@ function harness(overrides: Partial<LocalCallDeps> = {}) {
   }, deps);
   const feed = (level: number, ms: number) => { for (let i = 0; i < ms / FRAME_MS; i++) { call.feed(frame(level)); clock += FRAME_MS; } };
   const types = () => events.map(event => event.type);
-  return { call, events, audio, closes, heard, answered, spoken, voices, feed, types, advance: (ms: number) => { clock += ms; } };
+  return { call, events, audio, closes, heard, answered, spoken, voices, saids, feed, types, advance: (ms: number) => { clock += ms; } };
 }
 
 test('an utterance is heard, answered, and voiced a sentence at a time', async () => {
@@ -96,6 +98,7 @@ test('an utterance is heard, answered, and voiced a sentence at a time', async (
   assert.equal((h.events[1] as { text: string }).text, 'First thing.');
   assert.deepEqual(h.spoken.map(s => s.emotion), ['annoyed', 'annoyed'], 'one register for the whole reply, not a mood per sentence');
   assert.equal(h.spoken[0].seed, h.spoken[1].seed, 'one take: the same seed for every piece');
+  assert.deepEqual(h.saids, [], 'she said all of it: nothing to correct');
   assert.equal((h.events[2] as { sampleRate: number }).sampleRate, 24000);
 });
 
@@ -200,6 +203,8 @@ test('while a tool runs she says a filler, before any sentence', async () => {
   assert.equal(h.events.filter(e => e.type === 'filler').length, 1, 'one filler a turn, however many tools');
 });
 
+const LONG_LINE = 'A long line she never finishes, about the website and the shop and the graphics card and every other thing they have talked about this week, which goes on and on.';
+
 test('talking over her drops her voice, tells the phone, and the next turn knows', async () => {
   let release: (() => void) | null = null;
   const answers: { text: string; interrupted: boolean }[] = [];
@@ -207,16 +212,17 @@ test('talking over her drops her voice, tells the phone, and the next turn knows
     answer: async (text, options) => {
       answers.push({ text, interrupted: options.interrupted });
       if (text === 'First thing.') {
-        options.onSentence('A long line she never finishes.', 'neutral');
+        options.onSentence(LONG_LINE, 'neutral');
         await new Promise<void>(resolve => { release = resolve; });
-        return { reply: 'A long line she never finishes.' };
+        return { reply: LONG_LINE };
       }
       options.onSentence('Fine, what.', 'annoyed');
       return { reply: 'Fine, what.' };
     },
     hear: async () => (answers.length ? 'Second thing, stop.' : 'First thing.'),
     // The line she is cut off in goes on and on; her answer to the interruption is short.
-    speak: async text => { const v = voice(text.startsWith('A long') ? 200 : 3); h.voices.push(v); return { stream: v.stream, sampleRate: 24000 }; },
+    // Her long line comes as 50 ms pieces, so a cut lands part-way through it.
+    speak: async text => { const v = voice(text.startsWith('A long') ? 400 : 3, text.startsWith('A long') ? 2400 : 480); h.voices.push(v); return { stream: v.stream, sampleRate: 24000 }; },
     moodNow: () => null,
   });
   h.feed(0.002, 2000); h.feed(0.3, 600); h.feed(0.002, 700);
@@ -236,6 +242,18 @@ test('talking over her drops her voice, tells the phone, and the next turn knows
   await settle(60);
   assert.deepEqual(answers.map(a => a.interrupted), [false, true], 'the next turn is told she was cut off');
   assert.equal(h.types().at(-1), 'assistant_end');
+  // The day keeps what she got out: the start of the long line, marked as cut, not the whole draft.
+  assert.equal(h.saids.length, 1);
+  assert.equal(h.saids[0][0], LONG_LINE);
+  assert.ok(h.saids[0][1].startsWith('A long line') && h.saids[0][1].endsWith('—') && h.saids[0][1].length < LONG_LINE.length, h.saids[0][1]);
+});
+
+test('what she got out of a line is measured by how much of it played', () => {
+  const line = 'Seven words here, then a few more words, and then the end of the sentence.';
+  assert.equal(saidOf(line, 0.2), '', 'under half a second is nothing');
+  assert.equal(saidOf(line, 1), 'Seven words—', 'fifteen characters a second, cut at a word');
+  assert.equal(saidOf(line, 2), 'Seven words here, then a few—');
+  assert.equal(saidOf(line, 10), line, 'long enough to have said all of it');
 });
 
 test('hanging up cancels her voice and reports the call\'s length', async () => {

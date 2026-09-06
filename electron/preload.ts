@@ -227,6 +227,13 @@ contextBridge.exposeInMainWorld('haru', {
       ipcRenderer.on('chat:fromPhone', listener);
       return () => ipcRenderer.removeListener('chat:fromPhone', listener);
     },
+    // Said on a call, and cut off: what she actually got out replaces the
+    // reply her brain wrote, or the reply goes when none of it was said.
+    onSaidFromPhone: (callback: (turn: { reply: string; said: string }) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, turn: { reply: string; said: string }) => callback(turn);
+      ipcRenderer.on('chat:saidFromPhone', listener);
+      return () => ipcRenderer.removeListener('chat:saidFromPhone', listener);
+    },
     // Rated from a phone. The thumb and the note land on the message here,
     // where the conversation lives; her comeback arrives as an interjection.
     onRatedFromPhone: (callback: (turn: { id: string; reaction?: 'up' | 'down'; note?: string }) => void) => {

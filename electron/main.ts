@@ -10485,6 +10485,9 @@ function webDeps(): WebDeps {
             return rate ? { stream: oneChunk(clip.audio.subarray(44)), sampleRate: rate } : null;
           },
           filler: () => { lastFiller = pickFiller(Math.random(), lastFiller); return lastFiller; },
+          // The desk owns the conversation: it is told what she actually got
+          // out, and rewrites her last line to that — or drops it when none did.
+          said: (reply, said) => sendToWindows('chat:saidFromPhone', { reply, said }),
           vad: { endAfterMs: call.endAfterMs },
           log: line => console.log(line),
         });

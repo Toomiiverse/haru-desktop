@@ -71,6 +71,13 @@ export type LocalCallDeps = {
   moodNow?(): string | null;
   /** A line to say while a tool runs. */
   filler(): string;
+  /**
+   * Told, once a turn is over, when what she got out differs from the reply
+   * her brain wrote — she was talked over, or they spoke before she could.
+   * `said` is the part that reached the phone; '' when none of it did. The
+   * day should hold what was said, not what was drafted.
+   */
+  said?(reply: string, said: string): void;
   vad?: Partial<VadOptions>;
   /** Wall clock, for the call's length. */
   now?(): number;
@@ -93,6 +100,29 @@ export type LocalCall = {
 };
 
 type Line = { text: string; emotion: string | null; seed: number; filler: boolean };
+
+/**
+ * What one reply's lines came to once played: the ones that went out whole, and
+ * the first that was cut with how long it had played. Each line carries its
+ * turn's take, so a reply whose brain finishes after the next turn has begun
+ * still finds what it got out.
+ */
+type Take = { voiced: string[]; cut: { text: string; seconds: number } | null; reported: boolean };
+type Queued = Line & { take: Take };
+
+/** About how much text a second of her voice carries, for cutting a line where the voice was cut. */
+const CHARS_PER_SECOND = 15;
+
+/** The first `seconds` worth of a line, ended at a word, marked as cut. Nothing under half a second. */
+export function saidOf(text: string, seconds: number): string {
+  if (seconds < 0.5) return '';
+  const chars = Math.round(seconds * CHARS_PER_SECOND);
+  if (chars >= text.length) return text;
+  const head = text.slice(0, chars);
+  const atWord = head.lastIndexOf(' ');
+  const kept = (atWord > 0 ? head.slice(0, atWord) : head).replace(/[,;:]$/, '');
+  return kept ? `${kept}—` : '';
+}
 
 /** The sample rate a WAV header declares, or 0 when the bytes are not a WAV. */
 export function wavSampleRate(bytes: Uint8Array): number {
@@ -133,13 +163,14 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
   let interrupted = false;        // she was cut off; the next turn is told
   let thinking = false;           // the brain is on a turn
   let generation = 0;             // bumps on every interruption: stale audio is dropped
-  let queue: Line[] = [];
+  let queue: Queued[] = [];
   let pumping = false;
   let spokeThisTurn = false;
   let fillerThisTurn = false;
   let turnDone: (() => void) | null = null;
   let lineId = 0;
   let turns = 0;
+  // What reached the phone this turn: whole lines, and the cut one by how much of it played.
   let lastEmotion: string | null = null;  // the mood of her last line, for the phone's face
   // Words heard but not yet answered: a breath in the middle of a sentence
   // reads to the detector as its end. What was said before the breath waits
@@ -262,9 +293,21 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
     thinking = true;
     spokeThisTurn = false;
     fillerThisTurn = false;
+    const take: Take = { voiced: [], cut: null, reported: false };
     const myGeneration = generation;
     const started = now();
     let firstVoiceAt = 0;
+    let reply = '';
+    // The day holds what she said. A reply she was cut off in, or never
+    // started, is written down as what came out — not as what was drafted.
+    const settleTake = (whole: boolean) => {
+      if (take.reported || !reply || !deps.said) return;
+      take.reported = true;
+      const said = [...take.voiced, take.cut ? saidOf(take.cut.text, take.cut.seconds) : ''].filter(Boolean).join(' ').trim();
+      if (whole || said === reply) return;
+      log(`[call] she got ${said.length} of ${reply.length} chars out — the day keeps what she said`);
+      deps.said(reply, said);
+    };
     // One register and one take for the whole reply. The register is read off
     // the first sentence — the words know their own tone — and only when that
     // reads as nothing in particular does her resting mood decide.
@@ -302,7 +345,10 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
           say({ text: deps.filler(), emotion: mood, seed, filler: true });
         },
       });
-      if (turns !== mine) return;
+      reply = answer.reply ?? '';
+      // The next turn began while her brain was still going: whatever of this
+      // one was voiced is already cut, so it is settled here, not after a drain.
+      if (turns !== mine) { settleTake(false); return; }
       if (generation === myGeneration) flush();
       if (answer.ignored) log('[call] she is not answering that');
     } catch (error) {
@@ -319,11 +365,12 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
           emit({ type: 'assistant_end', ...(lastEmotion ? { emotion: lastEmotion } : {}) });
           log(`[call] turn ${mine}: ${firstVoiceAt ? `first voice at ${firstVoiceAt - started}ms, ` : 'nothing voiced, '}said as ${mood ?? 'her plain self'}, done in ${now() - started}ms`);
         }
+        settleTake(generation === myGeneration && !take.cut && take.voiced.length > 0 && !queue.length);
       }
     }
     function say(line: Line) {
       if (!firstVoiceAt) firstVoiceAt = now();
-      queue.push(line);
+      queue.push({ ...line, take });
       void pump();
     }
   }
@@ -349,18 +396,25 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
         try { voice = await deps.speak(line.text, line.emotion, line.seed); } catch (error) { log(`[call] her voice failed: ${error instanceof Error ? error.message : String(error)}`); }
         if (!voice || generation !== myGeneration || closed) { if (voice) void voice.stream.cancel().catch(() => {}); continue; }
         const id = String(lineId);
-        emit({ type: 'audio_start', id, sampleRate: voice.sampleRate || VOICE_RATE });
+        const rate = voice.sampleRate || VOICE_RATE;
+        emit({ type: 'audio_start', id, sampleRate: rate });
         sending = true;
         const reader = voice.stream.getReader();
+        let bytes = 0;
+        let whole = false;
         try {
           for (;;) {
             const { value, done } = await reader.read();
-            if (done) break;
+            if (done) { whole = true; break; }
             if (generation !== myGeneration || closed) { await reader.cancel().catch(() => {}); break; }
-            if (value?.byteLength) handlers.onAudio(value);
+            if (value?.byteLength) { bytes += value.byteLength; handlers.onAudio(value); }
           }
         } catch (error) {
           log(`[call] her voice broke off: ${error instanceof Error ? error.message : String(error)}`);
+        }
+        if (!line.filler) {
+          if (whole && generation === myGeneration) line.take.voiced.push(line.text);
+          else if (!line.take.cut) line.take.cut = { text: line.text, seconds: bytes / (rate * 2) };
         }
         if (generation === myGeneration) { sending = false; herEchoUntil = now() + HER_ECHO_MS; emit({ type: 'audio_end', id }); }
       }
