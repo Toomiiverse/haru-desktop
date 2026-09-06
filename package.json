@@ -27,6 +27,7 @@
     "react-dom": "19.2.8"
   },
   "devDependencies": {
+    "@pixiv/three-vrm": "^3.5.5",
     "@types/adm-zip": "0.5.7",
     "@types/node": "26.1.2",
     "@types/react": "19.2.18",
@@ -37,6 +38,7 @@
     "cross-env": "10.1.0",
     "electron": "43.2.0",
     "electron-builder": "26.15.3",
+    "three": "^0.180.0",
     "typescript": "7.0.2",
     "vite": "8.2.0",
     "wait-on": "9.1.0"

@@ -1,0 +1,241 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>VRM spike</title>
+<style>
+  /* Nothing paints a background anywhere: if a single pixel of the window is
+     not the desktop behind it, the alpha question has answered itself. */
+  html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; }
+  canvas { display: block; }
+  #hud {
+    position: fixed; left: 8px; top: 8px; z-index: 10;
+    font: 11px 'JetBrains Mono', ui-monospace, monospace; color: #eaeaea;
+    background: rgba(0, 0, 0, 0.55); padding: 6px 8px; border-radius: 5px;
+    white-space: pre; pointer-events: none;
+  }
+</style>
+<div id="hud">loading…</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "../../node_modules/three/build/three.module.js",
+    "three/addons/": "../../node_modules/three/examples/jsm/",
+    "@pixiv/three-vrm": "../../node_modules/@pixiv/three-vrm/lib/three-vrm.module.js"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { VRMLoaderPlugin, VRMUtils, MToonMaterial } from '@pixiv/three-vrm';
+
+const hud = document.getElementById('hud');
+const say = (line) => { hud.textContent = line; };
+const report = (line) => window.spike?.report(line);
+
+// alpha:true plus a zero clear alpha is the whole transparency contract. If
+// this holds through the render loop the window composites over the desktop.
+// ?opaque=1 paints a solid background instead. It is the control: if she shows
+// up opaque and vanishes transparent, the problem is the alpha channel and not
+// the model, the camera or the lights.
+const params = new URLSearchParams(location.search);
+const opaque = params.get('opaque') === '1';
+// three.js premultiplies by default. MToon writes its own fragment colour, so
+// whether that agrees with the canvas is the thing under test.
+const premultiplied = params.get('premul') !== '0';
+const renderer = new THREE.WebGLRenderer({ alpha: !opaque, antialias: true, premultipliedAlpha: premultiplied });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+if (opaque) renderer.setClearColor(0x334455, 1); else renderer.setClearColor(0x000000, 0);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = null;
+
+// MToon is unlit-ish but still takes light for its shade ramp, so this is a
+// plain key plus ambient rather than anything clever.
+scene.add(new THREE.AmbientLight(0xffffff, 1.4));
+const key = new THREE.DirectionalLight(0xffffff, 1.5);
+key.position.set(1, 2, 2);
+scene.add(key);
+
+const camera = new THREE.PerspectiveCamera(28, innerWidth / innerHeight, 0.1, 20);
+camera.position.set(0, 1.28, 2.1);
+
+const loader = new GLTFLoader();
+loader.register((parser) => new VRMLoaderPlugin(parser));
+
+const modelPath = new URLSearchParams(location.search).get('model');
+const clock = new THREE.Clock();
+let vrm = null;
+
+// Frame times, not FPS: a companion is judged on what it takes away from the
+// game, and a number capped at the refresh rate hides that entirely.
+const frames = [];
+let started = 0;
+let phase = 'warmup';
+
+function stats(list) {
+  const sorted = [...list].sort((a, b) => a - b);
+  const at = (q) => sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * q))];
+  return { median: at(0.5), p95: at(0.95), worst: sorted[sorted.length - 1] };
+}
+
+loader.load(modelPath, (gltf) => {
+  vrm = gltf.userData.vrm;
+  // Both of these are load-time hygiene the docs insist on: unused nodes cost
+  // frame time for nothing, and a VRM 0.x model faces away from the camera.
+  VRMUtils.removeUnnecessaryVertices(gltf.scene);
+  VRMUtils.combineSkeletons(gltf.scene);
+  VRMUtils.rotateVRM0(vrm);
+  scene.add(vrm.scene);
+
+  const meta = vrm.meta ?? {};
+  const bones = Object.keys(vrm.humanoid?.humanBones ?? {}).length;
+  const expressions = Object.keys(vrm.expressionManager?.expressionMap ?? {});
+  let mtoon = 0, materials = 0, outlines = 0, tris = 0;
+  vrm.scene.traverse((object) => {
+    if (object.isMesh) {
+      tris += (object.geometry?.index?.count ?? object.geometry?.attributes?.position?.count ?? 0) / 3;
+      for (const material of [].concat(object.material)) {
+        materials++;
+        if (material instanceof MToonMaterial) {
+          mtoon++;
+          // The cel outline is a second draw of the mesh, so whether it is on
+          // is both a look question and a cost one.
+          if (material.outlineWidthMode && material.outlineWidthMode !== 'none') outlines++;
+        }
+      }
+    }
+  });
+  report(`[spike] loaded ${meta.name ?? meta.title ?? '?'} — spec ${vrm.meta?.metaVersion ?? '0'}, ${bones} bones, ${Math.round(tris / 1000)}k triangles`);
+  report(`[spike] materials: ${mtoon}/${materials} MToon (cel shader), ${outlines} drawing outlines`);
+  report(`[spike] spring bones (hair/cloth): ${vrm.springBoneManager?.joints?.size ?? 0} joints`);
+  report(`[spike] expressions: ${expressions.join(', ')}`);
+
+  // Where she actually is, in metres, and whether the camera is pointed at
+  // her. A VRM is authored around the origin at roughly human height, so a
+  // camera guessed rather than fitted is the likeliest reason for an empty
+  // window — and an empty window renders just as fast as a working one.
+  // Measured off the skeleton, not off a Box3. setFromObject reads each
+  // geometry's bind-pose bounds and ignores skinning entirely, so on a rigged
+  // VRM it returns a box that is confidently wrong — mine put her a head lower
+  // than the camera thought, which reads exactly like a model that is not
+  // rendering at all.
+  const head = vrm.humanoid?.getNormalizedBoneNode('head');
+  const foot = vrm.humanoid?.getNormalizedBoneNode('leftFoot');
+  const headY = head ? head.getWorldPosition(new THREE.Vector3()).y : 1.4;
+  const footY = foot ? foot.getWorldPosition(new THREE.Vector3()).y : 0;
+  const height = (headY - footY) * 1.15; // head bone sits below the crown.
+  const middle = footY + height / 2;
+  report(`[spike] skeleton: head ${headY.toFixed(2)}m, foot ${footY.toFixed(2)}m, so about ${height.toFixed(2)}m tall`);
+
+  const fitDistance = (height * 0.6) / Math.tan((camera.fov * Math.PI / 180) / 2);
+  camera.position.set(0, middle, fitDistance);
+  camera.lookAt(0, middle, 0);
+  camera.updateProjectionMatrix();
+  report(`[spike] camera at z=${fitDistance.toFixed(2)}m looking at y=${middle.toFixed(2)}`);
+  started = performance.now();
+}, undefined, (error) => {
+  report(`[spike] FAILED to load: ${error?.message ?? error}`);
+  say('load failed');
+});
+
+// A stand-in for the animation layer: a slow idle sway plus a blink, driven by
+// the same expression and bone handles a real clip layer would use. It is not
+// the animation, it is proof the handles move and cost what they cost.
+function idle(t) {
+  if (!vrm) return;
+  const hips = vrm.humanoid?.getNormalizedBoneNode('hips');
+  const chest = vrm.humanoid?.getNormalizedBoneNode('chest');
+  const head = vrm.humanoid?.getNormalizedBoneNode('head');
+  if (hips) hips.position.y = Math.sin(t * 1.1) * 0.008;
+  if (chest) chest.rotation.z = Math.sin(t * 0.7) * 0.03;
+  if (head) { head.rotation.y = Math.sin(t * 0.45) * 0.12; head.rotation.x = Math.sin(t * 0.6) * 0.05; }
+  const blink = (Math.sin(t * 0.9) > 0.985) ? 1 : 0;
+  vrm.expressionManager?.setValue('blink', blink);
+  // The visemes her lipsync already computes, exercised so their cost is in
+  // the number rather than discovered later.
+  vrm.expressionManager?.setValue('aa', Math.max(0, Math.sin(t * 3.1)) * 0.6);
+}
+
+/**
+ * Do not believe this function.
+ *
+ * Kept as a warning. With antialias:true the drawing buffer is multisampled and
+ * only resolved on the swap, so readPixels on the default framebuffer returns
+ * the cleared buffer — it reported "nothing drawn" for a model that a
+ * screenshot showed rendering perfectly, in both transparent and opaque runs,
+ * and cost an hour of chasing an alpha bug that was never there. A screen
+ * capture of the actual window is the only honest instrument here.
+ */
+function alphaHolds() {
+  const gl = renderer.getContext();
+  const pixel = new Uint8Array(4);
+  gl.readPixels(2, 2, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);
+  return { alpha: pixel[3], rgb: [pixel[0], pixel[1], pixel[2]] };
+}
+
+// Uncapped she renders at the monitor's refresh, which for a companion that
+// has to share a card with a game is the wrong question entirely. ?fps=30 is
+// the setting she would actually ship with.
+const fpsCap = Number(params.get('fps')) || 0;
+const minFrameMs = fpsCap ? 1000 / fpsCap - 1 : 0;
+let lastDraw = 0;
+
+let reportedAlpha = false;
+renderer.setAnimationLoop(() => {
+  const now = performance.now();
+  if (minFrameMs && now - lastDraw < minFrameMs) return;
+  lastDraw = now;
+  const delta = clock.getDelta();
+  const t = clock.elapsedTime;
+  const before = performance.now();
+  idle(t);
+  vrm?.update(delta);
+  renderer.render(scene, camera);
+  const cost = performance.now() - before;
+
+  if (!started) return;
+  const since = performance.now() - started;
+  // Two seconds of warmup: shader compilation and the first spring-bone steps
+  // are not what running all evening costs.
+  if (phase === 'warmup' && since > 2000) { phase = 'measuring'; frames.length = 0; }
+  if (phase === 'measuring') {
+    frames.push(cost);
+    if (!reportedAlpha && frames.length > 30) {
+      const { alpha, rgb } = alphaHolds();
+      report(`[spike] corner pixel rgba(${rgb.join(',')},${alpha}) — alpha ${alpha === 0 ? 'HOLDS (window is see-through)' : `LOST (opaque, a=${alpha})`}`);
+      // The corner only proves the window is empty where nothing was drawn.
+      // The middle proves something was.
+      const gl = renderer.getContext();
+      const px = new Uint8Array(4);
+      gl.readPixels(Math.floor(gl.drawingBufferWidth / 2), Math.floor(gl.drawingBufferHeight / 2), 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+      // Against a transparent clear, "drawn" means the alpha channel survived
+      // her. Against the opaque control it means the pixel stopped being the
+      // clear colour — checking alpha there only ever proves the clear worked.
+      const drawn = opaque ? !(px[0] === 0x33 && px[1] === 0x44 && px[2] === 0x55) : px[3] > 0;
+      report(`[spike] centre pixel rgba(${px[0]},${px[1]},${px[2]},${px[3]}) — ${drawn ? 'SHE IS THERE' : 'nothing drawn at centre'}`);
+      const info = renderer.info.render;
+      report(`[spike] draw calls ${info.calls}, triangles ${info.triangles}`);
+      reportedAlpha = true;
+    }
+    if (frames.length >= 600) {
+      const s = stats(frames);
+      report(`[spike] cpu frame cost over ${frames.length} frames — median ${s.median.toFixed(2)}ms, p95 ${s.p95.toFixed(2)}ms, worst ${s.worst.toFixed(2)}ms`);
+      report('[spike] holding for GPU sampling');
+      phase = 'holding';
+    }
+    const s = stats(frames);
+    say(`frames ${frames.length}\nmedian ${s.median.toFixed(2)}ms\np95    ${s.p95.toFixed(2)}ms`);
+  }
+});
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
