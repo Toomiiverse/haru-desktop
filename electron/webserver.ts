@@ -310,6 +310,14 @@ const SESSION_COOKIE = 'haru_session';
 const DEVICE_COOKIE = 'haru_device';
 /** Big enough for a long message, small enough that nobody posts a film. */
 const MAX_BODY = 256 * 1024;
+/**
+ * The two routes another machine of hers syncs through — every memory it
+ * holds, and its day at the desk — carry the whole thing each time, and a
+ * laptop that has pulled the server's records posts them all back. At the
+ * message-sized cap that was refused as "too much" forty-six times a day
+ * (2026-09-06), and the laptop's memories and activity never arrived.
+ */
+const MAX_SYNC_BODY = 8 * 1024 * 1024;
 /** A recording is not a message. Roughly a minute of opus, and a hard stop. */
 const MAX_AUDIO = 8 * 1024 * 1024;
 /** A file attached to a message. Videos are the biggest honest case. */
@@ -449,7 +457,11 @@ function whoIsThis(req: IncomingMessage, access: WebAccess, now: Date) {
 
 export function startWebServer(port: number, deps: WebDeps): Promise<{ port: number; stop(): Promise<void> }> {
   const server: Server = createServer((req, res) => { void handle(req, res, deps).catch(error => {
-    console.error('[web] ' + (error instanceof Error ? error.message : String(error)));
+    // Named by route, size and caller: "too much" forty-six times in a day
+    // said nothing about who was sending what (2026-09-06).
+    const from = String(req.headers['x-forwarded-for'] ?? req.headers['cf-connecting-ip'] ?? req.socket.remoteAddress ?? 'unknown').split(',')[0].trim();
+    const declared = req.headers['content-length'] ? ` (${req.headers['content-length']} bytes declared)` : '';
+    console.error(`[web] ${error instanceof Error ? error.message : String(error)} — ${req.method ?? '?'} ${(req.url ?? '/').split('?')[0]} from ${from}${declared}`);
     if (!res.headersSent) json(res, 500, { error: 'Something went wrong.' });
   }); });
 
@@ -1238,7 +1250,7 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
   }
 
   if (req.method === 'POST' && path === '/api/activity') {
-    const body = await readBody(req) as { activity?: unknown };
+    const body = await readBody(req, MAX_SYNC_BODY) as { activity?: unknown };
     if (!body.activity || typeof body.activity !== 'object' || Array.isArray(body.activity)) {
       return json(res, 400, { error: 'Send a log keyed by day.' });
     }
@@ -1246,7 +1258,7 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
   }
 
   if (req.method === 'POST' && path === '/api/memory/records') {
-    const body = await readBody(req) as { memories?: unknown };
+    const body = await readBody(req, MAX_SYNC_BODY) as { memories?: unknown };
     if (!Array.isArray(body.memories)) return json(res, 400, { error: 'Send a list of memories.' });
     const merged = deps.mergeMemories(body.memories);
     return json(res, 200, { ...merged, memories: deps.memoryRecords() });
@@ -1351,7 +1363,7 @@ async function login(req: IncomingMessage, res: ServerResponse, deps: WebDeps, a
   } else {
     sessions.set(token, now.getTime() + SESSION_MS);
     setCookie(res, SESSION_COOKIE, token, Math.floor(SESSION_MS / 1000));
-    console.log('[web] signed in for this session only');
+    console.log(`[web] signed in for this session only — from ${from}, ${String(req.headers['user-agent'] ?? 'no user agent').slice(0, 60)}`);
   }
   return json(res, 200, { ok: true });
 }

@@ -741,6 +741,17 @@ test('the desk trades memories with the server, and is not trusted while it does
     assert.equal(sent.status, 200);
     assert.equal((await sent.json()).added, 1);
 
+    // The whole of a laptop's memory comes back every time, and a laptop that
+    // has pulled the server's records posts them all back: well past the
+    // message-sized cap, which refused it as "too much" forty-six times a day.
+    const whole = { memories: Array.from({ length: 3000 }, (_, i) => ({ id: `m${i}`, text: `something worth keeping about them, the ${i}th of a great many `.repeat(2), kind: 'fact', mentions: 1 })) };
+    assert.ok(JSON.stringify(whole).length > 300 * 1024, 'the body is over the message cap');
+    const bulk = await web.call('/api/memory/records', { method: 'POST', body: JSON.stringify(whole) });
+    assert.equal(bulk.status, 200, 'a sync body is not a message');
+    assert.equal((await bulk.json()).added, 3000);
+    syncedMemories = [];
+    await web.call('/api/memory/records', { method: 'POST', body: JSON.stringify({ memories: [{ id: 'a', text: 'likes tea', kind: 'fact', mentions: 2 }] }) });
+
     const back = await web.call('/api/memory/records');
     assert.equal(back.status, 200);
     assert.deepEqual((await back.json()).memories.map((memory: { text: string }) => memory.text), ['likes tea']);
