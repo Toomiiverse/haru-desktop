@@ -106,6 +106,10 @@ function play(name, fade = 0.35) {
 const frames = [];
 let started = 0;
 let phase = 'warmup';
+// How far the arm strays from where it sat on the first measured frame.
+const travel = { raw: 0, normalized: 0 };
+const restRaw = new THREE.Quaternion();
+const restNorm = new THREE.Quaternion();
 
 function stats(list) {
   const sorted = [...list].sort((a, b) => a - b);
@@ -285,10 +289,23 @@ function buildClips(vrm) {
  *
  * Two formats, and the difference is whether retargeting has already happened.
  * A .vrma addresses the VRM humanoid by role — "leftUpperArm" — so it plays on
- * any VRM regardless of what the bones are called, which is what makes it the
- * format worth exporting from Blender. A .glb addresses nodes by name, so it
- * only plays on the rig it was authored against; fine when Blender exported it
- * from this very model, useless for anything shared.
+ * any VRM regardless of what the bones are called. That is the format to export
+ * from Blender, and it is not a preference.
+ *
+ * A .glb does not work here, and the way it fails is the trap. Blender exports
+ * nodes by name, those names all exist on the loaded model, and every track
+ * binds — 402 of 402. Then three-vrm copies its normalized rig onto those very
+ * nodes inside vrm.update(), every frame, and the animation is gone before it
+ * reaches the screen. Measured at 0.0 degrees of arm travel against 29 for the
+ * same pose authored on the normalized rig: a clip that plays perfectly and
+ * does nothing at all.
+ *
+ * Retargeting the tracks onto the normalized rig by hand was tried and is not
+ * in this file any more. Rewriting each key relative to its rest pose is
+ * arithmetic that looks right, moves the arm the correct 51 degrees, and
+ * renders her upside down with her legs folded over her head, because the root
+ * chain carries an orientation the rest pose does not describe. Skipping hips
+ * made it worse. That is what .vrma is for; do not re-derive it here.
  */
 async function clipsFromFile(url, vrm) {
   if (/\.vrma(\?|$)/i.test(url)) {
@@ -308,6 +325,17 @@ async function clipsFromFile(url, vrm) {
   }
   const gltf = await new GLTFLoader().loadAsync(url);
   if (!gltf.animations?.length) throw new Error('no animations inside the .glb');
+
+  // What a track points at, and whether the loaded model has anything by that
+  // name. A clip whose targets resolve to nothing plays perfectly and moves
+  // nothing, which is indistinguishable from a bad pose until you look.
+  const inScene = new Set();
+  vrm.scene.traverse((o) => inScene.add(o.name));
+  const sample = gltf.animations[0].tracks.slice(0, 3).map((t) => t.name);
+  const hits = gltf.animations[0].tracks.filter((t) => inScene.has(t.name.split('.')[0])).length;
+  report(`[spike] track targets look like: ${sample.join(' | ')}`);
+  report(`[spike] ${hits}/${gltf.animations[0].tracks.length} track targets exist in the loaded model`);
+
   return gltf.animations;
 }
 
@@ -375,7 +403,13 @@ renderer.setAnimationLoop(() => {
   const since = performance.now() - started;
   // Two seconds of warmup: shader compilation and the first spring-bone steps
   // are not what running all evening costs.
-  if (phase === 'warmup' && since > 2000) { phase = 'measuring'; frames.length = 0; }
+  if (phase === 'warmup' && since > 2000) {
+    phase = 'measuring';
+    frames.length = 0;
+    // Whatever pose she is in as measuring opens is the datum to measure from.
+    restRaw.copy(vrm?.humanoid?.getRawBoneNode?.('rightUpperArm')?.quaternion ?? restRaw);
+    restNorm.copy(vrm?.humanoid?.getNormalizedBoneNode?.('rightUpperArm')?.quaternion ?? restNorm);
+  }
   if (phase === 'measuring') {
     frames.push(cost);
     if (!reportedAlpha && frames.length > 30) {
@@ -395,9 +429,24 @@ renderer.setAnimationLoop(() => {
       report(`[spike] draw calls ${info.calls}, triangles ${info.triangles}`);
       reportedAlpha = true;
     }
+    // Is anything actually moving? A clip can bind, play, and be silently
+    // overwritten: three-vrm copies the normalized rig onto the raw bones
+    // inside vrm.update(), so a clip that animates raw bones — which is what
+    // Blender exports, since it knows nothing about VRM's normalized rig — is
+    // undone every frame. Watching both tells the two failures apart.
+    const arm = vrm?.humanoid;
+    if (arm) {
+      const raw = arm.getRawBoneNode?.('rightUpperArm');
+      const norm = arm.getNormalizedBoneNode?.('rightUpperArm');
+      if (raw) travel.raw = Math.max(travel.raw, raw.quaternion.angleTo(restRaw));
+      if (norm) travel.normalized = Math.max(travel.normalized, norm.quaternion.angleTo(restNorm));
+    }
+
     if (frames.length >= 600) {
       const s = stats(frames);
       report(`[spike] cpu frame cost over ${frames.length} frames — median ${s.median.toFixed(2)}ms, p95 ${s.p95.toFixed(2)}ms, worst ${s.worst.toFixed(2)}ms`);
+      const deg = (r) => (r * 180 / Math.PI).toFixed(1);
+      report(`[spike] right upper arm moved: raw ${deg(travel.raw)}deg, normalized ${deg(travel.normalized)}deg`);
       report('[spike] holding for GPU sampling');
       phase = 'holding';
     }
