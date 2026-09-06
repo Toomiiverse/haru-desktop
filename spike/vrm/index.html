@@ -67,9 +67,35 @@ camera.position.set(0, 1.28, 2.1);
 const loader = new GLTFLoader();
 loader.register((parser) => new VRMLoaderPlugin(parser));
 
-const modelPath = new URLSearchParams(location.search).get('model');
+const modelPath = params.get('model');
+const forcedAction = params.get('action') || '';
 const clock = new THREE.Clock();
 let vrm = null;
+let mixer = null;
+let clips = null;
+let playing = '';
+let current = null;
+
+/**
+ * Switch to a named action, blending out of whatever was running.
+ *
+ * The crossfade is the part worth proving. Snapping between clips is what makes
+ * a companion look like a puppet, and 0.35s of overlap is the difference
+ * between her changing her mind and her being replaced.
+ */
+function play(name, fade = 0.35) {
+  if (!mixer || !clips?.[name] || playing === name) return;
+  const next = mixer.clipAction(clips[name]);
+  next.reset();
+  next.setLoop(THREE.LoopRepeat);
+  next.enabled = true;
+  next.setEffectiveWeight(1);
+  if (current) next.crossFadeFrom(current, fade, false);
+  next.play();
+  current = next;
+  playing = name;
+  report(`[spike] -> ${name}`);
+}
 
 // Frame times, not FPS: a companion is judged on what it takes away from the
 // game, and a number capped at the refresh rate hides that entirely.
@@ -137,27 +163,97 @@ loader.load(modelPath, (gltf) => {
   camera.lookAt(0, middle, 0);
   camera.updateProjectionMatrix();
   report(`[spike] camera at z=${fitDistance.toFixed(2)}m looking at y=${middle.toFixed(2)}`);
+
+  // The seam this whole spike exists to test. In the real app the life loop
+  // already emits an action name every tick and CompanionWindow looks it up in
+  // ACTION_SHAPES; here the same names index a bag of clips instead of a bag of
+  // gaze-and-expression shapes. Nothing else about the flow changes.
+  mixer = new THREE.AnimationMixer(vrm.scene);
+  clips = buildClips(vrm);
+  const bound = Object.values(clips).reduce((n, c) => n + c.tracks.length, 0);
+  report(`[spike] clips: ${Object.keys(clips).join(', ')} (${bound} tracks bound to the normalized rig)`);
+  play(forcedAction && clips[forcedAction] ? forcedAction : 'settle', 0);
   started = performance.now();
 }, undefined, (error) => {
   report(`[spike] FAILED to load: ${error?.message ?? error}`);
   say('load failed');
 });
 
-// A stand-in for the animation layer: a slow idle sway plus a blink, driven by
-// the same expression and bone handles a real clip layer would use. It is not
-// the animation, it is proof the handles move and cost what they cost.
-function idle(t) {
+/**
+ * Clips, built in code rather than imported.
+ *
+ * The point is not the animation — hand-keyed quaternions will never look like
+ * authored motion. The point is the machinery around it: that a clip can be
+ * named, played, crossfaded into another, and layered under the expression and
+ * look-at passes without any of the three fighting. That is the part the app
+ * has to own, and it is the same whether the keys came from here or Blender.
+ *
+ * Named after entries in ACTION_SHAPES, because those names already exist and
+ * the life loop already emits them.
+ */
+function buildClips(vrm) {
+  const bone = (name) => vrm.humanoid?.getNormalizedBoneNode(name);
+  // Tracks address the normalized rig, which three-vrm keeps under vrm.scene
+  // and syncs onto the real bones each update. Animating the raw bones instead
+  // works until a model is rigged with a different rest pose.
+  const track = (boneName, times, eulers) => {
+    const node = bone(boneName);
+    if (!node) return null;
+    const values = [];
+    for (const [x, y, z] of eulers) {
+      const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(x, y, z));
+      values.push(q.x, q.y, q.z, q.w);
+    }
+    return new THREE.QuaternionKeyframeTrack(`${node.name}.quaternion`, times, values);
+  };
+  const clip = (name, duration, tracks) => new THREE.AnimationClip(name, duration, tracks.filter(Boolean));
+
+  // Arms rest at the sides rather than in the T-pose the file ships in. Every
+  // clip starts from this, which is what stops a crossfade snapping.
+  const REST_ARM = 1.25;
+
+  return {
+    settle: clip('settle', 4, [
+      track('chest', [0, 2, 4], [[0.02, 0, 0], [-0.01, 0, 0], [0.02, 0, 0]]),
+      track('head', [0, 1.5, 3, 4], [[0, 0.1, 0], [0.04, -0.05, 0], [0, -0.12, 0], [0, 0.1, 0]]),
+      track('leftUpperArm', [0, 4], [[0, 0, REST_ARM], [0, 0, REST_ARM]]),
+      track('rightUpperArm', [0, 4], [[0, 0, -REST_ARM], [0, 0, -REST_ARM]]),
+      track('leftLowerArm', [0, 2, 4], [[0, 0.15, 0.1], [0, 0.2, 0.14], [0, 0.15, 0.1]]),
+      track('rightLowerArm', [0, 2, 4], [[0, -0.15, -0.1], [0, -0.2, -0.14], [0, -0.15, -0.1]]),
+    ]),
+    // One-shot. The arm that waves is the only thing that leaves rest.
+    'lean-in': clip('lean-in', 2.4, [
+      track('chest', [0, 1.2, 2.4], [[0.02, 0, 0], [0.1, 0, 0], [0.02, 0, 0]]),
+      track('head', [0, 1.2, 2.4], [[0, 0, 0], [0.12, 0, 0.06], [0, 0, 0]]),
+      track('leftUpperArm', [0, 2.4], [[0, 0, REST_ARM], [0, 0, REST_ARM]]),
+      track('rightUpperArm', [0, 0.5, 1.4, 2.4], [[0, 0, -REST_ARM], [0, 0, -0.5], [0, 0, -0.45], [0, 0, -REST_ARM]]),
+      track('rightLowerArm', [0, 0.5, 0.9, 1.3, 1.7, 2.4], [[0, -0.15, -0.1], [0, -0.6, -0.5], [0, -0.2, -0.9], [0, -0.6, -0.5], [0, -0.2, -0.9], [0, -0.15, -0.1]]),
+    ]),
+    // Crude on purpose: a real walk is the thing Blender is for. This only has
+    // to prove the legs move on a loop and the spring bones follow.
+    walk: clip('walk', 1, [
+      track('hips', [0, 0.25, 0.5, 0.75, 1], [[0, 0, 0.02], [0, 0, -0.02], [0, 0, 0.02], [0, 0, -0.02], [0, 0, 0.02]]),
+      track('leftUpperLeg', [0, 0.5, 1], [[0.5, 0, 0], [-0.4, 0, 0], [0.5, 0, 0]]),
+      track('rightUpperLeg', [0, 0.5, 1], [[-0.4, 0, 0], [0.5, 0, 0], [-0.4, 0, 0]]),
+      track('leftLowerLeg', [0, 0.25, 0.5, 1], [[-0.1, 0, 0], [-0.7, 0, 0], [-0.05, 0, 0], [-0.1, 0, 0]]),
+      track('rightLowerLeg', [0, 0.5, 0.75, 1], [[-0.05, 0, 0], [-0.1, 0, 0], [-0.7, 0, 0], [-0.05, 0, 0]]),
+      track('leftUpperArm', [0, 0.5, 1], [[-0.35, 0, REST_ARM], [0.35, 0, REST_ARM], [-0.35, 0, REST_ARM]]),
+      track('rightUpperArm', [0, 0.5, 1], [[0.35, 0, -REST_ARM], [-0.35, 0, -REST_ARM], [0.35, 0, -REST_ARM]]),
+      track('chest', [0, 0.5, 1], [[0.04, 0.05, 0], [0.04, -0.05, 0], [0.04, 0.05, 0]]),
+    ]),
+  };
+}
+
+/**
+ * The face, which is a separate layer and stays separate.
+ *
+ * Expressions and visemes are driven per frame while a clip plays the body —
+ * the two never touch, which is the whole reason emotions can stay as
+ * expressions while actions become clips.
+ */
+function face(t) {
   if (!vrm) return;
-  const hips = vrm.humanoid?.getNormalizedBoneNode('hips');
-  const chest = vrm.humanoid?.getNormalizedBoneNode('chest');
-  const head = vrm.humanoid?.getNormalizedBoneNode('head');
-  if (hips) hips.position.y = Math.sin(t * 1.1) * 0.008;
-  if (chest) chest.rotation.z = Math.sin(t * 0.7) * 0.03;
-  if (head) { head.rotation.y = Math.sin(t * 0.45) * 0.12; head.rotation.x = Math.sin(t * 0.6) * 0.05; }
-  const blink = (Math.sin(t * 0.9) > 0.985) ? 1 : 0;
-  vrm.expressionManager?.setValue('blink', blink);
-  // The visemes her lipsync already computes, exercised so their cost is in
-  // the number rather than discovered later.
+  vrm.expressionManager?.setValue('blink', Math.sin(t * 0.9) > 0.985 ? 1 : 0);
   vrm.expressionManager?.setValue('aa', Math.max(0, Math.sin(t * 3.1)) * 0.6);
 }
 
@@ -193,10 +289,20 @@ renderer.setAnimationLoop(() => {
   const delta = clock.getDelta();
   const t = clock.elapsedTime;
   const before = performance.now();
-  idle(t);
+  // Body from the clip, face from the expression layer, spring bones from
+  // vrm.update — three passes that never touch each other.
+  mixer?.update(delta);
+  face(t);
   vrm?.update(delta);
   renderer.render(scene, camera);
   const cost = performance.now() - before;
+
+  // Cycles through the vocabulary so a crossfade can actually be watched.
+  // ?action=walk pins one instead, which is how each was screenshotted.
+  if (!forcedAction && started) {
+    const order = ['settle', 'lean-in', 'settle', 'walk'];
+    play(order[Math.floor((performance.now() - started) / 4000) % order.length]);
+  }
 
   if (!started) return;
   const since = performance.now() - started;
@@ -229,7 +335,7 @@ renderer.setAnimationLoop(() => {
       phase = 'holding';
     }
     const s = stats(frames);
-    say(`frames ${frames.length}\nmedian ${s.median.toFixed(2)}ms\np95    ${s.p95.toFixed(2)}ms`);
+    say(`${playing}\nframes ${frames.length}\nmedian ${s.median.toFixed(2)}ms\np95    ${s.p95.toFixed(2)}ms`);
   }
 });
 

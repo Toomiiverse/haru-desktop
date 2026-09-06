@@ -41,6 +41,7 @@ function createWindow() {
       opaque: process.env.SPIKE_OPAQUE ?? '',
       premul: process.env.SPIKE_PREMUL ?? '',
       fps: process.env.SPIKE_FPS ?? '',
+      action: process.env.SPIKE_ACTION ?? '',
     },
   });
   return window_;
