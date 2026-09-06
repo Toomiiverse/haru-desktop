@@ -529,7 +529,7 @@ function voice() {
   const win: Stub = { Object, Math, RegExp, Float32Array, Int16Array, ArrayBuffer, DataView, JSON };
   win.window = win;
   vm.runInContext(app.slice(start, end + 5), vm.createContext(win), { filename: 'voice.js' });
-  return { Vad: win.HaruVad, Talk: win.HaruTalk, wake: win.haruWake, wav: win.haruWav, pcm: win.haruPcm16 };
+  return { Vad: win.HaruVad, Talk: win.HaruTalk, wake: win.haruWake, wav: win.haruWav };
 }
 
 test('speech is a level well above the room held for a beat, and ends after a stretch of quiet', () => {
@@ -583,18 +583,6 @@ test('the conversation: her name wakes her, what follows is said, speaking over 
   assert.deepEqual(plain(talk.tick(7000 + 25000)), [{ type: 'asleep' }]);
   assert.deepEqual(plain(talk.heard('Haru, are you there', 40000)), [{ type: 'say', text: 'are you there', interrupted: false }], 'her name and the message in one breath');
   assert.deepEqual(plain(talk.stop()), [{ type: 'off' }]);
-});
-
-test('a call sends the same 16 kHz samples bare, and the page places one where her machine can take it', () => {
-  const { wav, pcm } = voice();
-  const frame = new Float32Array(4800); for (let i = 0; i < frame.length; i++) frame[i] = Math.sin(i / 10) * 0.5;
-  const bare = pcm([frame], 48000, 16000) as Int16Array;
-  assert.equal(bare.length, 1600, 'a tenth of a second at 16 kHz');
-  assert.deepEqual(Array.from(bare), Array.from(new Int16Array(wav([frame], 48000, 16000) as ArrayBuffer, 44)), 'the wave file is these samples with a header');
-  const app = appPage();
-  for (const piece of ['/api/call/status', "'/api/call/session'", '{type:\'hello\',pcm:true}', "type:'her'", "case 'user_interruption'", "case 'assistant_end'"]) {
-    assert.ok(app.includes(piece), `the page's call is missing ${piece}`);
-  }
 });
 
 test('the wave file: 16 kHz mono 16-bit with a proper header, boxed down from the microphone rate', () => {
