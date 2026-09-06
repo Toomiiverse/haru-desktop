@@ -35,6 +35,9 @@ export type HerSleepSchedule = {
   wakeHandled: boolean;
   /** Whether she has announced her goodnight for this schedule. */
   announced: boolean;
+  /** Set when their knocking got her up before her time (wokenAt), with how many messages it took. */
+  wokenEarly?: boolean;
+  wokenBy?: number;
 };
 
 export const DEFAULT_HER_SLEEP: HerSleepPrefs = { enabled: true, fallbackBedtime: '23:30', fallbackWake: '08:00' };
@@ -53,11 +56,90 @@ export const ASLEEP_AWAY_LINE = "I'm asleep. I'll see it when I'm up.";
  * which reads as a server, not a person asleep. She does not wake up — the
  * line just wears thinner, the way anyone's would.
  */
+export const ASLEEP_LINES: readonly string[] = [
+  ASLEEP_AWAY_LINE,
+  "Still asleep. It'll keep till I'm up.",
+  "I'm asleep. Whatever it is, it can wait till morning.",
+  "You know I can't read these yet. Go do something. I'll see them when I'm up.",
+];
+
 export function asleepLine(nth: number): string {
-  if (nth <= 2) return ASLEEP_AWAY_LINE;
-  if (nth <= 5) return "Still asleep. It'll keep till I'm up.";
-  if (nth <= 9) return "I'm asleep. Whatever it is, it can wait till morning.";
-  return "You know I can't read these yet. Go do something. I'll see them when I'm up.";
+  if (nth <= 2) return ASLEEP_LINES[0];
+  if (nth <= 5) return ASLEEP_LINES[1];
+  if (nth <= 9) return ASLEEP_LINES[2];
+  return ASLEEP_LINES[3];
+}
+
+/** Whether a stored line of hers is one of the door's, rather than a reply she gave. */
+export function isAsleepLine(text: string): boolean {
+  return ASLEEP_LINES.includes((text ?? '').trim());
+}
+
+/**
+ * The night's exchanges, folded.
+ *
+ * Every message into her sleep is stored beside the line the door answered
+ * with, so the transcript reads as her holding a conversation she was not
+ * awake for — fourteen "I'm asleep"s in a row on 2026-09-06, a nudge brief
+ * that showed them as the last thing said between them, and a diary that
+ * had her "already up" at 2:23 AM. Handed to a model, each run becomes one
+ * turn of theirs that says what it was, and her canned lines go.
+ */
+export function foldAsleepExchanges<T extends { role?: string; content?: string; at?: string }>(messages: T[]): (T | { role: 'user'; content: string; at?: string })[] {
+  const out: (T | { role: 'user'; content: string; at?: string })[] = [];
+  let run: T[] = [];
+  const flush = () => {
+    if (!run.length) return;
+    const quoted = run.slice(0, 3).map(message => `"${String(message.content ?? '').replace(/\s+/g, ' ').slice(0, 80)}"`).join(', ');
+    const more = run.length > 3 ? ` and ${run.length - 3} more` : '';
+    const at = run[0].at;
+    out.push({ role: 'user', content: `[${run.length} message${run.length === 1 ? '' : 's'} sent while you were asleep, unread until you woke: ${quoted}${more}]`, ...(at ? { at } : {}) });
+    run = [];
+  };
+  for (let i = 0; i < messages.length; i++) {
+    const message = messages[i];
+    const next = messages[i + 1];
+    if (message.role === 'user' && next?.role === 'assistant' && isAsleepLine(String(next.content ?? ''))) { run.push(message); i++; continue; }
+    // A door line on its own — the pair was split by something — goes too.
+    if (message.role === 'assistant' && isAsleepLine(String(message.content ?? ''))) continue;
+    flush();
+    out.push(message);
+  }
+  flush();
+  return out;
+}
+
+/** Enough knocking wakes her: this many of their messages inside this long. */
+export const KNOCK_COUNT = 4;
+export const KNOCK_WINDOW_MS = 10 * 60_000;
+
+/** Whether their knocking at the door is enough to get her up. */
+export function enoughKnocking(knocksAtMs: number[], nowMs: number, count = KNOCK_COUNT, windowMs = KNOCK_WINDOW_MS): boolean {
+  return knocksAtMs.filter(at => at <= nowMs && nowMs - at <= windowMs).length >= count;
+}
+
+/**
+ * The schedule with her wake moved to now: she is up, and it was them that
+ * did it. `wake` is minutes since midnight of the day after `day`, so a wake
+ * still on the decision day comes out negative — the window math allows it.
+ */
+export function wokenAt(schedule: HerSleepSchedule, now: Date, knocks: number): HerSleepSchedule {
+  const offset = daysBetween(schedule.day, localDateKey(now));
+  const wake = now.getHours() * 60 + now.getMinutes() + (offset - 1) * 1440;
+  return { ...schedule, wake, wokenEarly: true, wokenBy: knocks };
+}
+
+/**
+ * One background line for her chat prompt on the day after a night: when she
+ * slept, so "you were dead asleep" is not news to her and "2am? 3am?" is not
+ * a guess. Nothing while she is still asleep, nothing after that day.
+ */
+export function sleepNote(schedule: HerSleepSchedule | null, now: Date): string {
+  if (!schedule) return '';
+  if (localDateKey(now) !== dayAfter(schedule.day)) return '';
+  if (herAsleep(schedule, now)) return '';
+  const got = schedule.wokenEarly ? ', and it was their messages that got you up' : '';
+  return `You slept last night: in bed at ${clockMinutes(schedule.bedtime)}, up at ${clockMinutes(schedule.wake)}, your own hours${got}. Anything they sent between those times reached you only when you woke — you were not there for it. Background: bring it up only if the night or their messages come up.`;
 }
 
 /** Sane ranges: bed no earlier than 21:00, no later than 02:00; up no earlier than 05:00, no later than 12:00. */
@@ -128,6 +210,8 @@ export function readHerSleepState(saved: unknown): HerSleepSchedule | null {
     decidedAt: typeof record.decidedAt === 'string' ? record.decidedAt : '',
     wakeHandled: record.wakeHandled === true,
     announced: record.announced === true,
+    ...(record.wokenEarly === true ? { wokenEarly: true } : {}),
+    ...(typeof record.wokenBy === 'number' ? { wokenBy: record.wokenBy } : {}),
   };
 }
 
@@ -191,7 +275,8 @@ export function messagesWhileAsleep(schedule: HerSleepSchedule, messages: { at?:
  * once; four or more is properly being texted to sleep, and she holds it.
  * Nothing at all when it was a quiet night.
  */
-export function wakeNote(count: number, wakeAt: string): string {
+export function wakeNote(count: number, wakeAt: string, wokenBy = 0): string {
+  if (wokenBy > 0) return `You were asleep, and they banged on your door — ${Math.max(wokenBy, count)} messages in a few minutes — until you got up at ${wakeAt}. You are up now and properly annoyed about how: say so plainly, in your way, then answer what they wanted, and hold it against them for a while.`;
   if (count <= 1) return '';
   if (count <= 3) return `You were asleep until ${wakeAt}. They texted you ${count} times while you slept, and you noticed. Be annoyed about it once, in your way — and then drop it.`;
   return `You were asleep until ${wakeAt}. They texted you ${count} times while you slept. You are properly annoyed about that — say so plainly, and hold it against them for a while.`;

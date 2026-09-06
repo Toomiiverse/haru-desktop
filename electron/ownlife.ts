@@ -184,6 +184,8 @@ export type Rec = {
   at: string;
   /** Whether she has already asked whether he tried it. */
   followed: boolean;
+  /** When he told her, unasked, that he had already seen or played it (recsAnsweredBy). */
+  answeredAt?: string;
 };
 
 /** How long before she is allowed to ask whether he tried it. */
@@ -192,6 +194,8 @@ export const REC_FOLLOW_UP_MS = 3 * 24 * 3_600_000;
 export const REC_MIN_GAP_MS = 3 * 7 * 24 * 3_600_000;
 /** Share of an idle line that becomes a fresh recommendation. */
 export const REC_ODDS = 0.35;
+/** Fresh recommendations a day can carry: five "Try X" in one afternoon read as an advert (2026-09-06). */
+export const REC_MAX_PER_DAY = 2;
 
 export function readRecs(saved: unknown): Rec[] {
   if (!Array.isArray(saved)) return [];
@@ -201,6 +205,47 @@ export function readRecs(saved: unknown): Rec[] {
     && typeof (rec as Rec).interest === 'string'
     && typeof (rec as Rec).at === 'string'
     && typeof (rec as Rec).followed === 'boolean');
+}
+
+/**
+ * The recommendations he has already answered without being asked.
+ *
+ * Told to try Cyberpunk: Edgerunners at 11:34, he wrote "I have watched it
+ * already" and "re-watched it five times" — and at 15:59 she was still asking
+ * whether he was "giving Cyberpunk a pass" (2026-09-06). A message of his
+ * after the recommendation that names the thing is the answer: the follow-up
+ * is owed no more, and the composer can be told he has seen it.
+ */
+export function recsAnsweredBy(recs: Rec[], theirs: { content?: string; at?: string }[]): { recs: Rec[]; answered: string[] } {
+  const answered: string[] = [];
+  const updated = recs.map(rec => {
+    if (rec.followed || rec.answeredAt) return rec;
+    const since = Date.parse(rec.at);
+    const names = nameWords(rec.interest);
+    const reply = theirs.find(message => {
+      const at = Date.parse(message.at ?? '');
+      if (!Number.isFinite(at) || at <= since) return false;
+      const text = String(message.content ?? '').toLowerCase();
+      return names.some(name => text.includes(name));
+    });
+    if (!reply) return rec;
+    answered.push(rec.interest);
+    return { ...rec, followed: true, answeredAt: reply.at ?? new Date().toISOString() };
+  });
+  return { recs: updated, answered };
+}
+
+/** The whole name, and each distinctive word of it — "edgerunners" answers for "Cyberpunk: Edgerunners". */
+function nameWords(interest: string): string[] {
+  const whole = interest.toLowerCase().trim();
+  const words = whole.split(/[^\p{L}\p{N}]+/u).filter(word => word.length >= 5 && !GENERIC_WORDS.has(word));
+  return [whole, ...words];
+}
+const GENERIC_WORDS = new Set(['ultimate', 'edition', 'season', 'series', 'ghost', 'shell', 'experiments', 'serial', 'cowboy', 'remake', 'part']);
+
+/** The recommendations made on a day, by the caller's clock. */
+export function recsOnDay(recs: Rec[], dayOf: (iso: string) => string, dayKey: string): Rec[] {
+  return recs.filter(rec => Number.isFinite(Date.parse(rec.at)) && dayOf(rec.at) === dayKey);
 }
 
 /** A recommendation overdue for its one follow-up, if any. */
@@ -215,7 +260,8 @@ export function recDueForFollowUp(recs: Rec[], nowMs: number): Rec | null {
  * not pushed in a while. Nothing when there is nothing left, and the roll
  * keeps it a chance rather than a rota.
  */
-export function pickRecommend(interests: { name: string; stance: string }[], recs: Rec[], nowMs: number, random: () => number = Math.random): string | null {
+export function pickRecommend(interests: { name: string; stance: string }[], recs: Rec[], nowMs: number, random: () => number = Math.random, madeToday = 0): string | null {
+  if (madeToday >= REC_MAX_PER_DAY) return null;
   const recd = new Set(recs.filter(rec => nowMs - Date.parse(rec.at) < REC_MIN_GAP_MS).map(rec => rec.interest.toLowerCase()));
   const candidates = interests.filter(interest => interest.stance && !recd.has(interest.name.toLowerCase()));
   if (!candidates.length) return null;

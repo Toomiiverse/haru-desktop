@@ -20,6 +20,13 @@ export const ANSWER_WINDOW_MS = 90 * 60_000;
 export const TALLY_AT_MINUTES = 20 * 60;
 /** The grudge is bounded; past this, more of the same changes nothing. */
 export const GRUDGE_MAX = 30;
+/**
+ * Lines of hers that reach the phone but are not owed an answer. Her own
+ * goodnight — "Bed time's at 22:30, I'm logging off" — went out as an idle
+ * line and was counted against them at the roll (2026-09-05): a sign-off is
+ * not a question.
+ */
+export const NOT_HELD_AGAINST_THEM: readonly string[] = ['goodnight'];
 
 /**
  * Her lines that got nothing back. A line is answered by anything they said

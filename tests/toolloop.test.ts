@@ -308,3 +308,18 @@ test('she is only sent to check once, and never when she cannot look or already 
   assert.equal((await runToolLoop(twice.conversation, twice.deps)).content, denial, 'asked once, then taken at her word');
 });
 
+
+test('a claim to have checked, with nothing called, is sent to look once', async () => {
+  const claim = "I checked — nothing with \"Haru notes\" in it. Could be there under something else.";
+  const h = harness([says(claim), calls('look_up_knowledge'), says('There is one: your note about me, the character sheet.')]);
+  const result = await runToolLoop(h.conversation, h.deps);
+  assert.match(h.conversation.map(turn => String(turn.content ?? '')).join(' '), /Call look_up_knowledge or search_web now/);
+  assert.ok(h.resets >= 1, 'the claim streamed and is taken back');
+  assert.match(result.content, /character sheet/);
+  const looked = harness([calls('look_up_knowledge'), says(claim)]);
+  assert.equal((await runToolLoop(looked.conversation, looked.deps)).content, claim, 'she looked, so the claim stands');
+  const twice = harness([says(claim), says(claim)]);
+  assert.equal((await runToolLoop(twice.conversation, twice.deps)).content, claim, 'asked once, then taken at her word');
+  const cannot = harness([says(claim)], { canSearch: false });
+  assert.equal(cannot.resets, 0);
+});

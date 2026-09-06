@@ -83,7 +83,8 @@ export type WebDeps = {
    */
   expression(text: string): Promise<{ emotion: string | null; expression: string | null }>;
   /** The day so far, with ids so a reply can be rated, and any rating it already has. */
-  history(): { id?: string; role: string; content: string; at?: string; reaction?: string; note?: string; aside?: string }[];
+  /** The day as heard; `poll` marks a page refreshing itself, which is not the page being opened. */
+  history(poll?: boolean): { id?: string; role: string; content: string; at?: string; reaction?: string; note?: string; aside?: string }[];
   /**
    * What they thought of a reply of hers. A thumb lands on the message the
    * same way the desktop's does — into her prompt, onto her mood — and she
@@ -803,7 +804,7 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
   }
 
   if (req.method === 'GET' && path === '/api/chat') {
-    return json(res, 200, { messages: deps.history().slice(-60) });
+    return json(res, 200, { messages: deps.history(url.searchParams.get('poll') === '1').slice(-60) });
   }
 
   // Whether a call can be placed, on which engine, and how much of today's allowance is left.

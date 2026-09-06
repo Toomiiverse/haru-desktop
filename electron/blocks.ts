@@ -47,8 +47,8 @@ export type BlockSources = {
   sessions: SessionSummary[];
   /** Ongoing works the user consumes — the following list. */
   following?: { title: string; kind: string; progress?: number }[];
-  /** Today's agenda, for the working-state block. */
-  agenda?: { title: string; kind: string; done: boolean }[];
+  /** The list, for the working-state block: what is due today and what is coming up. */
+  agenda?: { title: string; kind: string; done: boolean; date?: string; time?: string | null; daysAway?: number }[];
   /**
    * Her own life, already framed: what she is into and what she thinks of it,
    * what she read in the small hours, what she wrote in her diary (tastes.ts,
@@ -319,10 +319,12 @@ export function resolveBlockValue(block: MemoryBlock, sources: BlockSources, sho
       for (const session of sources.sessions.slice(-3)) {
         lines.push(`- ${session.day}: ${wrap(session.summary, 160)}`);
       }
+      // Dated: a psychologist on Friday is not "today's agenda" on Sunday (2026-09-06).
       const agenda = (sources.agenda ?? []).filter(item => !item.done);
-      if (agenda.length) {
-        lines.push(`- Today's agenda: ${agenda.map(item => `${item.title} (${item.kind})`).join(', ')}`);
-      }
+      const today = agenda.filter(item => !Number.isFinite(item.daysAway) || (item.daysAway as number) <= 0);
+      const soon = agenda.filter(item => Number.isFinite(item.daysAway) && (item.daysAway as number) > 0 && (item.daysAway as number) <= 7);
+      if (today.length) lines.push(`- Today's agenda: ${today.map(item => `${item.title} (${item.kind}${item.time ? `, ${item.time}` : ''})`).join(', ')}`);
+      if (soon.length) lines.push(`- Coming up: ${soon.map(item => `${item.title} (${whenIs(item.date, item.daysAway as number)}${item.time ? ` ${item.time}` : ''})`).join(', ')}`);
       return lines.join('\n');
     }
     case 'her_own': {
@@ -518,4 +520,11 @@ export function formatMemoryBlocks(blocks: MemoryBlock[], sources: BlockSources,
   }
   const text = parts.length ? `<memory_blocks>\n${parts.join('\n')}\n</memory_blocks>` : '';
   return { text, cut };
+}
+/** "tomorrow", or the weekday and date, for a list item a few days out. */
+function whenIs(date: string | undefined, daysAway: number): string {
+  if (daysAway === 1) return 'tomorrow';
+  const [year, month, day] = (date ?? '').split('-').map(Number);
+  if (!year || !month || !day) return `in ${daysAway} days`;
+  return new Date(Date.UTC(year, month - 1, day)).toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' });
 }

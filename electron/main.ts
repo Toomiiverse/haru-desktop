@@ -27,7 +27,7 @@ import { looksLikeNothing, readListenConfig, transcribe, type ListenConfig } fro
 import { spokenVocabulary } from './vocabulary';
 import { herNameFrom } from './hername';
 import { apnsPayload, apnsSigner, readApnsConfig, readApnsDevices, sendApns, type ApnsDevice } from './apns';
-import { parseSecondThought, secondThoughtDelay, secondThoughtNote, wantsSecondThought, SECOND_THOUGHT_GAP_MS } from './secondthought';
+import { looksLikeAnEcho, parseSecondThought, secondThoughtDelay, secondThoughtNote, wantsSecondThought, SECOND_THOUGHT_GAP_MS } from './secondthought';
 import { applyRevoices, dueForRevoice, exchangesFrom as revoiceExchanges, grounded, parseRevoices, readRevoiceState, revoicePrompt, withRewrites, REVOICE_EVERY, type Revoice } from './revoice';
 import { decide, readEscalateConfig, type EscalateConfig } from './escalate';
 import { describeFailure, fromOpenAIReply, isOpenAIShaped, toOpenAIBody, DEFAULT_ENDPOINTS, type ChatTool, type Provider } from './provider';
@@ -48,7 +48,7 @@ import { INTERRUPTED_ASIDE, wakeAck } from './wake';
 import { acceptedOffer, promisedTitle, reminderAsk, reminderPromised, reminderSavedAside } from './remindme';
 import { describeWeather, readForecast, weatherEvents, weatherToDrawOn, weatherUrl, WEATHER_POLL_MS, type WeatherSample, disputesRain } from './weather';
 import { HANGING_COOLDOWN_MS, isClosing, leftHanging, saidTheyWereLeaving } from './hanging';
-import { awakeHoursSince, theyAreUp, awakeMinutesSince } from './awake';
+import { awakeHoursSince, theyAreUp, awakeMinutesSince, quietEndedAt } from './awake';
 import { describeTold, placeToldFrom, toldTheyAreBusy, toldStillStands, type Told, errandsToldFrom, errandToAskAfter, type Errand } from './told';
 import { markMentioned, upcomingToMention } from './upcoming';
 import { directionsAskFrom, directionsNote, dropRouteTalk, matchNamedPlace, startingPoint, withDirections, withoutMapsLinks, type DirectionsAsk, claimsTraffic, withoutTrafficDenials } from './directions';
@@ -94,7 +94,7 @@ import { attachmentsInPlay, describeAttached, READ_IT_ALL_PROMPT, readAttachment
 import { forOllama, withoutOldest } from './ollamaturns';
 import { seedEmoji, seedOffTheOrders } from './seed';
 import { pickToBringUp, REMEMBERED_PICKS } from './bored';
-import { grudgeInstruction, irritationAfterTally, nextGrudge, tallyDue, tallyInstruction, unanswered, type Said } from './grudge';
+import { grudgeInstruction, irritationAfterTally, nextGrudge, NOT_HELD_AGAINST_THEM, tallyDue, tallyInstruction, unanswered, type Said } from './grudge';
 import { groundedInstruction, placeQuery } from './places';
 import { daySaid, DEFAULT_BEDTIME_MINUTES, howTheDayWent, nightfallDue, sulkGrudge, sulkInstruction, sulkStillStands, type DayVerdict } from './nightfall';
 import { keepNights, nightNoteInstruction, nightsInstruction, nightsOn, nightsToDrawOn, pickInstruction, tidyPick, timeForSomething, type Night, nightToRaise } from './nightlife';
@@ -112,9 +112,9 @@ import { heldShots, keepShot, localShots, missingFrom, pruneShots, readShot, MAX
 import { DiscordLink, looksLikeUserId, readDiscordConfig, useOfChannel, type DiscordConfig } from './discord';
 import { reactedPrompt, readReaction, REACTION_COOLDOWN_MS } from './reacted';
 import { startWebServer, type WebDeps } from './webserver';
-import { asleepLine, dayAfter, decideTimesSystem, fallbackSchedule, goodnightDue, herAsleep, messagesWhileAsleep, parseDecidedTimes, readHerSleep, readHerSleepState, wakeIrritation, wakeNote, clockMinutes, type HerSleepSchedule } from './hersleep';
+import { asleepLine, dayAfter, decideTimesSystem, enoughKnocking, fallbackSchedule, foldAsleepExchanges, goodnightDue, herAsleep, isAsleepLine, messagesWhileAsleep, parseDecidedTimes, readHerSleep, readHerSleepState, sleepNote, sleepWindowOn, wakeIrritation, wakeNote, wokenAt, clockMinutes, KNOCK_WINDOW_MS, type HerSleepSchedule } from './hersleep';
 import { parseBalances, balanceWarning } from './venicebalance';
-import { advanceWant, dayNote, dayNoteInstruction, dayPassDue, dayPickInstruction, firstsNote, keepDay, markRecFollowed, noteRecommendation, pickRecommend, pickWantToWork, readDays, readRecs, readWants, readWeek, recDueForFollowUp, reconcileWants, wantInstruction, wantOutcome, wantQuery, wantsNote, weekKey, weekNote, weekReflectionInstruction, weekSummaryDue, WANT_ODDS, type HerDay, type HerWeek, type Rec, type Want } from './ownlife';
+import { advanceWant, dayNote, dayNoteInstruction, dayPassDue, dayPickInstruction, firstsNote, keepDay, markRecFollowed, noteRecommendation, pickRecommend, pickWantToWork, readDays, readRecs, readWants, readWeek, recDueForFollowUp, reconcileWants, recsAnsweredBy, recsOnDay, wantInstruction, wantOutcome, wantQuery, wantsNote, weekKey, weekNote, weekReflectionInstruction, weekSummaryDue, WANT_ODDS, type HerDay, type HerWeek, type Rec, type Want } from './ownlife';
 import { inQuietHours, newVapidKeys, pushRequest, readPushDevices, readPushPrefs, type PushDevice, type PushPrefs, nextNudgeDelay, NUDGE_GAP_MS, NUDGE_RETRY_MS, nudgeOverdue, PUSH_BREATHER_MS, tooSoonToPush, heldBack } from './push';
 import { CHECK_EVERY_MS, describeUpdate, progressStep, whyNotCheck, type UpdateState } from './updates';
 import { BREVITY, summonedLine } from './summoned';
@@ -583,7 +583,7 @@ function summariseSession(messages: { role?: string; content?: string }[], day: 
   // is summarised once, at the roll, over all of it — and re-summarising has to
   // be able to replace what the old behaviour left behind.
   if (!replace && getSessions().some(session => session.day === day)) return;
-  const said = messages
+  const said = foldAsleepExchanges(messages)
     .filter(message => message.role === 'user' || message.role === 'assistant')
     // Labelled `They:` and `Haru:` rather than `Them:` and `You:`. The note the
     // model is about to write goes into her own system prompt, where "you" is
@@ -1162,7 +1162,21 @@ function broadcastBeat(emotion: Emotion, gesture?: 'nod' | 'shake' | 'stare') {
 // screen — but the promise is returned so the voice can pick a clip that matches
 // the mood this line was actually said in. Callers that only want the expression
 // can go on ignoring it.
+/** A line classified lately, so the phone's face and the desk's mood share one call rather than queue two. */
+const recentClassifications = new Map<string, { at: number; result: Promise<Emotion | null> }>();
+const CLASSIFY_MEMO_MS = 2 * 60_000;
+
 function classifyEmotion(reply: string, config: ProviderConfig): Promise<Emotion | null> {
+  const key = reply.slice(0, 600);
+  const cached = recentClassifications.get(key);
+  if (cached && Date.now() - cached.at < CLASSIFY_MEMO_MS) return cached.result;
+  const result = classifyEmotionNow(reply, config);
+  recentClassifications.set(key, { at: Date.now(), result });
+  while (recentClassifications.size > 20) recentClassifications.delete(recentClassifications.keys().next().value!);
+  return result;
+}
+
+function classifyEmotionNow(reply: string, config: ProviderConfig): Promise<Emotion | null> {
   const system = classificationPrompt(getMood());
   return ollamaPost(
     [{ role: 'system', content: system }, { role: 'user', content: `The line she just said: "${reply.slice(0, 600)}"` }],
@@ -1342,7 +1356,7 @@ function spokenOn(day: string, today: string): { role?: string; content?: string
 function todaySoFar(limit = UNPROMPTED_CONTEXT_TURNS): string {
   const now = zonedNow(CHAT_TIMEZONE);
   const today = localDateKey(now);
-  const render = (spoken: { role?: string; content?: string }[]) => spoken.slice(-limit).map(message =>
+  const render = (spoken: { role?: string; content?: string; at?: string }[]) => foldAsleepExchanges(spoken).slice(-limit).map(message =>
     `${message.role === 'user' ? 'Them' : 'You'}: ${String(message.content ?? '').replace(/\s+/g, ' ').slice(0, 200)}`).join('\n');
 
   const todays = spokenOn(today, today);
@@ -1390,6 +1404,18 @@ function rightNow(): string {
   return `It is ${formatTimeOfDay(now.getHours(), now.getMinutes())}. Do not guess at the time or imply it is late unless that is actually what the clock says.`;
 }
 
+/**
+ * Her night and her things are in the her_own block every composer already
+ * gets; listed here as well they went into each brief twice (2026-09-06).
+ * What the block cannot know is what she has said tonight, so only the
+ * guard survives here.
+ */
+function nightRaisedAlready(recentLines: string[]): string {
+  const nights = nightsOn(getNights(), lastNightKey());
+  if (!nights.length) return '';
+  return nightsToDrawOn(nights, recentLines) ? '' : 'You have already told them about your night today — do not bring it up again unless they ask.';
+}
+
 function unpromptedContext(): string {
   // What they are partway through, on every path where she speaks first. Added
   // here rather than at each call site because there are four of them and the
@@ -1411,7 +1437,7 @@ function unpromptedContext(): string {
   // not repeat at one in the morning is what she said at half eleven.
   // Where their phone says they are rides along too: a nudge that knows they
   // are at the shops has something to needle with.
-  const parts = [summariseFollowing(getFollowing(), Date.now()), todaySoFar(), alreadySaidRecently(asides, CHAT_TIMEZONE, Date.now(), theirLastWordAt()), stillWaiting(), describeWhereabouts(getWhereabouts()), toldNow(), arrivalNote(), unansweredAsksNote(asides, CHAT_TIMEZONE, Date.now()), weatherToDrawOn(getWeather().last, weatherWhere(), asides.map(aside => aside.text), Date.now(), getWeather().disputedAt), nightsToDrawOn(nightsOn(getNights(), lastNightKey()), asides.map(aside => aside.text)), tastesInstruction(getInterests())].filter(Boolean);
+  const parts = [summariseFollowing(getFollowing(), Date.now()), todaySoFar(), alreadySaidRecently(asides, CHAT_TIMEZONE, Date.now(), theirLastWordAt()), stillWaiting(), describeWhereabouts(getWhereabouts()), toldNow(), arrivalNote(), unansweredAsksNote(asides, CHAT_TIMEZONE, Date.now()), weatherToDrawOn(getWeather().last, weatherWhere(), asides.map(aside => aside.text), Date.now(), getWeather().disputedAt), nightRaisedAlready(asides.map(aside => aside.text)), sleepNote(getHerSleepSchedule(), zonedNow(CHAT_TIMEZONE))].filter(Boolean);
   if (!parts.length) return '';
   // "Do not repeat a point you have already made" was read as "change the
   // subject": once a thread was answered and settled she abandoned the day
@@ -4065,7 +4091,10 @@ const memoryStore = createMemoryStore({
   character: getCharacter,
   profile: getProfile,
   following: () => Object.values(getFollowing()).map(work => ({ title: work.title, kind: work.kind, progress: work.progress })),
-  agenda: () => getKept().map(item => ({ title: item.title, kind: item.kind, done: item.done })),
+  agenda: () => {
+    const todayKey = localDateKey(zonedNow(CHAT_TIMEZONE));
+    return getKept().map(item => ({ title: item.title, kind: item.kind, done: item.done, date: item.date, time: item.time ?? null, daysAway: Math.round((Date.parse(`${item.date}T00:00:00Z`) - Date.parse(`${todayKey}T00:00:00Z`)) / 86400000) }));
+  },
   // Her own life in one place — the her_own block renders it, so the chat
   // prompt no longer scatters the same lines separately. What is nearest in
   // time first: last night, the day's own reading, the week — then the things
@@ -6300,6 +6329,7 @@ async function secondThought(repliedAt: number, input: { latest: string; reply: 
     ]);
     const line = parseSecondThought(oneEmojiAtMost(dropOverusedEmoji(dropRoleHeader(dropStageDirections(answer.content ?? '')), [input.reply], HER_EMOJI), HER_EMOJI));
     if (!line) { console.log('[followup] she had nothing to add'); return; }
+    if (looksLikeAnEcho(line, [...messages.map(message => message.content), input.latest])) { console.log(`[followup] dropped — it repeats what was said: ${JSON.stringify(line.slice(0, 80))}`); return; }
     if (lastUserActivityAt > repliedAt) { console.log('[followup] they answered while she was thinking — kept to herself'); return; }
     lastSecondThoughtAt = Date.now();
     lastInterjectionAt = Date.now();
@@ -6763,13 +6793,14 @@ const promptState = {
     vitals,
     pushback: store.get('pushback') as Pushback | undefined,
     grudge: getMood().grudge ?? 0,
-    ignoredToday: getMood().ignoredToday ?? 0,
+    ignoredToday: ignoredTodayNow(),
     // With a complaint about the arrival to make, the background line that says
     // the same thing calmly is left out: told both, she read the settled one and
     // said "you're home" as though that were fine.
     whereabouts: [turnedUp ? '' : describeWhereabouts(getWhereabouts()), toldNow()].filter(Boolean).join(' '),
     weather: describeWeather(getWeather().last, weatherWhere(), Date.now(), getWeather().disputedAt),
     body: describeBody(getBody(), Date.now(), clockAt, localDateKey(zonedNow(CHAT_TIMEZONE))),
+    herSleep: sleepNote(getHerSleepSchedule(), zonedNow(CHAT_TIMEZONE)),
     // So "what did you get up to last night?" has a true answer. Without this
     // the only record of her night is on disk and she invents one instead.
     nights: nightsInstruction(nightsOn(getNights(), lastNightKey())),
@@ -6801,7 +6832,7 @@ const promptState = {
     .map(turn => ({ role: turn.role, content: turn.content, ...(turn.at ? { at: turn.at } : {}), ...((turn as { id?: string }).id ? { id: (turn as { id?: string }).id } : {}) })) as OllamaMessage[];
   if (earlier.notes.length) console.log(`[ai] ${earlier.notes.length} note(s) — months and days — go in front of today's`);
   if (before.length) console.log(`[ai] ${before.length} turns from un-distilled days go in front of today's`);
-  const history = markTimeGaps(withoutTrafficDenials([...before, ...withoutStaleDenials(withFiles, hasItems)] as unknown as { role: string; content: string; at?: string }[], Boolean(directions?.route)), CHAT_TIMEZONE) as unknown as OllamaMessage[];
+  const history = markTimeGaps(withoutTrafficDenials([...before, ...withoutStaleDenials(foldAsleepExchanges(withFiles) as typeof withFiles, hasItems)] as unknown as { role: string; content: string; at?: string }[], Boolean(directions?.route)), CHAT_TIMEZONE) as unknown as OllamaMessage[];
   // Her replies as re-voiced by the background pass (revoice.ts), before the
   // other seeds: a rewrite that still ends on an order loses it like any other.
   const revoiced = applyRevoices(history as unknown as { id?: string; role: string; content: string }[], revoiceState().rewrites);
@@ -7586,7 +7617,7 @@ async function answerOnDiscord(text: string, channelId = '') {
     const today = checkInsOn(getCheckIns(), localDateKey(now));
     console.log(`[discord] check-in noted${anxiety ? ` (anxiety ${anxiety}/10)` : ''} — ${today.length} today`);
     // The note is kept even while she is asleep; only the answer waits.
-    if (asleep) return { reply: asleepReply(), ignored: false };
+    if (asleep) { const line = knockWhileAsleep(); if (line) return { reply: line, ignored: false }; }
     const character = getActiveCharacter();
     const system = [
       character.identity,
@@ -7604,7 +7635,7 @@ async function answerOnDiscord(text: string, channelId = '') {
     }
   }
   // Her night: unreachable until she wakes, Discord included.
-  if (asleep) return { reply: asleepReply(), ignored: false };
+  if (asleep) { const line = knockWhileAsleep(); if (line) return { reply: line, ignored: false }; }
   const history = (store.get('chat.messages') as { role: string; content: string; at?: string }[] ?? []);
   // The deterministic route earns its keep here first: a Discord notification
   // that turns out to be a greeting or a time check should be instant, and if
@@ -7659,10 +7690,10 @@ async function answerOnDiscordStreamed(text: string, channelId: string, onChunk:
   const started = Date.now();
   const config = store.get('ai.config') as ProviderConfig | undefined;
   if (!config?.model) return { reply: '', ignored: true };
-  if (herAsleepNow()) {
-    const line = asleepReply();
-    onChunk(line);
-    return { reply: line, ignored: false };
+  const door = herAsleepNow() ? knockWhileAsleep() : null;
+  if (door) {
+    onChunk(door);
+    return { reply: door, ignored: false };
   }
   // A check-in channel answers with a one-line quip through ollamaQuip, which
   // has no streaming of its own — the placeholder is already up, so the line is
@@ -8046,7 +8077,7 @@ function currentStanding() {
     irritation: mood.irritation,
     ego: mood.ego,
     grudge: mood.grudge ?? 0,
-    ignoredToday: mood.ignoredToday ?? 0,
+    ignoredToday: ignoredTodayNow(),
     lastMessageAt: mood.lastMessageAt,
     knownSince: days[0],
     daysTalked: new Set(days).size,
@@ -8271,10 +8302,10 @@ function apnsBearerFor(config: NonNullable<ReturnType<typeof readApnsConfig>>) {
   return (apnsBearer ??= apnsSigner(config));
 }
 
-async function pushThroughApple(kind: string, text: string, url: string, topic: string, eventId?: string): Promise<boolean> {
+async function pushThroughApple(kind: string, text: string, url: string, topic: string, eventId?: string): Promise<number> {
   const { config, devices } = getApns();
-  if (!config || !devices.length) return false;
-  let delivered = false;
+  if (!config || !devices.length) return 0;
+  let delivered = 0;
   const payload = apnsPayload(PUSH_TITLE, text.slice(0, 500), url, topic, { kind, eventId });
   for (const device of devices) {
     try {
@@ -8286,7 +8317,7 @@ async function pushThroughApple(kind: string, text: string, url: string, topic: 
         console.warn(`[push] Apple refused for "${device.name}": ${result.status} ${result.reason ?? ''}`.trim());
         if (result.status === 403) apnsBearer = null;
       } else {
-        delivered = true;
+        delivered += 1;
         console.log(`[push] delivered a ${kind} push through Apple to "${device.name.slice(0, 40)}"`);
         savePush({ lastReachedAt: Date.now() });
       }
@@ -8304,8 +8335,13 @@ async function pushToPhone(kind: 'random' | 'events' | 'system' | 'weather', tex
   // time a refusal for preferences or quiet hours reads as broken.
   if (!force && (!prefs[kind] || heldBack(prefs, zonedNow(CHAT_TIMEZONE)))) return false;
   // The native app, through Apple, alongside the page's Web Push.
-  let delivered = await pushThroughApple(kind, text, url, topic, eventId);
-  if (!devices.length) return delivered;
+  const apple = await pushThroughApple(kind, text, url, topic, eventId);
+  let delivered = apple > 0;
+  let web = 0;
+  // How many copies went out, in one line: two Apple tokens and three web
+  // subscriptions all named "iPhone" were each taking every push (2026-09-06).
+  const readout = () => console.log(`[push] ${JSON.stringify(text.slice(0, 40))} went to ${apple} Apple token(s) and ${web} web subscription(s)`);
+  if (!devices.length) { readout(); return delivered; }
   const keys = vapidKeys();
   const payload = JSON.stringify({ title: PUSH_TITLE, body: text.slice(0, 500), url, kind, eventId });
   for (const device of devices) {
@@ -8319,6 +8355,7 @@ async function pushToPhone(kind: 'random' | 'events' | 'system' | 'weather', tex
         console.warn(`[push] the push service refused for "${device.name}": ${response.status}`);
       } else {
         delivered = true;
+        web += 1;
         // Said, because a push that lands is otherwise indistinguishable in the
         // log from one that was never attempted — which is exactly the question
         // asked when a phone stays quiet.
@@ -8331,6 +8368,7 @@ async function pushToPhone(kind: 'random' | 'events' | 'system' | 'weather', tex
       console.warn('[push] could not send:', error instanceof Error ? error.message : error);
     }
   }
+  readout();
   return delivered;
 }
 
@@ -8346,6 +8384,7 @@ const PUSH_KIND: Partial<Record<AsideSource, 'random' | 'events' | 'system' | 'w
   weather: 'weather',
   journal: 'events',
   idle: 'random',
+  goodnight: 'random',
   system: 'system',
 };
 
@@ -8420,8 +8459,10 @@ const TALKING_RECENTLY_MS = 20 * 60_000;
  * stated too. One short line, because it is a notification.
  */
 async function boredNudge(): Promise<string | null> {
-  if (herAsleepNow()) return null;
-  const config = store.get('ai.config') as ProviderConfig | undefined;
+  if (herAsleepNow() || herHasSaidGoodnight()) return null;
+  // Her nudges' own brain (ai.nudge): the other unprompted composers already
+  // used it; this one was still on the local 9B, at 10–19 s a try (2026-09-06).
+  const config = nudgeBrain() ?? (store.get('ai.config') as ProviderConfig | undefined);
   if (!config?.model) return null;
   const mood = getMood();
   // Not speaking to them is still a message: the beat is kept, the line is cold.
@@ -8470,11 +8511,18 @@ async function boredNudge(): Promise<string | null> {
   // to try something new of hers. Either way it is her thing, so it sits with
   // `mine` rather than with a question about his day.
   let rec: { kind: 'followup'; interest: string; recId: string } | { kind: 'recommend'; interest: string; recId: null } | null = null;
+  // What he has already answered about her recommendations, before anything
+  // is chased or pushed again: "I have watched it already" settles one.
+  const dayOf = (iso: string) => localDateKey(zonedNow(CHAT_TIMEZONE, new Date(iso)));
+  const theirsToday = ((store.get('chat.messages') as { role: string; content?: string; at?: string }[] | undefined) ?? []).filter(message => message.role === 'user');
+  const settled = recsAnsweredBy(getRecs(), theirsToday);
+  if (settled.answered.length) { setRecs(settled.recs); console.log(`[push] they have already answered ${settled.answered.join(', ')} — no follow-up owed`); }
+  const answeredToday = getRecs().filter(candidate => candidate.answeredAt && dayOf(candidate.answeredAt) === todayKey).map(candidate => candidate.interest);
   if (!ignoring && !task && !mine) {
     const due = recDueForFollowUp(getRecs(), nowMs);
     if (due) rec = { kind: 'followup', interest: due.interest, recId: due.id };
     else {
-      const recommend = pickRecommend(getInterests(), getRecs(), nowMs);
+      const recommend = pickRecommend(getInterests(), getRecs(), nowMs, Math.random, recsOnDay(getRecs(), dayOf, todayKey).length);
       if (recommend) rec = { kind: 'recommend', interest: recommend, recId: null };
     }
   }
@@ -8488,6 +8536,10 @@ async function boredNudge(): Promise<string | null> {
   // of sleep is not eight hours of ignoring her.
   const quietHours = awakeHoursSince(mood.lastMessageAt, getPush().prefs, now);
   const quietMinutes = awakeMinutesSince(mood.lastMessageAt, getPush().prefs, now);
+  // The awake count is clamped at the quiet's end; when it is, "they last
+  // wrote N minutes ago" is false — he wrote at 02:24 and she was told 41 (2026-09-06).
+  const rawMinutes = Number.isFinite(Date.parse(mood.lastMessageAt ?? '')) ? Math.round((Date.now() - Date.parse(mood.lastMessageAt!)) / 60_000) : null;
+  const sinceTheNight = quietMinutes !== null && rawMinutes !== null && rawMinutes > quietMinutes + 5;
   const character = getActiveCharacter();
   const system = [
     character.identity,
@@ -8496,12 +8548,15 @@ async function boredNudge(): Promise<string | null> {
     character.style,
     moodInstruction(mood.irritation),
     egoInstruction(mood.ego),
-    grudgeInstruction(mood.grudge ?? 0, mood.ignoredToday ?? 0),
+    grudgeInstruction(mood.grudge ?? 0, ignoredTodayNow()),
     'They are away, reachable only as a notification on their phone. Nothing on their list needs you. You are messaging them first — nothing they said prompted this.',
+    answeredToday.length ? `They have told you they have already seen or played ${answeredToday.join(' and ')} — do not tell them to try it, and do not ask whether they did.` : '',
     // The exact length, or she invents one: told nothing under an hour she wrote
     // "playing ghost for an hour" and "10 minutes of silence" in the same line.
-    quietHours !== null && quietHours >= 1 ? `They have not said a word to you in ${quietHours} hour${quietHours === 1 ? '' : 's'}. That is the length of the silence — name no other.`
-      : quietMinutes !== null ? `They last wrote to you ${Math.max(1, quietMinutes)} minutes ago. That is the length of the silence — do not call it longer or shorter.` : '',
+    quietHours !== null && quietHours >= 1 ? `They have not said a word to you in ${quietHours} hour${quietHours === 1 ? '' : 's'}${sinceTheNight ? ' — their last message was last night, before the quiet' : ''}. That is the length of the silence — name no other.`
+      : quietMinutes !== null ? (sinceTheNight
+        ? `The night is over and they have been up for about ${Math.max(1, quietMinutes)} minutes without a word to you; their last message was last night. That is the length of the silence — ${Math.max(1, quietMinutes)} minutes, no more.`
+        : `They last wrote to you ${Math.max(1, quietMinutes)} minutes ago. That is the length of the silence — do not call it longer or shorter.`) : '',
     rec ? rec.kind === 'followup'
       ? `You told them to try ${rec.interest} a while ago and they never said whether they did. Ask them once, in your way — one line, no sulking, no guilt-trip, and then drop it.`
       : `Tell them to try ${rec.interest} — one of yours, and you actually rate it. One or two lines: you are telling them, not asking, and it is not an advert.`
@@ -8572,6 +8627,8 @@ type PesterOutcome = { how: 'sent' | 'refused' | 'later' | 'quiet'; inMs?: numbe
 
 async function pesterOnPush(): Promise<PesterOutcome> {
   if (herAsleepNow()) return { how: 'quiet' };
+  // "I'm logging off" at 21:18, then a nudge at 22:28 (2026-09-05): a goodnight is a goodnight.
+  if (herHasSaidGoodnight()) { console.log('[push] she has said goodnight — nothing more tonight'); return { how: 'quiet' }; }
   const { devices, prefs } = getPush();
   if (!webServer || !devices.length) return { how: 'quiet' };
   if (inQuietHours(prefs, zonedNow(CHAT_TIMEZONE))) return { how: 'quiet' };
@@ -8846,7 +8903,7 @@ async function tallyIgnored(config: ProviderConfig) {
 
 /** The lines of hers on a day that got nothing back, from what was heard that day (grudge.ts). */
 function countIgnored(day: string, heard: { role: string; at?: string }[]): Said[] {
-  const pushed = new Set(Object.keys(PUSH_KIND));
+  const pushed = new Set(Object.keys(PUSH_KIND).filter(source => !NOT_HELD_AGAINST_THEM.includes(source)));
   // Nothing before their first word of the day counts: they cannot ignore
   // what they have not been up to see.
   const firstWord = heard.filter(turn => turn.role === 'user' && turn.at).map(turn => Date.parse(turn.at!)).filter(Number.isFinite).sort((a, b) => a - b)[0] ?? 0;
@@ -8931,6 +8988,80 @@ function asleepReply(): string {
   return asleepLine(before + 1);
 }
 
+/** Their messages into her sleep lately, as clock times — the knocking at the door. */
+const knocks: number[] = [];
+
+/**
+ * The door, knocked on.
+ *
+ * Every message that lands while she sleeps is a knock; enough of them in a
+ * few minutes (hersleep.ts) and she gets up early, and the wake note says
+ * how. He sent "Wake up" five times in a row on 2026-09-06 and got the same
+ * line five times. Returns the door's line, or null when she is up now and
+ * the message is to be answered for real.
+ */
+function knockWhileAsleep(): string | null {
+  const now = Date.now();
+  knocks.push(now);
+  while (knocks.length && now - knocks[0] > KNOCK_WINDOW_MS) knocks.shift();
+  const schedule = getHerSleepSchedule();
+  if (schedule && enoughKnocking(knocks, now)) {
+    const woken = wokenAt(schedule, zonedNow(CHAT_TIMEZONE), knocks.length);
+    setHerSleepSchedule(woken);
+    console.log(`[her-sleep] woken early — ${knocks.length} messages in ${Math.max(1, Math.round((now - knocks[0]) / 60_000))} min; up at ${clockMinutes(woken.wake)}`);
+    knocks.length = 0;
+    return null;
+  }
+  return asleepReply();
+}
+
+/**
+ * Today's share of the grudge. The roll settles yesterday's count under
+ * yesterday's key; read without the key it was "today alone they ignored 4"
+ * at 06:40 on a morning nothing had been said yet (2026-09-06).
+ */
+function ignoredTodayNow(): number {
+  const mood = getMood();
+  return mood.talliedDay === localDateKey(zonedNow(CHAT_TIMEZONE)) ? mood.ignoredToday ?? 0 : 0;
+}
+
+/** Between her goodnight and her bedtime she has logged off: nothing more of her own tonight. */
+function herHasSaidGoodnight(): boolean {
+  const state = getHerSleepSchedule();
+  if (!state?.announced) return false;
+  const now = zonedNow(CHAT_TIMEZONE);
+  const window = sleepWindowOn(state, localDateKey(now));
+  if (!window) return false;
+  return now.getHours() * 60 + now.getMinutes() < window.fromMin;
+}
+
+/** When she got up this morning, on the real clock — or 0 when this is not the morning after a night. */
+function herWokeAtMs(): number {
+  const state = getHerSleepSchedule();
+  if (!state) return 0;
+  const now = zonedNow(CHAT_TIMEZONE);
+  if (localDateKey(now) !== dayAfter(state.day)) return 0;
+  const midnight = new Date(now.getTime());
+  midnight.setHours(0, 0, 0, 0);
+  const wokeAt = midnight.getTime() + state.wake * 60_000;
+  if (wokeAt > now.getTime()) return 0;
+  // A zoned date is shifted by a constant from real time; the difference carries over.
+  return Date.now() - (now.getTime() - wokeAt);
+}
+
+/** Why she takes them to be up right now, for the log. */
+function upBecause(): string {
+  const prefs = getPush().prefs;
+  const now = zonedNow(CHAT_TIMEZONE);
+  const since = quietEndedAt(prefs, now)?.getTime() ?? 0;
+  const log = store.getActivityLog();
+  const days = Object.keys(log).sort();
+  const latest = days.length ? (log[days[days.length - 1]] ?? []).map(entry => entry.until ?? entry.at).sort().at(-1) : undefined;
+  const signs: [string, string | undefined][] = [['they wrote', getMood().lastMessageAt], ['the page or app was opened', store.get('web.lastOpenedAt') as string | undefined], ['the desk was in use', latest]];
+  const seen = signs.filter(([, at]) => Number.isFinite(Date.parse(at ?? '')) && Date.parse(at!) >= since).sort((a, b) => Date.parse(b[1]!) - Date.parse(a[1]!))[0];
+  return seen ? `${seen[0]} at ${clockAt(Date.parse(seen[1]!))}` : `past their up-by (${prefs.upBy || 'unset'})`;
+}
+
 function herAsleepNow(): boolean {
   const prefs = getHerSleepPrefs();
   if (!prefs.enabled) return false;
@@ -8996,7 +9127,7 @@ async function maybeSayHerGoodnight(config: ProviderConfig) {
   ].filter(Boolean).join(' ');
   try {
     const line = await ollamaQuip(system, 'Say goodnight.', config);
-    if (line && interject(line, { source: 'idle' })) {
+    if (line && interject(line, { source: 'goodnight' })) {
       setHerSleepSchedule({ ...state, announced: true });
       console.log(`[her-sleep] said goodnight for a ${clockMinutes(state.bedtime)} bedtime`);
     }
@@ -9019,19 +9150,23 @@ function wakeNoteNow(): string {
   const todayKey = localDateKey(now);
   const wakeDay = dayAfter(state.day);
   if (todayKey > wakeDay) { setHerSleepSchedule({ ...state, wakeHandled: true }); return ''; }
-  if (todayKey !== wakeDay) return '';
-  if (now.getHours() * 60 + now.getMinutes() < state.wake) return '';
-  const heard = (store.get('chat.messages') as { role?: string; at?: string }[] | undefined) ?? [];
+  // Knocked awake before midnight, the note is owed on the decision day.
+  if (todayKey !== wakeDay && !(state.wokenEarly && todayKey === state.day)) return '';
+  if (todayKey === wakeDay && now.getHours() * 60 + now.getMinutes() < state.wake) return '';
+  // Both days the night touches, from the archive as well as the live day:
+  // the 05:00 roll files the small hours under yesterday, and read from the
+  // live day alone she woke on 2026-09-06 with no idea he had sent fourteen.
+  const heard = [...messagesOn(state.day), ...messagesOn(wakeDay)] as { role?: string; at?: string }[];
   const count = messagesWhileAsleep(state, heard, CHAT_TIMEZONE);
   setHerSleepSchedule({ ...state, wakeHandled: true });
-  if (count > 1) {
+  if (count > 1 || state.wokenEarly) {
     const mood = getMood();
-    const bump = wakeIrritation(count);
+    const bump = wakeIrritation(count) + (state.wokenEarly ? 1 : 0);
     const capped = Math.min(IGNORE_THRESHOLD - 1, mood.irritation + bump);
     setMood({ ...mood, irritation: Math.max(mood.irritation, capped) });
     console.log(`[her-sleep] woke to ${count} messages while she slept — irritation ${mood.irritation} -> ${capped}`);
   }
-  const note = wakeNote(count, clockMinutes(state.wake));
+  const note = wakeNote(count, clockMinutes(state.wake), state.wokenBy ?? 0);
   if (note) console.log(`[her-sleep] first reply after waking: ${count} messages overnight`);
   return note;
 }
@@ -9398,6 +9533,12 @@ async function writeDiary(config: ProviderConfig) {
     tastes: getInterests().filter(interest => interest.stance).map(interest => ({ name: interest.name, stance: interest.stance })),
     weather: describeWeather(getWeather().last, weatherWhere(), Date.now(), getWeather().disputedAt).split('. That is the actual')[0] || undefined,
     hisLastMessageAt: (() => { const last = messages.filter(message => message.role === 'user' && message.at).at(-1)?.at; return last ? clockAt(Date.parse(last)) : undefined; })(),
+    herSleep: (() => {
+      const schedule = getHerSleepSchedule();
+      if (!schedule || schedule.day !== due) return undefined;
+      const texted = messagesWhileAsleep(schedule, [...messagesOn(due), ...messagesOn(dayAfter(due))] as { role?: string; at?: string }[], CHAT_TIMEZONE);
+      return { bed: clockMinutes(schedule.bedtime), wake: clockMinutes(schedule.wake), texted, wokenEarly: Boolean(schedule.wokenEarly) };
+    })(),
   });
   try {
     // Her identity and what she knows of them, but not her style: the style is
@@ -9716,7 +9857,7 @@ async function checkNudgeFloor() {
   if (!webServer || !devices.length || !prefs.random) return;
   if (Date.now() < floorQuietUntil) return;
   // Two hours of silence from someone asleep is not two hours of silence.
-  if (!theyAreUpNow()) return;
+  if (!theyAreUpNow() || herHasSaidGoodnight()) return;
   const reached = lastReachedThem();
   if (!reached) {
     // First run since this existed: start the clock now rather than treating an
@@ -9724,8 +9865,11 @@ async function checkNudgeFloor() {
     savePush({ lastReachedAt: Date.now() });
     return;
   }
-  if (!nudgeOverdue(reached, Date.now(), prefs, zonedNow(CHAT_TIMEZONE))) return;
-  console.log(`[push] ${Math.round((Date.now() - reached) / 60_000)} min since anything of hers landed — going on the floor, not the beat`);
+  // From her own wake when that is later: a push before her night is not two
+  // hours of her silence, and counted that way it buzzed him ten minutes after she got up (2026-09-06).
+  const since = Math.max(reached, herWokeAtMs());
+  if (!nudgeOverdue(since, Date.now(), prefs, zonedNow(CHAT_TIMEZONE))) return;
+  console.log(`[push] ${Math.round((Date.now() - since) / 60_000)} min since anything of hers landed — going on the floor, not the beat (they are up: ${upBecause()})`);
   const outcome = await pesterOnPush();
   // Rebook the random beat from here, so the floor and the beat do not end up
   // firing on top of each other.
@@ -9824,9 +9968,10 @@ function webDeps(): WebDeps {
   const deps: WebDeps = {
     readAccess: getWebAccess,
     saveAccess: saveWebAccess,
-    history: () => {
-      // Opening the page is a sign of life: the morning waits for one.
-      store.set('web.lastOpenedAt', new Date().toISOString());
+    history: (poll = false) => {
+      // Opening the page is a sign of life: the morning waits for one. A poll
+      // from a page left open on the nightstand is not.
+      if (!poll) store.set('web.lastOpenedAt', new Date().toISOString());
       const messages = (store.get('chat.messages') as { id?: string; role: string; content: string; at?: string; reaction?: string; note?: string; aside?: string }[] | undefined) ?? [];
       // What she said to the phone on her own — a chase, a nudge, the weather
       // — is an aside, not a message, and the notification that carried it
@@ -9883,9 +10028,10 @@ function webDeps(): WebDeps {
       // Her night: unreachable until she wakes. The message is already on the
       // way into the transcript, and the away line stands in for a reply — no
       // model call, no voice, nothing composed.
-      if (herAsleepNow()) {
+      const door = herAsleepNow() ? knockWhileAsleep() : null;
+      if (door) {
         const trace = newTrace();
-        const line = asleepReply();
+        const line = door;
         sendToWindows('chat:fromPhone', { text, reply: line, ignored: false, ...(files.length ? { attachments: files } : {}) });
         console.log(`[web] asleep — not answering (${text.length} chars stored)`);
         trace.done('web', { tier: 'asleep', chars: line.length });
@@ -9930,9 +10076,10 @@ function webDeps(): WebDeps {
       const history = (store.get('chat.messages') as { role: string; content: string; at?: string }[] ?? []);
       const files = readAttachments(attachments).slice(0, 6);
       const voice = sentenceStreamer(onSentence);
-      if (herAsleepNow()) {
+      const door = herAsleepNow() ? knockWhileAsleep() : null;
+      if (door) {
         const trace = newTrace();
-        const line = asleepReply();
+        const line = door;
         onChunk(line);
         voice.feed(line);
         voice.flush();
@@ -10033,6 +10180,8 @@ function webDeps(): WebDeps {
     async expression(text) {
       const config = store.get('ai.config') as ProviderConfig | undefined;
       if (!config?.model) return { emotion: null, expression: null };
+      // The door's line is not hers to feel: thirteen seconds of classifier for "I'm asleep" (2026-09-06).
+      if (isAsleepLine(text)) return { emotion: 'sleepy', expression: faceForEmotion('sleepy', modelExpressions()) };
       try {
         const started = Date.now();
         const felt = await classifyEmotion(text, config);
@@ -11364,7 +11513,8 @@ app.whenReady().then(() => {
   ipcMain.handle('google:disconnect', () => { disconnectGoogle(store); broadcastGoogleStatus(); return googleStatus(store); });
   ipcMain.handle('google:sync', () => syncFromGoogle());
   ipcMain.handle('ai:send', (_e, messages: { role: string; content: string }[], config: ProviderConfig) => {
-    if (herAsleepNow()) return { content: asleepReply(), ignored: false, irritation: 0, ego: 0 };
+    const door = herAsleepNow() ? knockWhileAsleep() : null;
+    if (door) return { content: door, ignored: false, irritation: 0, ego: 0 };
     return ollamaChat(messages, config);
   });
   ipcMain.handle('ai:test', (_e, endpoint: string, provider?: string) => (isOpenAIShaped(provider)
@@ -11555,10 +11705,10 @@ app.whenReady().then(() => {
     if (!said) return { reply: '', ignored: false };
     const config = store.get('ai.config') as ProviderConfig | undefined;
     if (!config?.model) throw new Error('No model is set up.');
-    if (herAsleepNow()) {
-      const line = asleepReply();
-      sendToWindows('chat:fromPhone', { text: said, reply: line, ignored: false });
-      return { reply: line, ignored: false };
+    const door = herAsleepNow() ? knockWhileAsleep() : null;
+    if (door) {
+      sendToWindows('chat:fromPhone', { text: said, reply: door, ignored: false });
+      return { reply: door, ignored: false };
     }
 
     const messages = [...(store.get('chat.messages') as { role: string; content: string; at?: string }[] ?? []),

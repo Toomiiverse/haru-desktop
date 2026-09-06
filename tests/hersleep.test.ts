@@ -8,8 +8,7 @@ import {
   clockMinutes, clampBedtime, clampWake, dayAfter, daysBetween,
   decideTimesSystem, fallbackSchedule, goodnightDue, herAsleep,
   messagesWhileAsleep, parseDecidedTimes, readHerSleep, readHerSleepState,
-  sleepWindowOn, wakeIrritation, wakeNote,
-} from '../electron/hersleep';
+  sleepWindowOn, wakeIrritation, wakeNote, foldAsleepExchanges, isAsleepLine, enoughKnocking, wokenAt, sleepNote, KNOCK_COUNT, KNOCK_WINDOW_MS } from '../electron/hersleep';
 import { zonedNow } from '../electron/dates';
 
 const ZONE = 'Australia/Perth';
@@ -160,4 +159,78 @@ test('clockMinutes wraps an after-midnight bedtime into a clock you can read', (
   assert.equal(clockMinutes(23 * 60 + 30), '23:30');
   assert.equal(clockMinutes(24 * 60 + 30), '00:30');
   assert.equal(clockMinutes(8 * 60), '08:00');
+});
+test('the night\'s asleep exchanges fold into one turn of theirs, and her door lines go', () => {
+  const messages = [
+    { role: 'user', content: 'I’m gonna probably play some games to relax', at: '2026-09-05T12:57:28.000Z' },
+    { role: 'assistant', content: 'Finally, a sensible plan.', at: '2026-09-05T12:57:28.000Z' },
+    { role: 'user', content: 'Never played those games before', at: '2026-09-05T17:17:56.000Z' },
+    { role: 'assistant', content: ASLEEP_AWAY_LINE, at: '2026-09-05T17:17:56.000Z' },
+    { role: 'user', content: 'are you awake?', at: '2026-09-05T17:19:48.000Z' },
+    { role: 'assistant', content: asleepLine(3), at: '2026-09-05T17:19:48.000Z' },
+    { role: 'user', content: 'Wake up', at: '2026-09-05T17:22:41.000Z' },
+    { role: 'assistant', content: asleepLine(6), at: '2026-09-05T17:22:41.000Z' },
+    { role: 'user', content: 'I like the tone', at: '2026-09-05T18:23:57.000Z' },
+    { role: 'assistant', content: asleepLine(10), at: '2026-09-05T18:23:57.000Z' },
+    { role: 'user', content: 'Yeah right I was trying to message you last night', at: '2026-09-06T02:17:40.000Z' },
+    { role: 'assistant', content: 'Tch. I was asleep.', at: '2026-09-06T02:17:40.000Z' },
+  ];
+  const folded = foldAsleepExchanges(messages);
+  assert.equal(folded.length, 5);
+  assert.equal(folded[2].role, 'user');
+  assert.match(String(folded[2].content), /^\[4 messages sent while you were asleep, unread until you woke: "Never played those games before", "are you awake\?", "Wake up" and 1 more\]$/);
+  assert.equal(folded[2].at, '2026-09-05T17:17:56.000Z');
+  assert.equal(folded[3].content, 'Yeah right I was trying to message you last night');
+  assert.ok(!folded.some(m => m.role === 'assistant' && isAsleepLine(String(m.content))));
+  // A lone door line, its pair split by something, goes as well; a real reply stays.
+  assert.deepEqual(foldAsleepExchanges([{ role: 'assistant', content: ASLEEP_AWAY_LINE }, { role: 'assistant', content: 'Fine.' }]), [{ role: 'assistant', content: 'Fine.' }]);
+  assert.deepEqual(foldAsleepExchanges([]), []);
+  for (const n of [1, 3, 6, 10]) assert.ok(isAsleepLine(asleepLine(n)));
+  assert.ok(!isAsleepLine('I was asleep, so what?'));
+});
+
+test('enough knocking wakes her: the agreed count inside the window, not spread across the night', () => {
+  const t0 = Date.parse('2026-09-06T01:17:00.000Z');
+  const minute = 60_000;
+  assert.ok(!enoughKnocking([t0, t0 + minute, t0 + 2 * minute], t0 + 3 * minute), 'three is not enough');
+  assert.ok(enoughKnocking([t0, t0 + minute, t0 + 2 * minute, t0 + 3 * minute], t0 + 3 * minute));
+  assert.ok(!enoughKnocking([t0, t0 + 20 * minute, t0 + 40 * minute, t0 + 60 * minute], t0 + 60 * minute), 'four an hour apart is not banging on the door');
+  assert.equal(KNOCK_COUNT, 4);
+  assert.equal(KNOCK_WINDOW_MS, 10 * minute);
+});
+
+test('woken early, her wake moves to now, the window closes, and the note says how it happened', () => {
+  const s = schedule();
+  // 01:22 AWST on the morning after — inside her window until then.
+  const now = at('2026-09-04', 1, 22);
+  assert.ok(herAsleep(s, now));
+  const woken = wokenAt(s, now, 5);
+  assert.ok(!herAsleep(woken, now));
+  assert.equal(woken.wake, 82);
+  assert.equal(woken.wokenEarly, true);
+  assert.equal(woken.wokenBy, 5);
+  // The knocks before this minute are inside the window and still count.
+  assert.equal(messagesWhileAsleep(woken, [{ at: '2026-09-03T17:19:00.000Z', role: 'user' }, { at: '2026-09-03T17:30:00.000Z', role: 'user' }], ZONE), 1);
+  // Still on the decision day, before midnight: the wake comes out negative and the window math holds.
+  const late = at('2026-09-03', 23, 50);
+  const earlyWoken = wokenAt(s, late, 4);
+  assert.ok(!herAsleep(earlyWoken, late));
+  assert.equal(earlyWoken.wake, 23 * 60 + 50 - 1440);
+  assert.match(wakeNote(3, '01:22', 5), /banged on your door — 5 messages/);
+  assert.match(wakeNote(3, '01:22', 5), /01:22/);
+  assert.equal(wakeNote(1, '08:00', 0), '');
+  const read = readHerSleepState({ ...woken });
+  assert.equal(read?.wokenEarly, true);
+  assert.equal(read?.wokenBy, 5);
+  assert.equal(readHerSleepState({ ...s })?.wokenEarly, undefined);
+});
+
+test('the sleep note is for the day after, once she is up, and says when she slept', () => {
+  const s = schedule();
+  assert.equal(sleepNote(null, at('2026-09-04', 10, 0)), '');
+  assert.equal(sleepNote(s, at('2026-09-03', 20, 0)), '', 'not before the night');
+  assert.equal(sleepNote(s, at('2026-09-04', 3, 0)), '', 'not while she is asleep');
+  assert.match(sleepNote(s, at('2026-09-04', 10, 0)), /in bed at 23:30, up at 08:00/);
+  assert.equal(sleepNote(s, at('2026-09-05', 10, 0)), '', 'not the day after that');
+  assert.match(sleepNote({ ...s, wokenEarly: true }, at('2026-09-04', 10, 0)), /their messages that got you up/);
 });

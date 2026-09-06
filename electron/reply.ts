@@ -710,8 +710,38 @@ export function answersThePrompt(reply: string, priming: string): boolean {
   return quoted.test(reply);
 }
 
-const NUMBER_WORDS: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19, twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60 };
-const STATED_MINUTES = /\b(?:(?:about|around|roughly|nearly|almost|over|a good)\s+)?(\d{1,3}|(?:twenty|thirty|forty|fifty)(?:[- ](?:one|two|three|four|five|six|seven|eight|nine))?|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|sixty)\s+(?:minutes?|mins?)\b/gi;
+const NUMBER_WORDS: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19, twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60, seventy: 70, eighty: 80, ninety: 90, hundred: 100 };
+const UNITS = '(?:one|two|three|four|five|six|seven|eight|nine)';
+const TEENS = '(?:ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen)';
+const TENS = '(?:twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)';
+const BELOW_HUNDRED = `(?:${TENS}(?:[- ]${UNITS})?|${TEENS}|${UNITS})`;
+// Digits, or words up to nine hundred and ninety-nine — "three hundred and
+// fifty-four minutes" was said on 2026-09-05 and read as no number at all.
+const NUMBER = `(?:\\d{1,3}|${UNITS} hundred(?: and ${BELOW_HUNDRED}| ${BELOW_HUNDRED})?|${BELOW_HUNDRED})`;
+const ABOUT = '(?:(?:about|around|roughly|nearly|almost|over|a good)\\s+)?';
+// One pass over both shapes — "six hours and forty-eight minutes" and "354
+// minutes" — because a minutes pass after an hours pass rewrote the hours
+// pass's own "22 minutes".
+const STATED_SPAN = new RegExp(`\\b${ABOUT}(?:(${NUMBER})\\s+(?:hours?|hrs?)(?:\\s+(?:and\\s+)?(${NUMBER})\\s+(?:minutes?|mins?))?|(${NUMBER})\\s+(?:minutes?|mins?))\\b`, 'gi');
+
+function numberFrom(said: string): number {
+  if (/^\d+$/.test(said)) return Number(said);
+  let total = 0;
+  for (const word of said.toLowerCase().replace(/\band\b/g, ' ').split(/[- ]+/).filter(Boolean)) {
+    const value = NUMBER_WORDS[word];
+    if (value === undefined) continue;
+    total = value === 100 ? Math.max(total, 1) * 100 : total + value;
+  }
+  return total;
+}
+
+/** A span in the unit family she used: minutes stay minutes; hours keep their minutes beside them. */
+function spanInHours(minutes: number): string {
+  if (minutes < 60) return `${minutes} minutes`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return `${hours} hour${hours === 1 ? '' : 's'}${rest ? ` and ${rest} minutes` : ''}`;
+}
 
 /**
  * The minutes of silence she states, made the real ones. Told "27 minutes
@@ -719,10 +749,12 @@ const STATED_MINUTES = /\b(?:(?:about|around|roughly|nearly|almost|over|a good)\
  * Only the minutes are touched; the rest of the line is hers.
  */
 export function fixStatedMinutes(line: string, minutes: number): string {
-  return line.replace(STATED_MINUTES, (whole, said: string) => {
-    const words = said.toLowerCase().split(/[- ]/);
-    const value = /^\d+$/.test(said) ? Number(said) : words.reduce((sum, word) => sum + (NUMBER_WORDS[word] ?? 0), 0);
-    return value === minutes ? whole : `${minutes} minutes`;
+  return line.replace(STATED_SPAN, (whole, hours?: string, rest?: string, plain?: string) => {
+    if (hours) {
+      const value = numberFrom(hours) * 60 + (rest ? numberFrom(rest) : 0);
+      return value === minutes ? whole : spanInHours(minutes);
+    }
+    return numberFrom(plain ?? '') === minutes ? whole : `${minutes} minutes`;
   });
 }
 
@@ -838,6 +870,18 @@ export function dropClosingOrder(reply: string): string {
  * certain without checking.
  */
 const DENIES_IT_EXISTS = /\b(?:does(?:n'?t| not) exist|do(?:n'?t| not) exist|there(?:'?s| is) no such\b|no such (?:thing|card|product|model|game|show)\b|is ?n'?t (?:a )?(?:real|thing)\b|not a real\b|never (?:been )?announced|has(?:n'?t| not) (?:even )?(?:been )?announced|you'?re (?:hallucinating|making (?:that|it) up)|made (?:that|it) up|that'?s not a (?:thing|real)\b)/i;
+
+/**
+ * Says she looked, without having looked. "I checked — nothing with 'Haru
+ * notes' in it" went out on a turn where no tool ran at all (2026-09-06); the
+ * note was there. The claim is the tell, and the loop can press the lookup
+ * on her once (toolloop.ts), as it does for a denial.
+ */
+const CLAIMS_CHECKED = /\b(?:I(?:'ve| have| just)? (?:checked|looked(?: it)? up|searched|had a look|went through|dug through|scanned|combed through)|(?:checked|searched|looked through) (?:your|the|my) (?:vault|notes|files|knowledge|records|docs|documents|library))\b/i;
+
+export function claimsChecked(reply: string): boolean {
+  return CLAIMS_CHECKED.test((reply ?? '').replace(/[‘’]/g, "'"));
+}
 
 export function deniesItExists(reply: string): boolean {
   return DENIES_IT_EXISTS.test((reply ?? '').replace(/[‘’]/g, "'"));

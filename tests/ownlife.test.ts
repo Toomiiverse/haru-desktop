@@ -9,8 +9,7 @@ import {
   firstsNote, keepDay, markRecFollowed, noteRecommendation, pickRecommend,
   pickWantToWork, readDays, readRecs, readWants, reconcileWants,
   recDueForFollowUp, wantInstruction, wantOutcome, wantQuery, wantsNote,
-  weekKey, weekNote, weekReflectionInstruction, weekSummaryDue,
-} from '../electron/ownlife';
+  weekKey, weekNote, weekReflectionInstruction, weekSummaryDue, recsAnsweredBy, recsOnDay, REC_MAX_PER_DAY } from '../electron/ownlife';
 
 const at = (day: string, hour: number, minute = 0) => {
   const [y, m, d] = day.split('-').map(Number);
@@ -187,4 +186,32 @@ test('the reflection asks for her own voice, first person, no list', () => {
   const instruction = weekReflectionInstruction('Read: …');
   assert.match(instruction, /Sum it up in your own voice/);
   assert.match(instruction, /no questions, no list/);
+});
+test('a recommendation he answers in conversation is settled, and the day caps how many go out', () => {
+  const recs = [
+    { id: 'a', interest: 'Cyberpunk: Edgerunners', at: '2026-09-06T03:34:15.000Z', followed: false },
+    { id: 'b', interest: 'Control: Ultimate Edition', at: '2026-09-06T04:40:51.000Z', followed: false },
+  ];
+  const theirs = [
+    { content: 'I have watched it already. What do you think of the ending?', at: '2026-09-06T03:34:50.000Z' },
+    { content: 'I think I’ve re-watched Edgerunners five times now', at: '2026-09-06T03:35:36.000Z' },
+    { content: 'Still stuck at work. 30 minutes to go though!', at: '2026-09-06T08:00:33.000Z' },
+  ];
+  const { recs: settled, answered } = recsAnsweredBy(recs, theirs);
+  assert.deepEqual(answered, ['Cyberpunk: Edgerunners']);
+  assert.equal(settled[0].followed, true);
+  assert.equal(settled[0].answeredAt, '2026-09-06T03:35:36.000Z');
+  assert.equal(settled[1].followed, false, 'nothing of his named Control');
+  // "Wtf us control 💀" — a word of the name after the recommendation is him answering it.
+  assert.deepEqual(recsAnsweredBy(settled, [{ content: 'Wtf us control 💀', at: '2026-09-06T04:42:06.000Z' }]).answered, ['Control: Ultimate Edition']);
+  // A message from before the recommendation does not count.
+  const earlier = recsAnsweredBy(recs, [{ content: 'edgerunners is great', at: '2026-09-06T01:00:00.000Z' }]);
+  assert.deepEqual(earlier.answered, []);
+  // The day's cap.
+  const dayOf = (iso: string) => iso.slice(0, 10);
+  assert.equal(recsOnDay(recs, dayOf, '2026-09-06').length, 2);
+  assert.equal(REC_MAX_PER_DAY, 2);
+  const interests = [{ name: 'Hades', stance: 'good' }];
+  assert.equal(pickRecommend(interests, [], Date.now(), () => 0, 2), null, 'two already today: no third');
+  assert.equal(pickRecommend(interests, [], Date.now(), () => 0, 1), 'Hades');
 });

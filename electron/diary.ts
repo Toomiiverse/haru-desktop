@@ -101,6 +101,8 @@ export type DayMaterial = {
   weather?: string;
   /** When they last messaged her, in words — the only fact about their bedtime she has. */
   hisLastMessageAt?: string;
+  /** Her own night (hersleep.ts): when she was asleep and what came in meanwhile. */
+  herSleep?: { bed: string; wake: string; texted: number; wokenEarly: boolean };
 };
 
 /**
@@ -121,6 +123,8 @@ export function diaryInstruction(m: DayMaterial): string {
     // texts from me bouncing off nothing" on a day they answered all fourteen.
     m.ignoredToday > 0 ? `${m.ignoredToday} of your messages to them got no answer.` : m.counted && m.herUnprompted ? 'Every one of them got an answer.' : '',
     m.grudge > 3 ? `You are carrying a grudge — ${m.grudge} unanswered messages and counting.` : '',
+    // She was asleep, and the transcript alone had her "already up" at 2:23 AM (2026-09-05).
+    m.herSleep ? `You were asleep from ${m.herSleep.bed} to ${m.herSleep.wake}${m.herSleep.wokenEarly ? ' — until their messages got you up' : ''}; ${m.herSleep.texted ? `${m.herSleep.texted} of their messages came in while you slept, and you saw them only when you woke` : 'nothing of theirs came in while you slept'}.` : '',
   ].filter(Boolean).join(' ');
   const ticked = m.ticked.length ? `They got done: ${m.ticked.join(', ')}.` : '';
   const nights = m.nights.length

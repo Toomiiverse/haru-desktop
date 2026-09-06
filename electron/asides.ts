@@ -37,6 +37,7 @@ export type AsideSource =
   | 'weather'     // the weather turning where they are
   | 'upcoming'    // something on the calendar, an hour or a quarter of an hour out
   | 'followup'    // a beat after her own reply, the thing she left out
+  | 'goodnight'   // turning in for the night, at her own hour (hersleep.ts)
   | 'other';
 
 export type Aside = {
@@ -121,7 +122,7 @@ export const ASIDE_DAYS = 7;
 // and 'upcoming' were missing, which is three of the seven sources that reach
 // the phone — the evening tally counted none of them, so being left on read
 // after "you left me hanging" cost them nothing.
-const SOURCES: AsideSource[] = ['screen', 'screenshot', 'activity', 'fullscreen', 'reminder', 'idle', 'journal', 'page', 'poke', 'kept', 'system', 'hanging', 'weather', 'upcoming', 'other', 'followup'];
+const SOURCES: AsideSource[] = ['screen', 'screenshot', 'activity', 'fullscreen', 'reminder', 'idle', 'journal', 'page', 'poke', 'kept', 'system', 'hanging', 'weather', 'upcoming', 'other', 'followup', 'goodnight'];
 
 export function readAsides(saved: unknown): Aside[] {
   if (!Array.isArray(saved)) return [];

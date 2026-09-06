@@ -975,9 +975,9 @@ function acts(m,isLast){
     +'</span></div>';
 }
 
-async function load(){
+async function load(poll){
   try{
-    const {messages}=await get('/api/chat');
+    const {messages}=await get(poll?'/api/chat?poll=1':'/api/chat');
     bubbles(messages); showingSaved=false;
     // Today, as last seen: painted at once next time, and read when she is out of reach.
     window.haruKeep.set('today',{savedAt:Date.now(),messages});
@@ -1015,7 +1015,7 @@ window.haruNet.onChange(s=>{
   $('net').hidden=s==='on';
   $('net').textContent=s==='off'?'Offline':'Out of reach';
   document.querySelector('.topbar').classList.toggle('off',s!=='on');
-  if(s==='on'&&wasOut) void load();
+  if(s==='on'&&wasOut) void load(true);
   wasOut=s!=='on';
 });
 
@@ -1547,11 +1547,12 @@ async function askIfSheHasSomethingToSay(){
   }catch(r){ if(r&&r.status===401) location.reload(); }
 }
 setTimeout(askIfSheHasSomethingToSay,1500);
-document.addEventListener('visibilitychange',()=>{ if(!document.hidden){ refreshIfIdle(); askIfSheHasSomethingToSay(); } });
-window.addEventListener('pageshow',e=>{ if(e.persisted) refreshIfIdle(); });
+document.addEventListener('visibilitychange',()=>{ if(!document.hidden){ refreshIfIdle(true); askIfSheHasSomethingToSay(); } });
+window.addEventListener('pageshow',e=>{ if(e.persisted) refreshIfIdle(true); });
 // Re-read the day unless she is mid-answer, when the stream on screen is newer
 // than anything the server would hand back.
-function refreshIfIdle(){ if($('cb').disabled) return; void load(); }
+// opened: the page came back in front of them; anything else is the page checking on its own.
+function refreshIfIdle(opened){ if($('cb').disabled) return; void load(!opened); }
 // Four minutes: she is being carried around, not watched. Anything faster reads
 // as pestering, and the spacing on her side would refuse it anyway.
 setInterval(askIfSheHasSomethingToSay,4*60_000);

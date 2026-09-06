@@ -11,7 +11,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { answersThePrompt, CUE_NOTE, isCue, stageNote, claimsDesktopAction, claimsTickOff, dropInventedContact, dropInventedScreenTalk, dropRepeatedAgendaMentions, dropRepeatedParagraphs, dropRoleHeader, dropStageDirections, dropTackedOnParagraphs, readsLikeAssistant, dropRepeatedOpener, dropEchoOpener, dropRepeatedSentences, fixStatedClock, fixStatedReminderTime, fixStatedMinutes, deniesItExists, thinksAloud, dropThinkingAloud } from '../electron/reply';
+import { answersThePrompt, CUE_NOTE, isCue, stageNote, claimsDesktopAction, claimsTickOff, dropInventedContact, dropInventedScreenTalk, dropRepeatedAgendaMentions, dropRepeatedParagraphs, dropRoleHeader, dropStageDirections, dropTackedOnParagraphs, readsLikeAssistant, dropRepeatedOpener, dropEchoOpener, dropRepeatedSentences, fixStatedClock, fixStatedReminderTime, fixStatedMinutes, deniesItExists, claimsChecked, thinksAloud, dropThinkingAloud } from '../electron/reply';
 
 // -- claiming to have touched the machine -------------------------------------
 
@@ -428,6 +428,17 @@ test('the minutes of silence she states become the real ones, digits or words; a
   assert.equal(fixStatedMinutes('No minutes mentioned here.', 27), 'No minutes mentioned here.');
 });
 
+test('hours she states, and numbers past a hundred, are made the real span too', () => {
+  // Said on 2026-09-06 at 08:22, told "2 hours" (142 minutes since the quiet ended).
+  assert.equal(fixStatedMinutes('Six hours and forty-eight minutes of silence. You’re worse than a cordless drill.', 142), '2 hours and 22 minutes of silence. You’re worse than a cordless drill.');
+  // Said on 2026-09-05 at 20:00.
+  assert.equal(fixStatedMinutes('Three hundred and fifty-four minutes of radio silence.', 41), '41 minutes of radio silence.');
+  assert.equal(fixStatedMinutes('3 hours of nothing.', 41), '41 minutes of nothing.');
+  assert.equal(fixStatedMinutes('2 hours of nothing.', 120), '2 hours of nothing.');
+  assert.equal(fixStatedMinutes('an hour and a half, easily', 90), 'an hour and a half, easily', 'articles are left alone — "an hour" is idiom as often as a count');
+  assert.equal(fixStatedMinutes('354 minutes.', 354), '354 minutes.');
+});
+
 test('the paragraph ceiling is the caller\'s: four for a hosted brain, two by default', () => {
   const five = ['One.', 'Two.', 'Three.', 'Four.', 'Five.'].join('\n\n');
   assert.equal(dropTackedOnParagraphs(five, false), 'One.\n\nTwo.');
@@ -526,3 +537,12 @@ test('her own words are left alone, third parties and lists included', () => {
   }
 });
 
+
+test('a claim to have checked is caught; an honest "I have not looked" is not', () => {
+  assert.ok(claimsChecked('I checked — nothing with "Haru notes" in it. Could be there under something else.'));
+  assert.ok(claimsChecked('I looked it up and there is nothing on the RX 6750 XT in your notes.'));
+  assert.ok(claimsChecked('I’ve searched your vault. No PC build notes.'));
+  assert.ok(!claimsChecked('I have not looked yet — give me a second.'));
+  assert.ok(!claimsChecked('You should check the vault yourself.'));
+  assert.ok(!claimsChecked('Checked out, then. Go to bed.'));
+});

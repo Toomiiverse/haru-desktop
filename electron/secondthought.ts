@@ -30,7 +30,7 @@ export function wantsSecondThought(input: { hers: boolean; ranting: boolean; rep
 
 export function secondThoughtNote(secondsAgo: number): string {
   const ago = secondsAgo < 75 ? 'about a minute' : `about ${Math.round(secondsAgo / 60)} minutes`;
-  return `You said the last thing above ${ago} ago and they have not answered. This is not a reply to anything — it is you, a beat later, adding to what you said if there is something worth adding: the point you left out, the thing you actually want to ask them about it, or something of your own you want to bring up. One to three lines, as a new message, no greeting and no recap of what you already said. If there is nothing worth adding, answer with a single dash and nothing else.`;
+  return `You said the last thing above ${ago} ago and they have not answered. This is not a reply to anything — it is you, a beat later, adding to what you said if there is something worth adding: the point you left out, the thing you actually want to ask them about it, or something of your own you want to bring up. One to three lines, as a new message, no greeting and no recap of what you already said. Never repeat what they said or what you said — a line that is already in the conversation is not a new message. If there is nothing worth adding, answer with a single dash and nothing else.`;
 }
 
 /** What she said, or null when she chose not to. */
@@ -41,4 +41,40 @@ export function parseSecondThought(text: string): string | null {
   line = line.split(/\n{2,}/)[0].trim();
   if (line.length < 8 || line.length > 600) return null;
   return line;
+}
+
+/**
+ * Not an echo.
+ *
+ * Asked for the thing she left out, the model has twice handed back a line
+ * already in the conversation: once his last message word for word ("That's
+ * fair enough - sounds like you're really enjoying chainsaw man…" went out
+ * as hers and he answered "I'm not reading it - you are", 2026-09-06), once a
+ * paragraph of her own reply with an asterisk in front. Either reads as her
+ * repeating what was just said. Compared loosely — case, punctuation and
+ * markup do not count — and a line whose words are mostly in a recent one is
+ * that line.
+ */
+export function looksLikeAnEcho(line: string, recent: string[]): boolean {
+  const flat = flatten(line);
+  if (!flat) return true;
+  const contains = (whole: string, part: string) => part.split(' ').length >= 4 && whole.includes(part);
+  return recent.some(text => {
+    const other = flatten(text);
+    if (!other) return false;
+    if (flat === other || contains(other, flat) || contains(flat, other)) return true;
+    return sharedWords(flat, other) >= 0.8;
+  });
+}
+
+function flatten(text: string): string {
+  return (text ?? '').toLowerCase().replace(/[*_`~>#"'“”‘’]/g, '').replace(/[^\p{L}\p{N}\s]/gu, ' ').replace(/\s+/g, ' ').trim();
+}
+
+/** The share of the line's words the other text also has; short lines only count when identical. */
+function sharedWords(line: string, other: string): number {
+  const words = line.split(' ').filter(Boolean);
+  if (words.length < 4) return line === other ? 1 : 0;
+  const theirs = new Set(other.split(' '));
+  return words.filter(word => theirs.has(word)).length / words.length;
 }

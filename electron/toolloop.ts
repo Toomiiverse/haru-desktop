@@ -24,7 +24,7 @@
 // reported rather than looped on.
 
 import type { ChatMessage, ToolCall } from './provider';
-import { claimsDesktopAction, claimsTickOff, readsLikeAssistant, deniesItExists, thinksAloud, dropThinkingAloud } from './reply';
+import { claimsDesktopAction, claimsTickOff, readsLikeAssistant, deniesItExists, thinksAloud, dropThinkingAloud, claimsChecked } from './reply';
 
 /** How many rounds a single reply may spend before it has to settle. */
 export const MAX_TOOL_ROUNDS = 4;
@@ -146,6 +146,7 @@ export async function runToolLoop(conversation: ChatMessage[], deps: ToolLoopDep
   let claimRetried = false;
   let tickRetried = false;
   let existenceRetried = false;
+  let checkRetried = false;
   let voiceRetried = false;
 
   for (let round = 0; round < maxRounds; round++) {
@@ -264,6 +265,22 @@ export async function runToolLoop(conversation: ChatMessage[], deps: ToolLoopDep
       conversation.push({
         role: 'user',
         content: 'You just said that is ticked off, but it is still on their list — saying so does not change it, calling complete_kept_item does. Call it now for the task you meant. If you did not mean any of the ones actually on the list, say plainly that it is not ticked off rather than implying it is.',
+      });
+      continue;
+    }
+
+    // Says she looked, without having looked. "I checked — nothing with 'Haru
+    // notes' in it" went out on a turn where no tool ran (2026-09-06); the
+    // note was there. Once, and only when nothing at all was called: a claim
+    // after a real lookup is a report.
+    if (claimsChecked(message.content) && !checkRetried && !ran.size && deps.canSearch()) {
+      checkRetried = true;
+      resetStream();
+      warn('[ai] she said she checked without calling anything — asking her to look');
+      conversation.push(message);
+      conversation.push({
+        role: 'user',
+        content: 'You just said you checked, but you did not call anything — nothing was looked up. Call look_up_knowledge or search_web now for what they asked, and answer from what comes back. If you are not going to look, say plainly that you have not checked rather than implying you did.',
       });
       continue;
     }

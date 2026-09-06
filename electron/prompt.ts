@@ -198,6 +198,8 @@ export type PromptState = {
   weather?: string;
   /** How they slept and how far they have walked, from the phone, when it says so. */
   body?: string;
+  /** When she slept last night, in words (hersleep.ts sleepNote), or nothing. */
+  herSleep?: string;
   /** The way somewhere, when they asked for it: what was found and what the app will attach (directions.ts). */
   directionsNote?: string;
 };
@@ -263,6 +265,7 @@ function systemBlocks(state: PromptState, away = false): SystemBlock[] {
     { stable: false, text: state.whereabouts ?? '' },
     { stable: false, text: state.weather ?? '' },
     { stable: false, text: state.body ?? '' },
+    { stable: false, text: state.herSleep ?? '' },
     { stable: false, text: state.recalled ?? '' },
     // Query-selected memory, rendered per message (profileSummary in main.ts):
     // the human block shows what is relevant to this turn, so this is the
