@@ -113,7 +113,7 @@ import { heldShots, keepShot, localShots, missingFrom, pruneShots, readShot, MAX
 import { DiscordLink, looksLikeUserId, readDiscordConfig, useOfChannel, type DiscordConfig } from './discord';
 import { reactedPrompt, readReaction, REACTION_COOLDOWN_MS } from './reacted';
 import { startWebServer, type WebDeps } from './webserver';
-import { asleepLine, backToSleep, dayAfter, decideTimesSystem, dozeOffDue, enoughKnocking, fallbackSchedule, foldAsleepExchanges, goodnightDue, groggyFor, groggyNote, herAsleep, isAsleepLine, knockedAwake, messagesWhileAsleep, parseDecidedTimes, pointlessWake, pointlessWakesLately, readHerSleep, readHerSleepState, readWakes, sleepNote, sleepWindowOn, wakeIrritation, wakeNote, wokenAt, clockMinutes, BLOCKED_LINE, BLOCK_AFTER_POINTLESS, KNOCK_WINDOW_MS, WAKES_KEPT, type HerSleepSchedule, type Wake } from './hersleep';
+import { asleepLine, backToSleep, dayAfter, decideTimesSystem, dozeOffDue, enoughKnocking, fallbackSchedule, foldAsleepExchanges, goodnightDue, groggyFor, groggyNote, herAsleep, isAsleepLine, knockedAwake, messagesWhileAsleep, parseDecidedTimes, pointlessWake, pointlessWakesLately, readsAsGoodnight, readHerSleep, readHerSleepState, readWakes, sleepNote, sleepWindowOn, wakeIrritation, wakeNote, wokenAt, clockMinutes, BLOCKED_LINE, BLOCK_AFTER_POINTLESS, KNOCK_WINDOW_MS, WAKES_KEPT, type HerSleepSchedule, type Wake } from './hersleep';
 import { parseBalances, balanceWarning } from './venicebalance';
 import { advanceWant, dayNote, dayNoteInstruction, dayPassDue, dayPickInstruction, firstsNote, keepDay, markRecFollowed, noteRecommendation, pickRecommend, pickWantToWork, readDays, readRecs, readWants, readWeek, recDueForFollowUp, reconcileWants, recsAnsweredBy, recsOnDay, wantInstruction, wantOutcome, wantQuery, wantsNote, weekKey, weekNote, weekReflectionInstruction, weekSummaryDue, WANT_ODDS, type HerDay, type HerWeek, type Rec, type Want } from './ownlife';
 import { inQuietHours, newVapidKeys, pushRequest, readPushDevices, readPushPrefs, type PushDevice, type PushPrefs, nextNudgeDelay, NUDGE_GAP_MS, NUDGE_RETRY_MS, nudgeOverdue, PUSH_BREATHER_MS, tooSoonToPush, heldBack, withoutDevice, isPhoneWebApp, coveredByNativeApp } from './push';
@@ -7154,6 +7154,8 @@ const promptState = {
   if (touched && brain.hosted) recordBrief(`chat filtered (${brainName}) — as she wrote it, then as sent`, said, routeless);
   console.log(`[ai] chat reply in ${Date.now() - started}ms, ${content.length} chars — brain=${brainName} handed≈${handed}tok filters=${touched ? `touched(${said.trim().length - routeless.trim().length >= 0 ? '-' : '+'}${Math.abs(said.trim().length - routeless.trim().length)})` : 'untouched'}`);
   if (messages.at(-1)?.role === 'user' && !brief && !choices) scheduleSecondThought({ hers: Boolean(hers), ranting, latest, reply: content, config });
+  // Got up because of them and saying goodnight: that is her going back to bed, whether or not she called the tool.
+  if (herKnockedAwakeNow() && readsAsGoodnight(content)) void goBackToSleepOnHerWord();
   // Cleared only once a reply actually exists, so a failed or unreachable turn
   // leaves the note in place for the retry rather than losing it.
   if (fresh) store.delete('chat.freshStart');
@@ -9181,6 +9183,14 @@ async function wakeWasForNothing(state: HerSleepSchedule): Promise<boolean> {
     console.warn('[her-sleep] could not ask her verdict on the wake:', error instanceof Error ? error.message : error);
   }
   return plain;
+}
+
+/** She said goodnight while up because of them: back to bed, with her verdict on the wake. */
+async function goBackToSleepOnHerWord() {
+  const state = getHerSleepSchedule();
+  if (!state || !knockedAwake(state, zonedNow(CHAT_TIMEZONE))) return;
+  const pointless = await wakeWasForNothing(state);
+  goBackToSleep({ pointless, block: false, why: 'she said goodnight' });
 }
 
 /** Left alone after being got up, she drifts off again — and judges the wake as she goes. */

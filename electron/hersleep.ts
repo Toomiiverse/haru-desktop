@@ -194,6 +194,20 @@ export function backToSleep(schedule: HerSleepSchedule, input: { atIso: string; 
   };
 }
 
+/**
+ * Her words are the call. Got up at 02:48 and told she could go back to
+ * sleep, she wrote "I'm out. Goodnight, Tommy." and stayed up, because the
+ * tool went uncalled (2026-09-07). A reply that says goodnight while she is
+ * up because of them is her going back to bed, tool or no tool.
+ */
+// "Goodnight, Tommy." is a goodnight; "it was a good night" is not, and
+// "I'm out of ideas" is not "I'm out".
+const SAYS_GOODNIGHT = /(?<!\b(?:a|the|was|another|such a|any)\s)\bgood ?night\b|\bnight night\b|\bnighty\b|\bsleep well\b|\bi'?m (?:going|off|heading) (?:back )?to (?:bed|sleep)\b|\b(?:going|back) to sleep(?: now)?(?=[.!,]|\s*$)|\bi'?m out(?=[.!,]|\s*$)|\bthat'?s me done\b/i;
+
+export function readsAsGoodnight(reply: string): boolean {
+  return SAYS_GOODNIGHT.test((reply ?? '').replace(/[‘’]/g, "'"));
+}
+
 /** The nights they got her up, kept so a habit can be told from a once. */
 export type Wake = { at: string; pointless: boolean };
 export const WAKES_KEPT = 30;

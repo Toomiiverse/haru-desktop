@@ -8,7 +8,7 @@ import {
   clockMinutes, clampBedtime, clampWake, dayAfter, daysBetween,
   decideTimesSystem, fallbackSchedule, goodnightDue, herAsleep,
   messagesWhileAsleep, parseDecidedTimes, readHerSleep, readHerSleepState,
-  sleepWindowOn, wakeIrritation, wakeNote, foldAsleepExchanges, isAsleepLine, enoughKnocking, wokenAt, sleepNote, KNOCK_COUNT, KNOCK_WINDOW_MS, groggyFor, groggyNote, GROGGY_REGISTER, knockedAwake, dozeOffDue, pointlessWake, backToSleep, readWakes, pointlessWakesLately, DOZE_MINUTES, BLOCKED_LINE, BLOCK_AFTER_POINTLESS } from '../electron/hersleep';
+  sleepWindowOn, wakeIrritation, wakeNote, foldAsleepExchanges, isAsleepLine, enoughKnocking, wokenAt, sleepNote, KNOCK_COUNT, KNOCK_WINDOW_MS, groggyFor, groggyNote, GROGGY_REGISTER, knockedAwake, dozeOffDue, pointlessWake, backToSleep, readWakes, pointlessWakesLately, DOZE_MINUTES, BLOCKED_LINE, BLOCK_AFTER_POINTLESS, readsAsGoodnight } from '../electron/hersleep';
 import { zonedNow } from '../electron/dates';
 
 const ZONE = 'Australia/Perth';
@@ -310,4 +310,13 @@ test('left alone she dozes off; the wake is judged; the morning knows; a habit s
   assert.equal(carried?.plannedWake, 8 * 60);
   assert.equal(carried?.wokenForNothing, true);
   assert.equal(carried?.knockedAt, '2026-09-03T17:22:00.000Z');
+});
+
+test('a reply that says goodnight is her going back to bed; one that does not is not', () => {
+  assert.ok(readsAsGoodnight("I'm already up. 😒 You don't get to put me back in a box. But fine. If you're just going to sit there thanking me, I'm out.\n\nGoodnight, Tommy."));
+  assert.ok(readsAsGoodnight('Fine. Going back to sleep. Don’t.'));
+  assert.ok(readsAsGoodnight("I'm off to bed. Night."));
+  assert.ok(!readsAsGoodnight("Yeah, well. You're welcome, I guess."));
+  assert.ok(!readsAsGoodnight('What was so urgent at this hour?'));
+  assert.ok(!readsAsGoodnight('It was a good night, actually — I read about Control.'), '"good night" as two words about the night is not a goodnight');
 });
