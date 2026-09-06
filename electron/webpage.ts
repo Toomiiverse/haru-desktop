@@ -266,8 +266,9 @@ const VOICE = `
   //
   // Frames of float samples at the microphone's rate, boxed down to 16 kHz
   // (averaging, so the higher frequencies fold into hiss rather than words)
-  // and written as 16-bit PCM with a 44-byte header. Whisper wants nothing more.
-  function toWav(frames, fromRate, toRate) {
+  // as 16-bit PCM. A call sends these bare; the wave file below puts a
+  // 44-byte header on them. Whisper wants nothing more either way.
+  function toPcm16(frames, fromRate, toRate) {
     let n = 0; for (const f of frames) n += f.length;
     const all = new Float32Array(n); let at = 0; for (const f of frames) { all.set(f, at); at += f.length; }
     const ratio = fromRate / toRate, outN = Math.floor(all.length / ratio);
@@ -278,6 +279,10 @@ const VOICE = `
       const v = sum / (Math.min(b, all.length) - a);
       out[i] = Math.max(-32768, Math.min(32767, Math.round(v * 32767)));
     }
+    return out;
+  }
+  function toWav(frames, fromRate, toRate) {
+    const out = toPcm16(frames, fromRate, toRate);
     const buf = new ArrayBuffer(44 + out.length * 2), dv = new DataView(buf);
     const str = (p, s) => { for (let i = 0; i < s.length; i++) dv.setUint8(p + i, s.charCodeAt(i)); };
     str(0, 'RIFF'); dv.setUint32(4, 36 + out.length * 2, true); str(8, 'WAVE'); str(12, 'fmt ');
@@ -292,6 +297,7 @@ const VOICE = `
   window.HaruTalk = Talk;
   window.haruWake = wakePhraseIn;
   window.haruWav = toWav;
+  window.haruPcm16 = toPcm16;
 })();
 `;
 
@@ -1357,6 +1363,8 @@ async function deliver(text,sent,{interrupted=false}={}){
 $('cf').addEventListener('submit',async ev=>{
   ev.preventDefault();
   const text=ci.value.trim(); if(!text&&!staged.length)return;
+  // One voice at a time: a typed message ends the call and goes its own way.
+  if(call) hangUp('');
   // Nothing leaves an offline phone; the words stay in the box (and in the
   // draft) rather than turning into a bubble that then fails.
   if(!window.haruNet.online()){
@@ -1785,8 +1793,15 @@ async function drawBell(){
 // for both microphone and audio.
 const mic=$('mic'), talkPill=$('talk');
 let vad=null, talk=null, ctx=null, earStream=null, earNode=null, ring=[], ringMs=0, ticker=null;
+let call=null, callAble=false, callVoice=null, callLines=0;
 const now=()=>performance.now();
 function showTalk(){
+  if(call){
+    const c=call.state;
+    talkPill.hidden=false; mic.classList.add('on'); mic.classList.toggle('hot',c==='listening');
+    talkPill.textContent=c==='connecting'?'Calling…':c==='thinking'?'Thinking…':c==='speaking'?(call.filler||'Speaking…'):'Listening…';
+    return;
+  }
   const s=talk?talk.state():'off';
   talkPill.hidden=s==='off'; mic.classList.toggle('on',s!=='off'); mic.classList.toggle('hot',s==='awake');
   talkPill.textContent=s==='asleep'?'Say “Hey Haru”':s==='awake'?'Listening…':s==='thinking'?'Thinking…':s==='speaking'?'Speaking…':'';
@@ -1802,6 +1817,9 @@ async function openEar(){
   const mute=ctx.createGain(); mute.gain.value=0;
   earNode.onaudioprocess=e=>{
     const d=e.inputBuffer.getChannelData(0), t=now();
+    // On a call the frames go up as they are; her machine's ears do the rest.
+    if(call){ sendUp(d); return; }
+    if(!vad) return;
     let sum=0; for(let i=0;i<d.length;i++) sum+=d[i]*d[i];
     const level=Math.sqrt(sum/d.length), ms=d.length/ctx.sampleRate*1000;
     ring.push({t,data:Float32Array.from(d)}); ringMs+=ms;
@@ -1857,21 +1875,143 @@ async function acknowledge(){
   }catch{ if(talk) act(talk.spokeEnd(now())); }
 }
 mic.onclick=async()=>{
+  if(call){ hangUp(''); return; }
   if(talk){ act(talk.stop()); talk=null; vad=null; closeEar(); clearInterval(ticker); return; }
   if(!navigator.mediaDevices||!(window.AudioContext||window.webkitAudioContext)){ mic.title='This phone cannot listen.'; return; }
   try{
     primeVoice();
+    // Where her machine can take a call, the tap places one; press-to-talk
+    // is what is left when it cannot.
+    if(callAble){ await openEar(); placeCall(); return; }
     vad=window.HaruVad(); talk=window.HaruTalk({wake:window.haruWake});
     await openEar();
     act(talk.start(now(),true));
     ticker=setInterval(()=>{ if(talk) act(talk.tick(now())); },1000);
   }catch(e){
     console.warn('[ears] '+(e&&e.message||e));
-    talk=null; vad=null; closeEar(); mic.title='No microphone: '+(e&&e.message||e); showTalk();
+    talk=null; vad=null; call=null; closeEar(); mic.title='No microphone: '+(e&&e.message||e); showTalk();
   }
 };
 player.addEventListener('ended',()=>{ if(talk) act(talk.spokeEnd(now())); });
-document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='hidden'&&talk){ act(talk.stop()); talk=null; vad=null; closeEar(); clearInterval(ticker); } });
+document.addEventListener('visibilitychange',()=>{
+  if(document.visibilityState!=='hidden') return;
+  if(call) hangUp('');
+  if(talk){ act(talk.stop()); talk=null; vad=null; closeEar(); clearInterval(ticker); }
+});
+window.addEventListener('pagehide',()=>{ if(call) hangUp(''); });
+
+// ---- A call -----------------------------------------------------------------
+//
+// Where her machine can take a call — its own ears, brain and voice, or Hume's
+// — the microphone tap places one instead of the press-to-talk above, the way
+// the phone app does. The microphone goes up the socket as 16 kHz PCM, and
+// down come what was heard, what she says, her voice as it is made, and the
+// turns of it: she was talked over, she has finished. Her machine's ears
+// decide when they have stopped talking, so nothing here waits for her name.
+// Her voice plays through the context the tap opened for the ear, which is
+// what lets it play at all on iOS. Typing during a call hangs it up first:
+// one voice at a time. Typed messages keep their own voice, as ever.
+window.haruNet.fetch('/api/call/status').then(r=>r.ok?r.json():null).then(s=>{ callAble=!!(s&&s.enabled); }).catch(()=>{});
+function placeCall(){
+  const ws=new WebSocket((location.protocol==='https:'?'wss://':'ws://')+location.host+'/api/call/session');
+  ws.binaryType='arraybuffer';
+  call={ws,state:'connecting',replyId:null,reply:'',filler:null,turnOver:true,ended:false};
+  ws.onopen=()=>{ ws.send(JSON.stringify({type:'hello',pcm:true})); };
+  ws.onmessage=e=>{
+    if(typeof e.data!=='string'){ feedVoice(e.data); return; }
+    let ev=null; try{ ev=JSON.parse(e.data); }catch{ return; }
+    onCallEvent(ev);
+  };
+  ws.onclose=()=>{ if(call&&call.ws===ws) hangUp('the line dropped',true); };
+  ws.onerror=()=>{ if(call&&call.ws===ws) hangUp('the line failed',true); };
+  showTalk();
+}
+// Ends the call from this side, or notes that the other side did (theirs).
+function hangUp(reason,theirs){
+  const c=call; if(!c) return;
+  c.ended=true; call=null;
+  stopCallVoice();
+  try{ if(c.ws.readyState===1) c.ws.send(JSON.stringify({type:'stop'})); c.ws.close(); }catch(e){}
+  closeEar();
+  if(theirs&&reason){ $('chat').insertAdjacentHTML('beforeend','<div class="msg sys">The call ended — '+esc(reason)+'.</div>'); $('chat').scrollTop=$('chat').scrollHeight; }
+  showTalk();
+}
+function sendUp(frame){
+  if(!call||call.ws.readyState!==1||!ctx) return;
+  call.ws.send(window.haruPcm16([frame],ctx.sampleRate,16000).buffer);
+}
+// Whether she is audible through this speaker, so her machine's ear knows an
+// echo of her from somebody talking over her.
+function tellHer(speaking){ if(call&&call.ws.readyState===1) call.ws.send(JSON.stringify({type:'her',speaking:speaking})); }
+function onCallEvent(ev){
+  const c=call; if(!c) return;
+  switch(ev.type){
+    case 'ready': c.state='listening'; break;
+    case 'refused': hangUp(ev.reason||'she could not take the call',true); return;
+    case 'user_message':
+      if(ev.interim||!ev.text) break;
+      $('chat').insertAdjacentHTML('beforeend','<div class="msg me">'+esc(ev.text)+'</div>'); $('chat').scrollTop=$('chat').scrollHeight;
+      c.reply=''; c.replyId=null; c.turnOver=false; c.state='thinking';
+      if(window.haruAvatar) window.haruAvatar.think();
+      break;
+    case 'filler': c.filler=ev.text||null; c.state='speaking'; break;
+    case 'assistant_message': {
+      if(!ev.text) break;
+      c.filler=null;
+      let bubble=c.replyId&&document.getElementById(c.replyId);
+      if(bubble){ c.reply+=' '+ev.text; }
+      else { c.replyId='call'+(++callLines); c.reply=ev.text; $('chat').insertAdjacentHTML('beforeend','<div class="msg them" id='+c.replyId+'></div>'); bubble=document.getElementById(c.replyId); }
+      if(bubble) bubble.textContent=c.reply;
+      $('chat').scrollTop=$('chat').scrollHeight;
+      c.state='speaking';
+      break;
+    }
+    case 'audio_start': beginVoice(ev.sampleRate||24000); break;
+    case 'audio_end': endVoice(); break;
+    case 'user_interruption': stopCallVoice(); c.filler=null; c.state='listening'; if(window.haruAvatar) window.haruAvatar.poke('exclaim'); break;
+    case 'assistant_end':
+      c.filler=null; c.turnOver=true;
+      if(ev.emotion&&window.haruAvatar) window.haruAvatar.express(ev.emotion);
+      if(!callVoice) c.state='listening';
+      break;
+    case 'error': $('chat').insertAdjacentHTML('beforeend','<div class="msg sys">'+esc(ev.message||'Something went wrong on the call.')+'</div>'); break;
+    case 'ended': hangUp(ev.reason||'the call ended',true); return;
+  }
+  showTalk();
+}
+// Her voice as it is made: frames of PCM scheduled back to back, each one
+// starting where the last ends, so the stream plays as one line.
+function beginVoice(rate){
+  stopCallVoice();
+  if(!ctx) return;
+  callVoice={rate:rate,at:ctx.currentTime+0.06,sources:[],pending:0,ended:false};
+  tellHer(true);
+  if(window.haruAvatar) window.haruAvatar.attend('talking',4000);
+}
+function feedVoice(buf){
+  const v=callVoice; if(!v||!ctx) return;
+  const n=buf.byteLength>>1; if(!n) return;
+  const i16=new Int16Array(buf,0,n);
+  const ab=ctx.createBuffer(1,n,v.rate), ch=ab.getChannelData(0);
+  for(let i=0;i<n;i++) ch[i]=i16[i]/32768;
+  const src=ctx.createBufferSource(); src.buffer=ab; src.connect(ctx.destination);
+  const at=Math.max(v.at,ctx.currentTime);
+  src.start(at); v.at=at+ab.duration;
+  v.pending++; v.sources.push(src);
+  src.onended=()=>{ if(callVoice!==v) return; v.pending--; if(v.ended&&v.pending===0) voiceDone(v); };
+}
+function endVoice(){ const v=callVoice; if(!v) return; v.ended=true; if(v.pending===0) voiceDone(v); }
+function voiceDone(v){
+  if(callVoice!==v) return;
+  callVoice=null; tellHer(false);
+  if(call&&call.state==='speaking'&&call.turnOver){ call.state='listening'; showTalk(); }
+}
+function stopCallVoice(){
+  const v=callVoice; if(!v) return;
+  callVoice=null;
+  for(const s of v.sources){ try{ s.onended=null; s.stop(); }catch(e){} }
+  tellHer(false);
+}
 
 // ---- Where they are ---------------------------------------------------------
 //
