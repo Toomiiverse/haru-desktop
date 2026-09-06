@@ -65,7 +65,7 @@ import { haruNote, rangeStats, type HaruNote, type RangeName, type RangeStats } 
 import { describeRating, entryFor, journalPrompt, readEntries, readJournalConfig, readRating, recentTrend, shouldAsk, upsertEntry, SCALE_MAX, type JournalConfig, type JournalEntry } from './journal';
 import { formatList, formatMedia, formatMissing, lookUp, readAniListConfig, userList, type AniListConfig, type ListEntry, type MediaKind } from './anilist';
 import { createDesktopShortcut, desktopShortcutPath, isAutoStartEnabled, setAutoStart, startedHidden } from './startup';
-import { answersThePrompt, CUE_NOTE, isCue, stageNote, dropRoleHeader, dropTackedOnParagraphs, dropInventedContact, dropInventedScreenTalk, dropRepeatedAgendaMentions, dropRepeatedParagraphs, dropStageDirections, dropRepeatedOpener, dropEchoOpener, dropRepeatedSentences, fixStatedClock, fixStatedReminderTime, fixStatedMinutes, dropOverusedEmoji, oneEmojiAtMost, dropClosingOrder } from './reply';
+import { answersThePrompt, CUE_NOTE, isCue, stageNote, dropRoleHeader, dropTackedOnParagraphs, dropInventedContact, dropInventedScreenTalk, dropRepeatedAgendaMentions, dropRepeatedParagraphs, dropStageDirections, dropRepeatedOpener, dropEchoOpener, dropRepeatedSentences, fixStatedClock, fixStatedReminderTime, fixStatedMinutes, dropOverusedEmoji, oneEmojiAtMost, dropClosingOrder, thinksAloud } from './reply';
 import { runToolLoop } from './toolloop';
 import { chatTools, coerceKnowledgeCategory, runChatTool, type ToolAvailability, type ToolDeps } from './tools';
 import { createMemoryStore } from './memorystore';
@@ -6333,7 +6333,7 @@ function brainFor(
 
   const verdict = pictures ? { escalate: true, because: 'there is a picture in it' }
     : files ? { escalate: true, because: 'there is a file in it' }
-    : decide(message, setting);
+    : decide(message, setting, { routed: conversationRoute() !== null });
   if (!verdict.escalate) return { config: local, escalated: false, because: verdict.because, sees: false };
 
   // pageWasRead is already true whenever a stranger's page is in the turn, and a
@@ -9766,6 +9766,11 @@ function sentenceStreamer(onSentence?: (sentence: string, emotion: string) => vo
     feed(chunk: string) {
       streamedSoFar += chunk;
       if (!onSentence) return;
+      // A round that opens as her deliberation — "The user said…", "I should…"
+      // — is not voiced. The loop asks again for the words alone and takes
+      // the round back, and a leak already read aloud cannot be taken back:
+      // one was, and the day kept it as what she said (2026-09-06).
+      if (thinksAloud(streamedSoFar)) { buffer = ''; return; }
       buffer += chunk;
       const { sentences, rest } = streamedSentences(buffer);
       buffer = rest;
@@ -10504,7 +10509,7 @@ function webDeps(): WebDeps {
           filler: () => { lastFiller = pickFiller(Math.random(), lastFiller); return lastFiller; },
           // The desk owns the conversation: it is told what she actually got
           // out, and rewrites her last line to that — or drops it when none did.
-          said: (reply, said) => sendToWindows('chat:saidFromPhone', { reply, said }),
+          said: (reply, said) => sendToWindows('chat:saidFromPhone', { reply, said: thinksAloud(said) ? '' : said }),
           vad: { endAfterMs: call.endAfterMs },
           log: line => console.log(line),
         });

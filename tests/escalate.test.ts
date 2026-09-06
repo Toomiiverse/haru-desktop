@@ -30,6 +30,14 @@ test('a question about the world is research and goes out', () => {
   }
 });
 
+test('with a conversation route set, a question about the world stays with her', () => {
+  assert.equal(decide('How good is the RX 9060 XT vs the 5060', on).escalate, true);
+  const routed = decide('How good is the RX 9060 XT vs the 5060', on, { routed: true });
+  assert.equal(routed.escalate, false);
+  assert.equal(routed.because, 'the conversation route answers it');
+  assert.equal(decide('What do you think of the ending? Did it earn it?', on, { routed: true }).escalate, false);
+});
+
 test('an errand stays home even when it mentions a price', () => {
   assert.equal(decide('Remind me to check GPU prices tomorrow', on).escalate, false);
   assert.equal(decide('Add the 10m HDMI cable to my list', on).escalate, false);

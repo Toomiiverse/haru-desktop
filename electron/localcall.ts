@@ -350,6 +350,12 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
       // one was voiced is already cut, so it is settled here, not after a drain.
       if (turns !== mine) { settleTake(false); return; }
       if (generation === myGeneration) flush();
+      // A reply that streamed no sentence — a round held back from her voice
+      // and answered again, a line that came whole — is still said.
+      if (generation === myGeneration && sentences === 0 && reply && !answer.ignored) {
+        log('[call] nothing of the reply was streamed — saying it whole');
+        say({ text: reply, emotion: mood, seed, filler: false });
+      }
       if (answer.ignored) log('[call] she is not answering that');
     } catch (error) {
       log(`[call] her brain failed: ${error instanceof Error ? error.message : String(error)}`);

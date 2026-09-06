@@ -496,6 +496,10 @@ What's the thing that made you say it just now — something today, or just the 
 
 test('her deliberation is recognised and the reply behind it kept', () => {
   assert.equal(thinksAloud(KIMI_LEAK), true);
+  // Said aloud on a call, 2026-09-06, to a misheard goodbye.
+  assert.equal(thinksAloud('The user said "Vida, Haru." This doesn\'t seem to connect to anything in the conversation.'), true);
+  assert.equal(thinksAloud('The us'), false, 'a word still arriving is not yet a leak');
+  assert.equal(thinksAloud('The user'), true, 'the two words are — a call holds the round back from her voice here');
   const { text, dropped } = dropThinkingAloud(KIMI_LEAK);
   assert.ok(text.startsWith('That sucks. 😤 And "lately"'), `the reply begins where the plan ran into it, not: ${text.slice(0, 40)}`);
   assert.ok(text.endsWith('stacking up?'));

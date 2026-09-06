@@ -252,6 +252,14 @@ test('talking over her drops her voice, tells the phone, and the next turn knows
   assert.ok(h.saids[0][1].length <= 45, `about two seconds' worth, not the twenty seconds that were sent: ${h.saids[0][1]}`);
 });
 
+test('a reply that streamed no sentence is still said, whole', async () => {
+  const h = harness({ answer: async () => ({ reply: 'Fine. Go.' }) });
+  h.feed(0.002, 2000); h.feed(0.3, 600); h.feed(0.002, 700);
+  await settle(30);
+  assert.deepEqual(h.spoken.map(s => s.text), ['Fine. Go.']);
+  assert.ok(h.types().includes('assistant_end'));
+});
+
 test('what she got out of a line is measured by how much of it played', () => {
   const line = 'Seven words here, then a few more words, and then the end of the sentence.';
   assert.equal(saidOf(line, 0.2), '', 'under half a second is nothing');
