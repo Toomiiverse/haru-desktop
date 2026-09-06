@@ -13,10 +13,11 @@ import { createKnowledgeStore, SAVE_DEBOUNCE_MS, type KnowledgeStoreDeps } from 
 import type { KnowledgeStore } from '../electron/knowledge';
 import { chunkRecord, documentRecord, storeWith } from './helpers';
 
-function harness(options: Partial<{ knowledge: KnowledgeStore; config: Record<string, unknown> }> = {}) {
+function harness(options: Partial<{ knowledge: KnowledgeStore; config: Record<string, unknown>; fetch: KnowledgeStoreDeps['fetch'] }> = {}) {
   const settings = new Map<string, unknown>(Object.entries(options.config ?? {}));
   let knowledge = options.knowledge ?? storeWith([]);
   const saves: KnowledgeStore[] = [];
+  const calls: { url: string; headers?: Record<string, string> }[] = [];
 
   const deps: KnowledgeStoreDeps = {
     store: {
@@ -25,10 +26,16 @@ function harness(options: Partial<{ knowledge: KnowledgeStore; config: Record<st
       getKnowledge: () => knowledge,
       setKnowledge: (next) => { saves.push(next); knowledge = next; },
     },
-    fetch: async () => new Response(''),
+    fetch: async (url, init) => {
+      calls.push({ url, headers: init?.headers });
+      return options.fetch ? options.fetch(url, init) : new Response('');
+    },
     apiKeyFor: () => 'key',
+    // The rule main.ts applies: stay where the chat model is while it is on
+    // this machine, fall back to the local Ollama the moment it is not.
+    embedEndpoint: chat => /^https?:\/\/(localhost|127\.0\.0\.1)/i.test(chat.trim()) ? chat.trim() : 'http://localhost:11434',
   };
-  return { live: createKnowledgeStore(deps), saves, settings, get knowledge() { return knowledge; } };
+  return { live: createKnowledgeStore(deps), saves, settings, calls, get knowledge() { return knowledge; } };
 }
 
 /** A promise somebody else decides the fate of. */
@@ -83,6 +90,29 @@ test('there is nothing to embed with without a model, and ingest says so', async
   const h = harness();
   await assert.rejects(h.live.ingest({ file: 'notes.md' }), /no model is set up/);
   assert.equal(h.live.embedder(), null);
+});
+
+test('a hosted brain does not take the embeddings with it', async () => {
+  // The live bug: the endpoint came from ai.config and the model from
+  // embedModel, so Venice was asked for nomic-embed-text and said 404.
+  const h = harness({
+    config: { 'ai.config': { endpoint: 'https://api.venice.ai/api/v1', model: 'qwen-3-6-plus', provider: 'venice' } },
+    fetch: async () => new Response(JSON.stringify({ embeddings: [[0.5]] })),
+  });
+  assert.deepEqual(await h.live.embedder()!.embed('something worth remembering'), [0.5]);
+  assert.equal(h.calls[0].url, 'http://localhost:11434/api/embed');
+  // Ollama's shape, and no key sent somewhere the chat config never named.
+  assert.equal(h.calls[0].headers?.Authorization, undefined);
+});
+
+test('a local OpenAI-compatible brain keeps both its shape and its key', async () => {
+  const h = harness({
+    config: { 'ai.config': { endpoint: 'http://localhost:8080/v1', model: 'local', provider: 'openai' } },
+    fetch: async () => new Response(JSON.stringify({ data: [{ index: 0, embedding: [0.25] }] })),
+  });
+  assert.deepEqual(await h.live.embedder()!.embed('a fact'), [0.25]);
+  assert.equal(h.calls[0].url, 'http://localhost:8080/v1/embeddings');
+  assert.equal(h.calls[0].headers?.Authorization, 'Bearer key');
 });
 
 test('an endpoint without a model is not an embedder either', () => {

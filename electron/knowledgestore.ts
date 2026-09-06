@@ -46,6 +46,8 @@ export type KnowledgeStoreDeps = {
   fetch: Fetcher;
   /** The bearer token for an endpoint, which lives with the provider config. */
   apiKeyFor(endpoint: string): string;
+  /** Where embeddings go, given where the chat model is. See embedEndpoint in main.ts. */
+  embedEndpoint(chatEndpoint: string): string;
 };
 
 export type IngestArgs = {
@@ -114,15 +116,32 @@ export function createKnowledgeStore(deps: KnowledgeStoreDeps) {
     if (changed) scheduleSave();
   }
 
+  /**
+   * The embedder, which is not simply "wherever the chat model is".
+   *
+   * It was, and that broke the day the chat model moved off this machine: the
+   * endpoint came from ai.config while the model name came from embedModel, so
+   * a hosted brain was asked for `nomic-embed-text` and answered 404. Memory
+   * retrieval then drops to keyword-only, which it is meant to do rather than
+   * fail — so the only sign was one warning in a console nobody could read.
+   *
+   * The embed model is a name Ollama has pulled, so embeddings follow the chat
+   * model only while it is on this machine and fall back to the local Ollama
+   * when it is not. The OpenAI shape is kept for a local OpenAI-compatible
+   * server, which is a real thing to be pointed at, and is dropped along with
+   * the key the moment we are talking to somewhere the chat config never named.
+   */
   function embedder(): Embedder | null {
     const ai = store.get('ai.config') as { endpoint?: string; model?: string; provider?: string } | undefined;
     if (!ai?.endpoint || !ai.model) return null;
-    const endpoint = ai.endpoint;
+    const endpoint = deps.embedEndpoint(ai.endpoint);
+    const asConfigured = endpoint === ai.endpoint.trim();
+    const openAI = asConfigured && isOpenAIShaped(ai.provider);
     const built = createEmbedder({
       endpoint,
       model: config().embedModel,
-      provider: isOpenAIShaped(ai.provider) ? 'openai' : 'ollama',
-      apiKey: deps.apiKeyFor(endpoint),
+      provider: openAI ? 'openai' : 'ollama',
+      ...(openAI ? { apiKey: deps.apiKeyFor(endpoint) } : {}),
     }, deps.fetch);
     return cachedEmbedder(built, embeddingCache);
   }

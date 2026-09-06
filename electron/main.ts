@@ -2,7 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain, Menu, type MenuItemConstructorOpti
 import path from 'node:path';
 import os from 'node:os';
 import { createHash, randomUUID } from 'node:crypto';
-import { appendFileSync, copyFileSync, existsSync, readdirSync, mkdirSync, readFileSync, rmSync, statSync, watch, writeFileSync, type FSWatcher } from 'node:fs';
+import { appendFileSync, copyFileSync, existsSync, readdirSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, watch, writeFileSync, type FSWatcher } from 'node:fs';
 import { execFile, spawn } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import AdmZip from 'adm-zip';
@@ -20,7 +20,7 @@ import { isRelaunchNotReturn, openingAngles, pickAngle, shouldPipeUp } from './o
 import { allDayDueMinutes, isEveningCheck, reminderInstruction, reminderTier, reminderVolume, shouldRemind, type ReminderState } from './reminders';
 import { isHeated, readTone, sharpen, toneGesture, tonePose } from './tone';
 import { isSilenced, nextPushback, PUSHBACK_LIMIT, pushbackInstruction, readsAsDropIt, type Pushback } from './pushback';
-import { activityInstruction, isJustATool, isNotable, readActivity, type Activity, type ActivityKind } from './activity';
+import { activityInstruction, isJustATool, isNotable, promotedByFullscreen, readActivity, type Activity, type ActivityKind } from './activity';
 import { belongsToPlace, expireHaunts, familiarity, markRemembered, noteExchange, noteVisit, readHaunts, rememberSaid, worthRemembering } from './familiar';
 import { discoverWardrobe, type ParameterRange, type WardrobeControl } from './wardrobe';
 import { looksLikeNothing, readListenConfig, transcribe, type ListenConfig } from './listen';
@@ -35,6 +35,7 @@ import { mayWander, pickDestination, readRoamConfig, refugeFrom, speedFor, step,
 import { angleFor, mayNotice, noteNoticed, readNotices, type Page as NoticedPage, type PageState } from './noticing';
 import { CAPTURE_HEIGHT, CAPTURE_WIDTH, readWatchingConfig, recentScene, sceneAsk, shouldLook, watchingPrompt, worthMentioning, type WatchingConfig } from './watching';
 import { gameMemoryForPrompt, noteInGameMemory, openGameMemory, timesThisWeek, welcomePrompt } from './games';
+import { obsScreenshot, readObsServer } from './obs';
 import { buildGameIndex, gameFor } from './steam';
 import { pdfPrompt, readPdf } from './pdf';
 import { classify, discard, extractAudio, extractFrames, findFfmpeg, OPENABLE, readText, type FileKind } from './attach';
@@ -297,12 +298,27 @@ const knowledgeFile = process.env.HARU_KNOWLEDGE_FILE ? process.env.HARU_KNOWLED
 // writes them. Opening can fail on a corrupt file, in which case the newest
 // backup is restored and we try once more before giving up.
 let store: HaruStore;
+// Spelled out rather than left to default. Both are userData either way, but
+// recoverBackups builds its own paths from these options — with no cwd it looks
+// for a relative "config.json" beside the executable, finds nothing, and
+// recovers everything except the one file most likely to need it.
+const storeOptions = { knowledgeFile, cwd: app.getPath('userData') };
 try {
-  store = new HaruStore({ knowledgeFile });
+  store = new HaruStore(storeOptions);
 } catch (error) {
   console.warn('[store] could not open the store:', error instanceof Error ? error.message : error);
-  if (!HaruStore.recoverBackups({ knowledgeFile })) throw error;
-  store = new HaruStore({ knowledgeFile });
+  if (!HaruStore.recoverBackups(storeOptions)) throw error;
+  store = new HaruStore(storeOptions);
+}
+// The line above does not read the file: conf parses on the first get, so a
+// half-written config.json opens perfectly and then throws from whichever timer
+// reads first — 720 times in 23 seconds, in the one case on record. verify is
+// the eager read that turns that into a recovery here, where a backup can still
+// be put back, instead of a crash loop an hour later.
+if (!store.verify()) {
+  console.error('[store] a store file will not parse — restoring the newest backup');
+  if (HaruStore.recoverBackups(storeOptions)) store = new HaruStore(storeOptions);
+  else console.error('[store] no backup to restore; carrying on with what parses');
 }
 store.migrate();
 store.hardenPermissions();
@@ -1539,6 +1555,45 @@ function visionEndpoint(provider: ProviderConfig | undefined, vision?: VisionCon
   return chat && !isRemote(chat) ? chat : LOCAL_MODELS;
 }
 
+/**
+ * The address embeddings go to.
+ *
+ * The same shape as visionEndpoint above and for an unrelated reason: not where
+ * the data is allowed to go, but where the model actually is. The embed model
+ * is a name Ollama has pulled — nomic-embed-text, by default — so asking a
+ * hosted brain for it returns a 404 and quietly costs her semantic recall. See
+ * the embedder in ./knowledgestore.
+ */
+function embedEndpoint(chatEndpoint: string): string {
+  const chat = chatEndpoint.trim();
+  return chat && !isRemote(chat) ? chat : LOCAL_MODELS;
+}
+
+/**
+ * Whether she can actually do the things she is switched on for.
+ *
+ * Every unprompted path ends in the same line — `if (!provider?.model) return;`
+ * — which is right, and completely silent. An ai.config that never got written
+ * therefore looks exactly like a quiet evening: she goes on watching the screen
+ * and saying nothing about it, and there is no way in or out of the app to tell
+ * which of the two is happening. That cost three days once.
+ *
+ * So the setup is read out at boot, and it is deliberately the settings that
+ * gate her behaviour rather than everything in the store.
+ */
+function reportSetup() {
+  const provider = store.get('ai.config') as ProviderConfig | undefined;
+  if (provider?.model) console.log(`[setup] brain: ${provider.model} at ${provider.endpoint || LOCAL_MODELS}${isRemote(provider.endpoint ?? '') ? '' : ' (this machine)'}`);
+  else console.error('[setup] NO CHAT MODEL — she will answer nothing and say nothing unprompted. Set one in Settings.');
+
+  const vision = readVisionConfig(store.get('vision'));
+  const watching = readWatchingConfig(store.get('watching'));
+  const screenshots = readScreenshotConfig(store.get('screenshots'));
+  if (vision.enabled) console.log(`[setup] eyes: ${vision.model} at ${visionEndpoint(provider, vision)}`);
+  // Only worth a warning where something is actually waiting on them.
+  else if (watching.enabled || screenshots.enabled) console.warn(`[setup] eyes are OFF, so ${[watching.enabled && 'watching the screen', screenshots.enabled && 'noticing screenshots'].filter(Boolean).join(' and ')} will do nothing.`);
+}
+
 let lastLookAt = 0;
 let lastSceneSeen = '';
 let lastSceneAt = 0;
@@ -1657,13 +1712,22 @@ async function glanceAtScreen() {
   lastLookAt = Date.now();
   try {
     const startedAt = Date.now();
-    const sources = await desktopCapturer.getSources({
-      types: ['screen'],
-      thumbnailSize: { width: CAPTURE_WIDTH, height: CAPTURE_HEIGHT },
-    });
-    const frame = activeScreen(sources)?.thumbnail;
-    if (!frame || frame.isEmpty()) return;
-    const encoded = frame.toPNG().toString('base64');
+    // OBS first, when it is running: full resolution where the thumbnail path
+    // tops out at 1280, and its capture does not black-frame on exclusive
+    // fullscreen. Both are this machine; the frame goes to the same local
+    // eyes either way. See obs.ts.
+    const obs = readObsServer(app.getPath('appData'));
+    let encoded = obs?.enabled ? await obsScreenshot(obs) : null;
+    const eyes = encoded ? 'obs' : 'screen';
+    if (!encoded) {
+      const sources = await desktopCapturer.getSources({
+        types: ['screen'],
+        thumbnailSize: { width: CAPTURE_WIDTH, height: CAPTURE_HEIGHT },
+      });
+      const frame = activeScreen(sources)?.thumbnail;
+      if (!frame || frame.isEmpty()) return;
+      encoded = frame.toPNG().toString('base64');
+    }
     const title = gameNow() || watchingTitle || currentActivity?.label || '';
     // The eyes report game state, plainly; she reacts to the report in her own
     // voice with the chat model, and the report stays in her context so a
@@ -1671,7 +1735,11 @@ async function glanceAtScreen() {
     const sighting = await look(encoded, vision, visionEndpoint(provider, vision), modelHeaders(visionEndpoint(provider, vision)), net.fetch, {
       ask: sceneAsk(title),
       keepAlive: '30m',
-      numPredict: 160,
+      // qwen3-vl reasons before it answers whatever think:false says, and the
+      // reasoning counts against this. At 160 the answer was cut off or never
+      // started — "the vision model returned nothing", three nights running —
+      // measured at 370–510 tokens for a fight scene, so 800 leaves room.
+      numPredict: 800,
     });
     const scene = sighting.description;
     const mentionable = worthMentioning(scene, lastSceneSeen);
@@ -1679,7 +1747,7 @@ async function glanceAtScreen() {
     // what is on screen is context either way.
     lastSceneSeen = scene;
     lastSceneAt = Date.now();
-    console.log(`[watch] saw: ${toLength(scene, 160)} (${Date.now() - startedAt}ms)`);
+    console.log(`[watch] saw (${eyes}): ${toLength(scene, 160)} (${Date.now() - startedAt}ms)`);
     if (!mentionable) return;
     const character = getActiveCharacter();
     const line = toLength(await ollamaQuip(
@@ -2223,7 +2291,14 @@ function handleHelperLine(line: string) {
     // something she had opinions about, and it would have gone into the
     // following tracker as a thing they keep coming back to.
     if (isJustATool(process, title)) { console.log('[activity] ignoring a tool window'); return; }
-    const activity = readActivity(process, title);
+    let activity = readActivity(process, title);
+    // The helper checks fullscreen before the foreground in the same tick, so
+    // by the time a fullscreen game's own foreground line lands here,
+    // watchingTitle already names it. Promoted only when the titles agree:
+    // done from the fullscreen line instead, the promotion landed on whatever
+    // window was foreground a tick earlier — the first game folder this ever
+    // made was for haru-desktop itself. See promotedByFullscreen.
+    if (activity.kind === 'other' && watchingTitle && title.trim() === watchingTitle) activity = promotedByFullscreen(activity, process);
     // The label is what she says out loud, and for a game it was the process
     // name — "wdc", or the publisher if the window title got there first. Steam
     // knows the real one, so every remark that names the game gets it, not just
@@ -3828,6 +3903,7 @@ const knowledge = createKnowledgeStore({
   store,
   fetch: net.fetch,
   apiKeyFor: keyFor,
+  embedEndpoint,
 });
 
 const getKnowledgeConfig = knowledge.config;
@@ -10505,6 +10581,7 @@ app.whenReady().then(() => {
   if (!startedHidden() || !store.get('live2d.model')) createWindow();
   createCompanionWindow();
   reportCapabilities();
+  reportSetup();
   startWindowsHelper();
   watchScreenshots();
   startWatchingScreen();
@@ -10566,6 +10643,29 @@ function noteCrash(kind: string, error: unknown) {
  *
  * Two instances of that were found running at once.
  */
+/**
+ * The console, kept.
+ *
+ * Every reason she has for staying quiet is a console.log, and the console of
+ * a detached app goes nowhere: three days of "why has she not remarked on the
+ * game" came down to one warning nobody could have read. So the console is
+ * copied here, beside the crashes. Rotated once at start so it cannot grow for
+ * ever; the previous run is kept as .1 for the day the question is about it.
+ */
+function keepConsole() {
+  const file = path.join(app.getPath('userData'), 'haru-main.log');
+  try { if (statSync(file).size > 2_000_000) renameSync(file, `${file}.1`); } catch { /* no log yet */ }
+  for (const level of ['log', 'warn', 'error'] as const) {
+    const original = console[level].bind(console);
+    console[level] = (...args: unknown[]) => {
+      original(...args);
+      const text = args.map(arg => arg instanceof Error ? (arg.stack ?? arg.message) : typeof arg === 'string' ? arg : JSON.stringify(arg)).join(' ');
+      try { appendFileSync(file, `${new Date().toISOString()} ${text}\n`); } catch { /* there is nothing further to try */ }
+    };
+  }
+}
+keepConsole();
+
 process.on('uncaughtException', error => {
   noteCrash('uncaught exception', error);
   if (quitting) app.exit(0);

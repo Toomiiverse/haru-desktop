@@ -16,6 +16,44 @@ export type Activity = {
 };
 
 const GAME_PROCESSES = /^(steam|steamwebhelper|leagueclient|league of legends|riotclient|valorant|epicgameslauncher|battle\.net|gog galaxy|minecraft|javaw|csgo|cs2|dota2|eldenring|origin|ubisoftconnect|roblox\w*)$/i;
+
+/** Things that go fullscreen to play a film, not a game. */
+const MEDIA_PLAYERS = /^(vlc|mpv|mpc-hc\w*|wmplayer|potplayer\w*|kodi|plex\w*|jellyfin\w*)$/i;
+
+/** Apps that cover a monitor all day and are famously not games. The first
+ *  run of this promotion made a game folder for the Claude window it was
+ *  written in. */
+const NOT_GAMES = /^(claude|discord|slack|teams|ms-teams|notion|obsidian|spotify|figma|telegram|whatsapp|signal|element|zoom|vesktop)$/i;
+
+/**
+ * The call remade once the window goes fullscreen.
+ *
+ * The process list above only knows launchers and Steam's biggest names, so a
+ * game it has never heard of — Zenless Zone Zero arrives from HoYoPlay as
+ * "ZenlessZoneZero", on no list — reads as 'other' and none of the gaming
+ * machinery fires. Fullscreen is the evidence the list lacks — the helper
+ * reports it one line before the window's own foreground line, so the
+ * foreground handler applies this when the fullscreen title matches its own: a
+ * fullscreen window from an unknown process is a game, unless the process is a
+ * known film player. Browsers and code never reach this — they classified as
+ * themselves, not 'other'. A label that is one CamelCase word is the exe's own
+ * name, and gets its spaces back before anything says it out loud.
+ */
+export function promotedByFullscreen(activity: Activity, processName: string): Activity {
+  if (activity.kind !== 'other') return activity;
+  const process = (processName ?? '').replace(/\.exe$/i, '').trim();
+  if (MEDIA_PLAYERS.test(process) || NOT_GAMES.test(process)) return activity;
+  // A game titles its window as its own exe — ZenlessZoneZero, GenshinImpact.
+  // A browser, a chat app, an editor titles it as the page or the document,
+  // and that difference is what separates a game the list has never heard of
+  // from any app that happens to cover a monitor.
+  const strip = (text: string) => text.toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (!strip(activity.label) || strip(activity.label) !== strip(process)) return activity;
+  // ponytail: a game whose title differs from its exe (Wuthering Waves ships as
+  // Client-Win64-Shipping) is missed — add it to GAME_PROCESSES when it comes up.
+  const label = /^[A-Za-z0-9]+$/.test(activity.label) ? activity.label.replace(/(?<=[a-z0-9])(?=[A-Z])/g, ' ') : activity.label;
+  return { kind: 'gaming', label: label || activity.label };
+}
 const CODE_PROCESSES = /^(code|devenv|rider64|idea64|pycharm64|webstorm64|sublime_text|cursor|windowsterminal|powershell|cmd|wt)$/i;
 const BROWSERS = /^(chrome|firefox|msedge|brave|opera|vivaldi|zen|librewolf|arc)$/i;
 

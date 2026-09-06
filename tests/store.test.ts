@@ -24,6 +24,32 @@ test('get/set/delete round-trip through the facade', () => {
   assert.equal(store.get('some.key'), undefined);
 });
 
+test('an unreadable store answers with defaults and refuses to write over itself', () => {
+  const { store, dir, configName } = makeStore();
+  store.set('chat.messages', [{ role: 'user', content: 'a real conversation' }]);
+  const file = path.join(dir, `${configName}.json`);
+  const good = readFileSync(file, 'utf8');
+
+  // What a process killed between an atomic write and its rename leaves behind.
+  const torn = '{"chat": {"messages": [{"role": "user",';
+  writeFileSync(file, torn);
+
+  // The read answers rather than throwing into the timer that made it.
+  assert.deepEqual(store.get('chat.messages', []), []);
+  assert.equal(store.healthy, false);
+
+  // And that empty answer never goes back over the transcript it came from.
+  store.set('chat.messages', []);
+  assert.equal(readFileSync(file, 'utf8'), torn);
+
+  // Once it parses again, reading and writing both resume on their own.
+  writeFileSync(file, good);
+  assert.equal((store.get('chat.messages') as unknown[]).length, 1);
+  assert.equal(store.healthy, true);
+  store.set('after', 'the weather cleared');
+  assert.equal(store.get('after'), 'the weather cleared');
+});
+
 test('typed memory accessors read and write', () => {
   const { store } = makeStore();
   assert.deepEqual(store.getMemories(), []);
