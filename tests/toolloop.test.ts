@@ -7,7 +7,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { MAX_TOOL_ROUNDS, runToolLoop, type ToolLoopDeps } from '../electron/toolloop';
+import { MAX_TOOL_ROUNDS, runToolLoop, type ToolLoopDeps, textToolCall } from '../electron/toolloop';
 import type { ChatMessage, ToolCall } from '../electron/provider';
 
 const says = (content: string): ChatMessage => ({ role: 'assistant', content });
@@ -87,6 +87,45 @@ test('a reply with no tool calls settles in one round', async () => {
   assert.equal(result.rounds, 1);
   assert.equal(result.ran.size, 0);
   assert.equal(h.resets, 0, 'nothing was discarded, so nothing should be taken back');
+});
+
+// -- a call written out as words ---------------------------------------------------
+
+test('a call written out as words is read as the call it is, and a sentence naming a tool is not', () => {
+  assert.deepEqual(textToolCall('look_up_knowledge:0{"query": "Haru notes", "category": "personal"}'), { function: { name: 'look_up_knowledge', arguments: '{"query": "Haru notes", "category": "personal"}' } });
+  assert.deepEqual(textToolCall('functions.get_system_info:0{}'), { function: { name: 'get_system_info', arguments: '{}' } });
+  assert.deepEqual(textToolCall('adopt_interest(kind="game", title="Zenless Zone Zero")'), { function: { name: 'adopt_interest', arguments: '{"kind":"game","title":"Zenless Zone Zero"}' } });
+  assert.deepEqual(textToolCall("search_web(query='RX 9060 XT FSR 4', fresh=true, limit=3)"), { function: { name: 'search_web', arguments: '{"query":"RX 9060 XT FSR 4","fresh":true,"limit":3}' } });
+  assert.equal(textToolCall('I could call search_web(query="x") but I would rather not.'), null);
+  assert.equal(textToolCall('Tch. Fine. Sit with that.'), null);
+  assert.equal(textToolCall('look_up_knowledge:0{not json'), null);
+  assert.equal(textToolCall('adopt_interest(kind=game)'), null, 'a bare word is not a value she could have meant');
+});
+
+test('a call written out as words runs like any other, and its words are taken back', async () => {
+  const seen: unknown[] = [];
+  const h = harness([
+    { role: 'assistant', content: 'adopt_interest(kind="game", title="Zenless Zone Zero")' },
+    says('Fine. Zenless Zone Zero it is.'),
+  ], { runTool: async call => { seen.push(call.function?.arguments); return 'adopted'; } });
+  const result = await runToolLoop(h.conversation, h.deps);
+  assert.equal(result.content, 'Fine. Zenless Zone Zero it is.');
+  assert.deepEqual([...result.ran], ['adopt_interest']);
+  assert.deepEqual(seen, ['{"kind":"game","title":"Zenless Zone Zero"}']);
+  assert.equal(h.conversation[1].content, '', 'the words that were the call do not stay as her line');
+  assert.ok(h.resets >= 1, 'the reader saw the call streamed; it is taken back');
+});
+
+test('a call written out as words when no tools were on the table is asked again for words', async () => {
+  const h = harness([
+    { role: 'assistant', content: 'get_system_info:0{}' },
+    says('Ask your machine, not me.'),
+  ], { pageReadAfter: 'never' });
+  h.deps.pageWasRead = () => true; // tools withdrawn for the turn
+  const result = await runToolLoop(h.conversation, h.deps);
+  assert.equal(result.content, 'Ask your machine, not me.');
+  assert.equal(result.ran.size, 0);
+  assert.ok(h.say.some(line => /asking for words/.test(line)), h.say.join('\n'));
 });
 
 test('a tool call runs, its result goes back, and the next round settles', async () => {

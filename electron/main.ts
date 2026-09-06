@@ -1169,10 +1169,9 @@ function classifyEmotion(reply: string, config: ProviderConfig): Promise<Emotion
     config,
     // Low temperature because this is a label, not writing; the schema is what
     // guarantees it comes back parseable. The classifier reads a 600-char line
-    // and nothing else, so it gets 2048 context, not the 20K the chat window
-    // wants — a 20K KV cache is what pushed the Q6_K off the card and left
-    // classification running at CPU speed (9 tok/s, 5.5s a line).
-    { tools: false, temperature: 0.1, format: EMOTION_SCHEMA, maxTokens: 120, numCtx: 2048 },
+    // and nothing else; it runs in the side jobs' shared context rather than
+    // one of its own, so it never trades runners with them — see sideNumCtx.
+    { tools: false, temperature: 0.1, format: EMOTION_SCHEMA, maxTokens: 120, numCtx: sideNumCtx() },
   ).then(message => {
     const parsed = parseEmotion(message.content ?? '');
     if (!parsed) { console.warn(`[emotion] unparseable classification, keeping previous: ${JSON.stringify(message.content ?? '')}`); return null; }
@@ -3064,7 +3063,8 @@ const IN_TURN_READ_TOKENS = 450;
 async function eyesForReading(vision: VisionConfig, provider: ProviderConfig): Promise<{ config: VisionConfig; endpoint: string; numCtx?: number }> {
   const local = store.get('ai.config') as ProviderConfig | undefined;
   if (local && await localModelSees(local)) {
-    return { config: { ...vision, model: local.model }, endpoint: trimEndpoint(local.endpoint), numCtx: chatNumCtx() };
+    // A look at a picture is a side job on the same model: the shared runner, not the chat's window.
+    return { config: { ...vision, model: local.model }, endpoint: trimEndpoint(local.endpoint), numCtx: sideNumCtx() };
   }
   return { config: vision, endpoint: visionEndpoint(provider, vision) };
 }
@@ -3890,6 +3890,25 @@ function historyBudgetChars(): number {
 function chatNumCtx(): number {
   const wanted = store.get('ai.numCtx');
   return typeof wanted === 'number' && Number.isFinite(wanted) && wanted >= 2048 ? Math.min(Math.round(wanted), 262144) : 8192;
+}
+
+/**
+ * The context every side job on the local model runs in — the emotion
+ * classifier, quips, the second thought, the diary, memory extraction, saying
+ * a hosted answer as herself. One size, on purpose: Ollama keeps one runner
+ * per model and context size, and the classifier at 2048 next to everything
+ * else at the chat's 20480 meant a full reload on every switch — 76 reloads in
+ * 22 hours on 2026-09-06, with the big runner never fitting next to Breeze on
+ * the card (25 evictions, most loads with 26–31 of 34 layers on the GPU, an
+ * 8–21 s wait for a face). The prompts those jobs actually sent were at most
+ * 5,986 tokens; 8192 holds them all in one runner that stays resident. Only the
+ * conversation itself — the local brain answering when the hosted one cannot —
+ * asks for the chat's full context, and pays one reload for it.
+ */
+const SIDE_NUM_CTX = 8192;
+
+function sideNumCtx(): number {
+  return Math.min(chatNumCtx(), SIDE_NUM_CTX);
 }
 // How long the local model is kept resident after a request. Without this, an
 // idle machine's model is evicted and the next phone message pays a cold start
@@ -5068,7 +5087,7 @@ async function sendToProvider(conversation: OllamaMessage[], config: ProviderCon
           // expiry, then sixty seconds exactly when it moved out here.
           // releaseModelForGame had it in the right place all along.
           keep_alive: OLLAMA_KEEP_ALIVE,
-          options: { temperature, num_ctx: numCtx ?? chatNumCtx(), ...(maxTokens ? { num_predict: maxTokens } : {}) },
+          options: { temperature, num_ctx: numCtx ?? sideNumCtx(), ...(maxTokens ? { num_predict: maxTokens } : {}) },
         }),
       });
     } catch (error) {
@@ -6858,6 +6877,9 @@ const promptState = {
   // Fixed for the whole turn. Only `tools` changes round to round, and that is
   // the loop's decision rather than this function's.
   const roundOptions: PostOptions = {
+    // The conversation is the one local call that wants the whole window;
+    // everything else shares the side jobs' runner (sideNumCtx).
+    numCtx: chatNumCtx(),
     // A message from outside the desk — a phone, Discord — gets a short leash.
     // The reader is watching a chat app, a long reply is a long wait, and
     // away-turns were found to run long: the cap keeps her concise without

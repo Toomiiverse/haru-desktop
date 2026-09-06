@@ -29,6 +29,45 @@ import { claimsDesktopAction, claimsTickOff, readsLikeAssistant, deniesItExists,
 /** How many rounds a single reply may spend before it has to settle. */
 export const MAX_TOOL_ROUNDS = 4;
 
+/**
+ * A tool call written out as words.
+ *
+ * Kimi K2.5 through Venice sometimes puts its call in the text instead of the
+ * tool_calls field — its own call tokens stripped on the way, leaving
+ * `look_up_knowledge:0{"query": "Haru notes"}` or
+ * `adopt_interest(kind="game", title="Zenless Zone Zero")` as the whole reply.
+ * Five of those reached the reader as her line on 2026-09-06. Only a reply
+ * that is nothing but the call is read this way; a sentence that names a tool
+ * is a sentence.
+ */
+export function textToolCall(content: string): ToolCall | null {
+  const text = (content ?? '').trim();
+  // Kimi's own shape: name:0{json}, with or without a `functions.` prefix.
+  const kimi = /^(?:functions\.)?([a-z][a-z0-9_]*):\d+\s*(\{[\s\S]*\})$/i.exec(text);
+  if (kimi) {
+    try { JSON.parse(kimi[2]); } catch { return null; }
+    return { function: { name: kimi[1], arguments: kimi[2] } };
+  }
+  // The pythonic shape: name(key="value", other=3).
+  const python = /^(?:functions\.)?([a-z][a-z0-9_]*)\(([\s\S]*)\)$/i.exec(text);
+  if (!python) return null;
+  const args: Record<string, unknown> = {};
+  const inner = python[2].trim();
+  const pair = /([a-z_][a-z0-9_]*)\s*=\s*(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'|(-?\d+(?:\.\d+)?)|(true|false|null))\s*(?:,\s*|$)/giy;
+  for (let at = 0; at < inner.length;) {
+    pair.lastIndex = at;
+    const found = pair.exec(inner);
+    if (!found) return null;
+    const [, key, doubled, single, number, word] = found;
+    args[key] = doubled !== undefined ? doubled.replace(/\\(.)/g, '$1')
+      : single !== undefined ? single.replace(/\\(.)/g, '$1')
+      : number !== undefined ? Number(number)
+      : word === 'true' ? true : word === 'false' ? false : null;
+    at = pair.lastIndex;
+  }
+  return { function: { name: python[1], arguments: JSON.stringify(args) } };
+}
+
 export type ToolLoopDeps = {
   /**
    * Ask the model. `tools` is the loop's decision; everything else about the
@@ -122,6 +161,24 @@ export async function runToolLoop(conversation: ChatMessage[], deps: ToolLoopDep
     const tools = !deps.pageWasRead() && !emptyRetried && round < maxRounds - 1;
     const roundStarted = Date.now();
     const message = await deps.ask(conversation, { tools });
+
+    // A call written out as words is the call it is — run, when tools were on
+    // the table; asked again for words when they were not.
+    if (!message.tool_calls?.length && message.content) {
+      const written = textToolCall(message.content);
+      if (written && tools) {
+        warn(`[ai] a tool call written out as words — running ${written.function?.name}`);
+        message.tool_calls = [written];
+        message.content = '';
+      } else if (written && !emptyRetried) {
+        emptyRetried = true;
+        resetStream();
+        warn(`[ai] a tool call written out as words with no tools on the table (${written.function?.name}) — asking for words`);
+        conversation.push(message);
+        conversation.push({ role: 'user', content: 'Answer them in words. Do not call anything.' });
+        continue;
+      }
+    }
 
     if (message.tool_calls?.length) {
       // Logged by name: when a tool does not fire, the useful question is whether
