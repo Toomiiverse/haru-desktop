@@ -4490,6 +4490,9 @@ const AT_THE_DESK_SECONDS = 300;
 
 async function composeOpening(): Promise<string | null> {
   if (herAsleepNow()) return null;
+  // Said goodnight, then a restart: the desk asked for an opening and got one
+  // thirteen minutes before her bedtime (2026-09-06). She has logged off.
+  if (herHasSaidGoodnight()) { console.log('[chat] no opening — she has said goodnight'); return null; }
   const config = store.get('ai.config') as ProviderConfig | undefined;
   if (!config?.model) return null;
 
