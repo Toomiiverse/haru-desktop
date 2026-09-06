@@ -4,7 +4,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  ASLEEP_AWAY_LINE, BEDTIME_MAX, BEDTIME_MIN, WAKE_MAX, WAKE_MIN,
+  ASLEEP_AWAY_LINE, asleepLine, BEDTIME_MAX, BEDTIME_MIN, WAKE_MAX, WAKE_MIN,
   clockMinutes, clampBedtime, clampWake, dayAfter, daysBetween,
   decideTimesSystem, fallbackSchedule, goodnightDue, herAsleep,
   messagesWhileAsleep, parseDecidedTimes, readHerSleep, readHerSleepState,
@@ -104,6 +104,19 @@ test('messagesWhileAsleep counts both sides of midnight, nothing else', () => {
   ];
   assert.equal(messagesWhileAsleep(s, heard, ZONE), 2);
   assert.equal(messagesWhileAsleep(s, [], ZONE), 0);
+  // Her own asleep lines sit beside each of theirs with the same stamp: theirs count, hers do not.
+  const withHers = heard.flatMap(m => [{ ...m, role: 'user' }, { ...m, role: 'assistant' }]);
+  assert.equal(messagesWhileAsleep(s, withHers, ZONE), 2);
+});
+
+test('the asleep line wears thinner the more they send, and never wakes her', () => {
+  const lines = [1, 2, 3, 5, 6, 9, 10, 25].map(asleepLine);
+  assert.equal(lines[0], ASLEEP_AWAY_LINE);
+  assert.equal(lines[1], ASLEEP_AWAY_LINE);
+  assert.equal(new Set(lines).size, 4, 'four registers across the night');
+  for (const line of lines) { assert.match(line, /asleep|up|morning/i); assert.doesNotMatch(line, /She|Haru/); }
+  assert.notEqual(asleepLine(3), asleepLine(6));
+  assert.notEqual(asleepLine(6), asleepLine(10));
 });
 
 test('the wake note and its cost follow the agreed thresholds', () => {

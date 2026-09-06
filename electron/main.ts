@@ -112,7 +112,8 @@ import { heldShots, keepShot, localShots, missingFrom, pruneShots, readShot, MAX
 import { DiscordLink, looksLikeUserId, readDiscordConfig, useOfChannel, type DiscordConfig } from './discord';
 import { reactedPrompt, readReaction, REACTION_COOLDOWN_MS } from './reacted';
 import { startWebServer, type WebDeps } from './webserver';
-import { ASLEEP_AWAY_LINE, dayAfter, decideTimesSystem, fallbackSchedule, goodnightDue, herAsleep, messagesWhileAsleep, parseDecidedTimes, readHerSleep, readHerSleepState, wakeIrritation, wakeNote, clockMinutes, type HerSleepSchedule } from './hersleep';
+import { asleepLine, dayAfter, decideTimesSystem, fallbackSchedule, goodnightDue, herAsleep, messagesWhileAsleep, parseDecidedTimes, readHerSleep, readHerSleepState, wakeIrritation, wakeNote, clockMinutes, type HerSleepSchedule } from './hersleep';
+import { parseBalances, balanceWarning } from './venicebalance';
 import { advanceWant, dayNote, dayNoteInstruction, dayPassDue, dayPickInstruction, firstsNote, keepDay, markRecFollowed, noteRecommendation, pickRecommend, pickWantToWork, readDays, readRecs, readWants, readWeek, recDueForFollowUp, reconcileWants, wantInstruction, wantOutcome, wantQuery, wantsNote, weekKey, weekNote, weekReflectionInstruction, weekSummaryDue, WANT_ODDS, type HerDay, type HerWeek, type Rec, type Want } from './ownlife';
 import { inQuietHours, newVapidKeys, pushRequest, readPushDevices, readPushPrefs, type PushDevice, type PushPrefs, nextNudgeDelay, NUDGE_GAP_MS, NUDGE_RETRY_MS, nudgeOverdue, PUSH_BREATHER_MS, tooSoonToPush, heldBack } from './push';
 import { CHECK_EVERY_MS, describeUpdate, progressStep, whyNotCheck, type UpdateState } from './updates';
@@ -6880,6 +6881,8 @@ const promptState = {
           return answer;
         } catch (error) {
           console.warn(`[ai] the conversation route (${config.model}) did not answer (${error instanceof Error ? error.message : String(error)}) — answering at home`);
+          // Refused for money is worth telling the phone about now, not on the hour.
+          if (/insufficient .*balance/i.test(error instanceof Error ? error.message : String(error))) void checkVeniceBalance('a refused turn');
           if (roundStreamed) { roundStreamed = ''; onChunkReset?.(); }
           spilledHome = true;
           return ollamaPost(sending, home, { ...roundOptions, tools });
@@ -7546,7 +7549,7 @@ async function answerOnDiscord(text: string, channelId = '') {
     const today = checkInsOn(getCheckIns(), localDateKey(now));
     console.log(`[discord] check-in noted${anxiety ? ` (anxiety ${anxiety}/10)` : ''} — ${today.length} today`);
     // The note is kept even while she is asleep; only the answer waits.
-    if (asleep) return { reply: ASLEEP_AWAY_LINE, ignored: false };
+    if (asleep) return { reply: asleepReply(), ignored: false };
     const character = getActiveCharacter();
     const system = [
       character.identity,
@@ -7564,7 +7567,7 @@ async function answerOnDiscord(text: string, channelId = '') {
     }
   }
   // Her night: unreachable until she wakes, Discord included.
-  if (asleep) return { reply: ASLEEP_AWAY_LINE, ignored: false };
+  if (asleep) return { reply: asleepReply(), ignored: false };
   const history = (store.get('chat.messages') as { role: string; content: string; at?: string }[] ?? []);
   // The deterministic route earns its keep here first: a Discord notification
   // that turns out to be a greeting or a time check should be instant, and if
@@ -7620,8 +7623,9 @@ async function answerOnDiscordStreamed(text: string, channelId: string, onChunk:
   const config = store.get('ai.config') as ProviderConfig | undefined;
   if (!config?.model) return { reply: '', ignored: true };
   if (herAsleepNow()) {
-    onChunk(ASLEEP_AWAY_LINE);
-    return { reply: ASLEEP_AWAY_LINE, ignored: false };
+    const line = asleepReply();
+    onChunk(line);
+    return { reply: line, ignored: false };
   }
   // A check-in channel answers with a one-line quip through ollamaQuip, which
   // has no streaming of its own — the placeholder is already up, so the line is
@@ -8854,6 +8858,42 @@ function setHerSleepSchedule(schedule: HerSleepSchedule | null) {
 }
 
 /** Whether she is asleep right now — unreachable until her own wake time. */
+/**
+ * Whether there is money behind her hosted voice. Asked of Venice on the hour
+ * and when a turn is refused for it; the phone gets a system note once a day
+ * per level (venicebalance.ts). Not her voice — she would not know.
+ */
+async function checkVeniceBalance(reason: string): Promise<void> {
+  const route = store.get('ai.conversation') as { provider?: string } | undefined;
+  if (route?.provider !== 'venice') return;
+  const key = getVeniceKey();
+  if (!key) return;
+  try {
+    const response = await net.fetch('https://api.venice.ai/api/v1/api_keys/rate_limits', { headers: { Authorization: `Bearer ${key}` } });
+    if (!response.ok) { console.warn(`[venice] could not read the balance (${response.status})`); return; }
+    const balances = parseBalances(await response.json());
+    if (!balances) { console.warn('[venice] the balance came back in a shape I do not know'); return; }
+    store.set('venice.balance', { ...balances, at: new Date().toISOString() });
+    console.log(`[venice] balance $${balances.usd.toFixed(2)}${balances.diem ? ` + ${balances.diem.toFixed(2)} diem` : ''} — checked on ${reason}`);
+    const lowUsd = typeof store.get('venice.lowBalanceUsd') === 'number' ? store.get('venice.lowBalanceUsd') as number : 2;
+    const warning = balanceWarning(balances, lowUsd, (store.get('venice.warned') as { level?: 'fine' | 'low' | 'empty'; at?: string } | undefined) ?? {}, new Date());
+    if (!warning) return;
+    store.set('venice.warned', { level: warning.level, at: new Date().toISOString() });
+    console.warn(`[venice] ${warning.line}`);
+    void pushToPhone('system', warning.line);
+  } catch (error) {
+    console.warn('[venice] could not read the balance:', error instanceof Error ? error.message : error);
+  }
+}
+
+/** Her line for a message that arrives while she sleeps: plainer the first time, thinner the tenth. */
+function asleepReply(): string {
+  const schedule = getHerSleepSchedule();
+  const heard = (store.get('chat.messages') as { role?: string; at?: string }[] | undefined) ?? [];
+  const before = schedule ? messagesWhileAsleep(schedule, heard, CHAT_TIMEZONE) : 0;
+  return asleepLine(before + 1);
+}
+
 function herAsleepNow(): boolean {
   const prefs = getHerSleepPrefs();
   if (!prefs.enabled) return false;
@@ -9803,10 +9843,11 @@ function webDeps(): WebDeps {
       // model call, no voice, nothing composed.
       if (herAsleepNow()) {
         const trace = newTrace();
-        sendToWindows('chat:fromPhone', { text, reply: ASLEEP_AWAY_LINE, ignored: false, ...(files.length ? { attachments: files } : {}) });
+        const line = asleepReply();
+        sendToWindows('chat:fromPhone', { text, reply: line, ignored: false, ...(files.length ? { attachments: files } : {}) });
         console.log(`[web] asleep — not answering (${text.length} chars stored)`);
-        trace.done('web', { tier: 'asleep', chars: ASLEEP_AWAY_LINE.length });
-        return { reply: ASLEEP_AWAY_LINE, ignored: false };
+        trace.done('web', { tier: 'asleep', chars: line.length });
+        return { reply: line, ignored: false };
       }
       // The quick route answers what it can before the model is even asked: a
       // time check or a greeting from a phone should be instant, not the cold
@@ -9849,13 +9890,14 @@ function webDeps(): WebDeps {
       const voice = sentenceStreamer(onSentence);
       if (herAsleepNow()) {
         const trace = newTrace();
-        onChunk(ASLEEP_AWAY_LINE);
-        voice.feed(ASLEEP_AWAY_LINE);
+        const line = asleepReply();
+        onChunk(line);
+        voice.feed(line);
         voice.flush();
-        sendToWindows('chat:fromPhone', { text, reply: ASLEEP_AWAY_LINE, ignored: false, ...(files.length ? { attachments: files } : {}) });
+        sendToWindows('chat:fromPhone', { text, reply: line, ignored: false, ...(files.length ? { attachments: files } : {}) });
         console.log(`[web] asleep — not answering (${text.length} chars stored)`);
-        trace.done('web', { tier: 'asleep', chars: ASLEEP_AWAY_LINE.length });
-        return { reply: ASLEEP_AWAY_LINE, ignored: false };
+        trace.done('web', { tier: 'asleep', chars: line.length });
+        return { reply: line, ignored: false };
       }
       const trace = newTrace();
       const quick = files.length ? null : quickHit(text, history);
@@ -9912,8 +9954,9 @@ function webDeps(): WebDeps {
       const config = store.get('ai.config') as ProviderConfig | undefined;
       if (!config?.model) throw new Error('no model is set up');
       if (herAsleepNow()) {
-        onSentence?.(ASLEEP_AWAY_LINE, localEmotion(ASLEEP_AWAY_LINE));
-        return { reply: ASLEEP_AWAY_LINE, ignored: false };
+        const line = asleepReply();
+        onSentence?.(line, localEmotion(line));
+        return { reply: line, ignored: false };
       }
       const history = (store.get('chat.messages') as { role: string; content: string; at?: string; attachments?: Attachment[] }[] ?? []);
       const last = history.at(-1);
@@ -10677,6 +10720,9 @@ app.whenReady().then(() => {
   // would time out before it began. apns.ts sets this per connection; a
   // WebSocket has no such option, so the default is raised once here.
   setDefaultAutoSelectFamilyAttemptTimeout(5_000);
+  // The money behind her hosted voice, on the hour; the day it ran out, nobody knew.
+  setTimeout(() => void checkVeniceBalance('startup'), 2 * 60_000);
+  setInterval(() => void checkVeniceBalance('the hour'), 60 * 60_000);
   // Whatever was said to her elsewhere today. Once at startup, then quietly on
   // the hour — often enough that the evening review has it, rare enough that a
   // sleeping server is not being knocked on constantly.
@@ -11259,7 +11305,7 @@ app.whenReady().then(() => {
   ipcMain.handle('google:disconnect', () => { disconnectGoogle(store); broadcastGoogleStatus(); return googleStatus(store); });
   ipcMain.handle('google:sync', () => syncFromGoogle());
   ipcMain.handle('ai:send', (_e, messages: { role: string; content: string }[], config: ProviderConfig) => {
-    if (herAsleepNow()) return { content: ASLEEP_AWAY_LINE, ignored: false, irritation: 0, ego: 0 };
+    if (herAsleepNow()) return { content: asleepReply(), ignored: false, irritation: 0, ego: 0 };
     return ollamaChat(messages, config);
   });
   ipcMain.handle('ai:test', (_e, endpoint: string, provider?: string) => (isOpenAIShaped(provider)
@@ -11451,8 +11497,9 @@ app.whenReady().then(() => {
     const config = store.get('ai.config') as ProviderConfig | undefined;
     if (!config?.model) throw new Error('No model is set up.');
     if (herAsleepNow()) {
-      sendToWindows('chat:fromPhone', { text: said, reply: ASLEEP_AWAY_LINE, ignored: false });
-      return { reply: ASLEEP_AWAY_LINE, ignored: false };
+      const line = asleepReply();
+      sendToWindows('chat:fromPhone', { text: said, reply: line, ignored: false });
+      return { reply: line, ignored: false };
     }
 
     const messages = [...(store.get('chat.messages') as { role: string; content: string; at?: string }[] ?? []),

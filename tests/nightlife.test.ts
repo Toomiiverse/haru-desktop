@@ -72,6 +72,10 @@ test('her night reaches the prompt as something that happened, with a limit on w
   assert.match(said, /deep sea gigantism: It was all right\./);
   assert.match(said, /neon signs/);
   assert.match(said, /say you only read a bit about it rather than filling the gap/);
+  // Last night is last night: the diary holds the earlier ones, and they are not folded in.
+  assert.match(said, /^Last night/);
+  assert.match(said, /Nothing else belongs to last night/);
+  assert.match(said, /diary/);
 });
 
 test('her night is offered to an unprompted line once, not as the opener of every one', () => {

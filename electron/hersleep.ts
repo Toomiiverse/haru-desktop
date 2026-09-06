@@ -47,6 +47,19 @@ export const DEFAULT_HER_SLEEP: HerSleepPrefs = { enabled: true, fallbackBedtime
  */
 export const ASLEEP_AWAY_LINE = "I'm asleep. I'll see it when I'm up.";
 
+/**
+ * What the nth message into her sleep gets. The first couple get the plain
+ * line; eleven in a row got eleven identical copies of it on 2026-09-05,
+ * which reads as a server, not a person asleep. She does not wake up — the
+ * line just wears thinner, the way anyone's would.
+ */
+export function asleepLine(nth: number): string {
+  if (nth <= 2) return ASLEEP_AWAY_LINE;
+  if (nth <= 5) return "Still asleep. It'll keep till I'm up.";
+  if (nth <= 9) return "I'm asleep. Whatever it is, it can wait till morning.";
+  return "You know I can't read these yet. Go do something. I'll see them when I'm up.";
+}
+
 /** Sane ranges: bed no earlier than 21:00, no later than 02:00; up no earlier than 05:00, no later than 12:00. */
 export const BEDTIME_MIN = 21 * 60;
 export const BEDTIME_MAX = 26 * 60;
@@ -153,11 +166,15 @@ export function herAsleep(schedule: HerSleepSchedule | null, now: Date): boolean
   return minutesNow >= window.fromMin && minutesNow < window.toMin;
 }
 
-/** How many of their messages fall inside the schedule's sleep window. */
-export function messagesWhileAsleep(schedule: HerSleepSchedule, messages: { at?: string }[], timeZone: string): number {
+/**
+ * How many of their messages fall inside the schedule's sleep window. Theirs:
+ * her own asleep lines sit beside each one with the same stamp, and counting
+ * both had her wake to "twenty-two messages" after thirteen.
+ */
+export function messagesWhileAsleep(schedule: HerSleepSchedule, messages: { at?: string; role?: string }[], timeZone: string): number {
   let count = 0;
   for (const message of messages) {
-    if (!message.at) continue;
+    if (!message.at || (message.role && message.role !== 'user')) continue;
     const at = zonedNow(timeZone, new Date(message.at));
     const window = sleepWindowOn(schedule, localDateKey(at));
     if (!window) continue;
