@@ -11,7 +11,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { answersThePrompt, CUE_NOTE, isCue, stageNote, claimsDesktopAction, claimsTickOff, dropInventedContact, dropInventedScreenTalk, dropRepeatedAgendaMentions, dropRepeatedParagraphs, dropRoleHeader, dropStageDirections, dropTackedOnParagraphs, readsLikeAssistant, dropRepeatedOpener, dropEchoOpener, dropRepeatedSentences, fixStatedClock, fixStatedReminderTime, fixStatedMinutes, deniesItExists } from '../electron/reply';
+import { answersThePrompt, CUE_NOTE, isCue, stageNote, claimsDesktopAction, claimsTickOff, dropInventedContact, dropInventedScreenTalk, dropRepeatedAgendaMentions, dropRepeatedParagraphs, dropRoleHeader, dropStageDirections, dropTackedOnParagraphs, readsLikeAssistant, dropRepeatedOpener, dropEchoOpener, dropRepeatedSentences, fixStatedClock, fixStatedReminderTime, fixStatedMinutes, deniesItExists, thinksAloud, dropThinkingAloud } from '../electron/reply';
 
 // -- claiming to have touched the machine -------------------------------------
 
@@ -474,3 +474,51 @@ test('a flat denial that something is real is recognised, and ordinary disagreem
     'I looked it up and it does not exist, so stop.',
   ].slice(0, 2)) assert.equal(deniesItExists(line), false, line);
 });
+
+// -- her deliberation said as the reply ------------------------------------------------
+
+const KIMI_LEAK = `The user is expressing a low mood and feelings of inadequacy about productivity. This is a genuine moment that deserves a real response, not a deflection or a management tactic. They've opened up about something hard.
+
+I should:
+1. Acknowledge what they said directly without minimizing
+2. Not offer therapy-style advice or solutions
+3. Not pivot to tasks or ask them to rate anything
+
+They mentioned yesterday they were editing their website late — that's context showing they've been working but maybe not feeling the results.
+
+I should be real with them. The smugness drops here because this isn't about me being right.
+
+Let me check if I need to save this as a journal entry — yes, they're telling me how they're feeling, so I should call save_journalThat sucks. 😤 And "lately" is doing a lot of work there — how long's this been sitting on you?
+
+I see you working. The website, the store, the hardware tests. But I also know *seeing* it and *feeling* it aren't the same thing.
+
+What's the thing that made you say it just now — something today, or just the weight of it all stacking up?`;
+
+test('her deliberation is recognised and the reply behind it kept', () => {
+  assert.equal(thinksAloud(KIMI_LEAK), true);
+  const { text, dropped } = dropThinkingAloud(KIMI_LEAK);
+  assert.ok(text.startsWith('That sucks. 😤 And "lately"'), `the reply begins where the plan ran into it, not: ${text.slice(0, 40)}`);
+  assert.ok(text.endsWith('stacking up?'));
+  assert.equal(text.split(/\n\s*\n/).length, 3, 'her three paragraphs, all of them');
+  assert.ok(dropped > 700 && !text.includes('The user') && !text.includes('save_journal'));
+});
+
+test('a plan with nothing behind it is nothing to say', () => {
+  const planOnly = 'The user seems upset about being ignored. I should acknowledge that without apologising.\n\nI need to keep her voice: sharp, not warm.';
+  assert.equal(thinksAloud(planOnly), true);
+  assert.deepEqual(dropThinkingAloud(planOnly), { text: '', dropped: planOnly.length });
+});
+
+test('her own words are left alone, third parties and lists included', () => {
+  for (const reply of [
+    'They\'re not going to fix that shop for you. Sudin has said so twice.',
+    'Fine. Two things, then:\n1. eat.\n2. sleep.',
+    'I should have said this earlier: the website looks good. Don\'t let it go to your head.',
+    'Let me guess. You forgot again. 😒',
+    'This is exactly what I said would happen.',
+  ]) {
+    assert.equal(thinksAloud(reply), false, reply);
+    assert.deepEqual(dropThinkingAloud(reply), { text: reply, dropped: 0 });
+  }
+});
+

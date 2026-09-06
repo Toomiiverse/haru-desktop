@@ -24,7 +24,7 @@
 // reported rather than looped on.
 
 import type { ChatMessage, ToolCall } from './provider';
-import { claimsDesktopAction, claimsTickOff, readsLikeAssistant, deniesItExists } from './reply';
+import { claimsDesktopAction, claimsTickOff, readsLikeAssistant, deniesItExists, thinksAloud, dropThinkingAloud } from './reply';
 
 /** How many rounds a single reply may spend before it has to settle. */
 export const MAX_TOOL_ROUNDS = 4;
@@ -225,6 +225,31 @@ export async function runToolLoop(conversation: ChatMessage[], deps: ToolLoopDep
         content: 'You just said that is not real. You do not know that: your training stopped a while ago and anything released since looks invented to you. Search for it with search_web before you say it does not exist. If the search shows it is real, say so plainly and answer the actual question; if it genuinely is not, then say so and you will have earned it.',
       });
       continue;
+    }
+
+    // She answered with her deliberation — "The user is expressing… I should:
+    // 1. Acknowledge…" — a model's notes to itself said out loud (Kimi K2.5,
+    // 2026-09-06). When the words she meant are there behind the notes they
+    // are kept and the notes go; when there is nothing but notes, she is asked
+    // once for the words alone. Either way the streamed text is taken back:
+    // the reader has seen the plan.
+    if (thinksAloud(message.content)) {
+      const { text, dropped } = dropThinkingAloud(message.content);
+      if (text.length >= 40 && !thinksAloud(text)) {
+        resetStream();
+        warn(`[ai] dropped ${dropped} chars of her own deliberation from in front of the reply`);
+        message.content = text;
+      } else if (!voiceRetried) {
+        voiceRetried = true;
+        resetStream();
+        warn('[ai] replied with her deliberation instead of the words — asking once for the words alone');
+        conversation.push(message);
+        conversation.push({
+          role: 'user',
+          content: 'That reply was your reasoning about what to say, not the thing said. Reply again with only what you would say to them — no analysis of them, no plan, no notes to yourself, and no mention of this note.',
+        });
+        continue;
+      }
     }
 
     // She answered in the register of a help desk. Four different doors let a

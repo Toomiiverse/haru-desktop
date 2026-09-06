@@ -201,6 +201,54 @@ export function readsLikeAssistant(reply: string): boolean {
 }
 
 /**
+ * Her deliberation, said out loud as the reply.
+ *
+ * Seen 2026-09-06 from Kimi K2.5: a reply that began "The user is expressing a
+ * low mood… I should: 1. Acknowledge… 2. Not offer therapy-style advice…" and
+ * ran for five paragraphs of notes to itself before the words she meant to
+ * say, glued on to the end of the last note. Nothing in that is hers: she
+ * never calls him "the user", and she does not number what she is about to
+ * do. A reply that starts that way is either a plan with the answer after it
+ * — salvageable — or a plan alone, which has to be asked for again.
+ */
+// "I should" alone is hers ("I should have said this earlier"); the planning
+// forms are "I should:" and "I should acknowledge / not / keep / be…".
+const PLANNING_VERBS = '(?:acknowledge|not|keep|stay|be|avoid|respond|answer|reply|call|check|save|address|focus|make|hold|match|lean|drop|push|ask|point|give|offer|remind|steer|use)';
+const THINKING_OPENER = new RegExp(`^(?:The user\\b|I should(?:n'?t)?(?::|\\s+${PLANNING_VERBS}\\b)|I need to\\s+${PLANNING_VERBS}\\b|Let me (?:think|check|see|consider|figure)\\b|Okay, so (?:the user|they)\\b|Alright, (?:so )?(?:the user|they)\\b|First, (?:I|let me)\\b)`);
+const THINKING_CONTINUES = new RegExp(`^(?:They (?:mentioned|said|are|have|'re|'ve|seem|want|opened|need|asked|just)\\b|This is (?:a |just |the |about )|This isn'?t\\b|\\d+[.)]\\s|So I\\b|I can\\b|I'?ll\\b|I won'?t\\b|I should(?:n'?t)?(?::|\\s+${PLANNING_VERBS}\\b)|The \\w+ (?:drops|stays|goes|comes) here|Since (?:they|the user)\\b|Given (?:that|the|what)\\b|No (?:therapy|advice|solutions)\\b|Keep it\\b|Stay (?:in|with)\\b)`);
+
+export function thinksAloud(reply: string): boolean {
+  const paragraphs = (reply ?? '').trim().split(/\n\s*\n/);
+  if (!paragraphs[0]) return false;
+  return THINKING_OPENER.test(paragraphs[0]) || paragraphs.some(paragraph => /^The user\b/.test(paragraph));
+}
+
+/**
+ * The reply without the deliberation in front of it. `dropped` counts what
+ * went; an empty `text` means there was no reply behind the plan at all.
+ * The last note often runs straight into the reply with no break — "…so I
+ * should call save_journalThat sucks." — so a lower-case-to-capital seam in
+ * the last dropped paragraph is where the reply is taken to begin.
+ */
+export function dropThinkingAloud(reply: string): { text: string; dropped: number } {
+  const whole = (reply ?? '').trim();
+  const paragraphs = whole.split(/\n\s*\n/);
+  let i = 0;
+  while (i < paragraphs.length && (i === 0 ? THINKING_OPENER.test(paragraphs[i]) : THINKING_OPENER.test(paragraphs[i]) || THINKING_CONTINUES.test(paragraphs[i]))) i++;
+  if (i === 0) return { text: whole, dropped: 0 };
+  let salvaged = '';
+  const last = paragraphs[i - 1];
+  const seams = [...last.matchAll(/[a-z_](?=[A-Z])/g)];
+  if (seams.length) {
+    const at = seams[seams.length - 1].index! + 1;
+    const tail = last.slice(at).trim();
+    if (tail.length >= 30 && !THINKING_OPENER.test(tail) && !THINKING_CONTINUES.test(tail)) salvaged = tail;
+  }
+  const rest = [salvaged, ...paragraphs.slice(i)].filter(Boolean).join('\n\n').trim();
+  return { text: rest, dropped: whole.length - rest.length };
+}
+
+/**
  * The chat template leaking into what she said.
  *
  * Found in the wild: a stored message whose text began, literally, with

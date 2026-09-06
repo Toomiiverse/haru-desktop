@@ -199,6 +199,29 @@ test('each retry fires at most once, so a stubborn model is reported not looped'
   assert.equal(result.ran.size, 0);
 });
 
+test('her deliberation in front of the reply is cut, and the reply behind it stands', async () => {
+  const h = harness([
+    says('The user is expressing a low mood. This deserves a real response.\n\nI should:\n1. Acknowledge it\n2. Not offer therapy\n\nLet me check if I need to save this — yes, so I should call save_journalThat sucks. 😤 And "lately" is doing a lot of work there.\n\nWhat set it off today?'),
+  ]);
+  const result = await runToolLoop(h.conversation, h.deps);
+  assert.equal(result.content, 'That sucks. 😤 And "lately" is doing a lot of work there.\n\nWhat set it off today?');
+  assert.equal(result.rounds, 1, 'no second round: the words were there');
+  assert.equal(h.resets, 1, 'the reader saw the plan; it is taken back');
+  assert.ok(h.say.some(line => line.includes('deliberation')));
+});
+
+test('a plan with no words behind it is asked for again, once', async () => {
+  const h = harness([
+    says('The user seems upset about being ignored. I should acknowledge that without apologising.'),
+    says('You were ignored? Funny. I counted fourteen of mine.'),
+  ]);
+  const result = await runToolLoop(h.conversation, h.deps);
+  assert.equal(result.content, 'You were ignored? Funny. I counted fourteen of mine.');
+  assert.equal(result.rounds, 2);
+  assert.equal(h.resets, 1);
+  assert.ok(h.conversation.some(m => m.role === 'user' && /reasoning about what to say/.test(String(m.content))));
+});
+
 test('a reply in a help-desk register is pressed once to be herself', async () => {
   const h = harness([
     says("I'm sorry to hear that. Could you please clarify what specifically is not true?"),
