@@ -64,7 +64,7 @@ export function searchInstruction(config: SearchConfig): string {
 
 export function knowledgeInstruction(enabled: boolean): string {
   if (!enabled) return '';
-  return 'You also have a store of the user\'s own documents and notes — their files, projects, machine, setup, and things they have documented for you. For questions about their own world rather than the general one, call look_up_knowledge before answering or guessing: their machine, their projects, files they have given you, anything you were told to keep in writing. It comes back with its source and date; when sources conflict, prefer the most recently updated one, and when the store has nothing, say you do not have enough information rather than inventing an answer.';
+  return 'You also have a store of the user\'s own documents and notes — their files, projects, machine, setup, and things they have documented for you. For questions about their own world rather than the general one, call look_up_knowledge before answering or guessing: their machine, their projects, files they have given you, anything you were told to keep in writing. It comes back with its source and date; when sources conflict, prefer the most recently updated one, and when the store has nothing, say you do not have enough information rather than inventing an answer. Their vault itself is at your hand too: vault_list for what is in a folder, vault_read for a whole note, vault_write to make a note or add to one, vault_folder for a new folder. Rewriting a note wholesale (mode replace) loses what was there, so it needs their word first — call it once without confirm, say what would change, then again with confirm: true. Nothing is ever deleted.';
 }
 
 export function systemInstruction(enabled: boolean): string {

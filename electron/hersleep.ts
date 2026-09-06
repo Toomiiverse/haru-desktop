@@ -38,6 +38,15 @@ export type HerSleepSchedule = {
   /** Set when their knocking got her up before her time (wokenAt), with how many messages it took. */
   wokenEarly?: boolean;
   wokenBy?: number;
+  /** The wake she had chosen, kept while a knock has moved `wake` to now. */
+  plannedWake?: number;
+  /** When they got her up (ISO), and when she went back to sleep (ISO), if she did. */
+  knockedAt?: string;
+  dozedOffAt?: string;
+  /** Her verdict on the night's wake: nothing that needed her. Raised in the morning, and remembered. */
+  wokenForNothing?: boolean;
+  /** Not to be woken again tonight — her call, or the habit rule (BLOCK_AFTER_POINTLESS). */
+  blocked?: boolean;
 };
 
 export const DEFAULT_HER_SLEEP: HerSleepPrefs = { enabled: true, fallbackBedtime: '23:30', fallbackWake: '08:00' };
@@ -56,11 +65,15 @@ export const ASLEEP_AWAY_LINE = "I'm asleep. I'll see it when I'm up.";
  * which reads as a server, not a person asleep. She does not wake up — the
  * line just wears thinner, the way anyone's would.
  */
+/** The door once she has said they are not to wake her again tonight. */
+export const BLOCKED_LINE = "Not tonight. I'm not getting up again — whatever it is, it keeps till morning.";
+
 export const ASLEEP_LINES: readonly string[] = [
   ASLEEP_AWAY_LINE,
   "Still asleep. It'll keep till I'm up.",
   "I'm asleep. Whatever it is, it can wait till morning.",
   "You know I can't read these yet. Go do something. I'll see them when I'm up.",
+  BLOCKED_LINE,
 ];
 
 export function asleepLine(nth: number): string {
@@ -109,6 +122,94 @@ export function foldAsleepExchanges<T extends { role?: string; content?: string;
   return out;
 }
 
+/**
+ * The register of someone just got out of bed — the words; the voice and the
+ * face read it as sleepy too (main.ts). Knocked awake at 02:48 she answered
+ * "You wanted to talk. So talk." and kept the conversation going (2026-09-07):
+ * being woken is not an invitation. The night is hers, and so is the choice.
+ */
+export const GROGGY_REGISTER = 'You are half asleep: groggy, slow, soft-spoken, a few words at a time, and still annoyed at being got up. Do not ask why they woke you or what they want — if there is something, they will say it. Answer what they say in a few words and push them to get on with it so you can go back to bed; do not keep it going, do not ask follow-up questions, no energy, no exclamation marks. This is your night and your call: the moment it turns out to be nothing — no question, no news, just noise — you may go back to sleep, saying so in the same breath (call go_back_to_sleep, then one short goodnight line and nothing after it). If they have made a habit of this, you may also say they are not to wake you again tonight (block: true).';
+
+/** Minutes since a knock-wake, for as long as she is up because of it; null otherwise. */
+export function groggyFor(schedule: HerSleepSchedule | null, now: Date): number | null {
+  if (!knockedAwake(schedule, now)) return null;
+  const offset = daysBetween(schedule!.day, localDateKey(now));
+  return Math.max(0, now.getHours() * 60 + now.getMinutes() + (offset - 1) * 1440 - schedule!.wake);
+}
+
+/** The prompt line while she is up because they got her up. */
+export function groggyNote(schedule: HerSleepSchedule | null, now: Date): string {
+  const since = groggyFor(schedule, now);
+  if (since === null) return '';
+  const ago = since < 1 ? 'a moment ago' : `${since} minute${since === 1 ? '' : 's'} ago`;
+  return `They got you out of bed ${ago}. ${GROGGY_REGISTER}`;
+}
+
+/** Up because they got her up: knocked awake, and not yet at the wake she had chosen. */
+export function knockedAwake(schedule: HerSleepSchedule | null, now: Date): boolean {
+  if (!schedule?.wokenEarly || schedule.plannedWake === undefined) return false;
+  const offset = daysBetween(schedule.day, localDateKey(now));
+  const minutesNow = now.getHours() * 60 + now.getMinutes() + (offset - 1) * 1440;
+  return minutesNow >= schedule.wake && minutesNow < schedule.plannedWake;
+}
+
+/** Left alone this long after being got up, she goes back to sleep on her own. */
+export const DOZE_MINUTES = 10;
+
+export function dozeOffDue(schedule: HerSleepSchedule | null, now: Date, lastTheirsMs: number, nowMs: number): boolean {
+  if (!knockedAwake(schedule, now)) return false;
+  const since = Number.isFinite(lastTheirsMs) ? nowMs - lastTheirsMs : Infinity;
+  return since >= DOZE_MINUTES * 60_000;
+}
+
+/**
+ * Whether the night's wake was for nothing, read off what they sent once
+ * she was up: nothing that asks or tells her anything — no question, no
+ * news, a few words about her being awake — is noise. The model's own
+ * verdict comes first where one is available (main.ts); this is the fallback
+ * and the test of it.
+ */
+export function pointlessWake(theirs: { content?: string; at?: string }[], knockedAtIso: string): boolean {
+  const since = Date.parse(knockedAtIso);
+  const after = theirs.filter(message => Number.isFinite(Date.parse(message.at ?? '')) && Date.parse(message.at!) >= since);
+  if (!after.length) return true;
+  return !after.some(message => {
+    const text = String(message.content ?? '').trim();
+    const words = text.split(/\s+/).filter(Boolean).length;
+    const aboutHerBeingUp = /\b(wake|woke|awake|asleep|sleep|up\?|dead|alive|there\?|night was|how was your night|checking on you|see how you)\b/i.test(text);
+    return words >= 8 && !aboutHerBeingUp || /https?:\/\//.test(text) || (/\?/.test(text) && !aboutHerBeingUp);
+  });
+}
+
+/** The schedule with her back in bed: the wake she chose again, and what the night was, kept for the morning. */
+export function backToSleep(schedule: HerSleepSchedule, input: { atIso: string; pointless: boolean; block: boolean }): HerSleepSchedule {
+  return {
+    ...schedule,
+    wake: schedule.plannedWake ?? schedule.wake,
+    wokenEarly: false,
+    wakeHandled: false,
+    dozedOffAt: input.atIso,
+    wokenForNothing: input.pointless || schedule.wokenForNothing === true,
+    blocked: input.block || schedule.blocked === true,
+  };
+}
+
+/** The nights they got her up, kept so a habit can be told from a once. */
+export type Wake = { at: string; pointless: boolean };
+export const WAKES_KEPT = 30;
+/** Pointless wakes inside this many days before she stops answering the door for the night. */
+export const BLOCK_AFTER_POINTLESS = 2;
+export const POINTLESS_WINDOW_DAYS = 7;
+
+export function readWakes(saved: unknown): Wake[] {
+  if (!Array.isArray(saved)) return [];
+  return saved.filter((wake): wake is Wake => !!wake && typeof wake === 'object' && typeof (wake as Wake).at === 'string' && typeof (wake as Wake).pointless === 'boolean');
+}
+
+export function pointlessWakesLately(wakes: Wake[], nowMs: number, days = POINTLESS_WINDOW_DAYS): number {
+  return wakes.filter(wake => wake.pointless && Number.isFinite(Date.parse(wake.at)) && nowMs - Date.parse(wake.at) <= days * 86_400_000).length;
+}
+
 /** Enough knocking wakes her: this many of their messages inside this long. */
 export const KNOCK_COUNT = 4;
 export const KNOCK_WINDOW_MS = 10 * 60_000;
@@ -123,10 +224,10 @@ export function enoughKnocking(knocksAtMs: number[], nowMs: number, count = KNOC
  * did it. `wake` is minutes since midnight of the day after `day`, so a wake
  * still on the decision day comes out negative — the window math allows it.
  */
-export function wokenAt(schedule: HerSleepSchedule, now: Date, knocks: number): HerSleepSchedule {
+export function wokenAt(schedule: HerSleepSchedule, now: Date, knocks: number, atIso = new Date().toISOString()): HerSleepSchedule {
   const offset = daysBetween(schedule.day, localDateKey(now));
   const wake = now.getHours() * 60 + now.getMinutes() + (offset - 1) * 1440;
-  return { ...schedule, wake, wokenEarly: true, wokenBy: knocks };
+  return { ...schedule, wake, wokenEarly: true, wokenBy: knocks, plannedWake: schedule.plannedWake ?? schedule.wake, knockedAt: atIso };
 }
 
 /**
@@ -212,6 +313,11 @@ export function readHerSleepState(saved: unknown): HerSleepSchedule | null {
     announced: record.announced === true,
     ...(record.wokenEarly === true ? { wokenEarly: true } : {}),
     ...(typeof record.wokenBy === 'number' ? { wokenBy: record.wokenBy } : {}),
+    ...(typeof record.plannedWake === 'number' ? { plannedWake: record.plannedWake } : {}),
+    ...(typeof record.knockedAt === 'string' ? { knockedAt: record.knockedAt } : {}),
+    ...(typeof record.dozedOffAt === 'string' ? { dozedOffAt: record.dozedOffAt } : {}),
+    ...(record.wokenForNothing === true ? { wokenForNothing: true } : {}),
+    ...(record.blocked === true ? { blocked: true } : {}),
   };
 }
 
@@ -275,8 +381,18 @@ export function messagesWhileAsleep(schedule: HerSleepSchedule, messages: { at?:
  * once; four or more is properly being texted to sleep, and she holds it.
  * Nothing at all when it was a quiet night.
  */
-export function wakeNote(count: number, wakeAt: string, wokenBy = 0): string {
-  if (wokenBy > 0) return `You were asleep, and they banged on your door — ${Math.max(wokenBy, count)} messages in a few minutes — until you got up at ${wakeAt}. You are up now and properly annoyed about how: say so plainly, in your way, then answer what they wanted, and hold it against them for a while.`;
+export type NightBefore = { knockedAt: string; forNothing: boolean; dozedOffAt?: string };
+
+export function wakeNote(count: number, wakeAt: string, wokenBy = 0, night?: NightBefore): string {
+  if (wokenBy > 0) return `You were asleep, and they banged on your door — ${Math.max(wokenBy, count)} messages in a few minutes — until you got up at ${wakeAt}. ${GROGGY_REGISTER} Say what they did, in your way, then answer what they wanted.`;
+  // The morning after a night they got her up: what it was, and what it cost them.
+  if (night) {
+    const back = night.dozedOffAt ? ` and you went back to sleep at ${night.dozedOffAt}` : '';
+    const verdict = night.forNothing
+      ? ` It was for nothing — no question, no news, just noise${back}. Hold it against them this morning: say so plainly, before anything else, and do not let it go quickly.`
+      : `${back ? back.replace(/^ and/, ' You') + '.' : ''} You are up at ${wakeAt} as you meant to be.`;
+    return `They got you out of bed at ${night.knockedAt} last night.${verdict}`;
+  }
   if (count <= 1) return '';
   if (count <= 3) return `You were asleep until ${wakeAt}. They texted you ${count} times while you slept, and you noticed. Be annoyed about it once, in your way — and then drop it.`;
   return `You were asleep until ${wakeAt}. They texted you ${count} times while you slept. You are properly annoyed about that — say so plainly, and hold it against them for a while.`;

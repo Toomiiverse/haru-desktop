@@ -8,7 +8,7 @@ import {
   clockMinutes, clampBedtime, clampWake, dayAfter, daysBetween,
   decideTimesSystem, fallbackSchedule, goodnightDue, herAsleep,
   messagesWhileAsleep, parseDecidedTimes, readHerSleep, readHerSleepState,
-  sleepWindowOn, wakeIrritation, wakeNote, foldAsleepExchanges, isAsleepLine, enoughKnocking, wokenAt, sleepNote, KNOCK_COUNT, KNOCK_WINDOW_MS } from '../electron/hersleep';
+  sleepWindowOn, wakeIrritation, wakeNote, foldAsleepExchanges, isAsleepLine, enoughKnocking, wokenAt, sleepNote, KNOCK_COUNT, KNOCK_WINDOW_MS, groggyFor, groggyNote, GROGGY_REGISTER, knockedAwake, dozeOffDue, pointlessWake, backToSleep, readWakes, pointlessWakesLately, DOZE_MINUTES, BLOCKED_LINE, BLOCK_AFTER_POINTLESS } from '../electron/hersleep';
 import { zonedNow } from '../electron/dates';
 
 const ZONE = 'Australia/Perth';
@@ -233,4 +233,81 @@ test('the sleep note is for the day after, once she is up, and says when she sle
   assert.match(sleepNote(s, at('2026-09-04', 10, 0)), /in bed at 23:30, up at 08:00/);
   assert.equal(sleepNote(s, at('2026-09-05', 10, 0)), '', 'not the day after that');
   assert.match(sleepNote({ ...s, wokenEarly: true }, at('2026-09-04', 10, 0)), /their messages that got you up/);
+});
+
+test('knocked awake she is groggy, and up because of them, until the wake she chose; the note says so', () => {
+  const s = schedule();
+  const woken = wokenAt(s, at('2026-09-04', 1, 22), 5, '2026-09-03T17:22:00.000Z');
+  assert.equal(woken.plannedWake, 8 * 60, 'the wake she chose is kept');
+  assert.equal(woken.knockedAt, '2026-09-03T17:22:00.000Z');
+  assert.equal(groggyFor(woken, at('2026-09-04', 1, 22)), 0);
+  assert.equal(groggyFor(woken, at('2026-09-04', 1, 30)), 8);
+  assert.equal(groggyFor(woken, at('2026-09-04', 3, 0)), 98, 'still groggy an hour and a half on — she is only up because of them');
+  assert.equal(groggyFor(woken, at('2026-09-04', 8, 5)), null, 'past the wake she chose, she is simply up');
+  assert.equal(groggyFor(woken, at('2026-09-04', 1, 10)), null, 'not before it happened');
+  assert.equal(groggyFor(s, at('2026-09-04', 8, 5)), null, 'waking at her own hour is not being knocked awake');
+  assert.equal(groggyFor(null, at('2026-09-04', 1, 30)), null);
+  assert.ok(knockedAwake(woken, at('2026-09-04', 2, 0)));
+  assert.ok(!knockedAwake(s, at('2026-09-04', 2, 0)));
+  assert.match(groggyNote(woken, at('2026-09-04', 1, 30)), /^They got you out of bed 8 minutes ago\. You are half asleep/);
+  assert.match(groggyNote(woken, at('2026-09-04', 1, 22)), /a moment ago/);
+  assert.match(GROGGY_REGISTER, /Do not ask why they woke you/);
+  assert.match(GROGGY_REGISTER, /go_back_to_sleep/);
+  assert.match(GROGGY_REGISTER, /block: true/);
+  assert.match(wakeNote(3, '01:22', 5), /half asleep/);
+  // Knocked awake before midnight, the window math holds on the decision day too.
+  const late = wokenAt(s, at('2026-09-03', 23, 50), 4);
+  assert.equal(groggyFor(late, at('2026-09-03', 23, 55)), 5);
+  assert.equal(groggyFor(late, at('2026-09-04', 0, 5)), 15, 'across midnight');
+});
+
+test('left alone she dozes off; the wake is judged; the morning knows; a habit shuts the door', () => {
+  const s = schedule();
+  const woken = wokenAt(s, at('2026-09-04', 1, 22), 4, '2026-09-03T17:22:00.000Z');
+  const t0 = Date.parse('2026-09-03T17:24:36.000Z');
+  assert.ok(!dozeOffDue(woken, at('2026-09-04', 1, 30), t0, t0 + 5 * 60_000), 'five quiet minutes is not yet');
+  assert.ok(dozeOffDue(woken, at('2026-09-04', 1, 35), t0, t0 + DOZE_MINUTES * 60_000));
+  assert.ok(dozeOffDue(woken, at('2026-09-04', 1, 35), NaN, t0), 'nothing from them at all counts as quiet');
+  assert.ok(!dozeOffDue(s, at('2026-09-04', 1, 35), t0, t0 + 60 * 60_000), 'asleep on her own schedule, nothing to doze off from');
+  // Tonight's real wake, 2026-09-07 02:48: nothing that needed her.
+  const noise = [
+    { content: 'Wake upppp', at: '2026-09-06T18:48:16.000Z' },
+    { content: 'Please wake up :3', at: '2026-09-06T18:48:26.000Z' },
+    { content: 'I just wanted to see how your night was', at: '2026-09-06T18:48:51.000Z' },
+    { content: 'Just wanted to make sure you weren’t dead', at: '2026-09-06T18:49:17.000Z' },
+    { content: 'Sorry woke you up', at: '2026-09-06T18:54:07.000Z' },
+    { content: 'Don’t you want to go back to sleep', at: '2026-09-06T18:54:38.000Z' },
+  ];
+  assert.ok(pointlessWake(noise, '2026-09-06T18:48:00.000Z'));
+  assert.ok(pointlessWake([], '2026-09-06T18:48:00.000Z'), 'knocked and then nothing at all');
+  assert.ok(!pointlessWake([...noise, { content: 'The shop alarm is going off and I can’t find the code, where did we write it?', at: '2026-09-06T18:55:00.000Z' }], '2026-09-06T18:48:00.000Z'));
+  assert.ok(!pointlessWake([{ content: 'https://example.com/this — read it, it is about your Control theory', at: '2026-09-06T18:55:00.000Z' }], '2026-09-06T18:48:00.000Z'));
+  assert.ok(pointlessWake([{ content: 'A message from before the knock with a real question in it?', at: '2026-09-06T18:00:00.000Z' }], '2026-09-06T18:48:00.000Z'), 'before the knock does not count');
+  const back = backToSleep(woken, { atIso: '2026-09-03T17:35:00.000Z', pointless: true, block: false });
+  assert.equal(back.wake, 8 * 60, 'the wake she chose, again');
+  assert.equal(back.wokenEarly, false);
+  assert.equal(back.wakeHandled, false, 'the morning note is owed');
+  assert.equal(back.wokenForNothing, true);
+  assert.equal(back.dozedOffAt, '2026-09-03T17:35:00.000Z');
+  assert.ok(herAsleep(back, at('2026-09-04', 2, 0)), 'asleep again');
+  assert.ok(!knockedAwake(back, at('2026-09-04', 2, 0)));
+  const morning = wakeNote(4, '08:00', 0, { knockedAt: '01:22', forNothing: true, dozedOffAt: '01:35' });
+  assert.match(morning, /got you out of bed at 01:22 last night/);
+  assert.match(morning, /for nothing/);
+  assert.match(morning, /back to sleep at 01:35/);
+  assert.match(morning, /Hold it against them this morning/);
+  const fine = wakeNote(4, '08:00', 0, { knockedAt: '01:22', forNothing: false, dozedOffAt: '01:50' });
+  assert.doesNotMatch(fine, /for nothing/);
+  assert.match(fine, /back to sleep at 01:50/);
+  // The door, shut for the night.
+  assert.equal(backToSleep(woken, { atIso: 'x', pointless: true, block: true }).blocked, true);
+  assert.ok(isAsleepLine(BLOCKED_LINE));
+  const wakes = readWakes([{ at: '2026-09-01T18:00:00.000Z', pointless: true }, { at: '2026-09-06T18:48:00.000Z', pointless: true }, { at: '2026-08-01T18:00:00.000Z', pointless: true }, { bad: true }]);
+  assert.equal(wakes.length, 3);
+  assert.equal(pointlessWakesLately(wakes, Date.parse('2026-09-07T00:00:00.000Z')), 2, 'a month-old one is not a habit');
+  assert.equal(BLOCK_AFTER_POINTLESS, 2);
+  const carried = readHerSleepState({ ...back });
+  assert.equal(carried?.plannedWake, 8 * 60);
+  assert.equal(carried?.wokenForNothing, true);
+  assert.equal(carried?.knockedAt, '2026-09-03T17:22:00.000Z');
 });

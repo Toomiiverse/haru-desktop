@@ -12,6 +12,9 @@
 // never offered.
 
 import test from 'node:test';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import assert from 'node:assert/strict';
 import { chatTools, machineRelevant, runChatTool, type ToolAvailability, type ToolDeps } from '../electron/tools';
 import type { ToolCall } from '../electron/provider';
@@ -27,6 +30,7 @@ const EVERYTHING: ToolAvailability = {
   system: { enabled: true, level: 2 },
   hands: true,
   desktop: { launch: true, power: true },
+  knockedAwake: true,
 };
 
 const NOTHING: ToolAvailability = {
@@ -40,6 +44,7 @@ const NOTHING: ToolAvailability = {
   system: { enabled: false, level: 0 },
   hands: false,
   desktop: { launch: false, power: false },
+  knockedAwake: false,
 };
 
 const offered = (available: ToolAvailability) =>
@@ -75,6 +80,8 @@ function deps(overrides: Partial<ToolDeps> = {}): ToolDeps {
     getInterests: () => [],
     setInterests: () => {},
     myself: () => ({ conversation: null }),
+    vault: { root: () => '', afterWrite: () => {} },
+    goBackToSleep: () => null,
     hostedModels: async () => null,
     changeMySetting: async () => ({ ok: true, note: 'In effect now.' }),
     browserPort: () => 9222,
@@ -134,7 +141,7 @@ test('no handler is dead code — every one is reachable from some setting', asy
     'get_system_info', 'get_gpu_info', 'get_processes', 'get_docker_status',
     'get_service_status', 'diagnose_system', 'restart_docker_container',
     'start_service', 'stop_service', 'restart_haru', 'look_up_knowledge', 'adopt_interest', 'browser_control',
-    'describe_myself', 'change_setting',
+    'describe_myself', 'change_setting', 'vault_list', 'vault_read', 'vault_write', 'vault_folder', 'go_back_to_sleep',
   ];
   for (const name of handled) {
     assert.ok(reachable.has(name), `${name} has a handler but is never offered to anyone`);
@@ -433,4 +440,42 @@ test('describe_myself hands back what main knows of her; change_setting checks, 
   // A model id is checked against what the endpoint lists.
   const listed: Partial<ToolDeps> = { ...over, hostedModels: async () => ['kimi-k2-5', 'grok-4-20'] };
   assert.match(JSON.parse(await run('change_setting', { name: 'conversation_model', value: 'grok 4', confirm: true }, '', listed)).error, /Close: grok-4-20/);
+});
+
+test('the vault tools list, read, add, and only replace at their word; nothing without a vault', async () => {
+  assert.match(JSON.parse(await run('vault_list')).error, /No vault/);
+  const root = mkdtempSync(path.join(tmpdir(), 'haru-vault-tools-'));
+  try {
+    writeFileSync(path.join(root, 'Home.md'), 'home\n');
+    let synced = 0;
+    const over: Partial<ToolDeps> = { vault: { root: () => root, afterWrite: () => { synced += 1; } } };
+    const listed = JSON.parse(await run('vault_list', {}, '', over));
+    assert.deepEqual(listed.notes.map((n: { path: string }) => n.path), ['Home.md']);
+    assert.equal(JSON.parse(await run('vault_read', { path: 'Home' }, '', over)).text, 'home\n');
+    const made = JSON.parse(await run('vault_write', { path: 'Ideas/one', text: 'a thought', mode: 'create' }, '', over));
+    assert.equal(made.ok, true);
+    assert.equal(synced, 1, 'a write is followed by a re-read of the vault');
+    const asked = JSON.parse(await run('vault_write', { path: 'Home', text: 'new', mode: 'replace' }, '', over));
+    assert.equal(asked.confirm, true);
+    assert.equal(readFileSync(path.join(root, 'Home.md'), 'utf8'), 'home\n', 'nothing replaced before the word');
+    const done = JSON.parse(await run('vault_write', { path: 'Home', text: 'new', mode: 'replace', confirm: true }, '', over));
+    assert.equal(done.ok, true);
+    assert.equal(readFileSync(path.join(root, 'Home.md'), 'utf8'), 'new\n');
+    assert.match(JSON.parse(await run('vault_write', { path: 'Haru/Her', text: 'x', mode: 'append' }, '', over)).error, /your own folder/);
+    assert.match(JSON.parse(await run('vault_write', { path: 'x', text: 'y', mode: 'delete' }, '', over)).error, /mode is/);
+    const folder = JSON.parse(await run('vault_folder', { path: 'Reading' }, '', over));
+    assert.equal(folder.ok, true);
+    assert.equal(synced, 2);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('going back to sleep is on the table only while she is up because they knocked', async () => {
+  assert.ok(offered(EVERYTHING).includes('go_back_to_sleep'));
+  assert.ok(!offered({ ...EVERYTHING, knockedAwake: false }).includes('go_back_to_sleep'));
+  assert.match(JSON.parse(await run('go_back_to_sleep')).error, /not up because of them/);
+  let asked: { block: boolean } | null = null;
+  const done = JSON.parse(await run('go_back_to_sleep', { block: true }, '', { goBackToSleep: input => { asked = input; return { asleep: true, blocked: true }; } }));
+  assert.deepEqual(asked, { block: true });
+  assert.equal(done.asleep, true);
+  assert.match(done.note, /one short goodnight/);
 });

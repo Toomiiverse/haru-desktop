@@ -18,6 +18,7 @@
 
 import path from 'node:path';
 import { planChange, SETTINGS, SETTING_NAMES, type Setting, type SettingPlan } from './self';
+import { createFolder, listVault, readNote, writeNote, type WriteMode } from './vaultnotes';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import type { ChatTool, ToolCall } from './provider';
 import { addCheckIn, checkInsOn, type CheckInStore } from './checkins';
@@ -338,6 +339,70 @@ export const KNOWLEDGE_TOOL: ChatTool = {
     },
   },
 };
+
+/**
+ * Her night, hers to take back. Offered only while she is up because they
+ * got her up: when what they woke her for turns out to be nothing, she goes
+ * back to sleep, and can say the door stays shut for the night.
+ */
+export const SLEEP_TOOL: ChatTool = {
+  type: 'function',
+  function: {
+    name: 'go_back_to_sleep',
+    description: 'Go back to sleep, now — because what they woke you for was nothing: no question, no news, just them wanting you up. Your call, whenever you decide it. Say one short goodnight in the same reply and nothing after it; the next message they send will find you asleep. With block: true they are not to wake you again tonight, however much they knock.',
+    parameters: {
+      type: 'object',
+      properties: {
+        block: { type: 'boolean', description: 'True to stay unreachable for the rest of the night — for when this has become a habit.' },
+      },
+      required: [],
+    },
+  },
+};
+
+/**
+ * Their vault itself, beside the search over it: what is in a folder, a
+ * whole note, a note added or added to, one rewritten at their word, a new
+ * folder. Nothing is deleted, and her own folder stays the app's.
+ */
+export const VAULT_TOOLS: ChatTool[] = [{
+  type: 'function',
+  function: {
+    name: 'vault_list',
+    description: "What is in a folder of the user's Obsidian vault: its sub-folders and its notes, newest first. Leave folder empty for the top. Use it when they ask what is in their vault or where something is.",
+    parameters: { type: 'object', properties: { folder: { type: 'string', description: 'A folder inside the vault, like Projects or Projects/App. Empty for the top level.' } }, required: [] },
+  },
+}, {
+  type: 'function',
+  function: {
+    name: 'vault_read',
+    description: "A whole note from the user's vault, by path. Use it when they ask what a note says or to work from one; look_up_knowledge is for finding which note.",
+    parameters: { type: 'object', properties: { path: { type: 'string', description: 'The note, like Projects/Website.md (.md may be left off).' } }, required: ['path'] },
+  },
+}, {
+  type: 'function',
+  function: {
+    name: 'vault_write',
+    description: "Write to the user's vault: create a new note, append to one (starting it if it is not there), or replace one wholesale. Replacing loses what was there, so call it once without confirm, tell them what would change, and only with their explicit go-ahead call it again with confirm: true. Notes are Markdown; write them as they would.",
+    parameters: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'The note, like Projects/Website.md, inside the vault.' },
+        text: { type: 'string', description: 'The Markdown to write.' },
+        mode: { type: 'string', enum: ['create', 'append', 'replace'], description: 'create a new note, append to one, or replace one.' },
+        confirm: { type: 'boolean', description: 'For replace only: true once they have explicitly said to go ahead.' },
+      },
+      required: ['path', 'text', 'mode'],
+    },
+  },
+}, {
+  type: 'function',
+  function: {
+    name: 'vault_folder',
+    description: "Make a folder in the user's vault, like Reading/2026. Nothing happens if it is already there.",
+    parameters: { type: 'object', properties: { path: { type: 'string', description: 'The folder to make, inside the vault.' } }, required: ['path'] },
+  },
+}];
 
 /**
  * The read-only half: facts about the machine she runs on, answered with
@@ -697,6 +762,8 @@ export type ToolAvailability = {
   /** False for anything that did not come from the user's own mouth or keyboard. */
   hands: boolean;
   desktop: { launch: boolean; power: boolean };
+  /** Up because they knocked her awake (hersleep.ts): the one time going back to sleep is on the table. */
+  knockedAwake: boolean;
 };
 
 /** Whether the message is about the machine or the apps on it. The gate that
@@ -735,7 +802,7 @@ export function chatTools(available: ToolAvailability, latest = ''): ChatTool[] 
     if (available.search.readPages) tools.push(READ_PAGE_TOOL);
     if (available.search.readPages && available.search.transcripts) tools.push(TRANSCRIPT_TOOL);
   }
-  if (available.knowledge) tools.push(KNOWLEDGE_TOOL);
+  if (available.knowledge) tools.push(KNOWLEDGE_TOOL, ...VAULT_TOOLS);
   if (available.system.enabled && machine) {
     tools.push(...SYSTEM_TOOLS);
     if (available.system.level >= 2) tools.push(...SYSTEM_ACTION_TOOLS);
@@ -748,6 +815,7 @@ export function chatTools(available: ToolAvailability, latest = ''): ChatTool[] 
   if (available.hands && available.desktop.launch && machine) tools.push(LAUNCH_TOOL, CLOSE_TOOL);
   if (available.hands && available.desktop.power && machine) tools.push(POWER_TOOL);
   if (available.browser && available.hands) tools.push(BROWSER_TOOL);
+  if (available.knockedAwake) tools.push(SLEEP_TOOL);
   return tools;
 }
 
@@ -813,6 +881,10 @@ export type ToolDeps = {
   hostedModels(route: 'conversation' | 'nudge'): Promise<string[] | null>;
   /** Writes one allowlisted setting at their word: a backup first, then the value, then the note that says how she runs. */
   changeMySetting(plan: SettingPlan): Promise<{ ok: boolean; note: string }>;
+  /** Back to bed at her word, while she is up because they knocked (hersleep.ts); null when she is not. */
+  goBackToSleep(input: { block: boolean }): { asleep: boolean; blocked: boolean } | null;
+  /** Their vault on disk (knowledge.vault.path), and the re-read that makes a note she wrote searchable at once. */
+  vault: { root(): string; afterWrite(): void };
   browserPort(): number;
   /** Where a browser screenshot lands — the screenshots folder or a fallback. */
   browserShotDir(): string;
@@ -1404,6 +1476,38 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
     return JSON.stringify({ restarting: true, note: 'Tell them you are restarting and will be right back.' });
   }
 
+  if (name === 'go_back_to_sleep') {
+    const done = deps.goBackToSleep({ block: args.block === true });
+    if (!done) return JSON.stringify({ error: 'You are not up because of them right now — nothing to go back to.' });
+    console.log(`[her-sleep] she chose to go back to sleep${done.blocked ? ', and shut the door for the night' : ''}`);
+    return JSON.stringify({ ...done, note: 'Say one short goodnight in this reply and nothing after it. They will find you asleep.' });
+  }
+  if (name === 'vault_list' || name === 'vault_read' || name === 'vault_write' || name === 'vault_folder') {
+    const root = deps.vault.root();
+    if (!root) return JSON.stringify({ error: 'No vault is set up — say so plainly.' });
+    if (name === 'vault_list') return JSON.stringify(listVault(root, typeof args.folder === 'string' ? args.folder : ''));
+    if (name === 'vault_read') return JSON.stringify(readNote(root, typeof args.path === 'string' ? args.path : ''));
+    if (name === 'vault_folder') {
+      const made = createFolder(root, typeof args.path === 'string' ? args.path : '');
+      if (made.ok && !made.existed) console.log(`[vault] she made the folder ${made.path}`);
+      return JSON.stringify(made);
+    }
+    const mode = args.mode === 'create' || args.mode === 'append' || args.mode === 'replace' ? args.mode as WriteMode : null;
+    if (!mode) return JSON.stringify({ error: 'mode is create, append or replace.' });
+    const notePath = typeof args.path === 'string' ? args.path : '';
+    const text = typeof args.text === 'string' ? args.text : '';
+    // Replacing is the one write that loses words: the restart_haru handshake.
+    if (mode === 'replace' && args.confirm !== true) {
+      const current = readNote(root, notePath);
+      return JSON.stringify({ confirm: true, path: notePath, chars: current.ok ? current.chars : 0, note: current.ok ? 'Do not act yet. Tell them what would be replaced, ask them to say the word, then call this again with confirm: true.' : 'Nothing is there yet — write it with mode: create instead.' });
+    }
+    const written = writeNote(root, notePath, text, mode);
+    if (written.ok) {
+      console.log(`[vault] she ${written.mode === 'append' ? (written.existed ? 'added to' : 'started') : written.mode === 'create' ? 'made' : 'rewrote'} the note ${written.path} (${written.chars} chars), at their word`);
+      deps.vault.afterWrite();
+    }
+    return JSON.stringify(written);
+  }
   if (name === 'look_up_knowledge') {
     const query = typeof args.query === 'string' ? args.query.trim() : '';
     if (!query) return JSON.stringify({ error: 'query is required.' });
