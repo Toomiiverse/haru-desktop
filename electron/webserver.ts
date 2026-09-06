@@ -133,13 +133,13 @@ export type WebDeps = {
    *  phone's own; the one secret — the signing key — never appears here. */
   push: {
     /** The native app's device token, from Apple. `sandbox` for a build run from Xcode; TestFlight and the store are production. */
-    subscribeApns(token: string, name: string, sandbox: boolean): void;
+    subscribeApns(token: string, name: string, sandbox: boolean, deviceId?: string): void;
     unsubscribeApns(token: string): void;
     /** Whether the Apple sender has a key to sign with. */
     apnsReady(): boolean;
     /** The public half of the VAPID pair, for the page to subscribe with. */
     key(): string;
-    subscribe(device: { endpoint: string; p256dh: string; auth: string }, name: string): void;
+    subscribe(device: { endpoint: string; p256dh: string; auth: string }, name: string, deviceId?: string): void;
     unsubscribe(endpoint: string): void;
     prefs(): PushPrefs;
     savePrefs(prefs: PushPrefs): void;
@@ -1152,14 +1152,14 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
     if (Buffer.from(p256dh, 'base64url').length !== 65 || Buffer.from(auth, 'base64url').length !== 16) {
       return json(res, 400, { error: 'Those are not subscription keys.' });
     }
-    deps.push.subscribe({ endpoint, p256dh, auth }, me.device?.name ?? 'a phone');
+    deps.push.subscribe({ endpoint, p256dh, auth }, me.device?.name ?? 'a phone', me.device?.id);
     return json(res, 200, { ok: true });
   }
 
   if (req.method === 'POST' && path === '/api/push/apns') {
     const body = await readBody(req) as { token?: unknown; sandbox?: unknown };
     if (!isDeviceToken(body.token)) return json(res, 400, { error: 'That is not a device token.' });
-    deps.push.subscribeApns(body.token.toLowerCase(), me.device?.name ?? 'an iPhone', body.sandbox === true);
+    deps.push.subscribeApns(body.token.toLowerCase(), me.device?.name ?? 'an iPhone', body.sandbox === true, me.device?.id);
     return json(res, 200, { ok: true, ready: deps.push.apnsReady() });
   }
 

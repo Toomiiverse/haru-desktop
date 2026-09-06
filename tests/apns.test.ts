@@ -45,3 +45,10 @@ test('the sender is configured only when the key, its id and the team are all th
   assert.equal(readApnsConfig({ keyId: 'K', teamId: 'T' }), null);
   assert.deepEqual(readApnsConfig({ keyPath: '/k.p8', keyId: 'K', teamId: 'T' }), { keyPath: '/k.p8', keyId: 'K', teamId: 'T', bundleId: 'com.toomiiverse.haru' });
 });
+
+test('a device token remembers which sign-in registered it, when told', () => {
+  const token = 'ad2915c353fb16ae957c88c99595e562d5c480e43bef07507b95ebc12a96dce1';
+  const [withId, without] = readApnsDevices([{ token, name: 'iPhone', at: '', sandbox: false, deviceId: 'app1' }, { token: token.replace('a', 'b'), name: 'iPhone', at: '', sandbox: false }]);
+  assert.equal(withId.deviceId, 'app1');
+  assert.equal(without.deviceId, undefined);
+});

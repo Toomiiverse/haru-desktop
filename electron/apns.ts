@@ -14,7 +14,7 @@ import { readFileSync } from 'node:fs';
 import http2 from 'node:http2';
 
 export type ApnsConfig = { keyPath: string; keyId: string; teamId: string; bundleId: string };
-export type ApnsDevice = { token: string; name: string; at: string; sandbox: boolean };
+export type ApnsDevice = { token: string; name: string; at: string; sandbox: boolean; /** The sign-in it came from (webAccess.devices id). */ deviceId?: string };
 
 export const APNS_HOST = 'https://api.push.apple.com';
 export const APNS_SANDBOX_HOST = 'https://api.sandbox.push.apple.com';
@@ -38,7 +38,7 @@ export function readApnsDevices(saved: unknown): ApnsDevice[] {
   const out: ApnsDevice[] = [];
   for (const entry of list as Record<string, unknown>[]) {
     if (!entry || !isDeviceToken(entry.token)) continue;
-    out.push({ token: entry.token.toLowerCase(), name: typeof entry.name === 'string' ? entry.name : 'an iPhone', at: typeof entry.at === 'string' ? entry.at : '', sandbox: entry.sandbox === true });
+    out.push({ token: entry.token.toLowerCase(), name: typeof entry.name === 'string' ? entry.name : 'an iPhone', at: typeof entry.at === 'string' ? entry.at : '', sandbox: entry.sandbox === true, ...(typeof entry.deviceId === 'string' && entry.deviceId ? { deviceId: entry.deviceId } : {}) });
   }
   return out;
 }

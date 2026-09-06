@@ -298,13 +298,18 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
     const started = now();
     let firstVoiceAt = 0;
     let reply = '';
-    // The day holds what she said. A reply she was cut off in, or never
-    // started, is written down as what came out — not as what was drafted.
+    // The day holds what she said. A reply she was cut off in is written
+    // down as what came out — not as what was drafted. A reply she never got
+    // a word of stays as written: taken out, his question sat in the
+    // transcript with nothing under it (the shirt question, 2026-09-06), and
+    // the draft is what she would have said, there for him to read.
     const settleTake = (whole: boolean) => {
       if (take.reported || !reply || !deps.said) return;
       take.reported = true;
       const said = [...take.voiced, take.cut ? saidOf(take.cut.text, take.cut.seconds) : ''].filter(Boolean).join(' ').trim();
-      if (whole || said === reply) return;
+      // A play-time estimate can run past the text ("89 of 22 chars"): that is all of it.
+      if (whole || said === reply || said.length >= reply.length) return;
+      if (!said) { log(`[call] she got none of ${reply.length} chars out — the day keeps the reply as written`); return; }
       log(`[call] she got ${said.length} of ${reply.length} chars out — the day keeps what she said`);
       deps.said(reply, said);
     };

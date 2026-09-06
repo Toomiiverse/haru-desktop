@@ -116,7 +116,7 @@ import { startWebServer, type WebDeps } from './webserver';
 import { asleepLine, dayAfter, decideTimesSystem, enoughKnocking, fallbackSchedule, foldAsleepExchanges, goodnightDue, herAsleep, isAsleepLine, messagesWhileAsleep, parseDecidedTimes, readHerSleep, readHerSleepState, sleepNote, sleepWindowOn, wakeIrritation, wakeNote, wokenAt, clockMinutes, KNOCK_WINDOW_MS, type HerSleepSchedule } from './hersleep';
 import { parseBalances, balanceWarning } from './venicebalance';
 import { advanceWant, dayNote, dayNoteInstruction, dayPassDue, dayPickInstruction, firstsNote, keepDay, markRecFollowed, noteRecommendation, pickRecommend, pickWantToWork, readDays, readRecs, readWants, readWeek, recDueForFollowUp, reconcileWants, recsAnsweredBy, recsOnDay, wantInstruction, wantOutcome, wantQuery, wantsNote, weekKey, weekNote, weekReflectionInstruction, weekSummaryDue, WANT_ODDS, type HerDay, type HerWeek, type Rec, type Want } from './ownlife';
-import { inQuietHours, newVapidKeys, pushRequest, readPushDevices, readPushPrefs, type PushDevice, type PushPrefs, nextNudgeDelay, NUDGE_GAP_MS, NUDGE_RETRY_MS, nudgeOverdue, PUSH_BREATHER_MS, tooSoonToPush, heldBack } from './push';
+import { inQuietHours, newVapidKeys, pushRequest, readPushDevices, readPushPrefs, type PushDevice, type PushPrefs, nextNudgeDelay, NUDGE_GAP_MS, NUDGE_RETRY_MS, nudgeOverdue, PUSH_BREATHER_MS, tooSoonToPush, heldBack, withoutDevice, isPhoneWebApp, coveredByNativeApp } from './push';
 import { CHECK_EVERY_MS, describeUpdate, progressStep, whyNotCheck, type UpdateState } from './updates';
 import { BREVITY, summonedLine } from './summoned';
 import { CHOICES_TOOL, readChoices } from './choices';
@@ -10330,19 +10330,31 @@ function webDeps(): WebDeps {
       },
     },
     push: {
-      subscribeApns: (token, name, sandbox) => {
-        const devices = getApns().devices.filter(d => d.token !== token);
-        devices.push({ token, name, at: new Date().toISOString(), sandbox });
+      subscribeApns: (token, name, sandbox, deviceId) => {
+        // The same token again, or a new token from the same sign-in (a
+        // reinstall), replaces what that phone had; two tokens both named
+        // "iPhone" were each taking every push (2026-09-06).
+        const devices = withoutDevice(getApns().devices.filter(d => d.token !== token), deviceId);
+        devices.push({ token, name, at: new Date().toISOString(), sandbox, ...(deviceId ? { deviceId } : {}) });
         saveApnsDevices(devices);
         console.log(`[push] "${name}" registered with Apple${sandbox ? ' (sandbox)' : ''} — ${devices.length} device(s)`);
+        const covered = coveredByNativeApp(getPush().devices, true);
+        if (covered.length) {
+          savePush({ devices: getPush().devices.filter(device => !covered.includes(device)) });
+          console.log(`[push] the app covers this phone — ${covered.length} web-app subscription(s) let go`);
+        }
       },
       unsubscribeApns: token => saveApnsDevices(getApns().devices.filter(d => d.token !== token)),
       apnsReady: () => Boolean(getApns().config),
       key: () => vapidKeys().publicKey,
-      subscribe(device, name) {
+      subscribe(device, name, deviceId) {
+        if (getApns().devices.length && isPhoneWebApp(name)) {
+          console.log(`[push] the app covers this phone — the web app's subscription is not kept`);
+          return;
+        }
         const { devices } = getPush();
-        const rest = devices.filter(d => d.endpoint !== device.endpoint);
-        savePush({ devices: [{ ...device, name, added: new Date().toISOString() }, ...rest] });
+        const rest = withoutDevice(devices.filter(d => d.endpoint !== device.endpoint), deviceId);
+        savePush({ devices: [{ ...device, name, added: new Date().toISOString(), ...(deviceId ? { deviceId } : {}) }, ...rest] });
         // Logged only when it is new — the page re-posts its subscription on
         // every load to revive a pruned one, and that should stay silent.
         if (rest.length === devices.length) console.log(`[push] "${name}" subscribed (${rest.length + 1} in all)`);

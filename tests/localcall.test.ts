@@ -309,3 +309,43 @@ test('the call config reads forward, and the fillers rotate', () => {
   assert.equal(pickFiller(0.999), FILLERS[FILLERS.length - 1]);
   assert.notEqual(pickFiller(0, FILLERS[0]), FILLERS[0], 'not the one said last time');
 });
+
+test('talked over before a word of it: the reply stays in the day as written', async () => {
+  let release: (() => void) | null = null;
+  let letSpeak: (() => void) | null = null;
+  const answers: { text: string; interrupted: boolean }[] = [];
+  const h = harness({
+    answer: async (text, options) => {
+      answers.push({ text, interrupted: options.interrupted });
+      if (text === 'First thing.') {
+        options.onSentence(LONG_LINE, 'neutral');
+        await new Promise<void>(resolve => { release = resolve; });
+        return { reply: LONG_LINE };
+      }
+      options.onSentence('Fine, what.', 'annoyed');
+      return { reply: 'Fine, what.' };
+    },
+    hear: async () => (answers.length ? 'Second thing, stop.' : 'First thing.'),
+    // Her voice for the long line is held back until they have already cut in:
+    // the engine was still fetching it when they spoke, as at 11:12 on 2026-09-06.
+    speak: async text => {
+      if (text.startsWith('A long')) await new Promise<void>(resolve => { letSpeak = resolve; });
+      const v = voice(text.startsWith('A long') ? 400 : 3, text.startsWith('A long') ? 2400 : 480); h.voices.push(v); return { stream: v.stream, sampleRate: 24000 };
+    },
+    moodNow: () => null,
+  });
+  h.feed(0.002, 2000); h.feed(0.3, 600); h.feed(0.002, 700);
+  await settle(30);
+  assert.equal(h.audio.length, 0, 'nothing of her voice has gone out yet');
+  // Over her before a word of it has played.
+  h.feed(0.5, 600);
+  await settle(10);
+  assert.ok(h.types().includes('user_interruption'), 'the phone is told to hush');
+  letSpeak!();
+  h.feed(0.002, 700);
+  release!();
+  await settle(60);
+  assert.deepEqual(answers.map(a => a.interrupted), [false, true]);
+  // Nothing of it came out, so nothing is rewritten: the draft is her answer.
+  assert.deepEqual(h.saids, [], 'a reply she got no word of is not taken out of the day');
+});
