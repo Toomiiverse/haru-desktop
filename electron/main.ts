@@ -41,7 +41,7 @@ import { pdfPrompt, readPdf } from './pdf';
 import { classify, discard, extractAudio, extractFrames, findFfmpeg, OPENABLE, readText, type FileKind } from './attach';
 import { markTimeGaps, sinceLast, earlierDaysContext, earlierTurns, DAYS_OF_HISTORY, HISTORY_BUDGET_CHARS } from './history';
 import { exchangesFrom, pickRecalled, recallNote, RECALL_DAYS, type Exchange } from './recall';
-import { correct, noteUsed, readHearing, remember } from './hearing';
+import { correct, narrow, noteUsed, readHearing, remember } from './hearing';
 import { assumeItIsTheirs, identifyWork, noteWork, readFollowing, recogniseNow, summariseFollowing } from './following';
 import { lookUpPlace, readWindowsLocation, searchPlaces, type FoundPlace } from './location';
 import { INTERRUPTED_ASIDE, wakeAck } from './wake';
@@ -10298,6 +10298,20 @@ function webDeps(): WebDeps {
       } catch {
         return null;
       }
+    },
+    corrections: () => readHearing(store.get('hearing')).corrections,
+    teach: (heard, meant) => {
+      const after = remember(readHearing(store.get('hearing')), heard, meant, new Date().toISOString());
+      store.set('hearing', after);
+      // The pair, not the sentence: what she took from it is what will fire next time.
+      const pair = narrow(heard, meant);
+      console.log(pair ? `[listen] taught from the phone: "${pair.heard}" -> "${pair.meant}"` : `[listen] nothing to learn from "${heard.slice(0, 40)}" against "${meant.slice(0, 40)}"`);
+      return { learned: pair, count: after.corrections.length };
+    },
+    forgetCorrection: heard => {
+      const kept = { corrections: readHearing(store.get('hearing')).corrections.filter(c => c.heard !== heard) };
+      store.set('hearing', kept);
+      return kept.corrections;
     },
     async hear(audio, mime) {
       const listen = readListenConfig(store.get('listen'));

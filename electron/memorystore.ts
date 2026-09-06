@@ -297,9 +297,9 @@ export function createMemoryStore(deps: MemoryStoreDeps) {
     // decides what the human block shows — so the blocks can never drift from
     // the authoritative records. The persona block is left out here: the
     // prompt ends on the same text, and it was going in twice. Compact, for
-    // the reason given on BlockRenderOptions. `scale` shrinks every block's
-    // budget for an away reply, which re-processes this whole section each
-    // turn — see BlockRenderOptions.scale.
+    // the reason given on BlockRenderOptions. `scale` shrinks the budget of
+    // every block but her own for an away reply, which re-processes this whole
+    // section each turn — see BlockRenderOptions.scale and UNSCALED_BLOCKS.
     const blocks = formatMemoryBlocks(store.getBlocks(), blockSources(query, semantic), { omit: ['persona'], compact: true, ...(scale !== undefined ? { scale } : {}) });
     for (const entry of blocks.cut) {
       console.warn(`[blocks] ${entry.label} cut from ${entry.before} to ${entry.after} chars to fit its budget — selection was tighter than this; raise the block limit if it keeps happening`);

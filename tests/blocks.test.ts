@@ -363,6 +363,24 @@ test('withEditedValue marks the block edited; resetBlockToDerived clears it', ()
   assert.equal(reset.value, undefined);
   assert.deepEqual(reset, human);
 });
+test('an away reply scales what she keeps about them, never what she has been up to herself', () => {
+  const herOwn = defaultMemoryBlocks().find(block => block.label === 'her_own')!;
+  // Under her own limit whole, over half of it: scaled it would be cut.
+  const long = Array.from({ length: 90 }, (_, i) => `- Line ${i} of her own: something she read in the small hours and what she made of it, at length.`).join('\n');
+  assert.ok(long.length > herOwn.limit / 2 && long.length < herOwn.limit);
+  const notes = { ...herOwn, id: 'notes', label: 'notes', value: long };
+  const sources = {
+    character: { identity: '', style: '' },
+    profile: { nickname: '', occupation: '', about: '' },
+    memories: [] as MemoryRecord[],
+    sessions: [] as SessionSummary[],
+    herOwn: long,
+  };
+  const { text, cut } = formatMemoryBlocks([herOwn, notes], sources, { scale: 0.5 });
+  assert.deepEqual(cut.map(entry => entry.label), ['notes'], 'the same text under another label is cut to half its budget');
+  assert.ok(text.includes('Line 89 of her own'), 'her own block goes in whole');
+});
+
 test('fitToLimit scale shrinks the effective budget', () => {
   const long = Array.from({ length: 40 }, (_, i) => `line number ${i} with some padding words`).join('\n');
   const block = { ...defaultMemoryBlocks()[0], limit: 400 };

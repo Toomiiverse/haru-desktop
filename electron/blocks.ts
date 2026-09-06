@@ -141,8 +141,10 @@ export function defaultMemoryBlocks(): MemoryBlock[] {
     {
       id: blockIdFor('her_own'),
       label: 'her_own',
+      // Wider than the human blocks: this is a week of her own life plus the
+      // night just gone, and it was being cut on every phone turn at 8000.
       description: 'What Haru has been up to on her own — the things she is into and the views she holds on them, what she read in the small hours, what she wrote in her diary. These are hers, not the user\'s: hold them, bring one up when it fits, and disagree when you mean it.',
-      limit: 8000,
+      limit: 10000,
       read_only: false,
     },
   ];
@@ -488,6 +490,15 @@ export function renderBlockCompact(block: MemoryBlock, value: string): string {
  * 2,500 characters — into the prompt twice, once early where it is forgotten
  * and once late where it counts. The block still exists for the inspector.
  */
+/**
+ * Blocks an away reply gets whole. The scale exists so a phone that reads at
+ * the speed of the first word is not kept waiting on what she remembers about
+ * them; what she has been up to herself is what makes her her, and cutting it
+ * to six tenths dropped last night out of every call. Measured 2026-09-06: the
+ * extra size moves the hosted model's first word by tenths of a second at most.
+ */
+const UNSCALED_BLOCKS = new Set(['her_own']);
+
 export function formatMemoryBlocks(blocks: MemoryBlock[], sources: BlockSources, options: BlockRenderOptions = {}): BlockRenderResult {
   const parts: string[] = [];
   const cut: BlockRenderResult['cut'] = [];
@@ -501,7 +512,7 @@ export function formatMemoryBlocks(blocks: MemoryBlock[], sources: BlockSources,
     if (omitted.has(block.label)) continue;
     const value = resolveBlockValue(block, sources, shown);
     if (!value.trim()) continue;
-    const fitted = fitToLimit(value, block, scale);
+    const fitted = fitToLimit(value, block, UNSCALED_BLOCKS.has(block.label) ? 1 : scale);
     if (fitted.cut) cut.push({ label: block.label, before: value.length, after: fitted.value.length });
     parts.push(options.compact ? renderBlockCompact(block, fitted.value) : renderBlock(block, fitted.value));
   }

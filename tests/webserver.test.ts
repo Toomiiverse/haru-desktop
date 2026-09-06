@@ -18,6 +18,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import WebSocket from 'ws';
+import { narrow, readHearing, remember } from '../electron/hearing';
 import { startWebServer, type WebDeps } from '../electron/webserver';
 import { standingFrom } from '../electron/standing';
 import { DEFAULT_VITALS } from '../electron/vitals';
@@ -123,6 +124,9 @@ push: {
     libFolder: () => null,
     speak: async () => null,
     hear: async () => '',
+    corrections: () => [],
+    teach: () => ({ learned: null, count: 0 }),
+    forgetCorrection: () => [],
     knowledge: {
       search: async () => ({ results: [] }),
       stats: () => ({}),
@@ -660,6 +664,28 @@ test('the where routes, like the rest, are for the signed-in only', async () => 
 });
 
 // -- her ears kept open --------------------------------------------------------
+
+test('she can be taught what she mishears from the phone, shown the list, and made to forget', async () => {
+  let hearing = readHearing(undefined);
+  const web = await door({
+    corrections: () => hearing.corrections,
+    teach: (heard, meant) => { hearing = remember(hearing, heard, meant, '2026-09-06T00:00:00Z'); return { learned: narrow(heard, meant), count: hearing.corrections.length }; },
+    forgetCorrection: heard => { hearing = { corrections: hearing.corrections.filter(c => c.heard !== heard) }; return hearing.corrections; },
+  });
+  try {
+    await web.signIn();
+    const taught = await web.call('/api/hearing', { method: 'POST', body: JSON.stringify({ heard: 'remind me to call harrow at six', meant: 'remind me to call Haru at six' }) });
+    assert.equal(taught.status, 200);
+    assert.deepEqual(await taught.json(), { learned: { heard: 'harrow', meant: 'Haru' }, count: 1 });
+    const list = await web.call('/api/hearing');
+    const page = await list.json() as { corrections: { heard: string; meant: string }[] };
+    assert.deepEqual(page.corrections.map(c => [c.heard, c.meant]), [['harrow', 'Haru']]);
+    const half = await web.call('/api/hearing', { method: 'POST', body: JSON.stringify({ heard: 'only this' }) });
+    assert.equal(half.status, 400);
+    const gone = await web.call('/api/hearing/forget', { method: 'POST', body: JSON.stringify({ heard: 'harrow' }) });
+    assert.deepEqual(await gone.json(), { corrections: [] });
+  } finally { await web.stop(); }
+});
 
 test('her name alone gets a word back; a line is spoken in its mood; a message said over her says so', async () => {
   const spoken: { text: string; emotion?: string | null }[] = [];

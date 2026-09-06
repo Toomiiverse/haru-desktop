@@ -20,6 +20,7 @@ import filePath from 'node:path';
 import { WebSocketServer, type WebSocket as CallSocket } from 'ws';
 import { clmTurnFrom, spokenReply, sseChunk, sseStop, SSE_DONE } from './evi';
 import { pcmToWav } from './voice';
+import type { Correction } from './hearing';
 import type { Standing } from './standing';
 import type { Her } from './her';
 import {
@@ -195,6 +196,11 @@ export type WebDeps = {
   wake(): { line: string; emotion: string };
   /** What they just said, through the same ears and the same corrections as the desktop. */
   hear(audio: Uint8Array, mime: string): Promise<string>;
+  /** What she has been taught she mishears — see hearing.ts. */
+  corrections(): Correction[];
+  /** Teaching her ears from the phone: what came back against what was said. The pair she kept, if there was one. */
+  teach(heard: string, meant: string): { learned: { heard: string; meant: string } | null; count: number };
+  forgetCorrection(heard: string): Correction[];
   /**
    * Speech to speech through Hume's EVI — see evi.ts. A call: the phone streams
    * its microphone up one socket and her voice comes back down it, while her
@@ -960,6 +966,27 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
       'Cache-Control': 'no-store',
     });
     return res.end(Buffer.from(clip.audio));
+  }
+
+  // Her ears, taught. The phone had no way to tell her she keeps getting a
+  // name wrong; this is it — what came back, against what was actually said.
+  // The pair is narrowed to the word that differs (hearing.ts) and rewrites
+  // every take after this one, calls included.
+  if (req.method === 'GET' && path === '/api/hearing') {
+    return json(res, 200, { corrections: deps.corrections() });
+  }
+  if (req.method === 'POST' && path === '/api/hearing') {
+    const body = await readBody(req) as { heard?: unknown; meant?: unknown };
+    const heard = typeof body.heard === 'string' ? body.heard.trim().slice(0, 500) : '';
+    const meant = typeof body.meant === 'string' ? body.meant.trim().slice(0, 500) : '';
+    if (!heard || !meant) return json(res, 400, { error: 'Both what she heard and what you said.' });
+    return json(res, 200, deps.teach(heard, meant));
+  }
+  if (req.method === 'POST' && path === '/api/hearing/forget') {
+    const body = await readBody(req) as { heard?: unknown };
+    const heard = typeof body.heard === 'string' ? body.heard.trim() : '';
+    if (!heard) return json(res, 400, { error: 'Which one.' });
+    return json(res, 200, { corrections: deps.forgetCorrection(heard) });
   }
 
   // Her ears. The body is a recording rather than JSON, so it is read raw and
