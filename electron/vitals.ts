@@ -29,6 +29,21 @@ export const DEFAULT_VITALS: Vitals = {
 
 const clamp = (value: number) => Math.min(1, Math.max(0, value));
 
+/**
+ * Where curiosity sits in a room where something is happening. The `curious`
+ * cue is pitched just above it on purpose: a conversation should bring her to
+ * attention, and something that actually interests her is what carries her
+ * past the line into "one pointed question is allowed".
+ */
+export const CURIOSITY_ENGAGED = 0.75;
+
+/**
+ * Where attention warms her to, past the 0.7 she rests at while her window is
+ * the one being used. Slowly, so a long conversation can reach `fond` and a
+ * single message cannot.
+ */
+const WARMED_BY_ATTENTION = 0.8;
+
 // Eases a value toward a target rather than snapping, so state changes read as
 // drifting rather than flipping. `rate` is per-tick pull, 0-1.
 const toward = (value: number, target: number, rate: number) => value + (target - value) * clamp(rate);
@@ -67,7 +82,7 @@ export function driftVitals(current: Vitals, environment: Environment, seconds: 
   const energy = toward(current.energy, energyTarget, step);
 
   // Curiosity builds while something is happening and fades in a quiet room.
-  const curiosityTarget = active ? 0.75 : idleSeconds > 600 ? 0.15 : 0.4;
+  const curiosityTarget = active ? CURIOSITY_ENGAGED : idleSeconds > 600 ? 0.15 : 0.4;
   const curiosity = toward(current.curiosity, curiosityTarget, step);
 
   // Focus is about whether her window is the one being used.
@@ -215,7 +230,18 @@ export function applyEvent(current: Vitals, event: 'praised' | 'criticised' | 's
   const next = { ...current };
   if (event === 'praised') { next.happiness = clamp(next.happiness + 0.2); next.affection = clamp(next.affection + 0.15); next.energy = clamp(next.energy + 0.1); }
   if (event === 'criticised') { next.happiness = clamp(next.happiness - 0.25); next.stress = clamp(next.stress + 0.2); }
-  if (event === 'spoken-to') { next.curiosity = clamp(next.curiosity + 0.2); next.affection = clamp(next.affection + 0.05); next.sleepiness = clamp(next.sleepiness - 0.05); }
+  // Being spoken to brings her to attention. It used to add a flat +0.2 curiosity
+  // and +0.05 affection to every message, which nothing pulled back fast enough:
+  // by his third message curiosity was pinned at 1.00 and affection climbed for
+  // as long as he kept typing, whatever either of them actually said. So the two
+  // cues that tell her how to behave — "something has your interest, one pointed
+  // question is allowed" and "you are fonder of them than you let on" — spoke on
+  // essentially every turn of every conversation. Measured over one log: fond in
+  // 45% of turns, bright in 42%, and lines written to be occasional ("for once",
+  // "let it slip once") were her default. Pulled toward a level instead of added
+  // to, so a conversation settles her at attentive and warm rather than running
+  // her to the top of both scales.
+  if (event === 'spoken-to') { next.curiosity = toward(next.curiosity, CURIOSITY_ENGAGED, 0.5); next.affection = toward(next.affection, WARMED_BY_ATTENTION, 0.1); next.sleepiness = clamp(next.sleepiness - 0.05); }
   if (event === 'ignored-user') { next.stress = clamp(next.stress + 0.1); }
   return next;
 }

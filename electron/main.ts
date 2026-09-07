@@ -57,7 +57,7 @@ import { bodyForPage, describeBody, readBody as readBodyState, readBodyReport, t
 import { convertImage, normaliseFormat, FORMATS } from './convert';
 import { cancelPower, closeApp, findApps, isCancellable, launch, listRunning, matchApp, matchRunning, normalisePower, POWER_DELAY_S, readDesktopConfig, runPower, supportedDesktop, type DesktopConfig } from './desktop';
 import { looksLikeScreenshot, maySpeak, readScreenshotConfig, screenshotPrompt, SETTLE_MS, SETTLE_TRIES, type ScreenshotConfig } from './screenshots';
-import { look, photoName, readVisionConfig, whileLooking, type VisionConfig } from './vision';
+import { look, photoName, readShotDescription, readVisionConfig, whileLooking, type VisionConfig } from './vision';
 import { CAPTION_MAX_CHARS, describedShots, forgetCaptions, moreThanOnePass, noteCaption, noteFailure, readCaptions, shotsNeedingALook } from './seen';
 import { EXPRESSIVE, LAST_WORD, NATURAL, NO_INVENTED_HISTORY, NO_ABANDON_THREAD, readsAsRough, roomInstruction, HER_EMOJI, emojiRut, roomToRant, askingAboutHer, herSubjectNote, namesIn, justTalking, JUST_TALKING_NOTE } from './room';
 import { journalStance } from './journal';
@@ -234,18 +234,34 @@ const SHOT_LOOK_TICK_MS = 5 * 60_000;
  * made it look properly. Shape the input; a rule in the prompt about what not
  * to do is the weakest instrument here.
  */
+// The two labels used to be demonstrated with angle-bracket placeholders —
+// `Text: <everything you read>` — and a 12B on a CPU copied them back as the
+// answer, brackets and all, several times on 2026-09-07. A worked example is
+// harder to mistake for the thing being asked for than a slot is; readShotDescription
+// catches what still comes back as the template. Same lesson as the paragraph
+// above: shape the input.
 const SHOT_LOOK_PROMPT = [
   'Read this screenshot of a computer screen.',
   'First read out every piece of text you can see: headings, list items, numbers, buttons.',
   'Then say in one sentence which program it is and what is being done in it.',
-  'Answer exactly in this form, nothing else:',
-  'Text: <everything you read>',
-  'Doing: <one sentence>',
+  'Answer in exactly two labelled lines and nothing else, like this:',
+  'Text: Inbox - 3 unread. Reply. Archive. Settings.',
+  'Doing: Reading email in Gmail.',
 ].join('\n');
+
+// One pass at a time. A backlog is worked through a shot at a time on a CPU, at
+// twenty-odd seconds each and a two-minute ceiling on a wedged one, so a pass
+// over the 190-odd held here runs far longer than the five minutes between
+// ticks. Unguarded, the next tick started a second pass from the same stored
+// captions and walked the same queue: 294 looks for 192 shots in one log, a
+// third of them repeating a shot looked at in the previous twelve — and the
+// pairs disagreed, because a model asked the same picture twice answers twice.
+let lookingAtShots = false;
 
 async function lookAtSyncedShots() {
   const vision = readVisionConfig(store.get('vision'));
   if (!vision.enabled) return;
+  if (lookingAtShots) return;
   const root = shotStoreRoot();
   if (!existsSync(root)) return;
   const captions = readCaptions(store.get('shots.captions'));
@@ -263,46 +279,61 @@ async function lookAtSyncedShots() {
   const keepAlive = moreThanOnePass(held, captions, described) ? '10m' : '0';
   const provider = store.get('ai.config') as ProviderConfig | undefined;
   const endpoint = visionEndpoint(provider, vision);
+  // Written through after every shot rather than banked to the end of the pass.
+  // A pass over a long backlog runs for hours, and this app is restarted often;
+  // held to the end, an interrupted pass threw away every caption it had earned
+  // and the next one started again from the top of the same queue.
   let saved = captions;
-  for (const shot of next) {
-    const bytes = readShot(root, shot.day, shot.name);
-    if (!bytes) continue;
-    try {
-      const sighting = await look(bytes.toString('base64'), vision, endpoint, modelHeaders(endpoint), net.fetch, {
-        ask: SHOT_LOOK_PROMPT,
-        keepAlive,
-      });
-      const text = sighting.description.trim().slice(0, CAPTION_MAX_CHARS);
-      if (!text) continue;
-      saved = noteCaption(saved, { day: shot.day, name: shot.name, at: new Date().toISOString(), text });
-      // Onto the entry as well, which is the road a description already travels
-      // to reach her: summariseDay carries it into the day pass, and the day
-      // pass is what turns a day into memories. Left only in the store beside
-      // it, a caption was written and read by nothing. describeShot returns the
-      // log unchanged when the shot has no entry to attach to — true of the
-      // backlog that arrived before the log did — and the store keeps it then.
-      const attached = describeShot(store.getActivityLog(), shot.day, shot.name, text);
-      if (attached !== store.getActivityLog()) store.setActivityLog(attached);
-      console.log(`[shot] ${shot.day}/${shot.name}: ${text.slice(0, 90)}`);
-    } catch (error) {
-      const why = whyItFailed(error);
-      console.warn(`[shot] could not look at ${shot.day}/${shot.name}:`, why);
-      // A refusal about this picture — too large for the window, a format it
-      // cannot read — is about this picture. Left as a break it stalled the
-      // whole queue for ever: the shot was never captioned, so the next pass
-      // started on the same one and stopped there again. Anything else means
-      // the model or the machine is unavailable and the rest would fail the
-      // same way, so those still keep for the next pass.
-      // Counted rather than classified. Whether it was refused, timed out or
-      // came back malformed, a shot that fails MAX_LOOK_TRIES times is left
-      // alone and the queue moves on. A machine that is not answering fails
-      // every shot equally, so the pass still stops after the first one.
-      saved = noteFailure(saved, shot.day, shot.name, new Date().toISOString());
-      if ((error as { aboutThisImage?: boolean })?.aboutThisImage) continue;
-      break;
+  const remember = (next: typeof saved) => { saved = next; store.set('shots.captions', saved); };
+  lookingAtShots = true;
+  try {
+    for (const shot of next) {
+      const bytes = readShot(root, shot.day, shot.name);
+      if (!bytes) continue;
+      try {
+        const sighting = await look(bytes.toString('base64'), vision, endpoint, modelHeaders(endpoint), net.fetch, {
+          ask: SHOT_LOOK_PROMPT,
+          keepAlive,
+        });
+        const text = readShotDescription(sighting.description).slice(0, CAPTION_MAX_CHARS);
+        // Nothing usable said about it. Counted as a failure rather than skipped, or
+        // the same shot comes back every pass and the queue never moves past it.
+        if (!text) {
+          remember(noteFailure(saved, shot.day, shot.name, new Date().toISOString()));
+          console.warn(`[shot] nothing readable came back for ${shot.day}/${shot.name}`);
+          continue;
+        }
+        remember(noteCaption(saved, { day: shot.day, name: shot.name, at: new Date().toISOString(), text }));
+        // Onto the entry as well, which is the road a description already travels
+        // to reach her: summariseDay carries it into the day pass, and the day
+        // pass is what turns a day into memories. Left only in the store beside
+        // it, a caption was written and read by nothing. describeShot returns the
+        // log unchanged when the shot has no entry to attach to — true of the
+        // backlog that arrived before the log did — and the store keeps it then.
+        const attached = describeShot(store.getActivityLog(), shot.day, shot.name, text);
+        if (attached !== store.getActivityLog()) store.setActivityLog(attached);
+        console.log(`[shot] ${shot.day}/${shot.name}: ${text.slice(0, 90)}`);
+      } catch (error) {
+        const why = whyItFailed(error);
+        console.warn(`[shot] could not look at ${shot.day}/${shot.name}:`, why);
+        // A refusal about this picture — too large for the window, a format it
+        // cannot read — is about this picture. Left as a break it stalled the
+        // whole queue for ever: the shot was never captioned, so the next pass
+        // started on the same one and stopped there again. Anything else means
+        // the model or the machine is unavailable and the rest would fail the
+        // same way, so those still keep for the next pass.
+        // Counted rather than classified. Whether it was refused, timed out or
+        // came back malformed, a shot that fails MAX_LOOK_TRIES times is left
+        // alone and the queue moves on. A machine that is not answering fails
+        // every shot equally, so the pass still stops after the first one.
+        remember(noteFailure(saved, shot.day, shot.name, new Date().toISOString()));
+        if ((error as { aboutThisImage?: boolean })?.aboutThisImage) continue;
+        break;
+      }
     }
+  } finally {
+    lookingAtShots = false;
   }
-  if (saved !== captions) store.set('shots.captions', saved);
 }
 
 const knowledgeFile = process.env.HARU_KNOWLEDGE_FILE ? process.env.HARU_KNOWLEDGE_FILE : path.join(app.getPath('userData'), 'knowledge.json');

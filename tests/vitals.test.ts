@@ -11,6 +11,7 @@ import {
   VITAL_CUES_SPOKEN,
   shouldPersistVitals,
   spokenCues,
+  CURIOSITY_ENGAGED,
   cueLog,
   VITALS_SAVE_DELTA,
   VITALS_SAVE_INTERVAL_MS,
@@ -145,6 +146,49 @@ test('applyEvent clamps at the bottom of the range', () => {
   const base: Vitals = { ...DEFAULT_VITALS, happiness: 0.05, stress: 0.02 };
   const next = applyEvent(base, 'criticised');
   assert.ok(next.happiness >= 0);
+});
+
+// ---- being talked to is not the same as being interested ----
+//
+// Both of these ran away before 2026-09-07: 'spoken-to' added a flat +0.2
+// curiosity and +0.05 affection per message, and nothing pulled either back
+// between one message and the next. Three messages pinned curiosity at 1.00 and
+// affection climbed for as long as he kept typing — so the two cues that tell
+// her how to behave spoke on every turn of every conversation, and she answered
+// "I'm so tired" with three interview questions in a row.
+
+/** Ten messages, half a minute apart, in a room where she is being used. */
+function conversation(start: Vitals, messages = 10): Vitals {
+  const room: Environment = { hour: 9, idleSeconds: 5, onBattery: false, windowFocused: true };
+  let vitals = start;
+  for (let message = 0; message < messages; message++) {
+    for (let tick = 0; tick < 7; tick++) vitals = driftVitals(vitals, room, 4);
+    vitals = applyEvent(vitals, 'spoken-to');
+  }
+  return vitals;
+}
+
+test('a long conversation leaves her attentive, not fascinated — the curious cue is not earned by message count', () => {
+  const after = conversation({ ...DEFAULT_VITALS, curiosity: 0.35 });
+  assert.ok(after.curiosity > 0.6, `she should be attentive, got ${after.curiosity}`);
+  // The cue sits above the engaged level on purpose: being spoken to must not
+  // reach it on its own, or "something has your interest" means "he typed".
+  assert.ok(after.curiosity <= CURIOSITY_ENGAGED + 0.01, `curiosity ran past the engaged level: ${after.curiosity}`);
+  assert.ok(!spokenCues(after).some(entry => entry.cue.name === 'curious'), 'the curious cue spoke for a conversation alone');
+});
+
+test('affection does not climb without limit while he keeps talking', () => {
+  const ten = conversation({ ...DEFAULT_VITALS, affection: 0.7 });
+  const forty = conversation({ ...DEFAULT_VITALS, affection: 0.7 }, 40);
+  assert.ok(forty.affection < 0.85, `affection ran away over a long conversation: ${forty.affection}`);
+  // Four times the messages is not four times the fondness.
+  assert.ok(forty.affection - ten.affection < 0.1, `still ratcheting: ${ten.affection} -> ${forty.affection}`);
+});
+
+test('being spoken to still warms her when she has gone cold', () => {
+  const after = conversation({ ...DEFAULT_VITALS, affection: 0.25, curiosity: 0.15 }, 5);
+  assert.ok(after.affection > 0.3, `attention should warm her, got ${after.affection}`);
+  assert.ok(after.curiosity > 0.4, `attention should wake her up, got ${after.curiosity}`);
 });
 
 // ---- chooseIdleAction: weighted random, deterministic via injected rng ----

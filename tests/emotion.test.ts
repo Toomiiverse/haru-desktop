@@ -105,6 +105,30 @@ test('emotionToVitals keeps every value clamped to [0, 1]', () => {
   }
 });
 
+test('a run of the same reading converges instead of climbing — she cannot talk herself into a state', () => {
+  // The loop this closes: a reply with a question in it comes back `curious`,
+  // that raised curiosity, and past 0.8 the vital cue told her one pointed
+  // question was allowed — so she asked another. By the third turn curiosity
+  // sat at 1.00 and stayed there (2026-09-07, three interview questions in a
+  // row in answer to "I'm so tired").
+  const curious = { emotion: 'curious' as const, confidence: 0.92, energy: 0.5, intent: 'listen' as const, focus: 'user' as const };
+  let vitals = { happiness: 0.5, energy: 0.5, curiosity: 0.5, affection: 0.5, sleepiness: 0.2, stress: 0.2 };
+  const first = emotionToVitals(curious, vitals).curiosity - vitals.curiosity;
+  // Three replies was all it took in life. 0.8 is where vitals.ts starts telling
+  // her a pointed question is allowed; her own three questions must not reach it.
+  for (let reply = 0; reply < 3; reply++) vitals = emotionToVitals(curious, vitals);
+  assert.ok(vitals.curiosity < 0.8, `three curious replies talked her past the cue: ${vitals.curiosity}`);
+  for (let reply = 0; reply < 7; reply++) vitals = emotionToVitals(curious, vitals);
+  const later = emotionToVitals(curious, vitals).curiosity - vitals.curiosity;
+  assert.ok(later < first / 3, `the tenth reading moved her nearly as much as the first: ${first} then ${later}`);
+});
+
+test('one strong reading still moves her properly', () => {
+  const vitals = { happiness: 0.5, energy: 0.5, curiosity: 0.5, affection: 0.5, sleepiness: 0.2, stress: 0.2 };
+  const next = emotionToVitals({ emotion: 'affectionate', confidence: 1, energy: 0.5, intent: 'listen', focus: 'user' }, vitals);
+  assert.ok(next.affection - vitals.affection > 0.05, `a confident reading barely registered: ${next.affection}`);
+});
+
 test('emotionToVitals leaves neutral readings with no effect', () => {
   const vitals = { happiness: 0.5, energy: 0.5, curiosity: 0.5, affection: 0.5, sleepiness: 0.2, stress: 0.2 };
   const next = emotionToVitals({ emotion: 'neutral', confidence: 1, energy: 0.5, intent: 'listen', focus: 'user' }, vitals);

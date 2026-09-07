@@ -163,7 +163,19 @@ export function emotionToVitals<T extends Record<string, number>>(emotion: Emoti
   const shifts = VITAL_SHIFTS[emotion.emotion];
   for (const [key, amount] of Object.entries(shifts)) {
     if (typeof next[key] !== 'number') continue;
-    next[key] = Math.min(1, Math.max(0, next[key] + amount * emotion.confidence));
+    // Damped by the room left, so a run of same-labelled replies converges
+    // instead of climbing. Added flat, this was a loop she fed herself: a reply
+    // with a question in it comes back `curious`, that raised curiosity, and
+    // past 0.8 the vital cue told her one pointed question was allowed — so she
+    // asked another, and it scored again. Curiosity reached 1.00 on the third
+    // turn and stayed, and on the morning of 2026-09-07 "I'm so tired" was
+    // answered with three interview questions running ("What time did you
+    // actually get up?", "Noted. And the rest of the morning —"). Her own
+    // performance may colour how she feels; it must not manufacture the state
+    // that licensed it. This is the reasoning the energy line below was already
+    // written with, applied to the rest of them.
+    const room = amount > 0 ? 1 - next[key] : next[key];
+    next[key] = Math.min(1, Math.max(0, next[key] + amount * emotion.confidence * room));
   }
   // The reported energy pulls her own toward it rather than replacing it, so one
   // lively reply does not make her lively for the rest of the evening.
