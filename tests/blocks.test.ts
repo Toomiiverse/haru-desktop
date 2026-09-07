@@ -24,7 +24,7 @@ function record(overrides: Partial<MemoryRecord> & { id: string; text: string; k
 
 test('defaultMemoryBlocks has the standard set with unique lowercase labels', () => {
   const blocks = defaultMemoryBlocks();
-  assert.deepEqual(blocks.map(b => b.label), ['persona', 'human', 'preferences', 'relationship', 'current_project', 'working_state', 'her_own']);
+  assert.deepEqual(blocks.map(b => b.label), ['persona', 'human', 'preferences', 'her_standing', 'relationship', 'current_project', 'working_state', 'her_own']);
   assert.equal(new Set(blocks.map(b => b.label)).size, blocks.length);
   for (const block of blocks) {
     assert.equal(blockLabelValid(block.label), true);
@@ -34,12 +34,16 @@ test('defaultMemoryBlocks has the standard set with unique lowercase labels', ()
   }
 });
 
-test('persona is the only read-only default', () => {
+test('persona and her own standings are the read-only defaults', () => {
   const blocks = defaultMemoryBlocks();
   const persona = findBlock(blocks, 'persona')!;
   assert.equal(persona.read_only, true);
   assert.equal(persona.description.toLowerCase().includes('read-only'), true);
-  for (const block of blocks.filter(b => b.label !== 'persona')) {
+  // Hers are read-only for a different reason than persona's: a rule the memory
+  // tools can quietly rewrite or delete is not a rule she holds. She forms them
+  // and supersedes them by forming a newer one, and nothing else edits them.
+  assert.equal(findBlock(blocks, 'her_standing')!.read_only, true);
+  for (const block of blocks.filter(b => b.label !== 'persona' && b.label !== 'her_standing')) {
     assert.equal(block.read_only, false);
   }
 });
@@ -56,7 +60,7 @@ test('mergeBlockDefaults keeps custom blocks and adds missing defaults', () => {
   const merged = mergeBlockDefaults(saved);
   assert.ok(findBlock(merged, 'custom'));
   assert.equal(findBlock(merged, 'custom')!.limit, 1234);
-  for (const label of ['persona', 'human', 'preferences', 'relationship', 'current_project', 'working_state', 'her_own']) {
+  for (const label of ['persona', 'human', 'preferences', 'her_standing', 'relationship', 'current_project', 'working_state', 'her_own']) {
     assert.ok(findBlock(merged, label), `missing default ${label}`);
   }
 });

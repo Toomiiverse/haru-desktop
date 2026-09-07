@@ -639,13 +639,13 @@ test('the same sentence in their own words is kept', () => {
     "Don't let Tommy leave the house without coffee.",
     'Remind Tommy about bin night on Thursdays.',
   ]) {
-    assert.equal(isWorthRemembering(bullet, { theirWords: true }), true, `refused: ${bullet}`);
+    assert.equal(isWorthRemembering(bullet, { meantAsARule: true }), true, `refused: ${bullet}`);
   }
 });
 
 test('their words are exempt from the nagging rule and nothing else', () => {
   // The other gates still apply to a page the user wrote: an empty bullet, or
   // one that is only about her, is no better for having been typed by him.
-  assert.equal(isWorthRemembering('   ', { theirWords: true }), false);
-  assert.equal(isWorthRemembering('Thanks you for the help', { theirWords: true }), false);
+  assert.equal(isWorthRemembering('   ', { meantAsARule: true }), false);
+  assert.equal(isWorthRemembering('Thanks you for the help', { meantAsARule: true }), false);
 });

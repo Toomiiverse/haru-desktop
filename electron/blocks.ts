@@ -15,6 +15,7 @@
 // memory tool.
 
 import { keywords, retrieveMemories, type MemoryKind, type MemoryRecord, type SessionSummary } from './memory';
+import { herStandingInstruction, herStandings, isHerStanding } from './herstanding';
 
 export type MemoryBlock = {
   /** Stable per label — block-persona, block-human, … */
@@ -116,6 +117,17 @@ export function defaultMemoryBlocks(): MemoryBlock[] {
       description: 'Standing preferences — how the user likes things done and how Haru should behave. Follow them even when they have not been mentioned recently.',
       limit: 3000,
       read_only: false,
+    },
+    {
+      id: blockIdFor('her_standing'),
+      label: 'her_standing',
+      // read_only: these are hers. The memory tools may not edit or delete one,
+      // and neither may he through them — a rule somebody else can quietly
+      // rewrite is not a rule she holds. Hers to form, hers to supersede when
+      // she next sits down with what happened.
+      description: 'Rules Haru has worked out for herself about how she is treated, from things that actually happened to her more than once. Hers, not the user\'s. They carry the same weight as the user\'s preferences and she may hold to one against a direct request.',
+      limit: 1200,
+      read_only: true,
     },
     {
       id: blockIdFor('relationship'),
@@ -292,9 +304,15 @@ export function resolveBlockValue(block: MemoryBlock, sources: BlockSources, sho
     }
     case 'preferences': {
       const records = sources.memories
-        .filter(memory => memory.kind === 'preference' && !memory.supersededBy && memory.status !== 'archived')
+        .filter(memory => memory.kind === 'preference' && !isHerStanding(memory) && !memory.supersededBy && memory.status !== 'archived')
         .sort((a, b) => (b.importance ?? 0) - (a.importance ?? 0) || b.mentions - a.mentions);
       return linesFromRecords(fresh(records, sources, shown));
+    }
+    case 'her_standing': {
+      // Rendered from herStandingInstruction rather than linesFromRecords: the
+      // sentence saying she may hold one against him is the feature, and a bare
+      // list of rules without it is a list of things she will apologise for.
+      return herStandingInstruction(herStandings(sources.memories));
     }
     case 'relationship': {
       const records = sources.memories

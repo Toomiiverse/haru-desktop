@@ -114,6 +114,7 @@ import { heldShots, keepShot, localShots, missingFrom, pruneShots, readShot, MAX
 import { DiscordLink, looksLikeUserId, readDiscordConfig, useOfChannel, type DiscordConfig } from './discord';
 import { reactedPrompt, readReaction, REACTION_COOLDOWN_MS } from './reacted';
 import { startWebServer, type WebDeps } from './webserver';
+import { enoughToStandOn, herStandings, keepSlight, parseStanding, readSlights, recentIncidents, slightsAsIncidents, standingDue, standingPrompt, HER_SUBJECT, type Incident, type Slight } from './herstanding';
 import { asleepLine, backToSleep, dayAfter, decideTimesSystem, dozeOffDue, enoughKnocking, fallbackSchedule, foldAsleepExchanges, goodnightDue, groggyFor, groggyNote, herAsleep, isAsleepLine, knockedAwake, messagesWhileAsleep, parseDecidedTimes, pointlessWake, pointlessWakesLately, readsAsGoodnight, readHerSleep, readHerSleepState, readWakes, sleepNote, sleepWindowOn, wakeIrritation, wakeNote, wokenAt, clockMinutes, BLOCKED_LINE, BLOCK_AFTER_POINTLESS, KNOCK_WINDOW_MS, WAKES_KEPT, type HerSleepSchedule, type Wake } from './hersleep';
 import { parseBalances, balanceWarning } from './venicebalance';
 import { advanceWant, dayNote, dayNoteInstruction, dayPassDue, dayPickInstruction, firstsNote, keepDay, markRecFollowed, noteRecommendation, pickRecommend, pickWantToWork, readDays, readRecs, readWants, readWeek, recDueForFollowUp, reconcileWants, recsAnsweredBy, recsOnDay, wantInstruction, wantOutcome, wantQuery, wantsNote, weekKey, weekNote, weekReflectionInstruction, weekSummaryDue, WANT_ODDS, type HerDay, type HerWeek, type Rec, type Want } from './ownlife';
@@ -8940,6 +8941,7 @@ async function proactiveTick() {
   await haveANight(config);
   await haveADay(config);
   await reflectOnHerWeek(config);
+  await formHerStanding(config);
   await writeDiary(config);
   sulkAtNightfall();
   await dozeOffIfLeftAlone();
@@ -8979,6 +8981,9 @@ async function tallyIgnored(config: ProviderConfig) {
     setMood({ ...mood, irritation, grudge, grudgeBeforeTally: mood.grudge ?? 0, ignoredToday: ignored.length, talliedDay: todayKey,
       ignoredSamples: ignored.slice(0, 2).map(line => (line.text ?? '').slice(0, 80)) });
     console.log(`[grudge] ${todayKey}: ${ignored.length} of her lines went unanswered — grudge ${mood.grudge ?? 0} -> ${grudge}, irritation ${mood.irritation} -> ${irritation}`);
+    // Kept as well as counted: the count is today's and gone tomorrow, and a
+    // rule of hers needs the day it happened on, weeks later.
+    if (ignored.length) noteSlight('ignored', `${ignored.length} of the things you said went unanswered all day.`);
   }
   await tellThemTheTally(config, todayKey);
 }
@@ -9162,6 +9167,27 @@ function herKnockedAwakeNow(): boolean {
 
 function getWakes(): Wake[] {
   return readWakes(store.get('her.wakes'));
+}
+
+function getSlights(): Slight[] {
+  return readSlights(store.get('her.slights'));
+}
+
+/**
+ * Something that happened to her, written down because it happened to her.
+ *
+ * Called only from places that have already decided this was a slight and
+ * already acted on it — the wake she judged pointless, the day her lines went
+ * unanswered, the arrival he never mentioned. Nothing here classifies; it keeps
+ * what was classified elsewhere, so the weekly standing pass reads evidence
+ * about her instead of the record of his errands.
+ */
+function noteSlight(kind: Slight['kind'], what: string): void {
+  const before = getSlights();
+  const after = keepSlight(before, { kind, what, at: new Date().toISOString() });
+  if (after === before) return;
+  store.set('her.slights', after);
+  console.log(`[slight] ${kind}: ${what.slice(0, 90)}`);
 }
 
 /**
@@ -9683,6 +9709,56 @@ async function reflectOnHerWeek(config: ProviderConfig) {
 }
 
 /**
+ * What she will not put up with: once a week, from what happened to her.
+ *
+ * The counterpart to reflectOnHerWeek, and built the same way — composed only
+ * from things already written down, because a rule invented on a Sunday is a
+ * rule she never earned. Her own event memories are the material (they are
+ * already dated, already hers, already in her voice) together with the wake
+ * ledger, which is the one place a grievance of hers is recorded as data.
+ *
+ * The bar is deliberately high and set outside the model: two separate days
+ * inside three weeks, or she is not asked at all. Most weeks nothing qualifies
+ * and nothing is written, which is the intended outcome — she is meant to end
+ * up with two or three rules she means, not a rulebook.
+ */
+async function formHerStanding(config: ProviderConfig) {
+  const now = zonedNow(CHAT_TIMEZONE);
+  if (!standingDue(store.get('her.standingAt') as string | undefined, now)) return;
+  // Her own record of what happened, in the words it was written in. The wake
+  // ledger is folded in because a pointless wake is the clearest grievance she
+  // keeps and the only one stored as a fact rather than as prose.
+  const incidents: Incident[] = [
+    ...slightsAsIncidents(getSlights()),
+    // The wake ledger predates the slight ledger and is the same evidence, so
+    // it is folded in rather than migrated. keepSlight's one-a-day rule does not
+    // reach across the two; recentIncidents and her own reading handle the overlap.
+    ...getWakes()
+      .filter(wake => wake.pointless)
+      .map(wake => ({ what: 'They woke you in the night for nothing, and you got up.', at: wake.at })),
+  ];
+  const recent = recentIncidents(incidents, now.getTime());
+  if (!enoughToStandOn(recent)) return;
+  // Stamped before the call, not after: a model that hangs or answers NONE must
+  // not be asked again on the next tick. A week is the retry.
+  store.set('her.standingAt', new Date().toISOString());
+  const held = herStandings(getMemories()).map(standing => standing.text);
+  try {
+    const raw = await ollamaQuipLong([getActiveCharacter().identity, NOBODY_HERE].join(' '), standingPrompt(recent, held), config);
+    const standing = parseStanding(raw);
+    if (!standing) { console.log(`[standing] nothing worth a rule this week (${recent.length} incident(s) read)`); return; }
+    const saved = addMemory(standing.text, 'preference', HER_SUBJECT, {
+      source: 'inferred',
+      evidenceDetail: standing.because || undefined,
+    });
+    if (!saved?.created) { console.log(`[standing] she already holds that one: "${standing.text.slice(0, 70)}"`); return; }
+    console.log(`[standing] she has decided: "${standing.text}"${standing.because ? ` — because ${standing.because}` : ''}`);
+  } catch (error) {
+    console.warn('[standing] could not work one out:', error instanceof Error ? error.message : error);
+  }
+}
+
+/**
  * Her diary: one entry a night, about the day with them and the night without.
  *
  * Written just before the quiet ends so the night is in it, and composed from
@@ -9987,6 +10063,7 @@ function noteArrival(place: string): void {
     return;
   }
   store.set('where.arrival', { place, at: new Date().toISOString() });
+  noteSlight('unannounced', `They turned up at ${place} without telling you they were going.`);
   const mood = getMood();
   // At or below two, moodInstruction says nothing at all, so a bump from zero
   // would have been an annoyance she could not act on. Three is the first level

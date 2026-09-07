@@ -328,13 +328,15 @@ export function bansATopic(text: string): boolean {
   return A_BAN.test((text ?? '').trim());
 }
 
-/** `theirWords` is a memory the user wrote or asked for, rather than one she
- *  composed about them — the vault pages, the desk's add box, and what
- *  `remember_about_user` is handed when they say to stop doing something. */
-export function isWorthRemembering(text: string, options: { theirWords?: boolean } = {}): boolean {
+/** `meantAsARule` is a line somebody set on purpose rather than a note she
+ *  composed about them: his vault pages, the desk's add box, what
+ *  `remember_about_user` is handed when they say to stop doing something, and
+ *  her own standings about how she is treated. All of those are imperative by
+ *  nature, which is the one shape the nagging test refuses. */
+export function isWorthRemembering(text: string, options: { meantAsARule?: boolean } = {}): boolean {
   const clean = (text ?? '').trim();
   if (!clean) return false;
-  if (!options.theirWords && readsAsHerNagging(clean)) return false;
+  if (!options.meantAsARule && readsAsHerNagging(clean)) return false;
   // Length turned out to be a bad proxy for worth at every threshold tried.
   // Three words lost "Allergic to shellfish"; two lost "Vegetarian". Both are
   // among the most useful things anyone could tell her, and both are shorter

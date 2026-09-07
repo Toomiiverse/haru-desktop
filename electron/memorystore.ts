@@ -18,6 +18,7 @@
 // memory is a little blunter for an evening.
 
 import { randomUUID } from 'node:crypto';
+import { isHerStanding } from './herstanding';
 import {
   applyDecay, DEEP_RECALL_LIMIT, isExplicitRecall, isWorthRemembering, migrateMemories,
   pruneMemories, rememberInto, retrieveMemories, vectorSimilarity,
@@ -119,9 +120,13 @@ export function createMemoryStore(deps: MemoryStoreDeps) {
     // write a memory can skip the check. Six of her first eleven memories said
     // nothing — that they exist, that they live in a city — and each one held a
     // place in the prompt that a real fact could have had.
-    // Their own words are exempt from the her-own-nagging rule: an instruction
-    // in a preference is the point of it, not a summariser overreaching.
-    if (!isWorthRemembering(fact, { theirWords: extra.source === 'explicit' })) {
+    // A rule set on purpose is exempt from the her-own-nagging test, which only
+    // ever meant to catch her writing instructions for him and filing them as
+    // facts. His preference page is imperative by design, and so is a standing
+    // of her own about how she is treated — "I don't get up for this any more"
+    // is the whole content of it.
+    const meantAsARule = extra.source === 'explicit' || isHerStanding({ kind, subject });
+    if (!isWorthRemembering(fact, { meantAsARule })) {
       console.log(`[memory] not worth keeping: "${fact.slice(0, 60)}"`);
       return { created: false, record: null };
     }
