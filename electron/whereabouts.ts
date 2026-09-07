@@ -205,3 +205,25 @@ export function unannouncedArrivalNote(arrival: Arrival | null | undefined, nowM
   return `Their phone put them at ${arrival.place} ${when}, and they never said they were going — you found out from a phone rather than from them. That is worth being annoyed about, and it is yours to say once, in your way — say it before anything else, then answer whatever they actually said. Do not ask where they are: you know. Do not ask why they did not tell you as though it were a mystery — make it a complaint, not a question.`;
 }
 
+/**
+ * The history without her claims that she cannot see where they are, once she can.
+ *
+ * The same finding as the traffic denials (withoutTrafficDenials in
+ * directions.ts) and the reminder denials before those: she copies what she can
+ * see over what she is told. On 2026-09-07 she answered "how come you can't see
+ * my screen or where I am" with "I just can't. That's how I'm built… No location
+ * tracking, no screen peeking, no secret camera in your pocket" — while tracking
+ * was switched on, her store held a fix accurate to fourteen metres from seven
+ * minutes earlier, and three of her own replies further up the same transcript
+ * read "You're at The PC Project, as your phone says". Two prompt lines invited
+ * the first denial; this stops the denial teaching the next one.
+ *
+ * Gated the same way: only while she actually has a fresh fix, so a denial made
+ * on a night when the phone had told her nothing is true and stays.
+ */
+const CANT_SEE_WHERE = /\b(?:can'?t|cannot|don'?t|do not|unable to|no way to) (?:see|know|track|access|tell|check|find)\b[^.!?\n]{0,40}\b(?:where you are|where they are|your location|their location|location)\b|\bno location (?:tracking|access|data|services?)\b|\bdon'?t have (?:access to )?(?:your |their )?location\b|\bnot? (?:tracking|track) (?:your|their) (?:location|whereabouts|phone)\b/i;
+
+export function withoutWhereDenials<T extends { role: string; content: string }>(messages: T[], knowsWhere: boolean): T[] {
+  if (!knowsWhere) return messages;
+  return messages.filter(message => !(message.role === 'assistant' && CANT_SEE_WHERE.test(message.content.replace(/[\u2018\u2019]/g, "'"))));
+}

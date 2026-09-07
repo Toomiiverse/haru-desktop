@@ -52,7 +52,7 @@ import { awakeHoursSince, theyAreUp, awakeMinutesSince, quietEndedAt } from './a
 import { describeTold, placeToldFrom, toldTheyAreBusy, toldStillStands, type Told, errandsToldFrom, errandToAskAfter, type Errand } from './told';
 import { markMentioned, upcomingToMention } from './upcoming';
 import { directionsAskFrom, directionsNote, dropRouteTalk, matchNamedPlace, startingPoint, withDirections, withoutMapsLinks, type DirectionsAsk, claimsTraffic, withoutTrafficDenials } from './directions';
-import { absorb, describeWhereabouts, distanceM, forgetPlace, homeOf, namePlace, placeAt, readSpot, readWhereabouts, whereForPage, type Whereabouts, SPOT_STALE_MS, saidTheyWereGoing, unannouncedArrivalNote, type Arrival } from './whereabouts';
+import { absorb, describeWhereabouts, distanceM, forgetPlace, homeOf, namePlace, placeAt, readSpot, readWhereabouts, whereForPage, type Whereabouts, SPOT_STALE_MS, saidTheyWereGoing, unannouncedArrivalNote, withoutWhereDenials, type Arrival } from './whereabouts';
 import { bodyForPage, describeBody, readBody as readBodyState, readBodyReport, type Body } from './body';
 import { convertImage, normaliseFormat, FORMATS } from './convert';
 import { cancelPower, closeApp, findApps, isCancellable, launch, listRunning, matchApp, matchRunning, normalisePower, POWER_DELAY_S, readDesktopConfig, runPower, supportedDesktop, type DesktopConfig } from './desktop';
@@ -6912,7 +6912,7 @@ const promptState = {
     .map(turn => ({ role: turn.role, content: turn.content, ...(turn.at ? { at: turn.at } : {}), ...((turn as { id?: string }).id ? { id: (turn as { id?: string }).id } : {}) })) as OllamaMessage[];
   if (earlier.notes.length) console.log(`[ai] ${earlier.notes.length} note(s) — months and days — go in front of today's`);
   if (before.length) console.log(`[ai] ${before.length} turns from un-distilled days go in front of today's`);
-  const history = markTimeGaps(withoutTrafficDenials([...before, ...withoutStaleDenials(foldAsleepExchanges(withFiles) as typeof withFiles, hasItems)] as unknown as { role: string; content: string; at?: string }[], Boolean(directions?.route)), CHAT_TIMEZONE) as unknown as OllamaMessage[];
+  const history = markTimeGaps(withoutWhereDenials(withoutTrafficDenials([...before, ...withoutStaleDenials(foldAsleepExchanges(withFiles) as typeof withFiles, hasItems)] as unknown as { role: string; content: string; at?: string }[], Boolean(directions?.route)), Boolean(describeWhereabouts(getWhereabouts()))), CHAT_TIMEZONE) as unknown as OllamaMessage[];
   // Her replies as re-voiced by the background pass (revoice.ts), before the
   // other seeds: a rewrite that still ends on an order loses it like any other.
   const revoiced = applyRevoices(history as unknown as { id?: string; role: string; content: string }[], revoiceState().rewrites);

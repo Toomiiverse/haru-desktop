@@ -2,7 +2,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { absorb, describeWhereabouts, distanceM, forgetPlace, namePlace, placeAt, readSpot, readWhereabouts, SPOT_STALE_MS, whereForPage, type Whereabouts, saidTheyWereGoing, unannouncedArrivalNote, ARRIVAL_FRESH_MS } from '../electron/whereabouts';
+import { absorb, describeWhereabouts, distanceM, forgetPlace, namePlace, placeAt, readSpot, readWhereabouts, SPOT_STALE_MS, whereForPage, type Whereabouts, saidTheyWereGoing, unannouncedArrivalNote, withoutWhereDenials, ARRIVAL_FRESH_MS } from '../electron/whereabouts';
 
 const NOW = new Date('2026-08-28T10:00:00Z');
 const HOME = { lat: -31.9505, lon: 115.8605 };
@@ -107,3 +107,34 @@ test('an unannounced arrival is a complaint she makes once, and stops being news
   assert.equal(unannouncedArrivalNote(null, now, clock), '');
 });
 
+
+// ---- her own denials must not teach the next one ----
+
+test('her denial that she can see where they are is dropped once she can', () => {
+  const said = [
+    { role: 'user', content: "How come you can't see my screen or where I am" },
+    { role: 'assistant', content: "I just can't. That's how I'm built." },
+    { role: 'assistant', content: 'No location tracking, no screen peeking, no secret camera in your pocket.' },
+    { role: 'assistant', content: "\u{1F624} I can't see your location, your screen, or what you're doing." },
+    { role: 'assistant', content: "You're at The PC Project, as your phone says." },
+  ];
+  const kept = withoutWhereDenials(said, true).map(m => m.content);
+  assert.equal(kept.length, 3, `dropped the wrong number: ${JSON.stringify(kept)}`);
+  assert.ok(kept.some(c => c.includes('The PC Project')), 'the true reply must survive');
+  assert.ok(kept.some(c => c.startsWith('How come')), 'his own message is never touched');
+  assert.ok(!kept.some(c => /location tracking/i.test(c)));
+});
+
+test('a denial made when she genuinely had nothing stands', () => {
+  const said = [{ role: 'assistant', content: "I can't see your location right now." }];
+  assert.equal(withoutWhereDenials(said, false).length, 1);
+});
+
+test('ordinary replies that merely mention seeing are left alone', () => {
+  const said = [
+    { role: 'assistant', content: "I can't see why you'd drive there." },
+    { role: 'assistant', content: 'You know I can see where you are, so stop asking.' },
+    { role: 'assistant', content: "I don't know what you want me to say." },
+  ];
+  assert.equal(withoutWhereDenials(said, true).length, 3);
+});

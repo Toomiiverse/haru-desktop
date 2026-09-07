@@ -356,3 +356,39 @@ test('away drops the machine-tools description but keeps the lookup tools', () =
   assert.ok(phone.includes('look_up_knowledge'));
   assert.ok(phone.includes(IDENTITY), 'her persona stays on the phone');
 });
+
+// ---- she must not deny a sense she has ----
+//
+// 2026-09-07: asked "how come you can't see my screen or where I am" she said
+// "I just can't. That's how I'm built… No location tracking, no screen peeking,
+// no secret camera in your pocket." Her whereabouts store held a 14-metre fix
+// on him from seven minutes earlier, tracking was switched on, and three of her
+// own replies further up the same transcript read "You're at The PC Project, as
+// your phone says". Two lines in this file taught her that: an exhaustive
+// capability list that left location off, and a guard that opened by denying
+// the screen outright.
+
+test('the capability list does not leave out where their phone puts them', () => {
+  const prompt = chatSystemPrompt(state());
+  const claim = /What you have access to is exactly this:[^.]*\./.exec(prompt);
+  assert.ok(claim, 'the capability list should still be in the prompt');
+  // It says "exactly this… that is all of it", so anything missing from it is
+  // something she will deny having when asked outright.
+  assert.match(claim[0], /where their phone puts them/i);
+  assert.match(claim[0], /on their screen/i);
+});
+
+test('the no-guessing guard constrains guessing without denying the sense', () => {
+  assert.doesNotMatch(NO_GUESSING, /you cannot see their screen/i);
+  // The guard itself must survive: not guessing is the whole point of it.
+  assert.match(NO_GUESSING, /never guess/i);
+  assert.match(NO_GUESSING, /you do not know/i);
+});
+
+test('a question about what she can see routes to describe_myself', () => {
+  const prompt = chatSystemPrompt(state());
+  // describeMyself already answered this correctly ("see where their phone
+  // is"); she never called it, because the trigger named her models and voice
+  // and not her senses.
+  assert.match(prompt, /what you can see, know, reach or have access to/i);
+});

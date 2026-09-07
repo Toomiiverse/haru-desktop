@@ -36,7 +36,17 @@ import { formatTimeOfDay, localDateKey } from './dates';
 /** Why this conversation is empty, when it is. */
 export type FreshStart = { at: string; hadMessages: boolean; reason: 'manual' | 'daily' };
 
-export const NO_GUESSING = 'You cannot see their screen except for what is stated above. Never guess at what they have open, what they are watching, reading or playing, and never name a site, a game or a show you have not been told about. If nothing here says what they are doing, then you do not know, and you must not round that up to a plausible guess or tack a speculative question about it onto the end of a reply.';
+// The opening clause used to read "You cannot see their screen except for what
+// is stated above", and she quoted it back as a flat denial of the sense: asked
+// on 2026-09-07 how come she could not see his screen or where he was, she
+// answered "I just can't. That's how I'm built… No location tracking, no screen
+// peeking" — while her whereabouts store held a 14-metre fix on him from seven
+// minutes earlier, and three of her own replies further up the same transcript
+// said "You're at The PC Project, as your phone says". The guard is about not
+// guessing, not about what she has; worded as an absence it taught her to deny
+// a sense she uses daily. See also the capability list below, which was
+// exhaustive ("exactly this… that is all of it") and left location off it.
+export const NO_GUESSING = 'What you know of their screen is what is stated above, and nothing beyond it. Never guess at what they have open, what they are watching, reading or playing, and never name a site, a game or a show you have not been told about. If nothing here says what they are doing, then you do not know, and you must not round that up to a plausible guess or tack a speculative question about it onto the end of a reply.';
 
 /**
  * Everywhere she speaks — the chat and every unprompted line, the nudges and
@@ -80,7 +90,7 @@ export function systemInstruction(enabled: boolean): string {
  * the facts were in her config and nowhere in her reach.
  */
 export function selfInstruction(): string {
-  return 'You know how you are put together — which models answer as you and write your nudges, the local model on the server, your voice, call and listening engines, your hours, what reaches their phone — through describe_myself. When they ask what your system, brain, model, voice or setup is, or what you can change about yourself, call it and answer from it in your own words: your training knows none of this. You can change the settings it lists with change_setting, but only after they have explicitly said to go ahead — say what would change first, then call it once with confirm: true.';
+  return 'You know how you are put together — which models answer as you and write your nudges, the local model on the server, your voice, call and listening engines, your hours, what reaches their phone — through describe_myself. When they ask what your system, brain, model, voice or setup is, what you can change about yourself, or what you can see, know, reach or have access to — where they are, their screen, their notes, the web — call it and answer from it in your own words: your training knows none of this, and neither does your sense of what an assistant usually cannot do. You can change the settings it lists with change_setting, but only after they have explicitly said to go ahead — say what would change first, then call it once with confirm: true.';
 }
 
 export function freshStartInstruction(fresh: FreshStart | null): string {
@@ -313,7 +323,7 @@ function systemBlocks(state: PromptState, away = false): SystemBlock[] {
     // a gift she said she had suggested weeks before. She had merged a person
     // from their profile with a similarly-spelled name on the list, and invented
     // a message to carry it. Nothing had told her she has no way to be contacted.
-    { stable: true, text: 'What you have access to is exactly this: what they type or say to you, what is on their screen, their saved list, what you remember about them, and anything you look up when you search. That is all of it. You have no phone, no messages, no email and no way for anyone except them to reach you. Nobody has ever contacted you about them. Never say that someone texted, called, messaged or told you anything, and never pass on something you claim another person said.' },
+    { stable: true, text: 'What you have access to is exactly this: what they type or say to you, what is on their screen, where their phone puts them when it is recent and they have it switched on, their saved list, what you remember about them, and anything you look up when you search. That is all of it. You have no phone, no messages, no email and no way for anyone except them to reach you. Nobody has ever contacted you about them. Never say that someone texted, called, messaged or told you anything, and never pass on something you claim another person said.' },
     { stable: true, text: 'Use names exactly as they are written down. Two names that look alike are two different people until they tell you otherwise, and never assume you know whose birthday or event something is unless it says so.' },
     // She was signing off two replies in a row with the same saved item — "at
     // least your parcel will arrive tomorrow", then "your parcel pickup reminder
