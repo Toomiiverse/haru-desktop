@@ -35,6 +35,7 @@ import {
   entityTerms,
   entityScore,
   monthFoldPrompt,
+  readsAsHerNagging,
 } from '../electron/memory';
 
 const fixture = (overrides: Partial<MemoryRecord> & { id: string; text: string; kind: MemoryRecord['kind'] }): MemoryRecord => ({
@@ -616,4 +617,35 @@ test('monthFoldPrompt names the month and forbids the second person', () => {
   assert.ok(prompt.includes('2026-08'));
   assert.ok(prompt.includes('third person'));
   assert.ok(prompt.includes('nothing invented'));
+});
+
+// ---- their words are not her nagging ----
+//
+// Preferences.md asks for exactly one form — "one bullet per preference: what
+// Haru should do or avoid" — and that is the same form her own nagging takes.
+// Three of the user's five bullets were refused on every hourly sync, 93 times
+// each in one log, and the tally reported them as already known.
+
+test('an instruction she wrote for herself is still refused', () => {
+  assert.equal(isWorthRemembering('Don\u2019t be late for the motherboard pickup'), false);
+  assert.equal(isWorthRemembering('Remember to call the shop'), false);
+  assert.equal(readsAsHerNagging('Never let it go to voicemail'), true);
+});
+
+test('the same sentence in their own words is kept', () => {
+  for (const bullet of [
+    "Don't interrupt with unprompted lines while Tommy is working at the shop or mid-task.",
+    "Don't nag about the same thing twice in a day — say it once, in her own way.",
+    "Don't let Tommy leave the house without coffee.",
+    'Remind Tommy about bin night on Thursdays.',
+  ]) {
+    assert.equal(isWorthRemembering(bullet, { theirWords: true }), true, `refused: ${bullet}`);
+  }
+});
+
+test('their words are exempt from the nagging rule and nothing else', () => {
+  // The other gates still apply to a page the user wrote: an empty bullet, or
+  // one that is only about her, is no better for having been typed by him.
+  assert.equal(isWorthRemembering('   ', { theirWords: true }), false);
+  assert.equal(isWorthRemembering('Thanks you for the help', { theirWords: true }), false);
 });

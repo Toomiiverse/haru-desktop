@@ -119,7 +119,9 @@ export function createMemoryStore(deps: MemoryStoreDeps) {
     // write a memory can skip the check. Six of her first eleven memories said
     // nothing — that they exist, that they live in a city — and each one held a
     // place in the prompt that a real fact could have had.
-    if (!isWorthRemembering(fact)) {
+    // Their own words are exempt from the her-own-nagging rule: an instruction
+    // in a preference is the point of it, not a summariser overreaching.
+    if (!isWorthRemembering(fact, { theirWords: extra.source === 'explicit' })) {
       console.log(`[memory] not worth keeping: "${fact.slice(0, 60)}"`);
       return { created: false, record: null };
     }

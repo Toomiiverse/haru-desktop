@@ -4161,6 +4161,10 @@ const { getMemories, setMemories, addMemory, mergeIn, getSessions, getMonthNotes
 let admitVaultMemory: ((draft: { text: string; kind: 'relationship' | 'preference' | 'fact'; subject?: string }) => { created: boolean } | null) | undefined = undefined;
 admitVaultMemory = draft => {
   const result = addMemory(draft.text, draft.kind, draft.subject, { source: 'explicit' });
+  // A refused bullet used to reach the tally as a repeat, so a page whose lines
+  // were all being thrown away read as a page already known: "Preferences.md: 5
+  // bullet(s), +0 ~5 repeated", every hour, while three of the five were dropped.
+  if (result && !result.created && !result.record) console.warn(`[vault-memory] refused a bullet: "${draft.text.slice(0, 80)}"`);
   return result ? { created: result.created } : null;
 };
 const tryEmbedQuery = memoryStore.embedQuery;

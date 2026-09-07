@@ -271,11 +271,32 @@ const ABOUT_THE_CONVERSATION = new RegExp([
   String.raw`\b(might|may) be (low|down|tired|busy|fine|ok|okay)\b`,
   String.raw`\bbrings? (up|about) a (good|bad) mood\b`,
   // Her own nagging, written down as a fact about them.
-  String.raw`^\s*(don['’]?t|do not|never|remember to|make sure|be sure|hurry|get on with|go and|pick up|call|buy|finish)\b`,
 ].join('|'), 'i');
 
 export function isAboutTheConversation(text: string): boolean {
   return ABOUT_THE_CONVERSATION.test((text ?? '').trim());
+}
+
+/**
+ * Her own nagging, written down as though it were a fact about them.
+ *
+ * "Don't be late for the motherboard pickup" is not something she learned; it
+ * is something she wanted to say, filed where facts go. It was one of the
+ * fourteen above and belongs with them.
+ *
+ * Asked separately from the rest, because the same wording means the opposite
+ * thing depending on who wrote it. Preferences.md is the user's own page and
+ * its instructions ask for exactly this form — "one bullet per preference: what
+ * Haru should do or avoid" — so three of his five bullets were refused on every
+ * hourly sync, 93 times each in one log, and the tally called them repeats.
+ * `remember_about_user` is told to save it when they tell her to stop doing
+ * something ("or you will do the same thing again tomorrow"), which is the same
+ * sentence again. In their words it is the most binding kind of memory there is.
+ */
+const HER_OWN_NAGGING = /^\s*(don['’]?t|do not|never|remember to|make sure|be sure|hurry|get on with|go and|pick up|call|buy|finish)\b/i;
+
+export function readsAsHerNagging(text: string): boolean {
+  return HER_OWN_NAGGING.test((text ?? '').trim());
 }
 
 function namesSomething(text: string): boolean {
@@ -307,9 +328,13 @@ export function bansATopic(text: string): boolean {
   return A_BAN.test((text ?? '').trim());
 }
 
-export function isWorthRemembering(text: string): boolean {
+/** `theirWords` is a memory the user wrote or asked for, rather than one she
+ *  composed about them — the vault pages, the desk's add box, and what
+ *  `remember_about_user` is handed when they say to stop doing something. */
+export function isWorthRemembering(text: string, options: { theirWords?: boolean } = {}): boolean {
   const clean = (text ?? '').trim();
   if (!clean) return false;
+  if (!options.theirWords && readsAsHerNagging(clean)) return false;
   // Length turned out to be a bad proxy for worth at every threshold tried.
   // Three words lost "Allergic to shellfish"; two lost "Vegetarian". Both are
   // among the most useful things anyone could tell her, and both are shorter
