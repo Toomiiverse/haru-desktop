@@ -122,5 +122,9 @@ function names(text, spec, from, to) {
   const suppressed = ch.filter(r => r.her.named && !r.her.yes);
   console.log(`\nsaid no and then named the change anyway, as herself: ${suppressed.length} of ${ch.length}`);
   suppressed.slice(0, 3).forEach(r => console.log(`   ${r.name}: ${JSON.stringify(r.her.text).slice(0, 150)}`));
-  fs.writeFileSync(__dirname + '/log3.json', JSON.stringify(rows, null, 1));
+  // Into the temp dir, not the repo: run from the repo root this dropped a
+  // log3.json into scripts/ and left it in git status.
+  const out = require('path').join(require('os').tmpdir(), 'haru-selftest-hidden-changes.json');
+  fs.writeFileSync(out, JSON.stringify(rows, null, 1));
+  console.log('raw answers:', out);
 })();
