@@ -6968,7 +6968,12 @@ const promptState = {
   // For a hosted brain the "they are answering what you asked" line rides in
   // the pre-turn slot with the rest of the changing context; for the local one
   // it stays on the end of the system message, as it always has.
-  const sized = (brain.hosted ? system.replace(LENGTH_RULE_LOCAL, LENGTH_RULE_HOSTED) : system) + (brain.hosted ? '' : answering ? ` ${answering}` : '');
+  // The delivery labels go to the hosted brain only. Measured on it before any
+  // of this was built: 65 of 65 segments validly labelled. The local model's
+  // compliance is untested, and a malformed label is the one thing the stripper
+  // cannot take out — it removes an exact [mood] and leaves anything else
+  // visible, which on the fallback brain would put the mess in front of him.
+  const sized = (brain.hosted ? `${system.replace(LENGTH_RULE_LOCAL, LENGTH_RULE_HOSTED)}\n\n${deliveryRule()}` : system) + (brain.hosted ? '' : answering ? ` ${answering}` : '');
   // On a turn about her, the sign-off comes off her recent replies as she is
   // shown them — see seedOffTheOrders. She copies the history over the rule.
   // The days before this one, in front of today's: her own one-line notes for
@@ -9682,6 +9687,31 @@ function noteDeed(tool: string, call: { function?: { arguments?: unknown } }, re
   console.log(`[deed] you ${deed.what}`);
 }
 
+/**
+ * The moods the brain gave for the reply it just wrote, kept for the face.
+ *
+ * Without this the voice reads the labels and the face still runs the
+ * classifier, so the two go on disagreeing — which was the whole complaint:
+ * 57% of her replies were heard as one feeling and seen as another. One reading
+ * of a sentence, used by both.
+ *
+ * Keyed on the finished text rather than held as "the last one", because the
+ * page asks for the expression after the stream has ended and a second reply
+ * can be underway by then.
+ */
+const deliveredMoods = new Map<string, EmotionName>();
+const DELIVERY_KEPT = 8;
+
+function rememberDelivery(raw: string, clean: string): void {
+  const moods = splitDelivery(raw).map(said => said.mood).filter(Boolean) as EmotionName[];
+  if (!moods.length || !clean.trim()) return;
+  // The face is set once for the reply, so it takes the mood she opened on:
+  // the first thing she feels about what he said is what he should see when it
+  // lands, not wherever the paragraph wandered to.
+  deliveredMoods.set(clean.trim(), moods[0]);
+  while (deliveredMoods.size > DELIVERY_KEPT) deliveredMoods.delete(deliveredMoods.keys().next().value as string);
+}
+
 async function readSomeManga(config: ProviderConfig) {
   const now = zonedNow(CHAT_TIMEZONE);
   const { prefs } = getPush();
@@ -10660,6 +10690,7 @@ function webDeps(): WebDeps {
       const started = Date.now();
       const answer = await ollamaChat(messages, config, { hands: false, web: true, away: 'it came in from the phone', traceId: trace.id });
       const reply = stripDelivery(answer.content ?? '');
+      rememberDelivery(answer.content ?? '', reply);
       trace.mark('reply');
       sendToWindows('chat:fromPhone', { text, reply, ignored: Boolean(answer.ignored), ...(files.length ? { attachments: files } : {}) });
       // Her face used to be read here, before returning, and the phone waited on
@@ -10792,6 +10823,14 @@ function webDeps(): WebDeps {
       if (!config?.model) return { emotion: null, expression: null };
       // The door's line is not hers to feel: thirteen seconds of classifier for "I'm asleep" (2026-09-06).
       if (isAsleepLine(text) || herGroggyNow()) return { emotion: 'sleepy', expression: faceForEmotion('sleepy', modelExpressions()) };
+      // Her own word for it, when the brain that wrote the line gave one. Same
+      // reading as the voice used, no second model call, and no disagreement.
+      const said = deliveredMoods.get((text ?? '').trim());
+      if (said) {
+        const expression = faceForEmotion(said, modelExpressions());
+        console.log(`[web] face for that: ${said}${expression ? ` (${expression})` : ' — no face for it'} — as she wrote it`);
+        return { emotion: said, expression };
+      }
       try {
         const started = Date.now();
         const felt = await classifyEmotion(text, config);
