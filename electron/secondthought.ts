@@ -40,7 +40,42 @@ export function parseSecondThought(text: string): string | null {
   // The first few lines are the message; anything past them is a second reply.
   line = line.split(/\n{2,}/)[0].trim();
   if (line.length < 8 || line.length > 600) return null;
+  if (addsNothing(line)) return null;
   return line;
+}
+
+/**
+ * "Nothing to add", said the long way round.
+ *
+ * The note asks for a single dash when she has nothing, and she mostly obliges.
+ * On 2026-09-08 she instead wrote "tch, okay so i already said this — but
+ * you're right to push on it. 🫡", which is the same refusal wearing her voice:
+ * no point left out, no question, nothing of her own, just a remark about the
+ * talking. It passed every guard — long enough, not a dash, and it echoed no
+ * line in the conversation because it had no content to echo.
+ *
+ * It cost more than a wasted aside. Thirteen seconds later he asked how to
+ * flash the BIOS, and she answered with a sixty-nine-character near-copy of it
+ * (filters untouched, so the model wrote it) because it was the last thing she
+ * had said and she copies what she can see. He had to ask twice.
+ *
+ * So: take out her fillers and the stock remarks about having already spoken,
+ * and if fewer than four words of substance are left, she had nothing. "Like I
+ * said, clear the CMOS first" survives, because what follows the meta-remark is
+ * the whole point of it.
+ */
+const FILLER = /\b(tch|okay|ok|so|fine|right|well|alright|hm+|ugh|yeah|yep|look|anyway|honestly|actually)\b/gi;
+const ABOUT_THE_TALKING = /\b(i(?:'ve| have)? (?:already )?(?:said|mentioned|told you|covered|explained|answered)(?: this| that| it)?(?: before| already)?|like i said|as i (?:said|mentioned)|you'?re right to (?:push|ask|chase)|you'?re right|fair enough|good (?:question|point)|my bad|but still)\b/gi;
+
+export function addsNothing(line: string): boolean {
+  const left = (line ?? '')
+    .replace(/[\p{Extended_Pictographic}\u{1F3FB}-\u{1F3FF}\u{FE0F}]/gu, ' ')
+    .replace(ABOUT_THE_TALKING, ' ')
+    .replace(FILLER, ' ')
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .split(/\s+/)
+    .filter(Boolean);
+  return left.length < 4;
 }
 
 /**

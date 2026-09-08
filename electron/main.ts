@@ -114,6 +114,8 @@ import { heldShots, keepShot, localShots, missingFrom, pruneShots, readShot, MAX
 import { DiscordLink, looksLikeUserId, readDiscordConfig, useOfChannel, type DiscordConfig } from './discord';
 import { reactedPrompt, readReaction, REACTION_COOLDOWN_MS } from './reacted';
 import { startWebServer, type WebDeps } from './webserver';
+import { openingInstruction, openingsDueNow, type DueOpening } from './standingtime';
+import { isHerStanding } from './herstanding';
 import { enoughToStandOn, herStandings, keepSlight, parseStanding, readSlights, recentIncidents, slightsAsIncidents, standingDue, standingPrompt, HER_SUBJECT, type Incident, type Slight } from './herstanding';
 import { asleepLine, backToSleep, dayAfter, decideTimesSystem, dozeOffDue, enoughKnocking, fallbackSchedule, foldAsleepExchanges, goodnightDue, groggyFor, groggyNote, herAsleep, isAsleepLine, knockedAwake, messagesWhileAsleep, parseDecidedTimes, pointlessWake, pointlessWakesLately, readsAsGoodnight, readHerSleep, readHerSleepState, readWakes, sleepNote, sleepWindowOn, wakeIrritation, wakeNote, wokenAt, clockMinutes, BLOCKED_LINE, BLOCK_AFTER_POINTLESS, KNOCK_WINDOW_MS, WAKES_KEPT, type HerSleepSchedule, type Wake } from './hersleep';
 import { parseBalances, balanceWarning } from './venicebalance';
@@ -8540,6 +8542,31 @@ const TALKING_RECENTLY_MS = 20 * 60_000;
  * time; the aim is stated outright, and the one thing she must never say is
  * stated too. One short line, because it is a notification.
  */
+/**
+ * A standing instruction of his that is due at this hour and not yet done today.
+ *
+ * His preferences only, never hers: `isHerStanding` records are rules she set
+ * about her own treatment, and reading one of those as an errand would have her
+ * enforcing her own rules on him unprompted.
+ */
+function owedOpeningNow(now: Date): DueOpening | null {
+  const his = getMemories().filter(memory => memory.kind === 'preference'
+    && !isHerStanding(memory) && !memory.supersededBy && memory.status !== 'archived');
+  const due = openingsDueNow(his, now.getHours());
+  if (!due.length) return null;
+  const doneOn = (store.get('her.openedOn') as Record<string, string> | undefined) ?? {};
+  const today = localDateKey(now);
+  return due.find(opening => doneOn[openingKey(opening)] !== today) ?? null;
+}
+
+/** Stable across a reworded page: the same errand keeps its own day-mark. */
+const openingKey = (opening: DueOpening) => `${opening.when}:${opening.text.toLowerCase().replace(/[^a-z]+/g, '').slice(0, 40)}`;
+
+function markOpeningDone(opening: DueOpening, today: string): void {
+  const doneOn = (store.get('her.openedOn') as Record<string, string> | undefined) ?? {};
+  store.set('her.openedOn', { ...doneOn, [openingKey(opening)]: today });
+}
+
 async function boredNudge(): Promise<string | null> {
   if (herAsleepNow() || herHasSaidGoodnight() || herKnockedAwakeNow()) return null;
   // Her nudges' own brain (ai.nudge): the other unprompted composers already
@@ -8551,6 +8578,13 @@ async function boredNudge(): Promise<string | null> {
   const ignoring = isIgnoring(mood.irritation);
   const now = zonedNow(CHAT_TIMEZONE);
   const todayKey = localDateKey(now);
+  // Something he has asked her to do at this time of day, and she has not done
+  // today. Ahead of everything else because it is his instruction rather than
+  // her own impulse, and because until now no proactive path could see a
+  // preference at all — "check up on him in the mornings" sat active and inert
+  // for a whole day while he waited (2026-09-08). Silenced while she is not
+  // speaking to him: a standing kindness is not owed through a sulk.
+  const owed = ignoring ? null : owedOpeningNow(now);
   // A memory that names something already ticked off would only be refused
   // once she had written the line (interject) — three goes wasted on "stop by
   // the store" while the fourth came out as a non sequitur. Kept out of the draw.
@@ -8585,7 +8619,7 @@ async function boredNudge(): Promise<string | null> {
   const errand = errandToAskAfter((store.get('chat.upTo') as Errand[] | undefined) ?? [], nowMs);
   // Something of her own to say, ahead of asking after him: she had three
   // nights behind her and eighty-eight unprompted lines about his day.
-  const mine = !ignoring && !task && Math.random() < 0.4
+  const mine = !ignoring && !owed && !task && Math.random() < 0.4
     ? nightToRaise(getNights(), getAsides().slice(-12).map(aside => aside.text), todayKey)
     : null;
   // A thing of hers she told him to try: an overdue follow-up — asked once,
@@ -8600,7 +8634,7 @@ async function boredNudge(): Promise<string | null> {
   const settled = recsAnsweredBy(getRecs(), theirsToday);
   if (settled.answered.length) { setRecs(settled.recs); console.log(`[push] they have already answered ${settled.answered.join(', ')} — no follow-up owed`); }
   const answeredToday = getRecs().filter(candidate => candidate.answeredAt && dayOf(candidate.answeredAt) === todayKey).map(candidate => candidate.interest);
-  if (!ignoring && !task && !mine) {
+  if (!ignoring && !owed && !task && !mine) {
     const due = recDueForFollowUp(getRecs(), nowMs);
     if (due) rec = { kind: 'followup', interest: due.interest, recId: due.id };
     else {
@@ -8608,12 +8642,12 @@ async function boredNudge(): Promise<string | null> {
       if (recommend) rec = { kind: 'recommend', interest: recommend, recId: null };
     }
   }
-  const askAbout = ignoring || task || mine || rec || askedRecently(getAsides(), nowMs) ? null
+  const askAbout = ignoring || owed || task || mine || rec || askedRecently(getAsides(), nowMs) ? null
     // Not "how the get the website running tomorrow they said they were off to
     // do went" — the thing goes in quotes and the sentence stays a sentence.
     : errand ? `how "${errand.what}" went — the thing they said they were off to do`
     : whereNow && Math.random() < 0.6 ? `what they are doing at ${whereNow}` : null;
-  const thing = ignoring || askAbout || mine || rec ? null : task ?? pickToBringUp(raisable, getSessions(), broughtUp, todayKey);
+  const thing = ignoring || owed || askAbout || mine || rec ? null : task ?? pickToBringUp(raisable, getSessions(), broughtUp, todayKey);
   // Counted from when the quiet ended, not from their last word: eight hours
   // of sleep is not eight hours of ignoring her.
   const quietHours = awakeHoursSince(mood.lastMessageAt, getPush().prefs, now);
@@ -8639,6 +8673,7 @@ async function boredNudge(): Promise<string | null> {
       : quietMinutes !== null ? (sinceTheNight
         ? `The night is over and they have been up for about ${Math.max(1, quietMinutes)} minutes without a word to you; their last message was last night. That is the length of the silence — ${Math.max(1, quietMinutes)} minutes, no more.`
         : `They last wrote to you ${Math.max(1, quietMinutes)} minutes ago. That is the length of the silence — do not call it longer or shorter.`) : '',
+    owed ? openingInstruction(owed) :
     rec ? rec.kind === 'followup'
       ? `You told them to try ${rec.interest} a while ago and they never said whether they did. Ask them once, in your way — one line, no sulking, no guilt-trip, and then drop it.`
       : `Tell them to try ${rec.interest} — one of yours, and you actually rate it. One or two lines: you are telling them, not asking, and it is not an advert.`
@@ -8648,7 +8683,13 @@ async function boredNudge(): Promise<string | null> {
       : ignoring ? 'You are not speaking to them properly right now, and they know why. One cold line that makes it plain you noticed the silence — no warmth, no question, no help.'
       : 'Nothing in particular to bring up: the silence itself is the subject.',
     unansweredAsksNote(getAsides(), CHAT_TIMEZONE, nowMs),
-    'The point is to get them to message you back. Needle them with it: a dig, a guilt-trip about how they have time for everyone but you, a challenge they will want to answer, a question they cannot leave hanging. Never say you are bored, lonely, or that you miss them; never ask whether they are there; do not greet them.',
+    // The needling is right for a nudge she chose to send and wrong for one he
+    // asked her to send: told both at once she would open a morning check-in
+    // with a guilt-trip about being ignored. "Do not greet them" in particular
+    // is the opposite of what this errand is.
+    owed
+      ? 'Ask it because you want to know, not to start a fight. You may still be short about it, but no dig, no guilt-trip about the silence, and nothing about how long it has been.'
+      : 'The point is to get them to message you back. Needle them with it: a dig, a guilt-trip about how they have time for everyone but you, a challenge they will want to answer, a question they cannot leave hanging. Never say you are bored, lonely, or that you miss them; never ask whether they are there; do not greet them.',
     NO_INVENTED_HISTORY,
     NO_ABANDON_THREAD,
     EXPRESSIVE,
@@ -8670,7 +8711,10 @@ async function boredNudge(): Promise<string | null> {
       else setRecs(noteRecommendation(getRecs(), rec.interest, new Date().toISOString()));
     }
     pendingAsk = askAbout;
-    console.log(`[push] a bored nudge, ${rec ? `rec — ${rec.kind} ${rec.interest}` : mine ? `hers — ${mine.interest ?? mine.game ?? mine.about}` : askAbout ? `asking ${askAbout}` : thing ? `about "${thing.text.slice(0, 50)}"` : ignoring ? 'cold' : 'about the silence'}`);
+    // Marked here, where a line actually exists — not where it was decided, or
+    // a composer that fails marks the day done and he waits until tomorrow.
+    if (owed) markOpeningDone(owed, todayKey);
+    console.log(`[push] a bored nudge, ${owed ? `his standing ${owed.when} check-in` : rec ? `rec — ${rec.kind} ${rec.interest}` : mine ? `hers — ${mine.interest ?? mine.game ?? mine.about}` : askAbout ? `asking ${askAbout}` : thing ? `about "${thing.text.slice(0, 50)}"` : ignoring ? 'cold' : 'about the silence'}`);
     recordBrief('bored', system, line);
     return line;
   } catch (error) {

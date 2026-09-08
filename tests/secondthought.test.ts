@@ -2,7 +2,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { looksLikeAnEcho, parseSecondThought, secondThoughtDelay, secondThoughtNote, wantsSecondThought, SECOND_THOUGHT_MIN_MS, SECOND_THOUGHT_MAX_MS } from '../electron/secondthought';
+import { looksLikeAnEcho, parseSecondThought, secondThoughtDelay, secondThoughtNote, wantsSecondThought, SECOND_THOUGHT_MIN_MS, SECOND_THOUGHT_MAX_MS, addsNothing} from '../electron/secondthought';
 
 test('a follow-up is always considered after her subject or a rant, rarely otherwise, never after a grunt', () => {
   assert.ok(wantsSecondThought({ hers: true, ranting: false, replyLength: 200 }, () => 0.99));
@@ -51,4 +51,32 @@ test('a follow-up that repeats what was just said is not a follow-up', () => {
 
 test('the note tells her not to repeat either side', () => {
   assert.match(secondThoughtNote(60), /Never repeat what they said or what you said/);
+});
+
+// ---- "nothing to add", said the long way round ----
+
+test('the meta-remark she actually sent is treated as having nothing to add', () => {
+  // 2026-09-08 04:50:24. Thirteen seconds later she answered "How to bios
+  // flash" with a near-copy of it, because it was the last thing she had said.
+  assert.equal(parseSecondThought("tch, okay so i already said this — but you're right to push on it. 🫡"), null);
+  assert.equal(addsNothing("tch, okay so i already said this — but you're right to push on it. 🫡"), true);
+});
+
+test('other ways of saying nothing are caught too', () => {
+  for (const said of [
+    'Well, like I said. 🙄',
+    "Fair enough, you're right.",
+    'Actually — as I mentioned already.',
+    'Good question. But still.',
+  ]) assert.equal(parseSecondThought(said), null, `let through: ${said}`);
+});
+
+test('a meta-remark that carries a real point survives', () => {
+  // The whole risk of this guard: the point often follows the throat-clearing.
+  for (const said of [
+    'Like I said, clear the CMOS first — do that before you touch anything else.',
+    "hm, actually — wait. 15 to C5 to A6, and A6 is BIOS entry, so it is posting.",
+    "850W minimum, 1000W+ if you're not running it solo. More if you overclock.",
+    "You're right to push, but the stick is dead — swap it before you flash anything.",
+  ]) assert.equal(parseSecondThought(said), said, `wrongly dropped: ${said}`);
 });
