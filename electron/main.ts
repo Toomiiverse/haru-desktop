@@ -117,6 +117,7 @@ import { startWebServer, type WebDeps } from './webserver';
 import { openingInstruction, openingsDueNow, type DueOpening } from './standingtime';
 import { parseVaultMemoryPage, VAULT_MEMORY_PAGES, type VaultMemoryPage } from './vaultmemories';
 import { planRetirement, readAdmitted, recordsToRetire, type Admitted } from './vaultretire';
+import { afterReading, feedUrl, pagesUrl, parseReadingTake, PAGE_PROMPT, readableChapters, readingInstruction, readReading, REQUEST_GAP_MS, searchUrl, tonightsPages, USER_AGENT, type ChapterRef, type Reading } from './manga';
 import { isHerStanding } from './herstanding';
 import { enoughToStandOn, herStandings, keepSlight, parseStanding, readSlights, recentIncidents, slightsAsIncidents, standingDue, standingPrompt, HER_SUBJECT, type Incident, type Slight } from './herstanding';
 import { asleepLine, backToSleep, dayAfter, decideTimesSystem, dozeOffDue, enoughKnocking, fallbackSchedule, foldAsleepExchanges, goodnightDue, groggyFor, groggyNote, herAsleep, isAsleepLine, knockedAwake, messagesWhileAsleep, parseDecidedTimes, pointlessWake, pointlessWakesLately, readsAsGoodnight, readHerSleep, readHerSleepState, readWakes, sleepNote, sleepWindowOn, wakeIrritation, wakeNote, wokenAt, clockMinutes, BLOCKED_LINE, BLOCK_AFTER_POINTLESS, KNOCK_WINDOW_MS, WAKES_KEPT, type HerSleepSchedule, type Wake } from './hersleep';
@@ -267,6 +268,11 @@ async function lookAtSyncedShots() {
   const vision = readVisionConfig(store.get('vision'));
   if (!vision.enabled) return;
   if (lookingAtShots) return;
+  // Her reading gets the card. Both passes go to the same vision model, the
+  // backlog runs around the clock, and a page costs about a hundred seconds —
+  // so a twenty-minute sitting queued behind old screenshots is an hour and a
+  // half of nothing. The backlog has waited three weeks; it can wait an hour.
+  if (readingMangaNow) return;
   const root = shotStoreRoot();
   if (!existsSync(root)) return;
   const captions = readCaptions(store.get('shots.captions'));
@@ -9080,6 +9086,7 @@ async function proactiveTick() {
   await decideHerNight(config);
   await maybeSayHerGoodnight(config);
   await haveANight(config);
+  await readSomeManga(config);
   await haveADay(config);
   await reflectOnHerWeek(config);
   await formHerStanding(config);
@@ -9622,6 +9629,143 @@ let lastNightThingAt: number | null = null;
  * whole conceit, and it keeps a search and two model calls off the hours when
  * the GPU is answering them.
  */
+/**
+ * A night spent reading the thing itself, rather than reading about it.
+ *
+ * Her nights were spent on reviews and forum threads, which is how a stance
+ * gets built out of a fandom's opinion of a story instead of the story. She
+ * reads pages now: her own vision model on the server takes a manga page about
+ * as well as it takes his screen, and given the first chapter of Chainsaw Man
+ * it returned the debt tally in order, "38,040,000 yen", "You know the drill,
+ * Pochita!" — right, and in sequence.
+ *
+ * A stretch a night, not a volume. A page costs about a hundred seconds on that
+ * card, so a 53-page chapter would be an hour and a half of it, and someone who
+ * reads a chapter a night is a better character than one who inhales a series
+ * between midnight and two. It also means she is genuinely partway through
+ * something, which is the part he cannot get from a summary.
+ */
+let readingMangaNow = false;
+
+async function readSomeManga(config: ProviderConfig) {
+  const now = zonedNow(CHAT_TIMEZONE);
+  const { prefs } = getPush();
+  if (!inQuietHours(prefs, now)) return;
+  if (readingMangaNow) return;
+  const vision = readVisionConfig(store.get('vision'));
+  if (!vision.enabled) return;
+  const today = nightKey(now);
+  if ((store.get('her.readingOn') as string | undefined) === today) return;
+
+  let reading = readReading(store.get('her.reading'));
+  readingMangaNow = true;
+  try {
+    if (!reading) reading = await pickSomethingToRead();
+    if (!reading) return;
+    const { from, to } = tonightsPages(reading);
+    if (to <= from) return;
+    const at = await mangaGet(pagesUrl(reading.chapterId)) as { baseUrl?: string; chapter?: { hash?: string; data?: string[] } } | null;
+    const files = at?.chapter?.data ?? [];
+    if (!at?.baseUrl || !at.chapter?.hash || !files.length) { console.warn(`[manga] no pages came back for ${reading.title} ch ${reading.chapter}`); return; }
+    const endpoint = visionEndpoint(store.get('ai.config') as ProviderConfig | undefined, vision);
+    const read: string[] = [];
+    for (let page = from; page < Math.min(to, files.length); page++) {
+      try {
+        const bytes = await mangaBytes(`${at.baseUrl}/data/${at.chapter.hash}/${files[page]}`);
+        if (!bytes) continue;
+        // Held between pages: a cold start costs more than the page does.
+        const sighting = await look(bytes.toString('base64'), vision, endpoint, modelHeaders(endpoint), net.fetch,
+          { ask: PAGE_PROMPT, keepAlive: '10m', timeoutMs: 180_000 });
+        const text = sighting.description.trim();
+        if (text) read.push(`PAGE ${page + 1}\n${text}`);
+      } catch (error) {
+        console.warn(`[manga] could not read page ${page + 1}:`, error instanceof Error ? error.message : error);
+      }
+    }
+    if (!read.length) { console.warn('[manga] nothing came off the pages tonight'); return; }
+    const readTo = from + read.length;
+    const raw = await ollamaQuipLong([getActiveCharacter().identity, NOBODY_HERE].join(' '),
+      readingInstruction(reading, from, readTo, read.join('\n\n')), nudgeBrain() ?? config);
+    const take = parseReadingTake(raw);
+    // The bookmark moves whether or not she had anything to say: the pages were
+    // read either way, and re-reading them tomorrow is the one outcome to avoid.
+    const chapters = await chaptersOf(reading.seriesId);
+    const next = chapters[chapters.findIndex(c => c.id === reading!.chapterId) + 1] ?? null;
+    const moved = afterReading(reading, readTo, next, new Date().toISOString());
+    store.set('her.reading', moved);
+    store.set('her.readingOn', today);
+    if (!take) { console.log(`[manga] read ${reading.title} ch ${reading.chapter} pp.${from + 1}-${readTo}, nothing to say about it`); return; }
+    store.set('nights', keepNights(getNights(), {
+      day: today, at: new Date().toISOString(),
+      about: `${reading.title}, chapter ${reading.chapter}`,
+      note: take.note, sources: [`https://mangadex.org/chapter/${reading.chapterId}`], interest: reading.title,
+    }));
+    if (take.stands) {
+      const held = getInterests();
+      const mine = held.find(entry => entry.name.toLowerCase() === reading!.title.toLowerCase());
+      // Where it stands, from having read it rather than from a review — which
+      // is the fault this whole pass exists to correct.
+      if (mine) setInterests(held.map(entry => (entry.id === mine.id ? { ...entry, stands: take.stands, lastAt: new Date().toISOString() } : entry)));
+    }
+    console.log(`[manga] read ${reading.title} ch ${reading.chapter} pp.${from + 1}-${readTo} — ${take.note.length} chars${take.stands ? ` — stands: ${take.stands.slice(0, 60)}` : ''}`);
+  } catch (error) {
+    console.warn('[manga] the night\'s reading came to nothing:', error instanceof Error ? error.message : error);
+  } finally {
+    readingMangaNow = false;
+  }
+}
+
+/** Their public API asks for a real name and a gentle hand; this gives both. */
+let lastMangaCallAt = 0;
+async function mangaWait(): Promise<void> {
+  const since = Date.now() - lastMangaCallAt;
+  if (since < REQUEST_GAP_MS) await new Promise(resolve => setTimeout(resolve, REQUEST_GAP_MS - since));
+  lastMangaCallAt = Date.now();
+}
+
+async function mangaGet(url: string): Promise<unknown | null> {
+  await mangaWait();
+  const response = await net.fetch(url, { headers: { 'User-Agent': USER_AGENT } });
+  if (!response.ok) { console.warn(`[manga] ${response.status} from ${url.slice(0, 60)}`); return null; }
+  return response.json();
+}
+
+async function mangaBytes(url: string): Promise<Buffer | null> {
+  await mangaWait();
+  const response = await net.fetch(url, { headers: { 'User-Agent': USER_AGENT } });
+  if (!response.ok) return null;
+  return Buffer.from(await response.arrayBuffer());
+}
+
+async function chaptersOf(seriesId: string): Promise<ChapterRef[]> {
+  const feed = await mangaGet(feedUrl(seriesId)) as { data?: { id: string; attributes?: Record<string, unknown> }[] } | null;
+  return readableChapters(feed?.data ?? []);
+}
+
+/**
+ * Something of hers that exists as a manga.
+ *
+ * Only from what she has already taken up, so this never becomes her reading a
+ * stranger: the interests are the things she chose, and the manga of one of
+ * them is the same interest by another route.
+ */
+async function pickSomethingToRead(): Promise<Reading | null> {
+  for (const interest of getInterests()) {
+    const found = await mangaGet(searchUrl(interest.name)) as { data?: { id: string; attributes?: { title?: Record<string, string> } }[] } | null;
+    const hit = found?.data?.[0];
+    if (!hit) continue;
+    const chapters = await chaptersOf(hit.id);
+    if (!chapters.length) continue;
+    const first = chapters[0];
+    console.log(`[manga] taking up ${interest.name} — ${chapters.length} readable chapter(s)`);
+    return {
+      seriesId: hit.id, title: interest.name, chapter: first.chapter, chapterId: first.id,
+      page: 0, pages: first.pages, startedAt: new Date().toISOString(), lastAt: new Date().toISOString(), finished: 0,
+    };
+  }
+  return null;
+}
+
 async function haveANight(config: ProviderConfig) {
   const now = zonedNow(CHAT_TIMEZONE);
   const { prefs } = getPush();
