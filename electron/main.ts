@@ -46,7 +46,7 @@ import { assumeItIsTheirs, identifyWork, noteWork, readFollowing, recogniseNow, 
 import { lookUpPlace, readWindowsLocation, searchPlaces, type FoundPlace } from './location';
 import { INTERRUPTED_ASIDE, wakeAck } from './wake';
 import { acceptedOffer, promisedTitle, reminderAsk, reminderPromised, reminderSavedAside } from './remindme';
-import { describeWeather, readForecast, weatherEvents, weatherToDrawOn, weatherUrl, WEATHER_POLL_MS, type WeatherSample, disputesRain } from './weather';
+import { describeWeather, readForecast, weatherEvents, weatherToDrawOn, weatherUrl, WEATHER_A_DAY, WEATHER_POLL_MS, type WeatherSample, disputesRain } from './weather';
 import { HANGING_COOLDOWN_MS, isClosing, leftHanging, saidTheyWereLeaving } from './hanging';
 import { awakeHoursSince, theyAreUp, awakeMinutesSince, quietEndedAt } from './awake';
 import { describeTold, placeToldFrom, toldTheyAreBusy, toldStillStands, type Told, errandsToldFrom, errandToAskAfter, type Errand } from './told';
@@ -8952,6 +8952,25 @@ async function pollWeather(): Promise<{ previous: WeatherSample | null; current:
 }
 
 function proactiveSystem(...facts: string[]): string {
+  return proactivePrompt(facts, true);
+}
+
+/**
+ * The same prompt, for material that is a reason to talk rather than an errand.
+ *
+ * proactiveSystem ends by insisting the fact survives into her line, which is
+ * right for a reminder — a heads-up with the time filed off is not a heads-up.
+ * It is wrong for weather. Told "rain, 15°C" and then told the thing and the
+ * when are not optional, she wrote "raining at 15°C is peak nonsense; you'll
+ * freeze your face off if you don't put a coat on", which is a forecast with
+ * attitude on it. He asked for the opposite: the weather as her way into a
+ * conversation, not the subject of one.
+ */
+function proactiveOccasion(...facts: string[]): string {
+  return proactivePrompt(facts, false);
+}
+
+function proactivePrompt(facts: string[], mustSurvive: boolean): string {
   const character = getActiveCharacter();
   const now = zonedNow(CHAT_TIMEZONE);
   return [
@@ -8963,7 +8982,8 @@ function proactiveSystem(...facts: string[]): string {
     // Last, because everything above it is context and this is the errand: told
     // rain was due in 44 minutes she wrote about him scrolling and never
     // mentioned it, and a weather notification with no weather in it is noise.
-    facts.length ? 'The facts at the top are why you are writing at all: what they say — the thing and when — must survive into your line. The attitude is yours; the fact is not optional.' : '',
+    facts.length && mustSurvive ? 'The facts at the top are why you are writing at all: what they say — the thing and when — must survive into your line. The attitude is yours; the fact is not optional.' : '',
+    facts.length && !mustSurvive ? 'The facts at the top are what prompted you, not a message to pass on. It should be obvious what you are talking about; nothing else up there has to reach him.' : '',
   ].filter(Boolean).join('\n\n');
 }
 
@@ -9018,6 +9038,9 @@ async function checkUpcoming(config: ProviderConfig) {
   if (line && interject(line, { source: 'upcoming' })) console.log(`[push] gave a ${next.lead}-minute heads up about "${next.item.title}"`);
 }
 
+/** How long he has to have been quiet before the weather is worth a word. */
+const WEATHER_NEEDS_QUIET_MS = 90 * 60_000;
+
 async function checkWeather(config: ProviderConfig, prefs: PushPrefs) {
   const polled = await pollWeather();
   if (!polled || !prefs.weather) return;
@@ -9027,13 +9050,27 @@ async function checkWeather(config: ProviderConfig, prefs: PushPrefs) {
   // it is not worth a buzz on its own. Rain, a storm, a swing in the heat are.
   const event = events.find(candidate => candidate.kind !== 'sky-changed');
   if (!event) return;
+  // Weather is a way into a conversation, so it only earns a message when there
+  // is no conversation: at 7pm with him neither home nor in touch, the rain is
+  // worth a word. Two minutes after he has been talking to her it is filler.
+  const quiet = Date.now() - (Date.parse(getMood().lastMessageAt ?? '') || 0);
+  if (quiet < WEATHER_NEEDS_QUIET_MS) return;
+  // Whatever kind it is, it counts against the day: the per-kind cooldowns
+  // cannot see each other, and five in a day is what that cost him.
+  const today = localDateKey(zonedNow(CHAT_TIMEZONE));
+  const soFar = asidesOn(getAsides(), today).filter(aside => aside.source === 'weather').length;
+  if (soFar >= WEATHER_A_DAY) { console.log(`[push] the weather is not worth a ${soFar + 1}${soFar ? 'rd' : 'st'} mention today`); return; }
   saveWeather({ ...state, notified: { ...state.notified, [event.kind]: Date.now() } });
-  const system = proactiveSystem(
-    `${event.text} Tell them, in your way — what and when must survive; the attitude is yours.`,
+  // Not a forecast to deliver. He asked for the opposite of a warning: "7pm,
+  // Tommy isn't home or texted me, is raining, Haru says 'I can't believe it's
+  // raining, and I just washed my hair too :('". The weather is hers as much as
+  // his, and it is the excuse to talk rather than the subject.
+  const system = proactiveOccasion(
+    `${event.text} This is happening to you too, and it is your reason for messaging him — it is not news you are delivering. Say how it actually lands on you: put out, pleased, bored, whatever it is, and something of your own in it if there is something. Then leave him somewhere to answer. Do not report the forecast, do not give him numbers or percentages, and do not tell him to take a coat.`,
   );
-  const line = await ollamaQuip(system, 'Tell them.', config);
+  const line = await ollamaQuip(system, 'Say something about it.', config);
   recordBrief(`weather ${event.kind}`, system, line);
-  if (line && interject(line, { source: 'weather' })) console.log(`[push] said the weather turned (${event.kind})`);
+  if (line && interject(line, { source: 'weather' })) console.log(`[push] brought up the weather (${event.kind})`);
 }
 
 async function proactiveTick() {

@@ -33,6 +33,19 @@ export const WEATHER_POLL_MS = 15 * 60_000;
 /** A reading older than this says nothing about now. */
 export const WEATHER_STALE_MS = 45 * 60_000;
 
+/** How close rain has to be before it is worth remarking on. */
+export const RAIN_SOON_MIN = 45;
+
+/**
+ * How many of these she may bring up in a day, whatever kind they are.
+ *
+ * The cooldowns below are per kind and cannot see one another, so a showery day
+ * satisfied several at once and he got five in a day on 2026-09-03. Weather is
+ * a way into a conversation, and a third one in a day is not a way into
+ * anything.
+ */
+export const WEATHER_A_DAY = 2;
+
 /** How often each kind of change may buzz the phone. */
 export const COOLDOWN_MS: Record<WeatherEvent['kind'], number> = {
   'rain-soon': 2 * 60 * 60_000,
@@ -127,7 +140,11 @@ const deg = (c: number) => `${Math.round(c)}°C`;
  * already said for this shower.
  */
 /** She reads a forecast, not the sky over them: said as such, and never as what is happening to them. */
-const FORECAST_NOT_A_WINDOW = ' This is what the forecast service says, not something you can see: say it as the forecast, and do not tell them they are wet, caught in it, or out in it — you do not know that. If they say it is not raining where they are, they are right.';
+// The truth guard, kept. What went with it — "say it as the forecast" — did
+// not: it turned every one of these into a weather report read aloud, which is
+// the opposite of what they are for now. She may treat the weather as hers,
+// because it is; what she may not do is claim to see him in it.
+const FORECAST_NOT_A_WINDOW = ' You have this from the forecast rather than a window, so do not tell them they are wet, caught in it, or out in it — you do not know that. If they say it is not raining where they are, they are right.';
 
 /** How long their "it's not raining here" outranks the forecast's rain. */
 export const DISPUTE_STANDS_MS = 2 * 60 * 60_000;
@@ -151,29 +168,37 @@ export function weatherEvents(previous: WeatherSample | null, current: WeatherSa
   // Told it is not raining where they are, nothing about rain is news for a
   // while: not its start, not its end, not its coming — they can see the sky.
   const disputed = disputeStands(disputedAtMs, nowMs);
-  if (!disputed && !current.raining && current.rainSoonMin !== null && current.rainSoonMin <= 45 && fresh('rain-soon')) {
-    const when = current.rainSoonMin <= 5 ? 'any minute now' : `in about ${current.rainSoonMin} minutes`;
-    out.push({ kind: 'rain-soon', text: `The forecast has rain due where they are ${when}${current.rainSoonProb ? ` (${current.rainSoonProb}% likely)` : ''}. It is ${deg(current.tempC)} and ${current.sky} there right now.${FORECAST_NOT_A_WINDOW}` });
+  // Once per front, not once per cooldown. A cooldown re-arms while the
+  // condition is still true, so a band of rain sitting offshore forecasting
+  // "five minutes" all afternoon produced three separate warnings on
+  // 2026-09-03 about rain that never arrived — rain-started did not fire that
+  // day, or for eight days either side of it. The rising edge is the event:
+  // she remarks when rain appears in the forecast, and not again until it has
+  // either arrived or gone away and a new front comes in.
+  const wasComing = previous !== null && previous.rainSoonMin !== null && previous.rainSoonMin <= RAIN_SOON_MIN && !previous.raining;
+  if (!disputed && !current.raining && current.rainSoonMin !== null && current.rainSoonMin <= RAIN_SOON_MIN && !wasComing && fresh('rain-soon')) {
+    const when = current.rainSoonMin <= 5 ? 'about to start' : `due in about ${current.rainSoonMin} minutes`;
+    out.push({ kind: 'rain-soon', text: `Rain is ${when} where you both are. It is ${deg(current.tempC)} and ${current.sky} out.${FORECAST_NOT_A_WINDOW}` });
   }
   if (previous) {
     // Drizzle is a weather code, not a shower: a forecast model's "drizzle" over
     // a dry shop earned "It's raining, you're wet". Real rain, or measurable
     // drizzle, is a push; a code alone is not.
     const shower = current.raining && (current.sky !== 'drizzle' || (current.mm ?? 0) >= 0.3);
-    if (!disputed && shower && !previous.raining && fresh('rain-started')) out.push({ kind: 'rain-started', text: `The forecast says it has started raining where they are (${current.sky}). ${deg(current.tempC)}.${FORECAST_NOT_A_WINDOW}` });
+    if (!disputed && shower && !previous.raining && fresh('rain-started')) out.push({ kind: 'rain-started', text: `It has started raining where you both are — ${current.sky}, ${deg(current.tempC)}.${FORECAST_NOT_A_WINDOW}` });
     // Only the end of a shower she announced: the forecast's codes flap, and
     // "the rain has stopped" about rain nobody heard of is a non sequitur.
     const announced = nowMs - (notified['rain-started'] ?? 0) <= 6 * 60 * 60_000;
-    if (!disputed && !current.raining && previous.raining && announced && fresh('rain-stopped')) out.push({ kind: 'rain-stopped', text: `The rain has stopped where they are; it is ${current.sky} now, ${deg(current.tempC)}.` });
+    if (!disputed && !current.raining && previous.raining && announced && fresh('rain-stopped')) out.push({ kind: 'rain-stopped', text: `The rain has stopped; it is ${current.sky} now, ${deg(current.tempC)}.` });
     const swing = current.tempC - previous.tempC;
-    if (Math.abs(swing) >= 5 && fresh('temp-swing')) out.push({ kind: 'temp-swing', text: `It has ${swing < 0 ? 'dropped' : 'climbed'} ${Math.round(Math.abs(swing))} degrees where they are since she last looked: ${deg(current.tempC)} now.` });
+    if (Math.abs(swing) >= 5 && fresh('temp-swing')) out.push({ kind: 'temp-swing', text: `It has ${swing < 0 ? 'dropped' : 'climbed'} ${Math.round(Math.abs(swing))} degrees since you last looked — ${deg(current.tempC)} now.` });
     const notable = (sky: Sky) => sky === 'clear' || sky === 'overcast' || sky === 'fog' || sky === 'snow';
     if (current.sky !== previous.sky && !current.raining && !previous.raining && notable(current.sky) && fresh('sky-changed')) {
-      out.push({ kind: 'sky-changed', text: `The sky where they are has turned from ${previous.sky} to ${current.sky}. ${deg(current.tempC)}.` });
+      out.push({ kind: 'sky-changed', text: `The sky has turned from ${previous.sky} to ${current.sky}. ${deg(current.tempC)}.` });
     }
   }
   if (current.turning?.to === 'storm' && current.sky !== 'storm' && fresh('storm-coming')) {
-    out.push({ kind: 'storm-coming', text: `A thunderstorm is forecast where they are in about ${current.turning.inHours} hour${current.turning.inHours === 1 ? '' : 's'}.` });
+    out.push({ kind: 'storm-coming', text: `A thunderstorm is forecast in about ${current.turning.inHours} hour${current.turning.inHours === 1 ? '' : 's'}.` });
   }
   return out;
 }
