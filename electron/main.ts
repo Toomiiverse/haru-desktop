@@ -118,6 +118,7 @@ import { openingInstruction, openingsDueNow, type DueOpening } from './standingt
 import { parseVaultMemoryPage, VAULT_MEMORY_PAGES, type VaultMemoryPage } from './vaultmemories';
 import { planRetirement, readAdmitted, recordsToRetire, type Admitted } from './vaultretire';
 import { afterReading, feedUrl, pagesUrl, parseReadingTake, PAGE_PROMPT, readableChapters, readingInstruction, readReading, REQUEST_GAP_MS, searchUrl, tonightsPages, USER_AGENT, type ChapterRef, type Reading } from './manga';
+import { deedFrom, isADeed, keepDeed, readDeeds } from './deeds';
 import { isHerStanding } from './herstanding';
 import { enoughToStandOn, herStandings, keepSlight, parseStanding, readSlights, recentIncidents, slightsAsIncidents, standingDue, standingPrompt, HER_SUBJECT, type Incident, type Slight } from './herstanding';
 import { asleepLine, backToSleep, dayAfter, decideTimesSystem, dozeOffDue, enoughKnocking, fallbackSchedule, foldAsleepExchanges, goodnightDue, groggyFor, groggyNote, herAsleep, isAsleepLine, knockedAwake, messagesWhileAsleep, parseDecidedTimes, pointlessWake, pointlessWakesLately, readsAsGoodnight, readHerSleep, readHerSleepState, readWakes, sleepNote, sleepWindowOn, wakeIrritation, wakeNote, wokenAt, clockMinutes, BLOCKED_LINE, BLOCK_AFTER_POINTLESS, KNOCK_WINDOW_MS, WAKES_KEPT, type HerSleepSchedule, type Wake } from './hersleep';
@@ -7121,10 +7122,17 @@ const promptState = {
         return sendToProvider(sending, spill, { ...roundOptions, tools });
       }
     },
-    runTool: call => {
+    runTool: async call => {
       // A call in progress says something while this runs (localcall.ts).
-      onToolCall?.((call as { function?: { name?: string } }).function?.name ?? 'tool');
-      return runChatTool(call, latest, toolDeps());
+      const tool = (call as { function?: { name?: string } }).function?.name ?? 'tool';
+      onToolCall?.(tool);
+      const result = await runChatTool(call, latest, toolDeps());
+      // Written down here, at the one seam every tool passes through, and only
+      // for the ones that changed something. She had no record of her own
+      // conduct at all, so a claim about what she did had nothing behind it to
+      // check and she supplied a reason instead (2026-09-08).
+      noteDeed(tool, call, result);
+      return result;
     },
     // Read through rather than passed by value: runChatTool sets these while a
     // round is in flight, and a copy taken before the round would miss it.
@@ -9646,6 +9654,32 @@ let lastNightThingAt: number | null = null;
  * something, which is the part he cannot get from a summary.
  */
 let readingMangaNow = false;
+
+/**
+ * A tool call, kept if it did something.
+ *
+ * The result is inspected rather than trusted: a tool that came back with an
+ * error is a thing she tried and did not do, and half of these refuse until he
+ * confirms, so the first call of a confirm pair changes nothing. Writing either
+ * one down as done would make the ledger lie in the one direction it must not.
+ */
+function noteDeed(tool: string, call: { function?: { arguments?: unknown } }, result: string): void {
+  if (!isADeed(tool)) return;
+  let failed = false;
+  try {
+    const parsed = JSON.parse(result) as Record<string, unknown>;
+    failed = typeof parsed.error === 'string' || parsed.confirm === false || parsed.ok === false || parsed.created === false;
+  } catch { failed = false; }
+  let args: Record<string, unknown> = {};
+  try {
+    const raw = call.function?.arguments;
+    args = typeof raw === 'string' ? JSON.parse(raw) : (raw && typeof raw === 'object' ? raw as Record<string, unknown> : {});
+  } catch { args = {}; }
+  const deed = deedFrom(tool, args, failed, new Date().toISOString());
+  if (!deed) return;
+  store.set('her.deeds', keepDeed(readDeeds(store.get('her.deeds')), deed));
+  console.log(`[deed] you ${deed.what}`);
+}
 
 async function readSomeManga(config: ProviderConfig) {
   const now = zonedNow(CHAT_TIMEZONE);
