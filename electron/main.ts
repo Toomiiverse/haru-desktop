@@ -118,6 +118,7 @@ import { openingInstruction, openingsDueNow, type DueOpening } from './standingt
 import { parseVaultMemoryPage, VAULT_MEMORY_PAGES, type VaultMemoryPage } from './vaultmemories';
 import { planRetirement, readAdmitted, recordsToRetire, type Admitted } from './vaultretire';
 import { afterReading, feedUrl, pagesUrl, parseReadingTake, PAGE_PROMPT, readableChapters, readingInstruction, readReading, REQUEST_GAP_MS, searchUrl, tonightsPages, USER_AGENT, type ChapterRef, type Reading } from './manga';
+import { cleaningChunks, deliveryRule, hasDeliveryLabel, splitDelivery, stripDelivery } from './delivery';
 import { deedFrom, isADeed, keepDeed, readDeeds } from './deeds';
 import { isHerStanding } from './herstanding';
 import { enoughToStandOn, herStandings, keepSlight, parseStanding, readSlights, recentIncidents, slightsAsIncidents, standingDue, standingPrompt, HER_SUBJECT, type Incident, type Slight } from './herstanding';
@@ -7821,7 +7822,7 @@ async function answerOnDiscord(text: string, channelId = '') {
   // sitting in the recent transcript, and this comes straight back home.
   const started = Date.now();
   const answer = await ollamaChat(messages, config, { hands: false, away: 'it came in over Discord', traceId: trace.id });
-  const reply = answer.content ?? '';
+  const reply = stripDelivery(answer.content ?? '');
   trace.mark('reply');
   // Lands in the desktop transcript too, so coming back to the desk does not
   // mean finding half a conversation missing.
@@ -7883,7 +7884,7 @@ async function answerOnDiscordStreamed(text: string, channelId: string, onChunk:
     // what the reader actually keeps, so the stamp goes back with the text.
     onChunkReset: () => { trace.unmark('first'); onChunk('\uFFFD'); },
   });
-  const reply = answer.content ?? '';
+  const reply = stripDelivery(answer.content ?? '');
   trace.mark('reply');
   sendToWindows('chat:fromPhone', { text, reply, ignored: Boolean(answer.ignored) });
   console.log(`[discord] streamed ${text.length} chars in ${Date.now() - started}ms, ${reply.length} chars (${messages.length} messages of history)`);
@@ -10536,8 +10537,16 @@ function sentenceStreamer(onSentence?: (sentence: string, emotion: string) => vo
       buffer += chunk;
       const { sentences, rest } = streamedSentences(buffer);
       buffer = rest;
-      const emotion = herGroggyNow() ? 'sleepy' : localEmotion(streamedSoFar);
-      for (const sentence of sentences) onSentence(sentence, emotion);
+      // The brain that wrote the sentence says how it meant it. A label is
+      // taken when it is there and the keyword pass stands in when it is not,
+      // so a model that ignores the rule costs nothing. Groggy still overrides
+      // both: half asleep she sounds half asleep whatever she wrote.
+      const heuristic = herGroggyNow() ? 'sleepy' : localEmotion(streamedSoFar);
+      for (const sentence of sentences) {
+        for (const said of splitDelivery(sentence)) {
+          onSentence(said.text, herGroggyNow() ? 'sleepy' : (said.mood ?? heuristic));
+        }
+      }
     },
     reset() {
       buffer = '';
@@ -10546,7 +10555,12 @@ function sentenceStreamer(onSentence?: (sentence: string, emotion: string) => vo
     flush() {
       if (!onSentence) return;
       const tail = buffer.trim();
-      if (tail) onSentence(tail, herGroggyNow() ? 'sleepy' : localEmotion(streamedSoFar));
+      if (tail) {
+        const heuristic = herGroggyNow() ? 'sleepy' : localEmotion(streamedSoFar);
+        for (const said of splitDelivery(tail)) {
+          onSentence(said.text, herGroggyNow() ? 'sleepy' : (said.mood ?? heuristic));
+        }
+      }
       buffer = '';
     },
   };
@@ -10645,7 +10659,7 @@ function webDeps(): WebDeps {
       // desk keeps the local one — that is what the GPU is for.
       const started = Date.now();
       const answer = await ollamaChat(messages, config, { hands: false, web: true, away: 'it came in from the phone', traceId: trace.id });
-      const reply = answer.content ?? '';
+      const reply = stripDelivery(answer.content ?? '');
       trace.mark('reply');
       sendToWindows('chat:fromPhone', { text, reply, ignored: Boolean(answer.ignored), ...(files.length ? { attachments: files } : {}) });
       // Her face used to be read here, before returning, and the phone waited on
@@ -10664,6 +10678,10 @@ function webDeps(): WebDeps {
       const history = (store.get('chat.messages') as { role: string; content: string; at?: string }[] ?? []);
       const files = readAttachments(attachments).slice(0, 6);
       const voice = sentenceStreamer(onSentence);
+      // The page gets the cleaned stream; the voice gets the raw one, because
+      // the label is how it learns the mood and is the one thing he must never
+      // see. A no-op until the delivery rule is switched on.
+      let showClean = cleaningChunks(onChunk);
       const door = herAsleepNow() ? knockWhileAsleep() : null;
       if (door) {
         const trace = newTrace();
@@ -10699,16 +10717,16 @@ function webDeps(): WebDeps {
         ...(options?.onToolCall ? { onToolCall: options.onToolCall } : {}),
         onSending: () => trace.mark('sending'),
         traceId: trace.id,
-        onChunk: chunk => { trace.mark('first'); onChunk(chunk); voice.feed(chunk); },
+        onChunk: chunk => { trace.mark('first'); showClean(chunk); voice.feed(chunk); },
         // The reader sees only what survives, but a round that ends in a tool
         // call or a retry can leave a few streamed words behind it. Sink them
         // with nothing: the streamed text is replaced by the reply that counts.
         // The first-word stamp goes with them, or the trace would claim a TTFT
         // on words nobody ever saw. The voice is sunk the same way — nothing of
         // a thrown-away round may be spoken.
-        onChunkReset: () => { trace.unmark('first'); onChunk('\uFFFD'); voice.reset(); },
+        onChunkReset: () => { trace.unmark('first'); onChunk('\uFFFD'); voice.reset(); showClean = cleaningChunks(onChunk); },
       });
-      const reply = answer.content ?? '';
+      const reply = stripDelivery(answer.content ?? '');
       // The last sentence arrives without the space the splitter waits for —
       // this is the reply's end, so what is left is hers to say.
       voice.flush();
@@ -10740,6 +10758,10 @@ function webDeps(): WebDeps {
       const prompt = history.at(-2);
       if (!last || last.role !== 'assistant' || !prompt || prompt.role !== 'user') return null;
       const voice = sentenceStreamer(onSentence);
+      // The page gets the cleaned stream; the voice gets the raw one, because
+      // the label is how it learns the mood and is the one thing he must never
+      // see. A no-op until the delivery rule is switched on.
+      let showClean = cleaningChunks(onChunk);
       const trace = newTrace();
       const started = Date.now();
       const answer = await ollamaChat(history.slice(0, -1), config, {
@@ -10747,10 +10769,10 @@ function webDeps(): WebDeps {
         web: true,
         away: 'the phone asked for it again',
         traceId: trace.id,
-        onChunk: chunk => { trace.mark('first'); onChunk(chunk); voice.feed(chunk); },
-        onChunkReset: () => { trace.unmark('first'); onChunk('\uFFFD'); voice.reset(); },
+        onChunk: chunk => { trace.mark('first'); showClean(chunk); voice.feed(chunk); },
+        onChunkReset: () => { trace.unmark('first'); onChunk('\uFFFD'); voice.reset(); showClean = cleaningChunks(onChunk); },
       });
-      const reply = answer.content ?? '';
+      const reply = stripDelivery(answer.content ?? '');
       voice.flush();
       trace.mark('reply');
       sendToWindows('chat:fromPhone', { text: prompt.content, reply, ignored: Boolean(answer.ignored), retry: true, ...(prompt.attachments?.length ? { attachments: prompt.attachments } : {}) });
@@ -12318,7 +12340,7 @@ app.whenReady().then(() => {
     // hands stay on: she is at her own machine, and this is the same person at
     // the same desk. brief, because it has to fit in a caption.
     const answer = await ollamaChat(messages, config, { brief: true, choices: true });
-    const reply = answer.content ?? '';
+    const reply = stripDelivery(answer.content ?? '');
     const choices = [...pendingChoices];
     // The same channel the phone and Discord use, so the desk transcript picks
     // it up and coming back to the window does not mean finding half a
