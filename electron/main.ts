@@ -115,6 +115,8 @@ import { DiscordLink, looksLikeUserId, readDiscordConfig, useOfChannel, type Dis
 import { reactedPrompt, readReaction, REACTION_COOLDOWN_MS } from './reacted';
 import { startWebServer, type WebDeps } from './webserver';
 import { openingInstruction, openingsDueNow, type DueOpening } from './standingtime';
+import { parseVaultMemoryPage, VAULT_MEMORY_PAGES, type VaultMemoryPage } from './vaultmemories';
+import { planRetirement, readAdmitted, recordsToRetire, type Admitted } from './vaultretire';
 import { isHerStanding } from './herstanding';
 import { enoughToStandOn, herStandings, keepSlight, parseStanding, readSlights, recentIncidents, slightsAsIncidents, standingDue, standingPrompt, HER_SUBJECT, type Incident, type Slight } from './herstanding';
 import { asleepLine, backToSleep, dayAfter, decideTimesSystem, dozeOffDue, enoughKnocking, fallbackSchedule, foldAsleepExchanges, goodnightDue, groggyFor, groggyNote, herAsleep, isAsleepLine, knockedAwake, messagesWhileAsleep, parseDecidedTimes, pointlessWake, pointlessWakesLately, readsAsGoodnight, readHerSleep, readHerSleepState, readWakes, sleepNote, sleepWindowOn, wakeIrritation, wakeNote, wokenAt, clockMinutes, BLOCKED_LINE, BLOCK_AFTER_POINTLESS, KNOCK_WINDOW_MS, WAKES_KEPT, type HerSleepSchedule, type Wake } from './hersleep';
@@ -4119,6 +4121,64 @@ const readVaultConfig = () => ({ path: knowledge.vaultPath() });
 const saveVaultConfig = knowledge.saveVaultPath;
 const syncVault = knowledge.syncVault;
 const autoSyncVault = knowledge.autoSyncVault;
+
+/**
+ * The sync, and then the other half of it.
+ *
+ * admitVaultMemories only ever adds, so a bullet he deleted stayed a live
+ * memory for ever: on 2026-09-08 his page said "she can interrupt whenever she
+ * likes, the shop included" while her store still held "don't interrupt with
+ * unprompted lines while Tommy is working at the shop", both active, both in
+ * the same block. Editing the page had never changed her mind, only added to
+ * it. Retirement runs on the same beat as admission because they are two halves
+ * of the same question: what does the page say now.
+ */
+async function syncVaultAndRetire(): Promise<void> {
+  await autoSyncVault();
+  retireGoneVaultBullets();
+}
+
+function retireGoneVaultBullets(): void {
+  const vault = knowledge.vaultPath();
+  if (!vault) return;
+  const admitted = readAdmitted(store.get('vault.admitted'));
+  const next: Admitted = { ...admitted };
+  let touched = false;
+  for (const [page, spec] of Object.entries(VAULT_MEMORY_PAGES)) {
+    const file = path.join(vault, page);
+    if (!existsSync(file)) continue;
+    let current: string[];
+    try {
+      current = parseVaultMemoryPage(readFileSync(file, 'utf8'), page as VaultMemoryPage).map(draft => draft.text);
+    } catch (error) {
+      // An unreadable page is not an empty one, and must not be treated as a
+      // deletion of everything it used to say.
+      console.warn(`[vault-memory] could not re-read ${page} to retire from it:`, error instanceof Error ? error.message : error);
+      continue;
+    }
+    const plan = planRetirement(admitted[page], current);
+    if (plan.held) {
+      // Only worth saying when there was something to lose by getting it wrong.
+      if (plan.held === 'the page parsed to nothing' && (admitted[page]?.length ?? 0) > 0) {
+        console.warn(`[vault-memory] ${page} parsed to nothing — retiring nothing, its ${admitted[page]!.length} bullet(s) stand`);
+      }
+      // The page is still recorded on a first sync, so the next one can compare.
+      if (plan.held === 'first sync, nothing to compare') { next[page] = current; touched = true; }
+      continue;
+    }
+    const hits = recordsToRetire(getMemories(), plan.gone, spec.kind);
+    if (hits.length) {
+      const shelved = new Set(hits.map(hit => hit.id));
+      setMemories(getMemories().map(memory => (shelved.has(memory.id) ? { ...memory, status: 'archived' as const } : memory)));
+      for (const hit of hits) console.log(`[vault-memory] retired — no longer on ${page}: "${hit.text.slice(0, 80)}"`);
+    } else if (plan.gone.length) {
+      console.log(`[vault-memory] ${plan.gone.length} bullet(s) left ${page}, nothing of hers matched them`);
+    }
+    next[page] = current;
+    touched = true;
+  }
+  if (touched) store.set('vault.admitted', next);
+}
 const reindexKnowledge = knowledge.reindex;
 
 const memoryStore = createMemoryStore({
@@ -4754,7 +4814,7 @@ function toolDeps(): ToolDeps {
     // Her night is hers: back to bed when she decides the wake was nothing (hersleep.ts).
     goBackToSleep: input => goBackToSleep({ pointless: true, block: input.block, why: 'her call' }),
     // Their vault on disk, and the re-read that makes a note she wrote searchable at once.
-    vault: { root: () => knowledge.vaultPath(), afterWrite: () => { void autoSyncVault(); } },
+    vault: { root: () => knowledge.vaultPath(), afterWrite: () => { void syncVaultAndRetire(); } },
     // Herself, and what of herself she may change (self.ts).
     myself: () => {
       const snapshot = readSelfSnapshot(key => store.get(key));
@@ -11283,8 +11343,8 @@ app.whenReady().then(() => {
   // A saved vault keeps itself current without being asked: a first check a
   // minute after boot, then hourly. Runs on the knowledge queue, so it never
   // waits on or blocks a conversation.
-  setTimeout(() => { void autoSyncVault(); }, 60_000);
-  setInterval(() => { void autoSyncVault(); }, 60 * 60_000);
+  setTimeout(() => { void syncVaultAndRetire(); }, 60_000);
+  setInterval(() => { void syncVaultAndRetire(); }, 60 * 60_000);
   // And her own folder in it, the other way round.
   loadRecallVectors();
   setTimeout(() => { void refreshRecallVectors(); }, 90_000);
