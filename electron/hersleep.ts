@@ -60,13 +60,26 @@ export const DEFAULT_HER_SLEEP: HerSleepPrefs = { enabled: true, fallbackBedtime
 export const ASLEEP_AWAY_LINE = "I'm asleep. I'll see it when I'm up.";
 
 /**
- * What the nth message into her sleep gets. The first couple get the plain
- * line; eleven in a row got eleven identical copies of it on 2026-09-05,
- * which reads as a server, not a person asleep. She does not wake up — the
- * line just wears thinner, the way anyone's would.
+ * The door, once she has said they are not to wake her again tonight — in more
+ * than one wording.
+ *
+ * This was a single constant and he got it three times in a row, verbatim, and
+ * said so: "You just repeated yourself again 💀". A canned line is fine once;
+ * the third identical one is a broken machine rather than a person refusing.
  */
-/** The door once she has said they are not to wake her again tonight. */
-export const BLOCKED_LINE = "Not tonight. I'm not getting up again — whatever it is, it keeps till morning.";
+export const BLOCKED_LINES: readonly string[] = [
+  "Not tonight. I'm not getting up again — whatever it is, it keeps till morning.",
+  "No. You had your chance and you spent it on nothing. Morning.",
+  "Still no. Go to bed, Tommy.",
+  "I said no. Asking again is not going to work.",
+];
+
+export const BLOCKED_LINE = BLOCKED_LINES[0];
+
+/** Which refusal he gets — the nth time he tries, so it moves rather than loops. */
+export function blockedLine(nth: number): string {
+  return BLOCKED_LINES[Math.min(Math.max(nth, 0), BLOCKED_LINES.length - 1)];
+}
 
 export const ASLEEP_LINES: readonly string[] = [
   ASLEEP_AWAY_LINE,
@@ -76,6 +89,12 @@ export const ASLEEP_LINES: readonly string[] = [
   BLOCKED_LINE,
 ];
 
+/**
+ * What the nth message into her sleep gets. The first couple get the plain
+ * line; eleven in a row got eleven identical copies of it on 2026-09-05,
+ * which reads as a server, not a person asleep. She does not wake up — the
+ * line just wears thinner, the way anyone's would.
+ */
 export function asleepLine(nth: number): string {
   if (nth <= 2) return ASLEEP_LINES[0];
   if (nth <= 5) return ASLEEP_LINES[1];
@@ -83,9 +102,16 @@ export function asleepLine(nth: number): string {
   return ASLEEP_LINES[3];
 }
 
-/** Whether a stored line of hers is one of the door's, rather than a reply she gave. */
+/**
+ * Whether a stored line of hers is one of the door's, rather than a reply she gave.
+ *
+ * Every door line, both lists. A refusal this misses is a refusal that stays in
+ * the transcript as her half of a conversation she was asleep for, which is the
+ * thing foldAsleepExchanges exists to prevent.
+ */
 export function isAsleepLine(text: string): boolean {
-  return ASLEEP_LINES.includes((text ?? '').trim());
+  const line = (text ?? '').trim();
+  return ASLEEP_LINES.includes(line) || BLOCKED_LINES.includes(line);
 }
 
 /**
@@ -204,8 +230,26 @@ export function backToSleep(schedule: HerSleepSchedule, input: { atIso: string; 
 // "I'm out of ideas" is not "I'm out".
 const SAYS_GOODNIGHT = /(?<!\b(?:a|the|was|another|such a|any)\s)\bgood ?night\b|\bnight night\b|\bnighty\b|\bsleep well\b|\bi'?m (?:going|off|heading) (?:back )?to (?:bed|sleep)\b|\b(?:going|back) to sleep(?: now)?(?=[.!,]|\s*$)|\bi'?m out(?=[.!,]|\s*$)|\bthat'?s me done\b/i;
 
+/**
+ * A goodnight she is *reporting* is not a goodnight she is saying.
+ *
+ * Got up at 00:44 by four messages, her first words back were "you already said
+ * goodnight. then you sent three more. what." — his goodnight, quoted at him.
+ * The matcher read it as hers and put her back to bed **2.5 seconds** after
+ * waking, marked the wake pointless, and that was the second pointless wake in
+ * seven days, so it blocked him for the night. One regex match cost him the
+ * evening (2026-09-09).
+ *
+ * The tell is second person and attribution: "you said goodnight", "your
+ * goodnight", "you told me goodnight". Hers has no owner but her.
+ */
+const REPORTING_ONE = /\b(?:you|u)\b[^.!?]{0,30}\b(?:said|say|saying|says|sent|told me|gave me)\b[^.!?]{0,20}\bgood ?night\b|\byour good ?night\b|\bsaid good ?night\b/gi;
+
 export function readsAsGoodnight(reply: string): boolean {
-  return SAYS_GOODNIGHT.test((reply ?? '').replace(/[‘’]/g, "'"));
+  // Struck rather than vetoed: "You already said goodnight. Fine. Goodnight,
+  // Tommy." is both, and the second one is the one that decides.
+  const said = (reply ?? '').replace(/[‘’]/g, "'").replace(REPORTING_ONE, ' ');
+  return SAYS_GOODNIGHT.test(said);
 }
 
 /** The nights they got her up, kept so a habit can be told from a once. */

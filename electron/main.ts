@@ -122,7 +122,7 @@ import { cleaningChunks, deliveryRule, hasDeliveryLabel, splitDelivery, stripDel
 import { deedFrom, isADeed, keepDeed, readDeeds } from './deeds';
 import { isHerStanding } from './herstanding';
 import { enoughToStandOn, herStandings, keepSlight, parseStanding, readSlights, recentIncidents, slightsAsIncidents, standingDue, standingPrompt, HER_SUBJECT, type Incident, type Slight } from './herstanding';
-import { asleepLine, backToSleep, dayAfter, decideTimesSystem, dozeOffDue, enoughKnocking, fallbackSchedule, foldAsleepExchanges, goodnightDue, groggyFor, groggyNote, herAsleep, isAsleepLine, knockedAwake, messagesWhileAsleep, parseDecidedTimes, pointlessWake, pointlessWakesLately, readsAsGoodnight, readHerSleep, readHerSleepState, readWakes, sleepNote, sleepWindowOn, wakeIrritation, wakeNote, wokenAt, clockMinutes, BLOCKED_LINE, BLOCK_AFTER_POINTLESS, KNOCK_WINDOW_MS, WAKES_KEPT, type HerSleepSchedule, type Wake } from './hersleep';
+import { blockedLine, asleepLine, backToSleep, dayAfter, decideTimesSystem, dozeOffDue, enoughKnocking, fallbackSchedule, foldAsleepExchanges, goodnightDue, groggyFor, groggyNote, herAsleep, isAsleepLine, knockedAwake, messagesWhileAsleep, parseDecidedTimes, pointlessWake, pointlessWakesLately, readsAsGoodnight, readHerSleep, readHerSleepState, readWakes, sleepNote, sleepWindowOn, wakeIrritation, wakeNote, wokenAt, clockMinutes, BLOCKED_LINE, BLOCK_AFTER_POINTLESS, KNOCK_WINDOW_MS, WAKES_KEPT, type HerSleepSchedule, type Wake } from './hersleep';
 import { parseBalances, balanceWarning } from './venicebalance';
 import { advanceWant, dayNote, dayNoteInstruction, dayPassDue, dayPickInstruction, firstsNote, keepDay, markRecFollowed, noteRecommendation, pickRecommend, pickWantToWork, readDays, readRecs, readWants, readWeek, recDueForFollowUp, reconcileWants, recsAnsweredBy, recsOnDay, wantInstruction, wantOutcome, wantQuery, wantsNote, weekKey, weekNote, weekReflectionInstruction, weekSummaryDue, WANT_ODDS, type HerDay, type HerWeek, type Rec, type Want } from './ownlife';
 import { inQuietHours, newVapidKeys, pushRequest, readPushDevices, readPushPrefs, type PushDevice, type PushPrefs, nextNudgeDelay, NUDGE_GAP_MS, NUDGE_RETRY_MS, nudgeOverdue, PUSH_BREATHER_MS, tooSoonToPush, heldBack, withoutDevice, isPhoneWebApp, coveredByNativeApp } from './push';
@@ -9252,10 +9252,14 @@ const knocks: number[] = [];
 function knockWhileAsleep(): string | null {
   const now = Date.now();
   const schedule = getHerSleepSchedule();
-  // She has said they are not to wake her again tonight: the door stays shut.
-  if (schedule?.blocked) return BLOCKED_LINE;
   knocks.push(now);
   while (knocks.length && now - knocks[0] > KNOCK_WINDOW_MS) knocks.shift();
+  // She has said they are not to wake her again tonight: the door stays shut —
+  // but it says so differently each time he tries. The paragraph above is about
+  // exactly this and only fixed it for the asleep lines; he got the refusal
+  // three times word for word and answered "You just repeated yourself again"
+  // (2026-09-09).
+  if (schedule?.blocked) return blockedLine(knocks.length - 1);
   if (schedule && enoughKnocking(knocks, now)) {
     const woken = wokenAt(schedule, zonedNow(CHAT_TIMEZONE), knocks.length, new Date().toISOString());
     setHerSleepSchedule(woken);

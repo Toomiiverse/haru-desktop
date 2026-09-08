@@ -8,7 +8,7 @@ import {
   clockMinutes, clampBedtime, clampWake, dayAfter, daysBetween,
   decideTimesSystem, fallbackSchedule, goodnightDue, herAsleep,
   messagesWhileAsleep, parseDecidedTimes, readHerSleep, readHerSleepState,
-  sleepWindowOn, wakeIrritation, wakeNote, foldAsleepExchanges, isAsleepLine, enoughKnocking, wokenAt, sleepNote, KNOCK_COUNT, KNOCK_WINDOW_MS, groggyFor, groggyNote, GROGGY_REGISTER, knockedAwake, dozeOffDue, pointlessWake, backToSleep, readWakes, pointlessWakesLately, DOZE_MINUTES, BLOCKED_LINE, BLOCK_AFTER_POINTLESS, readsAsGoodnight } from '../electron/hersleep';
+  sleepWindowOn, wakeIrritation, wakeNote, foldAsleepExchanges, isAsleepLine, enoughKnocking, wokenAt, sleepNote, KNOCK_COUNT, KNOCK_WINDOW_MS, groggyFor, groggyNote, GROGGY_REGISTER, knockedAwake, dozeOffDue, pointlessWake, backToSleep, readWakes, pointlessWakesLately, DOZE_MINUTES, BLOCKED_LINE, BLOCKED_LINES, blockedLine, BLOCK_AFTER_POINTLESS, readsAsGoodnight } from '../electron/hersleep';
 import { zonedNow } from '../electron/dates';
 
 const ZONE = 'Australia/Perth';
@@ -319,4 +319,32 @@ test('a reply that says goodnight is her going back to bed; one that does not is
   assert.ok(!readsAsGoodnight("Yeah, well. You're welcome, I guess."));
   assert.ok(!readsAsGoodnight('What was so urgent at this hour?'));
   assert.ok(!readsAsGoodnight('It was a good night, actually — I read about Control.'), '"good night" as two words about the night is not a goodnight');
+});
+
+// 00:44, four messages in, and this cost him the rest of the evening: read as
+// hers, it put her back to bed 2.5 seconds after waking, scored the wake
+// pointless, and tripped the block.
+test('a goodnight she is quoting back at him is his, not hers', () => {
+  assert.ok(!readsAsGoodnight('you already said goodnight. then you sent three more. what.'), 'verbatim, 2026-09-09');
+  assert.ok(!readsAsGoodnight('You said goodnight an hour ago.'));
+  assert.ok(!readsAsGoodnight("Your goodnight didn't mean much then."));
+  assert.ok(!readsAsGoodnight('u said goodnight already though'));
+  assert.ok(!readsAsGoodnight('You told me goodnight and then kept texting.'));
+  // And it still has to hear the real thing, including in the same breath.
+  assert.ok(readsAsGoodnight('You already said goodnight. Fine. Goodnight, Tommy. Actually going to sleep now.'),
+    'quoting his does not buy him the night if she then says her own');
+  assert.ok(readsAsGoodnight('Goodnight, Tommy.'));
+});
+
+test('the door says no in a different way each time he tries it', () => {
+  const said = [0, 1, 2, 3].map(blockedLine);
+  assert.equal(new Set(said).size, said.length, 'four tries, four wordings');
+  assert.equal(blockedLine(0), BLOCKED_LINE, 'the first one is the line she has always used');
+  // He knocked six times on 2026-09-09; past the end it holds the last one
+  // rather than throwing or going quiet.
+  assert.equal(blockedLine(9), BLOCKED_LINES[BLOCKED_LINES.length - 1]);
+  assert.equal(blockedLine(-1), BLOCKED_LINE, 'a count that starts at zero cannot underflow into undefined');
+  // Every one of them still has to read as her asleep, or the app will treat
+  // the refusal as a real reply and log it as a conversation.
+  for (const line of BLOCKED_LINES) assert.ok(isAsleepLine(line), `not an asleep line: ${line}`);
 });
