@@ -24,6 +24,7 @@ import {
 import { baseExtractors, ingestFile, type Extractor, type IngestResult } from './ingestion';
 import { cachedEmbedder, createEmbedder, EmbeddingCache, type Embedder } from './embeddings';
 import { syncVaultFiles, type VaultSyncReport } from './obsidian';
+import { admitVaultMemories } from './vaultmemories';
 import { isOpenAIShaped } from './provider';
 import { readPdf } from './pdf';
 
@@ -46,6 +47,10 @@ export type KnowledgeStoreDeps = {
   fetch: Fetcher;
   /** The bearer token for an endpoint, which lives with the provider config. */
   apiKeyFor(endpoint: string): string;
+  /** The vault pages (People.md, Preferences.md, Us.md) as memory records.
+   *  Wired by the app to the memory store's admission; absent, the pages are
+   *  still searchable knowledge but never standing context. */
+  remember?: (draft: { text: string; kind: 'relationship' | 'preference' | 'fact'; subject?: string }) => { created: boolean } | null;
 };
 
 export type IngestArgs = {
@@ -247,6 +252,14 @@ export function createKnowledgeStore(deps: KnowledgeStoreDeps) {
     persist();
     const full = { ...report, ms: Date.now() - started };
     console.log(`[knowledge] vault sync ${vault}: ${full.files} files, +${full.added} ~${full.updated} =${full.unchanged} -${full.removed} in ${full.ms}ms`);
+    // The user-owned pages become standing memories on the same tick, so a
+    // preference edited in the vault is in her blocks within the hour. Missing
+    // pages are simply absent from the report.
+    if (deps.remember) {
+      for (const entry of admitVaultMemories(vault, deps.remember)) {
+        console.log(`[vault-memory] ${entry.page}: ${entry.bullets} bullet(s), +${entry.admitted} ~${entry.repeated} repeated`);
+      }
+    }
     return full;
   }
 
