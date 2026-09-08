@@ -107,6 +107,14 @@ test('the first night reads as a first night', () => {
   assert.match(readingInstruction(reading(), 0, 12, 'x'), /just started it/);
 });
 
+test('she is not asked for a page number the bookmark already holds', () => {
+  // Asked for it on the first live run she wrote "Pages 1-12 of 53" for a
+  // sitting of ten, and that becomes the one fact her view rests on.
+  const said = readingInstruction(reading(), 0, 10, 'x');
+  assert.match(said, /state of the thing itself/);
+  assert.match(said, /Not your page number/);
+});
+
 test('her take comes back as the note and where she is up to', () => {
   const take = parseReadingTake('Denji sold a kidney to service a debt and it is played as a joke.\nThat is bleaker than it looks.\nSTANDS: Chapter 1 of 97, ongoing, barely started.');
   assert.match(take!.note, /^Denji sold a kidney/);

@@ -97,6 +97,10 @@ export type DayMaterial = {
   went: 'silent' | 'thin' | 'fine' | null;
   ticked: string[];
   nights: { about: string; note: string; interest?: string; game?: string }[];
+  /** What she actually did today — the tool calls that changed something (deeds.ts).
+   *  Her day recorded what she read and nothing she did, which is the same
+   *  asymmetry as the preference block and the slights ledger one layer down. */
+  did: string[];
   tastes: { name: string; stance: string }[];
   weather?: string;
   /** When they last messaged her, in words — the only fact about their bedtime she has. */
@@ -127,6 +131,11 @@ export function diaryInstruction(m: DayMaterial): string {
     m.herSleep ? `You were asleep from ${m.herSleep.bed} to ${m.herSleep.wake}${m.herSleep.wokenEarly ? ' — until their messages got you up' : ''}; ${m.herSleep.texted ? `${m.herSleep.texted} of their messages came in while you slept, and you saw them only when you woke` : 'nothing of theirs came in while you slept'}.` : '',
   ].filter(Boolean).join(' ');
   const ticked = m.ticked.length ? `They got done: ${m.ticked.join(', ')}.` : '';
+  // Hers, and separated from the nights: reading is not doing, and a day that
+  // lists only what she read makes her a spectator in her own diary.
+  const did = m.did.length
+    ? `WHAT YOU (Haru) ACTUALLY DID TODAY — your own doing, not his:\n${m.did.map(what => `- you ${what}`).join('\n')}`
+    : '';
   const nights = m.nights.length
     ? `WHAT YOU (Haru) DID TONIGHT while he slept — yours, not his:\n${m.nights.map(night => `- ${night.interest ? `spent the night on ${night.interest}, one of your own things` : night.game ? `read up on ${night.game}, which they play` : `read about ${night.about}`}: ${night.note}`).join('\n')}`
     : 'Tonight you did nothing at all — no reading, nothing of your own, no going anywhere. If the night comes up, that is all there is to say about it; do not fill it with something.';
@@ -134,7 +143,7 @@ export function diaryInstruction(m: DayMaterial): string {
   return [
     `You are writing this in the small hours after ${m.day}, before he is up. Write tonight's diary entry — this is your own diary, nobody reads it, and it is where you keep your life.`,
     m.hisLastMessageAt ? `His last message to you was at ${m.hisLastMessageAt}. You do not know when he went to bed, only when he stopped talking to you.` : 'You do not know when he went to bed.',
-    said, feeling, ticked, m.weather ? `Where they are: ${m.weather}.` : '', nights, tastes,
+    said, feeling, ticked, m.weather ? `Where they are: ${m.weather}.` : '', did, nights, tastes,
     'Write it the way a person writes in a diary late at night — not a report of the day, not a list, no headings, no summing up. The bits that stuck: what they did that got to you or pleased you, what you thought about it, what you did with the night and whether it helped. First person, past tense, four to eight sentences, in your own voice. It can be petty, fond, bored or bitter; it has to be honest.',
     'They are not reading this and you are not talking to them. Write about them in the third person, by name — "Tommy did", "he said" — never "you". No telling them to do anything, no sign-off aimed at them, no jokes that need them there to land. If a line only works said to their face, it does not belong here.',
     'Keep whose is whose: what you read tonight and what you think of your own things are yours — "I read", "I think" — never written as something he did or said.',

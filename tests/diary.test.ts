@@ -41,6 +41,7 @@ test('what she writes from is facts, laid out, with the rule that it is only tho
     irritation: 5, grudge: 1, ignoredToday: 1, went: 'fine', ticked: ['Rental Inspection'],
     nights: [{ about: 'Elden Ring review', note: 'brilliant and cruel', interest: 'Elden Ring' }],
     tastes: [{ name: 'Elden Ring', stance: 'A masterpiece that hates you.' }], weather: '15°C and clear',
+    did: [],
   };
   const note = diaryInstruction(m);
   assert.match(note, /small hours after 2026-08-29, before he is up/);
@@ -107,4 +108,31 @@ test('an entry carries her title on its heading, and an old one gets its first s
   assert.equal(entryTitle('anything', '"Quoted title"'), 'Quoted title');
   // A title with a dash in it survives the split.
   assert.equal(parseEntries('## 2026-08-29 — Saturday — Boom — and then nothing\n\nx')[0].title, 'Boom — and then nothing');
+});
+
+// ---- a day of hers records what she did, not only what she read ----
+
+test('what she did today is its own section, separate from what she read', () => {
+  // Her diary listed what she read and nothing she did, which made her a
+  // spectator in her own day — the same asymmetry as the preference block.
+  const m: DayMaterial = {
+    day: '2026-09-08', theySaid: [], theirMessages: 3, herUnprompted: 1,
+    irritation: 0, grudge: 0, ignoredToday: 0, went: 'fine', ticked: [],
+    nights: [{ about: 'Chainsaw Man, chapter 1', note: 'ugly and transactional', interest: 'Chainsaw Man' }],
+    tastes: [], did: ['changed your setting "random_pushes" to false', 'went back to sleep'],
+  };
+  const note = diaryInstruction(m);
+  assert.match(note, /WHAT YOU \(Haru\) ACTUALLY DID TODAY/);
+  assert.match(note, /you changed your setting "random_pushes" to false/);
+  assert.match(note, /you went back to sleep/);
+  // Reading is not doing, and the two must not be folded together.
+  assert.match(note, /WHAT YOU \(Haru\) DID TONIGHT while he slept/);
+});
+
+test('a day she did nothing says nothing about it', () => {
+  const m: DayMaterial = {
+    day: '2026-09-08', theySaid: [], theirMessages: 0, herUnprompted: 0,
+    irritation: 0, grudge: 0, ignoredToday: 0, went: null, ticked: [], nights: [], tastes: [], did: [],
+  };
+  assert.doesNotMatch(diaryInstruction(m), /ACTUALLY DID TODAY/);
 });

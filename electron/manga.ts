@@ -159,7 +159,11 @@ export function readingInstruction(reading: Reading, from: number, to: number, p
     'Write what you make of it, in three or four lines, to yourself — nobody is reading this.',
     'It has to come from those pages and not from anything you know about the series: what actually happened, what you thought of it, what you want to know next.',
     'No summary of the plot for its own sake, no recommending it, no talking to anyone.',
-    'Then on a last line, starting with STANDS:, one short sentence on where you are up to and whether it is finished, so you do not lose your place.',
+    // Not her page number. The bookmark holds that exactly, and asked for it on
+    // the first live run she wrote "Pages 1-12 of 53" for a sitting of ten —
+    // which then becomes the one fact her view is allowed to rest on. She is
+    // asked for the state of the work, which is what that field was added for.
+    'Then on a last line, starting with STANDS:, one short sentence on the state of the thing itself — whether it is finished or still running, and how far the story has got. Not your page number: that is kept for you, and guessing at it is how you end up wrong about it.',
   ].join('\n');
 }
 

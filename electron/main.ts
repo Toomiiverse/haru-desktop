@@ -9717,7 +9717,12 @@ async function readSomeManga(config: ProviderConfig) {
       }
     }
     if (!read.length) { console.warn('[manga] nothing came off the pages tonight'); return; }
-    const readTo = from + read.length;
+    // Where she got to, not how many came back. Two of tonight's twelve pages
+    // timed out, and counting successes moved the bookmark to 10 — which skips
+    // the two that failed for ever and re-reads the two after them tomorrow. A
+    // page she could not read is a page she has been past; the alternative is a
+    // sitting that sticks on a bad page and never advances.
+    const readTo = Math.min(to, files.length);
     const raw = await ollamaQuipLong([getActiveCharacter().identity, NOBODY_HERE].join(' '),
       readingInstruction(reading, from, readTo, read.join('\n\n')), nudgeBrain() ?? config);
     const take = parseReadingTake(raw);
@@ -10109,6 +10114,9 @@ async function writeDiary(config: ProviderConfig) {
     went: mood.owedMorning?.day === due ? mood.owedMorning.went : mood.nightfallDay === due ? 'fine' : null,
     ticked: getKept().filter(item => item.done && item.completedAt?.startsWith(due)).map(item => item.title),
     nights: tonight.map(night => ({ about: night.about, note: night.note, interest: night.interest, game: night.game })),
+    // What she did today, from the deed ledger. Her day recorded what she read
+    // and nothing she did; this is the consumer that ledger was missing.
+    did: readDeeds(store.get('her.deeds')).filter(deed => nightKey(new Date(deed.at)) === due).map(deed => deed.what),
     tastes: getInterests().filter(interest => interest.stance).map(interest => ({ name: interest.name, stance: interest.stance })),
     weather: describeWeather(getWeather().last, weatherWhere(), Date.now(), getWeather().disputedAt).split('. That is the actual')[0] || undefined,
     hisLastMessageAt: (() => { const last = messages.filter(message => message.role === 'user' && message.at).at(-1)?.at; return last ? clockAt(Date.parse(last)) : undefined; })(),
