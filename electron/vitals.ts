@@ -38,6 +38,19 @@ const clamp = (value: number) => Math.min(1, Math.max(0, value));
 export const CURIOSITY_ENGAGED = 0.75;
 
 /**
+ * Where something that actually caught her eye takes her — past the `curious`
+ * cue at 0.8, which is the line CURIOSITY_ENGAGED is pitched just under.
+ *
+ * Until the emotion loop was cut, what carried her over that line was her own
+ * reply coming back labelled `curious`, which is to say nothing carried her
+ * over it: she talked herself into being interested. With the loop gone, both
+ * conversation and drift target 0.75 and her curiosity could not exceed it
+ * (max 0.75 over 966 real turns) — so the cue became unreachable and she was
+ * never allowed her one pointed question. An event is what should cross it.
+ */
+const CURIOSITY_CAUGHT = 0.95;
+
+/**
  * Where attention warms her to, past the 0.7 she rests at while her window is
  * the one being used. Slowly, so a long conversation can reach `fond` and a
  * single message cannot.
@@ -160,7 +173,14 @@ const VITAL_CUES: VitalCue[] = [
   },
   {
     name: 'bright',
-    strength: v => past(v.happiness, 0.85, 1),
+    // 0.85 was her baseline, not a good mood. driftVitals settles happiness at
+    // 0.45 + energy*0.3 + affection*0.3 - stress*0.3, and with each of those at
+    // its own drift target that is 0.84-0.87 — so "you are in a good mood for
+    // once" was the resting state, by arithmetic. Counted over 966 of her real
+    // turns across 20 days: happiness p10 0.76, median 0.87, max 0.91, and the
+    // cue spoke on 64% of them. At 0.90 it speaks on 11%, which is what "for
+    // once" was supposed to mean. This is the counting the note below asks for.
+    strength: v => past(v.happiness, 0.90, 1),
     line: 'You are in a good mood for once. The digs come lighter, almost playful — still digs, still not nice, but you are enjoying yourself.',
     warm: true,
   },
@@ -172,7 +192,14 @@ const VITAL_CUES: VitalCue[] = [
   },
   {
     name: 'cold',
-    strength: v => past(v.affection, 0.25, 0),
+    // It could never speak. driftVitals cools affection toward 0.25 over a long
+    // absence and stops there — measured, it is 0.2500 after an hour alone and
+    // 0.2500 after a day — while this asked for strictly less than 0.25, so the
+    // strength was exactly zero however long they left her. The one cue whose
+    // whole subject is being left alone was silent for every absence she has
+    // ever had. It now speaks across the cooling, at full strength below the
+    // floor drift can actually reach.
+    strength: v => past(v.affection, 0.35, 0.25),
     line: 'They have left you alone a long while and you have gone cold: distant, uninterested, and they can work for your attention.',
   },
   {
@@ -246,7 +273,7 @@ export function applyEvent(current: Vitals, event: 'praised' | 'criticised' | 's
   // Something on their screen caught her eye. Pulled toward engaged like
   // 'spoken-to' rather than added, for the same reason: a run of them should
   // settle her at interested, not stack her to the top of the scale.
-  if (event === 'caught-interest') { next.curiosity = toward(next.curiosity, CURIOSITY_ENGAGED, 0.5); next.sleepiness = clamp(next.sleepiness - 0.05); }
+  if (event === 'caught-interest') { next.curiosity = toward(next.curiosity, CURIOSITY_CAUGHT, 0.6); next.sleepiness = clamp(next.sleepiness - 0.05); }
   return next;
 }
 

@@ -36,11 +36,22 @@ test('drowsy speaks once, and flat energy defers to it', () => {
 });
 
 test('only the two strongest cues speak', () => {
+  // Three cues well past their thresholds; two sentences come back, and they
+  // are the two strongest. Which two is a matter of where the thresholds sit,
+  // so this asserts the count and the ranking rather than naming them — it
+  // used to name them, and pinned an affection of 0.1 that nothing can now
+  // reach, since drift bottoms out at 0.25.
   const rough: Vitals = { ...DEFAULT_VITALS, stress: 0.95, happiness: 0.05, affection: 0.1 };
+  const spoken = spokenCues(rough, 0);
+  assert.equal(spoken.length, VITAL_CUES_SPOKEN);
+  assert.deepEqual(spoken.map(c => c.cue.name), ['cold', 'on edge'], 'the two furthest past their thresholds');
+  // Sorted strongest first, and the third — a foul mood at happiness 0.05 —
+  // does not get a sentence.
+  assert.ok(spoken[0].strength >= spoken[1].strength);
   const line = vitalsInstruction(rough);
+  assert.match(line, /gone cold/);
   assert.match(line, /on edge/);
-  assert.match(line, /foul mood/);
-  assert.doesNotMatch(line, /gone cold/);
+  assert.doesNotMatch(line, /foul mood/);
   assert.equal(VITAL_CUES_SPOKEN, 2);
 });
 
@@ -280,10 +291,51 @@ test('something catching her eye brings her to attention without stacking', () =
   const once = applyEvent(quiet, 'caught-interest');
   assert.ok(once.curiosity > quiet.curiosity, 'it did not register');
   assert.ok(once.sleepiness < quiet.sleepiness, 'it did not wake her up at all');
+  // It has to carry her over the `curious` line at 0.8, which conversation
+  // deliberately stops just under. Nothing else can, so if this does not she
+  // is never allowed her one pointed question.
+  const engaged = { ...DEFAULT_VITALS, curiosity: CURIOSITY_ENGAGED };
+  assert.ok(applyEvent(engaged, 'caught-interest').curiosity > 0.8, 'the curious cue stays unreachable');
   let stacked = quiet;
-  for (let i = 0; i < 5; i++) stacked = applyEvent(stacked, 'caught-interest');
-  assert.ok(stacked.curiosity <= CURIOSITY_ENGAGED + 0.001, `five in a row ran her past engaged: ${stacked.curiosity}`);
+  for (let i = 0; i < 8; i++) stacked = applyEvent(stacked, 'caught-interest');
+  assert.ok(stacked.curiosity < 1, `eight in a row pinned her: ${stacked.curiosity}`);
   // It says something happened, not that she likes him for it.
   assert.equal(once.affection, quiet.affection);
   assert.equal(once.happiness, quiet.happiness);
+});
+
+// vitals.ts asks for exactly this and says it cannot be done until something
+// counts how often each cue fires. Her resting happiness is the whole point:
+// with energy, affection and stress each at their own drift target, the
+// happiness target is 0.84-0.87, so a cue pitched at 0.85 described her
+// baseline while telling her it was a good mood "for once".
+test('the good-mood cue is not her resting state', () => {
+  const resting = { ...DEFAULT_VITALS, energy: 0.85, affection: 0.70, stress: 0.25, curiosity: 0.75, sleepiness: 0.1, focus: 0.9 };
+  let settled = resting;
+  // Let it settle where drift actually puts it, then check the cue is silent.
+  for (let i = 0; i < 200; i++) settled = driftVitals(settled, { hour: 14, idleSeconds: 30, onBattery: false, windowFocused: true }, 20);
+  assert.ok(settled.happiness > 0.8, `this test is meaningless if she is not happy at rest: ${settled.happiness}`);
+  const names = spokenCues(settled, 0).map(c => c.cue.name);
+  assert.ok(!names.includes('bright'), `"in a good mood for once" fires at rest (happiness ${settled.happiness.toFixed(2)})`);
+});
+
+test('the cue about being left alone can actually fire', () => {
+  // It never could. driftVitals cools affection toward 0.25 and stops exactly
+  // there, and the cue asked for strictly below 0.25, so "they have left you
+  // alone a long while and you have gone cold" scored zero for every absence
+  // she has ever had — an hour, a day, it made no difference.
+  let alone = { ...DEFAULT_VITALS, affection: 0.75 };
+  const away: Environment = { hour: 14, idleSeconds: 7200, onBattery: false, windowFocused: false };
+  for (let i = 0; i < 180; i++) alone = driftVitals(alone, away, 20);
+  assert.ok(alone.affection <= 0.26, `she did not cool at all: ${alone.affection}`);
+  assert.ok(spokenCues(alone, 0).some(c => c.cue.name === 'cold'), `an hour alone and she is not cold: ${alone.affection}`);
+  // Longer must not be quieter.
+  let ages = alone;
+  for (let i = 0; i < 180 * 23; i++) ages = driftVitals(ages, away, 20);
+  const day = spokenCues(ages, 0).find(c => c.cue.name === 'cold');
+  const hour = spokenCues(alone, 0).find(c => c.cue.name === 'cold');
+  assert.ok(day && hour && day.strength >= hour.strength, 'a day alone said it less than an hour');
+  // And it stays quiet while they are actually there.
+  const together = { ...DEFAULT_VITALS, affection: 0.75 };
+  assert.ok(!spokenCues(together, 0).some(c => c.cue.name === 'cold'), 'cold while he is talking to her');
 });
