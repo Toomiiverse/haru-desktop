@@ -12,7 +12,7 @@ import { connectGoogle, disconnectGoogle, googleStatus, pullEvents, pullTasks, p
 import { afterCooldown, afterEgoCooldown, afterPoke, egoInstruction, goodnightInstruction, IGNORE_THRESHOLD, IRRITATION_MAX, isGoodnight, isIgnoring, isLowEffort, isRedo, leverageInstruction, moodInstruction, nextEgo, nextIrritation, notTwiceInstruction, shoutInstruction, shoutState, type ShoutState } from './mood';
 import { nextPokeCount, pokeEmotion, pokeInstruction, pokeIrritation, pokeTier, type PokeKind } from './poke';
 import { applyEvent, chooseIdleAction, cueLog, DEFAULT_VITALS, driftVitals, nextTickDelayMs, shouldPersistVitals, type Environment, type Vitals } from './vitals';
-import { classificationPrompt, emotionToVitals, EMOTION_SCHEMA, EMOTIONS, NEUTRAL_EMOTION, parseEmotion, type Emotion, type EmotionName, faceForEmotion, localEmotion } from './emotion';
+import { classificationPrompt, EMOTION_SCHEMA, EMOTIONS, NEUTRAL_EMOTION, parseEmotion, type Emotion, type EmotionName, faceForEmotion, localEmotion } from './emotion';
 import { withDiscoveredExpressions } from './expressions';
 import { reportCapabilities, seesItsOwnScreen } from './capabilities';
 import { chaseableOverdue, findItem, shiftDays, formatAgenda, itemStatus, missedInstruction, putOffInstruction, putOffUntil, relevantItems, readsAsAnswerToHer, readsAsBareReport, tickOffInstruction, readsAsDone, doneClause, readsAsNotDone, relativeDay, staleItemNamed, inventedTimeFor, raisedRecently, type ItemStatus, underwayClause, isUnderway, FOLLOW_UP_MS } from './agenda';
@@ -1198,9 +1198,24 @@ let currentEmotion: Emotion = NEUTRAL_EMOTION;
 // Alternated so repeated praise does not produce the same face every time.
 let lastPraiseWasSmug = false;
 
+/**
+ * Her face, and only her face.
+ *
+ * This used to fold the reading into her vitals as well, which meant her own
+ * prose set her mood: she writes a sharp line, the classifier reads it back as
+ * `annoyed`, and that lowered happiness and raised stress — so the next reply
+ * was written by a Haru her last reply had made unhappy. The 2026-09-07 fix
+ * damped it (each shift scaled by the headroom left, so a run of same-labelled
+ * replies converged instead of climbing to 1.00) but the loop itself remained.
+ *
+ * Measured over 2026-09-06..08, 108 of her real replies through the real
+ * classifier: her own prose alone moved happiness -0.16, stress +0.12,
+ * energy -0.10. Her mood now moves on things that happen to her — his
+ * messages, his praise and criticism, being poked, being woken — through
+ * nudgeVitals, and never on what she just said about them.
+ */
 function broadcastBeat(emotion: Emotion, gesture?: 'nod' | 'shake' | 'stare') {
   currentEmotion = emotion;
-  vitals = emotionToVitals(emotion, vitals);
   for (const win of BrowserWindow.getAllWindows()) win.webContents.send('emotion:changed', { emotion, gesture });
 }
 
@@ -3508,6 +3523,9 @@ async function reactToFullscreen(title: string) {
     const line = await ollamaQuip(system, `The window that just went fullscreen is titled: "${named.slice(0, 160)}"`, config);
     console.log(`[helper] fullscreen: ${title.slice(0, 60)}`);
     broadcastBeat({ emotion: 'curious', confidence: 0.9, energy: 0.7, intent: 'tease', focus: 'away' }, 'stare');
+    // Something happened on their screen, which is a real event and the one
+    // beat whose vitals movement used to ride on broadcastBeat.
+    nudgeVitals('caught-interest');
     sendToWindows('companion:pose', 'lean-in');
     // Spoken only if it was also written down — see interject.
     if (interject(line, { source: 'fullscreen' })) void speak(line);

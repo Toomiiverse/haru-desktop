@@ -271,3 +271,19 @@ test('spokenCues and vitalsInstruction cannot drift apart', () => {
   // Strongest first, so the log's order is the order she was told them in.
   assert.deepEqual([...spoke].sort((a, b) => b.strength - a.strength), spoke);
 });
+
+test('something catching her eye brings her to attention without stacking', () => {
+  // The fullscreen beat's vitals movement used to ride on broadcastBeat, which
+  // no longer moves anything. Pulled toward engaged like being spoken to, for
+  // the same reason: five of them in a row should settle her at interested.
+  const quiet = { ...DEFAULT_VITALS, curiosity: 0.2, sleepiness: 0.4 };
+  const once = applyEvent(quiet, 'caught-interest');
+  assert.ok(once.curiosity > quiet.curiosity, 'it did not register');
+  assert.ok(once.sleepiness < quiet.sleepiness, 'it did not wake her up at all');
+  let stacked = quiet;
+  for (let i = 0; i < 5; i++) stacked = applyEvent(stacked, 'caught-interest');
+  assert.ok(stacked.curiosity <= CURIOSITY_ENGAGED + 0.001, `five in a row ran her past engaged: ${stacked.curiosity}`);
+  // It says something happened, not that she likes him for it.
+  assert.equal(once.affection, quiet.affection);
+  assert.equal(once.happiness, quiet.happiness);
+});

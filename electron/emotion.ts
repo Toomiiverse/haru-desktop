@@ -139,51 +139,11 @@ export function parseEmotion(raw: unknown): Emotion | null {
 
 // What each reading does to how she feels. Scaled by confidence, so a hedged
 // classification barely moves her and a certain one moves her properly.
-const VITAL_SHIFTS: Record<EmotionName, Partial<Record<'happiness' | 'curiosity' | 'affection' | 'stress' | 'sleepiness' | 'energy', number>>> = {
-  neutral: {},
-  happy: { happiness: 0.2, energy: 0.1 },
-  curious: { curiosity: 0.25, energy: 0.05 },
-  smug: { happiness: 0.12, affection: -0.05 },
-  annoyed: { happiness: -0.18, stress: 0.15 },
-  bored: { curiosity: -0.2, energy: -0.1 },
-  sleepy: { sleepiness: 0.15, energy: -0.15 },
-  surprised: { curiosity: 0.2, energy: 0.15 },
-  affectionate: { affection: 0.2, happiness: 0.15 },
-  embarrassed: { stress: 0.12, affection: 0.08 },
-  // Fired up and pushing at something. Costs nothing in happiness — she is not
-  // enjoying herself exactly, she is on a mission.
-  determined: { energy: 0.2, curiosity: 0.1, stress: 0.05 },
-  // Anxious on their behalf, which is a kind of caring: stress up, and
-  // affection with it, or it reads as irritation.
-  worried: { stress: 0.2, affection: 0.1, energy: -0.05 },
-};
-
-export function emotionToVitals<T extends Record<string, number>>(emotion: Emotion, vitals: T): T {
-  const next = { ...vitals } as Record<string, number>;
-  const shifts = VITAL_SHIFTS[emotion.emotion];
-  for (const [key, amount] of Object.entries(shifts)) {
-    if (typeof next[key] !== 'number') continue;
-    // Damped by the room left, so a run of same-labelled replies converges
-    // instead of climbing. Added flat, this was a loop she fed herself: a reply
-    // with a question in it comes back `curious`, that raised curiosity, and
-    // past 0.8 the vital cue told her one pointed question was allowed — so she
-    // asked another, and it scored again. Curiosity reached 1.00 on the third
-    // turn and stayed, and on the morning of 2026-09-07 "I'm so tired" was
-    // answered with three interview questions running ("What time did you
-    // actually get up?", "Noted. And the rest of the morning —"). Her own
-    // performance may colour how she feels; it must not manufacture the state
-    // that licensed it. This is the reasoning the energy line below was already
-    // written with, applied to the rest of them.
-    const room = amount > 0 ? 1 - next[key] : next[key];
-    next[key] = Math.min(1, Math.max(0, next[key] + amount * emotion.confidence * room));
-  }
-  // The reported energy pulls her own toward it rather than replacing it, so one
-  // lively reply does not make her lively for the rest of the evening.
-  if (typeof next.energy === 'number') {
-    next.energy = Math.min(1, Math.max(0, next.energy + (emotion.energy - next.energy) * 0.3 * emotion.confidence));
-  }
-  return next as T;
-}
+// Her reading no longer moves her vitals. It used to, through emotionToVitals
+// and a table of per-emotion shifts, and that made her own prose the thing that
+// set her mood — see broadcastBeat in main.ts for the measurement that ended it.
+// Her mood moves on events now (vitals.ts applyEvent); this file only says how
+// a line was said.
 
 // The labels are spelled out because leaving them to the model's own reading
 // went wrong in a specific way: it treated low energy as sleepiness, calling a

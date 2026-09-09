@@ -226,7 +226,7 @@ export function cueLog(vitals: Vitals | undefined, irritation = 0): string {
 }
 
 // Events that move her outside the slow drift.
-export function applyEvent(current: Vitals, event: 'praised' | 'criticised' | 'spoken-to' | 'ignored-user'): Vitals {
+export function applyEvent(current: Vitals, event: 'praised' | 'criticised' | 'spoken-to' | 'ignored-user' | 'caught-interest'): Vitals {
   const next = { ...current };
   if (event === 'praised') { next.happiness = clamp(next.happiness + 0.2); next.affection = clamp(next.affection + 0.15); next.energy = clamp(next.energy + 0.1); }
   if (event === 'criticised') { next.happiness = clamp(next.happiness - 0.25); next.stress = clamp(next.stress + 0.2); }
@@ -243,6 +243,10 @@ export function applyEvent(current: Vitals, event: 'praised' | 'criticised' | 's
   // her to the top of both scales.
   if (event === 'spoken-to') { next.curiosity = toward(next.curiosity, CURIOSITY_ENGAGED, 0.5); next.affection = toward(next.affection, WARMED_BY_ATTENTION, 0.1); next.sleepiness = clamp(next.sleepiness - 0.05); }
   if (event === 'ignored-user') { next.stress = clamp(next.stress + 0.1); }
+  // Something on their screen caught her eye. Pulled toward engaged like
+  // 'spoken-to' rather than added, for the same reason: a run of them should
+  // settle her at interested, not stack her to the top of the scale.
+  if (event === 'caught-interest') { next.curiosity = toward(next.curiosity, CURIOSITY_ENGAGED, 0.5); next.sleepiness = clamp(next.sleepiness - 0.05); }
   return next;
 }
 
