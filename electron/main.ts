@@ -5428,7 +5428,7 @@ const GLOAT_EXAMPLES = [
  *
  * `onChunk` streams her version to the reader; the hosted one was not shown.
  */
-async function inHerVoice(answer: string, recent: { role: string; content: string }[], options: { maxTokens?: number; onChunk?: (text: string) => void } = {}): Promise<string> {
+async function inHerVoice(answer: string, recent: { role: string; content: string; attachments?: unknown[] }[], options: { maxTokens?: number; onChunk?: (text: string) => void } = {}): Promise<string> {
   const local = store.get('ai.config') as ProviderConfig | undefined;
   // Her own model says it — the one that knows how she talks. With a
   // conversation route set, that is the route: it answers as her every other
@@ -5456,7 +5456,9 @@ async function inHerVoice(answer: string, recent: { role: string; content: strin
     const started = Date.now();
     const message = await ollamaPost(
       // The last few turns, as themselves. Six is enough to know what "it" is.
-      [{ role: 'system', content: system }, ...seedEmoji(recent.filter(turn => turn.role === 'user' || turn.role === 'assistant').slice(-6).map(turn => ({ role: turn.role, content: turn.content.slice(0, 600) })))],
+      // A picture sent without a word under it is an empty message here, and
+      // the rewrite reasoned about "empty quotes" instead of speaking (2026-09-10).
+      [{ role: 'system', content: system }, ...seedEmoji(recent.filter(turn => turn.role === 'user' || turn.role === 'assistant').slice(-6).map(turn => ({ role: turn.role, content: turn.content.trim() ? turn.content.slice(0, 600) : turn.role === 'user' && turn.attachments?.length ? '(a picture, sent without a word — what you know is about it)' : turn.content })))],
       speaker,
       // A little room over the hosted cap: her version of a list is rarely
       // shorter than the list.
@@ -5480,6 +5482,16 @@ async function inHerVoice(answer: string, recent: { role: string; content: strin
 function composerTurns(system: string, user: string): { role: string; content: string }[] {
   // The first-person note rides in every system prompt, parsed answers and all:
   // everything she composes here is said as herself, or it is not hers to say.
+    // Her deliberation, said out loud: "The user sent empty quotes. This is a
+    // pause, a silence…" ran to 1,600 characters and went out as the reply,
+    // with no answer behind it to salvage (2026-09-10). The hosted words at
+    // least say the right thing, so they go as they came. The same when her
+    // version has grown far past the research — that much is not a voice, it
+    // is invention.
+    if (thinksAloud(hers) || hers.length > answer.length * 3 + 200) {
+      console.warn(`[ai] ${speaker.model} ${thinksAloud(hers) ? 'thought aloud instead of saying' : `wrote ${hers.length} chars around`} the hosted answer (${answer.length} chars) — sending the hosted words as they came`);
+      return answer;
+    }
   return isCue(user)
     ? [{ role: 'system', content: `${system} ${FIRST_PERSON_NOTE} ${CUE_NOTE}` }, { role: 'user', content: stageNote(user) }]
     : [{ role: 'system', content: `${system} ${FIRST_PERSON_NOTE}` }, { role: 'user', content: user }];
@@ -5909,6 +5921,10 @@ async function askForJournal() {
     console.warn('[journal] could not compose the ask:', error instanceof Error ? error.message : error);
   }
 }
+    // An ask asks. Handed the day's context the 9B wrote a jab about the car
+    // and the drive with nothing asked, and that went out as the evening's
+    // question (2026-09-10). The retry clock above tries again in a few minutes.
+    if (!/\?/.test(line) && !/\b(?:tell me|talk to me|out with it|spill|go on)\b/i.test(line)) { console.log(`[journal] the ask asked nothing — trying again shortly: ${JSON.stringify(line.slice(0, 80))}`); return; }
 
 /**
  * She noticed you moved. Called from the renderer on a tab change; nearly every
@@ -6481,7 +6497,11 @@ async function secondThought(repliedAt: number, input: { latest: string; reply: 
   if (isSilenced(store.get('pushback') as Pushback | undefined, now)) { console.log('[followup] held — she has been told to stop'); return; }
   if (inQuietHours(getPush().prefs, zonedNow(CHAT_TIMEZONE))) { console.log('[followup] held — quiet hours'); return; }
   const messages = ((store.get('chat.messages') as { role: string; content: string }[] | undefined) ?? []).slice(-14);
-  if (messages.at(-1)?.role !== 'assistant' || !messages.at(-1)?.content?.includes(input.reply.slice(0, 40))) { console.log('[followup] the conversation moved on — nothing to add'); return; }
+  // Compared without the emotion tags: the reply here still carries its
+  // "[annoyed]" and the stored message does not, so every tagged reply read as
+  // a conversation that had moved on and never got its beat later (2026-09-10).
+  const untagged = (text: string) => text.replace(/\[[a-z][a-z ]{1,20}\]\s*/gi, '');
+  if (messages.at(-1)?.role !== 'assistant' || !untagged(messages.at(-1)?.content ?? '').includes(untagged(input.reply).slice(0, 40))) { console.log('[followup] the conversation moved on — nothing to add'); return; }
   const character = getActiveCharacter();
   const route = conversationRoute() ?? input.config;
   const system = [character.identity, character.style, FIRST_PERSON_NOTE, NATURAL, NO_INVENTED_HISTORY].join('\n\n');
@@ -7214,7 +7234,7 @@ const promptState = {
   // room for. Five hundred characters of her own opinion came back as eighty.
   // Talking about her own thing echoes it too — the same reason a rant does.
   const ranting = Boolean(rantRoomNow || hers);
-  const headed = dropRoleHeader(dropInventedContact(dropStageDirections(dropInventedScreenTalk(brain.escalated || fromSearch || ranting ? deduped : dropRepeatedParagraphs(deduped, recent), grounded))));
+  const headed = dropRoleHeader(dropInventedContact(dropStageDirections(dropInventedScreenTalk(brain.escalated || fromSearch || ranting ? deduped : dropRepeatedParagraphs(deduped, recent, brain.hosted ? HOSTED_PARAGRAPHS : undefined), grounded))));
   const trimmed = headed;
   // Last, on the reply that survives everything else: a signature opener is
   // only a signature against what she said last time.

@@ -433,6 +433,13 @@ const NEAR_DUPLICATE = 0.6;
  * still leaves room for a real answer that needs two beats and a caveat.
  */
 const MAX_PARAGRAPHS = 3;
+/**
+ * A list is a shape, not padding or a loop: the parts are the answer, however
+ * many. Any line of the reply, not only a paragraph's first — the steps mostly
+ * sit under a lead-in ("If that fails, run:"), and tested paragraph by
+ * paragraph the list was never seen (2026-09-10).
+ */
+const ENUMERATED = /^\s*(?:[-*•]|\d+[.)])\s/m;
 
 /**
  * The closing question, asked a third time.
@@ -472,7 +479,7 @@ function overlap(a: string, b: string) {
   return shared / (first.size + second.size - shared);
 }
 
-export function dropRepeatedParagraphs(reply: string, previousReplies: string[]): string {
+export function dropRepeatedParagraphs(reply: string, previousReplies: string[], ceiling = MAX_PARAGRAPHS): string {
   const seen = new Set(
     previousReplies
       .flatMap(message => message.split(/\n{2,}|\n(?=[A-Z“"])/))
@@ -498,7 +505,12 @@ export function dropRepeatedParagraphs(reply: string, previousReplies: string[])
   if (!kept.length) return reply;
   // Cut from the end, because a loop degrades as it runs — the opening
   // paragraphs are the ones she actually meant.
-  return dropTrailingRepeatQuestions(kept.slice(0, MAX_PARAGRAPHS)).join('\n\n').trim();
+  // The ceiling is the caller's where the model is a hosted one: its four
+  // paragraphs were being cut to three here, before dropTackedOnParagraphs
+  // ever saw them, and the paragraph that went was the closing question or
+  // the one piece of advice that mattered — six replies in one afternoon
+  // (2026-09-10). A list keeps its parts.
+  return dropTrailingRepeatQuestions(ENUMERATED.test(reply) ? kept : kept.slice(0, ceiling)).join('\n\n').trim();
 }
 /**
  * The paragraph after the answer.
@@ -522,7 +534,6 @@ export function dropRepeatedParagraphs(reply: string, previousReplies: string[])
  * replied with a lead-in and two numbered steps, and that reply was exactly what
  * was wanted — it must survive this untouched, and it does, on both counts.
  */
-const ENUMERATED = /^\s*(?:[-*•]|\d+[.)])\s/;
 const TACKED_ON_CEILING = 2;
 
 export function dropTackedOnParagraphs(reply: string, lookedSomethingUp: boolean, ceiling = TACKED_ON_CEILING): string {
@@ -531,7 +542,7 @@ export function dropTackedOnParagraphs(reply: string, lookedSomethingUp: boolean
   const paragraphs = reply.split(/\n{2,}/);
   if (paragraphs.length <= ceiling) return reply;
   // A list is a shape, not padding: the parts are the answer.
-  if (paragraphs.some(paragraph => ENUMERATED.test(paragraph))) return reply;
+  if (ENUMERATED.test(reply)) return reply;
   return paragraphs.slice(0, ceiling).join('\n\n').trim();
 }
 

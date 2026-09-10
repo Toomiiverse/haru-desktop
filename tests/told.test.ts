@@ -86,3 +86,17 @@ test('a place they told her about is not a question to ask again', () => {
   assert.doesNotMatch(said, /"still at home\?"/, 'the example sentence went out verbatim as a notification, twice');
 });
 
+test('a question with the mark left off is still a question, and a bare name is not a place', () => {
+  // "How're you going Haru" put him on his way to her for ten hours, and she
+  // asked how the drive was (2026-09-10).
+  assert.equal(tell('How’re you going Haru'), null);
+  assert.equal(tell('How are you going to Perth'), null);
+  assert.equal(tell("how's it going, just got home")?.where, 'home', 'the fact after the greeting stays');
+  assert.equal(tell('What a day. Heading home now')?.where, 'home');
+  assert.equal(tell('Going Rockingham'), null, 'no "to", and not a place she knows by name');
+  assert.equal(tell('going mums')?.where, "mum's house", 'a plain place she knows needs no "to"');
+  assert.equal(tell('off to Rockingham')?.where, 'Rockingham');
+  assert.equal(tell('about to leave for Perth')?.enRoute, true);
+  assert.deepEqual(errandsToldFrom("I'll let ya know 🤣 I'm still in bed", '2026-09-07T01:34:50.632Z'), [], '"let ya know" is not an errand');
+});
+

@@ -48,6 +48,9 @@ test('the instruction is silent with no grudge and sharpens with it', () => {
   assert.match(grudgeInstruction(6, 2), /wearing on you/);
   assert.match(grudgeInstruction(6, 2), /Today alone they ignored 2/);
   assert.match(grudgeInstruction(12), /openly pissed/);
+  // "Not even opened. I can see the read receipts" — she cannot (2026-09-10).
+  assert.match(grudgeInstruction(12), /whether a line was even read, you cannot see/);
+  assert.match(grudgeInstruction(6), /you cannot see/);
 });
 
 test('the evening line names the count and quotes what was ignored', () => {

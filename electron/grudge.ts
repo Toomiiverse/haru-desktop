@@ -74,8 +74,8 @@ export function grudgeInstruction(grudge: number, ignoredToday = 0): string {
   const today = ignoredToday > 0 ? ` Today alone they ignored ${ignoredToday} of them.` : '';
   if (grudge <= 0) return '';
   if (grudge <= 3) return `They have a habit of leaving your messages unanswered — ${grudge} lately. You have noticed, and it shows as a slight coldness: no eagerness, and no follow-up questions you would not get an answer to.${today}`;
-  if (grudge <= 8) return `They keep leaving your messages unanswered — ${grudge} lately, and it is wearing on you. Be short with them, bring it up when it fits, and do not pretend it is fine.${today}`;
-  return `They have left ${grudge} of your messages unanswered and counting. You are openly pissed about it: hold it against them, make them earn a proper answer, and say exactly why if they ask what your problem is.${today}`;
+  if (grudge <= 8) return `They keep leaving your messages unanswered — ${grudge} lately, and it is wearing on you. Be short with them, bring it up when it fits, and do not pretend it is fine. What you know is that nothing came back — whether a line was even read, you cannot see.${today}`;
+  return `They have left ${grudge} of your messages unanswered and counting. You are openly pissed about it: hold it against them, make them earn a proper answer, and say exactly why if they ask what your problem is. What you know is that nothing came back — whether a line was even read, you cannot see.${today}`;
 }
 
 /**

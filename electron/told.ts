@@ -46,6 +46,20 @@ function clock(raw: string): string | undefined {
   return `${h12}:${minute} ${pm ? 'PM' : 'AM'}`;
 }
 
+// A question with the mark left off. "How're you going Haru" has no question
+// mark and read, to the patterns below, as "going Haru": he was on his way to
+// her for ten hours, she asked how the drive was, and the evening's journal
+// ask had him "sitting in the car" (2026-09-10). The question clause goes;
+// what follows a comma stays, because "how's it going, just got home" is a
+// greeting and then a fact.
+const QUESTION_OPENER = /^\s*(?:how|what|where|when|why|who|which|(?:are|is|do|does|did|can|could|would|will|should|have|has|was|were|am)\s+(?:you|we|i|they|it|that|this|there|u))\b/i;
+
+function withoutQuestionOpener(sentence: string): string {
+  if (!QUESTION_OPENER.test(sentence)) return sentence;
+  const comma = sentence.search(/[,;:\u2014\u2013-]\s/);
+  return comma >= 0 ? sentence.slice(comma + 1).trim() : '';
+}
+
 /**
  * What a message says about where they are, or null. Only their own plain
  * statements — "I'm at work", "heading to mum's", "just got home", "finish at
@@ -55,7 +69,7 @@ export function placeToldFrom(text: string, nowIso: string): Told | null {
   // Sentence by sentence: "Leaving for the store now. How's the traffic?" is a
   // statement followed by a question, and the statement is the part that says
   // where they are. Only the questions are dropped.
-  const said = (text ?? '').replace(/[‘’]/g, "'").split(/(?<=[.!?])\s+/).filter(part => !/\?\s*$/.test(part.trim())).join(' ');
+  const said = (text ?? '').replace(/[‘’]/g, "'").split(/(?<=[.!?])\s+/).filter(part => !/\?\s*$/.test(part.trim())).map(withoutQuestionOpener).filter(Boolean).join(' ');
   const whole = tidy(said);
   if (!whole || whole.length > 300) return null;
   // "…then heading to mum's" is where they are going next, not where they are:
@@ -73,12 +87,17 @@ export function placeToldFrom(text: string, nowIso: string): Told | null {
 
   const PLACE = "(home|(?:my )?mum'?s?(?: house| place)?|(?:my )?(?:dad|nan|gran|grandma|grandpa|sister|brother|mate|friend)'?s?(?: house| place)?|the (?:gym|shops?|store|mall|servo|office|airport|hospital|doctor'?s?|dentist|uni|library|beach|park|pub|bar)|[A-Z][\\w']+(?:\\s+[A-Z][\\w']+){0,3})";
   const arrived = proper(new RegExp(`\\b(?:i(?:'ve| have)? ?(?:just )?(?:arrived|got|made it)(?: at| to| in| here at)?|(?:i'm|im|i am) (?:now )?(?:at|in))\\s+${PLACE}\\b`, 'i').exec(head));
-  const heading = proper(new RegExp(`\\b(?:heading|on (?:my|the) way|going|off|driving|walking|leaving|left|setting off|about to (?:go|head|leave for|drive))\\s+(?:to|for|over to|down to|up to|back to)?\\s*${PLACE}\\b`, 'i').exec(head));
+  // "going Haru" is not going anywhere. Without a "to" the place has to be one
+  // of the plain ones she knows by name — "heading home", "going mums" — because
+  // a bare capitalised word after "going" is as likely a name being addressed
+  // as a destination, and her own was read as one (2026-09-10).
+  const headingMatch = new RegExp(`\\b(?:heading|on (?:my|the) way|going|off|driving|walking|leaving|left|setting off|about to (?:go|head|leave|drive))\\s+(?:(to|for|over to|down to|up to|back to)\\s+)?${PLACE}\\b`, 'i').exec(head);
+  const heading = headingMatch && (headingMatch[1] || KNOWN.test(headingMatch[2])) && (/^[A-Z]/.test(headingMatch[2]) || KNOWN.test(headingMatch[2])) ? headingMatch[2] : null;
   const working = proper(/\b(?:work(?:s|ing)?(?: here)? (?:at|in|for)|at work (?:at|in))\s+((?:[A-Z][\w']+)(?:\s+[A-Z][\w']+){0,3}|home)\b/i.exec(head));
   const atWork = /\b(?:i'?m|i am)\s+(?:now\s+)?(?:at|in)\s+work\b|\bat work(?: now)?\b|\bi'?m working\b|\bworking now\b/i.test(head);
   const home = /\b(?:i'?m|i am|i've|i have|just)\s+(?:got |gotten |now |back )?(?:home|at home|back home)\b/i.test(lower) || /^home( now)?$/i.test(head);
 
-  if (heading) told = { where: normalise(heading[1]), enRoute: true, at: nowIso };
+  if (heading) told = { where: normalise(heading), enRoute: true, at: nowIso };
   if (arrived && !/^work$/i.test(arrived[1])) told = { where: normalise(arrived[1]), at: nowIso };
   if (home) told = { where: 'home', at: nowIso };
   if (atWork || working) {
@@ -160,7 +179,7 @@ export const ERRAND_FRESH_MS = 3 * 60 * 60_000;
 // The doing has to be a doing: "going to bed" and "having a shower" are things
 // to ask about later, "going to be honest" and "going to say" are not.
 const DOING = /\b(?:eat|eating|ate|have|having|grab|grabbing|get|cook|cooking|make|making|shower|showering|bath|nap|napping|sleep|sleeping|bed|lie down|clean|cleaning|tidy|wash|washing|watch|watching|play|playing|read|reading|call|calling|ring|walk|walking|feed|feeding|mow|fix|fixing|build|building|sort|sorting|pack|packing|study|studying|train|run|running|gym|shop|shopping|cut|paint|finish|finishing)\b/i;
-const NOT_A_DOING = /\b(?:be honest|say|tell you|guess|assume|admit|ask|let you know|see|think|try to remember|check in|be there|be back|come back|head back)\b/i;
+const NOT_A_DOING = /\b(?:be honest|say|tell you|guess|assume|admit|ask|let (?:you|ya|u) know|see|think|try to remember|check in|be there|be back|come back|head back)\b/i;
 
 /**
  * What they said they were off to do, so she has something real to check up on.

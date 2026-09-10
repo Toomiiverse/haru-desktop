@@ -546,3 +546,15 @@ test('a claim to have checked is caught; an honest "I have not looked" is not', 
   assert.ok(!claimsChecked('You should check the vault yourself.'));
   assert.ok(!claimsChecked('Checked out, then. Go to bed.'));
 });
+
+test('a hosted reply keeps its fourth paragraph, and a list keeps its parts', () => {
+  // Six replies in one afternoon lost their last paragraph — the closing
+  // question, or the advice that mattered — to a cap of three that ran before
+  // the hosted ceiling of four ever applied (2026-09-10).
+  const four = 'One thing about the boot drive.\n\nTwo, check the ports.\n\nThree, the manual.\n\nWhich is it?';
+  assert.equal(dropRepeatedParagraphs(four, []), 'One thing about the boot drive.\n\nTwo, check the ports.\n\nThree, the manual.', 'the local ceiling is still three');
+  assert.equal(dropRepeatedParagraphs(four, [], 4), four, "the hosted ceiling is the caller's");
+  const steps = 'Boot from it and pick repair.\n\nIf that fails, run:\n- `bootrec /fixmbr`\n- `bootrec /fixboot`\n\nThe last one asks to add Windows.\n\nIf the drive still does not show, reseat it.';
+  assert.equal(dropRepeatedParagraphs(steps, []), steps, 'a list under a lead-in is still a list');
+  assert.equal(dropTackedOnParagraphs(steps, false), steps);
+});
