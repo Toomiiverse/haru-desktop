@@ -341,10 +341,17 @@ export function resolveBlockValue(block: MemoryBlock, sources: BlockSources, sho
         lines.push(`- ${session.day}: ${wrap(session.summary, 160)}`);
       }
       // Dated: a psychologist on Friday is not "today's agenda" on Sunday (2026-09-06).
+      // And not on the Sunday after either: the fix above only parted the
+      // future off, and an event two days gone that nobody ticked was still
+      // "Today's agenda: Sam Psychologist (event, 11:30 AM)" — she opened with
+      // "11:30 AM is over, Tommy. Don't ignore the calendar." (2026-09-13).
+      // A past item is named as past, with its day, so the time reads as gone.
       const agenda = (sources.agenda ?? []).filter(item => !item.done);
-      const today = agenda.filter(item => !Number.isFinite(item.daysAway) || (item.daysAway as number) <= 0);
+      const today = agenda.filter(item => !Number.isFinite(item.daysAway) || item.daysAway === 0);
+      const overdue = agenda.filter(item => Number.isFinite(item.daysAway) && (item.daysAway as number) < 0);
       const soon = agenda.filter(item => Number.isFinite(item.daysAway) && (item.daysAway as number) > 0 && (item.daysAway as number) <= 7);
       if (today.length) lines.push(`- Today's agenda: ${today.map(item => `${item.title} (${item.kind}${item.time ? `, ${item.time}` : ''})`).join(', ')}`);
+      if (overdue.length) lines.push(`- Not ticked off, from before today: ${overdue.map(item => `${item.title} (${item.kind}, was ${whenWas(item.date, item.daysAway as number)}${item.time ? ` ${item.time}` : ''})`).join(', ')} — these are past, not today's; the times have been and gone`);
       if (soon.length) lines.push(`- Coming up: ${soon.map(item => `${item.title} (${whenIs(item.date, item.daysAway as number)}${item.time ? ` ${item.time}` : ''})`).join(', ')}`);
       return lines.join('\n');
     }
@@ -543,6 +550,14 @@ export function formatMemoryBlocks(blocks: MemoryBlock[], sources: BlockSources,
   return { text, cut };
 }
 /** "tomorrow", or the weekday and date, for a list item a few days out. */
+/** "yesterday", "2 days ago (Fri 11 Sep)" — a past date, so it cannot be read as still to come. */
+function whenWas(date: string | undefined, daysAway: number): string {
+  const ago = daysAway === -1 ? 'yesterday' : `${-daysAway} days ago`;
+  const [year, month, day] = (date ?? '').split('-').map(Number);
+  if (!year || !month || !day) return ago;
+  return `${ago} (${new Date(Date.UTC(year, month - 1, day)).toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' })})`;
+}
+
 function whenIs(date: string | undefined, daysAway: number): string {
   if (daysAway === 1) return 'tomorrow';
   const [year, month, day] = (date ?? '').split('-').map(Number);

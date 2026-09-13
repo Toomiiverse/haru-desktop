@@ -146,6 +146,27 @@ test('resolveBlockValue surfaces projects and recent working state', () => {
   assert.ok(working.includes('Rental inspection'));
 });
 
+test('a past item nobody ticked is named as past, not as today\'s agenda', () => {
+  // Sunday 13 September 2026: a psychologist appointment from Friday, still
+  // open, was "Today's agenda: Sam Psychologist (event, 11:30 AM)" — and she
+  // opened with "11:30 AM is over, Tommy. Don't ignore the calendar."
+  const working = resolveBlockValue(findBlock(defaultMemoryBlocks(), 'working_state')!, {
+    character: { identity: '', style: '' },
+    profile: { nickname: '', occupation: '', about: '' },
+    memories: [],
+    sessions: [],
+    agenda: [
+      { title: 'Sam Psychologist', kind: 'event', done: false, date: '2026-09-11', time: '11:30 AM', daysAway: -2 },
+      { title: 'Joint Therapy', kind: 'event', done: false, date: '2026-09-18', time: '6:30 PM', daysAway: 5 },
+      { title: 'Verge collection', kind: 'event', done: false, date: '2026-09-13', daysAway: 0 },
+    ],
+  });
+  assert.match(working, /Today's agenda: Verge collection \(event\)/);
+  assert.doesNotMatch(working, /Today's agenda:[^\n]*Sam Psychologist/);
+  assert.match(working, /Not ticked off, from before today: Sam Psychologist \(event, was 2 days ago \(Fri,? 11 Sept?\) 11:30 AM\)/);
+  assert.match(working, /Coming up: Joint Therapy \(Fri,? 18 Sept? 6:30 PM\)/);
+});
+
 test('an explicit governed value wins over derivation', () => {
   const human = findBlock(defaultMemoryBlocks(), 'human')!;
   const edited = { ...human, value: 'Goes by Tommy.', edited: true };
