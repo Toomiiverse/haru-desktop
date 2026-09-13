@@ -11358,6 +11358,15 @@ function webDeps(): WebDeps {
         const voice = readVoiceConfig(store.get('voice'));
         const reason = readListenConfig(store.get('listen')).engine === 'off' ? 'not set up'
           : !voice.webEnabled || voice.engine === 'off' ? 'not set up'
+    addAgenda(title, date, time) {
+      // "9:00 AM" as she writes it, or "09:00" as a phone does; anything else
+      // is refused rather than saved wrong.
+      const parsed = time ? parseTimeOfDay(time) : null;
+      if (time && !parsed) return null;
+      const item = addKeptItem({ title, date, ...(parsed ? { time: formatTimeOfDay(parsed.hour, parsed.minute) } : {}), kind: 'task' });
+      console.log(`[agenda] the phone wrote one down: "${item.title}" on ${item.date}${item.time ? ` at ${item.time}` : ''}`);
+      return { id: item.id, title: item.title, date: item.date, ...(item.time ? { time: item.time } : {}) };
+    },
           : herAsleepNow() ? 'asleep'
           : undefined;
         return { enabled: !reason, engine, minutesToday, cap: 0, ...(reason ? { reason } : {}) };

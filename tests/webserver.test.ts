@@ -58,6 +58,7 @@ function deps(overrides: Partial<WebDeps> = {}): WebDeps {
     history: () => [],
     agenda: () => [],
     tickOff: () => {},
+    addAgenda: () => null,
     memories: () => [],
     diary: () => [{ day: '2026-08-29', title: 'Tommy was a pain.', text: 'Tommy was a pain. I read about Elden Ring instead.' }],
     her: () => ({ things: [], adventures: [], likes: [], wants: [], diary: { entries: 0 }, nightsOut: { count: 0 } }),
@@ -1047,5 +1048,29 @@ test('a call that cannot be placed says why and closes', async () => {
     const end = await dialled.closed;
     assert.equal(end.code, 1008);
     assert.equal(end.reason, 'She is asleep.');
+  } finally { await web.stop(); }
+});
+
+test('the phone can write a task onto her list, and a bad one is refused', async () => {
+  // A reminder added to the Haru list in Apple Reminders (Reminders.swift).
+  const written: { title: string; date: string; time?: string }[] = [];
+  const web = await door({
+    addAgenda: (title, date, time) => {
+      if (time && !/^\d{1,2}:\d{2}( [AP]M)?$/i.test(time)) return null;
+      written.push({ title, date, ...(time ? { time } : {}) });
+      return { id: `k${written.length}`, title, date, ...(time ? { time } : {}) };
+    },
+    agenda: () => written.map((item, index) => ({ id: `k${index + 1}`, title: item.title, date: item.date, time: item.time ?? null, kind: 'task', done: false, daysAway: 1 })),
+  });
+  try {
+    assert.equal((await web.call('/api/agenda', { method: 'POST', body: JSON.stringify({ title: 'Pay the rego', date: '2026-10-06' }) })).status, 401, 'signed out');
+    await web.signIn();
+    const saved = await (await web.call('/api/agenda', { method: 'POST', body: JSON.stringify({ title: '  Pay the rego ', date: '2026-10-06', time: '09:00' }) })).json();
+    assert.deepEqual(saved.item, { id: 'k1', title: 'Pay the rego', date: '2026-10-06', time: '09:00' });
+    assert.equal(saved.items.length, 1);
+    assert.equal((await web.call('/api/agenda', { method: 'POST', body: JSON.stringify({ title: 'No date' }) })).status, 400);
+    assert.equal((await web.call('/api/agenda', { method: 'POST', body: JSON.stringify({ title: 'Bad date', date: '6/10' }) })).status, 400);
+    assert.equal((await web.call('/api/agenda', { method: 'POST', body: JSON.stringify({ title: 'Bad time', date: '2026-10-06', time: 'nine-ish' }) })).status, 400);
+    assert.equal(written.length, 1);
   } finally { await web.stop(); }
 });

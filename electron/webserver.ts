@@ -96,6 +96,8 @@ export type WebDeps = {
   /** date is a bare YYYY-MM-DD; daysAway is its offset from today so the page can bucket into daily/weekly/monthly without redoing timezone-aware date math client-side. */
   agenda(): { id: string; title: string; date: string; time: string | null; kind: string; done?: boolean; daysAway: number }[];
   tickOff(id: string): Promise<void> | void;
+  /** A task the phone wrote down — a reminder added to the Haru list in Apple Reminders. Null when the time does not read as one. */
+  addAgenda(title: string, date: string, time?: string): { id: string; title: string; date: string; time?: string } | null;
   memories(): string[];
   /** Where they stand with her, for the status tab. See standing.ts. */
   standing(): Standing;
@@ -1192,6 +1194,21 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
   }
 
   if (req.method === 'GET' && path === '/api/agenda') return json(res, 200, { items: deps.agenda() });
+
+  // The phone's own list writes back: a reminder added to the Haru list in
+  // Apple Reminders arrives here and becomes a task of hers, so the two lists
+  // stay one list (Reminders.swift in haru-ios). A title and a bare date; a
+  // clock is optional and read as either "9:00 AM" or "09:00".
+  if (req.method === 'POST' && path === '/api/agenda') {
+    const body = await readBody(req) as { title?: unknown; date?: unknown; time?: unknown };
+    const title = typeof body.title === 'string' ? body.title.trim().slice(0, 140) : '';
+    const date = typeof body.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(body.date) ? body.date : '';
+    const time = typeof body.time === 'string' && body.time.trim() ? body.time.trim() : undefined;
+    if (!title || !date) return json(res, 400, { error: 'A title and a date, please.' });
+    const item = deps.addAgenda(title, date, time);
+    if (!item) return json(res, 400, { error: 'That time does not read as one.' });
+    return json(res, 200, { item, items: deps.agenda() });
+  }
 
   if (req.method === 'POST' && path === '/api/agenda/done') {
     const body = await readBody(req) as { id?: unknown };
