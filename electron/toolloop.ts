@@ -24,7 +24,8 @@
 // reported rather than looped on.
 
 import type { ChatMessage, ToolCall } from './provider';
-import { claimsDesktopAction, claimsTickOff, readsLikeAssistant, deniesItExists, thinksAloud, dropThinkingAloud, claimsChecked } from './reply';
+import { claimsDesktopAction, claimsTickOff, readsLikeAssistant, deniesItExists, thinksAloud, dropThinkingAloud, claimsChecked, asksToLookUp } from './reply';
+import { stripDelivery } from './delivery';
 
 /** How many rounds a single reply may spend before it has to settle. */
 export const MAX_TOOL_ROUNDS = 4;
@@ -41,7 +42,10 @@ export const MAX_TOOL_ROUNDS = 4;
  * is a sentence.
  */
 export function textToolCall(content: string): ToolCall | null {
-  const text = (content ?? '').trim();
+  // Kimi K3 wraps it: `[search_web(query="RX 9060 XT FSR 4 support")]`, and
+  // may put a delivery label in front (2026-09-14). One pair of brackets
+  // around the whole reply comes off, and any labels with it.
+  const text = stripDelivery(content ?? '').trim().replace(/^\[\s*([\s\S]*?)\s*\]$/, '$1').trim();
   // Kimi's own shape: name:0{json}, with or without a `functions.` prefix.
   const kimi = /^(?:functions\.)?([a-z][a-z0-9_]*):\d+\s*(\{[\s\S]*\})$/i.exec(text);
   if (kimi) {
@@ -147,7 +151,10 @@ export async function runToolLoop(conversation: ChatMessage[], deps: ToolLoopDep
   let tickRetried = false;
   let existenceRetried = false;
   let checkRetried = false;
+  let lookUpRetried = false;
   let voiceRetried = false;
+  // What they asked, read once before any corrective turn is pushed after it.
+  const theirWords = String([...conversation].reverse().find(turn => turn.role === 'user')?.content ?? '');
 
   for (let round = 0; round < maxRounds; round++) {
     // Reading anything ends her reach for the rest of the turn. pageWasRead
@@ -281,6 +288,23 @@ export async function runToolLoop(conversation: ChatMessage[], deps: ToolLoopDep
       conversation.push({
         role: 'user',
         content: 'You just said you checked, but you did not call anything — nothing was looked up. Call look_up_knowledge or search_web now for what they asked, and answer from what comes back. If you are not going to look, say plainly that you have not checked rather than implying you did.',
+      });
+      continue;
+    }
+
+    // Asked to look it up, and answered from memory. Kimi K3 did that on two
+    // of six "can you look up whether the RX 9060 XT supports FSR 4" turns,
+    // and on a third said "Let me check" and cited a spec sheet it never
+    // opened (2026-09-14). No claim to catch, so the ask is the tell: once,
+    // and only when nothing at all was called and a search was possible.
+    if (asksToLookUp(theirWords) && !lookUpRetried && !checkRetried && !ran.size && deps.canSearch()) {
+      lookUpRetried = true;
+      resetStream();
+      warn('[ai] they asked her to look it up and she answered from memory — asking her to look');
+      conversation.push(message);
+      conversation.push({
+        role: 'user',
+        content: 'They asked you to look that up, and you answered from memory — nothing was searched. Call search_web (or look_up_knowledge, if it is about their own notes) now and answer from what comes back. If you are not going to look, say so plainly rather than answering as though you had.',
       });
       continue;
     }

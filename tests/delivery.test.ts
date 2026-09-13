@@ -1,7 +1,22 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { cleaningChunks, deliveryRule, hasDeliveryLabel, splitDelivery, stripDelivery } from '../electron/delivery';
+import { cleaningChunks, deliveryReminder, deliveryRule, hasDeliveryLabel, splitDelivery, stripDelivery } from '../electron/delivery';
 import { EMOTIONS } from '../electron/emotion';
+
+test('a mood off the list is read as the one it means, and never reaches him', () => {
+  // Kimi K3, 2026-09-14: "[concerned] Stop." — the stripper left it in.
+  const said = splitDelivery('[concerned] Stop. [angry] You are not useless. [playful] Fine.');
+  assert.deepEqual(said.map(s => s.mood), ['worried', 'annoyed', 'smug']);
+  assert.equal(stripDelivery('[concerned] Stop.\n\n[concerned] You are not useless.'), 'Stop.\n\nYou are not useless.');
+  assert.equal(hasDeliveryLabel('[Concerned] Stop.'), true);
+  assert.equal(stripDelivery('[whatever] is not one of your moods.'), '[whatever] is not one of your moods.', 'a word that names no feeling is still hers');
+});
+
+test('the reminder names every mood and shows the shape', () => {
+  const said = deliveryReminder();
+  for (const mood of EMOTIONS) assert.ok(said.includes(mood), `missing ${mood}`);
+  assert.match(said, /\[annoyed\] like this/);
+});
 
 // Verbatim from the live conversation route, before any of this was wired up.
 const REAL = '[annoyed] Oh, perfect. You want me to care about your motherboard now. [neutral] C5 is usually memory initialization—reseat your RAM, one stick at a time.';

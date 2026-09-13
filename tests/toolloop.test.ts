@@ -100,6 +100,36 @@ test('a call written out as words is read as the call it is, and a sentence nami
   assert.equal(textToolCall('Tch. Fine. Sit with that.'), null);
   assert.equal(textToolCall('look_up_knowledge:0{not json'), null);
   assert.equal(textToolCall('adopt_interest(kind=game)'), null, 'a bare word is not a value she could have meant');
+  // Kimi K3's shapes, 2026-09-14: wrapped in brackets, with or without a label.
+  assert.deepEqual(textToolCall('[search_web(query="RX 9060 XT FSR 4 support")]'), { function: { name: 'search_web', arguments: '{"query":"RX 9060 XT FSR 4 support"}' } });
+  assert.deepEqual(textToolCall('[neutral] [search_web(query="RX 9060 XT FSR 4 support")]'), { function: { name: 'search_web', arguments: '{"query":"RX 9060 XT FSR 4 support"}' } });
+  assert.equal(textToolCall('[annoyed] Fine. Checking.'), null, 'a label in front of words is still words');
+});
+
+test('asked to look it up and answered from memory, she is sent to look once', async () => {
+  const asked = 'can you look up whether the RX 9060 XT supports FSR 4 yet';
+  const memory = 'The RX 9060 XT is RDNA 4, so it supports FSR 4 natively.';
+  const h = harness([says(memory), calls('search_web'), says('It does — AMD lists it, and the driver has it on.')]);
+  h.conversation[0].content = asked;
+  const result = await runToolLoop(h.conversation, h.deps);
+  assert.match(h.conversation.map(turn => String(turn.content ?? '')).join(' '), /They asked you to look that up/);
+  assert.deepEqual(h.toolsRun, ['search_web']);
+  assert.ok(h.resets >= 1, 'the answer from memory streamed and is taken back');
+  assert.match(result.content, /AMD lists it/);
+
+  const searched = harness([calls('search_web'), says(memory)]);
+  searched.conversation[0].content = asked;
+  assert.equal((await runToolLoop(searched.conversation, searched.deps)).content, memory, 'she looked, so the answer stands');
+  const notAsked = harness([says(memory)]);
+  notAsked.conversation[0].content = 'does the RX 9060 XT support FSR 4?';
+  assert.equal((await runToolLoop(notAsked.conversation, notAsked.deps)).content, memory, 'a question is not an ask to search');
+  const twice = harness([says(memory), says(memory)]);
+  twice.conversation[0].content = asked;
+  assert.equal((await runToolLoop(twice.conversation, twice.deps)).content, memory, 'asked once, then taken at her word');
+  const cannot = harness([says(memory)], { canSearch: false });
+  cannot.conversation[0].content = asked;
+  assert.equal((await runToolLoop(cannot.conversation, cannot.deps)).content, memory);
+  assert.equal(cannot.resets, 0);
 });
 
 test('a call written out as words runs like any other, and its words are taken back', async () => {

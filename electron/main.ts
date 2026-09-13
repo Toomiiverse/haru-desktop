@@ -99,7 +99,7 @@ import { pickToBringUp, REMEMBERED_PICKS } from './bored';
 import { grudgeInstruction, irritationAfterTally, nextGrudge, NOT_HELD_AGAINST_THEM, tallyDue, tallyInstruction, unanswered, type Said } from './grudge';
 import { groundedInstruction, placeQuery } from './places';
 import { daySaid, DEFAULT_BEDTIME_MINUTES, howTheDayWent, nightfallDue, sulkGrudge, sulkInstruction, sulkStillStands, type DayVerdict } from './nightfall';
-import { keepNights, nightNoteInstruction, nightsInstruction, nightsOn, nightsToDrawOn, pickInstruction, tidyPick, timeForSomething, type Night, nightToRaise } from './nightlife';
+import { keepNights, lastNightDay, nightNoteInstruction, nightsInstruction, nightsOn, nightsToDrawOn, pickInstruction, tidyPick, timeForSomething, type Night, nightToRaise } from './nightlife';
 import { gamesPlayedLately, GUIDE_ODDS, guideNoteInstruction, guideQuery, pickGame, withSteam, type Played } from './gamenight';
 import { addressesSomeone, adopt, ADOPT_ODDS, adoptInstruction, deepen, deepenInstruction, isOneOfTheirs, MAX_INTERESTS, nightQuery, NOBODY_HERE, parseAdoption, parseDeepening, pickTonight, tastesInstruction, unaddressed, type Interest } from './tastes';
 import { readSteamWebConfig, recentlyPlayed } from './steamweb';
@@ -118,7 +118,7 @@ import { openingInstruction, openingsDueNow, type DueOpening } from './standingt
 import { parseVaultMemoryPage, VAULT_MEMORY_PAGES, type VaultMemoryPage } from './vaultmemories';
 import { planRetirement, readAdmitted, recordsToRetire, type Admitted } from './vaultretire';
 import { afterReading, feedUrl, pagesUrl, parseReadingTake, PAGE_PROMPT, readableChapters, readingInstruction, readingNote, readReading, REQUEST_GAP_MS, searchUrl, tonightsPages, USER_AGENT, type ChapterRef, type Reading } from './manga';
-import { cleaningChunks, deliveryRule, hasDeliveryLabel, splitDelivery, stripDelivery } from './delivery';
+import { cleaningChunks, deliveryReminder, deliveryRule, hasDeliveryLabel, splitDelivery, stripDelivery } from './delivery';
 import { deedFrom, isADeed, keepDeed, readDeeds } from './deeds';
 import { isHerStanding } from './herstanding';
 import { enoughToStandOn, herStandings, keepSlight, parseStanding, readSlights, recentIncidents, slightsAsIncidents, standingDue, standingPrompt, HER_SUBJECT, type Incident, type Slight } from './herstanding';
@@ -7076,7 +7076,11 @@ const promptState = {
   // LAST_WORD still comes last of all, whichever brain is answering.
   const preTurnSystem = [
     ...(brain.hosted ? [chatDynamicContext(promptState, Boolean(away)), answering] : []),
-    aside, turnedUp, directions?.note ?? '', hers, talking, rantRoomNow, wakeNow, voiceRoomNow, emojiRut(herRecentReplies), LAST_WORD,
+    aside, turnedUp, directions?.note ?? '', hers, talking, rantRoomNow, wakeNow, voiceRoomNow, emojiRut(herRecentReplies),
+    // The labelling rule again, nearest his turn: at the end of the system
+    // message a hosted brain with twenty tools declared after it forgot it.
+    brain.hosted ? deliveryReminder() : '',
+    LAST_WORD,
   ].filter(Boolean);
   if (lastUser > 0) conversation.splice(lastUser, 0, ...preTurnSystem.map(content => ({ role: 'system', content })));
   // For tuning, when the environment asks for it: the prompt exactly as sent.
@@ -9676,7 +9680,7 @@ function lastNightKey(): string {
   const now = zonedNow(CHAT_TIMEZONE);
   const yesterday = new Date(now.getTime());
   yesterday.setDate(yesterday.getDate() - 1);
-  return now.getHours() < 12 ? localDateKey(yesterday) : nightKey(now);
+  return lastNightDay(getNights(), now.getHours(), localDateKey(now), localDateKey(yesterday));
 }
 
 /** The evening a small hour belongs to: 2am on Sunday is Saturday night. */

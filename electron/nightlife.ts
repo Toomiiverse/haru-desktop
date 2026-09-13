@@ -40,6 +40,22 @@ export const MAX_PER_NIGHT = 2;
 /** Not twice in quick succession — a night should have some shape to it. */
 export const NIGHT_GAP_MS = 75 * 60_000;
 
+/**
+ * The night that is hers to talk about now: the evening key of the night just
+ * gone, until the next one has begun.
+ *
+ * It used to switch to today's key at noon — tonight's, which had not happened
+ * — so from lunchtime until she started reading at 23:00 her prompt held no
+ * last night at all. Asked at 2:30 PM what she did last night, Kimi K3 answered
+ * with her daytime reading and K2.5 invented a chapter she had not read
+ * (2026-09-13). Before noon the small hours belong to yesterday's evening; from
+ * noon it is still that night, unless a night of today's has already started.
+ */
+export function lastNightDay(nights: Night[], hour: number, today: string, yesterday: string): string {
+  if (hour < 12) return yesterday;
+  return nights.some(night => night.day === today) ? today : yesterday;
+}
+
 export function nightsOn(nights: Night[], day: string): Night[] {
   return nights.filter(night => night.day === day);
 }

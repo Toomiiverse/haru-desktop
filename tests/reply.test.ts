@@ -11,6 +11,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { asksToLookUp } from '../electron/reply';
 import { answersThePrompt, CUE_NOTE, isCue, stageNote, claimsDesktopAction, claimsTickOff, dropInventedContact, dropInventedScreenTalk, dropRepeatedAgendaMentions, dropRepeatedParagraphs, dropRoleHeader, dropStageDirections, dropTackedOnParagraphs, readsLikeAssistant, dropRepeatedOpener, dropEchoOpener, dropRepeatedSentences, fixStatedClock, fixStatedReminderTime, fixStatedMinutes, deniesItExists, claimsChecked, thinksAloud, dropThinkingAloud } from '../electron/reply';
 
 // -- claiming to have touched the machine -------------------------------------
@@ -557,4 +558,23 @@ test('a hosted reply keeps its fourth paragraph, and a list keeps its parts', ()
   const steps = 'Boot from it and pick repair.\n\nIf that fails, run:\n- `bootrec /fixmbr`\n- `bootrec /fixboot`\n\nThe last one asks to add Windows.\n\nIf the drive still does not show, reseat it.';
   assert.equal(dropRepeatedParagraphs(steps, []), steps, 'a list under a lead-in is still a list');
   assert.equal(dropTackedOnParagraphs(steps, false), steps);
+});
+
+test('an ask to look something up is told from a question or a statement', () => {
+  for (const said of [
+    'can you look up whether the RX 9060 XT supports FSR 4 yet',
+    'Okay - Haru, search up Zelda games currently on the Nintendo switch 2 🙄',
+    'The switch 2 is out - fact check it if you want',
+    'look it up',
+    'google it',
+    'Haru search for a decent burger near me',
+    'can you find out if Umart is open',
+  ]) assert.ok(asksToLookUp(said), `missed: ${said}`);
+  for (const said of [
+    'does the RX 9060 XT support FSR 4?',
+    'I looked it up already',
+    'I really look up to Sudin',
+    'I was searching for my keys all morning',
+    'What Zelda games are currently on the switch 2?',
+  ]) assert.ok(!asksToLookUp(said), `false alarm: ${said}`);
 });

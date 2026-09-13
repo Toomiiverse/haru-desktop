@@ -30,17 +30,47 @@ export function deliveryRule(): string {
   return `Before each sentence of your reply, put how that sentence should sound in square brackets, chosen from exactly this list: ${EMOTIONS.join(', ')}. Like this: [annoyed] Do not touch that. [curious] What did you even try? Every sentence gets one, they are stripped before he sees them, and nothing else about how you write changes.`;
 }
 
+/**
+ * Moods she was not given, and the ones they are.
+ *
+ * Kimi K3, pressed to label every sentence, wrote "[concerned] Stop." — a word
+ * off the list, which the stripper left in front of him (2026-09-14). The list
+ * stays the list; these are read as the mood they plainly mean, and taken out
+ * like any other label. Only words that name a feeling or a tone of voice:
+ * "[redacted]" and "[whatever]" are still hers.
+ */
+export const MOOD_ALIASES: Readonly<Record<string, EmotionName>> = {
+  concerned: 'worried', anxious: 'worried', nervous: 'worried', sad: 'worried', upset: 'worried', hurt: 'worried', scared: 'worried',
+  angry: 'annoyed', irritated: 'annoyed', frustrated: 'annoyed', exasperated: 'annoyed', impatient: 'annoyed', mad: 'annoyed', grumpy: 'annoyed',
+  amused: 'smug', teasing: 'smug', playful: 'smug', sarcastic: 'smug', proud: 'smug', mocking: 'smug', cocky: 'smug',
+  excited: 'happy', pleased: 'happy', cheerful: 'happy', delighted: 'happy',
+  warm: 'affectionate', fond: 'affectionate', tender: 'affectionate', gentle: 'affectionate', soft: 'affectionate', caring: 'affectionate',
+  flustered: 'embarrassed', shy: 'embarrassed', sheepish: 'embarrassed',
+  confused: 'curious', puzzled: 'curious', intrigued: 'curious', interested: 'curious',
+  serious: 'determined', stern: 'determined', firm: 'determined', resolute: 'determined',
+  shocked: 'surprised', startled: 'surprised',
+  tired: 'sleepy', drowsy: 'sleepy',
+  calm: 'neutral', flat: 'neutral', deadpan: 'neutral',
+  dismissive: 'bored', indifferent: 'bored', unimpressed: 'bored', cold: 'bored',
+};
+
+const LABEL_WORDS = [...EMOTIONS, ...Object.keys(MOOD_ALIASES)].join('|');
+const moodOf = (word: string): EmotionName => {
+  const said = word.toLowerCase();
+  return (EMOTIONS as readonly string[]).includes(said) ? said as EmotionName : MOOD_ALIASES[said];
+};
+
 export type Delivered = { mood: EmotionName | null; text: string };
 
 // A label is a known mood in brackets at the start of a segment. Anything else
 // in brackets is hers — "[redacted]", a markdown link — and must survive.
-const LABEL = new RegExp(`^\\s*\\[(${EMOTIONS.join('|')})\\]\\s*`, 'i');
+const LABEL = new RegExp(`^\\s*\\[(${LABEL_WORDS})\\]\\s*`, 'i');
 // A fresh regex each call rather than a shared /g one, which would carry
 // lastIndex between calls — and this runs on every chunk of every stream.
 // The space after a label goes with it, or every removal leaves a double space
 // in the middle of her sentence. Removing more still only ever shortens the
 // text, so the streaming prefix stays monotonic.
-const withoutLabels = (text: string) => text.replace(new RegExp(`\\[(?:${EMOTIONS.join('|')})\\][ \\t]?`, 'gi'), '');
+const withoutLabels = (text: string) => text.replace(new RegExp(`\\[(?:${LABEL_WORDS})\\][ \\t]?`, 'gi'), '');
 
 /**
  * The reply, split into what to say and how to say it.
@@ -53,13 +83,13 @@ export function splitDelivery(reply: string): Delivered[] {
   const text = (reply ?? '').trim();
   if (!text) return [];
   const out: Delivered[] = [];
-  for (const piece of text.split(new RegExp(`(?=\\[(?:${EMOTIONS.join('|')})\\])`, 'i'))) {
+  for (const piece of text.split(new RegExp(`(?=\\[(?:${LABEL_WORDS})\\])`, 'i'))) {
     const chunk = piece.trim();
     if (!chunk) continue;
     const found = LABEL.exec(chunk);
     const said = chunk.replace(LABEL, '').trim();
     if (!said) continue;
-    out.push({ mood: found ? found[1].toLowerCase() as EmotionName : null, text: said });
+    out.push({ mood: found ? moodOf(found[1]) : null, text: said });
   }
   return out;
 }
@@ -111,5 +141,24 @@ export function cleaningChunks(onChunk: (text: string) => void): (chunk: string)
 
 /** Whether anything in this text still looks like a delivery label. */
 export function hasDeliveryLabel(text: string): boolean {
-  return new RegExp(`\\[(?:${EMOTIONS.join('|')})\\]`, 'i').test(text ?? '');
+  return new RegExp(`\\[(?:${LABEL_WORDS})\\]`, 'i').test(text ?? '');
+}
+
+/**
+ * The rule again, where she reads it last.
+ *
+ * At the end of a twelve-thousand-token system message, with twenty tools
+ * declared after it, Kimi K3 labelled none of seven replies; Kimi K2.5 labelled
+ * every one from the same prompt (2026-09-14). Said again just before his turn,
+ * K3 labelled about half, and wrote no worse for it. A missing label costs the
+ * keyword reading in its place (sentenceStreamer), which is how she sounded
+ * before labels existed.
+ *
+ * What did not go in, and why: showing her earlier replies with labels on got
+ * K3 to label every reply, and flattened her — most sentences [neutral], one
+ * reply fifty-eight "[annoyed] And I'm tired of…" sentences long until the
+ * token cap stopped it. A label on every reply is not worth that.
+ */
+export function deliveryReminder(): string {
+  return `[Label every sentence of this reply with how it sounds — [annoyed] like this — using only these: ${EMOTIONS.join(', ')}. Your replies above were shown with their labels taken out; label yours anyway.]`;
 }

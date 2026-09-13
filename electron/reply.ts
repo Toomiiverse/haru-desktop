@@ -890,6 +890,18 @@ const DENIES_IT_EXISTS = /\b(?:does(?:n'?t| not) exist|do(?:n'?t| not) exist|the
  */
 const CLAIMS_CHECKED = /\b(?:I(?:'ve| have| just)? (?:checked|looked(?: it)? up|searched|had a look|went through|dug through|scanned|combed through)|(?:checked|searched|looked through) (?:your|the|my) (?:vault|notes|files|knowledge|records|docs|documents|library))\b/i;
 
+/**
+ * Their message asks her to look something up — "can you look up…", "search
+ * for…", "google it", "fact check it". His words, not hers: the loop presses a
+ * search on her when she answers one of these from memory (toolloop.ts). The
+ * past tense ("I looked it up") and "look up to" are statements, not asks.
+ */
+const ASKS_TO_LOOK_UP = /\b(?:look (?:it |that |this |them |those |one )?up\b(?! to)|search (?:up|for|online|the web|the internet|it|that)\b|google (?:it|that|this|for)\b|fact[- ]?check|check (?:online|the web|the internet)\b|find out (?:online|if|whether)\b)|^\s*(?:(?:hey|ok|okay|oi)[,!]?\s+)?(?:haru[,!]?\s+)?(?:can you |could you |please )?(?:search|google)\b/i;
+
+export function asksToLookUp(message: string): boolean {
+  return ASKS_TO_LOOK_UP.test((message ?? '').replace(/[‘’]/g, "'"));
+}
+
 export function claimsChecked(reply: string): boolean {
   return CLAIMS_CHECKED.test((reply ?? '').replace(/[‘’]/g, "'"));
 }
