@@ -59,7 +59,7 @@ import { cancelPower, closeApp, findApps, isCancellable, launch, listRunning, ma
 import { looksLikeScreenshot, maySpeak, readScreenshotConfig, screenshotPrompt, SETTLE_MS, SETTLE_TRIES, type ScreenshotConfig } from './screenshots';
 import { look, photoName, readShotDescription, readVisionConfig, whileLooking, type VisionConfig } from './vision';
 import { CAPTION_MAX_CHARS, describedShots, forgetCaptions, moreThanOnePass, noteCaption, noteFailure, readCaptions, shotsNeedingALook } from './seen';
-import { EXPRESSIVE, LAST_WORD, NATURAL, NO_INVENTED_HISTORY, NO_ABANDON_THREAD, readsAsRough, roomInstruction, HER_EMOJI, emojiRut, roomToRant, askingAboutHer, herSubjectNote, namesIn, justTalking, JUST_TALKING_NOTE } from './room';
+import { EXPRESSIVE, HOSTED_VOICE, LAST_WORD, NATURAL, NO_INVENTED_HISTORY, NO_ABANDON_THREAD, readsAsRough, roomInstruction, HER_EMOJI, emojiRut, roomToRant, askingAboutHer, herSubjectNote, namesIn, justTalking, JUST_TALKING_NOTE } from './room';
 import { journalStance } from './journal';
 import { haruNote, rangeStats, type HaruNote, type RangeName, type RangeStats } from './journal';
 import { describeRating, entryFor, journalPrompt, readEntries, readJournalConfig, readRating, recentTrend, shouldAsk, upsertEntry, SCALE_MAX, type JournalConfig, type JournalEntry } from './journal';
@@ -7073,13 +7073,11 @@ const promptState = {
   // A hosted brain gets the changing context here rather than in the system
   // message, so the head stays byte-identical for the endpoint's prefix cache;
   // the local one already has it, in the tone-last order it was written for.
-  // LAST_WORD still comes last of all, whichever brain is answering.
+  // LAST_WORD comes last for the local brain; a hosted one gets her voice note
+  // after it (HOSTED_VOICE), since that is where a hosted model reads hardest.
   const preTurnSystem = [
     ...(brain.hosted ? [chatDynamicContext(promptState, Boolean(away)), answering] : []),
     aside, turnedUp, directions?.note ?? '', hers, talking, rantRoomNow, wakeNow, voiceRoomNow, emojiRut(herRecentReplies),
-    // The labelling rule again, nearest his turn: at the end of the system
-    // message a hosted brain with twenty tools declared after it forgot it.
-    brain.hosted ? deliveryReminder() : '',
     LAST_WORD,
   ].filter(Boolean);
   if (lastUser > 0) conversation.splice(lastUser, 0, ...preTurnSystem.map(content => ({ role: 'system', content })));
@@ -7093,6 +7091,10 @@ const promptState = {
   // her mouth and not her hands. Told firmly that a page cannot give it orders, a
   // 14B still obeyed one in four of them — so the guarantee cannot rest on the
   // wording. With no tools on the table the worst a hostile page can do is be
+    // After LAST_WORD, for a hosted brain only: her register and the labelling
+    // rule, nearest his turn, where a model that reads the end of the prompt
+    // hardest still has them (HOSTED_VOICE in room.ts, deliveryReminder).
+    brain.hosted ? `[${HOSTED_VOICE} ${deliveryReminder()}]` : '',
   // quoted; it cannot put anything on the calendar or fetch anything further.
   // She still has every tool back on the next message.
   pageWasRead = false;

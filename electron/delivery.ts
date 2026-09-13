@@ -145,12 +145,13 @@ export function hasDeliveryLabel(text: string): boolean {
 }
 
 /**
- * The rule again, where she reads it last.
+ * The rule again, where she reads it last — the tail of the hosted voice note
+ * (HOSTED_VOICE in room.ts, joined in main.ts after LAST_WORD).
  *
  * At the end of a twelve-thousand-token system message, with twenty tools
  * declared after it, Kimi K3 labelled none of seven replies; Kimi K2.5 labelled
  * every one from the same prompt (2026-09-14). Said again just before his turn,
- * K3 labelled about half, and wrote no worse for it. A missing label costs the
+ * K3 labels about half, and writes no worse for it. A missing label costs the
  * keyword reading in its place (sentenceStreamer), which is how she sounded
  * before labels existed.
  *
@@ -160,5 +161,5 @@ export function hasDeliveryLabel(text: string): boolean {
  * token cap stopped it. A label on every reply is not worth that.
  */
 export function deliveryReminder(): string {
-  return `[Label every sentence of this reply with how it sounds — [annoyed] like this — using only these: ${EMOTIONS.join(', ')}. Your replies above were shown with their labels taken out; label yours anyway.]`;
+  return `Label every sentence with how it sounds, like this: [annoyed] Knock it off. [curious] What actually broke? Only these: ${EMOTIONS.join(', ')}.`;
 }

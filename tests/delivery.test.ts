@@ -15,7 +15,8 @@ test('a mood off the list is read as the one it means, and never reaches him', (
 test('the reminder names every mood and shows the shape', () => {
   const said = deliveryReminder();
   for (const mood of EMOTIONS) assert.ok(said.includes(mood), `missing ${mood}`);
-  assert.match(said, /\[annoyed\] like this/);
+  assert.match(said, /like this: \[annoyed\] Knock it off\. \[curious\] What actually broke\?/);
+  assert.ok(!said.startsWith('[') && !said.endsWith(']'), 'main.ts wraps it with the voice note, as tested');
 });
 
 // Verbatim from the live conversation route, before any of this was wired up.
