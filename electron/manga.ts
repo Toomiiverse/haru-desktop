@@ -167,6 +167,25 @@ export function readingInstruction(reading: Reading, from: number, to: number, p
   ].join('\n');
 }
 
+/**
+ * Where she is up to, for the her_own block.
+ *
+ * Asked "what chapter are you up to" she said she was not reading it, only
+ * reading *about* it — while the bookmark stood at page 46 of chapter 1, read
+ * page by page over four nights (2026-09-12). Nothing in her prompt carried
+ * the bookmark: the night note said "read about", the want said "researched
+ * the ending", and the pages themselves were only ever shown to the night
+ * pass. This is the one line that says what she has actually read.
+ */
+export function readingNote(reading: Reading | null): string {
+  if (!reading?.title) return '';
+  const where = reading.page > 0
+    ? `${reading.page} of ${reading.pages || '?'} pages into chapter ${reading.chapter}`
+    : `about to start chapter ${reading.chapter}${reading.pages ? ` (${reading.pages} pages)` : ''}`;
+  const done = reading.finished > 0 ? `${reading.finished} chapter${reading.finished === 1 ? '' : 's'} finished, ` : '';
+  return `- Your manga, which you read page by page on MangaDex, a dozen pages a night in the small hours: ${reading.title} — ${done}${where}. Asked where you are up to, that is the answer. You have read those pages yourself, not a summary of them, and nothing past them.`;
+}
+
 export type ReadingTake = { note: string; stands: string };
 
 export function parseReadingTake(raw: string): ReadingTake | null {

@@ -27,7 +27,7 @@ import { looksLikeNothing, readListenConfig, transcribe, type ListenConfig } fro
 import { spokenVocabulary } from './vocabulary';
 import { herNameFrom } from './hername';
 import { apnsPayload, apnsSigner, readApnsConfig, readApnsDevices, sendApns, type ApnsDevice } from './apns';
-import { looksLikeAnEcho, parseSecondThought, secondThoughtDelay, secondThoughtNote, wantsSecondThought, SECOND_THOUGHT_GAP_MS } from './secondthought';
+import { looksLikeAnEcho, parseSecondThought, readsAsTheirAnswer, secondThoughtDelay, secondThoughtNote, wantsSecondThought, SECOND_THOUGHT_GAP_MS } from './secondthought';
 import { applyRevoices, dueForRevoice, exchangesFrom as revoiceExchanges, grounded, parseRevoices, readRevoiceState, revoicePrompt, withRewrites, REVOICE_EVERY, type Revoice } from './revoice';
 import { decide, readEscalateConfig, type EscalateConfig } from './escalate';
 import { describeFailure, fromOpenAIReply, isOpenAIShaped, toOpenAIBody, DEFAULT_ENDPOINTS, type ChatTool, type Provider } from './provider';
@@ -117,7 +117,7 @@ import { startWebServer, type WebDeps } from './webserver';
 import { openingInstruction, openingsDueNow, type DueOpening } from './standingtime';
 import { parseVaultMemoryPage, VAULT_MEMORY_PAGES, type VaultMemoryPage } from './vaultmemories';
 import { planRetirement, readAdmitted, recordsToRetire, type Admitted } from './vaultretire';
-import { afterReading, feedUrl, pagesUrl, parseReadingTake, PAGE_PROMPT, readableChapters, readingInstruction, readReading, REQUEST_GAP_MS, searchUrl, tonightsPages, USER_AGENT, type ChapterRef, type Reading } from './manga';
+import { afterReading, feedUrl, pagesUrl, parseReadingTake, PAGE_PROMPT, readableChapters, readingInstruction, readingNote, readReading, REQUEST_GAP_MS, searchUrl, tonightsPages, USER_AGENT, type ChapterRef, type Reading } from './manga';
 import { cleaningChunks, deliveryRule, hasDeliveryLabel, splitDelivery, stripDelivery } from './delivery';
 import { deedFrom, isADeed, keepDeed, readDeeds } from './deeds';
 import { isHerStanding } from './herstanding';
@@ -4237,6 +4237,10 @@ const memoryStore = createMemoryStore({
       tastesInstruction(interests),
       firstsNote(interests, today),
       wantsNote(getWants()),
+      // Right behind the night, not at the tail: the block is cut from the
+      // end when it is over budget, and this is the line that answers "what
+      // chapter are you up to".
+      readingNote(readReading(store.get('her.reading'))),
       diaryContext(recentEntries(app.getPath('home'), 2)),
     ].filter(Boolean).join('\n');
   },
@@ -5633,6 +5637,11 @@ async function quipOfHerOwn(system: string, user: string, config: ProviderConfig
   const line = await ollamaQuip(system, user, config);
   if (!reusesExample(line, examples)) return line;
   console.warn('[react] she read an example back word for word — asking again');
+    // And the other way round: a line lifted out of an example is a copy too.
+    // Rated down, she sent back a whole paragraph of the reply that was rated
+    // — "Actually wait—Switch 2? Did they finally confirm the hardware…" — and
+    // then had to apologise for asking what she had just answered (2026-09-11).
+    if (said.length >= 20 && shown.includes(said)) return true;
   const again = await ollamaQuip(`${system} You just used one of those examples exactly as written. They are a tone to aim at, not lines to copy. Write one of your own about what is actually happening here.`, user, config);
   if (reusesExample(again, examples)) console.warn('[react] and again on the second try — sending it anyway');
   return again;
@@ -5914,6 +5923,13 @@ async function askForJournal() {
       store.set('journal.askedOn', today);
       console.log(`[journal] asked for today's entry (${line.length} chars)`);
       void speak(line, classifyEmotion(line, provider));
+    // The ask comes after the day, not before it. Given the afternoon's RAM
+    // troubleshooting after the ask, the 9B answered the troubleshooting: a
+    // paragraph on memory training with the question tacked on the end, or
+    // "I told you to look it up yourself" with no question at all
+    // (2026-09-11, 2026-09-12).
+    'That is the day so far, and it is done — do not answer it, continue it or give advice on it. Ask them how their day was and how they are feeling, so it can go in their journal. One or two short lines, in your own voice.',
+    'Ask as though you want to know, not as though a form needs filling in. Do not mention journals, entries, logging, tracking or scores, and do not list the things you want rated.',
     } else {
       console.log('[journal] the ask was dropped — will try again shortly');
     }
@@ -6529,6 +6545,7 @@ async function secondThought(repliedAt: number, input: { latest: string; reply: 
 }
 
 /** A fixed loopback port for the Google consent answer, so the ssh forward can be written down once. */
+    if (readsAsTheirAnswer(line)) { console.log(`[followup] dropped — it is their side of the conversation, not hers: ${JSON.stringify(line.slice(0, 80))}`); return; }
 const GOOGLE_CONSENT_PORT = 8790;
 let pendingGoogleConsent: Promise<{ url: string; port: number }> | null = null;
 
@@ -7256,7 +7273,7 @@ const promptState = {
   if (promised) {
     const theirs = messages.filter(message => message.role === 'user').slice(-4).map(message => String(message.content ?? ''));
     const item = addKeptItem({ title: promisedTitle(theirs), date: promised.date, time: promised.time, kind: 'task' });
-    console.log(`[remind] she promised one in her reply — written down: "${item.title}" on ${item.date} at ${item.time}`);
+    console.log(`[remind] she promised one in her reply — written down: "${item.title}" on ${item.date}${item.time ? ` at ${item.time}` : ''}`);
   }
   // The eye-roll in thirty-five of forty replies: the wording that caused it is
   // fixed (EXPRESSIVE), and this catches what the wording does not.

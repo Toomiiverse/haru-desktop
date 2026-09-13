@@ -170,9 +170,13 @@ export function unlabel(note: string): string {
 
 export function nightsInstruction(nights: Night[]): string {
   if (!nights.length) return '';
-  const said = nights.slice(-MAX_PER_NIGHT).map(night => `- ${night.interest ? `${night.interest}, one of your own things` : night.game ? `${night.game}, which they have been playing — sizing it up` : night.about}: ${unlabel(night.note)}`).join('\n');
+  // A manga night is pages read, not a subject read about: told "you read
+  // about these" for a chapter she had turned page by page, she denied reading
+  // it at all (2026-09-12).
+  const pages = (night: Night) => night.sources.some(source => source.includes('mangadex.org'));
+  const said = nights.slice(-MAX_PER_NIGHT).map(night => `- ${pages(night) ? `${night.about} — pages you read yourself, one of your own things` : night.interest ? `${night.interest}, one of your own things` : night.game ? `${night.game}, which they have been playing — sizing it up` : night.about}: ${unlabel(night.note)}`).join('\n');
   return [
-    'Last night — the small hours just gone, while they were asleep — and it did happen: you read about these, and this is the whole of it:',
+    'Last night — the small hours just gone, while they were asleep — and it did happen: you read about these (or, where it says pages, read the pages themselves), and this is the whole of it:',
     said,
     'Nothing else belongs to last night. Other nights of yours are in your diary with their dates, and your own things are yours across many nights; asked about last night, this list alone is the answer, and an earlier night is said as an earlier night or not at all.',
     'It is yours to bring up, and yours to be asked about. Everything you know about it is above: if they push past it, say you only read a bit about it rather than filling the gap.',

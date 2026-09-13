@@ -30,7 +30,24 @@ export function wantsSecondThought(input: { hers: boolean; ranting: boolean; rep
 
 export function secondThoughtNote(secondsAgo: number): string {
   const ago = secondsAgo < 75 ? 'about a minute' : `about ${Math.round(secondsAgo / 60)} minutes`;
-  return `You said the last thing above ${ago} ago and they have not answered. This is not a reply to anything — it is you, a beat later, adding to what you said if there is something worth adding: the point you left out, the thing you actually want to ask them about it, or something of your own you want to bring up. One to three lines, as a new message, no greeting and no recap of what you already said. Never repeat what they said or what you said — a line that is already in the conversation is not a new message. If there is nothing worth adding, answer with a single dash and nothing else.`;
+  return `You said the last thing above ${ago} ago and they have not answered. This is not a reply to anything — it is you, a beat later, adding to what you said if there is something worth adding: the point you left out, the thing you actually want to ask them about it, or something of your own you want to bring up. One to three lines, as a new message, no greeting and no recap of what you already said. Never repeat what they said or what you said — a line that is already in the conversation is not a new message. It is your line and only yours: if what comes to mind is what they would say back — their answer, their excuse, what they have tried — that is not yours to write; answer with a single dash instead. If there is nothing worth adding, answer with a single dash and nothing else.`;
+}
+
+/**
+ * Their line, written by her.
+ *
+ * Asked what she might add a minute after "clear CMOS, try one stick", the
+ * model wrote "done that already. cleared cmos, single stick tested, even
+ * swapped slots…" — his answer to her, sent as hers, painted into the day, and
+ * treated by her next reply as something he had said (2026-09-12). A line that
+ * opens by reporting back on her own instructions is not hers. Narrow on
+ * purpose: "yeah. that." is a real second thought of hers, so a bare yes or no
+ * is left alone and only the report-back forms are caught.
+ */
+const THEIR_ANSWER = /^\s*(?:done(?: that| it| all(?: of)? that)?(?: already)?|did (?:that|it|all(?: of)? that)(?: already)?|already (?:did|done|tried)(?: that| it)?|i(?:'ve|’ve| have)? (?:cleared|tested|swapped|reseated|flashed|updated|reinstalled|unplugged|reflashed))\b/i;
+
+export function readsAsTheirAnswer(line: string): boolean {
+  return THEIR_ANSWER.test(line ?? '');
 }
 
 /** What she said, or null when she chose not to. */

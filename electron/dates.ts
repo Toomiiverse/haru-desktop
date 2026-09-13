@@ -2,6 +2,10 @@
 // so the logic can be exercised directly in plain Node.
 
 const WEEKDAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+/** A month by name, as a capturing group — "oct", "october", "sept". Shared with the reminder patterns so they agree on what a date looks like. */
+export const MONTH_PATTERN = '(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)';
+const monthIndex = (name: string) => MONTHS.indexOf(name.slice(0, 3).toLowerCase());
 
 // Reads the wall-clock date/time in `timeZone` as local Date fields, so day-boundary
 // math (getDate/getHours/etc.) reflects that zone regardless of the OS's own timezone.
@@ -79,6 +83,24 @@ export function resolveDate(input: string, now: Date): string | null {
       // Guards against overflow, e.g. the 31st rolling into the next month.
       if (candidate.getDate() === day) return localDateKey(candidate);
     }
+  }
+
+  // A calendar date: "the 6th of october", "6 oct", "october 6th", "oct 6, 2027",
+  // "6/10" (day first, as it is written here). Nothing above read one, so
+  // "remind me to do my car registration on the 6th of October" was filed for
+  // the day it was said with the date left in the title (2026-09-11). Without a
+  // year, a date already past is next year's.
+  const dayFirst = text.match(new RegExp(`^(?:on )?(?:the )?(\\d{1,2})(?:st|nd|rd|th)?(?: of)? ${MONTH_PATTERN}(?:,? (\\d{4}))?$`, 'i'));
+  const monthFirst = text.match(new RegExp(`^(?:on )?${MONTH_PATTERN} (?:the )?(\\d{1,2})(?:st|nd|rd|th)?(?:,? (\\d{4}))?$`, 'i'));
+  const numeric = text.match(/^(?:on )?(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?$/);
+  const parts = dayFirst ? { day: Number(dayFirst[1]), month: monthIndex(dayFirst[2]), year: dayFirst[3] }
+    : monthFirst ? { day: Number(monthFirst[2]), month: monthIndex(monthFirst[1]), year: monthFirst[3] }
+    : numeric ? { day: Number(numeric[1]), month: Number(numeric[2]) - 1, year: numeric[3] } : null;
+  if (parts && parts.month >= 0 && parts.month <= 11 && parts.day >= 1 && parts.day <= 31) {
+    const year = parts.year ? Number(parts.year.length === 2 ? `20${parts.year}` : parts.year) : today.getFullYear();
+    const candidate = new Date(year, parts.month, parts.day);
+    if (!parts.year && candidate.getTime() < today.getTime()) candidate.setFullYear(year + 1);
+    if (candidate.getDate() === parts.day) return localDateKey(candidate);
   }
   return null;
 }

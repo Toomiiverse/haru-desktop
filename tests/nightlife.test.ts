@@ -109,3 +109,11 @@ test('she has a night of her own to raise, unless she has raised it already or i
   assert.equal(nightToRaise([], [], '2026-09-01'), null);
 });
 
+test('a manga night is pages she read, not a subject she read about', () => {
+  const manga: Night = { day: '2026-09-11', at: '2026-09-11T15:20:10.351Z', about: 'Chainsaw Man, chapter 1', note: 'Denji whines.', sources: ['https://mangadex.org/chapter/73af4d8d'], interest: 'Chainsaw Man' };
+  const said = nightsInstruction([manga, night('2026-09-11', 'piano for The Real Folk Blues')]);
+  assert.match(said, /- Chainsaw Man, chapter 1 — pages you read yourself, one of your own things: Denji whines\./);
+  assert.match(said, /piano for The Real Folk Blues: It was all right\./);
+  assert.match(said, /read the pages themselves/);
+});
+

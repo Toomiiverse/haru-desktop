@@ -154,9 +154,12 @@ export function defaultMemoryBlocks(): MemoryBlock[] {
       id: blockIdFor('her_own'),
       label: 'her_own',
       // Wider than the human blocks: this is a week of her own life plus the
-      // night just gone, and it was being cut on every phone turn at 8000.
+      // night just gone, and it was being cut on every phone turn at 8000 —
+      // and again on every turn at 10000 once her manga and her wants were in
+      // it (11,028 chars, three days running, 2026-09-10 to 12). The cut
+      // takes the tail, which is where her diary sits.
       description: 'What Haru has been up to on her own — the things she is into and the views she holds on them, what she read in the small hours, what she wrote in her diary. These are hers, not the user\'s: hold them, bring one up when it fits, and disagree when you mean it.',
-      limit: 10000,
+      limit: 12000,
       read_only: false,
     },
   ];

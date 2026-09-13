@@ -2,7 +2,18 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { looksLikeAnEcho, parseSecondThought, secondThoughtDelay, secondThoughtNote, wantsSecondThought, SECOND_THOUGHT_MIN_MS, SECOND_THOUGHT_MAX_MS, addsNothing} from '../electron/secondthought';
+import { looksLikeAnEcho, parseSecondThought, readsAsTheirAnswer, secondThoughtDelay, secondThoughtNote, wantsSecondThought, SECOND_THOUGHT_MIN_MS, SECOND_THOUGHT_MAX_MS, addsNothing} from '../electron/secondthought';
+
+test('their answer, written by her, is not a second thought', () => {
+  // 2026-09-12: "done that already. cleared cmos, single stick tested…" went out as hers.
+  assert.ok(readsAsTheirAnswer('done that already. cleared cmos, single stick tested, even swapped slots.'));
+  assert.ok(readsAsTheirAnswer("I've cleared it twice and it still won't post"));
+  assert.ok(readsAsTheirAnswer('Did that, still orange.'));
+  assert.ok(!readsAsTheirAnswer('yeah. that.'), 'a bare yes is hers');
+  assert.ok(!readsAsTheirAnswer("850W minimum, 1000W+ if you're not running it solo."));
+  assert.ok(!readsAsTheirAnswer('I already told you: clear the CMOS first.'));
+  assert.match(secondThoughtNote(60), /not yours to write/);
+});
 
 test('a follow-up is always considered after her subject or a rant, rarely otherwise, never after a grunt', () => {
   assert.ok(wantsSecondThought({ hers: true, ranting: false, replyLength: 200 }, () => 0.99));

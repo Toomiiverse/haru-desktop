@@ -1,9 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  afterReading, feedUrl, parseReadingTake, PAGES_A_NIGHT, readableChapters, readingInstruction,
+  afterReading, feedUrl, parseReadingTake, PAGES_A_NIGHT, readableChapters, readingInstruction, readingNote,
   readReading, tonightsPages, type ChapterRef, type Reading,
 } from '../electron/manga';
+
+test('the block says where she is up to, in pages she read herself', () => {
+  // Asked what chapter she was on, she said she only read about it (2026-09-12).
+  const note = readingNote({ seriesId: 's', title: 'Chainsaw Man', chapter: '2', chapterId: 'c', page: 0, pages: 26, startedAt: '', lastAt: '', finished: 1 });
+  assert.match(note, /Chainsaw Man — 1 chapter finished, about to start chapter 2 \(26 pages\)/);
+  assert.match(note, /read those pages yourself/);
+  assert.match(readingNote({ seriesId: 's', title: 'Chainsaw Man', chapter: '1', chapterId: 'c', page: 46, pages: 53, startedAt: '', lastAt: '', finished: 0 }), /46 of 53 pages into chapter 1/);
+  assert.equal(readingNote(null), '');
+});
 
 const reading = (over: Partial<Reading> = {}): Reading => ({
   seriesId: 'a77742b1', title: 'Chainsaw Man', chapter: '1', chapterId: '73af4d8d',
