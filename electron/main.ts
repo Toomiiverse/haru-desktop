@@ -15,7 +15,7 @@ import { applyEvent, chooseIdleAction, cueLog, DEFAULT_VITALS, driftVitals, next
 import { classificationPrompt, EMOTION_SCHEMA, EMOTIONS, NEUTRAL_EMOTION, parseEmotion, type Emotion, type EmotionName, faceForEmotion, localEmotion } from './emotion';
 import { withDiscoveredExpressions } from './expressions';
 import { reportCapabilities, seesItsOwnScreen } from './capabilities';
-import { chaseableOverdue, findItem, shiftDays, formatAgenda, itemStatus, missedInstruction, putOffInstruction, putOffUntil, relevantItems, readsAsAnswerToHer, readsAsBareReport, tickOffInstruction, readsAsDone, doneClause, readsAsNotDone, relativeDay, staleItemNamed, inventedTimeFor, raisedRecently, type ItemStatus, underwayClause, isUnderway, FOLLOW_UP_MS } from './agenda';
+import { chaseableOverdue, findItem, shiftDays, formatAgenda, itemStatus, missedInstruction, movedSaid, putOffInstruction, putOffUntil, relevantItems, readsAsAnswerToHer, readsAsBareReport, tickOffInstruction, readsAsDone, doneClause, readsAsNotDone, relativeDay, staleItemNamed, inventedTimeFor, raisedRecently, type ItemStatus, underwayClause, isUnderway, FOLLOW_UP_MS } from './agenda';
 import { isRelaunchNotReturn, openingAngles, pickAngle, shouldPipeUp } from './opening';
 import { allDayDueMinutes, isEveningCheck, reminderInstruction, reminderTier, reminderVolume, shouldRemind, type ReminderState } from './reminders';
 import { isHeated, readTone, sharpen, toneGesture, tonePose } from './tone';
@@ -7280,6 +7280,17 @@ const promptState = {
     const theirs = messages.filter(message => message.role === 'user').slice(-4).map(message => String(message.content ?? ''));
     const item = addKeptItem({ title: promisedTitle(theirs), date: promised.date, time: promised.time, kind: 'task' });
     console.log(`[remind] she promised one in her reply — written down: "${item.title}" on ${item.date}${item.time ? ` at ${item.time}` : ''}`);
+  }
+  // Her claim of a move, made good the same way: "I've moved it to next Friday
+  // at 8:45 AM" with no tool behind it left the appointment on the old day and
+  // her asking after it that evening (2026-09-13). See movedSaid. Not when she
+  // moved it herself this turn, and not on a turn that was not theirs.
+  const moved = !ran.has('update_kept_item') && !ran.has('create_kept_item') && messages.at(-1)?.role === 'user'
+    ? movedSaid(latest, cleaned, typeof herPrevious === 'string' ? herPrevious : '', getKept().filter(item => !item.done), whatSheWasChasing(getKept().filter(item => !item.done)), zonedNow(CHAT_TIMEZONE))
+    : null;
+  if (moved) {
+    updateKept(moved.item.id, { date: moved.date, ...(moved.time ? { time: moved.time } : {}) });
+    console.log(`[agenda] she said she moved it — "${moved.item.title}" is now on ${moved.date}${moved.time ? ` at ${moved.time}` : ''}`);
   }
   // The eye-roll in thirty-five of forty replies: the wording that caused it is
   // fixed (EXPRESSIVE), and this catches what the wording does not.

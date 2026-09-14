@@ -254,3 +254,23 @@ test('sampleFromCollectors flags a stopped container', () => {
   const sample = sampleFromCollectors(collected({ docker }));
   assert.equal(sample.docker_problem, true);
 });
+
+test('a run past its threshold is announced once, not again every gap, until it lets go', () => {
+  // RAM on this box sits above 90% for days; the warning went out twice an
+  // hour all night (2026-09-14). Sampled every thirty seconds, as the app does.
+  const now = new Date();
+  const ago = (seconds: number) => new Date(now.getTime() - seconds * 1000).toISOString();
+  const above = (seconds: number): SystemSample => ({ ...base, ram_percent: 95, at: ago(seconds) });
+  const below = (seconds: number): SystemSample => ({ ...base, ram_percent: 50, at: ago(seconds) });
+  const thresholds = { ram_percent: { value: 90, seconds: 60 } };
+  const fired: Record<string, number> = {};
+  const check = (samples: SystemSample[]) => checkEvents(samples, thresholds, now, 0, fired).length;
+  assert.equal(check([above(0)]), 0);
+  assert.equal(check([above(30), above(0)]), 0, 'half a minute is a spike');
+  assert.equal(check([above(60), above(30), above(0)]), 1, 'the minute is up: said');
+  assert.equal(check([above(90), above(60), above(30), above(0)]), 0, 'the same run, not said again');
+  assert.equal(check([above(120), above(90), above(60), above(30), above(0)]), 0);
+  // It lets go for one sample and comes back: a new run, said again once.
+  assert.equal(check([above(150), above(120), below(90), above(60), above(30), above(0)]), 1);
+  assert.equal(check([above(180), above(150), below(120), above(90), above(60), above(30), above(0)]), 0, 'the new run, not said again');
+});

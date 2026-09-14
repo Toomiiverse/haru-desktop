@@ -35,7 +35,7 @@ import {
   staleItemNamed,
   inventedTimeFor,
   raisedRecently,
-  underwayClause, isUnderway, FOLLOW_UP_MS, UNDERWAY_GRACE_MS } from '../electron/agenda';
+  underwayClause, isUnderway, FOLLOW_UP_MS, UNDERWAY_GRACE_MS, movedSaid, saidWhen } from '../electron/agenda';
 
 const TODAY = '2026-08-20';
 const at = (hour: number, minute = 0) => new Date(2026, 7, 20, hour, minute);
@@ -605,3 +605,65 @@ test('"getting it done now" is started, not finished — and holds the chase for
   assert.equal(isUnderway({ ...item, done: true }, now + 60_000), false);
 });
 
+
+// ---- words that name nothing ----
+
+test('a system warning names no errand: "for the last 60 seconds" is not "for the electricians"', () => {
+  // "the" and "for" are three letters, so they passed the length filter and
+  // counted as two words of a title named whole. Every RAM warning she had to
+  // give went to the stale-item check and was thrown away for naming a done
+  // errand from August (2026-09-14).
+  const errands = [item({ title: 'Be at the shop by 7 for the electricians', done: true }), item({ title: 'Check that reminders work', done: true })];
+  assert.equal(staleItemNamed('RAM has been above 90% for the last 60 seconds.', errands, '2026-09-14'), null);
+  assert.equal(staleItemNamed('Your GPU has been above 90% utilisation for the last 60 seconds.', errands, '2026-09-14'), null);
+  assert.equal(staleItemNamed('The disk has been above 90% full for the last 60 seconds.', errands, '2026-09-14'), null);
+  assert.equal(staleItemNamed('Check that you have actually eaten something today.', errands, '2026-09-14'), null);
+  // Named properly, it is still caught.
+  assert.equal(staleItemNamed('Were you at the shop for the electricians, or did you sleep through it?', errands, '2026-09-14')?.title, 'Be at the shop by 7 for the electricians');
+  // And a report on it still ticks it off: the words that matter are the ones left.
+  const open = [item({ title: 'Be at the shop by 7 for the electricians' })];
+  assert.equal(findItem(open, 'at the shop, electricians are here')?.title, 'Be at the shop by 7 for the electricians');
+});
+
+// ---- her claim of a move, made good ----
+
+test('saidWhen reads a day and a clock out of one sentence', () => {
+  const now = new Date(2026, 8, 13, 14, 30); // a Sunday
+  assert.deepEqual(saidWhen('we rescheduled to next Friday @8:45am', now), { date: '2026-09-18', time: '8:45 AM' });
+  assert.deepEqual(saidWhen("I've moved it to next Friday at 8:45 AM.", now), { date: '2026-09-18', time: '8:45 AM' });
+  assert.deepEqual(saidWhen('make it the 6th of October', now), { date: '2026-10-06', time: undefined });
+  assert.deepEqual(saidWhen('push it to 3pm', now), { date: undefined, time: '3:00 PM' });
+  assert.deepEqual(saidWhen('tomorrow then', now), { date: '2026-09-14', time: undefined });
+  assert.deepEqual(saidWhen('nothing about when in here', now), { date: undefined, time: undefined });
+});
+
+test('movedSaid makes good on "I have moved it" when nothing moved', () => {
+  const now = new Date(2026, 8, 13, 14, 30);
+  const open = [
+    { id: 'sam', title: 'Sam Psychologist', date: '2026-09-11', time: '11:30 AM', kind: 'event', done: false },
+    { id: 'joint', title: 'Joint Therapy', date: '2026-09-18', time: '6:30 PM', kind: 'event', done: false },
+  ];
+  // As it happened, 2026-09-13: the hosted brain said it and called nothing.
+  const theirs = 'Oh yeah my bad, she had to cancel because she was sick so we rescheduled to next Friday @8:45am';
+  const hers = "Right, so you knew and didn't tell me. I've moved it to next Friday at 8:45 AM. Hope she's feeling better, at least.";
+  const previous = 'That was Friday. Your psychologist, Sam.\n\nYou set it yourself.';
+  const moved = movedSaid(theirs, hers, previous, open, null, now);
+  assert.equal(moved?.item.id, 'sam');
+  assert.equal(moved?.date, '2026-09-18');
+  assert.equal(moved?.time, '8:45 AM');
+  // Nothing named anywhere and nothing chased: nothing moves.
+  assert.equal(movedSaid(theirs, hers, '', open, null, now), null);
+  // What she was chasing is what "it" means.
+  assert.equal(movedSaid(theirs, hers, '', open, open[0], now)?.item.id, 'sam');
+  // A chase over a done item is over.
+  assert.equal(movedSaid(theirs, hers, '', open, { ...open[0], done: true }, now), null);
+  // Them having moved it is not her claim to have.
+  assert.equal(movedSaid(theirs, "So you moved it to Friday and didn't tell me. Fine.", previous, open, null, now), null);
+  // A claim with no when behind it moves nothing.
+  assert.equal(movedSaid('she cancelled', "Fine, I've moved it.", previous, open, null, now), null);
+  // A move to where it already is is not a move.
+  assert.equal(movedSaid('joint therapy is friday 6:30pm', "I've moved it to Friday at 6:30 PM.", '', open, null, now), null);
+  // A time alone keeps the day; a bare "Rescheduled." is her saying so.
+  const later = movedSaid('can we make Sam 3pm instead', 'Rescheduled. 3 PM.', '', open, null, now);
+  assert.deepEqual(later && { id: later.item.id, date: later.date, time: later.time }, { id: 'sam', date: '2026-09-11', time: '3:00 PM' });
+});

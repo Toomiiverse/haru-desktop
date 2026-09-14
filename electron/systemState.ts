@@ -83,29 +83,40 @@ export function checkEvents(
 
   const latest = samples[samples.length - 1];
 
+  // Once per episode, not once per gap. A run past its threshold was announced
+  // again every minGap for as long as it lasted — RAM on this box sits above
+  // 90% for days at a time, so the warning went out twice an hour, all night,
+  // for weeks (2026-09-14). The docker check below already fires only on a
+  // problem that was not there a sample ago; the thresholds now do the same.
+  // A run that had already lasted the threshold at the previous sample is the
+  // episode she has been told about; one that crossed it since is new. The
+  // condition has to let go for a sample before it can be an episode again.
+  const previous = samples.slice(0, -1);
+  const previousAt = previous.length ? new Date(Date.parse(previous[previous.length - 1].at)) : null;
+  const newlySustained = (pred: (sample: SystemSample) => boolean, seconds: number) => {
+    if (sustainedSpan(samples, now, pred) < seconds * 1000) return false;
+    if (!previousAt) return true;
+    return sustainedSpan(previous, previousAt, pred) < seconds * 1000;
+  };
+
   if (thresholds.gpu_percent) {
-    const span = sustainedSpan(samples, now, sample => sample.gpu_percent >= (thresholds.gpu_percent?.value ?? 0));
-    if (span >= (thresholds.gpu_percent.seconds ?? 0) * 1000) fire('gpu_percent', `Your GPU has been above ${thresholds.gpu_percent.value}% utilisation for the last ${thresholds.gpu_percent.seconds} seconds.`);
+    if (newlySustained(sample => sample.gpu_percent >= (thresholds.gpu_percent?.value ?? 0), thresholds.gpu_percent.seconds ?? 0)) fire('gpu_percent', `Your GPU has been above ${thresholds.gpu_percent.value}% utilisation for the last ${thresholds.gpu_percent.seconds} seconds.`);
   }
 
   if (thresholds.ram_percent) {
-    const span = sustainedSpan(samples, now, sample => sample.ram_percent >= (thresholds.ram_percent?.value ?? 0));
-    if (span >= (thresholds.ram_percent.seconds ?? 0) * 1000) fire('ram_percent', `RAM has been above ${thresholds.ram_percent.value}% for the last ${thresholds.ram_percent.seconds} seconds.`);
+    if (newlySustained(sample => sample.ram_percent >= (thresholds.ram_percent?.value ?? 0), thresholds.ram_percent.seconds ?? 0)) fire('ram_percent', `RAM has been above ${thresholds.ram_percent.value}% for the last ${thresholds.ram_percent.seconds} seconds.`);
   }
 
   if (thresholds.disk_percent) {
-    const span = sustainedSpan(samples, now, sample => sample.disk_percent >= (thresholds.disk_percent?.value ?? 0));
-    if (span >= (thresholds.disk_percent.seconds ?? 0) * 1000) fire('disk_percent', `The disk has been above ${thresholds.disk_percent.value}% full for the last ${thresholds.disk_percent.seconds} seconds.`);
+    if (newlySustained(sample => sample.disk_percent >= (thresholds.disk_percent?.value ?? 0), thresholds.disk_percent.seconds ?? 0)) fire('disk_percent', `The disk has been above ${thresholds.disk_percent.value}% full for the last ${thresholds.disk_percent.seconds} seconds.`);
   }
 
   if (thresholds.gpu_temp_c) {
-    const span = sustainedSpan(samples, now, sample => sample.temperature_c >= (thresholds.gpu_temp_c?.value ?? 0));
-    if (span >= (thresholds.gpu_temp_c.seconds ?? 0) * 1000) fire('gpu_temp_c', `The GPU has been above ${thresholds.gpu_temp_c.value}°C for the last ${thresholds.gpu_temp_c.seconds} seconds.`);
+    if (newlySustained(sample => sample.temperature_c >= (thresholds.gpu_temp_c?.value ?? 0), thresholds.gpu_temp_c.seconds ?? 0)) fire('gpu_temp_c', `The GPU has been above ${thresholds.gpu_temp_c.value}°C for the last ${thresholds.gpu_temp_c.seconds} seconds.`);
   }
 
   if (thresholds.network_down && latest) {
-    const span = sustainedSpan(samples, now, sample => sample.network_status !== 'online');
-    if (span >= (thresholds.network_down.seconds ?? 0) * 1000) fire('network_down', 'The server has lost its network connection.');
+    if (newlySustained(sample => sample.network_status !== 'online', thresholds.network_down.seconds ?? 0)) fire('network_down', 'The server has lost its network connection.');
   }
 
   if (thresholds.docker_crash && latest?.docker_problems?.length) {

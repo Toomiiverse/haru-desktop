@@ -44,9 +44,13 @@ export const MAX_LOOK_TRIES = 2;
  */
 export const CAPTION_MAX_CHARS = 700;
 
-/** Roughly a fortnight of a busy desk. Older captions fall off the end; the
- *  shots themselves have their own retention in shotstore.ts. */
-export const CAPTIONS_KEPT = 400;
+/**
+ * A month or two of a busy desk. Older captions fall off the end; the shots
+ * themselves have their own retention in shotstore.ts — ninety days, which is
+ * longer than this list, and the difference is what fallenOff is for. Four
+ * hundred was a fortnight's worth and the folder held four hundred and fifty.
+ */
+export const CAPTIONS_KEPT = 600;
 
 /** How many are looked at per pass. Small on purpose: the card is shared with
  *  the voice, and a backlog is not urgent. */
@@ -69,19 +73,43 @@ const key = (day: string, name: string) => `${day}/${name}`;
  * within a day — which for a timestamped filename is chronological, so what she
  * sees follows the day as it happened rather than arriving shuffled.
  */
-export function unseenShots(held: Record<string, string[]>, captions: Caption[], limit = SHOTS_PER_PASS): { day: string; name: string }[] {
+export function unseenShots(held: Record<string, string[]>, captions: Caption[], limit = SHOTS_PER_PASS, floor: string | null = null): { day: string; name: string }[] {
   const done = new Set(captions
     .filter(caption => caption.text.trim() || (caption.tries ?? 0) >= MAX_LOOK_TRIES)
     .map(caption => key(caption.day, caption.name)));
   const out: { day: string; name: string }[] = [];
   for (const day of Object.keys(held).sort()) {
     for (const name of [...(held[day] ?? [])].sort()) {
+      if (floor !== null && key(day, name) < floor) continue;
       if (done.has(key(day, name))) continue;
       out.push({ day, name });
       if (out.length >= limit) return out;
     }
   }
   return out;
+}
+
+/**
+ * The oldest shot she still holds a caption for, once the list is full — the
+ * line below which a shot has been looked at and since forgotten.
+ *
+ * Captions fall off the end at CAPTIONS_KEPT; the shots do not, they live for
+ * ninety days. With 451 pictures held and 400 captions kept, the 51 oldest
+ * were always "unseen": every pass described them again, pushed 51 newer
+ * captions off the end, and made those unseen in turn. The eyes ran around
+ * the clock on the CPU over a backlog that never shrank — the same August
+ * screenshot described nine times, ten gigabytes of RAM held for it, and half
+ * the looks timing out (2026-09-14). A shot older than the oldest caption kept
+ * is one she has already seen, and it is not looked at again.
+ */
+export function fallenOff(captions: Caption[]): string | null {
+  if (captions.length < CAPTIONS_KEPT) return null;
+  let oldest: string | null = null;
+  for (const caption of captions) {
+    const at = key(caption.day, caption.name);
+    if (oldest === null || at < oldest) oldest = at;
+  }
+  return oldest;
 }
 
 /** One caption in, the oldest out once the list is full. A second look at the
@@ -145,7 +173,9 @@ export function shotsNeedingALook(
   // leaves behind, which is the opposite of what these are.
   const theirs: Caption[] = Object.entries(described)
     .flatMap(([day, names]) => names.map(name => ({ day, name, at: '', text: 'described where it was taken' })));
-  return unseenShots(held, [...captions, ...theirs], limit);
+  // The floor is drawn from her own captions, before the stand-ins are added:
+  // they are not stored, so they never push anything off the end.
+  return unseenShots(held, [...captions, ...theirs], limit, fallenOff(captions));
 }
 
 /** A look that came to nothing, so the next pass knows it has been here. */
