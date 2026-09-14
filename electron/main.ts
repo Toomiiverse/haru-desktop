@@ -138,7 +138,7 @@ import { retrieveContext } from './retrieveContext';
 import type { VaultSyncReport } from './obsidian';
 import { diaryNotes, herNote, indexNote, memoriesNote, nightNotes, placesNote, standingNote, writeNotes } from './vault';
 import { collectAll, collectDocker, collectDockerLight, collectGpu, collectProcesses, collectServices, collectSystem, diagnose, KNOWN_SERVICES, USER_SERVICES, type Diagnosis } from './system';
-import { checkEvents, sampleFromCollectors, type EventThresholds, type SystemSample } from './systemState';
+import { carriedSamples, checkEvents, sampleFromCollectors, type EventThresholds, type SystemSample } from './systemState';
 
 type Bounds = { x: number; y: number; width: number; height: number };
 type Live2DModel = { path: string; name: string; url: string };
@@ -4299,8 +4299,15 @@ function readSystemEvents(): { enabled: boolean; sampleSeconds: number; minGapMi
   };
 }
 
-let systemSamples: SystemSample[] = [];
-const systemLastFired: Record<string, number> = {};
+// Carried over a restart while fresh, so a run she has already announced is
+// not announced again ten seconds later — see carriedSamples. Written back
+// every few samples rather than every one: the store is the whole config
+// file, and a warning that survives a restart does not need a thirty-second
+// clock to do it.
+let systemSamples: SystemSample[] = carriedSamples(store.get('system.samples'), Date.now());
+let systemSampleCount = 0;
+const SAMPLES_WRITTEN_EVERY = 4;
+const systemLastFired: Record<string, number> = { ...((store.get('system.lastFired') as Record<string, number> | undefined) ?? {}) };
 let systemCollecting = false;
 let pendingHaruRestart = false;
 
@@ -4317,8 +4324,10 @@ async function sampleSystem() {
     const sample = sampleFromCollectors({ ...light, gpu, docker, processes: [], services: [] }, new Date());
     systemSamples.push(sample);
     if (systemSamples.length > 8) systemSamples = systemSamples.slice(-8);
+    if (++systemSampleCount % SAMPLES_WRITTEN_EVERY === 0) store.set('system.samples', systemSamples);
     const events = readSystemEvents();
     const fired = checkEvents(systemSamples, events.thresholds, new Date(), events.minGapMinutes * 60_000, systemLastFired);
+    if (fired.length) store.set('system.lastFired', systemLastFired);
     for (const event of fired) {
       console.log(`[system] event ${event.kind}: ${event.message}`);
       interject(event.message, { source: 'system' });

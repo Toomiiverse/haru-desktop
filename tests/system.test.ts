@@ -20,7 +20,7 @@ import {
   type SystemCollected,
   type Diagnosis,
 } from '../electron/system';
-import { sampleFromCollectors, checkEvents, type SystemSample } from '../electron/systemState';
+import { sampleFromCollectors, checkEvents, carriedSamples, SAMPLES_CARRIED_MS, type SystemSample } from '../electron/systemState';
 
 // ---- parsers ---------------------------------------------------------------
 
@@ -273,4 +273,25 @@ test('a run past its threshold is announced once, not again every gap, until it 
   // It lets go for one sample and comes back: a new run, said again once.
   assert.equal(check([above(150), above(120), below(90), above(60), above(30), above(0)]), 1);
   assert.equal(check([above(180), above(150), below(120), above(90), above(60), above(30), above(0)]), 0, 'the new run, not said again');
+});
+
+test('the sample window carries over a restart while it is fresh, so a known run is not announced again', () => {
+  const now = new Date();
+  const ago = (seconds: number) => new Date(now.getTime() - seconds * 1000).toISOString();
+  const above = (seconds: number): SystemSample => ({ ...base, ram_percent: 95, at: ago(seconds) });
+  const thresholds = { ram_percent: { value: 90, seconds: 60 } };
+  // Before the restart: a run already a minute and a half old.
+  const before = [above(120), above(90), above(60), above(30)];
+  const carried = carriedSamples(before, now.getTime());
+  assert.equal(carried.length, 4);
+  // The first check after the restart, one new sample on top: nothing new to say.
+  assert.equal(checkEvents([...carried, above(0)], thresholds, now, 0, {}).length, 0);
+  // Started empty instead, the same run would be announced all over again.
+  assert.equal(checkEvents([above(60), above(30), above(0)], thresholds, now, 0, {}).length, 1);
+  // Too old to be the same run, or not a window at all: nothing carried.
+  assert.deepEqual(carriedSamples([above(SAMPLES_CARRIED_MS / 1000 + 60)], now.getTime()), []);
+  assert.deepEqual(carriedSamples('nonsense', now.getTime()), []);
+  assert.deepEqual(carriedSamples([{ at: 'not a date', ram_percent: 1 }, null], now.getTime()), []);
+  // A clock that went backwards is not trusted either.
+  assert.deepEqual(carriedSamples([above(-600)], now.getTime()), []);
 });

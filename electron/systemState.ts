@@ -14,6 +14,37 @@ export type SystemSample = {
   at: string;
 };
 
+/**
+ * How old a stored sample window may be and still count as the run in
+ * progress. A restart takes ten seconds and the window is written every couple
+ * of minutes, so five covers it; beyond that the box may have changed under her.
+ */
+export const SAMPLES_CARRIED_MS = 5 * 60_000;
+
+/**
+ * The sample window from before a restart, if it is recent enough to be the
+ * same run.
+ *
+ * checkEvents fires on a run that crossed its threshold since the previous
+ * sample. Started empty on every launch, every launch was a new run: RAM on
+ * this box sits above 90% for days, and each of the half-dozen restarts a
+ * development day brings put the same warning on his phone again
+ * (2026-09-14). Carried over, the first check after a restart sees a run that
+ * was already announced and says nothing; a box that was fine before the
+ * restart and is not after it still gets its warning.
+ */
+export function carriedSamples(saved: unknown, nowMs: number, maxAgeMs = SAMPLES_CARRIED_MS): SystemSample[] {
+  if (!Array.isArray(saved)) return [];
+  const samples = saved.filter((entry): entry is SystemSample =>
+    Boolean(entry) && typeof entry === 'object'
+    && typeof (entry as SystemSample).at === 'string' && Number.isFinite(Date.parse((entry as SystemSample).at))
+    && typeof (entry as SystemSample).ram_percent === 'number');
+  if (!samples.length) return [];
+  const newest = Math.max(...samples.map(sample => Date.parse(sample.at)));
+  if (nowMs - newest > maxAgeMs || newest > nowMs + 60_000) return [];
+  return samples;
+}
+
 export type Threshold = { value: number; seconds: number };
 export type EventThresholds = {
   gpu_percent?: Threshold;
