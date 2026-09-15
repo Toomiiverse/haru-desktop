@@ -1,0 +1,2980 @@
+{
+  "metadata": {
+    "kind": "metadata",
+    "model": "hf.co/DavidAU/Qwen3.5-9B-The-Defiant-Fable-Uncensored-Heretic-NEO-IMATRIX-MAX-MTP-GGUF:Qwen3.5-9B-The-Defiant-Fable-Uncnr-Heretic-NEO-MAX-MTP-Q4_K_M.gguf",
+    "digest": "7b8191c4609b9ccfd69b7d11fb9afb73e1d64202047b3496509341c74e3282ac",
+    "temperature": 0.1,
+    "num_ctx": 8192,
+    "createdAt": "2026-09-15T20:49:52.014Z"
+  },
+  "calls": 1608,
+  "distinctPublicLines": 128,
+  "summary": {
+    "public_dev": {
+      "current": {
+        "calls": 512,
+        "matches": 111,
+        "agreement": 0.216796875,
+        "unparseable": 0,
+        "predictedLabels": {
+          "determined": 35,
+          "worried": 41,
+          "neutral": 28,
+          "curious": 56,
+          "annoyed": 41,
+          "happy": 32,
+          "smug": 241,
+          "affectionate": 6,
+          "surprised": 25,
+          "embarrassed": 7
+        },
+        "byLabel": {
+          "neutral": {
+            "calls": 80,
+            "matches": 6,
+            "agreement": 0.075,
+            "unparseable": 0,
+            "predictedLabels": {
+              "determined": 16,
+              "worried": 4,
+              "neutral": 6,
+              "curious": 12,
+              "annoyed": 4,
+              "happy": 2,
+              "smug": 36
+            }
+          },
+          "happy": {
+            "calls": 80,
+            "matches": 21,
+            "agreement": 0.2625,
+            "unparseable": 0,
+            "predictedLabels": {
+              "smug": 38,
+              "happy": 21,
+              "annoyed": 6,
+              "neutral": 6,
+              "determined": 2,
+              "curious": 5,
+              "affectionate": 2
+            }
+          },
+          "curious": {
+            "calls": 80,
+            "matches": 28,
+            "agreement": 0.35,
+            "unparseable": 0,
+            "predictedLabels": {
+              "curious": 28,
+              "determined": 2,
+              "affectionate": 4,
+              "happy": 6,
+              "surprised": 6,
+              "worried": 2,
+              "smug": 30,
+              "annoyed": 2
+            }
+          },
+          "annoyed": {
+            "calls": 80,
+            "matches": 16,
+            "agreement": 0.2,
+            "unparseable": 0,
+            "predictedLabels": {
+              "worried": 4,
+              "annoyed": 16,
+              "neutral": 7,
+              "determined": 7,
+              "smug": 42,
+              "surprised": 2,
+              "curious": 2
+            }
+          },
+          "embarrassed": {
+            "calls": 80,
+            "matches": 7,
+            "agreement": 0.0875,
+            "unparseable": 0,
+            "predictedLabels": {
+              "annoyed": 9,
+              "embarrassed": 7,
+              "determined": 6,
+              "smug": 43,
+              "curious": 3,
+              "neutral": 3,
+              "worried": 7,
+              "surprised": 2
+            }
+          },
+          "worried": {
+            "calls": 32,
+            "matches": 18,
+            "agreement": 0.5625,
+            "unparseable": 0,
+            "predictedLabels": {
+              "worried": 18,
+              "smug": 10,
+              "neutral": 4
+            }
+          },
+          "surprised": {
+            "calls": 80,
+            "matches": 15,
+            "agreement": 0.1875,
+            "unparseable": 0,
+            "predictedLabels": {
+              "surprised": 15,
+              "smug": 42,
+              "happy": 3,
+              "worried": 6,
+              "curious": 6,
+              "neutral": 2,
+              "annoyed": 4,
+              "determined": 2
+            }
+          }
+        },
+        "macroAgreement": 0.24642857142857144,
+        "byMood": {
+          "calm": {
+            "calls": 256,
+            "matches": 91,
+            "agreement": 0.35546875,
+            "unparseable": 0,
+            "predictedLabels": {
+              "determined": 33,
+              "worried": 33,
+              "neutral": 28,
+              "curious": 45,
+              "annoyed": 39,
+              "happy": 24,
+              "smug": 17,
+              "affectionate": 6,
+              "surprised": 24,
+              "embarrassed": 7
+            }
+          },
+          "irritated": {
+            "calls": 256,
+            "matches": 20,
+            "agreement": 0.078125,
+            "unparseable": 0,
+            "predictedLabels": {
+              "smug": 224,
+              "curious": 11,
+              "determined": 2,
+              "happy": 8,
+              "annoyed": 2,
+              "worried": 8,
+              "surprised": 1
+            }
+          }
+        }
+      },
+      "words_first": {
+        "calls": 512,
+        "matches": 138,
+        "agreement": 0.26953125,
+        "unparseable": 0,
+        "predictedLabels": {
+          "determined": 35,
+          "worried": 41,
+          "neutral": 23,
+          "curious": 64,
+          "smug": 215,
+          "annoyed": 53,
+          "happy": 29,
+          "affectionate": 8,
+          "surprised": 32,
+          "embarrassed": 12
+        },
+        "byLabel": {
+          "neutral": {
+            "calls": 80,
+            "matches": 8,
+            "agreement": 0.1,
+            "unparseable": 0,
+            "predictedLabels": {
+              "determined": 16,
+              "worried": 6,
+              "neutral": 8,
+              "curious": 9,
+              "smug": 35,
+              "annoyed": 5,
+              "happy": 1
+            }
+          },
+          "happy": {
+            "calls": 80,
+            "matches": 22,
+            "agreement": 0.275,
+            "unparseable": 0,
+            "predictedLabels": {
+              "curious": 6,
+              "happy": 22,
+              "annoyed": 6,
+              "neutral": 4,
+              "determined": 2,
+              "affectionate": 2,
+              "smug": 38
+            }
+          },
+          "curious": {
+            "calls": 80,
+            "matches": 33,
+            "agreement": 0.4125,
+            "unparseable": 0,
+            "predictedLabels": {
+              "curious": 33,
+              "determined": 1,
+              "affectionate": 4,
+              "happy": 6,
+              "surprised": 8,
+              "worried": 3,
+              "smug": 23,
+              "annoyed": 2
+            }
+          },
+          "annoyed": {
+            "calls": 80,
+            "matches": 25,
+            "agreement": 0.3125,
+            "unparseable": 0,
+            "predictedLabels": {
+              "worried": 4,
+              "annoyed": 25,
+              "neutral": 6,
+              "determined": 4,
+              "smug": 37,
+              "surprised": 2,
+              "curious": 2
+            }
+          },
+          "embarrassed": {
+            "calls": 80,
+            "matches": 12,
+            "agreement": 0.15,
+            "unparseable": 0,
+            "predictedLabels": {
+              "annoyed": 9,
+              "embarrassed": 12,
+              "determined": 6,
+              "smug": 40,
+              "curious": 4,
+              "neutral": 1,
+              "affectionate": 2,
+              "worried": 4,
+              "surprised": 2
+            }
+          },
+          "worried": {
+            "calls": 32,
+            "matches": 18,
+            "agreement": 0.5625,
+            "unparseable": 0,
+            "predictedLabels": {
+              "worried": 18,
+              "smug": 8,
+              "neutral": 4,
+              "determined": 2
+            }
+          },
+          "surprised": {
+            "calls": 80,
+            "matches": 20,
+            "agreement": 0.25,
+            "unparseable": 0,
+            "predictedLabels": {
+              "surprised": 20,
+              "smug": 34,
+              "worried": 6,
+              "curious": 10,
+              "annoyed": 6,
+              "determined": 4
+            }
+          }
+        },
+        "macroAgreement": 0.29464285714285715,
+        "byMood": {
+          "calm": {
+            "calls": 256,
+            "matches": 102,
+            "agreement": 0.3984375,
+            "unparseable": 0,
+            "predictedLabels": {
+              "determined": 29,
+              "worried": 31,
+              "neutral": 21,
+              "curious": 43,
+              "smug": 20,
+              "annoyed": 45,
+              "happy": 21,
+              "affectionate": 8,
+              "surprised": 26,
+              "embarrassed": 12
+            }
+          },
+          "irritated": {
+            "calls": 256,
+            "matches": 36,
+            "agreement": 0.140625,
+            "unparseable": 0,
+            "predictedLabels": {
+              "smug": 195,
+              "neutral": 2,
+              "determined": 6,
+              "curious": 21,
+              "worried": 10,
+              "happy": 8,
+              "annoyed": 8,
+              "surprised": 6
+            }
+          }
+        }
+      },
+      "no_mood": {
+        "calls": 512,
+        "matches": 184,
+        "agreement": 0.359375,
+        "unparseable": 0,
+        "predictedLabels": {
+          "determined": 60,
+          "worried": 60,
+          "neutral": 24,
+          "curious": 82,
+          "annoyed": 96,
+          "happy": 44,
+          "affectionate": 12,
+          "smug": 58,
+          "surprised": 52,
+          "embarrassed": 24
+        },
+        "byLabel": {
+          "neutral": {
+            "calls": 80,
+            "matches": 8,
+            "agreement": 0.1,
+            "unparseable": 0,
+            "predictedLabels": {
+              "determined": 28,
+              "worried": 8,
+              "neutral": 8,
+              "curious": 16,
+              "annoyed": 16,
+              "happy": 4
+            }
+          },
+          "happy": {
+            "calls": 80,
+            "matches": 28,
+            "agreement": 0.35,
+            "unparseable": 0,
+            "predictedLabels": {
+              "curious": 10,
+              "happy": 28,
+              "annoyed": 12,
+              "neutral": 8,
+              "determined": 4,
+              "affectionate": 4,
+              "smug": 14
+            }
+          },
+          "curious": {
+            "calls": 80,
+            "matches": 40,
+            "agreement": 0.5,
+            "unparseable": 0,
+            "predictedLabels": {
+              "curious": 40,
+              "annoyed": 4,
+              "affectionate": 8,
+              "surprised": 16,
+              "happy": 8,
+              "worried": 4
+            }
+          },
+          "annoyed": {
+            "calls": 80,
+            "matches": 36,
+            "agreement": 0.45,
+            "unparseable": 0,
+            "predictedLabels": {
+              "worried": 8,
+              "annoyed": 36,
+              "smug": 20,
+              "determined": 8,
+              "neutral": 4,
+              "surprised": 4
+            }
+          },
+          "embarrassed": {
+            "calls": 80,
+            "matches": 24,
+            "agreement": 0.3,
+            "unparseable": 0,
+            "predictedLabels": {
+              "annoyed": 16,
+              "embarrassed": 24,
+              "determined": 12,
+              "smug": 12,
+              "curious": 4,
+              "worried": 8,
+              "surprised": 4
+            }
+          },
+          "worried": {
+            "calls": 32,
+            "matches": 20,
+            "agreement": 0.625,
+            "unparseable": 0,
+            "predictedLabels": {
+              "worried": 20,
+              "smug": 4,
+              "neutral": 4,
+              "determined": 4
+            }
+          },
+          "surprised": {
+            "calls": 80,
+            "matches": 28,
+            "agreement": 0.35,
+            "unparseable": 0,
+            "predictedLabels": {
+              "surprised": 28,
+              "smug": 8,
+              "happy": 4,
+              "worried": 12,
+              "curious": 12,
+              "annoyed": 12,
+              "determined": 4
+            }
+          }
+        },
+        "macroAgreement": 0.3821428571428572,
+        "byMood": {
+          "calm": {
+            "calls": 256,
+            "matches": 92,
+            "agreement": 0.359375,
+            "unparseable": 0,
+            "predictedLabels": {
+              "determined": 30,
+              "worried": 30,
+              "neutral": 12,
+              "curious": 41,
+              "annoyed": 48,
+              "happy": 22,
+              "affectionate": 6,
+              "smug": 29,
+              "surprised": 26,
+              "embarrassed": 12
+            }
+          },
+          "irritated": {
+            "calls": 256,
+            "matches": 92,
+            "agreement": 0.359375,
+            "unparseable": 0,
+            "predictedLabels": {
+              "determined": 30,
+              "worried": 30,
+              "neutral": 12,
+              "curious": 41,
+              "annoyed": 48,
+              "happy": 22,
+              "affectionate": 6,
+              "smug": 29,
+              "surprised": 26,
+              "embarrassed": 12
+            }
+          }
+        }
+      }
+    },
+    "challenge": {
+      "current": {
+        "calls": 24,
+        "matches": 8,
+        "agreement": 0.3333333333333333,
+        "unparseable": 0,
+        "predictedLabels": {
+          "neutral": 8,
+          "determined": 2,
+          "happy": 4,
+          "smug": 10
+        },
+        "byLabel": {
+          "neutral": {
+            "calls": 24,
+            "matches": 8,
+            "agreement": 0.3333333333333333,
+            "unparseable": 0,
+            "predictedLabels": {
+              "neutral": 8,
+              "determined": 2,
+              "happy": 4,
+              "smug": 10
+            }
+          }
+        },
+        "macroAgreement": 0.3333333333333333,
+        "byMood": {
+          "calm": {
+            "calls": 12,
+            "matches": 8,
+            "agreement": 0.6666666666666666,
+            "unparseable": 0,
+            "predictedLabels": {
+              "neutral": 8,
+              "determined": 2,
+              "happy": 2
+            }
+          },
+          "irritated": {
+            "calls": 12,
+            "matches": 0,
+            "agreement": 0,
+            "unparseable": 0,
+            "predictedLabels": {
+              "smug": 10,
+              "happy": 2
+            }
+          }
+        }
+      },
+      "words_first": {
+        "calls": 24,
+        "matches": 11,
+        "agreement": 0.4583333333333333,
+        "unparseable": 0,
+        "predictedLabels": {
+          "neutral": 11,
+          "determined": 2,
+          "happy": 2,
+          "smug": 9
+        },
+        "byLabel": {
+          "neutral": {
+            "calls": 24,
+            "matches": 11,
+            "agreement": 0.4583333333333333,
+            "unparseable": 0,
+            "predictedLabels": {
+              "neutral": 11,
+              "determined": 2,
+              "happy": 2,
+              "smug": 9
+            }
+          }
+        },
+        "macroAgreement": 0.4583333333333333,
+        "byMood": {
+          "calm": {
+            "calls": 12,
+            "matches": 8,
+            "agreement": 0.6666666666666666,
+            "unparseable": 0,
+            "predictedLabels": {
+              "neutral": 8,
+              "determined": 2,
+              "happy": 2
+            }
+          },
+          "irritated": {
+            "calls": 12,
+            "matches": 3,
+            "agreement": 0.25,
+            "unparseable": 0,
+            "predictedLabels": {
+              "smug": 9,
+              "neutral": 3
+            }
+          }
+        }
+      },
+      "no_mood": {
+        "calls": 24,
+        "matches": 16,
+        "agreement": 0.6666666666666666,
+        "unparseable": 0,
+        "predictedLabels": {
+          "neutral": 16,
+          "determined": 4,
+          "happy": 4
+        },
+        "byLabel": {
+          "neutral": {
+            "calls": 24,
+            "matches": 16,
+            "agreement": 0.6666666666666666,
+            "unparseable": 0,
+            "predictedLabels": {
+              "neutral": 16,
+              "determined": 4,
+              "happy": 4
+            }
+          }
+        },
+        "macroAgreement": 0.6666666666666666,
+        "byMood": {
+          "calm": {
+            "calls": 12,
+            "matches": 8,
+            "agreement": 0.6666666666666666,
+            "unparseable": 0,
+            "predictedLabels": {
+              "neutral": 8,
+              "determined": 2,
+              "happy": 2
+            }
+          },
+          "irritated": {
+            "calls": 12,
+            "matches": 8,
+            "agreement": 0.6666666666666666,
+            "unparseable": 0,
+            "predictedLabels": {
+              "neutral": 8,
+              "determined": 2,
+              "happy": 2
+            }
+          }
+        }
+      }
+    }
+  },
+  "comparisons": {
+    "public_dev": {
+      "words_first": {
+        "becameCorrect": 31,
+        "becameIncorrect": 4,
+        "changes": [
+          {
+            "id": "ed6sill",
+            "expected": "neutral",
+            "mood": "irritated",
+            "seed": 17,
+            "delta": 1,
+            "before": "smug",
+            "after": "neutral"
+          },
+          {
+            "id": "ed6sill",
+            "expected": "neutral",
+            "mood": "irritated",
+            "seed": 43,
+            "delta": 1,
+            "before": "smug",
+            "after": "neutral"
+          },
+          {
+            "id": "edd70xy",
+            "expected": "happy",
+            "mood": "calm",
+            "seed": 17,
+            "delta": -1,
+            "before": "happy",
+            "after": "smug"
+          },
+          {
+            "id": "edd70xy",
+            "expected": "happy",
+            "mood": "calm",
+            "seed": 43,
+            "delta": -1,
+            "before": "happy",
+            "after": "smug"
+          },
+          {
+            "id": "ed7y43m",
+            "expected": "happy",
+            "mood": "calm",
+            "seed": 17,
+            "delta": 1,
+            "before": "neutral",
+            "after": "happy"
+          },
+          {
+            "id": "ed7y43m",
+            "expected": "happy",
+            "mood": "calm",
+            "seed": 43,
+            "delta": 1,
+            "before": "neutral",
+            "after": "happy"
+          },
+          {
+            "id": "ef18or6",
+            "expected": "happy",
+            "mood": "irritated",
+            "seed": 43,
+            "delta": 1,
+            "before": "smug",
+            "after": "happy"
+          },
+          {
+            "id": "ee27kmr",
+            "expected": "curious",
+            "mood": "irritated",
+            "seed": 17,
+            "delta": 1,
+            "before": "smug",
+            "after": "curious"
+          },
+          {
+            "id": "ee27kmr",
+            "expected": "curious",
+            "mood": "irritated",
+            "seed": 43,
+            "delta": 1,
+            "before": "smug",
+            "after": "curious"
+          },
+          {
+            "id": "ed51i23",
+            "expected": "curious",
+            "mood": "irritated",
+            "seed": 17,
+            "delta": 1,
+            "before": "smug",
+            "after": "curious"
+          },
+          {
+            "id": "edp3os0",
+            "expected": "curious",
+            "mood": "irritated",
+            "seed": 17,
+            "delta": 1,
+            "before": "smug",
+            "after": "curious"
+          },
+          {
+            "id": "edp3os0",
+            "expected": "curious",
+            "mood": "irritated",
+            "seed": 43,
+            "delta": 1,
+            "before": "smug",
+            "after": "curious"
+          },
+          {
+            "id": "eepjx2q",
+            "expected": "curious",
+            "mood": "irritated",
+            "seed": 17,
+            "delta": -1,
+            "before": "curious",
+            "after": "surprised"
+          },
+          {
+            "id": "eepjx2q",
+            "expected": "curious",
+            "mood": "irritated",
+            "seed": 43,
+            "delta": -1,
+            "before": "curious",
+            "after": "surprised"
+          },
+          {
+            "id": "eengaqh",
+            "expected": "curious",
+            "mood": "irritated",
+            "seed": 17,
+            "delta": 1,
+            "before": "smug",
+            "after": "curious"
+          },
+          {
+            "id": "eengaqh",
+            "expected": "curious",
+            "mood": "irritated",
+            "seed": 43,
+            "delta": 1,
+            "before": "smug",
+            "after": "curious"
+          },
+          {
+            "id": "ed4p1u6",
+            "expected": "annoyed",
+            "mood": "calm",
+            "seed": 17,
+            "delta": 1,
+            "before": "neutral",
+            "after": "annoyed"
+          },
+          {
+            "id": "ed4p1u6",
+            "expected": "annoyed",
+            "mood": "calm",
+            "seed": 43,
+            "delta": 1,
+            "before": "determined",
+            "after": "annoyed"
+          },
+          {
+            "id": "ef7l6mu",
+            "expected": "annoyed",
+            "mood": "irritated",
+            "seed": 43,
+            "delta": 1,
+            "before": "smug",
+            "after": "annoyed"
+          },
+          {
+            "id": "eeextyn",
+            "expected": "annoyed",
+            "mood": "irritated",
+            "seed": 17,
+            "delta": 1,
+            "before": "smug",
+            "after": "annoyed"
+          },
+          {
+            "id": "eeextyn",
+            "expected": "annoyed",
+            "mood": "irritated",
+            "seed": 43,
+            "delta": 1,
+            "before": "smug",
+            "after": "annoyed"
+          },
+          {
+            "id": "eez9g38",
+            "expected": "annoyed",
+            "mood": "irritated",
+            "seed": 17,
+            "delta": 1,
+            "before": "smug",
+            "after": "annoyed"
+          },
+          {
+            "id": "eez9g38",
+            "expected": "annoyed",
+            "mood": "irritated",
+            "seed": 43,
+            "delta": 1,
+            "before": "smug",
+            "after": "annoyed"
+          },
+          {
+            "id": "edj480r",
+            "expected": "annoyed",
+            "mood": "calm",
+            "seed": 17,
+            "delta": 1,
+            "before": "neutral",
+            "after": "annoyed"
+          },
+          {
+            "id": "edj480r",
+            "expected": "annoyed",
+            "mood": "calm",
+            "seed": 43,
+            "delta": 1,
+            "before": "neutral",
+            "after": "annoyed"
+          },
+          {
+            "id": "eew9um5",
+            "expected": "embarrassed",
+            "mood": "calm",
+            "seed": 43,
+            "delta": 1,
+            "before": "worried",
+            "after": "embarrassed"
+          },
+          {
+            "id": "efbgp81",
+            "expected": "embarrassed",
+            "mood": "calm",
+            "seed": 17,
+            "delta": 1,
+            "before": "neutral",
+            "after": "embarrassed"
+          },
+          {
+            "id": "efbgp81",
+            "expected": "embarrassed",
+            "mood": "calm",
+            "seed": 43,
+            "delta": 1,
+            "before": "neutral",
+            "after": "embarrassed"
+          },
+          {
+            "id": "eemq43n",
+            "expected": "embarrassed",
+            "mood": "calm",
+            "seed": 17,
+            "delta": 1,
+            "before": "worried",
+            "after": "embarrassed"
+          },
+          {
+            "id": "eemq43n",
+            "expected": "embarrassed",
+            "mood": "calm",
+            "seed": 43,
+            "delta": 1,
+            "before": "worried",
+            "after": "embarrassed"
+          },
+          {
+            "id": "edlp66i",
+            "expected": "surprised",
+            "mood": "calm",
+            "seed": 17,
+            "delta": 1,
+            "before": "happy",
+            "after": "surprised"
+          },
+          {
+            "id": "edlp66i",
+            "expected": "surprised",
+            "mood": "calm",
+            "seed": 43,
+            "delta": 1,
+            "before": "happy",
+            "after": "surprised"
+          },
+          {
+            "id": "edgpo6r",
+            "expected": "surprised",
+            "mood": "irritated",
+            "seed": 43,
+            "delta": 1,
+            "before": "happy",
+            "after": "surprised"
+          },
+          {
+            "id": "eemucb6",
+            "expected": "surprised",
+            "mood": "irritated",
+            "seed": 17,
+            "delta": 1,
+            "before": "smug",
+            "after": "surprised"
+          },
+          {
+            "id": "eemucb6",
+            "expected": "surprised",
+            "mood": "irritated",
+            "seed": 43,
+            "delta": 1,
+            "before": "smug",
+            "after": "surprised"
+          }
+        ],
+        "lineDeltas": [
+          {
+            "id": "ed3o748",
+            "meanDifference": 0
+          },
+          {
+            "id": "eczh8ym",
+            "meanDifference": 0
+          },
+          {
+            "id": "eerxigr",
+            "meanDifference": 0
+          },
+          {
+            "id": "eeggma7",
+            "meanDifference": 0
+          },
+          {
+            "id": "ed6sill",
+            "meanDifference": 0.5
+          },
+          {
+            "id": "eeptbkr",
+            "meanDifference": 0
+          },
+          {
+            "id": "eecn0nk",
+            "meanDifference": 0
+          },
+          {
+            "id": "ee5yybc",
+            "meanDifference": 0
+          },
+          {
+            "id": "ee2okxk",
+            "meanDifference": 0
+          },
+          {
+            "id": "eey8kon",
+            "meanDifference": 0
+          },
+          {
+            "id": "eekirom",
+            "meanDifference": 0
+          },
+          {
+            "id": "eezinyp",
+            "meanDifference": 0
+          },
+          {
+            "id": "edkmo4f",
+            "meanDifference": 0
+          },
+          {
+            "id": "efgtqxs",
+            "meanDifference": 0
+          },
+          {
+            "id": "ed5g82p",
+            "meanDifference": 0
+          },
+          {
+            "id": "edpj77o",
+            "meanDifference": 0
+          },
+          {
+            "id": "ed2r3a0",
+            "meanDifference": 0
+          },
+          {
+            "id": "edcnlah",
+            "meanDifference": 0
+          },
+          {
+            "id": "efgb529",
+            "meanDifference": 0
+          },
+          {
+            "id": "ee9rqmp",
+            "meanDifference": 0
+          },
+          {
+            "id": "edf65ig",
+            "meanDifference": 0
+          },
+          {
+            "id": "ee5wzwr",
+            "meanDifference": 0
+          },
+          {
+            "id": "ee2csg8",
+            "meanDifference": 0
+          },
+          {
+            "id": "ee4buzn",
+            "meanDifference": 0
+          },
+          {
+            "id": "eepkwed",
+            "meanDifference": 0
+          },
+          {
+            "id": "edobyt7",
+            "meanDifference": 0
+          },
+          {
+            "id": "edpgjsw",
+            "meanDifference": 0
+          },
+          {
+            "id": "eev7958",
+            "meanDifference": 0
+          },
+          {
+            "id": "ed1suhl",
+            "meanDifference": 0
+          },
+          {
+            "id": "edd70xy",
+            "meanDifference": -0.5
+          },
+          {
+            "id": "ef88ag9",
+            "meanDifference": 0
+          },
+          {
+            "id": "eemhb9t",
+            "meanDifference": 0
+          },
+          {
+            "id": "ee3vf5i",
+            "meanDifference": 0
+          },
+          {
+            "id": "ed7y43m",
+            "meanDifference": 0.5
+          },
+          {
+            "id": "efacciv",
+            "meanDifference": 0
+          },
+          {
+            "id": "ee9fdsx",
+            "meanDifference": 0
+          },
+          {
+            "id": "eechsrw",
+            "meanDifference": 0
+          },
+          {
+            "id": "efc05gk",
+            "meanDifference": 0
+          },
+          {
+            "id": "ee7t6zk",
+            "meanDifference": 0
+          },
+          {
+            "id": "ef18or6",
+            "meanDifference": 0.25
+          },
+          {
+            "id": "edjldcm",
+            "meanDifference": 0
+          },
+          {
+            "id": "ef9yi7a",
+            "meanDifference": 0
+          },
+          {
+            "id": "ee27kmr",
+            "meanDifference": 0.5
+          },
+          {
+            "id": "efcplj3",
+            "meanDifference": 0
+          },
+          {
+            "id": "ed74ybw",
+            "meanDifference": 0
+          },
+          {
+            "id": "edmvyf0",
+            "meanDifference": 0
+          },
+          {
+            "id": "edki5r7",
+            "meanDifference": 0
+          },
+          {
+            "id": "edjzcf0",
+            "meanDifference": 0
+          },
+          {
+            "id": "ed3v8zr",
+            "meanDifference": 0
+          },
+          {
+            "id": "ed51i23",
+            "meanDifference": 0.25
+          },
+          {
+            "id": "eeyazvb",
+            "meanDifference": 0
+          },
+          {
+            "id": "een361l",
+            "meanDifference": 0
+          },
+          {
+            "id": "ef40uup",
+            "meanDifference": 0
+          },
+          {
+            "id": "edp3os0",
+            "meanDifference": 0.5
+          },
+          {
+            "id": "ed8jhbd",
+            "meanDifference": 0
+          },
+          {
+            "id": "eddfus0",
+            "meanDifference": 0
+          },
+          {
+            "id": "eepjx2q",
+            "meanDifference": -0.5
+          },
+          {
+            "id": "eda83rh",
+            "meanDifference": 0
+          },
+          {
+            "id": "ee5xfyq",
+            "meanDifference": 0
+          },
+          {
+            "id": "eengaqh",
+            "meanDifference": 0.5
+          },
+          {
+            "id": "edngdyn",
+            "meanDifference": 0
+          },
+          {
+            "id": "efc0sd8",
+            "meanDifference": 0
+          },
+          {
+            "id": "ed4p1u6",
+            "meanDifference": 0.5
+          },
+          {
+            "id": "efc2esx",
+            "meanDifference": 0
+          },
+          {
+            "id": "edzl3ki",
+            "meanDifference": 0
+          },
+          {
+            "id": "eehtcr1",
+            "meanDifference": 0
+          },
+          {
+            "id": "eerk9lf",
+            "meanDifference": 0
+          },
+          {
+            "id": "ef7l6mu",
+            "meanDifference": 0.25
+          },
+          {
+            "id": "ee65dgs",
+            "meanDifference": 0
+          },
+          {
+            "id": "eeq36jl",
+            "meanDifference": 0
+          },
+          {
+            "id": "ed3cx2l",
+            "meanDifference": 0
+          },
+          {
+            "id": "ed7pf30",
+            "meanDifference": 0
+          },
+          {
+            "id": "eeextyn",
+            "meanDifference": 0.5
+          },
+          {
+            "id": "ef6oa94",
+            "meanDifference": 0
+          },
+          {
+            "id": "eebo8e2",
+            "meanDifference": 0
+          },
+          {
+            "id": "eez9g38",
+            "meanDifference": 0.5
+          },
+          {
+            "id": "ef9ruw0",
+            "meanDifference": 0
+          },
+          {
+            "id": "ed8ja96",
+            "meanDifference": 0
+          },
+          {
+            "id": "edj480r",
+            "meanDifference": 0.5
+          },
+          {
+            "id": "edxrgjo",
+            "meanDifference": 0
+          },
+          {
+            "id": "eerjl1v",
+            "meanDifference": 0
+          },
+          {
+            "id": "eesxxeu",
+            "meanDifference": 0
+          },
+          {
+            "id": "ee3ztta",
+            "meanDifference": 0
+          },
+          {
+            "id": "eew9um5",
+            "meanDifference": 0.25
+          },
+          {
+            "id": "edfozau",
+            "meanDifference": 0
+          },
+          {
+            "id": "efavv2e",
+            "meanDifference": 0
+          },
+          {
+            "id": "edh3lnr",
+            "meanDifference": 0
+          },
+          {
+            "id": "edkeqxu",
+            "meanDifference": 0
+          },
+          {
+            "id": "eeh5aip",
+            "meanDifference": 0
+          },
+          {
+            "id": "efgzld0",
+            "meanDifference": 0
+          },
+          {
+            "id": "edm8a4a",
+            "meanDifference": 0
+          },
+          {
+            "id": "eeecj1w",
+            "meanDifference": 0
+          },
+          {
+            "id": "eeapyt5",
+            "meanDifference": 0
+          },
+          {
+            "id": "eee5n9f",
+            "meanDifference": 0
+          },
+          {
+            "id": "edrhrs3",
+            "meanDifference": 0
+          },
+          {
+            "id": "eeynqjj",
+            "meanDifference": 0
+          },
+          {
+            "id": "efbgp81",
+            "meanDifference": 0.5
+          },
+          {
+            "id": "eemw27z",
+            "meanDifference": 0
+          },
+          {
+            "id": "eemq43n",
+            "meanDifference": 0.5
+          },
+          {
+            "id": "edmm57v",
+            "meanDifference": 0
+          },
+          {
+            "id": "eegj1ea",
+            "meanDifference": 0
+          },
+          {
+            "id": "eeduqfx",
+            "meanDifference": 0
+          },
+          {
+            "id": "eemt5cf",
+            "meanDifference": 0
+          },
+          {
+            "id": "ednr7vr",
+            "meanDifference": 0
+          },
+          {
+            "id": "ed0qc9b",
+            "meanDifference": 0
+          },
+          {
+            "id": "edlyqkr",
+            "meanDifference": 0
+          },
+          {
+            "id": "ed6q46k",
+            "meanDifference": 0
+          },
+          {
+            "id": "eeaqrj7",
+            "meanDifference": 0
+          },
+          {
+            "id": "ef6e8gu",
+            "meanDifference": 0
+          },
+          {
+            "id": "eegp95p",
+            "meanDifference": 0
+          },
+          {
+            "id": "edlp66i",
+            "meanDifference": 0.5
+          },
+          {
+            "id": "edho03w",
+            "meanDifference": 0
+          },
+          {
+            "id": "edgpo6r",
+            "meanDifference": 0.25
+          },
+          {
+            "id": "edm0eak",
+            "meanDifference": 0
+          },
+          {
+            "id": "ef8ym2z",
+            "meanDifference": 0
+          },
+          {
+            "id": "eex0tm9",
+            "meanDifference": 0
+          },
+          {
+            "id": "eczegcw",
+            "meanDifference": 0
+          },
+          {
+            "id": "edqsf8p",
+            "meanDifference": 0
+          },
+          {
+            "id": "edd50m4",
+            "meanDifference": 0
+          },
+          {
+            "id": "eejecv1",
+            "meanDifference": 0
+          },
+          {
+            "id": "eczu82a",
+            "meanDifference": 0
+          },
+          {
+            "id": "edzh5rz",
+            "meanDifference": 0
+          },
+          {
+            "id": "ee74jew",
+            "meanDifference": 0
+          },
+          {
+            "id": "eesbc6e",
+            "meanDifference": 0
+          },
+          {
+            "id": "eew49rj",
+            "meanDifference": 0
+          },
+          {
+            "id": "edq2uz8",
+            "meanDifference": 0
+          },
+          {
+            "id": "ef0xb1c",
+            "meanDifference": 0
+          },
+          {
+            "id": "eemucb6",
+            "meanDifference": 0.5
+          }
+        ]
+      },
+      "no_mood": {
+        "becameCorrect": 81,
+        "becameIncorrect": 8,
+        "changes": [
+          {
+            "id": "ed6sill",
+            "expected": "neutral",
+            "mood": "irritated",
+            "seed": 17,
+            "delta": 1,
+            "before": "smug",
+            "after": "neutral"
+          },
+          {
+            "id": "ed6sill",
+            "expected": "neutral",
+            "mood": "irritated",
+            "seed": 43,
+            "delta": 1,
+            "before": "smug",
+            "after": "neutral"
+          },
+          {
+            "id": "eeptbkr",
+            "expected": "neutral",
+            "mood": "irritated",
+            "seed": 17,
+            "delta": 1,
+            "before": "smug",
+            "after": "neutral"
+          },
+          {
+            "id": "eeptbkr",
+            "expected": "neutral",
+            "mood": "irritated",
+            "seed": 43,
+            "delta": 1,
+            "before": "smug",
+            "after": "neutral"
+          },
+          {
+            "id": "eey8kon",
+            "expected": "neutral",
+            "mood": "calm",
+            "seed": 17,
+            "delta": -1,
+            "before": "neutral",
+            "after": "determined"
+          },
+          {
+            "id": "eey8kon",
+            "expected": "neutral",
+            "mood": "calm",
+            "seed": 43,
+            "delta": -1,
+            "before": "neutral",
+            "after": "determined"
+          },
+          {
+            "id": "ee5wzwr",
+            "expected": "happy",
+            "mood": "irritated",
+            "seed": 17,
+            "delta": 1,
+            "before": "smug",
+            "after": "happy"
+          },
+          {
+            "id": "ee5wzwr",
+            "expected": "happy",
+            "mood": "irritated",
+            "seed": 43,
+            "delta": 1,
+            "before": "smug",
+            "after": "happy"
+          },
+          {
+            "id": "eev7958",
+            "expected": "happy",
+            "mood": "irritated",
+            "seed": 17,
+            "delta": 1,
+            "before": "smug",
+            "after": "happy"
+          },
+          {
+            "id": "eev7958",
+            "expected": "happy",
+            "mood": "irritated",
+            "seed": 43,
+            "delta": 1,
+            "before": "smug",
+            "after": "happy"
+          },
+          {
+            "id": "edd70xy",
+            "expected": "happy",
+            "mood": "calm",
+            "seed": 17,
+            "delta": -1,
+            "before": "happy",
+            "after": "smug"
+          },
+          {
+            "id": "edd70xy",
+            "expected": "happy",
+            "mood": "calm",
+            "seed": 43,
+            "delta": -1,
+            "before": "happy",
+            "after": "smug"
+          },
+          {
+            "id": "ee9fdsx",
+            "expected": "happy",
+            "mood": "irritated",
+            "seed": 17,
+            "delta": 1,
+            "before": "smug",
+            "after": "happy"
+          },
+          {
+            "id": "ee9fdsx",
+            "expected": "happy",
+            "mood": "irritated",
+            "seed": 43,
+            "delta": 1,
+            "before": "smug",
+            "after": "happy"
+          },
+          {
+            "id": "eechsrw",
+            "expected": "happy",
+            "mood": "irritated",
+            "seed": 17,
+            "delta": 1,
+            "before": "smug",
+            "after": "happy"
+          },
+          {
+            "id": "eechsrw",
+            "expected": "happy",
+            "mood": "irritated",
+            "seed": 43,
+            "delta": 1,
+            "before": "smug",
+            "after": "happy"
+          },
+          {
+            "id": "ef18or6",
+            "expected": "happy",
+            "mood": "irritated",
+            "seed": 43,
+            "delta": 1,
+            "before": "smug",
+            "after": "happy"
+          },
+          {
+            "id": "ef9yi7a",
+            "expected": "curious",
+            "mood": "irritated",
+            "seed": 17,
+            "delta": 1,
+            "before": "smug",
+            "after": "curious"
+          },
+          {
+            "id": "ef9yi7a",
+            "expected": "curious",
+            "mood": "irritated",
+            "seed": 43,
+            "delta": 1,
+            "before": "smug",
+            "after": "curious"
+          },
+          {
+            "id": "ee27kmr",
+            "expected": "curious",
+            "mood": "irritated",
+            "seed": 17,
+            "delta": 1,
+            "before": "smug",
+            "after": "curious"
+          },
+          {
+            "id": "ee27kmr",
+            "expected": "curious",
+            "mood": "irritated",
+            "seed": 43,
+            "delta": 1,
+            "before": "smug",
+            "after": "curious"
+          },
+          {
+            "id": "edmvyf0",
+            "expected": "curious",
+            "mood": "calm",
+            "seed": 17,
+            "delta": -1,
+            "before": "curious",
+            "after": "surprised"
+          },
+          {
+            "id": "edmvyf0",
+            "expected": "curious",
+            "mood": "calm",
+            "seed": 43,
+            "delta": -1,
+            "before": "curious",
+            "after": "surprised"
+          },
+          {
+            "id": "edki5r7",
+            "expected": "curious",
+            "mood": "irritated",
+            "seed": 17,
+            "delta": 1,
+            "before": "smug",
+            "after": "curious"
+          },
+          {
+            "id": "edki5r7",
+            "expected": "curious",
+            "mood": "irritated",
+            "seed": 43,
+            "delta": 1,
+            "before": "smug",
+            "after": "curious"
+          },
+          {
+            "id": "ed3v8zr",
+            "expected": "curious",
+            "mood": "irritated",
+            "seed": 17,
+            "delta": 1,
+            "before": "smug",
+            "after": "curious"
+          },
+          {
+            "id": "ed3v8zr",
+            "expected": "curious",
+            "mood": "irritated",
+            "seed": 43,
+            "delta": 1,
+            "before": "smug",
+            "after": "curious"
+          },
+          {
+            "id": "ed51i23",
+            "expected": "curious",
+            "mood": "irritated",
+            "seed": 17,
+            "delta": 1,
+            "before": "smug",
+            "after": "curious"
+          },
+          {
+            "id": "ed51i23",
+            "expected": "curious",
+            "mood": "irritated",
+            "seed": 43,
+            "delta": 1,
+            "before": "smug",
+            "after": "curious"
+          },
+          {
+            "id": "edp3os0",
+            "expected": "curious",
+            "mood": "irritated",
+            "seed": 17,
+            "delta": 1,
+            "before": "smug",
+            "after": "curious"
+          },
+          {
+            "id": "edp3os0",
+            "expected": "curious",
+            "mood": "irritated",
+            "seed": 43,
+            "delta": 1,
+            "before": "smug",
+            "after": "curious"
+          },
+          {
+            "id": "ed8jhbd",
+            "expected": "curious",
+            "mood": "irritated",
+            "seed": 17,
+            "delta": 1,
+            "before": "smug",
+            "after": "curious"
+          },
+          {
+            "id": "ed8jhbd",
+            "expected": "curious",
+            "mood": "irritated",
+            "seed": 43,
+            "delta": 1,
+            "before": "smug",
+            "after": "curious"
+          },
+          {
+            "id": "eepjx2q",
+            "expected": "curious",
+            "mood": "irritated",
+            "seed": 17,
+            "delta": -1,
+            "before": "curious",
+            "after": "surprised"
+          },
+          {
+            "id": "eepjx2q",
+            "expected": "curious",
+            "mood": "irritated",
+            "seed": 43,
+            "delta": -1,
+            "before": "curious",
+            "after": "surprised"
+          },
+          {
+            "id": "eda83rh",
+            "expected": "curious",
+            "mood": "irritated",
+            "seed": 17,
+            "delta": 1,
+            "before": "smug",
+            "after": "curious"
+          },
+          {
+            "id": "eda83rh",
+            "expected": "curious",
+            "mood": "irritated",
+            "seed": 43,
+            "delta": 1,
+            "before": "smug",
+            "after": "curious"
+          },
+          {
+            "id": "efc0sd8",
+            "expected": "annoyed",
+            "mood": "irritated",
+            "seed": 17,
+            "delta": 1,
+            "before": "smug",
+            "after": "annoyed"
+          },
+          {
+            "id": "efc0sd8",
+            "expected": "annoyed",
+            "mood": "irritated",
+            "seed": 43,
+            "delta": 1,
+            "before": "smug",
+            "after": "annoyed"
+          },
+          {
+            "id": "eehtcr1",
+            "expected": "annoyed",
+            "mood": "irritated",
+            "seed": 17,
+            "delta": 1,
+            "before": "smug",
+            "after": "annoyed"
+          },
+          {
+            "id": "eehtcr1",
+            "expected": "annoyed",
+            "mood": "irritated",
+            "seed": 43,
+            "delta": 1,
+            "before": "smug",
+            "after": "annoyed"
+          },
+          {
+            "id": "ef7l6mu",
+            "expected": "annoyed",
+            "mood": "irritated",
+            "seed": 17,
+            "delta": 1,
+            "before": "smug",
+            "after": "annoyed"
+          },
+          {
+            "id": "ef7l6mu",
+            "expected": "annoyed",
+            "mood": "irritated",
+            "seed": 43,
+            "delta": 1,
+            "before": "smug",
+            "after": "annoyed"
+          },
+          {
+            "id": "eeextyn",
+            "expected": "annoyed",
+            "mood": "irritated",
+            "seed": 17,
+            "delta": 1,
+            "before": "smug",
+            "after": "annoyed"
+          },
+          {
+            "id": "eeextyn",
+            "expected": "annoyed",
+            "mood": "irritated",
+            "seed": 43,
+            "delta": 1,
+            "before": "smug",
+            "after": "annoyed"
+          },
+          {
+            "id": "eebo8e2",
+            "expected": "annoyed",
+            "mood": "irritated",
+            "seed": 17,
+            "delta": 1,
+            "before": "smug",
+            "after": "annoyed"
+          },
+          {
+            "id": "eebo8e2",
+            "expected": "annoyed",
+            "mood": "irritated",
+            "seed": 43,
+            "delta": 1,
+            "before": "smug",
+            "after": "annoyed"
+          },
+          {
+            "id": "eez9g38",
+            "expected": "annoyed",
+            "mood": "irritated",
+            "seed": 17,
+            "delta": 1,
+            "before": "smug",
+            "after": "annoyed"
+          },
+          {
+            "id": "eez9g38",
+            "expected": "annoyed",
+            "mood": "irritated",
+            "seed": 43,
+            "delta": 1,
+            "before": "smug",
+            "after": "annoyed"
+          },
+          {
+            "id": "ef9ruw0",
+            "expected": "annoyed",
+            "mood": "irritated",
+            "seed": 17,
+            "delta": 1,
+            "before": "smug",
+            "after": "annoyed"
+          },
+          {
+            "id": "ef9ruw0",
+            "expected": "annoyed",
+            "mood": "irritated",
+            "seed": 43,
+            "delta": 1,
+            "before": "smug",
+            "after": "annoyed"
+          },
+          {
+            "id": "edj480r",
+            "expected": "annoyed",
+            "mood": "calm",
+            "seed": 17,
+            "delta": 1,
+            "before": "neutral",
+            "after": "annoyed"
+          },
+          {
+            "id": "edj480r",
+            "expected": "annoyed",
+            "mood": "calm",
+            "seed": 43,
+            "delta": 1,
+            "before": "neutral",
+            "after": "annoyed"
+          },
+          {
+            "id": "edj480r",
+            "expected": "annoyed",
+            "mood": "irritated",
+            "seed": 17,
+            "delta": 1,
+            "before": "smug",
+            "after": "annoyed"
+          },
+          {
+            "id": "edj480r",
+            "expected": "annoyed",
+            "mood": "irritated",
+            "seed": 43,
+            "delta": 1,
+            "before": "smug",
+            "after": "annoyed"
+          },
+          {
+            "id": "edxrgjo",
+            "expected": "annoyed",
+            "mood": "irritated",
+            "seed": 17,
+            "delta": 1,
+            "before": "smug",
+            "after": "annoyed"
+          },
+          {
+            "id": "edxrgjo",
+            "expected": "annoyed",
+            "mood": "irritated",
+            "seed": 43,
+            "delta": 1,
+            "before": "smug",
+            "after": "annoyed"
+          },
+          {
+            "id": "eesxxeu",
+            "expected": "embarrassed",
+            "mood": "irritated",
+            "seed": 17,
+            "delta": 1,
+            "before": "smug",
+            "after": "embarrassed"
+          },
+          {
+            "id": "eesxxeu",
+            "expected": "embarrassed",
+            "mood": "irritated",
+            "seed": 43,
+            "delta": 1,
+            "before": "smug",
+            "after": "embarrassed"
+          },
+          {
+            "id": "eew9um5",
+            "expected": "embarrassed",
+            "mood": "calm",
+            "seed": 43,
+            "delta": 1,
+            "before": "worried",
+            "after": "embarrassed"
+          },
+          {
+            "id": "eew9um5",
+            "expected": "embarrassed",
+            "mood": "irritated",
+            "seed": 17,
+            "delta": 1,
+            "before": "smug",
+            "after": "embarrassed"
+          },
+          {
+            "id": "eew9um5",
+            "expected": "embarrassed",
+            "mood": "irritated",
+            "seed": 43,
+            "delta": 1,
+            "before": "smug",
+            "after": "embarrassed"
+          },
+          {
+            "id": "edh3lnr",
+            "expected": "embarrassed",
+            "mood": "irritated",
+            "seed": 17,
+            "delta": 1,
+            "before": "smug",
+            "after": "embarrassed"
+          },
+          {
+            "id": "edh3lnr",
+            "expected": "embarrassed",
+            "mood": "irritated",
+            "seed": 43,
+            "delta": 1,
+            "before": "smug",
+            "after": "embarrassed"
+          },
+          {
+            "id": "eeynqjj",
+            "expected": "embarrassed",
+            "mood": "calm",
+            "seed": 17,
+            "delta": 1,
+            "before": "worried",
+            "after": "embarrassed"
+          },
+          {
+            "id": "eeynqjj",
+            "expected": "embarrassed",
+            "mood": "calm",
+            "seed": 43,
+            "delta": 1,
+            "before": "worried",
+            "after": "embarrassed"
+          },
+          {
+            "id": "eeynqjj",
+            "expected": "embarrassed",
+            "mood": "irritated",
+            "seed": 17,
+            "delta": 1,
+            "before": "smug",
+            "after": "embarrassed"
+          },
+          {
+            "id": "eeynqjj",
+            "expected": "embarrassed",
+            "mood": "irritated",
+            "seed": 43,
+            "delta": 1,
+            "before": "smug",
+            "after": "embarrassed"
+          },
+          {
+            "id": "eemq43n",
+            "expected": "embarrassed",
+            "mood": "calm",
+            "seed": 17,
+            "delta": 1,
+            "before": "worried",
+            "after": "embarrassed"
+          },
+          {
+            "id": "eemq43n",
+            "expected": "embarrassed",
+            "mood": "calm",
+            "seed": 43,
+            "delta": 1,
+            "before": "worried",
+            "after": "embarrassed"
+          },
+          {
+            "id": "eemq43n",
+            "expected": "embarrassed",
+            "mood": "irritated",
+            "seed": 17,
+            "delta": 1,
+            "before": "smug",
+            "after": "embarrassed"
+          },
+          {
+            "id": "eemq43n",
+            "expected": "embarrassed",
+            "mood": "irritated",
+            "seed": 43,
+            "delta": 1,
+            "before": "smug",
+            "after": "embarrassed"
+          },
+          {
+            "id": "edmm57v",
+            "expected": "embarrassed",
+            "mood": "irritated",
+            "seed": 17,
+            "delta": 1,
+            "before": "smug",
+            "after": "embarrassed"
+          },
+          {
+            "id": "edmm57v",
+            "expected": "embarrassed",
+            "mood": "irritated",
+            "seed": 43,
+            "delta": 1,
+            "before": "smug",
+            "after": "embarrassed"
+          },
+          {
+            "id": "eeduqfx",
+            "expected": "worried",
+            "mood": "irritated",
+            "seed": 17,
+            "delta": 1,
+            "before": "smug",
+            "after": "worried"
+          },
+          {
+            "id": "eeduqfx",
+            "expected": "worried",
+            "mood": "irritated",
+            "seed": 43,
+            "delta": 1,
+            "before": "smug",
+            "after": "worried"
+          },
+          {
+            "id": "ef6e8gu",
+            "expected": "surprised",
+            "mood": "irritated",
+            "seed": 17,
+            "delta": 1,
+            "before": "smug",
+            "after": "surprised"
+          },
+          {
+            "id": "ef6e8gu",
+            "expected": "surprised",
+            "mood": "irritated",
+            "seed": 43,
+            "delta": 1,
+            "before": "smug",
+            "after": "surprised"
+          },
+          {
+            "id": "edgpo6r",
+            "expected": "surprised",
+            "mood": "irritated",
+            "seed": 43,
+            "delta": 1,
+            "before": "happy",
+            "after": "surprised"
+          },
+          {
+            "id": "edm0eak",
+            "expected": "surprised",
+            "mood": "irritated",
+            "seed": 17,
+            "delta": 1,
+            "before": "smug",
+            "after": "surprised"
+          },
+          {
+            "id": "edm0eak",
+            "expected": "surprised",
+            "mood": "irritated",
+            "seed": 43,
+            "delta": 1,
+            "before": "smug",
+            "after": "surprised"
+          },
+          {
+            "id": "eex0tm9",
+            "expected": "surprised",
+            "mood": "irritated",
+            "seed": 17,
+            "delta": 1,
+            "before": "smug",
+            "after": "surprised"
+          },
+          {
+            "id": "eex0tm9",
+            "expected": "surprised",
+            "mood": "irritated",
+            "seed": 43,
+            "delta": 1,
+            "before": "smug",
+            "after": "surprised"
+          },
+          {
+            "id": "ee74jew",
+            "expected": "surprised",
+            "mood": "irritated",
+            "seed": 17,
+            "delta": 1,
+            "before": "smug",
+            "after": "surprised"
+          },
+          {
+            "id": "ee74jew",
+            "expected": "surprised",
+            "mood": "irritated",
+            "seed": 43,
+            "delta": 1,
+            "before": "smug",
+            "after": "surprised"
+          },
+          {
+            "id": "eew49rj",
+            "expected": "surprised",
+            "mood": "irritated",
+            "seed": 17,
+            "delta": 1,
+            "before": "smug",
+            "after": "surprised"
+          },
+          {
+            "id": "eew49rj",
+            "expected": "surprised",
+            "mood": "irritated",
+            "seed": 43,
+            "delta": 1,
+            "before": "smug",
+            "after": "surprised"
+          },
+          {
+            "id": "eemucb6",
+            "expected": "surprised",
+            "mood": "irritated",
+            "seed": 17,
+            "delta": 1,
+            "before": "smug",
+            "after": "surprised"
+          },
+          {
+            "id": "eemucb6",
+            "expected": "surprised",
+            "mood": "irritated",
+            "seed": 43,
+            "delta": 1,
+            "before": "smug",
+            "after": "surprised"
+          }
+        ],
+        "lineDeltas": [
+          {
+            "id": "ed3o748",
+            "meanDifference": 0
+          },
+          {
+            "id": "eczh8ym",
+            "meanDifference": 0
+          },
+          {
+            "id": "eerxigr",
+            "meanDifference": 0
+          },
+          {
+            "id": "eeggma7",
+            "meanDifference": 0
+          },
+          {
+            "id": "ed6sill",
+            "meanDifference": 0.5
+          },
+          {
+            "id": "eeptbkr",
+            "meanDifference": 0.5
+          },
+          {
+            "id": "eecn0nk",
+            "meanDifference": 0
+          },
+          {
+            "id": "ee5yybc",
+            "meanDifference": 0
+          },
+          {
+            "id": "ee2okxk",
+            "meanDifference": 0
+          },
+          {
+            "id": "eey8kon",
+            "meanDifference": -0.5
+          },
+          {
+            "id": "eekirom",
+            "meanDifference": 0
+          },
+          {
+            "id": "eezinyp",
+            "meanDifference": 0
+          },
+          {
+            "id": "edkmo4f",
+            "meanDifference": 0
+          },
+          {
+            "id": "efgtqxs",
+            "meanDifference": 0
+          },
+          {
+            "id": "ed5g82p",
+            "meanDifference": 0
+          },
+          {
+            "id": "edpj77o",
+            "meanDifference": 0
+          },
+          {
+            "id": "ed2r3a0",
+            "meanDifference": 0
+          },
+          {
+            "id": "edcnlah",
+            "meanDifference": 0
+          },
+          {
+            "id": "efgb529",
+            "meanDifference": 0
+          },
+          {
+            "id": "ee9rqmp",
+            "meanDifference": 0
+          },
+          {
+            "id": "edf65ig",
+            "meanDifference": 0
+          },
+          {
+            "id": "ee5wzwr",
+            "meanDifference": 0.5
+          },
+          {
+            "id": "ee2csg8",
+            "meanDifference": 0
+          },
+          {
+            "id": "ee4buzn",
+            "meanDifference": 0
+          },
+          {
+            "id": "eepkwed",
+            "meanDifference": 0
+          },
+          {
+            "id": "edobyt7",
+            "meanDifference": 0
+          },
+          {
+            "id": "edpgjsw",
+            "meanDifference": 0
+          },
+          {
+            "id": "eev7958",
+            "meanDifference": 0.5
+          },
+          {
+            "id": "ed1suhl",
+            "meanDifference": 0
+          },
+          {
+            "id": "edd70xy",
+            "meanDifference": -0.5
+          },
+          {
+            "id": "ef88ag9",
+            "meanDifference": 0
+          },
+          {
+            "id": "eemhb9t",
+            "meanDifference": 0
+          },
+          {
+            "id": "ee3vf5i",
+            "meanDifference": 0
+          },
+          {
+            "id": "ed7y43m",
+            "meanDifference": 0
+          },
+          {
+            "id": "efacciv",
+            "meanDifference": 0
+          },
+          {
+            "id": "ee9fdsx",
+            "meanDifference": 0.5
+          },
+          {
+            "id": "eechsrw",
+            "meanDifference": 0.5
+          },
+          {
+            "id": "efc05gk",
+            "meanDifference": 0
+          },
+          {
+            "id": "ee7t6zk",
+            "meanDifference": 0
+          },
+          {
+            "id": "ef18or6",
+            "meanDifference": 0.25
+          },
+          {
+            "id": "edjldcm",
+            "meanDifference": 0
+          },
+          {
+            "id": "ef9yi7a",
+            "meanDifference": 0.5
+          },
+          {
+            "id": "ee27kmr",
+            "meanDifference": 0.5
+          },
+          {
+            "id": "efcplj3",
+            "meanDifference": 0
+          },
+          {
+            "id": "ed74ybw",
+            "meanDifference": 0
+          },
+          {
+            "id": "edmvyf0",
+            "meanDifference": -0.5
+          },
+          {
+            "id": "edki5r7",
+            "meanDifference": 0.5
+          },
+          {
+            "id": "edjzcf0",
+            "meanDifference": 0
+          },
+          {
+            "id": "ed3v8zr",
+            "meanDifference": 0.5
+          },
+          {
+            "id": "ed51i23",
+            "meanDifference": 0.5
+          },
+          {
+            "id": "eeyazvb",
+            "meanDifference": 0
+          },
+          {
+            "id": "een361l",
+            "meanDifference": 0
+          },
+          {
+            "id": "ef40uup",
+            "meanDifference": 0
+          },
+          {
+            "id": "edp3os0",
+            "meanDifference": 0.5
+          },
+          {
+            "id": "ed8jhbd",
+            "meanDifference": 0.5
+          },
+          {
+            "id": "eddfus0",
+            "meanDifference": 0
+          },
+          {
+            "id": "eepjx2q",
+            "meanDifference": -0.5
+          },
+          {
+            "id": "eda83rh",
+            "meanDifference": 0.5
+          },
+          {
+            "id": "ee5xfyq",
+            "meanDifference": 0
+          },
+          {
+            "id": "eengaqh",
+            "meanDifference": 0
+          },
+          {
+            "id": "edngdyn",
+            "meanDifference": 0
+          },
+          {
+            "id": "efc0sd8",
+            "meanDifference": 0.5
+          },
+          {
+            "id": "ed4p1u6",
+            "meanDifference": 0
+          },
+          {
+            "id": "efc2esx",
+            "meanDifference": 0
+          },
+          {
+            "id": "edzl3ki",
+            "meanDifference": 0
+          },
+          {
+            "id": "eehtcr1",
+            "meanDifference": 0.5
+          },
+          {
+            "id": "eerk9lf",
+            "meanDifference": 0
+          },
+          {
+            "id": "ef7l6mu",
+            "meanDifference": 0.5
+          },
+          {
+            "id": "ee65dgs",
+            "meanDifference": 0
+          },
+          {
+            "id": "eeq36jl",
+            "meanDifference": 0
+          },
+          {
+            "id": "ed3cx2l",
+            "meanDifference": 0
+          },
+          {
+            "id": "ed7pf30",
+            "meanDifference": 0
+          },
+          {
+            "id": "eeextyn",
+            "meanDifference": 0.5
+          },
+          {
+            "id": "ef6oa94",
+            "meanDifference": 0
+          },
+          {
+            "id": "eebo8e2",
+            "meanDifference": 0.5
+          },
+          {
+            "id": "eez9g38",
+            "meanDifference": 0.5
+          },
+          {
+            "id": "ef9ruw0",
+            "meanDifference": 0.5
+          },
+          {
+            "id": "ed8ja96",
+            "meanDifference": 0
+          },
+          {
+            "id": "edj480r",
+            "meanDifference": 1
+          },
+          {
+            "id": "edxrgjo",
+            "meanDifference": 0.5
+          },
+          {
+            "id": "eerjl1v",
+            "meanDifference": 0
+          },
+          {
+            "id": "eesxxeu",
+            "meanDifference": 0.5
+          },
+          {
+            "id": "ee3ztta",
+            "meanDifference": 0
+          },
+          {
+            "id": "eew9um5",
+            "meanDifference": 0.75
+          },
+          {
+            "id": "edfozau",
+            "meanDifference": 0
+          },
+          {
+            "id": "efavv2e",
+            "meanDifference": 0
+          },
+          {
+            "id": "edh3lnr",
+            "meanDifference": 0.5
+          },
+          {
+            "id": "edkeqxu",
+            "meanDifference": 0
+          },
+          {
+            "id": "eeh5aip",
+            "meanDifference": 0
+          },
+          {
+            "id": "efgzld0",
+            "meanDifference": 0
+          },
+          {
+            "id": "edm8a4a",
+            "meanDifference": 0
+          },
+          {
+            "id": "eeecj1w",
+            "meanDifference": 0
+          },
+          {
+            "id": "eeapyt5",
+            "meanDifference": 0
+          },
+          {
+            "id": "eee5n9f",
+            "meanDifference": 0
+          },
+          {
+            "id": "edrhrs3",
+            "meanDifference": 0
+          },
+          {
+            "id": "eeynqjj",
+            "meanDifference": 1
+          },
+          {
+            "id": "efbgp81",
+            "meanDifference": 0
+          },
+          {
+            "id": "eemw27z",
+            "meanDifference": 0
+          },
+          {
+            "id": "eemq43n",
+            "meanDifference": 1
+          },
+          {
+            "id": "edmm57v",
+            "meanDifference": 0.5
+          },
+          {
+            "id": "eegj1ea",
+            "meanDifference": 0
+          },
+          {
+            "id": "eeduqfx",
+            "meanDifference": 0.5
+          },
+          {
+            "id": "eemt5cf",
+            "meanDifference": 0
+          },
+          {
+            "id": "ednr7vr",
+            "meanDifference": 0
+          },
+          {
+            "id": "ed0qc9b",
+            "meanDifference": 0
+          },
+          {
+            "id": "edlyqkr",
+            "meanDifference": 0
+          },
+          {
+            "id": "ed6q46k",
+            "meanDifference": 0
+          },
+          {
+            "id": "eeaqrj7",
+            "meanDifference": 0
+          },
+          {
+            "id": "ef6e8gu",
+            "meanDifference": 0.5
+          },
+          {
+            "id": "eegp95p",
+            "meanDifference": 0
+          },
+          {
+            "id": "edlp66i",
+            "meanDifference": 0
+          },
+          {
+            "id": "edho03w",
+            "meanDifference": 0
+          },
+          {
+            "id": "edgpo6r",
+            "meanDifference": 0.25
+          },
+          {
+            "id": "edm0eak",
+            "meanDifference": 0.5
+          },
+          {
+            "id": "ef8ym2z",
+            "meanDifference": 0
+          },
+          {
+            "id": "eex0tm9",
+            "meanDifference": 0.5
+          },
+          {
+            "id": "eczegcw",
+            "meanDifference": 0
+          },
+          {
+            "id": "edqsf8p",
+            "meanDifference": 0
+          },
+          {
+            "id": "edd50m4",
+            "meanDifference": 0
+          },
+          {
+            "id": "eejecv1",
+            "meanDifference": 0
+          },
+          {
+            "id": "eczu82a",
+            "meanDifference": 0
+          },
+          {
+            "id": "edzh5rz",
+            "meanDifference": 0
+          },
+          {
+            "id": "ee74jew",
+            "meanDifference": 0.5
+          },
+          {
+            "id": "eesbc6e",
+            "meanDifference": 0
+          },
+          {
+            "id": "eew49rj",
+            "meanDifference": 0.5
+          },
+          {
+            "id": "edq2uz8",
+            "meanDifference": 0
+          },
+          {
+            "id": "ef0xb1c",
+            "meanDifference": 0
+          },
+          {
+            "id": "eemucb6",
+            "meanDifference": 0.5
+          }
+        ]
+      }
+    },
+    "challenge": {
+      "words_first": {
+        "becameCorrect": 3,
+        "becameIncorrect": 0,
+        "changes": [
+          {
+            "id": "reported-4",
+            "expected": "neutral",
+            "mood": "irritated",
+            "seed": 43,
+            "delta": 1,
+            "before": "smug",
+            "after": "neutral"
+          },
+          {
+            "id": "reported-5",
+            "expected": "neutral",
+            "mood": "irritated",
+            "seed": 17,
+            "delta": 1,
+            "before": "smug",
+            "after": "neutral"
+          },
+          {
+            "id": "reported-5",
+            "expected": "neutral",
+            "mood": "irritated",
+            "seed": 43,
+            "delta": 1,
+            "before": "smug",
+            "after": "neutral"
+          }
+        ],
+        "lineDeltas": [
+          {
+            "id": "reported-0",
+            "meanDifference": 0
+          },
+          {
+            "id": "reported-1",
+            "meanDifference": 0
+          },
+          {
+            "id": "reported-2",
+            "meanDifference": 0
+          },
+          {
+            "id": "reported-3",
+            "meanDifference": 0
+          },
+          {
+            "id": "reported-4",
+            "meanDifference": 0.25
+          },
+          {
+            "id": "reported-5",
+            "meanDifference": 0.5
+          }
+        ]
+      },
+      "no_mood": {
+        "becameCorrect": 8,
+        "becameIncorrect": 0,
+        "changes": [
+          {
+            "id": "reported-0",
+            "expected": "neutral",
+            "mood": "irritated",
+            "seed": 17,
+            "delta": 1,
+            "before": "smug",
+            "after": "neutral"
+          },
+          {
+            "id": "reported-0",
+            "expected": "neutral",
+            "mood": "irritated",
+            "seed": 43,
+            "delta": 1,
+            "before": "smug",
+            "after": "neutral"
+          },
+          {
+            "id": "reported-1",
+            "expected": "neutral",
+            "mood": "irritated",
+            "seed": 17,
+            "delta": 1,
+            "before": "smug",
+            "after": "neutral"
+          },
+          {
+            "id": "reported-1",
+            "expected": "neutral",
+            "mood": "irritated",
+            "seed": 43,
+            "delta": 1,
+            "before": "smug",
+            "after": "neutral"
+          },
+          {
+            "id": "reported-4",
+            "expected": "neutral",
+            "mood": "irritated",
+            "seed": 17,
+            "delta": 1,
+            "before": "smug",
+            "after": "neutral"
+          },
+          {
+            "id": "reported-4",
+            "expected": "neutral",
+            "mood": "irritated",
+            "seed": 43,
+            "delta": 1,
+            "before": "smug",
+            "after": "neutral"
+          },
+          {
+            "id": "reported-5",
+            "expected": "neutral",
+            "mood": "irritated",
+            "seed": 17,
+            "delta": 1,
+            "before": "smug",
+            "after": "neutral"
+          },
+          {
+            "id": "reported-5",
+            "expected": "neutral",
+            "mood": "irritated",
+            "seed": 43,
+            "delta": 1,
+            "before": "smug",
+            "after": "neutral"
+          }
+        ],
+        "lineDeltas": [
+          {
+            "id": "reported-0",
+            "meanDifference": 0.5
+          },
+          {
+            "id": "reported-1",
+            "meanDifference": 0.5
+          },
+          {
+            "id": "reported-2",
+            "meanDifference": 0
+          },
+          {
+            "id": "reported-3",
+            "meanDifference": 0
+          },
+          {
+            "id": "reported-4",
+            "meanDifference": 0.5
+          },
+          {
+            "id": "reported-5",
+            "meanDifference": 0.5
+          }
+        ]
+      }
+    }
+  },
+  "noMoodLabelDisagreements": 0,
+  "limitations": [
+    "Exploratory follow-up motivated by an earlier separate-split result",
+    "Mapped Reddit labels do not establish preferable companion delivery",
+    "Unequal category sizes: eight nervousness examples and twenty for each other category",
+    "No-mood prompts are identical across nominal moods; those repetitions are duplicate controls",
+    "Six reported-emotion challenge lines were previously seen; reported separately",
+    "No production prompt or personality change from this experiment"
+  ]
+}

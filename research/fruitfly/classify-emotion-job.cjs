@@ -5,6 +5,7 @@ const { performance } = require('node:perf_hooks');
 async function main() {
   const [jobPath, output] = process.argv.slice(2);
   const job = JSON.parse(fs.readFileSync(jobPath, 'utf8'));
+  const variants = job.variants ?? ['baseline', 'complete'];
   const config = JSON.parse(fs.readFileSync('/home/toomii/.config/haru-desktop/config.json', 'utf8')).ai.config;
   const endpoint = config.endpoint.replace(/\/+$/, '');
   if (config.provider !== 'ollama' || !/^http:\/\/(127\.0\.0\.1|localhost):\d+$/.test(endpoint)) throw Error('Expected existing local Ollama provider');
@@ -17,7 +18,7 @@ async function main() {
   try {
     for (const seed of job.seeds) for (const prompt of job.prompts) for (const item of job.cases) {
       // Alternate which prompt runs first; neither condition always gets a cold cache.
-      const order = completed % 4 === 0 ? ['baseline', 'complete'] : ['complete', 'baseline'];
+      const order = (completed / variants.length) % 2 === 0 ? variants : [...variants].reverse();
       for (const variant of order) {
         const at = performance.now();
         const response = await fetch(`${endpoint}/api/chat`, {
@@ -37,7 +38,7 @@ async function main() {
           evalCount: result.eval_count, evalDuration: result.eval_duration, doneReason: result.done_reason,
         }) + '\n');
         completed++;
-        if (completed % 20 === 0) console.log(`Classified ${completed}/${job.cases.length * job.prompts.length * job.seeds.length * 2}`);
+        if (completed % 20 === 0) console.log(`Classified ${completed}/${job.cases.length * job.prompts.length * job.seeds.length * variants.length}`);
       }
     }
   } finally { fs.closeSync(fd); }

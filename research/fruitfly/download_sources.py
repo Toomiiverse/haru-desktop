@@ -35,6 +35,10 @@ def main(cache):
         sources.append((f'banking-{split}.csv', f"{raw}PolyAI-LDN/task-specific-datasets/{banking['source_commit']}/banking_data/{split}.csv", banking['source_sha256'][split]))
     for local, remote in [('goemotions-test.tsv', 'test.tsv'), ('goemotions-labels.txt', 'emotions.txt')]:
         sources.append((local, f"{raw}google-research/google-research/{emotion['sourceCommit']}/goemotions/data/{remote}", emotion['sourceSha256'][local]))
+    ablation_path = HERE / 'mood-ablation-manifest.json'
+    if ablation_path.exists():
+        ablation = json.loads(ablation_path.read_text())
+        sources.append(('goemotions-dev.tsv', f"{raw}google-research/google-research/{ablation['sourceCommit']}/goemotions/data/dev.tsv", ablation['sourceSha256']))
     for name, url, expected in sources:
         target = cache / name
         if not target.exists():

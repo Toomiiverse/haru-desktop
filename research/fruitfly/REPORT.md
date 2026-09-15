@@ -26,7 +26,7 @@ Haru engineering fixes, not benefits attributable to the fly connectome.
 | Nudges and attention | Shadow policy fixed timing defects; fewer synthetic proposals are not evidence of preference | Continue shadow mode and obtain meaningful activity/feedback observations |
 | Repeated nudges | Embedding similarity confused paraphrases with changed meanings | Do not use similarity alone to suppress messages |
 | Mood | A real elapsed-time bug made recovery depend on timer cadence | Fixed, tested and deployed |
-| Emotion expression | Missing label definitions caused avoidable classification errors | Definitions added; scope and external check below |
+| Emotion expression | Definitions helped targeted labels, but agreement on public comments remained low | Keep the complete definitions; do not claim general emotional accuracy |
 | Learning preferences | Simple controls matched or beat the anatomical learner; little usable live feedback | No online learner deployed |
 | Gaze, gestures and embodied behavior | Existing movement blending already provides continuity; fly sensory/motor mappings do not transfer directly | No demonstrated benefit; no movement changes |
 
@@ -292,11 +292,72 @@ sensitive to the supplied mood; their expected neutral delivery may itself be
 debatable. All outputs were parseable.
 
 This measures agreement with authored labels before tone sharpening or rendered
-animation. It does not establish more natural expression. The additional
-GoEmotions human-annotated regression check is running and will be reported here
-without changing the prompt in response to its results.
+animation. It does not establish more natural expression.
 [Experiment details](../../docs/EMOTION-CLASSIFIER.md),
 [invented-line results](emotion-results.json)
+
+### External human-labelled check: much weaker generalization
+
+A fixed, balanced sample of 84 single-label GoEmotions test comments covered
+seven overlapping categories: neutral, happy, curious, annoyed, embarrassed,
+worried and surprised. IDs were chosen by hash order before inspecting model
+predictions. Two moods and two seeds produced 672 calls, with the same frozen
+before/after prompts. That comparison remains frozen; a separate exploratory
+mood-context follow-up uses a different dataset split.
+[GoEmotions paper](https://aclanthology.org/2020.acl-main.372/),
+[sample manifest](goemotions-manifest.json)
+
+| Setting | Before | Complete definitions |
+|---|---:|---:|
+| Calm | 64/168 (38.10%) | 74/168 (44.05%) |
+| Irritated | 22/168 (13.10%) | 32/168 (19.05%) |
+| Combined | 86/336 (25.60%) | 106/336 (31.55%) |
+
+There were 32 corrections and 12 regressions in paired calls. Worry agreement
+improved from 2/48 to 28/48; curiosity, happiness, embarrassment and surprise had
+some regressions. All outputs were parseable. The effect of supplying an irritated
+mood was larger than the benefit of adding definitions. The two contexts change
+irritation and ego together; this comparison does not isolate either variable.
+The paired improvement was 5.95 percentage points, with a line-cluster bootstrap
+95% percentile interval of 0 to 12.5 points; this remains a small, selected sample.
+
+Reddit labels describe comments in a different context from an animated
+companion's intended delivery. The mapping excludes five Haru labels, and this
+small balanced subset is not an estimate for the full dataset or directly
+comparable to its multi-label F1 benchmark. Nevertheless, these results show why
+**95.83% on invented lines must not be presented as general emotion accuracy**.
+Completing definitions is a bounded improvement; reliable emotional interpretation
+and natural expression remain unresolved. [Public-check results](goemotions-results.json)
+
+### Exploratory mood-context follow-up
+
+After seeing the public-check result, a separately documented follow-up tests
+whether the background mood sentence dominates the line itself. It compares the
+current prompt, a version explicitly prioritizing clearly expressed emotion in
+the words, and a version omitting background mood. It uses 128 previously unused
+comments from the official dev split, plus the six already-seen reported-emotion
+challenges kept separate. Two seeds and two contexts across three prompts produced
+1,608 calls. This is an exploratory diagnostic, not a deployed change or part of
+the original frozen comparison. [Follow-up protocol](PROTOCOL.md)
+
+| Prompt | Calm agreement | Irritated/high-ego agreement | Combined agreement | Equal-weight category mean |
+|---|---:|---:|---:|---:|
+| Current complete definitions | 91/256 (35.55%) | 20/256 (7.81%) | 21.68% | 24.64% |
+| Explicitly prioritize the words | 102/256 (39.84%) | 36/256 (14.06%) | 26.95% | 29.46% |
+| Omit background mood | 92/256 (35.94%) | 92/256 (35.94%) | 35.94% | 38.21% |
+
+There are twenty public examples per category except nervousness, which has eight.
+The category mean weights those groups equally. The no-mood prompts are identical
+across the two nominal contexts; their repeated labels matched exactly and do not
+constitute independent evidence. The previously seen reported-emotion challenges
+scored 8/24, 11/24 and 16/24 respectively and are not included in the public table.
+
+In the irritated/high-ego condition, the current prompt emitted “smug” on 224/256
+calls. Prioritizing the words reduced that to 195/256. Removing the mood sentence
+largely avoided that additional bias, but barely changed agreement in the calm
+condition. This locates one source of disagreement; it does not solve the broader
+classification problem or show which delivery the user prefers. Neither candidate
+was deployed. [Ablation results](mood-ablation-results.json)
 
 ## 6. Learning preferences
 
@@ -343,8 +404,9 @@ The feature branch is `feat/attention-shadow` in
 | `57713d7` | Attention patience, persistence and replay fixes | Shadow diagnostics only |
 | `f04fb52` | Elapsed-time mood drift | Corrected live mood timing |
 | `8e07a6f` | Determination/worry definitions | Complete live classifier prompt |
+| `0b79cf7` | Reproducible graph, retrieval, learning and affect research | Research files only; no application restart |
 
-The four commits were pushed and their changes applied to
+The listed commits were pushed and their changes applied to
 `toomii@haruserver:/home/toomii/haru-desktop`. The server's branch/HEAD was not
 moved, and unrelated uncommitted work was preserved. Backups and inverse patches
 are under `/home/toomii/.local/state/haru-deployments/`.

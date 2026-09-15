@@ -32,6 +32,29 @@ by people. This measures a classifier component, before tone sharpening and face
 rendering, on the current local Qwen3.5-9B configuration. It does not establish
 better conversations, a more appealing personality, or biological emotion.
 
+## External regression check
+
+A later frozen-prompt check used 84 human-labelled public GoEmotions comments,
+mapped into seven overlapping categories, with the same two moods and two seeds
+(672 calls). Agreement rose from 86/336 (25.60%) to 106/336 (31.55%), primarily
+through worry recognition. There were 32 paired corrections and 12 regressions.
+The supplied irritated mood substantially reduced agreement under both prompts.
+
+Reddit comments and companion delivery have different contexts, and the mapped,
+balanced sample is not the full dataset's benchmark. Still, the low agreement
+shows that the invented-line 95.83% result is not general emotion accuracy. The
+production prompt was unchanged; a separate offline mood-context follow-up uses
+a different split. See the [full report](../research/fruitfly/REPORT.md)
+and [public-check results](../research/fruitfly/goemotions-results.json).
+
+That follow-up used 128 previously unused comments and retained six earlier
+challenge lines as a separate probe (1,608 calls). Public-label agreement was
+21.68% with the current prompt, 26.95% when explicit wording took priority, and
+35.94% without the background mood sentence. Most of the latter gain came from
+avoiding the irritated/high-ego context; calm agreement barely changed. Overall
+agreement remained weak, and desired character delivery was not rated. Neither
+candidate was deployed. [Ablation results](../research/fruitfly/mood-ablation-results.json)
+
 ## Reproduce
 
 After `npm test`, create the fixed comparison job:

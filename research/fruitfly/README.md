@@ -116,6 +116,17 @@ hashes and labels, but no original comments. The same current local model, two
 seeds and two mood contexts are used before/after. Agreement is not directly
 comparable to the original GoEmotions paper's full multi-label F1 score.
 
+The separately documented exploratory mood-context ablation uses the unused
+official dev split, 128 public comments plus six previously seen challenges.
+It compares the current prompt, words-first wording, and omitted background mood.
+It is not a production change. To reproduce after preparing the emotion job:
+
+```text
+node research/fruitfly/prepare-mood-ablation.cjs CACHE
+node research/fruitfly/classify-emotion-job.cjs CACHE/mood-ablation-job.json CACHE/mood-ablation-call-results.jsonl
+node research/fruitfly/mood-ablation-report.cjs CACHE/mood-ablation-call-results.jsonl
+```
+
 ### Preference learning and affect replay
 
 ```text

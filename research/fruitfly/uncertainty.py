@@ -58,6 +58,16 @@ def main():
                               'Five algorithm seeds give limited estimates of mapping variability',
                               'Emotion calls are clustered by line; repeated moods/seeds are not independent texts',
                               'No correction for multiple exploratory comparisons; not a population or human-preference claim']}
+    public_path = HERE / 'goemotions-results.json'
+    if public_path.exists():
+        public = json.loads(public_path.read_text())
+        delta = np.array([row['meanDifference'] for row in public['lineDeltas']])
+        draws = delta[RNG.integers(len(delta), size=(REPEATS, len(delta)))].mean(axis=1)
+        output['public_emotion'] = {
+            'distinct_lines': len(delta), 'mean_difference_pp': float(delta.mean() * 100),
+            'line_cluster_bootstrap_95_percentile_pp': interval(draws * 100),
+            'became_correct': public['becameCorrect'], 'became_incorrect': public['becameIncorrect'],
+        }
     (HERE / 'uncertainty-results.json').write_text(json.dumps(output, indent=2) + '\n')
     print(json.dumps(output, indent=2))
 

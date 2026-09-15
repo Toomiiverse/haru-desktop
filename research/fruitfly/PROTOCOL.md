@@ -123,3 +123,27 @@ mapped labels differ in scope. Four Haru emotions and affection are not covered.
 The public text stays in the research cache; commit only IDs, hashes, predictions
 and aggregate results. This extends the earlier synthetic-only model-call rule
 to this public, human-annotated dataset on the same local Ollama provider.
+
+## Exploratory mood-context ablation, approximately 04:50
+
+The external check returned low agreement and classified 124/168 comments as
+smug under the irritated/high-ego context. This motivates a separate follow-up.
+It supersedes the earlier no-prompt-tuning stopping rule **for offline research
+only**; the original comparison remains frozen, all results remain reported,
+and no production prompt change will be made from this follow-up.
+
+Before predictions, fix three conditions: current complete definitions; the same
+prompt with an explicit instruction that words outrank background mood when the
+emotion is clear; and the same prompt with the background mood sentence omitted.
+Use up to 20 single-label comments for each of the same seven mapped categories
+from the previously unused official **dev** split (128 total; nervousness has
+only eight), selected by SHA-256 order of `haru-mood-ablation-20260916:<id>`.
+Require no ID overlap with the original test sample. Add the six existing
+reported-emotion challenges as a separately labelled, previously seen probe.
+
+Run two moods and seeds 17/43 for all three conditions (1,608 calls). Repeating
+the identical no-mood prompt under each nominal mood is a duplicate control,
+not an additional independent sample. Report micro and per-category agreement,
+paired changes and mood sensitivity. This is a new exploratory hypothesis using
+a separate split, not confirmation of the original fly-brain hypothesis, and
+emotion agreement is still not a rating of preferable character delivery.

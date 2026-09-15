@@ -56,5 +56,15 @@
     "Five algorithm seeds give limited estimates of mapping variability",
     "Emotion calls are clustered by line; repeated moods/seeds are not independent texts",
     "No correction for multiple exploratory comparisons; not a population or human-preference claim"
-  ]
+  ],
+  "public_emotion": {
+    "distinct_lines": 84,
+    "mean_difference_pp": 5.952380952380952,
+    "line_cluster_bootstrap_95_percentile_pp": [
+      0.0,
+      12.5
+    ],
+    "became_correct": 32,
+    "became_incorrect": 12
+  }
 }
