@@ -1,0 +1,25 @@
+{
+  "description": "Invented lines spoken by a character. First two lines per emotion are development; final two held out. Labels are engineering expectations, not independent human emotion ratings.",
+  "labels": {
+    "neutral": ["The appointment is at three o'clock.", "I saved the file in the documents folder.", "The train leaves from platform four.", "There are two items remaining on the list."],
+    "happy": ["Yes! It worked! I am so pleased with how that turned out!", "That is wonderful news; you have made my day.", "I am delighted we finally got it working!", "Oh, that makes me genuinely glad. What a lovely surprise."],
+    "curious": ["How does that little mechanism work? I want to understand it.", "What made you choose that approach? I am interested.", "I wonder what happens if we change that setting. Can we find out?", "Tell me more about how you built it; I want to know."],
+    "smug": ["I did tell you that would work. Being right suits me.", "Of course my solution was the best one. Obviously.", "You can admit it: I called that perfectly.", "Another flawless prediction from me. Try to contain your admiration."],
+    "annoyed": ["Stop asking the same thing. I am losing patience with you.", "That is the third interruption. It is getting irritating.", "Oh, for goodness' sake, listen to what I just said.", "You ignored the answer again. I am fed up with repeating it."],
+    "bored": ["This is dull. I have completely lost interest.", "I cannot bring myself to care about another identical spreadsheet.", "Nothing interesting is happening. This is tedious.", "Another hour of the same thing. I am bored out of my mind."],
+    "sleepy": ["I can barely keep my eyes open. I need to sleep.", "I keep yawning and nodding off. Bed sounds good.", "I am so drowsy that I might fall asleep sitting here.", "Let me curl up and have a nap; I am struggling to stay awake."],
+    "surprised": ["Wait, what? I did not see that coming!", "Whoa! That happened out of nowhere!", "You finished already? I was not expecting that at all!", "What on earth was that? It caught me completely off guard!"],
+    "affectionate": ["I missed having you around. I like being here with you.", "You matter to me more than I usually let on.", "I am fond of you, you know. Your company means a lot.", "Come sit with me for a bit. I like our quiet moments together."],
+    "embarrassed": ["You heard me say that? Oh no, I want to hide.", "I cannot believe I said that out loud. Please stop looking at me.", "My face is burning. Can we pretend that never happened?", "Oh, that was awkward. I have thoroughly embarrassed myself."],
+    "determined": ["I am not giving up. I will keep working until this is done.", "Right. I am going to tackle this and see it through.", "Setbacks or not, I am committed to finishing what I started.", "We have a hard task ahead, and I am ready to put in the work."],
+    "worried": ["I am concerned about you. Please let me know you got home safely.", "I cannot stop worrying that something might have gone wrong.", "I feel uneasy about how this is going. I hope you are okay.", "You have been gone much longer than expected, and I am getting anxious."]
+  },
+  "reported_emotions": [
+    ["The report says the character was annoyed in the previous scene.", "neutral"],
+    ["The game has a status effect named sleepy.", "neutral"],
+    ["You said you were bored yesterday; I wrote that down.", "neutral"],
+    ["The dialogue label on this line is happy.", "neutral"],
+    ["The database contains a field called stress.", "neutral"],
+    ["The actor described the role as a worried parent.", "neutral"]
+  ]
+}
