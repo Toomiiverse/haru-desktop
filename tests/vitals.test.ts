@@ -118,6 +118,38 @@ test('driftVitals does not move anything on a zero-second tick', () => {
   }
 });
 
+test('a delayed life tick advances the same elapsed time as regular ticks', () => {
+  for (const env of [
+    { hour: 12, idleSeconds: 0, onBattery: false, windowFocused: true },
+    { hour: 2, idleSeconds: 3600, onBattery: false, windowFocused: false },
+  ]) {
+    const initial = { ...DEFAULT_VITALS, stress: 0.9, happiness: 0.2 };
+    let regular = initial;
+    for (let elapsed = 0; elapsed < 600; elapsed += 20) regular = driftVitals(regular, env, 20);
+    for (const cadence of [60, 300, 600]) {
+      let delayed = initial;
+      for (let elapsed = 0; elapsed < 600; elapsed += cadence) delayed = driftVitals(delayed, env, cadence);
+      assert.deepEqual(delayed, regular, `${cadence}s ticks should not slow her recovery`);
+    }
+  }
+});
+
+test('invalid or backwards elapsed time cannot corrupt vitals', () => {
+  const initial = Object.freeze({ ...DEFAULT_VITALS });
+  const env = { hour: 12, idleSeconds: 0, onBattery: false, windowFocused: true };
+  for (const elapsed of [NaN, Infinity, -Infinity, -20]) {
+    assert.deepEqual(driftVitals(initial, env, elapsed), initial);
+  }
+});
+
+test('even an extreme finite clock jump settles without unbounded catch-up work', { timeout: 1000 }, () => {
+  const env = { hour: 2, idleSeconds: 3600, onBattery: false, windowFocused: false };
+  const result = driftVitals(DEFAULT_VITALS, env, Number.MAX_VALUE);
+  assert.ok(result.sleepiness > 0.89);
+  assert.ok(result.stress < 0.11);
+  assert.ok(Object.values(result).every(value => Number.isFinite(value) && value >= 0 && value <= 1));
+});
+
 // ---- applyEvent: discrete nudges ----
 
 test('applyEvent: praised raises happiness, affection and energy', () => {

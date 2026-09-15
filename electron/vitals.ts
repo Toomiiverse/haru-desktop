@@ -48,9 +48,19 @@ export function isNight(hour: number) {
   return hour >= 23 || hour < 6;
 }
 
-// One step of drift. `seconds` is how long since the last tick, so a slow or
-// missed tick moves state proportionally rather than by a fixed step.
+// Catch up in nominal steps: a late tick must not count as only 20 seconds.
+// A single environment snapshot cannot reconstruct a long absence; one hour
+// already settles these rates and bounds work after a system-clock jump.
 export function driftVitals(current: Vitals, environment: Environment, seconds: number): Vitals {
+  if (!Number.isFinite(seconds) || seconds <= 0) return { ...current };
+  let next = current;
+  for (let remaining = Math.min(seconds, 3600); remaining > 0; remaining -= 20) {
+    next = driftStep(next, environment, Math.min(20, remaining));
+  }
+  return next;
+}
+
+function driftStep(current: Vitals, environment: Environment, seconds: number): Vitals {
   // Normalised against a nominal 20s tick so rates stay meaningful if the
   // interval changes or a tick is late.
   const step = clamp(seconds / 20) * 0.25;
