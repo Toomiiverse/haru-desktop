@@ -10298,7 +10298,11 @@ async function writeDiary(config: ProviderConfig) {
  * back, which is the wrong answer to being ignored all day.
  */
 function sulkAtNightfall() {
-  if (herAsleepNow()) return;
+  // Not gated on her being awake. This only writes the day down — nothing is
+  // said until the morning line — and it comes due at the quiet hours, which is
+  // when she goes to bed: with her bedtime at 23:00 and quiet hours from 23:00
+  // she was asleep for the whole of the window and the day was never counted
+  // (2026-09-14; 09-11 before it).
   const now = zonedNow(CHAT_TIMEZONE);
   const todayKey = localDateKey(now);
   const mood = getMood();

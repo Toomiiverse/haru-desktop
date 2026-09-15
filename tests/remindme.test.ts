@@ -121,5 +121,13 @@ test('a calendar date is a date, and a greeting in front of the ask is still the
   // Her promise with a day and no clock is still a promise.
   assert.deepEqual(reminderPromised("Got it. I'll remind you to do your car registration on the 6th of October.", friday), { date: '2026-10-06' });
   assert.equal(reminderPromised('Sure, whatever you need.', friday), null);
+  // Her account of an old request is not a new promise: read as one, it filed
+  // "You forgot to remind me" for the day it was said (Monday 2026-09-14).
+  const monday = new Date(2026, 8, 14, 21, 38);
+  assert.equal(reminderPromised("No, I didn’t forget. 👀 You asked me on the 24th of August to remind you *one week in advance* for the 14th of September. I did that.", monday), null);
+  assert.equal(reminderPromised('I reminded you on Friday, genius.', monday), null);
+  assert.equal(reminderPromised('Want me to remind you on Friday?', monday), null);
+  assert.deepEqual(reminderPromised("Fine. I'll make sure to remind you on the 6th of October.", monday), { date: '2026-10-06' });
+  assert.deepEqual(reminderPromised('I will remind you on Friday, then.', monday), { date: '2026-09-18' });
 });
 

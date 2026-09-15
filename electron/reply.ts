@@ -356,7 +356,23 @@ export function dropRepeatedAgendaMentions(reply: string, previousReplies: strin
  * Matched on a third party doing the contacting: "you told me" is ordinary and
  * true, "Emma texted me" cannot be.
  */
-const GOT_IN_TOUCH = /\b(?!you\b|they\b|we\b|i\b)([A-Z][a-z]+|he|she|your \w+)\s+(?:just\s+|also\s+)?(texted|messaged|emailed|called|rang|phoned|dm'?d|pinged|wrote to|got in touch with|reached out to|told|asked|reminded|warned)\s+me\b/i;
+// Case-sensitive on the subject. With the whole pattern case-insensitive,
+// "[A-Z][a-z]+" matched any word at all, so "you just asked me to fix it" read
+// "just" as somebody who had asked her, and two replies that were nothing but
+// her arguing with him about what he had asked went out as empty bubbles, two
+// minutes apart (2026-09-14). A person is written with a capital, or is he, she
+// or "your <someone>"; a capitalised word that only starts a sentence is not one.
+const GOT_IN_TOUCH = /\b([A-Z][a-z]+|[Hh]e|[Ss]he|[Yy]our [a-z]+)\s+(?:(?:just|also|already|literally|actually|even|finally)\s+)?(?:texted|messaged|emailed|called|rang|phoned|dm'?d|pinged|wrote to|got in touch with|reached out to|told|asked|reminded|warned)\s+me\b/g;
+/** Words that can stand where the subject goes without being anybody. */
+const NOT_A_SUBJECT = /^(?:you|they|we|i|it|that|this|there|who|which|what|someone|somebody|nobody|everyone|everybody|anyone|also|already|actually|literally|even|never|always|once|then|finally|only|still|basically|clearly|probably|apparently|definitely|totally|really|and|but|so|or)$/i;
+
+function gotInTouch(paragraph: string): boolean {
+  for (const found of paragraph.matchAll(GOT_IN_TOUCH)) {
+    if (NOT_A_SUBJECT.test(found[1]) || NOT_A_PERSON.test(found[1])) continue;
+    return true;
+  }
+  return false;
+}
 const HEARD_FROM = /\bI (?:just )?(?:heard from|got a (?:text|message|call|email) from|spoke to|was talking to|had a word with)\s+(?!you\b)[A-Z]/;
 /**
  * The same lie without the "me" on the end.
@@ -388,7 +404,7 @@ const CREDITED = /\byou (said|told me|mentioned|reckoned|were saying)\b/i;
 
 export function dropInventedContact(reply: string): string {
   const paragraphs = reply.split(/\n{2,}/).map(part => part.trim()).filter(Boolean);
-  const invented = (paragraph: string) => GOT_IN_TOUCH.test(paragraph) || HEARD_FROM.test(paragraph);
+  const invented = (paragraph: string) => gotInTouch(paragraph) || HEARD_FROM.test(paragraph);
   const kept = paragraphs.filter(paragraph =>
     !invented(paragraph)
     && !(thirdPartyTalk(paragraph) && !CREDITED.test(paragraph)));

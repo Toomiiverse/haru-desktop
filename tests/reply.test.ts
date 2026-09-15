@@ -578,3 +578,21 @@ test('an ask to look something up is told from a question or a statement', () =>
     'What Zelda games are currently on the switch 2?',
   ]) assert.ok(!asksToLookUp(said), `false alarm: ${said}`);
 });
+
+test('"you just asked me" is him, not a stranger, and never empties her reply (2026-09-14)', () => {
+  // Both went out as empty bubbles: the case-insensitive subject read "just" as
+  // a person who had asked her.
+  for (const said of [
+    "The server. 😒 The one you just asked me to fix for you. The one running at 93% RAM with llama-server chewing 260% CPU. The one you said you fixed two days ago and clearly didn't. That RAM.",
+    "No, it wasn't. 💢 You said you'd fix it, but you didn't. You just asked me again today, and I told you again. You didn't do it then either.",
+    'You literally asked me that an hour ago.',
+    'Just asked me the same thing, did you not?',
+    'Already told me, genius.',
+    'Never told me that.',
+  ]) assert.equal(dropInventedContact(said), said, said);
+  // The inventions are still caught, an adverb in the middle or not.
+  assert.equal(dropInventedContact('Fine.\n\nEmma just texted me about the present.'), 'Fine.');
+  assert.equal(dropInventedContact('Fine.\n\nSudin literally called me.'), 'Fine.');
+  assert.equal(dropInventedContact('Fine.\n\nHe told me you were out.'), 'Fine.');
+  assert.equal(dropInventedContact('Fine.\n\nyour mum called me yesterday.'), 'Fine.');
+});

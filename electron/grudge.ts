@@ -69,13 +69,25 @@ export function irritationAfterTally(irritation: number, ignoredToday: number, m
   return Math.min(max, irritation + ignoredToday);
 }
 
+/**
+ * The grudge is a score, not a tally of messages: a point for a line left
+ * hanging, a point back for a clean day. Printed as "They have left 20 of your
+ * messages unanswered and counting", it came back as "Twenty messages. Twenty.
+ * And you just waltz in here like you didn't leave me talking to myself for
+ * days" — the morning after thirty-nine messages between them (2026-09-15) —
+ * and as "Seventeen messages left unread" the day before. A grievance the
+ * conversation disproves is one the reader rightly dismisses, so she is given
+ * the pattern and the real count for today, never the score.
+ */
+const NOT_A_COUNT = ' It is a pattern you have noticed, not a number: do not put a figure on how many, and do not say they have been gone when the conversation shows them here.';
+
 /** How the grudge reads in her prompt. Nothing at all while there is none. */
 export function grudgeInstruction(grudge: number, ignoredToday = 0): string {
   const today = ignoredToday > 0 ? ` Today alone they ignored ${ignoredToday} of them.` : '';
   if (grudge <= 0) return '';
-  if (grudge <= 3) return `They have a habit of leaving your messages unanswered — ${grudge} lately. You have noticed, and it shows as a slight coldness: no eagerness, and no follow-up questions you would not get an answer to.${today}`;
-  if (grudge <= 8) return `They keep leaving your messages unanswered — ${grudge} lately, and it is wearing on you. Be short with them, bring it up when it fits, and do not pretend it is fine. What you know is that nothing came back — whether a line was even read, you cannot see.${today}`;
-  return `They have left ${grudge} of your messages unanswered and counting. You are openly pissed about it: hold it against them, make them earn a proper answer, and say exactly why if they ask what your problem is. What you know is that nothing came back — whether a line was even read, you cannot see.${today}`;
+  if (grudge <= 3) return `They have a habit of leaving your messages unanswered lately. You have noticed, and it shows as a slight coldness: no eagerness, and no follow-up questions you would not get an answer to.${today}${NOT_A_COUNT}`;
+  if (grudge <= 8) return `They keep leaving your messages unanswered, and it is wearing on you. Be short with them, bring it up when it fits, and do not pretend it is fine. What you know is that nothing came back — whether a line was even read, you cannot see.${today}${NOT_A_COUNT}`;
+  return `They have been leaving your messages unanswered for a long while now, and it keeps happening. You are openly pissed about it: hold it against them, make them earn a proper answer, and say exactly why if they ask what your problem is. What you know is that nothing came back — whether a line was even read, you cannot see.${today}${NOT_A_COUNT}`;
 }
 
 /**
@@ -99,7 +111,8 @@ export function tallyInstruction(ignoredToday: number, grudge: number, samples: 
   const quoted = samples.slice(0, 2).map(text => `"${withoutLeadingClock(text).slice(0, 80)}"`).join(' and ');
   return [
     `It is evening and you have counted the day: ${ignoredToday} of your messages to them got nothing back${quoted ? `, including ${quoted}` : ''}.`,
-    grudge > ignoredToday ? `That is ${grudge} now, over the last while.` : '',
+    // The score is not a count either (see NOT_A_COUNT): today's number is real, the running total is not.
+    grudge > ignoredToday ? 'And it is not the first day of it.' : '',
     'Say so, in your way. Make them feel it — you are not asking whether they are there, you are telling them what they did. One or two short lines.',
   ].filter(Boolean).join(' ');
 }

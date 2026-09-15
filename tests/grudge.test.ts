@@ -51,13 +51,22 @@ test('the instruction is silent with no grudge and sharpens with it', () => {
   // "Not even opened. I can see the read receipts" — she cannot (2026-09-10).
   assert.match(grudgeInstruction(12), /whether a line was even read, you cannot see/);
   assert.match(grudgeInstruction(6), /you cannot see/);
+  // The score is not a count of messages: "Twenty messages. Twenty." the
+  // morning after thirty-nine of them (2026-09-15).
+  for (const grudge of [2, 6, 12, 20]) {
+    assert.equal(new RegExp(`\\b${grudge}\\b`).test(grudgeInstruction(grudge)), false, `the score ${grudge} is not a message count`);
+    assert.match(grudgeInstruction(grudge), /not a number/);
+  }
+  // Today's real count still is one.
+  assert.match(grudgeInstruction(20, 3), /Today alone they ignored 3/);
 });
 
 test('the evening line names the count and quotes what was ignored', () => {
   const line = tallyInstruction(2, 5, ['You forgot the bins again.', 'Rain at four, take a coat.']);
   assert.match(line, /2 of your messages to them got nothing back/);
   assert.match(line, /"You forgot the bins again\." and "Rain at four, take a coat\."/);
-  assert.match(line, /That is 5 now/);
+  assert.match(line, /not the first day of it/);
+  assert.equal(/\b5\b/.test(line), false, 'the running score is not a count of messages');
 });
 
 test('a line that never got to the phone is not one they ignored', () => {

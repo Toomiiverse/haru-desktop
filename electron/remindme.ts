@@ -138,7 +138,15 @@ const PROMISED = /\b(?:i(?:'|’)?ll|i will|i(?:'|’)?ve|i have|consider it|rem
  * and no clock. PROMISED wants a time, so this went unmatched, the tool was
  * never called, and the reminder existed only in her reply (2026-09-11).
  */
-const PROMISED_DAY = new RegExp(`\\bremind(?:ing)? you\\b[^.!?\\n]*?\\b(?:on|by|for)\\s+((?:the )?\\d{1,2}(?:st|nd|rd|th)?(?: of)? ${MONTH_PATTERN}(?:,? \\d{4})?|${MONTH_PATTERN} (?:the )?\\d{1,2}(?:st|nd|rd|th)?(?:,? \\d{4})?|tomorrow|(?:next |this )?(?:sunday|monday|tuesday|wednesday|thursday|friday|saturday))\\b`, 'i');
+// Her promise, not her account of one. "You asked me on the 24th of August to
+// remind you one week in advance for the 14th of September. I did that." has
+// "remind you … for the 14th of September" in it and is the opposite of a
+// promise; read as one, it put "You forgot to remind me" on his list for the day
+// it was said and pushed it to Google Tasks (2026-09-14). So the reminding has
+// to be something she says she will do — I'll, I will, I'm going to — with a
+// few words allowed between ("I'll make sure to remind you").
+const PROMISE_LEAD = "\\b(?:i'll|i will|i'm going to|i am going to|i'm gonna)\\s+(?:[a-z]+\\s+){0,3}?";
+const PROMISED_DAY = new RegExp(`${PROMISE_LEAD}remind(?:ing)? you\\b[^.!?\\n]*?\\b(?:on|by|for)\\s+((?:the )?\\d{1,2}(?:st|nd|rd|th)?(?: of)? ${MONTH_PATTERN}(?:,? \\d{4})?|${MONTH_PATTERN} (?:the )?\\d{1,2}(?:st|nd|rd|th)?(?:,? \\d{4})?|tomorrow|(?:next |this )?(?:sunday|monday|tuesday|wednesday|thursday|friday|saturday))\\b`, 'i');
 
 export function reminderPromised(herReply: string, now: Date): { time?: string; date: string } | null {
   const said = (herReply ?? '').replace(/[‘’]/g, "'");
