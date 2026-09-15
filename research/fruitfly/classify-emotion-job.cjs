@@ -1,4 +1,4 @@
-// Run on Haru's server. Reads only provider routing, sends invented fixtures.
+// Run on Haru's server. Reads only provider routing; uses research job text.
 const fs = require('node:fs');
 const { performance } = require('node:perf_hooks');
 

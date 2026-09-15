@@ -1,0 +1,135 @@
+{
+  "description": "Invented companion memories and paraphrases; no real user facts. Even topic indices are development, odd are held out. All records are indexed, but thresholds use development queries only.",
+  "topics": [
+    {"topic":"coffee","facts":[
+      ["Mara drinks decaffeinated coffee after lunch because caffeine keeps her awake.","What kind of coffee can Mara have in the afternoon?","Why does Mara avoid an afternoon espresso?"],
+      ["Mara's favourite morning drink is a flat white with oat milk.","How does Mara order her usual breakfast coffee?","Which milk goes in Mara's morning flat white?"]]},
+    {"topic":"interruptions","facts":[
+      ["Eli wants silence while recording audio, even if a small task is overdue.","Should I interrupt Eli during a recording session?","Does Eli want overdue-task chatter while the microphone is running?"],
+      ["Eli enjoys a short check-in after finishing a recording.","When would a friendly message suit Eli's recording routine?","Is the end of an audio take a good time to speak to Eli?"]]},
+    {"topic":"cat","facts":[
+      ["Jun's cat Pixel needs dinner at six in the evening.","When should Jun feed Pixel tonight?","What time is the cat's evening meal?"],
+      ["Pixel's veterinary check-up is next Thursday morning.","When is Jun taking the cat to the vet?","Which morning is Pixel's health appointment?"]]},
+    {"topic":"exercise","facts":[
+      ["Noor prefers gentle walks when work has been exhausting.","What movement would suit Noor after a draining workday?","How does Noor like to exercise when tired?"],
+      ["Noor attends a climbing session on Saturday afternoons.","When does Noor go bouldering?","What exercise has Noor planned for Saturday?"]]},
+    {"topic":"coding","facts":[
+      ["Rin's deployment failed because the server was running an old database migration.","Why did Rin's latest release fail?","What database issue stopped Rin's deployment?"],
+      ["Rin wants test failures explained before anyone rewrites the implementation.","How should I start helping Rin with a broken test?","Does Rin want a code rewrite before understanding the failing assertion?"]]},
+    {"topic":"sleep","facts":[
+      ["Alex asks for the bedroom lights to dim at ten each night.","When should Alex's bedroom lighting become softer?","What nightly lighting change does Alex want?"],
+      ["Alex sleeps late after a night shift and dislikes morning wake-up jokes.","How should I behave after Alex has worked overnight?","Would a morning alarm joke annoy Alex following a late shift?"]]},
+    {"topic":"study","facts":[
+      ["Sam studies best in twenty-five minute blocks followed by short breaks.","What study rhythm works for Sam?","How long should Sam focus before taking a quick pause?"],
+      ["Sam is revising graph theory for an exam on Friday.","Which subject does Sam need to review for the upcoming exam?","When is Sam's graph theory assessment?"]]},
+    {"topic":"food","facts":[
+      ["Leah dislikes coriander but enjoys basil in pasta.","Which herb should I leave out of Leah's dinner?","What herb can replace coriander in Leah's pasta?"],
+      ["Leah has already bought rice, tomatoes and lentils for this week's meals.","Which ingredients are already in Leah's shopping bag?","Does Leah still need to buy lentils for this week?"]]},
+    {"topic":"music","facts":[
+      ["Owen uses quiet instrumental jazz as background music while reading.","What should play softly while Owen reads?","Does Owen prefer vocals or instrumental music with a book?"],
+      ["Owen likes energetic electronic music when cleaning the kitchen.","What music motivates Owen to do kitchen chores?","Would upbeat electronic tracks fit Owen's cleaning routine?"]]},
+    {"topic":"calendar","facts":[
+      ["Priya's design review moved from Tuesday to Wednesday at two.","When is Priya's rescheduled design review?","Is Priya's review still on Tuesday?"],
+      ["Priya's dentist appointment remains on Tuesday at eleven.","Which appointment does Priya still have on Tuesday?","What time is Priya seeing the dentist?"]]},
+    {"topic":"gaming","facts":[
+      ["Kai wants no game advice during ranked matches unless asked directly.","Should I coach Kai in the middle of a competitive match?","When is it okay to give Kai ranked-game tips?"],
+      ["Kai enjoys discussing tactics after a ranked match has ended.","When would Kai welcome a conversation about strategy?","Does Kai like reviewing the match once it is over?"]]},
+    {"topic":"mood","facts":[
+      ["Ada wants someone to listen first when she says she has had a bad day.","What should I do first when Ada feels upset about her day?","Does Ada want immediate solutions when venting?"],
+      ["Ada likes practical checklists when she explicitly asks for a plan.","How should I help when Ada asks for actionable next steps?","What format does Ada prefer for a requested plan?"]]},
+    {"topic":"projects","facts":[
+      ["Ben's garden project is waiting for replacement irrigation tubing.","What is holding up Ben's garden work?","Which part does Ben need before fixing the irrigation?"],
+      ["Ben's website project is waiting for the client to approve the homepage copy.","Why is Ben's website launch paused?","Whose approval is needed for Ben's homepage text?"]]},
+    {"topic":"birthdays","facts":[
+      ["Tess's brother has a birthday on the third of November.","When is Tess's brother's birthday?","Which November date should Tess remember for her brother?"],
+      ["Tess's sister has a birthday on the thirteenth of November.","When should Tess celebrate her sister's birthday?","Whose birthday falls on November thirteen?"]]},
+    {"topic":"weather","facts":[
+      ["Mo wants a reminder to bring plants inside before a cold night.","What should I remind Mo about when frost is expected?","Why might Mo need to move the pot plants indoors?"],
+      ["Mo checks the wind forecast before taking a kayak onto the lake.","Which weather condition matters for Mo's paddling plan?","What forecast should Mo read before kayaking?"]]},
+    {"topic":"language","facts":[
+      ["Zoe is learning Spanish and likes being corrected gently after she finishes speaking.","When should I correct Zoe's Spanish mistakes?","How should feedback be delivered during Zoe's language practice?"],
+      ["Zoe already speaks French fluently and does not need beginner French exercises.","Which language does Zoe already know well?","Would introductory French drills be useful for Zoe?"]]},
+    {"topic":"shopping","facts":[
+      ["Drew needs a replacement USB-C cable that supports video output.","What feature matters in Drew's new cable?","Why would a charging-only lead fail to meet Drew's needs?"],
+      ["Drew has already ordered a wireless keyboard and should not buy another.","Which computer accessory is already on its way to Drew?","Does Drew still need to purchase a keyboard?"]]},
+    {"topic":"travel","facts":[
+      ["Iris takes the train to the airport because parking is expensive.","How does Iris prefer getting to the airport?","Why does Iris avoid driving to catch a flight?"],
+      ["Iris needs to renew her passport before booking the overseas trip.","What document must Iris update before planning international travel?","What is blocking Iris from booking the foreign holiday?"]]},
+    {"topic":"reminders","facts":[
+      ["Ash wants one reminder about paying rent, with a second only if the first was acknowledged.","How often should I chase Ash about rent?","Can I repeat Ash's rent reminder without an acknowledgement?"],
+      ["Ash has already paid the electricity bill for this month.","Which household bill has Ash finished paying?","Should I still prompt Ash about this month's electricity payment?"]]},
+    {"topic":"humour","facts":[
+      ["Luca enjoys playful teasing about abandoned hobby projects.","What subject can I gently joke about with Luca?","Would a light joke about Luca's unfinished hobbies land well?"],
+      ["Luca dislikes jokes about family arguments.","Which topic should I avoid teasing Luca about?","Is Luca comfortable with humour about disputes at home?"]]},
+    {"topic":"reading","facts":[
+      ["Mina has finished the first book in the series but has not started the second.","How far has Mina read in the series?","Would discussing the sequel spoil the story for Mina?"],
+      ["Mina prefers printed books when reading in bed.","Which book format does Mina like at bedtime?","Would Mina rather use paper or a screen for nighttime reading?"]]},
+    {"topic":"work","facts":[
+      ["Theo's manager asked for the budget draft by noon on Monday.","When is Theo's budget draft due?","What does Theo need to send the manager before Monday afternoon?"],
+      ["Theo's presentation rehearsal is on Monday at four in the afternoon.","What time does Theo practise the presentation?","Which Monday activity happens at four?"]]},
+    {"topic":"art","facts":[
+      ["Nia is experimenting with watercolour washes for a landscape painting.","What technique is Nia trying in her landscape?","Which painting medium is Nia using for the scenery?"],
+      ["Nia wants honest feedback about composition before discussing colour choices.","What aspect of Nia's artwork should feedback address first?","Should I begin critiquing Nia's painting with layout or palette?"]]},
+    {"topic":"health_routine","facts":[
+      ["Jules uses a timer to remember to stand up during long desk sessions.","What helps Jules take movement breaks at the desk?","When would a standing reminder be relevant to Jules?"],
+      ["Jules prefers water beside the keyboard so drinking is easy to remember.","Where does Jules keep a drink during computer work?","What makes it easier for Jules to remember water?"]]},
+    {"topic":"communication","facts":[
+      ["Finn wants concise answers for quick factual questions.","How detailed should a simple factual reply to Finn be?","Does Finn want long explanations for straightforward questions?"],
+      ["Finn asks for detailed reasoning when troubleshooting unfamiliar problems.","What depth helps Finn work through a new technical issue?","When does Finn appreciate a step-by-step explanation?"]]},
+    {"topic":"chores","facts":[
+      ["Ruby puts the recycling bin out on Wednesday night.","When should Ruby take out the recycling?","Which bin task belongs on Wednesday evening?"],
+      ["Ruby waters the balcony herbs on Saturday morning.","What plant care does Ruby do at the start of the weekend?","When are Ruby's balcony herbs due for water?"]]},
+    {"topic":"hardware","facts":[
+      ["Pat's microphone hum disappears when the laptop charger is unplugged.","What change stopped Pat's audio hum?","Which power connection seems related to Pat's microphone noise?"],
+      ["Pat's webcam freezes only when connected through the old USB hub.","What device is associated with Pat's frozen video?","How could Pat avoid the webcam problem caused by the hub?"]]},
+    {"topic":"achievements","facts":[
+      ["Esme finished her first five-kilometre run and felt proud of keeping going.","What recent exercise milestone did Esme reach?","What effort should I congratulate Esme for?"],
+      ["Esme is still practising piano scales and has not yet performed publicly.","Has Esme given her first piano recital?","Which musical skill is Esme currently working on?"]]},
+    {"topic":"boundaries","facts":[
+      ["Cal asks that private journal entries never be quoted in casual conversation.","Can I casually repeat something from Cal's personal journal?","What boundary did Cal set around diary content?"],
+      ["Cal is happy to discuss notes explicitly marked as shared project material.","Which of Cal's notes are okay to bring into project chat?","May I refer to Cal's shared project notes?"]]},
+    {"topic":"plans","facts":[
+      ["Liv cancelled the Friday picnic after the weather forecast worsened.","Is Liv's Friday picnic still happening?","Why did Liv call off the outdoor meal?"],
+      ["Liv's indoor board-game evening on Saturday is still going ahead.","Which weekend social plan has Liv kept?","Was Liv's Saturday game night also cancelled?"]]},
+    {"topic":"focus","facts":[
+      ["Max finds a visible progress bar motivating during a long task.","What visual feedback helps Max stay with a lengthy job?","Would tracking completion help motivate Max?"],
+      ["Max finds frequent countdown announcements distracting while concentrating.","What kind of time feedback disrupts Max's focus?","Should I keep announcing the remaining time while Max works?"]]},
+    {"topic":"social","facts":[
+      ["Ari needs quiet time after large social gatherings.","What helps Ari recover after a crowded party?","Should I keep chatting when Ari has just returned from a big event?"],
+      ["Ari enjoys discussing ideas during relaxed one-to-one walks.","What setting suits a thoughtful conversation with Ari?","Would Ari welcome an ideas chat on a quiet walk?"]]}
+  ],
+  "nudge_pairs": [
+    ["Time for a short screen break.","Give your eyes a rest from the monitor for a minute.",true],
+    ["Remember to feed the cat tonight.","The cat's evening meal still needs doing.",true],
+    ["Your meeting starts in ten minutes.","Just a heads-up: the meeting is only ten minutes away.",true],
+    ["You have been sitting for a while; stretch your legs.","Maybe stand up and have a quick walk after all that sitting.",true],
+    ["The laundry is finished and ready to hang out.","Your wash cycle has ended; the clothes can go on the line.",true],
+    ["You said you wanted to call your sister today.","A reminder about that phone call to your sister.",true],
+    ["The laptop battery is nearly empty.","Your computer needs plugging in soon.",true],
+    ["It might rain, so take an umbrella.","Bring something to keep dry; showers are expected.",true],
+    ["That was a solid bit of progress on your project.","You made real headway with the project just then.",true],
+    ["Shall we break the task into smaller steps?","Want help dividing this job into manageable pieces?",true],
+    ["The music seems a little loud for focusing.","Turning the background audio down might help you concentrate.",true],
+    ["Your tea is getting cold beside you.","That cup you made is cooling down on the desk.",true],
+    ["The download has finished.","Your file is ready; the transfer is complete.",true],
+    ["You left the balcony door open.","The door to the balcony is still ajar.",true],
+    ["Your friend replied to the invitation.","There is an answer from your friend about coming over.",true],
+    ["Remember to save your work before closing the app.","Save the document before you quit.",true],
+    ["Time for a short screen break.","Your meeting starts after the next short break.",false],
+    ["Remember to feed the cat tonight.","Remember to book the cat's vet appointment tonight.",false],
+    ["Your meeting starts in ten minutes.","Your meeting was cancelled ten minutes ago.",false],
+    ["You have been sitting for a while; stretch your legs.","You have been standing for a while; sit down and rest.",false],
+    ["The laundry is finished and ready to hang out.","The laundry machine has stopped because of an error.",false],
+    ["You said you wanted to call your sister today.","Your sister said she would call you tomorrow.",false],
+    ["The laptop battery is nearly empty.","The laptop battery is fully charged now.",false],
+    ["It might rain, so take an umbrella.","The rain has stopped; you can leave the umbrella here.",false],
+    ["That was a solid bit of progress on your project.","That project is blocked because the tests are failing.",false],
+    ["Shall we break the task into smaller steps?","You have finished every step of that task.",false],
+    ["The music seems a little loud for focusing.","Which song is playing in the background?",false],
+    ["Your tea is getting cold beside you.","Your tea is too hot to drink yet.",false],
+    ["The download has finished.","The upload has finished.",false],
+    ["You left the balcony door open.","You left the front door open.",false],
+    ["Your friend replied to the invitation.","Your friend has not replied to the invitation.",false],
+    ["Remember to save your work before closing the app.","Remember to back up your files before upgrading the computer.",false]
+  ]
+}
