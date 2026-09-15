@@ -1,16 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { appendFileSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { AttentionExperiment, newAttentionState, stepAttention, type AttentionInput } from '../electron/attention';
-import { DEFAULT_VITALS } from '../electron/vitals';
+import { DEFAULT_VITALS, driftVitals, applyEvent } from '../electron/vitals';
+import { shouldPipeUp } from '../electron/opening';
 
 const input = (overrides: Partial<AttentionInput> = {}): AttentionInput => ({
   now: 1_000_000, vitals: { ...DEFAULT_VITALS, energy: 1, curiosity: 1, sleepiness: 0, stress: 0, focus: 0 },
   environment: { hour: 12, idleSeconds: 0, onBattery: false, windowFocused: false },
-  activity: 'working', sinceInteractionMs: 600_000, baselineReady: false, blocked: false, ...overrides,
+  activity: 'working', sinceInteractionMs: 3_600_000, baselineReady: false, blocked: false, ...overrides,
 });
 
 test('replay: novelty habituates, direct contact wins, gates and cooldown suppress speech', () => {
@@ -49,7 +50,7 @@ test('shadow output records baseline comparisons, rotates, disables cleanly, and
   const dir = mkdtempSync(join(tmpdir(), 'haru-attention-'));
   try {
     const file = join(dir, 'attention.jsonl');
-    const experiment = new AttentionExperiment(() => file, true, 1600);
+    const experiment = new AttentionExperiment(() => file, true, 4000);
     for (let i = 0; i < 10; i++) experiment.observe(input({ now: 1_000_000 + i * 20_000 }));
     experiment.event('feedback', { id: 'reply-1', reaction: 'up', source: 'desktop' });
     assert.deepEqual(readdirSync(dir).sort(), ['attention.jsonl', 'attention.jsonl.1']);
@@ -62,9 +63,130 @@ test('shadow output records baseline comparisons, rotates, disables cleanly, and
     assert.equal(report.feedback.up, 1);
     assert.equal(report.baselineEligible, 0);
     assert.equal(report.malformed, 0);
+    assert.equal(report.policy, 2);
+    assert.ok(rows.filter(row => row.kind === 'sample').every(row => row.inputs.vitals && row.policy === 2));
+    appendFileSync(file, JSON.stringify({ version: 1, mode: 'shadow', session: 'old-session', at: new Date().toISOString(), kind: 'sample', action: 'speak', baselineEligible: true, computeMs: 0 }) + '\n');
+    const mixed = JSON.parse(execFileSync(process.execPath, [join(__dirname, '../../scripts/attention-report.cjs'), file], { encoding: 'utf8' }));
+    assert.equal(mixed.samples, report.samples);
+    const old = JSON.parse(execFileSync(process.execPath, [join(__dirname, '../../scripts/attention-report.cjs'), file, '1'], { encoding: 'utf8' }));
+    assert.equal(old.samples, 1);
     const before = readFileSync(file, 'utf8');
     new AttentionExperiment(() => file, false).observe(input());
     assert.equal(readFileSync(file, 'utf8'), before);
     assert.doesNotThrow(() => new AttentionExperiment(() => join(dir, 'missing', 'log')).observe(input()));
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('frequent conversation never triggers idle speech, across normal tick rates', () => {
+  for (const tick of [5, 20, 60]) {
+    let state = newAttentionState();
+    for (let seconds = 0; seconds < 3600; seconds += tick) {
+      state = stepAttention(state, input({ now: 1_000_000 + seconds * 1000, sinceInteractionMs: seconds % 300 * 1000 }));
+      assert.notEqual(state.action, 'speak', 'interrupt at ' + seconds + 's, tick ' + tick);
+    }
+  }
+});
+
+test('a persistently stronger state eventually wins regardless of initial contact', () => {
+  let cold = newAttentionState(), warm = newAttentionState();
+  for (let seconds = 0; seconds <= 600; seconds += 20) {
+    const reading = input({ now: 1_000_000 + seconds * 1000, vitals: DEFAULT_VITALS, sinceInteractionMs: Infinity });
+    cold = stepAttention(cold, reading);
+    warm = stepAttention(warm, { ...reading, sinceInteractionMs: seconds < 180 ? seconds * 1000 : Infinity });
+  }
+  assert.equal(cold.action, 'attend');
+  assert.equal(warm.action, cold.action);
+});
+
+test('shadow speech preserves the existing patience rule and its own minimum spacing', () => {
+  for (const tick of [5, 20, 60]) {
+    let state = newAttentionState(), last = -Infinity, proposals = 0;
+    for (let seconds = 0; seconds < 3600; seconds += tick) {
+      state = stepAttention(state, input({ now: 1_000_000 + seconds * 1000, sinceInteractionMs: seconds * 1000 }));
+      if (state.action === 'speak') {
+        assert.ok(seconds >= 900, 'must wait the baseline 15 minutes');
+        assert.ok(seconds - last >= 600, 'minimum ten minutes between proposals');
+        last = seconds; proposals++;
+      }
+    }
+    assert.ok(proposals > 0, 'must still speak when eligible');
+  }
+});
+
+test('small alternating score advantages do not cause action flicker', () => {
+  let state = { ...newAttentionState(), at: 1_000_000, activity: 'working', action: 'attend' as const,
+    scores: { attend: 0.45, rest: 0.4, investigate: 0, speak: 0 } };
+  let action = state.action;
+  for (let seconds = 20; seconds <= 600; seconds += 20) {
+    const next = stepAttention(state, input({ now: 1_000_000 + seconds * 1000, sinceInteractionMs: Infinity,
+      vitals: { ...DEFAULT_VITALS, energy: seconds % 40 ? 0.50 : 0.60 }, blocked: true }));
+    assert.equal(next.action, action);
+    state = { ...next, action: 'attend' };
+  }
+});
+
+test('a week of drifting vitals, feedback, sleep and irregular ticks respects speech gates', () => {
+  let state = newAttentionState(), vitals = { ...DEFAULT_VITALS }, lastContact = 0, lastProposal = -Infinity;
+  const actions = new Set<string>();
+  let seconds = 0, tick = 0;
+  while (seconds < 7 * 86400) {
+    const delta = [7, 23, 61][tick++ % 3];
+    seconds += delta;
+    const hour = Math.floor(seconds / 3600) % 24;
+    const active = hour >= 8 && hour < 22;
+    const environment = { hour, idleSeconds: active ? 0 : 3600, onBattery: hour >= 19, windowFocused: active && seconds % 1800 < 300 };
+    if (active && Math.floor(seconds / 900) !== Math.floor((seconds - delta) / 900)) {
+      lastContact = seconds;
+      vitals = applyEvent(vitals, tick % 2 ? 'praised' : 'criticised');
+    }
+    vitals = driftVitals(vitals, environment, delta);
+    const blocked = active && hour === 18;
+    const reading = input({
+      now: 1_000_000 + seconds * 1000, vitals, environment, blocked,
+      activity: !active ? 'other' : hour < 17 ? 'coding' : 'watching',
+      sinceInteractionMs: (seconds - lastContact) * 1000,
+    });
+    state = stepAttention(state, reading);
+    actions.add(state.action);
+    assert.ok(Object.values(state.scores).every(value => Number.isFinite(value) && value >= 0 && value <= 1));
+    if (state.action === 'speak') {
+      assert.equal(blocked, false);
+      assert.equal(shouldPipeUp({
+        minutesSinceUserSpoke: (seconds - lastContact) / 60,
+        minutesSinceSheSpoke: (seconds - lastProposal) / 60,
+        machineIdleSeconds: environment.idleSeconds, curiosity: vitals.curiosity, sleepiness: vitals.sleepiness,
+      }, () => 0), true);
+      assert.ok(seconds - lastProposal >= 600);
+      lastProposal = seconds;
+    }
+    if (!active) assert.notEqual(state.action, 'speak');
+  }
+  assert.ok(actions.has('attend') && actions.has('rest'));
+});
+
+test('invalid clocks and silence cannot crash diagnostics or bypass patience', () => {
+  for (const silence of [NaN, -1, -Infinity]) {
+    assert.notEqual(stepAttention(newAttentionState(), input({ sinceInteractionMs: silence })).action, 'speak');
+  }
+  for (const now of [NaN, Infinity, -1, 1e25]) {
+    const state = stepAttention(newAttentionState(), input({ now }));
+    assert.doesNotThrow(() => new Date(state.at).toISOString());
+  }
+  const away = stepAttention(newAttentionState(), input({
+    environment: { hour: 12, idleSeconds: 301, onBattery: false, windowFocused: false },
+  }));
+  assert.notEqual(away.action, 'speak');
+});
+
+test('long silence cannot override exhaustion or maximum stress', () => {
+  for (const vitals of [
+    { ...DEFAULT_VITALS, energy: 0, curiosity: 1 },
+    { ...DEFAULT_VITALS, stress: 1, energy: 1, curiosity: 1, sleepiness: 0 },
+  ]) {
+    let state = newAttentionState();
+    for (let seconds = 0; seconds <= 3600; seconds += 20) {
+      state = stepAttention(state, input({ now: 1_000_000 + seconds * 1000, vitals, sinceInteractionMs: Infinity }));
+      assert.notEqual(state.action, 'speak');
+    }
+  }
 });

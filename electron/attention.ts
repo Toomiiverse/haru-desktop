@@ -2,6 +2,9 @@
 // Shadow only: no return value from this module is used to control Haru.
 import { appendFileSync, existsSync, renameSync, statSync, unlinkSync } from 'node:fs';
 import type { Vitals, Environment } from './vitals';
+import { shouldPipeUp } from './opening';
+
+export const ATTENTION_POLICY = 2;
 
 export type AttentionAction = 'attend' | 'investigate' | 'speak' | 'rest';
 type Scores = Record<AttentionAction, number>;
@@ -17,28 +20,33 @@ export type AttentionInput = {
 export type AttentionState = {
   at: number; activity: string; novelty: number; action: AttentionAction;
   scores: Scores; lastProposalAt: number | null;
+  challenger: AttentionAction | null; challengerSince: number;
 };
 const zeroScores = (): Scores => ({ attend: 0, investigate: 0, speak: 0, rest: 0 });
 export const newAttentionState = (): AttentionState => ({
   at: 0, activity: '', novelty: 0, action: 'rest', scores: zeroScores(), lastProposalAt: null,
+  challenger: null, challengerSince: 0,
 });
 const unit = (n: number) => Number.isFinite(n) ? Math.max(0, Math.min(1, n)) : 0;
 export function stepAttention(previous: AttentionState, input: AttentionInput): AttentionState {
-  const now = Number.isFinite(input.now) ? Math.max(previous.at, input.now) : previous.at;
+  const now = Number.isFinite(input.now) && input.now >= 0 && input.now <= 8.64e15 ? Math.max(previous.at, input.now) : previous.at;
   const seconds = previous.at ? Math.min(300, Math.max(0, (now - previous.at) / 1000)) : 20;
   const v = input.vitals;
   const energy = unit(v.energy), curiosity = unit(v.curiosity), sleep = unit(v.sleepiness);
   const focus = unit(v.focus), stress = unit(v.stress);
-  const active = Number.isFinite(input.environment.idleSeconds) && input.environment.idleSeconds < 300;
+  const active = Number.isFinite(input.environment.idleSeconds) && input.environment.idleSeconds >= 0 && input.environment.idleSeconds <= 300;
   const direct = Number.isFinite(input.sinceInteractionMs) && input.sinceInteractionMs >= 0 && input.sinceInteractionMs < 180_000;
   // Repeated readings habituate; a change of category renews interest.
   // ponytail: category-level novelty; add richer events only if replay shows value.
   const novelty = previous.activity && previous.activity !== input.activity
     ? 1 : previous.novelty * Math.exp(-seconds / 90);
+  const quietMs = Math.min(input.sinceInteractionMs, previous.lastProposalAt === null ? Infinity : now - previous.lastProposalAt);
+  const quietDrive = quietMs === Infinity ? 1 : unit((quietMs / 60_000 - 15) / 15);
   const targets: Scores = {
     attend: direct ? 1 : active ? 0.25 + focus * 0.4 : 0.1,
     investigate: active ? novelty * curiosity * (1 - stress) : 0,
-    speak: active ? energy * curiosity * (1 - stress) * (1 - sleep) * 0.85 : 0,
+    speak: active ? unit(energy * curiosity * (1 - stress) * (1 - sleep)
+      * (0.85 + quietDrive * (1 - focus) * 0.6)) : 0,
     rest: Math.max(sleep, 1 - energy, active ? 0.1 : 0.7),
   };
   const alpha = 1 - Math.exp(-seconds / 30);
@@ -47,13 +55,28 @@ export function stepAttention(previous: AttentionState, input: AttentionInput): 
     scores[action] = unit(previous.scores[action] + alpha * (targets[action] - previous.scores[action]));
   }
   const recentProposal = previous.lastProposalAt !== null && now - previous.lastProposalAt < 600_000;
-  if (input.blocked || direct || recentProposal || !active) scores.speak = 0;
+  // Reuse the established patience and sleep rules, without another random draw.
+  const validSilence = input.sinceInteractionMs === Infinity
+    || (Number.isFinite(input.sinceInteractionMs) && input.sinceInteractionMs >= 0);
+  const patient = validSilence && shouldPipeUp({
+    minutesSinceUserSpoke: input.sinceInteractionMs / 60_000,
+    minutesSinceSheSpoke: previous.lastProposalAt === null ? Infinity : (now - previous.lastProposalAt) / 60_000,
+    machineIdleSeconds: input.environment.idleSeconds, curiosity, sleepiness: sleep,
+  }, () => 0);
+  if (input.blocked || direct || recentProposal || !active || !patient) scores.speak = 0;
   let action = (Object.keys(scores) as AttentionAction[]).reduce((best, next) => scores[next] > scores[best] ? next : best, 'rest');
-  // A challenger must win by a margin, so small input changes do not cause flicker.
-  if (scores[previous.action] > 0 && scores[action] - scores[previous.action] < 0.08) action = previous.action;
+  // Small advantages must persist for a minute, rather than being ignored forever.
+  let challenger: AttentionAction | null = null;
+  let challengerSince = now;
+  if (action !== previous.action && scores[previous.action] > 0 && scores[action] - scores[previous.action] < 0.08) {
+    challenger = action;
+    challengerSince = previous.challenger === action ? previous.challengerSince : now;
+    if (now - challengerSince < 60_000) action = previous.action;
+  }
   if (direct) action = 'attend';
+  if (direct || action === challenger) challenger = null;
   return {
-    at: now, activity: input.activity, novelty, action, scores,
+    at: now, activity: input.activity, novelty, action, scores, challenger, challengerSince,
     lastProposalAt: action === 'speak' ? now : previous.lastProposalAt,
   };
 }
@@ -72,6 +95,7 @@ export class AttentionExperiment {
     this.write({
       kind: 'sample', at: new Date(this.state.at).toISOString(),
       action: this.state.action, scores: this.state.scores, novelty: this.state.novelty,
+      inputs: { vitals: input.vitals, environment: input.environment, sinceInteractionMs: Number.isFinite(input.sinceInteractionMs) ? input.sinceInteractionMs : null },
       activity: input.activity, baselineReady: input.baselineReady,
       blocked: input.blocked, baselineEligible: input.baselineReady && !input.blocked,
       computeMs: performance.now() - started,
@@ -84,7 +108,7 @@ export class AttentionExperiment {
     if (!this.enabled || this.disabled) return;
     try {
       const file = this.file();
-      const line = JSON.stringify({ version: 1, mode: 'shadow', session: this.session, sequence: ++this.sequence, ...row }) + '\n';
+      const line = JSON.stringify({ version: 1, policy: ATTENTION_POLICY, mode: 'shadow', session: this.session, sequence: ++this.sequence, ...row }) + '\n';
       if (existsSync(file) && statSync(file).size + Buffer.byteLength(line) > this.maxBytes) {
         if (existsSync(file + '.1')) unlinkSync(file + '.1');
         renameSync(file, file + '.1');

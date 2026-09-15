@@ -9,8 +9,11 @@ It uses no FlyWire data, spiking neurons, new dependency, model call or GPU.
 At each existing idle-speech check, energy, curiosity, focus, stress and sleepiness
 compete through leaky scores for attend, investigate, speak and rest. Desktop
 activity category changes renew novelty; repeated observations reduce it.
-Direct interaction prioritizes attention for three minutes. A score margin
-reduces rapid switching, and proposed speech has a ten-minute cooldown.
+Direct interaction prioritizes attention for three minutes. Proposed speech
+also respects Haru's existing longer patience rule and a ten-minute cooldown.
+Small score advantages must persist for a minute before switching state; large
+advantages act immediately. A gradual urge to speak builds over 15–30 quiet
+minutes, moderated by focus, energy, curiosity, stress and sleepiness.
 
 The existing interjection gate, irritation, model availability and an idle
 composition already in progress inhibit proposed speech. The baseline records
@@ -23,7 +26,8 @@ This is an engineering hypothesis, not a biological model. Coefficients are
 hand chosen. Feedback already affects Haru's vitals; this experiment consumes
 those vitals and records explicit reply feedback, but does not train a policy.
 Novelty uses coarse categories, so two different coding tasks look the same.
-Transient scores reset on restart; Haru's existing persisted vitals remain the
+Recent conversation timing is recovered from the saved last-message timestamp
+after restart. Transient scores reset on restart; Haru's existing persisted vitals remain the
 source of longer-lived state.
 
 ## Run and inspect
@@ -32,12 +36,16 @@ Enabled by default. Set HARU_ATTENTION_SHADOW=0 before starting Haru to disable.
 The local userData directory contains attention-shadow.jsonl and at most one
 rotated .1 file, each limited to roughly 2 MiB. Logging failure disables the
 experiment for the session without stopping Haru. Only metadata is recorded:
-no message bodies, window titles, documents, feedback notes or credentials.
+numeric input snapshots are included, but no message bodies, window titles,
+documents, feedback notes or credentials.
 The adult activity category is recorded as other.
 
 Run:
 
     node scripts/attention-report.cjs /path/to/attention-shadow.jsonl
+
+The report defaults to policy 2. Append 1 to inspect the original policy
+without mixing measurements.
 
 The report includes proposed actions, eligible baseline speech, agreement,
 action switching, computation time, actual aside counts, short aside gaps,

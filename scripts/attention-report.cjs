@@ -4,7 +4,9 @@ const fs = require('node:fs');
 const readline = require('node:readline');
 async function main() {
   const file = process.argv[2];
-  if (!file) throw new Error('Usage: node scripts/attention-report.cjs /path/to/attention-shadow.jsonl');
+  if (!file) throw new Error('Usage: node scripts/attention-report.cjs /path/to/attention-shadow.jsonl [policy=2]');
+  const policy = Number(process.argv[3] ?? 2);
+  if (![1, 2].includes(policy)) throw new Error('Policy must be 1 or 2');
   const counts = { samples: 0, baselineEligible: 0, shadowSpeak: 0, agreement: 0, switches: 0, transitions: 0, actualAsides: 0, repeatBlocked: 0, interactions: 0, malformed: 0 };
   const actions = {}, feedback = new Map();
   let last, totalMs = 0, maxMs = 0, firstAt, lastAt, lastAside, shortAsideGaps = 0;
@@ -15,7 +17,8 @@ async function main() {
       if (!line.trim()) continue;
       let row;
       try { row = JSON.parse(line); } catch { counts.malformed++; continue; }
-      if (!row || row.version !== 1 || row.mode !== 'shadow' || !Number.isFinite(Date.parse(row.at))) { counts.malformed++; continue; }
+      if (!row || typeof row.session !== 'string' || row.version !== 1 || row.mode !== 'shadow' || !Number.isFinite(Date.parse(row.at))) { counts.malformed++; continue; }
+      if ((row.policy ?? 1) !== policy) continue;
       firstAt ??= row.at; lastAt = row.at;
       if (row.kind === 'sample') {
         if (!['attend', 'investigate', 'speak', 'rest'].includes(row.action) || typeof row.baselineEligible !== 'boolean' || !Number.isFinite(row.computeMs)) { counts.malformed++; continue; }
@@ -37,7 +40,7 @@ async function main() {
     }
   }
   console.log(JSON.stringify({
-    mode: 'shadow', firstAt, lastAt, ...counts, actions, shortAsideGaps,
+    mode: 'shadow', policy, firstAt, lastAt, ...counts, actions, shortAsideGaps,
     speechDecisionAgreement: counts.samples ? counts.agreement / counts.samples : null,
     actionSwitchRate: counts.transitions ? counts.switches / counts.transitions : null,
     meanComputeMs: counts.samples ? totalMs / counts.samples : null, maxComputeMs: counts.samples ? maxMs : null,

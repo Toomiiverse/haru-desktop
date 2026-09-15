@@ -3591,10 +3591,11 @@ let pipingUp = false;
 function observeAttention(environment: Environment, baselineReady: boolean, blocked: boolean) {
   if (process.env.HARU_ATTENTION_SHADOW === '0') return;
   const now = Date.now();
+  const lastInteractionAt = Math.max(lastUserActivityAt, Date.parse(getMood().lastMessageAt ?? '') || 0);
   attention.observe({
     now, vitals, environment,
     activity: currentActivity?.kind === 'adult' ? 'other' : currentActivity?.kind ?? 'other',
-    sinceInteractionMs: lastUserActivityAt ? now - lastUserActivityAt : Infinity,
+    sinceInteractionMs: lastInteractionAt ? Math.max(0, now - lastInteractionAt) : Infinity,
     baselineReady, blocked,
   });
 }
