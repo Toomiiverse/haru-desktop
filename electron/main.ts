@@ -7,6 +7,7 @@ import { execFile, spawn } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import AdmZip from 'adm-zip';
 import { HaruStore } from './store';
+import { AttentionExperiment } from './attention';
 import { formatTimeOfDay, localDateKey, parseTimeOfDay, resolveDate, zonedNow } from './dates';
 import { connectGoogle, disconnectGoogle, googleStatus, pullEvents, pullTasks, pushItem, pushTask, removeItem, removeTask, saveCredentials } from './google';
 import { afterCooldown, afterEgoCooldown, afterPoke, egoInstruction, goodnightInstruction, IGNORE_THRESHOLD, IRRITATION_MAX, isGoodnight, isIgnoring, isLowEffort, isRedo, leverageInstruction, moodInstruction, nextEgo, nextIrritation, notTwiceInstruction, shoutInstruction, shoutState, type ShoutState } from './mood';
@@ -1013,6 +1014,7 @@ async function syncItemToGoogle(item: KeptItem) {
 // most of the behaviour — movement only reads as deliberate if it is rare.
 // ---------------------------------------------------------------------------
 
+const attention = new AttentionExperiment(() => path.join(app.getPath('userData'), 'attention-shadow.jsonl'), process.env.HARU_ATTENTION_SHADOW !== '0');
 let vitals: Vitals = { ...DEFAULT_VITALS };
 let lastTickAt = Date.now();
 let tickTimer: ReturnType<typeof setTimeout> | undefined;
@@ -1224,6 +1226,7 @@ function noteAside(text: string, source: AsideSource, about = ''): Aside | null 
   if (!line) return null;
   const made = addAside(getAsides(), line, source, new Date(), localDateKey(zonedNow(CHAT_TIMEZONE)), about);
   const aside = made.aside;
+  if (aside) attention.event('aside', { id: aside.id, source });
   const asides = pendingAsk && source === 'idle' && /\?/.test(line) ? markAsked(made.asides, aside.id, pendingAsk) : made.asides;
   if (pendingAsk && source === 'idle') { if (/\?/.test(line)) console.log(`[push] she asked ${pendingAsk} — the next thing they say answers it`); pendingAsk = null; }
   store.set('chat.asides', asides);
@@ -1443,7 +1446,10 @@ function interject(line: string, { aboutTheGame = false, source = 'other' as Asi
   if (stale) return holdBack(line, `it named "${stale.title}", which is ${stale.done ? 'done' : 'long past'}`);
   // A line she has already said, or one copied out of the list of them
   // ("9:36 PM — “...”"), is not a new line: see echoesAside.
-  if (echoesAside(line, getAsides(), now)) return holdBack(line, 'it repeats a line she already said');
+  if (echoesAside(line, getAsides(), now)) {
+    attention.event('repeat-blocked');
+    return holdBack(line, 'it repeats a line she already said');
+  }
   lastInterjectionAt = now;
   // Before it goes out, so that whatever she has just demanded an account of is
   // on record by the time they reply.
@@ -1478,6 +1484,7 @@ let lastUserActivityAt = 0;
 const QUIET_AFTER_USER_MS = 3 * 60_000;
 
 function noteUserSpoke() {
+  attention.event('interaction');
   // Zeroed so she is free to follow up on her own next line; see stillWaiting,
   // which reads a non-zero value as "they never answered me".
   lastInterjectionAt = 0;
@@ -3581,13 +3588,24 @@ let pipingUp = false;
  * cadence as the rest of her — and so the decision is made against vitals that
  * were computed a line earlier rather than a stale copy.
  */
+function observeAttention(environment: Environment, baselineReady: boolean, blocked: boolean) {
+  if (process.env.HARU_ATTENTION_SHADOW === '0') return;
+  const now = Date.now();
+  attention.observe({
+    now, vitals, environment,
+    activity: currentActivity?.kind === 'adult' ? 'other' : currentActivity?.kind ?? 'other',
+    sinceInteractionMs: lastUserActivityAt ? now - lastUserActivityAt : Infinity,
+    baselineReady, blocked,
+  });
+}
+
 async function considerPipingUp(environment: Environment) {
-  if (pipingUp) return;
+  if (pipingUp) { observeAttention(environment, false, true); return; }
   const config = store.get('ai.config') as ProviderConfig | undefined;
-  if (!config?.model) return;
+  if (!config?.model) { observeAttention(environment, false, true); return; }
   const mood = getMood();
   // Stonewalling means stonewalling. She does not break her own silence.
-  if (isIgnoring(mood.irritation)) return;
+  if (isIgnoring(mood.irritation)) { observeAttention(environment, false, true); return; }
 
   const minutes = (since: number | null) => since ? (Date.now() - since) / 60_000 : Number.POSITIVE_INFINITY;
   const ready = shouldPipeUp({
@@ -3597,6 +3615,8 @@ async function considerPipingUp(environment: Environment) {
     curiosity: vitals.curiosity,
     sleepiness: vitals.sleepiness,
   });
+  // Observe the actual random decision; never draw another baseline coin flip.
+  observeAttention(environment, ready, whyNotInterject() !== null);
   if (!ready) return;
 
   pipingUp = true;
@@ -9658,6 +9678,7 @@ function appendFeedback(about: { id: string; reaction?: 'up' | 'down' | null; no
   const history = (store.get('chat.messages') as { id?: string; role: string; content?: string; reaction?: string }[] | undefined) ?? [];
   const entry = feedbackEntry(history, { ...about, model: (store.get('ai.config') as ProviderConfig | undefined)?.model ?? '', at: new Date().toISOString() });
   if (!entry) return;
+  attention.event('feedback', { id: entry.id, reaction: entry.reaction, source: entry.source });
   try { recordFeedback(feedbackFile(), entry); } catch (error) { console.warn('[feedback] could not write it down:', error instanceof Error ? error.message : error); }
 }
 
