@@ -18,6 +18,14 @@ test('doing is a deed and looking is not', () => {
   }
 });
 
+test('opening a Claude session is a deed and listing them is not', () => {
+  assert.equal(deedFrom('claude_session', { action: 'open', folder: 'haru-desktop' }, false, '2026-09-16T10:00:00.000Z')!.what,
+    'opened a Claude Code session for them in haru-desktop');
+  assert.equal(deedFrom('claude_session', { action: 'stop', id: '2c4feebf' }, false, '2026-09-16T10:00:00.000Z')!.what, 'stopped a Claude Code session');
+  assert.equal(deedFrom('claude_session', { action: 'list' }, false, '2026-09-16T10:00:00.000Z'), null);
+  assert.equal(deedFrom('claude_session', { action: 'open' }, true, '2026-09-16T10:00:00.000Z'), null);
+});
+
 test('the deed reads like something she would say', () => {
   const made = deedFrom('change_setting', { name: 'random_pushes', value: false }, false, '2026-09-08T09:00:00.000Z');
   assert.match(made!.what, /changed your setting "random_pushes" to false/);

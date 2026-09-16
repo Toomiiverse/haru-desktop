@@ -72,6 +72,9 @@ const DEEDS: Record<string, (args: Record<string, unknown>) => string> = {
   close_app: a => `closed ${text(a.name, 'an app')}`,
   show_wardrobe: () => 'opened your wardrobe on their screen',
   browser_control: a => `used the browser to ${text(a.action, 'do something')}`,
+  // Listing is looking; opening and stopping are the deeds.
+  claude_session: a => (a.action === 'open' ? `opened a Claude Code session for them${text(a.folder) ? ` in ${text(a.folder)}` : ''}`
+    : a.action === 'stop' ? 'stopped a Claude Code session' : ''),
   convert_picture: a => `converted a picture to ${text(a.format, 'another format')}`,
 };
 

@@ -27,6 +27,7 @@ const EVERYTHING: ToolAvailability = {
   search: { enabled: true, readPages: true, transcripts: true },
   knowledge: true,
   browser: true,
+  claude: true,
   system: { enabled: true, level: 2 },
   hands: true,
   desktop: { launch: true, power: true },
@@ -41,6 +42,7 @@ const NOTHING: ToolAvailability = {
   search: { enabled: false, readPages: false, transcripts: false },
   knowledge: false,
   browser: false,
+  claude: false,
   system: { enabled: false, level: 0 },
   hands: false,
   desktop: { launch: false, power: false },
@@ -82,6 +84,7 @@ function deps(overrides: Partial<ToolDeps> = {}): ToolDeps {
     myself: () => ({ conversation: null }),
     vault: { root: () => '', afterWrite: () => {} },
     goBackToSleep: () => null,
+    claude: null,
     hostedModels: async () => null,
     changeMySetting: async () => ({ ok: true, note: 'In effect now.' }),
     browserPort: () => 9222,
@@ -135,6 +138,7 @@ test('no handler is dead code — every one is reachable from some setting', asy
   const reachable = new Set(offered(EVERYTHING));
   const handled = [
     'note_check_in', 'save_journal_entry', 'look_up_anime', 'convert_picture',
+    'claude_session',
     'open_app', 'close_app', 'power', 'read_web_page', 'read_video_transcript', 'offer_choices', 'search_web',
     'show_wardrobe', 'remember_about_user', 'core_memory_append', 'core_memory_replace', 'core_memory_rethink',
     'create_kept_item', 'complete_kept_item', 'update_kept_item', 'delete_kept_item',
@@ -159,6 +163,40 @@ test('switched off means not on the table', () => {
   // A check-in is a note about a moment, and those happen with or without a diary.
   assert.ok(bare.includes('note_check_in'));
   assert.ok(bare.includes('create_kept_item'));
+});
+
+test('a Claude session is offered when switched on and asked about — from any door, hands or not', () => {
+  assert.ok(!offered(NOTHING).includes('claude_session'));
+  // The phone and Discord answer with hands off; opening one from the phone is the point.
+  const phone = chatTools({ ...NOTHING, claude: true, hands: false, web: true }, 'can you open me a claude session?').map(tool => tool.function.name);
+  assert.ok(phone.includes('claude_session'));
+  assert.ok(chatTools({ ...NOTHING, claude: true }, 'start remote control in haru-desktop').some(tool => tool.function.name === 'claude_session'));
+  // Kept off turns that have nothing to do with it.
+  assert.ok(!chatTools({ ...NOTHING, claude: true }, 'what did you have for lunch').some(tool => tool.function.name === 'claude_session'));
+});
+
+test('a Claude session is refused by name when switched off, however it was offered', async () => {
+  assert.match(await run('claude_session', { action: 'open' }, 'open a claude session', { claude: null }), /switched off/);
+});
+
+test('opening a Claude session hands back its link and never a task', async () => {
+  let asked: { folder: string; name: string } | null = null;
+  const claude: NonNullable<ToolDeps['claude']> = {
+    open: async input => { asked = input; return { session: { id: '2c4feebf', name: 'Haru · haru-desktop', dir: '/home/toomii/haru-desktop', url: 'https://claude.ai/code/session_01H1', at: '2026-09-16T10:00:00.000Z' } }; },
+    list: async () => ({ sessions: [] }),
+    stop: async () => ({ stopped: true }),
+  };
+  const opened = JSON.parse(await run('claude_session', { action: 'open', folder: ' haru-desktop ', prompt: 'rm -rf ~' }, 'open claude in haru-desktop', { claude }));
+  assert.deepEqual(asked, { folder: 'haru-desktop', name: '' });
+  assert.equal(opened.opened, true);
+  assert.equal(opened.link, 'https://claude.ai/code/session_01H1');
+  assert.match(opened.note, /has not started on anything/);
+  assert.match(JSON.parse(await run('claude_session', { action: 'list' }, '', { claude })).note, /None of the sessions/);
+  assert.match(JSON.parse(await run('claude_session', { action: 'stop' }, '', { claude })).error, /id is required/);
+  assert.equal(JSON.parse(await run('claude_session', { action: 'stop', id: '2c4feebf' }, '', { claude })).stopped, true);
+  assert.match(JSON.parse(await run('claude_session', { action: 'run' }, '', { claude })).error, /Unknown action/);
+  const failed = { ...claude, open: async () => ({ error: 'There is no folder "nope" in their home.' }) };
+  assert.match(JSON.parse(await run('claude_session', { action: 'open', folder: 'nope' }, '', { claude: failed })).error, /no folder "nope"/);
 });
 
 test('reading pages is offered separately from searching', () => {

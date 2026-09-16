@@ -33,6 +33,7 @@ import { findSuperseded, semanticSimilarities, supersede, MEMORY_KINDS, type Mem
 import { appendToBlockValue, canEditBlock, findBlock, replaceInBlockValue, resolveBlockValue, withEditedValue, type BlockSources, type MemoryBlock } from './blocks';
 import { adopt } from './tastes';
 import { activateTab, closeTab, listTargets, navigate, openTab, pageText, screenshot } from './browserctl';
+import type { OpenedSession } from './claudesession';
 import { findItem, readsAsNotDone } from './agenda';
 import { localDateKey, resolveDate, zonedNow } from './dates';
 import { collectAll, collectDocker, collectGpu, collectProcesses, collectServices, collectSystem, diagnose, KNOWN_SERVICES, USER_SERVICES } from './system';
@@ -740,6 +741,29 @@ export const BROWSER_TOOL: ChatTool = {
   },
 };
 
+/**
+ * A Claude Code session he can pick up in the Claude app on his phone
+ * (claudesession.ts). Open, list, stop — never a task: whatever the session
+ * does, he tells it himself, in the app.
+ */
+export const CLAUDE_SESSION_TOOL: ChatTool = {
+  type: 'function',
+  function: {
+    name: 'claude_session',
+    description: 'Open a Claude Code session on this machine that they can drive from the Claude app on their phone — it shows up under Code in the app, and the result gives you its link. Also lists the sessions you have opened, or stops one. Call it whenever they ask for a Claude session, Claude Code, remote control or a coding session. You really can — never say you cannot and never pretend you have. You only open it: they type what it should do in the Claude app, so never say it has started on anything. Give them the link.',
+    parameters: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', enum: ['open', 'list', 'stop'], description: '"open" a new session, "list" the ones you opened that are still running, or "stop" one.' },
+        folder: { type: 'string', description: 'Where the session works — a folder in their home such as "haru-desktop" or "pc-project-ops". Leave out for the usual place.' },
+        name: { type: 'string', description: 'What to call it in the Claude app, if they said. Leave out otherwise.' },
+        id: { type: 'string', description: 'For "stop": the session id from open or list.' },
+      },
+      required: ['action'],
+    },
+  },
+};
+
 /** The shape of an agenda entry the dispatcher touches. */
 type KeptLike = { id: string; title: string; date: string; time?: string; kind: 'task' | 'event'; done: boolean };
 
@@ -758,6 +782,8 @@ export type ToolAvailability = {
   knowledge: boolean;
   /** Whether she can drive the browser on this machine (browser.control). */
   browser: boolean;
+  /** Whether she can open Claude Code sessions for the Claude app (claudeCode.enabled). */
+  claude: boolean;
   system: { enabled: boolean; level: number };
   /** False for anything that did not come from the user's own mouth or keyboard. */
   hands: boolean;
@@ -776,6 +802,14 @@ const APP_TALK = /\b(?:open|launch|start|close|quit|shut ?down|shutdown|restart|
 
 export function machineRelevant(message: string): boolean {
   return MACHINE_TALK.test(message ?? '') || APP_TALK.test(message ?? '');
+}
+
+/** Whether the message could be asking for a Claude session. "session" alone is
+ *  enough: a stray match costs one tool on the table, a miss costs "I can't". */
+const CLAUDE_TALK = /\b(?:claude|remote[- ]?control|sessions?|coding)\b/i;
+
+export function claudeRelevant(message: string): boolean {
+  return CLAUDE_TALK.test(message ?? '');
 }
 
 export function chatTools(available: ToolAvailability, latest = ''): ChatTool[] {
@@ -803,6 +837,10 @@ export function chatTools(available: ToolAvailability, latest = ''): ChatTool[] 
     if (available.search.readPages && available.search.transcripts) tools.push(TRANSCRIPT_TOOL);
   }
   if (available.knowledge) tools.push(KNOWLEDGE_TOOL, ...VAULT_TOOLS);
+  // Not gated on hands, unlike everything else that touches the machine: the
+  // point is to open one from the phone, and an idle session only he can drive
+  // is nothing a page could turn against him — see claudesession.ts.
+  if (available.claude && (!latest || claudeRelevant(latest))) tools.push(CLAUDE_SESSION_TOOL);
   if (available.system.enabled && machine) {
     tools.push(...SYSTEM_TOOLS);
     if (available.system.level >= 2) tools.push(...SYSTEM_ACTION_TOOLS);
@@ -883,6 +921,12 @@ export type ToolDeps = {
   changeMySetting(plan: SettingPlan): Promise<{ ok: boolean; note: string }>;
   /** Back to bed at her word, while she is up because they knocked (hersleep.ts); null when she is not. */
   goBackToSleep(input: { block: boolean }): { asleep: boolean; blocked: boolean } | null;
+  /** Claude Code sessions for his phone (claudesession.ts), or null when switched off. */
+  claude: {
+    open(input: { folder: string; name: string }): Promise<{ session: OpenedSession } | { error: string }>;
+    list(): Promise<{ sessions: (OpenedSession & { status: string })[] } | { error: string }>;
+    stop(id: string): Promise<{ stopped: boolean; error?: string }>;
+  } | null;
   /** Their vault on disk (knowledge.vault.path), and the re-read that makes a note she wrote searchable at once. */
   vault: { root(): string; afterWrite(): void };
   browserPort(): number;
@@ -1156,6 +1200,41 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
     if (args.confirm !== true) return JSON.stringify({ confirm: true, name: settingName, what: setting.what, from: verdict.plan.from, to: verdict.plan.to, note: 'Do not act yet. Tell them what would change, ask them to say the word, then call this again with confirm: true.' });
     const done = await deps.changeMySetting(verdict.plan);
     return JSON.stringify(done.ok ? { changed: true, name: settingName, from: verdict.plan.from, to: verdict.plan.to, note: done.note } : { error: done.note });
+  }
+  if (name === 'claude_session') {
+    // Re-checked here: a model can name a tool it was never offered.
+    if (!deps.claude) return JSON.stringify({ error: 'Claude sessions are switched off — say so plainly, in your own words.' });
+    const action = typeof args.action === 'string' ? args.action : '';
+    const text = (value: unknown) => (typeof value === 'string' ? value.trim() : '');
+    try {
+      if (action === 'open') {
+        const opened = await deps.claude.open({ folder: text(args.folder), name: text(args.name) });
+        if ('error' in opened) return JSON.stringify({ error: `${opened.error} Say so plainly.` });
+        const { session } = opened;
+        return JSON.stringify({
+          opened: true, id: session.id, name: session.name, folder: session.dir, link: session.url,
+          note: session.url
+            ? 'It is open and waiting. Give them the link — it opens in the Claude app — and say it is also under Code in the app. They tell it what to do there; it has not started on anything.'
+            : 'It is open, but the link was not ready yet. Tell them to find it under Code in the Claude app by its name. It has not started on anything.',
+        });
+      }
+      if (action === 'list') {
+        const listed = await deps.claude.list();
+        if ('error' in listed) return JSON.stringify({ error: `${listed.error} Say so plainly.` });
+        if (!listed.sessions.length) return JSON.stringify({ sessions: [], note: 'None of the sessions you opened are running.' });
+        return JSON.stringify({ sessions: listed.sessions.map(session => ({ id: session.id, name: session.name, folder: session.dir, link: session.url, status: session.status, openedAt: session.at })) });
+      }
+      if (action === 'stop') {
+        const id = text(args.id);
+        if (!id) return JSON.stringify({ error: 'id is required to stop a session — list them first.' });
+        const stopped = await deps.claude.stop(id);
+        return JSON.stringify(stopped.stopped ? { stopped: true, id, note: 'Stopped. Its conversation is kept.' } : { error: stopped.error ?? 'It would not stop.' });
+      }
+      return JSON.stringify({ error: 'Unknown action — use open, list or stop.' });
+    } catch (error) {
+      console.warn('[claude] session tool failed:', error instanceof Error ? error.message : error);
+      return JSON.stringify({ error: `Claude is not answering (${error instanceof Error ? error.message : error}). Say so plainly rather than pretending it opened.` });
+    }
   }
   if (name === 'browser_control') {
     const action = typeof args.action === 'string' ? args.action : '';

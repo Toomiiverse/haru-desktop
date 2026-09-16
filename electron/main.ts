@@ -81,6 +81,7 @@ import { openLocalCall, withoutWavHeader, oneChunk, wavSampleRate } from './loca
 import { openEviSession } from './evibridge';
 import { setDefaultAutoSelectFamilyAttemptTimeout } from 'node:net';
 import { readBrowserControlConfig } from './browserctl';
+import { listSessions, openSession, readClaudeCodeConfig, readOpenedSessions, resolveSessionDir, sessionName, SESSIONS_KEPT as CLAUDE_SESSIONS_KEPT, stopSession, type SessionHost } from './claudesession';
 import { applyDecay, DEEP_RECALL_LIMIT, eventCandidates, eventsPrompt, findSuperseded, formatMemoryPrompt, isExplicitRecall, closeEvents, isWorthAnEvent, isWorthKeeping, isWorthRemembering, MEMORY_KINDS, migrateMemories, monthFoldPrompt, pruneMemories, readsAsSecondPerson, rememberInto, retrieveMemories, semanticSimilarities, summaryPrompt, supersede, THIRD_PERSON_AGAIN, vectorSimilarity, type ForgettingEntry, type MemoryKind, type MemoryRecord, type MemorySource, type RetrievalFactors, type ScoredMemory, type SessionSummary } from './memory';
 import { consolidateMemories, type ConsolidationChange } from './consolidation';
 import { appendToBlockValue, canEditBlock, findBlock, formatMemoryBlocks, replaceInBlockValue, resolveBlockValue, resetBlockToDerived, withEditedValue, type BlockSources, type MemoryBlock } from './blocks';
@@ -4805,6 +4806,7 @@ function availableTools(): ToolAvailability {
     search: { enabled: search.enabled, readPages: search.readPages, transcripts: transcriptsAvailable() },
     knowledge: getKnowledgeConfig().enabled,
     browser: readBrowserControlConfig(store.get('browser')).enabled,
+    claude: readClaudeCodeConfig(store.get('claudeCode')).enabled,
     system: { enabled: systemConfig.enabled, level: systemConfig.level },
     hands: handsAllowed,
     desktop: supportedDesktop(readDesktopConfig(store.get('desktop'))),
@@ -4825,6 +4827,49 @@ function refreshConfigurationNote() {
     if (error) console.warn('[self] could not refresh the configuration note:', error.message);
     else console.log('[self] refreshed the configuration note');
   });
+}
+
+/**
+ * Claude Code sessions for his phone: opened with `claude --bg --remote-control`,
+ * remembered under claudeCode.opened so she can give the link back and stop
+ * only the ones she opened. Read per call, so switching it off takes effect on
+ * the next turn.
+ */
+function claudeSessions(): ToolDeps['claude'] {
+  const config = readClaudeCodeConfig(store.get('claudeCode'));
+  if (!config.enabled) return null;
+  const host: SessionHost = {
+    config,
+    systemdRun: existsSync('/usr/bin/systemd-run') ? '/usr/bin/systemd-run' : null,
+    sleep: ms => new Promise(resolve => setTimeout(resolve, ms)),
+    run: (file, args, options) => new Promise(resolve => {
+      execFile(file, args, { cwd: options.cwd, timeout: options.timeoutMs, maxBuffer: 16 * 1024 * 1024 }, (error, stdout, stderr) => {
+        resolve({ ok: !error, stdout: String(stdout ?? ''), stderr: String(stderr ?? error?.message ?? '') });
+      });
+    }),
+  };
+  const opened = () => readOpenedSessions(store.get('claudeCode.opened'));
+  return {
+    open: async ({ folder, name }) => {
+      const where = resolveSessionDir(folder, config, os.homedir());
+      if ('error' in where) return where;
+      const result = await openSession(host, where.dir, sessionName(name, where.dir), new Date().toISOString());
+      if ('session' in result) {
+        store.set('claudeCode.opened', [...opened(), result.session].slice(-CLAUDE_SESSIONS_KEPT));
+        console.log(`[claude] opened ${result.session.id} "${result.session.name}" in ${result.session.dir} — ${result.session.url ?? 'no link yet'}`);
+      } else {
+        console.warn(`[claude] could not open a session in ${where.dir}: ${result.error}`);
+      }
+      return result;
+    },
+    list: () => listSessions(host, opened()),
+    stop: async id => {
+      if (!opened().some(session => session.id === id)) return { stopped: false, error: `"${id}" is not a session you opened — list yours first.` };
+      const result = await stopSession(host, id);
+      if (result.stopped) console.log(`[claude] stopped ${id}`);
+      return result;
+    },
+  };
 }
 
 function toolDeps(): ToolDeps {
@@ -4852,6 +4897,8 @@ function toolDeps(): ToolDeps {
     requestRestart: () => { pendingHaruRestart = true; },
     // Her night is hers: back to bed when she decides the wake was nothing (hersleep.ts).
     goBackToSleep: input => goBackToSleep({ pointless: true, block: input.block, why: 'her call' }),
+    // Claude Code sessions he picks up in the Claude app (claudesession.ts).
+    claude: claudeSessions(),
     // Their vault on disk, and the re-read that makes a note she wrote searchable at once.
     vault: { root: () => knowledge.vaultPath(), afterWrite: () => { void syncVaultAndRetire(); } },
     // Herself, and what of herself she may change (self.ts).
