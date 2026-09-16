@@ -133,7 +133,7 @@ export function createMemoryStore(deps: MemoryStoreDeps) {
     text: string,
     kind: MemoryKind = 'fact',
     subject?: string,
-    extra: { source?: MemorySource; predicate?: string; object?: string; evidenceDetail?: string; emotion?: EmotionName; emotionIntensity?: number; resighting?: boolean } = {},
+    extra: { source?: MemorySource; predicate?: string; object?: string; evidenceDetail?: string; emotion?: EmotionName; emotionIntensity?: number; resighting?: boolean; category?: Category; when?: string } = {},
   ) {
     const fact = text.trim();
     if (!fact) return null;
@@ -155,6 +155,7 @@ export function createMemoryStore(deps: MemoryStoreDeps) {
       text: fact, kind, subject, id: randomUUID(), now: new Date().toISOString(),
       source: extra.source, predicate: extra.predicate, object: extra.object, evidenceDetail: extra.evidenceDetail,
       emotion: extra.emotion, emotionIntensity: extra.emotionIntensity, resighting: extra.resighting,
+      category: extra.category, when: extra.when,
     });
     const pruned = pruneMemories(memories, MAX_MEMORIES);
     if (pruned.evicted.length) {

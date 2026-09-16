@@ -13,7 +13,7 @@
 // has been mentioned often — no classifier, no guessing.
 
 import { EMOTIONS, localEmotion, type EmotionName } from './emotion';
-import { categoryOf, isCategory, isDay, type Category } from './categories';
+import { CATEGORY_MEANING, categoryOf, isCategory, isDay, type Category } from './categories';
 
 export const MEMORY_KINDS = ['preference', 'relationship', 'event', 'fact'] as const;
 export type MemoryKind = typeof MEMORY_KINDS[number];
@@ -395,7 +395,7 @@ export function isWorthRemembering(text: string, options: { meantAsARule?: boole
  */
 export function rememberInto(
   memories: MemoryRecord[],
-  incoming: { text: string; kind: MemoryKind; subject?: string; id: string; now: string; source?: MemorySource; predicate?: string; object?: string; evidenceDetail?: string; emotion?: EmotionName; emotionIntensity?: number; resighting?: boolean },
+  incoming: { text: string; kind: MemoryKind; subject?: string; id: string; now: string; source?: MemorySource; predicate?: string; object?: string; evidenceDetail?: string; emotion?: EmotionName; emotionIntensity?: number; resighting?: boolean; category?: Category; when?: string },
 ): { memories: MemoryRecord[]; created: boolean; record: MemoryRecord } {
   const text = incoming.text.trim();
   const existing = memories.find(memory => isSameMemory(memory.text, text));
@@ -429,11 +429,16 @@ export function rememberInto(
         ? { at: incoming.now, kind: 'repeat', source: existing.source ?? 'conversation', detail: incoming.evidenceDetail }
         : { at: incoming.now, kind: 'repeat', source: existing.source ?? 'conversation' }],
       importance: Math.max(existing.importance ?? 0, scoreImportance(existing.kind, existing.text)),
-      // Said again, so it is current again. A dormant record that came back up
-      // stayed dormant for good before — decay only ever moves one way — and an
-      // archived one answered "I know" while staying out of every prompt. Not
-      // one that was ticked off: talking about a done thing does not undo it.
-      status: existing.evidence?.at(-1)?.kind === 'closed' ? existing.status : 'active',
+      // Said again, so it is current again: a dormant record that came back up
+      // stayed dormant for good before, since decay only ever moves one way.
+      // Not one that was ticked off — talking about a done thing does not undo
+      // it — and not an archived one, which was shelved on purpose: taken off
+      // his page, or found wrong, and a line that matches it is no reason to
+      // put it back.
+      status: existing.status === 'dormant' && existing.evidence?.at(-1)?.kind !== 'closed' ? 'active' : existing.status,
+      // Sorted already stays sorted; the day is added if it was missing.
+      ...(existing.category ?? incoming.category ? { category: existing.category ?? incoming.category } : {}),
+      ...(existing.when ?? (isDay(incoming.when) ? incoming.when : undefined) ? { when: existing.when ?? incoming.when } : {}),
     };
     return { memories: memories.map(memory => memory.id === existing.id ? updated : memory), created: false, record: updated };
   }
@@ -455,6 +460,8 @@ export function rememberInto(
     source,
     status: 'active',
     memoryType: guessMemoryType(incoming.kind, text),
+    ...(isCategory(incoming.category) ? { category: incoming.category } : {}),
+    ...(isCategory(incoming.category) && isDay(incoming.when) ? { when: incoming.when } : {}),
     evidence: [incoming.evidenceDetail
       ? { at: incoming.now, kind: 'statement', source, detail: incoming.evidenceDetail }
       : { at: incoming.now, kind: 'statement', source }],
@@ -1084,6 +1091,85 @@ export function eventCandidates(reply: string): string[] {
     .filter(line => line.length > 0 && !/^nothing notable$/i.test(line))
     .map(line => line.replace(/[.!]+$/, ''))
     .filter(line => line.length > 0);
+}
+
+// -- forming memories from a day ------------------------------------------------
+
+/** Categories a day's conversation can form; passing is what is left out. */
+export const FORMED: Category[] = ['identity', 'person', 'preference', 'instruction', 'plan', 'event', 'ongoing', 'shared', 'knowledge'];
+/** How much of a day one call reads. A long day is several windows, not its first six thousand characters. */
+export const FORMATION_WINDOW = 8000;
+/** How many a day may form, across all its windows. */
+export const MEMORIES_PER_DAY = 10;
+
+/**
+ * What a finished day taught her about him, of every kind.
+ *
+ * The pass this replaces asked for events only, three a day, from the first
+ * 6,000 characters. On the 27B brain it formed nothing at all: replayed over
+ * six real days from September, not one line survived, while the same days
+ * held a customer's build fixed by the wrong boot drive, an early Father's Day
+ * dinner with his mum and Johnny, and how to flash an MSI BIOS from a USB stick.
+ * And nothing else writes conversation memories in practice — the hosted brain
+ * has not called remember_about_user once in the log (2026-09-17). So the whole
+ * day is read, a window at a time, for anything worth keeping, each line with
+ * its category and day, and what she already knows is listed so it is not
+ * written down again.
+ */
+export function formationPrompt(day: string, known: string[], userName = ''): string {
+  const weekday = isDay(day) ? new Date(`${day}T00:00:00Z`).toLocaleDateString('en-AU', { weekday: 'long', timeZone: 'UTC' }) : '';
+  const name = userName.trim();
+  return [
+    'You are Haru, going back over part of a day of conversation with the user you live with, writing down what is worth remembering about them.',
+    ...(name ? [`The user is ${name}.`] : []),
+    'The transcript says who spoke: lines starting "They:" are the user, lines starting "Haru:" are you.',
+    'What Haru says about herself — what she read or watched, when she sleeps or logs off, her plans and opinions — is your own life, not theirs: never write it as something they did.',
+    'Only note what their own lines, or what they had open, show; not what Haru asked, guessed or suggested.',
+    '',
+    'Write each note as one line: <category> | <when> | <note>',
+    ...FORMED.map(category => `${category} — ${CATEGORY_MEANING[category]}.`),
+    '',
+    'The note: under 20 words, about the user as "they", never "you" or "your"; people, places and things by name; still clear on its own months from now.',
+    `WHEN: for a plan or an event, the calendar day as YYYY-MM-DD. This conversation was on ${weekday} ${day}, so "tomorrow" is the day after it. Otherwise -.`,
+    'Keep only what would still matter a month from now. Skip small talk, passing moods, errands finished in the moment and what was on the screen for a moment.',
+    ...(known.length ? ['Haru already knows these, so leave them out unless the day changed one:', ...known.map(text => `- ${text}`)] : []),
+    '',
+    'At most 6 lines, the ones that matter most. If nothing qualifies, reply with exactly: nothing notable.',
+  ].join('\n');
+}
+
+export type FormedNote = { category: Category; when?: string; note: string };
+
+/** The day's notes, read strictly: a line not in the shape, or in a category a day cannot form, is left out. */
+export function readFormation(answer: string): FormedNote[] {
+  const out: FormedNote[] = [];
+  for (const raw of String(answer ?? '').split('\n')) {
+    const match = raw.trim().replace(/^[-*\d.)\s]+(?=[a-z])/i, '').match(/^([a-z]+)\s*\|\s*(\S+)\s*\|\s*(.+)$/i);
+    if (!match) continue;
+    const category = match[1].toLowerCase() as Category;
+    const note = match[3].trim().replace(/[.!]+$/, '');
+    if (!FORMED.includes(category) || note.length < 4) continue;
+    out.push(isDay(match[2]) && (category === 'plan' || category === 'event') ? { category, when: match[2], note } : { category, note });
+  }
+  return out;
+}
+
+/** A day's labelled lines in windows of at most `size` characters, whole lines only. */
+export function formationWindows(lines: string[], size = FORMATION_WINDOW): string[] {
+  const windows: string[] = [];
+  let current: string[] = [];
+  let length = 0;
+  for (const line of lines) {
+    if (current.length && length + line.length + 1 > size) {
+      windows.push(current.join('\n'));
+      current = [];
+      length = 0;
+    }
+    current.push(line);
+    length += line.length + 1;
+  }
+  if (current.length) windows.push(current.join('\n'));
+  return windows;
 }
 
 /**
