@@ -8150,6 +8150,15 @@ function getApns(): { config: ReturnType<typeof readApnsConfig>; devices: ApnsDe
 function saveApnsDevices(devices: ApnsDevice[]) {
   store.set('apns', { ...((store.get('apns') ?? {}) as Record<string, unknown>), devices });
 }
+/**
+ * Whether anything of hers can buzz a phone at all — the page's Web Push or the
+ * native app through Apple. The gates below asked only the web list, and once
+ * the app superseded the browser's subscription (ffdc807, 2026-09-06) that list
+ * was empty for good: ten days with no nudge, chase or floor sent.
+ */
+function canReachPhone(): boolean {
+  return getPush().devices.length > 0 || getApns().devices.length > 0;
+}
 let apnsBearer: (() => string) | null = null;
 function apnsBearerFor(config: NonNullable<ReturnType<typeof readApnsConfig>>) {
   return (apnsBearer ??= apnsSigner(config));
@@ -8520,8 +8529,8 @@ async function pesterOnPush(): Promise<PesterOutcome> {
   if (herAsleepNow() || herKnockedAwakeNow()) return { how: 'quiet' };
   // "I'm logging off" at 21:18, then a nudge at 22:28 (2026-09-05): a goodnight is a goodnight.
   if (herHasSaidGoodnight()) { console.log('[push] she has said goodnight — nothing more tonight'); return { how: 'quiet' }; }
-  const { devices, prefs } = getPush();
-  if (!webServer || !devices.length) return { how: 'quiet' };
+  const { prefs } = getPush();
+  if (!webServer || !canReachPhone()) return { how: 'quiet' };
   if (inQuietHours(prefs, zonedNow(CHAT_TIMEZONE))) return { how: 'quiet' };
   // Something on the list that needs chasing comes first, always.
   if (prefs.events) {
@@ -8605,8 +8614,8 @@ const CHASE_TICK_MS = 60_000;
 let chaseTimer: ReturnType<typeof setInterval> | null = null;
 
 async function chaseTick() {
-  const { devices, prefs } = getPush();
-  if (!webServer || !devices.length || !prefs.events) return;
+  const { prefs } = getPush();
+  if (!webServer || !canReachPhone() || !prefs.events) return;
   if (inQuietHours(prefs, zonedNow(CHAT_TIMEZONE))) return;
   const said = await nudgeForPhone();
   if (said && noteAside(said.line, 'reminder', said.about)) console.log(`[push] chased about "${said.about}"`);
@@ -8794,9 +8803,9 @@ async function proactiveTick() {
   await dozeOffIfLeftAlone();
   await sayItInTheMorning(config);
   await checkNudgeFloor();
-  const { devices, prefs } = getPush();
+  const { prefs } = getPush();
   // The weather is read even with no phone to buzz: it is in her prompt.
-  if (!devices.length) { await pollWeather(); return; }
+  if (!canReachPhone()) { await pollWeather(); return; }
   if (inQuietHours(prefs, zonedNow(CHAT_TIMEZONE))) { await pollWeather(); return; }
   try {
     if (prefs.random) await checkHanging(config);
@@ -10165,8 +10174,8 @@ function theyAreUpNow(): boolean {
 let floorQuietUntil = 0;
 
 async function checkNudgeFloor() {
-  const { devices, prefs } = getPush();
-  if (!webServer || !devices.length || !prefs.random) return;
+  const { prefs } = getPush();
+  if (!webServer || !canReachPhone() || !prefs.random) return;
   if (Date.now() < floorQuietUntil) return;
   // Two hours of silence from someone asleep is not two hours of silence.
   if (!theyAreUpNow() || herHasSaidGoodnight() || herKnockedAwakeNow()) return;
