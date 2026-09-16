@@ -121,8 +121,10 @@ export function standingNote(standing: Standing, updatedAt: string): Note {
 
 /** What she remembers about him, current facts only, by subject. */
 export function memoriesNote(records: MemoryRecord[]): Note {
-  // Current: not replaced by a later fact, and not gone dormant.
-  const current = records.filter(record => !record.supersededBy && record.status !== 'dormant' && record.text.trim());
+  // Current: not replaced by a later fact, not gone dormant, and not archived —
+  // an archived memory is one she was stopped from using (three wrong ones were
+  // archived on 2026-09-17), and the page kept listing them as current.
+  const current = records.filter(record => !record.supersededBy && record.status !== 'dormant' && record.status !== 'archived' && record.text.trim());
   const groups = new Map<string, MemoryRecord[]>();
   for (const record of current) { const key = (record.subject ?? '').trim() || 'General'; groups.set(key, [...(groups.get(key) ?? []), record]); }
   const lines = ['---', 'tags: [haru/memories]', `count: ${current.length}`, '---', '', '# What she remembers', '', link(indexPath, 'Haru'), '', `${current.length} thing${current.length === 1 ? '' : 's'} she holds as current. Superseded and forgotten ones are not here.`, ''];

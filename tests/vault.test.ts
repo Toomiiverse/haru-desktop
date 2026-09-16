@@ -48,8 +48,10 @@ test('standing is a page with meters, the bond, and the waiting list as checkbox
     { id: '1', text: 'Works at Happytel', kind: 'fact', subject: 'Work', createdAt: '2026-08-01T00:00:00Z', lastSeenAt: '2026-08-30T00:00:00Z', mentions: 3 },
     { id: '2', text: 'Uses Ubuntu', kind: 'fact', createdAt: '2026-08-01T00:00:00Z', lastSeenAt: '2026-08-02T00:00:00Z', mentions: 1, supersededBy: '3' },
     { id: '3', text: 'Uses Debian', kind: 'fact', createdAt: '2026-08-03T00:00:00Z', lastSeenAt: '2026-08-03T00:00:00Z', mentions: 1 },
+    { id: '4', text: 'Has a PhD meeting tonight', kind: 'event', createdAt: '2026-08-04T00:00:00Z', lastSeenAt: '2026-08-05T00:00:00Z', mentions: 2, status: 'archived' },
   ] as never);
   assert.match(memories.text, /count: 2/);
+  assert.doesNotMatch(memories.text, /PhD/, 'an archived memory is not listed as current');
   assert.match(memories.text, /## Work\n\n- Works at Happytel \*\(fact, ×3, 2026-08-30\)\*/);
   assert.doesNotMatch(memories.text, /Ubuntu/);
   assert.match(memories.text, /## General\n\n- Uses Debian/);
