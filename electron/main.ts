@@ -75,7 +75,7 @@ import { formatList, formatMedia, formatMissing, lookUp, readAniListConfig, user
 import { createDesktopShortcut, desktopShortcutPath, isAutoStartEnabled, setAutoStart, startedHidden } from './startup';
 import { answersThePrompt, CUE_NOTE, isCue, stageNote, dropRoleHeader, dropTackedOnParagraphs, dropInventedContact, dropInventedScreenTalk, dropRepeatedAgendaMentions, dropRepeatedParagraphs, dropStageDirections, dropRepeatedOpener, dropEchoOpener, dropRepeatedSentences, fixStatedClock, fixStatedReminderTime, fixStatedMinutes, dropOverusedEmoji, oneEmojiAtMost, dropClosingOrder, thinksAloud } from './reply';
 import { runToolLoop } from './toolloop';
-import { chatTools, coerceKnowledgeCategory, runChatTool, type ToolAvailability, type ToolDeps } from './tools';
+import { chatTools, coerceKnowledgeCategory, runChatTool, steadyTable, type ToolAvailability, type ToolDeps } from './tools';
 import { describeMyself, describeSettings, readSelfSnapshot } from './self';
 import { pickBreath } from './breaths';
 import { createMemoryStore } from './memorystore';
@@ -5129,6 +5129,17 @@ type PostOptions = { tools?: boolean; temperature?: number; format?: unknown; ma
    *  that a 20K KV cache would push off the card. */
   numCtx?: number };
 
+/** Tools offered to a hosted model so far today — see steadyTable (tools.ts). */
+const heldTools = { day: '', names: new Set<string>() };
+
+/** The table for a hosted request: laid for this message, then held steady for the day so the prompt cache survives. */
+function hostedTools(conversation: { role?: string; content?: string }[]): ChatTool[] {
+  const day = localDateKey(zonedNow(CHAT_TIMEZONE));
+  if (heldTools.day !== day) { heldTools.day = day; heldTools.names = new Set(); }
+  const available = availableTools();
+  return steadyTable(chatTools(available, latestUserText(conversation)), chatTools(available), heldTools.names);
+}
+
 /** The last thing the user actually said — what the tool table should be laid for. */
 function latestUserText(conversation: { role?: string; content?: string }[]): string {
   for (let index = conversation.length - 1; index >= 0; index--) {
@@ -5142,7 +5153,7 @@ async function openAIPost(conversation: OllamaMessage[], config: ProviderConfig,
   const body = toOpenAIBody({
     model: config.model,
     conversation,
-    tools: tools && !toolless.has(config.model) ? chatTools(availableTools(), latestUserText(conversation)) : undefined,
+    tools: tools && !toolless.has(config.model) ? hostedTools(conversation) : undefined,
     temperature,
     maxTokens,
     json: Boolean(format),

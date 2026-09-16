@@ -928,6 +928,24 @@ export function chatTools(available: ToolAvailability, latest = ''): ChatTool[] 
 }
 
 /**
+ * The table held steady: every tool offered so far today, in chatTools' order,
+ * that is still available now.
+ *
+ * On Venice the tools are the head of the prompt, ahead of her system prompt and
+ * the conversation, so a different table is a different prompt from its first
+ * differing tool on. Measured 2026-09-17 with kimi-k2-5: the same 20 tools
+ * twice, 6,528 of 6,545 prompt tokens came from the cache; one tool more, 2,240.
+ * Laid per message, the table changed on 55 of his 99 turns that week — each a
+ * near-uncached reply. Held for the day it changed 11 times, for about four more
+ * tools on the table. `everything` is chatTools with no message, so a tool that
+ * is switched off, or needs hands this turn does not have, still drops out.
+ */
+export function steadyTable(offered: ChatTool[], everything: ChatTool[], held: Set<string>): ChatTool[] {
+  for (const tool of offered) held.add(tool.function.name);
+  return everything.filter(tool => held.has(tool.function.name));
+}
+
+/**
  * Everything the dispatcher needs from the running app. All of it is state the
  * app owns — the store, the lists, the flags a turn moves underneath it — and
  * none of it is reachable from a module that has to stay testable.
