@@ -346,6 +346,37 @@ export const KNOWLEDGE_TOOL: ChatTool = {
  * got her up: when what they woke her for turns out to be nothing, she goes
  * back to sleep, and can say the door stays shut for the night.
  */
+/**
+ * Her coming back to something later — "I'll ask how it went tonight" made
+ * into a plan rather than a sentence. The booking lives in schedule.json and
+ * comes back to her at its time (scheduler.ts); their own reminders stay on
+ * their list, which is create_kept_item's job.
+ */
+export const BOOK_TOOL: ChatTool = {
+  type: 'function',
+  function: {
+    name: 'book_follow_up',
+    description: "Set yourself to come back to something later: to ask how it went, to check they actually did it, to pick a thread back up once they are free. When the time comes you are asked to say it, and it reaches them like your other messages — this is how a promise to check in actually happens. Only when you mean to follow up yourself; their own reminders go in create_kept_item.",
+    parameters: {
+      type: 'object',
+      properties: {
+        why: { type: 'string', description: 'What you mean to ask or say then, in a few words of your own — "ask how the psych appointment went".' },
+        time: { type: 'string', description: 'The time of day, such as "6:00 PM".' },
+        date: { type: 'string', description: 'The day, in their words: "today", "tomorrow", "friday". Leave it out for the next time that clock time comes round.' },
+        in_minutes: { type: 'number', description: 'Instead of a time: how many minutes from now.' },
+      },
+      required: ['why'],
+    },
+  },
+};
+
+/** Whether the turn could be one worth coming back to: something happening later, or a promise to check. Broad on purpose — a stray match costs one tool on the table. */
+const LATER_TALK = /\b(?:later|tonight|tomorrow|morning|afternoon|evening|weekend|after|when i|going to|gonna|about to|heading|appointment|interview|exam|test|meeting|shift|work|date|dinner|party|doctor|dentist|psych\w*|call|remind|check (?:in|up|back|on)|let you know|how it goes|wish me luck|come back to|follow up)\b|\b\d{1,2}(?::\d{2})?\s?(?:am|pm)\b/i;
+
+export function laterRelevant(message: string): boolean {
+  return LATER_TALK.test(message ?? '');
+}
+
 export const SLEEP_TOOL: ChatTool = {
   type: 'function',
   function: {
@@ -784,6 +815,8 @@ export type ToolAvailability = {
   browser: boolean;
   /** Whether she can open Claude Code sessions for the Claude app (claudeCode.enabled). */
   claude: boolean;
+  /** Whether she can book herself a follow-up (scheduler.ts). Optional so fixtures need not name it. */
+  booking?: boolean;
   system: { enabled: boolean; level: number };
   /** False for anything that did not come from the user's own mouth or keyboard. */
   hands: boolean;
@@ -830,6 +863,7 @@ export function chatTools(available: ToolAvailability, latest = ''): ChatTool[] 
   // Always offered, journal or not: a check-in is a note about a moment, and
   // the moments worth noting happen whether or not anyone keeps a diary.
   tools.push(CHECKIN_TOOL);
+  if (available.booking && (!latest || laterRelevant(latest))) tools.push(BOOK_TOOL);
   if (available.anilist && !available.web) tools.push(ANILIST_TOOL);
   if (available.search.enabled) {
     tools.push(SEARCH_TOOL);
@@ -921,6 +955,8 @@ export type ToolDeps = {
   changeMySetting(plan: SettingPlan): Promise<{ ok: boolean; note: string }>;
   /** Back to bed at her word, while she is up because they knocked (hersleep.ts); null when she is not. */
   goBackToSleep(input: { block: boolean }): { asleep: boolean; blocked: boolean } | null;
+  /** Her own follow-ups (scheduler.ts), or null when there is nowhere to keep them. */
+  booking?: { book(input: { why: string; date?: string; time?: string; inMinutes?: number }): { booked: true; when: string } | { booked: false; reason: string } } | null;
   /** Claude Code sessions for his phone (claudesession.ts), or null when switched off. */
   claude: {
     open(input: { folder: string; name: string }): Promise<{ session: OpenedSession } | { error: string }>;
@@ -1560,6 +1596,19 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
     if (!done) return JSON.stringify({ error: 'You are not up because of them right now — nothing to go back to.' });
     console.log(`[her-sleep] she chose to go back to sleep${done.blocked ? ', and shut the door for the night' : ''}`);
     return JSON.stringify({ ...done, note: 'Say one short goodnight in this reply and nothing after it. They will find you asleep.' });
+  }
+  if (name === 'book_follow_up') {
+    if (!deps.booking) return JSON.stringify({ error: 'There is nowhere to keep that right now. Do not promise to check back.' });
+    const minutes = typeof args.in_minutes === 'number' ? args.in_minutes : typeof args.in_minutes === 'string' && /^\d+$/.test(args.in_minutes) ? Number(args.in_minutes) : undefined;
+    const result = deps.booking.book({
+      why: typeof args.why === 'string' ? args.why : '',
+      date: typeof args.date === 'string' && args.date.trim() ? args.date : undefined,
+      time: typeof args.time === 'string' && args.time.trim() ? args.time : undefined,
+      inMinutes: minutes,
+    });
+    return JSON.stringify(result.booked
+      ? { booked: true, when: result.when, note: 'Set — it comes back to you then. Mention it once in your own words if you like; never read this back.' }
+      : { booked: false, reason: result.reason });
   }
   if (name === 'vault_list' || name === 'vault_read' || name === 'vault_write' || name === 'vault_folder') {
     const root = deps.vault.root();

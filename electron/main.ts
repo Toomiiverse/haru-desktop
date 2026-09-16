@@ -42,6 +42,7 @@ import { classify, discard, extractAudio, extractFrames, findFfmpeg, OPENABLE, r
 import { markTimeGaps, sinceLast, earlierDaysContext, earlierTurns, DAYS_OF_HISTORY, HISTORY_BUDGET_CHARS } from './history';
 import { exchangesFrom, pickRecalled, recallNote, RECALL_DAYS, type Exchange } from './recall';
 import { applyExtraction, dayChunks, emptyGraph, EXTRACTION_SCHEMA, extractionInput, extractionPrompt, knownBlock, linkedFacts, linkedNote, readExtraction } from './factgraph';
+import { admitBooking, bookedNote, bookedPrompt, BOOKED_KIND, createScheduler, describeWhen, resolveBookingTime, zonedEpoch, type Job, type Outcome } from './scheduler';
 import { correct, narrow, noteUsed, readHearing, remember } from './hearing';
 import { assumeItIsTheirs, identifyWork, noteWork, readFollowing, recogniseNow, summariseFollowing } from './following';
 import { lookUpPlace, readWindowsLocation, searchPlaces, type FoundPlace } from './location';
@@ -4798,6 +4799,7 @@ function availableTools(): ToolAvailability {
   const systemConfig = readSystemConfig();
   return {
     choices: offeringChoices,
+    booking: true,
     journal: readJournalConfig(store.get('journal.config')).enabled,
     anilist: readAniListConfig(store.get('anilist')).enabled,
     web: talkingOnWeb,
@@ -4895,6 +4897,7 @@ function toolDeps(): ToolDeps {
     requestRestart: () => { pendingHaruRestart = true; },
     // Her night is hers: back to bed when she decides the wake was nothing (hersleep.ts).
     goBackToSleep: input => goBackToSleep({ pointless: true, block: input.block, why: 'her call' }),
+    booking: { book: bookFollowUp },
     // Claude Code sessions he picks up in the Claude app (claudesession.ts).
     claude: claudeSessions(),
     // Their vault on disk, and the re-read that makes a note she wrote searchable at once.
@@ -7052,6 +7055,7 @@ const promptState = {
     herRecentReplies,
     recalled: recallNote(recalled, new Intl.DateTimeFormat('en-AU', { weekday: 'long', timeZone: 'UTC' })),
     linked: linkedNote(factGraph, linked),
+    booked: bookedNote(scheduler.list(), Date.now(), CHAT_TIMEZONE),
     // Her list is left out when the subject is her — see PromptState.aboutHer.
     aboutHer: Boolean(hers),
     movedJustNow,
@@ -7989,6 +7993,106 @@ async function readDayIntoGraph(day: string, messages: { role?: string; content?
   return true;
 }
 
+// -- things to come back to (scheduler.ts) ----------------------------------------
+//
+// One saved list and one dispatcher: the daily sweeps at a time of day rather
+// than a day after whenever the app last started (a restart every few hours
+// meant the 24-hour interval never fired at all), and what she books for
+// herself with book_follow_up.
+
+/** The daily sweeps, before the 05:00 roll. Missed while the app was down, they run at the next start within twenty hours. */
+const MAINTENANCE_AT = '04:30';
+
+const scheduler = createScheduler({
+  load: () => store.getSchedule(),
+  save: file => store.setSchedule(file),
+  handlers: {
+    maintenance: () => {
+      runMemoryConsolidation();
+      runMemoryDecay();
+      pruneOldArchives();
+      runHauntHygiene();
+      return { done: true };
+    },
+    [BOOKED_KIND]: comeBackTo,
+  },
+  log: line => console.log(line),
+});
+
+function bookFollowUp(input: { why: string; date?: string; time?: string; inMinutes?: number }): { booked: true; when: string } | { booked: false; reason: string } {
+  const now = Date.now();
+  const at = resolveBookingTime(input, now, CHAT_TIMEZONE);
+  if (typeof at !== 'number') return { booked: false, reason: at.error };
+  const admitted = admitBooking(scheduler.list(), { at, why: input.why }, now, `booked-${randomUUID().slice(0, 8)}`);
+  if ('refused' in admitted) {
+    console.log(`[booked] refused ${JSON.stringify(input.why.slice(0, 80))}: ${admitted.refused}`);
+    return { booked: false, reason: admitted.refused };
+  }
+  scheduler.add(admitted.job);
+  const when = describeWhen(at, now, CHAT_TIMEZONE);
+  console.log(`[booked] she will come back to ${JSON.stringify(admitted.job.payload?.why)} at ${when}`);
+  return { booked: true, when };
+}
+
+/** Her wake time tonight or this morning, as an instant — what a booking made for her sleeping hours waits for. */
+function herWakeAt(): number | null {
+  const schedule = getHerSleepSchedule();
+  if (!schedule) return null;
+  const [year, month, date] = schedule.day.split('-').map(Number);
+  const after = new Date(Date.UTC(year, month - 1, date + 1)).toISOString().slice(0, 10);
+  return zonedEpoch(after, schedule.wake, CHAT_TIMEZONE);
+}
+
+/**
+ * A booking of hers, come due. Put off rather than dropped when the moment is
+ * wrong — asleep, his quiet hours, him not up, the two of them mid-conversation,
+ * a game on — and written by the conversation route when it is right, under the
+ * same guards as a second thought. She may still decide it no longer fits.
+ */
+async function comeBackTo(job: Job): Promise<Outcome> {
+  const why = String(job.payload?.why ?? '').trim();
+  if (!why) return { done: true };
+  const now = Date.now();
+  if (isSilenced(store.get('pushback') as Pushback | undefined, now)) {
+    console.log(`[booked] let go — she has been told to stop: ${JSON.stringify(why)}`);
+    return { done: true };
+  }
+  if (herAsleepNow() || herKnockedAwakeNow()) return { later: Math.max(herWakeAt() ?? 0, now) + 20 * 60_000, reason: 'she is asleep' };
+  if (inQuietHours(getPush().prefs, zonedNow(CHAT_TIMEZONE))) return { later: now + 30 * 60_000, reason: 'quiet hours' };
+  if (!theyAreUpNow()) return { later: now + 30 * 60_000, reason: 'they are not up' };
+  if (lastUserActivityAt && now - lastUserActivityAt < QUIET_AFTER_USER_MS) return { later: now + 10 * 60_000, reason: 'they are talking to her' };
+  if (now - lastInterjectionAt < INTERJECT_GAP_MS) return { later: now + 5 * 60_000, reason: 'she only just spoke' };
+  if (readGamingConfig(store.get('gaming')).quiet && gameIsRunning()) return { later: now + 20 * 60_000, reason: 'they are playing something' };
+  const route = conversationRoute() ?? (store.get('ai.config') as ProviderConfig | undefined);
+  if (!route?.model) return { failed: 'no brain to say it with' };
+  const messages = ((store.get('chat.messages') as { role: string; content: string }[] | undefined) ?? []).slice(-14);
+  const character = getActiveCharacter();
+  const conversation: OllamaMessage[] = [
+    { role: 'system', content: [character.identity, character.style, FIRST_PERSON_NOTE, NATURAL, NO_INVENTED_HISTORY].join('\n\n') },
+    ...messages.map(message => ({ role: message.role as OllamaMessage['role'], content: message.content })),
+    { role: 'system', content: bookedPrompt(why, Number(job.payload?.bookedAt ?? job.createdAt), now, CHAT_TIMEZONE) },
+  ];
+  const answer = await Promise.race([
+    sendToProvider(conversation, route, { tools: false, temperature: 0.8, maxTokens: 220 }),
+    new Promise<never>((_, reject) => setTimeout(() => reject(new Error('no answer in 40s')), 40_000)),
+  ]);
+  const line = parseSecondThought(oneEmojiAtMost(dropOverusedEmoji(dropRoleHeader(dropStageDirections(answer.content ?? '')), [], HER_EMOJI), HER_EMOJI));
+  if (!line) {
+    console.log(`[booked] she let it go: ${JSON.stringify(why)}`);
+    return { done: true };
+  }
+  if (readsAsTheirAnswer(line) || looksLikeAnEcho(line, messages.map(message => message.content)) || echoesAside(line, getAsides(), Date.now())) {
+    console.log(`[booked] dropped — not hers to say, or already said: ${JSON.stringify(line.slice(0, 80))}`);
+    return { done: true };
+  }
+  // They may have started talking while she was writing it.
+  if (lastUserActivityAt > now) return { later: Date.now() + 10 * 60_000, reason: 'they started talking while she wrote it' };
+  lastInterjectionAt = Date.now();
+  noteAside(line, 'booked', why.slice(0, 80));
+  console.log(`[booked] came back to ${JSON.stringify(why)}: ${JSON.stringify(line.slice(0, 120))}`);
+  return { done: true };
+}
+
 function rantRoom(latest: string, mentioned = ''): string {
   const mood = getMood();
   const lastNight = nightsOn(getNights(), lastNightKey())[0];
@@ -8340,6 +8444,7 @@ const PUSH_KIND: Partial<Record<AsideSource, 'random' | 'events' | 'system' | 'w
   idle: 'random',
   goodnight: 'random',
   system: 'system',
+  booked: 'random',
 };
 
 /**
@@ -11414,18 +11519,14 @@ app.whenReady().then(() => {
   // read is an empty one, never a crash.
   knowledge.load();
   void refreshMemoryVectors();
-  // The consolidation sweep: once shortly after boot (when the vectors are
-  // warm enough to be useful), then daily. Quiet when nothing changes.
-  setTimeout(() => { runMemoryConsolidation(); }, 60_000);
-  setTimeout(() => { runMemoryDecay(); }, 90_000);
-  setTimeout(() => { pruneOldArchives(); }, 120_000);
-  setTimeout(() => { runHauntHygiene(); }, 150_000);
-  setInterval(() => {
-    runMemoryConsolidation();
-    runMemoryDecay();
-    pruneOldArchives();
-    runHauntHygiene();
-  }, 24 * 60 * 60_000);
+  // The consolidation sweep, decay, archive pruning and haunt hygiene, daily at
+  // a time of day (scheduler.ts). They used to run a minute after boot and then
+  // every twenty-four hours from it — and with restarts every few hours the
+  // interval never fired, so the sweep ran as often as the app was restarted.
+  // Missed while down, the day's sweep runs at the next start. The same
+  // dispatcher brings her own bookings back to her.
+  scheduler.ensureDaily({ id: 'maintenance', kind: 'maintenance', daily: MAINTENANCE_AT, timezone: CHAT_TIMEZONE, staleAfterMs: 20 * 60 * 60_000 });
+  setTimeout(() => scheduler.start(), 30_000);
   const knowledgeSummary = knowledgeStats(knowledge.current());
   console.log(`[knowledge] loaded ${knowledgeSummary.documents} document(s), ${knowledgeSummary.chunks} chunk(s) from ${knowledgeFile}${knowledgeSummary.embedModels.length ? ` (${knowledgeSummary.embedModels.join(', ')})` : ''}`);
   // A saved vault keeps itself current without being asked: a first check a
