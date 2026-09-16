@@ -774,7 +774,12 @@ export function relativeDay(dateKey: string, todayKey: string, weekday: Intl.Dat
   const away = daysBetween(todayKey, dateKey);
   if (away > 1 && away <= 14) return `${name}, ${away} days from now`;
   if (away < -1 && away >= -14) return `last ${name}, ${-away} days ago`;
-  return dateKey < todayKey ? `last ${name}` : name;
+  // Past the fortnight a weekday alone is the nearest one: the car registration
+  // due on 6 October stood on his Standing page as "My car registration —
+  // Tuesday" nineteen days out (2026-09-17). So the date comes with it.
+  const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  const dated = `${name} ${day} ${MONTHS[month - 1]}${String(year) === todayKey.slice(0, 4) ? '' : ` ${year}`}`;
+  return dateKey < todayKey ? `last ${dated}` : dated;
 }
 
 

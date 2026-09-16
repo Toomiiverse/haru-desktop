@@ -376,9 +376,10 @@ test('anything else inside the fortnight spells the distance out', () => {
   assert.equal(relativeDay('2026-08-13', TODAY, WEEKDAY), 'last Thursday, 7 days ago');
 });
 
-test('beyond the fortnight the name is enough', () => {
-  assert.ok(!relativeDay('2026-09-30', TODAY, WEEKDAY).includes('days from now'));
-  assert.ok(relativeDay('2026-06-01', TODAY, WEEKDAY).startsWith('last '));
+test('beyond the fortnight the date comes with the name, or it reads as the nearest one', () => {
+  assert.equal(relativeDay('2026-09-30', TODAY, WEEKDAY), 'Wednesday 30 September');
+  assert.equal(relativeDay('2026-06-01', TODAY, WEEKDAY), 'last Monday 1 June');
+  assert.equal(relativeDay('2027-01-05', TODAY, WEEKDAY), 'Tuesday 5 January 2027');
 });
 
 // -- how long she keeps asking -----------------------------------------------------
