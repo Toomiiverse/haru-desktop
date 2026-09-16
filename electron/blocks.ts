@@ -14,8 +14,9 @@
 // configuration the user controls; the agent can never modify it through a
 // memory tool.
 
-import { keywords, retrieveMemories, type MemoryKind, type MemoryRecord, type SessionSummary } from './memory';
+import { importanceOf, keywords, retrieveMemories, type MemoryRecord, type SessionSummary } from './memory';
 import { herStandingInstruction, herStandings, isHerStanding } from './herstanding';
+import { categoryOf, isDay, type Category } from './categories';
 
 export type MemoryBlock = {
   /** Stable per label — block-persona, block-human, … */
@@ -65,6 +66,13 @@ export type BlockSources = {
    *  showed a semantic selection — two answers to "what does she know right
    *  now", and the prompt got the blunter one. */
   semantic?: Map<string, number>;
+  /**
+   * The latest message alone, when `query` has earlier lines run in front of
+   * it, and its own semantic map. Matched as well as the query, never instead
+   * (RetrieveOptions.focus).
+   */
+  latest?: string;
+  latestSemantic?: Map<string, number>;
   now?: Date;
 };
 
@@ -198,9 +206,6 @@ export function mergeBlockDefaults(saved: unknown): MemoryBlock[] {
 
 // -- derivation ---------------------------------------------------------------
 
-/** The kinds that shape how Haru talks regardless of the topic. */
-const ALWAYS_KINDS: MemoryKind[] = ['preference', 'relationship'];
-
 /** Wraps long lines so the block stays readable and the char count honest. */
 function wrap(text: string, width: number): string {
   if (text.length <= width) return text;
@@ -224,15 +229,106 @@ export function linesFromRecords(records: MemoryRecord[], width = 160): string {
   return records.map(record => `- ${wrap(record.text, width)}`).join('\n');
 }
 
-function selectedFor(query: string, sources: BlockSources, limit: number, semantic?: Map<string, number>): MemoryRecord[] {
-  return retrieveMemories(sources.memories, query, { limit, now: sources.now ?? new Date(), semantic })
+// -- which records each block draws on ------------------------------------------
+//
+// Each block asks for its own categories (categories.ts), so no block's
+// selection can be spent on records another block renders. The human block
+// used to retrieve twelve from everything and then drop the preferences and
+// relationships, which have blocks of their own — and with twenty of those on
+// record, the twelve were all of them, and it rendered no memories at all
+// (2026-09-17, on the live store and in the real last prompt).
+
+/** Who he is: shown every turn, the best of them when there are more than this. */
+export const IDENTITY_LIMIT = 15;
+/** The two of them — running jokes, house rules, moments — shown every turn, the best few. */
+export const SHARED_LIMIT = 6;
+/** What the message is about: events, plans, things under way, what he taught her. */
+export const MOMENT_LIMIT = 10;
+/** Plans ahead and things under way, for current_project. */
+export const PROJECT_LIMIT = 8;
+/** His own tastes, beside his rules for her: the best few for this message, not every opinion he has voiced. */
+export const TASTE_LIMIT = 8;
+/** Something under way not raised in this long is not current enough for current_project. */
+export const ONGOING_DAYS = 45;
+/**
+ * How related an event, plan or piece of knowledge has to be to the message to
+ * be shown in the human block: the best of its calibrated semantic, keyword
+ * and entity match. Measured on the live store (see the memory eval of
+ * 2026-09-17): below it, small talk pulled in a record or two about nothing it
+ * said; above it, questions about a remembered thing started missing it.
+ */
+export const MOMENT_FLOOR = 0.3;
+
+const MOMENT: Category[] = ['event', 'plan', 'ongoing', 'knowledge'];
+
+/** Records a block may show at all: current, not hers, not set aside. */
+function live(sources: BlockSources): MemoryRecord[] {
+  const now = sources.now ?? new Date();
+  return sources.memories.filter(memory => !memory.supersededBy
+    && memory.status !== 'archived'
+    && !isHerStanding(memory)
+    && categoryOf(memory, now) !== 'passing');
+}
+
+function ofCategory(sources: BlockSources, ...wanted: Category[]): MemoryRecord[] {
+  const now = sources.now ?? new Date();
+  return live(sources).filter(memory => wanted.includes(categoryOf(memory, now)));
+}
+
+function retrieved(records: MemoryRecord[], sources: BlockSources, limit: number, floor?: number): MemoryRecord[] {
+  const focus = sources.latest?.trim() ? { message: sources.latest.trim(), semantic: sources.latestSemantic } : undefined;
+  return retrieveMemories(records, sources.query?.trim() ?? '', { limit, now: sources.now ?? new Date(), semantic: sources.semantic, ...(floor !== undefined ? { floor } : {}), ...(focus ? { focus } : {}) })
     .map(entry => entry.memory);
 }
 
-const PROJECT_QUERY = 'project work company business job';
+/** Share of a record's content words another record in the same block already says. */
+const RESTATED = 0.75;
 
-/** Kinds with a block of their own. The human block leaves them to it. */
-const OWN_BLOCK: MemoryKind[] = ['preference', 'relationship'];
+/**
+ * One line per thing. The vault page and the conversation both write about
+ * the same people, so "Johnny — Tommy's stepfather; his mom's second husband"
+ * sat above "Tommy's stepfather is named Johnny" in every prompt. The longer
+ * line stays; one whose words the other already carries goes.
+ */
+export function withoutRestatements(records: MemoryRecord[]): MemoryRecord[] {
+  const words = records.map(record => keywords(record.text));
+  return records.filter((record, index) => {
+    const mine = words[index];
+    // Too few words to tell a restatement from two short lines that happen to share them.
+    if (mine.size < 3) return true;
+    return !records.some((other, at) => {
+      if (at === index) return false;
+      const theirs = words[at];
+      const shared = [...mine].filter(word => theirs.has(word)).length / mine.size;
+      if (shared < RESTATED) return false;
+      // The same length both ways round would drop both; the earlier one stays.
+      return other.text.length > record.text.length || (other.text.length === record.text.length && at < index);
+    });
+  });
+}
+
+function shortDay(day: string): string {
+  return new Date(`${day}T00:00:00Z`).toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' });
+}
+
+/**
+ * A plan, an event or something under way with the day it belongs to. An
+ * undated one says when it was said instead: "decided on a 1000W PSU" read as
+ * this week's news two weeks on, with nothing on the line to say otherwise.
+ */
+function dated(record: MemoryRecord, now: Date): string {
+  const text = record.text.replace(/[.\s]+$/, '');
+  if (isDay(record.when)) return record.text.includes(record.when) ? record.text : `${text} (${shortDay(record.when)})`;
+  const category = categoryOf(record, now);
+  if (category !== 'plan' && category !== 'event' && category !== 'ongoing') return record.text;
+  const said = record.createdAt.slice(0, 10);
+  if (!isDay(said)) return record.text;
+  return `${text} (${category === 'event' ? '' : 'said '}${shortDay(said)})`;
+}
+
+function datedLines(records: MemoryRecord[], now: Date): string {
+  return linesFromRecords(records.map(record => ({ ...record, text: dated(record, now) })));
+}
 
 /**
  * Share of a record's content words the profile has to contain before the
@@ -299,17 +395,22 @@ export function resolveBlockValue(block: MemoryBlock, sources: BlockSources, sho
       if (sources.profile.nickname.trim()) lines.push(`- Goes by ${sources.profile.nickname.trim()}.`);
       if (sources.profile.occupation.trim()) lines.push(`- Work: ${sources.profile.occupation.trim()}.`);
       if (sources.profile.about.trim()) lines.push(`- ${wrap(sources.profile.about.trim(), 160)}`);
-      const selected = selectedFor(sources.query?.trim() ?? '', sources, 12, sources.semantic)
-        .filter(memory => !OWN_BLOCK.includes(memory.kind));
-      const records = fresh(selected, sources, shown);
-      if (records.length) lines.push(linesFromRecords(records));
+      // Who they are, then the two of them, then whatever this message is about.
+      const identity = fresh(retrieved(ofCategory(sources, 'identity'), sources, IDENTITY_LIMIT), sources, shown);
+      const shared = fresh(retrieved(ofCategory(sources, 'shared'), sources, SHARED_LIMIT), sources, shown);
+      const moment = fresh(retrieved(ofCategory(sources, ...MOMENT), sources, MOMENT_LIMIT, MOMENT_FLOOR), sources, shown);
+      const records = [...withoutRestatements(identity), ...shared, ...moment];
+      if (records.length) lines.push(datedLines(records, sources.now ?? new Date()));
       return lines.join('\n');
     }
     case 'preferences': {
-      const records = sources.memories
-        .filter(memory => memory.kind === 'preference' && !isHerStanding(memory) && !memory.supersededBy && memory.status !== 'archived')
-        .sort((a, b) => (b.importance ?? 0) - (a.importance ?? 0) || b.mentions - a.mentions);
-      return linesFromRecords(fresh(records, sources, shown));
+      // His rules for her, every one; then the best few of his own tastes for
+      // this message.
+      const now = sources.now ?? new Date();
+      const rules = ofCategory(sources, 'instruction')
+        .sort((a, b) => importanceOf(b, now) - importanceOf(a, now) || b.mentions - a.mentions);
+      const tastes = retrieved(ofCategory(sources, 'preference'), sources, TASTE_LIMIT);
+      return linesFromRecords(fresh(withoutRestatements([...rules, ...tastes]), sources, shown));
     }
     case 'her_standing': {
       // Rendered from herStandingInstruction rather than linesFromRecords: the
@@ -318,18 +419,28 @@ export function resolveBlockValue(block: MemoryBlock, sources: BlockSources, sho
       return herStandingInstruction(herStandings(sources.memories));
     }
     case 'relationship': {
-      const records = sources.memories
-        .filter(memory => memory.kind === 'relationship' && !memory.supersededBy && memory.status !== 'archived')
-        .sort((a, b) => (b.importance ?? 0) - (a.importance ?? 0));
-      return linesFromRecords(fresh(records, sources, shown));
+      const now = sources.now ?? new Date();
+      const records = ofCategory(sources, 'person')
+        .sort((a, b) => importanceOf(b, now) - importanceOf(a, now));
+      return linesFromRecords(fresh(withoutRestatements(records), sources, shown));
     }
     case 'current_project': {
       const lines: string[] = [];
-      // Against the fixed project query, so no semantic map: that one was
-      // computed for the message, not for these words.
-      const projectRecords = fresh(selectedFor(PROJECT_QUERY, sources, 8)
-        .filter(memory => memory.kind === 'fact' || memory.kind === 'event'), sources, shown);
-      if (projectRecords.length) lines.push(linesFromRecords(projectRecords));
+      // What is still ahead, soonest first, then what is under way, latest
+      // first — whatever the message is about, since this is what he is in
+      // the middle of. A plan whose day has gone is an event by now
+      // (categoryOf) and is left to the human block.
+      const now = sources.now ?? new Date();
+      const recent = now.getTime() - ONGOING_DAYS * 86_400_000;
+      // Not a dormant one: that is a plan ticked off the list (closeEvents).
+      const plans = ofCategory(sources, 'plan')
+        .filter(memory => memory.status !== 'dormant')
+        .sort((a, b) => (a.when ?? '9999').localeCompare(b.when ?? '9999') || b.lastSeenAt.localeCompare(a.lastSeenAt));
+      const ongoing = ofCategory(sources, 'ongoing')
+        .filter(memory => memory.status !== 'dormant' && Date.parse(memory.lastSeenAt) >= recent)
+        .sort((a, b) => b.lastSeenAt.localeCompare(a.lastSeenAt));
+      const projectRecords = fresh([...plans, ...ongoing].slice(0, PROJECT_LIMIT), sources, shown);
+      if (projectRecords.length) lines.push(datedLines(projectRecords, now));
       for (const work of sources.following ?? []) {
         lines.push(`- ${work.title}${work.progress ? ` (${work.progress})` : ''}`);
       }

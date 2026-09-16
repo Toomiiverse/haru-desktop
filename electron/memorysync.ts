@@ -20,7 +20,7 @@
 // With that settled, the merge is a union by id where the newer copy wins, and
 // it converges no matter which machine runs it or in what order.
 
-import { migrateMemories, type EvidenceEntry, type MemoryRecord } from './memory';
+import { migrateMemories, tidyEvidence, type EvidenceEntry, type MemoryRecord } from './memory';
 
 export type MergeReport = {
   memories: MemoryRecord[];
@@ -38,6 +38,12 @@ function mergeEvidence(mine: EvidenceEntry[] = [], theirs: EvidenceEntry[] = [])
   const byKey = new Map<string, EvidenceEntry>();
   for (const entry of [...mine, ...theirs]) byKey.set(evidenceKey(entry), entry);
   return [...byKey.values()].sort((a, b) => a.at.localeCompare(b.at));
+}
+
+function sortingOf(newer: MemoryRecord, older: MemoryRecord): Pick<MemoryRecord, 'category' | 'when'> {
+  const sorted = newer.category ? newer : older.category ? older : null;
+  if (!sorted) return {};
+  return sorted.when ? { category: sorted.category, when: sorted.when } : { category: sorted.category };
 }
 
 /**
@@ -59,11 +65,17 @@ function reconcile(mine: MemoryRecord, theirs: MemoryRecord): MemoryRecord {
     // Both machines counted real mentions; neither total is the whole truth and
     // the larger is the closer one.
     mentions: Math.max(mine.mentions, theirs.mentions),
-    evidence: mergeEvidence(mine.evidence, theirs.evidence),
+    // Tidied as a read tidies it, so the desk's untidied log does not read as a
+    // change on every pull.
+    evidence: tidyEvidence(mergeEvidence(mine.evidence, theirs.evidence)),
     // Consolidation's work, carried rather than overwritten — see the header.
     supersededBy: mine.supersededBy ?? theirs.supersededBy,
     mergedFrom: mine.mergedFrom ?? theirs.mergedFrom,
     conflictsWith: mine.conflictsWith ?? theirs.conflictsWith,
+    // The sorting, from the newer copy that has one. The desk's older code
+    // drops both fields on read, so its copy of a record arrives without them
+    // however recently it was seen, and must not unsort what was sorted here.
+    ...sortingOf(newer, older),
   };
 }
 

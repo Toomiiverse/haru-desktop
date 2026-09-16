@@ -124,14 +124,15 @@ export function memoriesNote(records: MemoryRecord[]): Note {
   // Current: not replaced by a later fact, not gone dormant, and not archived —
   // an archived memory is one she was stopped from using (three wrong ones were
   // archived on 2026-09-17), and the page kept listing them as current.
-  const current = records.filter(record => !record.supersededBy && record.status !== 'dormant' && record.status !== 'archived' && record.text.trim());
+  // And not sorted as passing (categories.ts): kept for a while, never shown to her.
+  const current = records.filter(record => !record.supersededBy && record.status !== 'dormant' && record.status !== 'archived' && record.category !== 'passing' && record.text.trim());
   const groups = new Map<string, MemoryRecord[]>();
   for (const record of current) { const key = (record.subject ?? '').trim() || 'General'; groups.set(key, [...(groups.get(key) ?? []), record]); }
   const lines = ['---', 'tags: [haru/memories]', `count: ${current.length}`, '---', '', '# What she remembers', '', link(indexPath, 'Haru'), '', `${current.length} thing${current.length === 1 ? '' : 's'} she holds as current. Superseded and forgotten ones are not here.`, ''];
   for (const [subject, list] of [...groups.entries()].sort(([a], [b]) => (a === 'General' ? 1 : b === 'General' ? -1 : a.localeCompare(b)))) {
     lines.push(`## ${subject}`, '');
     for (const record of [...list].sort((a, b) => b.lastSeenAt.localeCompare(a.lastSeenAt))) {
-      lines.push(`- ${record.text.trim().replace(/\n+/g, ' ')} *(${record.kind}${record.mentions > 1 ? `, ×${record.mentions}` : ''}, ${record.lastSeenAt.slice(0, 10)})*`);
+      lines.push(`- ${record.text.trim().replace(/\n+/g, ' ')} *(${record.category ?? record.kind}${record.mentions > 1 ? `, ×${record.mentions}` : ''}, ${record.lastSeenAt.slice(0, 10)})*`);
     }
     lines.push('');
   }

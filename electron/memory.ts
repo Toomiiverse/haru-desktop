@@ -13,6 +13,7 @@
 // has been mentioned often — no classifier, no guessing.
 
 import { EMOTIONS, localEmotion, type EmotionName } from './emotion';
+import { categoryOf, isCategory, isDay, type Category } from './categories';
 
 export const MEMORY_KINDS = ['preference', 'relationship', 'event', 'fact'] as const;
 export type MemoryKind = typeof MEMORY_KINDS[number];
@@ -97,6 +98,13 @@ export type MemoryRecord = {
   mergedFrom?: string[];
   /** Ids of memories that claim the opposite of this one. */
   conflictsWith?: string[];
+  /**
+   * What this is, finer than `kind`, as sorted by the model (categories.ts).
+   * Absent until it has been sorted; categoryOf guesses in the meantime.
+   */
+  category?: Category;
+  /** For a plan or an event, the day it is or was (YYYY-MM-DD), when one could be worked out. */
+  when?: string;
 };
 
 export type SessionSummary = {
@@ -154,8 +162,38 @@ export function isExplicitRecall(text: string): boolean {
 /** How many memories a turn gets when they've explicitly asked her to recall something, instead of the usual `selectMemories` default. */
 export const DEEP_RECALL_LIMIT = 36;
 
-// Identity-defining records are always in the prompt; the rest compete for room.
-const ALWAYS_INCLUDED: MemoryKind[] = ['preference', 'relationship'];
+// The records that shape how she talks whatever the subject: his rules for her,
+// his tastes and his people. Everything else competes for room.
+const ALWAYS_INCLUDED: Category[] = ['instruction', 'preference', 'person'];
+
+/**
+ * How much a record matters, from what it is.
+ *
+ * The stored importance was scored once, at write time, from the kind the
+ * writer chose and a regex over the words — so "Works a long day from 10am to
+ * 4pm, then an event" scored 0.85 for the word "work" and was never going to
+ * fade, while a one-day schedule is exactly what should. Once a record has been
+ * sorted, its category says how long it deserves: rules, people and who he is
+ * for good; tastes and the two of them for a long while; plans and things under
+ * way while they last; a day's event never permanently; passing not at all.
+ * Derived rather than written back, so sorting a record never has to win a sync.
+ */
+export function importanceOf(memory: MemoryRecord, now?: Date): number {
+  const stored = memory.importance ?? 0.4;
+  if (!isCategory(memory.category)) return stored;
+  switch (categoryOf(memory, now)) {
+    case 'instruction': return Math.max(stored, 0.85);
+    case 'person':
+    case 'identity': return Math.max(stored, 0.8);
+    case 'preference':
+    case 'shared': return 0.7;
+    case 'knowledge':
+    case 'plan': return 0.5;
+    case 'ongoing': return 0.45;
+    case 'event': return Math.min(stored, 0.6);
+    case 'passing': return 0.1;
+  }
+}
 
 export const STOP_WORDS = new Set(['the', 'a', 'an', 'and', 'or', 'but', 'is', 'are', 'was', 'were', 'be', 'been', 'to', 'of', 'in', 'on', 'at', 'for', 'with', 'about', 'my', 'me', 'i', 'you', 'your', 'it', 'that', 'this', 'they', 'them', 'has', 'have', 'had', 'do', 'does', 'did', 'so', 'if', 'as', 'by', 'from', 'up', 'out', 'not', 'can', 'will', 'just', 'what', 'when', 'how', 'who']);
 
@@ -357,10 +395,19 @@ export function isWorthRemembering(text: string, options: { meantAsARule?: boole
  */
 export function rememberInto(
   memories: MemoryRecord[],
-  incoming: { text: string; kind: MemoryKind; subject?: string; id: string; now: string; source?: MemorySource; predicate?: string; object?: string; evidenceDetail?: string; emotion?: EmotionName; emotionIntensity?: number },
+  incoming: { text: string; kind: MemoryKind; subject?: string; id: string; now: string; source?: MemorySource; predicate?: string; object?: string; evidenceDetail?: string; emotion?: EmotionName; emotionIntensity?: number; resighting?: boolean },
 ): { memories: MemoryRecord[]; created: boolean; record: MemoryRecord } {
   const text = incoming.text.trim();
   const existing = memories.find(memory => isSameMemory(memory.text, text));
+  // The same line read off the same page again. The vault sync does that every
+  // hour, and each pass used to count as him saying it again: "Haru, with one r"
+  // reached 354 mentions and 354 evidence entries, most of memories.json by
+  // size, from a page nobody had touched. Still seen — it is on the page — but
+  // not said again.
+  if (existing && incoming.resighting && existing.text === text) {
+    const seen: MemoryRecord = { ...existing, lastSeenAt: incoming.now };
+    return { memories: memories.map(memory => memory.id === existing.id ? seen : memory), created: false, record: seen };
+  }
   if (existing) {
     const base = baseConfidence(existing.source ?? 'conversation');
     const updated: MemoryRecord = {
@@ -382,6 +429,11 @@ export function rememberInto(
         ? { at: incoming.now, kind: 'repeat', source: existing.source ?? 'conversation', detail: incoming.evidenceDetail }
         : { at: incoming.now, kind: 'repeat', source: existing.source ?? 'conversation' }],
       importance: Math.max(existing.importance ?? 0, scoreImportance(existing.kind, existing.text)),
+      // Said again, so it is current again. A dormant record that came back up
+      // stayed dormant for good before — decay only ever moves one way — and an
+      // archived one answered "I know" while staying out of every prompt. Not
+      // one that was ticked off: talking about a done thing does not undo it.
+      status: existing.evidence?.at(-1)?.kind === 'closed' ? existing.status : 'active',
     };
     return { memories: memories.map(memory => memory.id === existing.id ? updated : memory), created: false, record: updated };
   }
@@ -428,7 +480,11 @@ export function pruneMemories(memories: MemoryRecord[], limit: number): PruneRes
   if (memories.length <= limit) return { memories, evicted: [] };
   const archived = memories.filter(memory => memory.status === 'archived');
   const rest = memories.filter(memory => memory.status !== 'archived');
-  const untouchable = rest.filter(memory => memory.kind === 'preference' || memory.kind === 'relationship' || (memory.importance ?? 0) >= ALWAYS_IMPORTANT);
+  // Sorted records by what they are; unsorted ones by the old rule, since a
+  // category guessed from a kind is not enough to make anything permanent.
+  const untouchable = rest.filter(memory => isCategory(memory.category)
+    ? LASTING.includes(categoryOf(memory)) || importanceOf(memory) >= ALWAYS_IMPORTANT
+    : memory.kind === 'preference' || memory.kind === 'relationship' || (memory.importance ?? 0) >= ALWAYS_IMPORTANT);
   const touchable = rest.filter(memory => !untouchable.includes(memory));
   if (touchable.length <= limit - untouchable.length - archived.length) return { memories, evicted: [] };
   const scored = touchable.map(memory => ({ memory, score: pruneScore(memory) })).sort((a, b) => b.score - a.score);
@@ -439,10 +495,16 @@ export function pruneMemories(memories: MemoryRecord[], limit: number): PruneRes
   return { memories: [...kept, ...untouchable, ...archived], evicted };
 }
 
+/** Categories the cap never takes while anything else can go: who he is, his
+ *  people, his rules and tastes, the two of them, and what he taught her. */
+const LASTING: Category[] = ['identity', 'person', 'instruction', 'preference', 'shared', 'knowledge'];
+
 function pruneScore(memory: MemoryRecord): number {
-  const importance = memory.importance ?? 0.4;
-  const confidence = memory.confidence ?? 0.5;
   const now = new Date();
+  const importance = importanceOf(memory, now);
+  const confidence = memory.confidence ?? 0.5;
+  // Sorted as not worth keeping: first out, whatever its counts say.
+  if (categoryOf(memory) === 'passing') return -1 / (1 + memory.mentions);
   return (memory.mentions + 1)
     * (0.5 + importance)
     * (0.4 + confidence)
@@ -496,7 +558,7 @@ export function applyDecay(memories: MemoryRecord[], now: Date): DecayResult {
       out.push(memory);
       continue;
     }
-    const importance = memory.importance ?? 0.4;
+    const importance = importanceOf(memory, now);
     if (importance >= ALWAYS_IMPORTANT) {
       out.push(memory);
       continue;
@@ -569,9 +631,9 @@ export function supersede(memories: MemoryRecord[], oldId: string, newId: string
 export function selectMemories(memories: MemoryRecord[], message: string, limit = 14): MemoryRecord[] {
   // Superseded records are history, not current knowledge — they stay in the
   // store for findSuperseded to search, but never surface in a prompt.
-  const active = memories.filter(memory => !memory.supersededBy);
-  const always = active.filter(memory => ALWAYS_INCLUDED.includes(memory.kind));
-  const rest = active.filter(memory => !ALWAYS_INCLUDED.includes(memory.kind));
+  const active = memories.filter(memory => !memory.supersededBy && categoryOf(memory) !== 'passing');
+  const always = active.filter(memory => ALWAYS_INCLUDED.includes(categoryOf(memory)));
+  const rest = active.filter(memory => !ALWAYS_INCLUDED.includes(categoryOf(memory)));
   const asked = keywords(message);
   const ranked = rest
     .map(memory => {
@@ -636,12 +698,18 @@ export function memoryRecency(lastSeenAt: string, now: Date, halfLifeDays: numbe
 export const ALWAYS_IMPORTANT = 0.8;
 
 /** How much a memory type is worth when the topic matches at all. */
-function typeWeight(kind: MemoryKind): number {
-  switch (kind) {
-    case 'preference': return 1;
-    case 'relationship': return 1;
-    case 'fact': return 0.9;
+function typeWeight(category: Category): number {
+  switch (category) {
+    case 'instruction':
+    case 'preference':
+    case 'person': return 1;
+    case 'identity':
+    case 'shared':
+    case 'knowledge': return 0.9;
+    case 'plan':
+    case 'ongoing':
     case 'event': return 0.85;
+    case 'passing': return 0;
   }
 }
 
@@ -711,6 +779,23 @@ export function entityScore(query: string, memory: MemoryRecord): number {
 
 export type RetrieveOptions = {
   limit?: number;
+  /**
+   * How related a record that is not always offered has to be — the best of
+   * its semantic, keyword and entity match — to come back at all. Zero (the
+   * default) keeps the old rule, where any overlap counted: fine for a tool
+   * asking about one topic, too loose for the prompt, where "good morning"
+   * shares a word with half of what she knows.
+   */
+  floor?: number;
+  /**
+   * The message just sent, on its own, beside the query it is part of. The
+   * query is his last few lines run together, which is what lets "how did we
+   * fix it?" find anything — but it also means three earlier lines about
+   * something else dilute the one he just asked: with real earlier lines in
+   * front of them, questions about a remembered thing found it 26 times in 35
+   * instead of 35 (2026-09-17). Each signal is taken as the better of the two.
+   */
+  focus?: { message: string; semantic?: Map<string, number> };
   /** id → semantic similarity (0..1), computed by the caller with an embedder.
    *  Absent or missing ids fall back to the keyword score. */
   semantic?: Map<string, number>;
@@ -751,17 +836,20 @@ export function retrieveMemories(memories: MemoryRecord[], message: string, opti
   for (const memory of memories) {
     if (memory.supersededBy) continue;                    // replaced — history only
     if (memory.status === 'archived') continue;           // shelved — must be unarchived deliberately
-    const importance = memory.importance ?? 0.4;
+    const category = categoryOf(memory, now);
+    if (category === 'passing') continue;                 // sorted as not worth keeping
+    const importance = importanceOf(memory, now);
     const confidence = memory.confidence ?? 0.5;
-    const keyword = asked.size ? keywordSimilarity(message, memory.text) : 0;
-    const semantic = options.semantic?.get(memory.id) ?? keyword;
+    const focus = options.focus;
+    const keyword = Math.max(asked.size ? keywordSimilarity(message, memory.text) : 0, focus?.message ? keywordSimilarity(focus.message, memory.text) : 0);
+    const semantic = Math.max(options.semantic?.get(memory.id) ?? keyword, focus?.semantic?.get(memory.id) ?? 0);
     // The two new signals share a tenth of the relevance, so neither can move
     // a ranking the words disagree with — they settle the ties the words leave.
-    const entity = entityScore(message, memory);
+    const entity = Math.max(entityScore(message, memory), focus?.message ? entityScore(focus.message, memory) : 0);
     const affinity = memory.emotion && memory.emotion === queryEmotion
       ? 0.5 + 0.5 * (memory.emotionIntensity ?? 0.5)
       : 0.15;
-    const relevance = 0.4 * semantic + 0.3 * keyword + 0.2 * typeWeight(memory.kind) + 0.05 * entity + 0.05 * affinity;
+    const relevance = 0.4 * semantic + 0.3 * keyword + 0.2 * typeWeight(category) + 0.05 * entity + 0.05 * affinity;
     const recency = memoryRecency(memory.lastSeenAt, now, memoryHalfLifeDays(importance));
     const entry: ScoredMemory = {
       memory,
@@ -773,50 +861,44 @@ export function retrieveMemories(memories: MemoryRecord[], message: string, opti
         importance: 0.4 + 0.6 * importance,
         confidence: 0.5 + 0.5 * confidence,
         recency,
-        type: typeWeight(memory.kind),
+        type: typeWeight(category),
       },
     };
     // Preferences, relationships and anything of high importance shape how she
     // talks whatever the topic is. Everything else has to actually relate to
     // what was said — keyword or semantic overlap — or be something that keeps
     // coming back on its own.
-    const keptAlive = memory.kind === 'preference' || memory.kind === 'relationship' || importance >= ALWAYS_IMPORTANT;
-    const related = Math.max(semantic, keyword) > 0 || isRecurring(memory);
+    const keptAlive = ALWAYS_INCLUDED.includes(category) || importance >= ALWAYS_IMPORTANT;
+    const floor = options.floor ?? 0;
+    const match = Math.max(semantic, keyword, floor > 0 ? entity : 0);
+    const related = floor > 0 ? match >= floor : match > 0 || isRecurring(memory);
     if (keptAlive) always.push(entry);
-    else if (memory.status === 'dormant' ? Math.max(semantic, keyword) >= DORMANT_ADMISSION : related) scored.push(entry);
+    else if (memory.status === 'dormant' ? match >= Math.max(DORMANT_ADMISSION, floor) : related) scored.push(entry);
   }
 
   // One ranking, not two buckets in series: a highly relevant memory ranks
   // above an important one that has nothing to do with the question.
-  const ranked = [...always, ...scored].sort((a, b) => b.score - a.score);
-  const out: ScoredMemory[] = [];
-  for (const entry of ranked) {
+  //
+  // The records that shape how she talks — his rules, his tastes, his people —
+  // are promised a place whatever the message, but never more than half the
+  // budget while there is anything else to show. The promise used to be kept by
+  // displacing the weakest other entry, one at a time, with no end: twenty
+  // preferences and relationships against a limit of twelve displaced every
+  // record the message was about, and the human block, which leaves those kinds
+  // to blocks of their own, rendered no memories at all. "When is my
+  // psychologist appointment" had the rescheduled appointment on record, first
+  // in the semantic ranking, and got none of it (2026-09-17).
+  const byScore = (a: ScoredMemory, b: ScoredMemory) => b.score - a.score;
+  const promised = always.filter(entry => ALWAYS_INCLUDED.includes(categoryOf(entry.memory, now))).sort(byScore);
+  const promisedIds = new Set(promised.map(entry => entry.memory.id));
+  const others = [...always, ...scored].filter(entry => !promisedIds.has(entry.memory.id)).sort(byScore);
+  const kept = others.slice(0, Math.min(others.length, Math.floor(limit / 2)));
+  const out = [...kept, ...promised.slice(0, limit - kept.length)];
+  for (const entry of others.slice(kept.length)) {
     if (out.length >= limit) break;
     out.push(entry);
   }
-  // The always-included guarantee: if one of them was crowded out by the cut,
-  // it displaces the weakest non-always entry rather than vanishing. The
-  // guarantee is narrower than the eligibility above: a high-importance fact
-  // may be offered without being on-topic, but only preferences and
-  // relationships — the records that shape how she talks — are promised a
-  // slot. With a user who runs a company, most facts score 0.8 (work, project,
-  // business are all "important" words), and guaranteeing every one of them
-  // left one slot in twelve for whatever the message was actually about.
-  const guaranteed = always.filter(entry => ALWAYS_INCLUDED.includes(entry.memory.kind));
-  const alwaysIds = new Set(guaranteed.map(entry => entry.memory.id));
-  const present = new Set(out.map(entry => entry.memory.id));
-  for (const entry of guaranteed.sort((a, b) => b.score - a.score)) {
-    if (present.has(entry.memory.id)) continue;
-    const weakest = [...out].reverse().find(candidate => !alwaysIds.has(candidate.memory.id));
-    if (weakest) {
-      out.splice(out.indexOf(weakest), 1, entry);
-      present.add(entry.memory.id);
-    } else if (out.length < limit) {
-      out.push(entry);
-      present.add(entry.memory.id);
-    }
-  }
-  return out;
+  return out.sort(byScore);
 }
 
 /**
@@ -1134,7 +1216,7 @@ export function migrateMemories(saved: unknown, now: string): MemoryRecord[] {
         ? Math.min(1, Math.max(0, record.emotionIntensity))
         : undefined,
       evidence: Array.isArray(record.evidence)
-        ? record.evidence.filter(entry => entry && typeof entry.at === 'string' && EVIDENCE_KINDS.includes(entry.kind))
+        ? tidyEvidence(record.evidence.filter(entry => entry && typeof entry.at === 'string' && EVIDENCE_KINDS.includes(entry.kind)))
         : [{ at: createdAt, kind: 'statement', source: 'conversation' }],
       mergedFrom: Array.isArray(record.mergedFrom) ? record.mergedFrom.filter(id => typeof id === 'string') : undefined,
       conflictsWith: Array.isArray(record.conflictsWith) ? record.conflictsWith.filter(id => typeof id === 'string') : undefined,
@@ -1142,8 +1224,35 @@ export function migrateMemories(saved: unknown, now: string): MemoryRecord[] {
       // had been replaced: "lives in Manchester" came back alongside "lives in
       // Sheffield", and the next write put the resurrection on disk.
       supersededBy: typeof record.supersededBy === 'string' ? record.supersededBy : undefined,
+      // Checked like kind is, so a value this code does not know is dropped
+      // rather than trusted; left off entirely when absent, so a record that
+      // has not been sorted reads back exactly as it was written.
+      ...(isCategory(record.category) ? { category: record.category } : {}),
+      ...(isDay(record.when) ? { when: record.when } : {}),
     }];
   });
+}
+
+/**
+ * The evidence log without its hourly echoes: every entry that says something
+ * — a statement, a confirmation, a contradiction, a merge, a closing — plus the
+ * first repeat of each day. That keeps daysRaised exactly what it was, which
+ * is what the log is read for, and drops the rest: 353 hourly repeats from the
+ * vault sync on "Haru, with one r" were most of memories.json (2026-09-17).
+ * The desk's older copy still sends the long logs; they are tidied here, on
+ * the way in, every time.
+ */
+export function tidyEvidence(entries: EvidenceEntry[]): EvidenceEntry[] {
+  const days = new Set<string>();
+  const kept: EvidenceEntry[] = [];
+  for (const entry of entries) {
+    if (entry.kind !== 'repeat') { kept.push(entry); continue; }
+    const day = entry.at.slice(0, 10);
+    if (days.has(day)) continue;
+    days.add(day);
+    kept.push(entry);
+  }
+  return kept;
 }
 
 // -- confidence --------------------------------------------------------------

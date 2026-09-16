@@ -124,7 +124,7 @@ test('resolveBlockValue splits preferences and relationships into their blocks',
 test('resolveBlockValue surfaces projects and recent working state', () => {
   const blocks = defaultMemoryBlocks();
   const memories: MemoryRecord[] = [
-    record({ id: 'p', text: 'Works on the PC Project', kind: 'fact', importance: 0.8 }),
+    record({ id: 'p', text: 'Is building the PC Project website', kind: 'fact', importance: 0.6, lastSeenAt: new Date().toISOString() }),
     record({ id: 'e', text: 'Finished the edit on Thursday', kind: 'event', importance: 0.45 }),
   ];
   const sessions: SessionSummary[] = [
@@ -291,7 +291,7 @@ test('each record renders once, in its most specific block, and never when the p
       record({ id: 'pref', text: 'Dislikes being nagged', kind: 'preference', importance: 0.85 }),
       record({ id: 'rel', text: 'Emma is their girlfriend', kind: 'relationship', importance: 0.8 }),
       record({ id: 'founder', text: 'Is the founder of a company called The PC Project in Northbridge', kind: 'fact', importance: 0.8 }),
-      record({ id: 'mail', text: 'Wants 6 mailboxes for the company project', kind: 'fact', importance: 0.8 }),
+      record({ id: 'mail', text: 'Wants 6 mailboxes for the company project', kind: 'fact', importance: 0.8, category: 'plan', lastSeenAt: new Date().toISOString() }),
     ],
     sessions: [] as SessionSummary[],
     query: 'how many mailboxes for the project',

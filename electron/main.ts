@@ -144,6 +144,7 @@ import type { Embedder } from './embeddings';
 import { retrieveContext } from './retrieveContext';
 import type { VaultSyncReport } from './obsidian';
 import { diaryNotes, herNote, indexNote, memoriesNote, nightNotes, placesNote, standingNote, writeNotes } from './vault';
+import { readSorting, sortInput, sortPrompt } from './categories';
 import { collectAll, collectDocker, collectDockerLight, collectGpu, collectGpuApps, collectProcesses, collectServices, collectSystem, diagnose, KNOWN_SERVICES, USER_SERVICES, type Diagnosis } from './system';
 import { carriedSamples, checkEvents, sampleFromCollectors, type EventThresholds, type SystemSample } from './systemState';
 
@@ -4253,6 +4254,18 @@ const memoryStore = createMemoryStore({
     const todayKey = localDateKey(zonedNow(CHAT_TIMEZONE));
     return getKept().map(item => ({ title: item.title, kind: item.kind, done: item.done, date: item.date, time: item.time ?? null, daysAway: Math.round((Date.parse(`${item.date}T00:00:00Z`) - Date.parse(`${todayKey}T00:00:00Z`)) / 86400000) }));
   },
+  // What each new memory is (categories.ts), sorted on this machine's own
+  // model: a background job, twenty records a call, never urgent.
+  sort: async notes => {
+    const config = store.get('ai.config') as ProviderConfig | undefined;
+    if (!config?.model) return null;
+    const message = await ollamaPost(
+      [{ role: 'system', content: sortPrompt() }, { role: 'user', content: sortInput(notes, iso => localDateKey(zonedNow(CHAT_TIMEZONE, new Date(iso)))) }],
+      config,
+      { tools: false, temperature: 0, maxTokens: 40 * notes.length + 100 },
+    );
+    return readSorting(message.content ?? '', notes);
+  },
   // Her own life in one place — the her_own block renders it, so the chat
   // prompt no longer scatters the same lines separately. What is nearest in
   // time first: last night, the day's own reading, the week — then the things
@@ -4288,7 +4301,8 @@ const { getMemories, setMemories, addMemory, mergeIn, getSessions, getMonthNotes
 // they are never treated as guesses.
 let admitVaultMemory: ((draft: { text: string; kind: 'relationship' | 'preference' | 'fact'; subject?: string }) => { created: boolean } | null) | undefined = undefined;
 admitVaultMemory = draft => {
-  const result = addMemory(draft.text, draft.kind, draft.subject, { source: 'explicit' });
+  // A resighting: the same line on the same page is not him saying it again.
+  const result = addMemory(draft.text, draft.kind, draft.subject, { source: 'explicit', resighting: true });
   // A refused bullet used to reach the tally as a repeat, so a page whose lines
   // were all being thrown away read as a page already known: "Preferences.md: 5
   // bullet(s), +0 ~5 repeated", every hour, while three of the five were dropped.
@@ -6975,9 +6989,17 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // Semantic retrieval: embed this turn's query (cached) and fold the memory
   // similarities into what she gets told, so "the thing we did to the server"
   // can find the memory even with no words in common.
-  const queryVector = await tryEmbedQuery(`${recentUserContext} ${latest}`);
+  // And the message on its own, in parallel, so earlier lines about something
+  // else cannot drown out what was just asked (RetrieveOptions.focus).
+  const [queryVector, latestVector] = await Promise.all([
+    tryEmbedQuery(`${recentUserContext} ${latest}`),
+    recentUserContext.trim() ? tryEmbedQuery(latest) : Promise.resolve(null),
+  ]);
   const semantic = queryVector && memoryStore.vectors().size
     ? semanticSimilarities(getMemories(), queryVector, memoryStore.vectors())
+    : undefined;
+  const latestSemantic = latestVector && memoryStore.vectors().size
+    ? semanticSimilarities(getMemories(), latestVector, memoryStore.vectors())
     : undefined;
   // Further back than the days in front of her: an exchange or two from the
   // archive, only when this message names something specific that they name too,
@@ -7108,7 +7130,7 @@ const promptState = {
     // chose and why for the inspector, and the AniList list refreshes itself
     // when it has gone stale. Neither is a thing assembling a prompt should set
     // in motion.
-    profile: profileSummary(latest, recentUserContext, semantic, away ? awayMemoryScale() : undefined),
+    profile: profileSummary(latest, recentUserContext, semantic, away ? awayMemoryScale() : undefined, latestSemantic),
     aniList: aniListSummary(),
     journalConfig: readJournalConfig(store.get('journal.config')),
     journal: getJournal(),
@@ -11955,6 +11977,9 @@ app.whenReady().then(() => {
   // read is an empty one, never a crash.
   knowledge.load();
   void refreshMemoryVectors();
+  // Whatever was written before sorting existed, or while the model was away,
+  // sorted once the start-up rush is over.
+  memoryStore.scheduleSort(90_000);
   // The consolidation sweep, decay, archive pruning and haunt hygiene, daily at
   // a time of day (scheduler.ts). They used to run a minute after boot and then
   // every twenty-four hours from it — and with restarts every few hours the
