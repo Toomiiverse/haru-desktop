@@ -10,13 +10,25 @@
 // said back — embedded once, and searched per turn against what he has just
 // asked. Only a handful come back, only when they are actually close to the
 // question, and never from a day already in the prompt.
+//
+// Unasked, so it has to be sure. Since 2026-09-17 it needs the message to name
+// something specific that the old exchange names too (chatsearch.ts rareTerms),
+// and only two come back: the embedding score alone fired on nearly every
+// message, small talk included. When he refers back to something without naming
+// it, search_chats is hers to use instead.
+
+import { withRelativeDates } from './dates';
 
 export type Exchange = { id: string; day: string; text: string };
 
-/** Enough of a match to be the thing he means; below this it is a coincidence. */
-export const RECALL_FLOOR = 0.62;
+/**
+ * Enough of a match to be the thing he means; below this it is a coincidence.
+ * For nomic-embed-text with its search prefixes (chatsearch.ts embedText), and
+ * only alongside a shared specific word — see RARE_SHARE for what that bought.
+ */
+export const RECALL_FLOOR = 0.64;
 /** How many come back at most: this is a jog of the memory, not a transcript. */
-export const RECALL_LIMIT = 4;
+export const RECALL_LIMIT = 2;
 /** Nothing older than this: past a couple of months it is a different life. */
 export const RECALL_DAYS = 60;
 
@@ -55,9 +67,10 @@ export function cosine(a: number[], b: number[]): number {
   return size ? dot / size : 0;
 }
 
-/** The closest few, best first, and none that is merely nearby. */
-export function pickRecalled(exchanges: Exchange[], vectors: Map<string, number[]>, query: number[], limit = RECALL_LIMIT, floor = RECALL_FLOOR): { exchange: Exchange; score: number }[] {
+/** The closest few, best first, and none that is merely nearby — or, given `shares`, that is not about the same thing. */
+export function pickRecalled(exchanges: Exchange[], vectors: Map<string, number[]>, query: number[], limit = RECALL_LIMIT, floor = RECALL_FLOOR, shares?: (exchange: Exchange) => boolean): { exchange: Exchange; score: number }[] {
   return exchanges
+    .filter(exchange => !shares || shares(exchange))
     .map(exchange => ({ exchange, score: cosine(vectors.get(exchange.id) ?? [], query) }))
     .filter(entry => entry.score >= floor)
     .sort((a, b) => b.score - a.score)
@@ -77,7 +90,7 @@ export function recallNote(found: { exchange: Exchange; score: number }[], weekd
   };
   return [
     'From further back than the conversation above — older days, found because they look related to what they just said. They are not in front of you otherwise, and they are not necessarily still true:',
-    ...found.map(entry => `[${when(entry.exchange.day)}]\n${entry.exchange.text}`),
+    ...found.map(entry => `[${when(entry.exchange.day)}]\n${withRelativeDates(entry.exchange.text, entry.exchange.day)}`),
     'Use one only if it is actually the thing they mean. Say when it was if you bring it up, and do not treat any of it as still standing without checking.',
   ].join('\n\n');
 }

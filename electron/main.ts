@@ -40,7 +40,8 @@ import { buildGameIndex, gameFor } from './steam';
 import { pdfPrompt, readPdf } from './pdf';
 import { classify, discard, extractAudio, extractFrames, findFfmpeg, OPENABLE, readText, type FileKind } from './attach';
 import { markTimeGaps, sinceLast, earlierDaysContext, earlierTurns, DAYS_OF_HISTORY, HISTORY_BUDGET_CHARS } from './history';
-import { exchangesFrom, pickRecalled, recallNote, type Exchange } from './recall';
+import { exchangesFrom, pickRecalled, recallNote, RECALL_FLOOR, RECALL_LIMIT, type Exchange } from './recall';
+import { buildChatIndex, chatHitsNote, embedFormat, embedText, mentionsAny, rareTerms, searchChats, type ChatIndex } from './chatsearch';
 import { applyExtraction, dayChunks, emptyGraph, EXTRACTION_SCHEMA, extractionInput, extractionPrompt, knownBlock, linkedFacts, linkedNote, readExtraction } from './factgraph';
 import { admitBooking, bookedNote, bookedPrompt, BOOKED_KIND, createScheduler, describeWhen, resolveBookingTime, zonedEpoch, type Job, type Outcome } from './scheduler';
 import { describeGap, isRumination, keepThoughts, lastSpoken, mayAsk, mayInitiate, mindNote, noteAsked, pendingTrigger, readThoughts, roundVector, scoreThought, spend, spokenOn as thoughtsSpokenOn, THINKING_RULES, thinkingInput, THOUGHT_LIMITS, thoughtPrompt, withoutClock, type ThinkingState, type Thought, type ThoughtState, type Trigger } from './thoughts';
@@ -4825,6 +4826,7 @@ function availableTools(): ToolAvailability {
   return {
     choices: offeringChoices,
     booking: true,
+    chats: true,
     journal: readJournalConfig(store.get('journal.config')).enabled,
     anilist: readAniListConfig(store.get('anilist')).enabled,
     web: talkingOnWeb,
@@ -4923,6 +4925,7 @@ function toolDeps(): ToolDeps {
     // Her night is hers: back to bed when she decides the wake was nothing (hersleep.ts).
     goBackToSleep: input => goBackToSleep({ pointless: true, block: input.block, why: 'her call' }),
     booking: { book: bookFollowUp },
+    chats: { search: searchOldChats },
     // Claude Code sessions he picks up in the Claude app (claudesession.ts).
     claude: claudeSessions(),
     // Their vault on disk, and the re-read that makes a note she wrote searchable at once.
@@ -6943,10 +6946,19 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   const semantic = queryVector && memoryStore.vectors().size
     ? semanticSimilarities(getMemories(), queryVector, memoryStore.vectors())
     : undefined;
-  // Further back than the days in front of her: the closest few exchanges from
-  // the archive, or nothing when none of them is really about this. See recall.ts.
-  const recalled = queryVector && recallVectors.size
-    ? pickRecalled(olderExchanges(localDateKey(zonedNow(CHAT_TIMEZONE))), recallVectors, queryVector)
+  // Further back than the days in front of her: an exchange or two from the
+  // archive, only when this message names something specific that they name too,
+  // or nothing. Its own embedding, of this message alone and with the search
+  // prefix, because the memories above are embedded without one. See recall.ts.
+  const recallDay = localDateKey(zonedNow(CHAT_TIMEZONE));
+  const archiveIndex = chatIndex(recallDay);
+  const specific = rareTerms(archiveIndex, latest);
+  const recallModel = recallVectors.size && specific.size ? getKnowledgeEmbedder()?.model : undefined;
+  const recallVector = recallModel && embedFormat(recallModel) === recallFormat ? await tryEmbedQuery(embedText(recallModel, 'query', latest)) : null;
+  // From the index rather than the archive again: rebuilding a year of exchanges is ~50 ms a turn.
+  const shownDays = recallVector ? new Set(daysAlreadyShown(recallDay)) : null;
+  const recalled = recallVector && shownDays
+    ? pickRecalled(archiveIndex.exchanges, recallVectors, recallVector, RECALL_LIMIT, RECALL_FLOOR, exchange => !shownDays.has(exchange.day) && mentionsAny(archiveIndex, exchange.id, specific))
     : [];
   if (recalled.length) console.log(`[recall] ${recalled.map(entry => `${entry.exchange.day} (${entry.score.toFixed(2)})`).join(', ')}`);
   // Who and what the message names, and one step further (factgraph.ts). A
@@ -7900,18 +7912,57 @@ function recordBrief(kind: string, brief: string, line: string): void {
  * enough that putting it in the config would make every config write expensive.
  */
 const recallVectors = new Map<string, number[]>();
+/**
+ * Which embedder, with or without the search prefixes, made recallVectors
+ * (chatsearch.ts embedFormat). Vectors of another format are not comparable
+ * with a query made now: they are dropped and the archive is embedded again.
+ */
+let recallFormat = '';
 const RECALL_CACHE = () => path.join(app.getPath('userData'), 'recall-vectors.json');
-/** Embedded a chunk at a time, so a first run does not hold the GPU for a minute. */
-const RECALL_BATCH = 150;
+/**
+ * Embedded a run at a time, a few to a request: the embedder is on the CPU and
+ * a reply's own query waits behind whatever request is in flight. A run that
+ * leaves some over comes back a minute later rather than in fifteen, so a full
+ * re-embed (1,187 exchanges, ~2 minutes of CPU, 2026-09-17) is done in minutes.
+ */
+const RECALL_BATCH = 300;
+const RECALL_REQUEST = 16;
+let recallRefreshing = false;
 
 /** The days that are already in front of her whole (history.ts) — no point finding those again. */
 function daysAlreadyShown(todayKey: string): string[] {
   return Object.keys(store.getArchive()).filter(day => day < todayKey).sort().slice(-DAYS_OF_HISTORY);
 }
 
-/** As far back as the chats are kept — his choice, 2026-09-17 — rather than recall.ts's two months. */
-function olderExchanges(todayKey: string): Exchange[] {
-  return exchangesFrom(store.getArchive() as unknown as Record<string, { role?: string; content?: string }[]>, daysAlreadyShown(todayKey), todayKey, ARCHIVE_RETENTION_DAYS);
+/** Every kept exchange before today, the days in front of her included: what search_chats searches and what gets embedded. */
+function keptExchanges(todayKey: string): Exchange[] {
+  return exchangesFrom(store.getArchive() as unknown as Record<string, { role?: string; content?: string }[]>, [], todayKey, ARCHIVE_RETENTION_DAYS);
+}
+
+/**
+ * The word index over keptExchanges (chatsearch.ts), rebuilt only when the
+ * archive has moved on: a new day, or a day added or trimmed. Before today
+ * nothing else changes it.
+ */
+let chatIndexCache: { key: string; index: ChatIndex } | null = null;
+function chatIndex(todayKey: string): ChatIndex {
+  const archive = store.getArchive() as unknown as Record<string, unknown[]>;
+  const days = Object.keys(archive).filter(day => day < todayKey).sort();
+  const key = `${todayKey}|${days.length}|${days[0] ?? ''}|${days.at(-1) ?? ''}|${archive[days.at(-1) ?? '']?.length ?? 0}`;
+  if (chatIndexCache?.key !== key) chatIndexCache = { key, index: buildChatIndex(keptExchanges(todayKey)) };
+  return chatIndexCache.index;
+}
+
+/** search_chats (tools.ts): words and meaning over every kept day, dated finds with their neighbours. */
+async function searchOldChats(input: { query: string; from?: string; to?: string }): Promise<{ found: number; text: string }> {
+  const index = chatIndex(localDateKey(zonedNow(CHAT_TIMEZONE)));
+  const model = getKnowledgeEmbedder()?.model;
+  // Meaning only counts when the vectors were made the way this query is; words always do.
+  const queryVector = model && embedFormat(model) === recallFormat ? await tryEmbedQuery(embedText(model, 'query', input.query)) : null;
+  const hits = searchChats(index, { query: input.query, queryVector, vectors: recallVectors, from: input.from, to: input.to });
+  const range = input.from || input.to ? ` (${input.from ?? '…'} to ${input.to ?? '…'})` : '';
+  console.log(`[chats] "${input.query.slice(0, 60)}"${range} -> ${hits.length ? hits.map(hit => `${hit.exchange.day} (${hit.score.toFixed(3)})`).join(', ') : 'nothing'}${queryVector ? '' : ' [words only]'}`);
+  return { found: hits.length, text: chatHitsNote(hits, new Intl.DateTimeFormat('en-AU', { weekday: 'long', timeZone: 'UTC' })) };
 }
 
 /**
@@ -7927,7 +7978,15 @@ let recallCacheStale = false;
 
 function loadRecallVectors(): void {
   try {
-    const saved = JSON.parse(readFileSync(RECALL_CACHE(), 'utf8')) as Record<string, number[]>;
+    const file = JSON.parse(readFileSync(RECALL_CACHE(), 'utf8')) as { format?: unknown; vectors?: Record<string, number[]> };
+    // Before 2026-09-17 the file was the bare id → vector map, embedded without
+    // the search prefixes: not comparable, so it is embedded again and rewritten.
+    if (typeof file.format !== 'string' || !file.vectors || typeof file.vectors !== 'object') {
+      console.log('[recall] the saved vectors predate the search prefixes — embedding the archive again');
+      return;
+    }
+    recallFormat = file.format;
+    const saved = file.vectors;
     for (const [id, vector] of Object.entries(saved)) {
       if (!Array.isArray(vector)) continue;
       const rounded = roundedVector(vector);
@@ -7939,25 +7998,50 @@ function loadRecallVectors(): void {
 }
 
 async function refreshRecallVectors(): Promise<void> {
-  const todayKey = localDateKey(zonedNow(CHAT_TIMEZONE));
-  const all = olderExchanges(todayKey);
-  // Vectors for exchanges whose day has left the archive go with it. The days
-  // already in front of her whole are not searched but are still kept.
-  const kept = new Set(exchangesFrom(store.getArchive() as unknown as Record<string, { role?: string; content?: string }[]>, [], todayKey, ARCHIVE_RETENTION_DAYS).map(exchange => exchange.id));
-  for (const id of [...recallVectors.keys()]) if (!kept.has(id)) { recallVectors.delete(id); recallCacheStale = true; }
-  const missing = all.filter(exchange => !recallVectors.has(exchange.id)).slice(0, RECALL_BATCH);
-  let done = 0;
-  for (const exchange of missing) {
-    const vector = await tryEmbedQuery(exchange.text);
-    if (vector) { recallVectors.set(exchange.id, roundedVector(vector)); done++; }
-  }
-  if (!done && !recallCacheStale) return;
-  recallCacheStale = false;
+  const embedder = getKnowledgeEmbedder();
+  if (recallRefreshing || !embedder) return;
+  recallRefreshing = true;
+  let more = false;
   try {
-    writeFileSync(RECALL_CACHE(), JSON.stringify(Object.fromEntries(recallVectors)), 'utf8');
-    console.log(`[recall] embedded ${done} more — ${recallVectors.size} of ${all.length} older exchanges searchable`);
-  } catch (error) {
-    console.warn(`[recall] could not save what was embedded: ${error instanceof Error ? error.message : error}`);
+    const format = embedFormat(embedder.model);
+    if (format !== recallFormat) {
+      if (recallVectors.size) console.log(`[recall] vectors were made as ${recallFormat || 'unprefixed'}, now ${format} — embedding the archive again`);
+      recallVectors.clear();
+      recallFormat = format;
+    }
+    const todayKey = localDateKey(zonedNow(CHAT_TIMEZONE));
+    // Every kept day, the ones in front of her included: recall skips those,
+    // search_chats does not. Vectors for days that have left the archive go.
+    const all = keptExchanges(todayKey);
+    const kept = new Set(all.map(exchange => exchange.id));
+    for (const id of [...recallVectors.keys()]) if (!kept.has(id)) { recallVectors.delete(id); recallCacheStale = true; }
+    const missing = all.filter(exchange => !recallVectors.has(exchange.id)).slice(0, RECALL_BATCH);
+    let done = 0;
+    for (let at = 0; at < missing.length; at += RECALL_REQUEST) {
+      const batch = missing.slice(at, at + RECALL_REQUEST);
+      let vectors: number[][];
+      try {
+        vectors = await embedder.embedBatch(batch.map(exchange => embedText(embedder.model, 'document', exchange.text)));
+      } catch (error) {
+        console.warn(`[recall] could not embed: ${error instanceof Error ? error.message : error}`);
+        break;
+      }
+      batch.forEach((exchange, position) => {
+        if (vectors[position]?.length) { recallVectors.set(exchange.id, roundedVector(vectors[position])); done++; }
+      });
+    }
+    more = done > 0 && missing.length === RECALL_BATCH;
+    if (!done && !recallCacheStale) return;
+    recallCacheStale = false;
+    try {
+      writeFileSync(RECALL_CACHE(), JSON.stringify({ format: recallFormat, vectors: Object.fromEntries(recallVectors) }), 'utf8');
+      console.log(`[recall] embedded ${done} more — ${recallVectors.size} of ${all.length} kept exchanges searchable`);
+    } catch (error) {
+      console.warn(`[recall] could not save what was embedded: ${error instanceof Error ? error.message : error}`);
+    }
+  } finally {
+    recallRefreshing = false;
+    if (more) setTimeout(() => { void refreshRecallVectors(); }, 60_000);
   }
 }
 

@@ -342,6 +342,39 @@ export const KNOWLEDGE_TOOL: ChatTool = {
 };
 
 /**
+ * Her old chats with him, word for word (chatsearch.ts). What she is handed
+ * unasked is two exchanges at most and only when his message names something
+ * specific; this is for when he refers back and she has to go and look.
+ */
+export const CHATS_TOOL: ChatTool = {
+  type: 'function',
+  function: {
+    name: 'search_chats',
+    description: 'Search your old conversations with them — every earlier day kept, word for word — for something said before: what happened, what was decided, a name, a part, a place, a plan. Use it when they ask about or refer back to something from an earlier day that is not in the conversation above ("what was wrong with Logan\'s PC?", "when did I say the collection was?"). Results come dated, with the exchange either side. If nothing comes back, say you cannot find it — never guess what was said.',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'The words you expect in what was said — names, things, places — or a short description of it.' },
+        from: { type: 'string', description: 'Only days on or after this one, as YYYY-MM-DD. Leave out unless they gave a time.' },
+        to: { type: 'string', description: 'Only days on or before this one, as YYYY-MM-DD.' },
+      },
+      required: ['query'],
+    },
+  },
+};
+
+/**
+ * Whether the turn might be about something from before. Broad on purpose, like
+ * LATER_TALK: a stray match costs one tool on the table, a miss costs her
+ * making up what he said last week.
+ */
+const PAST_TALK = /\b(?:remember|recall|forgot|forget|mention(?:ed)?|told you|i said|you said|we said|talked|spoke|conversation|earlier|before|ago|last (?:time|night|week|weekend|month|year)|yesterday|the other (?:day|night|week)|back (?:when|then)|that time|again)\b|\b(?:what|when|where|who|how|which|why)\b[^.?!]{0,40}\b(?:was|were|did|had|said|told|happened)\b/i;
+
+export function pastRelevant(message: string): boolean {
+  return PAST_TALK.test(message ?? '');
+}
+
+/**
  * Her night, hers to take back. Offered only while she is up because they
  * got her up: when what they woke her for turns out to be nothing, she goes
  * back to sleep, and can say the door stays shut for the night.
@@ -817,6 +850,8 @@ export type ToolAvailability = {
   claude: boolean;
   /** Whether she can book herself a follow-up (scheduler.ts). Optional so fixtures need not name it. */
   booking?: boolean;
+  /** Whether her old chats can be searched (chatsearch.ts). Optional so fixtures need not name it. */
+  chats?: boolean;
   system: { enabled: boolean; level: number };
   /** False for anything that did not come from the user's own mouth or keyboard. */
   hands: boolean;
@@ -864,6 +899,7 @@ export function chatTools(available: ToolAvailability, latest = ''): ChatTool[] 
   // the moments worth noting happen whether or not anyone keeps a diary.
   tools.push(CHECKIN_TOOL);
   if (available.booking && (!latest || laterRelevant(latest))) tools.push(BOOK_TOOL);
+  if (available.chats && (!latest || pastRelevant(latest))) tools.push(CHATS_TOOL);
   if (available.anilist && !available.web) tools.push(ANILIST_TOOL);
   if (available.search.enabled) {
     tools.push(SEARCH_TOOL);
@@ -955,6 +991,8 @@ export type ToolDeps = {
   changeMySetting(plan: SettingPlan): Promise<{ ok: boolean; note: string }>;
   /** Back to bed at her word, while she is up because they knocked (hersleep.ts); null when she is not. */
   goBackToSleep(input: { block: boolean }): { asleep: boolean; blocked: boolean } | null;
+  /** Her old chats (chatsearch.ts): the finds, already dated and written out, or null when there is no archive to search. */
+  chats?: { search(input: { query: string; from?: string; to?: string }): Promise<{ found: number; text: string }> } | null;
   /** Her own follow-ups (scheduler.ts), or null when there is nowhere to keep them. */
   booking?: { book(input: { why: string; date?: string; time?: string; inMinutes?: number }): { booked: true; when: string } | { booked: false; reason: string } } | null;
   /** Claude Code sessions for his phone (claudesession.ts), or null when switched off. */
@@ -1635,6 +1673,16 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
       deps.vault.afterWrite();
     }
     return JSON.stringify(written);
+  }
+  if (name === 'search_chats') {
+    if (!deps.chats) return JSON.stringify({ error: 'Your old chats cannot be searched right now. Say you cannot check — do not guess what was said.' });
+    const query = typeof args.query === 'string' ? args.query.trim() : '';
+    if (!query) return JSON.stringify({ error: 'query is required: the words you expect in what was said.' });
+    const day = (value: unknown) => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value.trim()) ? value.trim() : undefined;
+    const result = await deps.chats.search({ query: query.slice(0, 200), from: day(args.from), to: day(args.to) });
+    return JSON.stringify(result.found
+      ? { found: result.found, chats: result.text, note: 'Word for word from your chats with them, under the day each was said ("Them" is them, "You" is you). Answer from these in your own voice and say when it was. Only the one that is actually what they mean counts; none of it is necessarily still true.' }
+      : { found: 0, note: 'Nothing in the kept chats matches. Say plainly you cannot find it — never make up what was said. If it might have been worded differently, you may search once more with other words.' });
   }
   if (name === 'look_up_knowledge') {
     const query = typeof args.query === 'string' ? args.query.trim() : '';
