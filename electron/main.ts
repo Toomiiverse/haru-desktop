@@ -47,6 +47,7 @@ import { describeGap, isRumination, keepThoughts, lastSpoken, mayAsk, mayInitiat
 import { vitalsInstruction } from './vitals';
 import { activeCards, loreNote, parseLorePage, LORE_PAGE, type LoreCard } from './lore';
 import { examplePool, examplesNote, pickExamples, reusedExample, type Example, type ExampleTurn } from './examples';
+import { applyGraphPage, GRAPH_PAGE, pageReportLine, readGraphPage, renderGraphPage } from './graphpage';
 import { correct, narrow, noteUsed, readHearing, remember } from './hearing';
 import { assumeItIsTheirs, identifyWork, noteWork, readFollowing, recogniseNow, summariseFollowing } from './following';
 import { lookUpPlace, readWindowsLocation, searchPlaces, type FoundPlace } from './location';
@@ -4179,6 +4180,7 @@ const autoSyncVault = knowledge.autoSyncVault;
 async function syncVaultAndRetire(): Promise<void> {
   await autoSyncVault();
   retireGoneVaultBullets();
+  syncGraphPage('hourly');
 }
 
 function retireGoneVaultBullets(): void {
@@ -7977,7 +7979,7 @@ async function readGraphTick(): Promise<void> {
   readingGraph = true;
   try {
     const done = await readDayIntoGraph(day, (archive[day] ?? []) as { role?: string; content?: unknown }[], brain);
-    if (done) { graphFailures.delete(day); return; }
+    if (done) { graphFailures.delete(day); syncGraphPage(`read ${day}`); return; }
     throw new Error('the reply could not be read');
   } catch (error) {
     const tries = (graphFailures.get(day) ?? 0) + 1;
@@ -7990,6 +7992,32 @@ async function readGraphTick(): Promise<void> {
     }
   } finally {
     readingGraph = false;
+  }
+}
+
+/**
+ * His corrections on Who is who.md folded into the graph, then the page written
+ * again from it (graphpage.ts). Only a page that exists is read: a deleted page
+ * is written back, never taken as "forget everything".
+ */
+function syncGraphPage(reason: string): void {
+  const vault = knowledge.vaultPath();
+  if (!vault) return;
+  const file = path.join(vault, GRAPH_PAGE);
+  try {
+    let graph = store.getFactGraph();
+    const current = existsSync(file) ? readFileSync(file, 'utf8') : '';
+    if (graph.page && current) {
+      const applied = applyGraphPage(graph, readGraphPage(current), localDateKey(zonedNow(CHAT_TIMEZONE)), new Date());
+      const line = pageReportLine(applied.report);
+      if (line) console.log(`[graph] from ${GRAPH_PAGE} (${reason}): ${line}`);
+      graph = applied.graph;
+    }
+    const { text, written } = renderGraphPage(graph, new Date());
+    if (current !== text) writeFileSync(file, text, 'utf8');
+    store.setFactGraph({ ...graph, page: written });
+  } catch (error) {
+    console.warn(`[graph] could not sync ${GRAPH_PAGE}: ${error instanceof Error ? error.message : error}`);
   }
 }
 
@@ -11785,6 +11813,8 @@ app.whenReady().then(() => {
   setInterval(() => { void refreshRecallVectors(); }, 15 * 60_000);
   // Who is who: the finished days not yet read, a day a minute until caught up.
   setInterval(() => { void readGraphTick(); }, GRAPH_TICK_MS);
+  // His page of what the graph believes: written at start, corrections read back hourly with the vault.
+  setTimeout(() => syncGraphPage('startup'), 100_000);
   setTimeout(() => publishToVault('startup'), 30_000);
   setInterval(() => publishToVault('tick'), VAULT_PUBLISH_MS);
   // A first pass shortly after boot so a backlog the desk sent overnight is

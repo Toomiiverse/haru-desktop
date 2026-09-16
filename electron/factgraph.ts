@@ -77,7 +77,14 @@ export type FactGraph = {
   read: Record<string, number>;
   /** Ids are short on purpose: the model is shown them in KNOWN and names them back. */
   nextId: number;
+  /** Facts he deleted from his page as wrong — never learned again (graphpage.ts). */
+  rejected?: Rejection[];
+  /** What his page last showed, so his edits can be told from the graph moving on (graphpage.ts). */
+  page?: PageWritten;
 };
+
+export type Rejection = { subject: string; object?: string; value?: string; relation: string; words: string[]; at: string };
+export type PageWritten = { at: string; facts: Record<string, { sentence: string; struck: boolean }>; entities: Record<string, string> };
 
 /** The user is always entity e0 — every day is about him. */
 export const USER_ENTITY = 'e0';
@@ -125,7 +132,11 @@ export function normalizeGraph(value: unknown): FactGraph {
     .filter(Number.isFinite)
     .reduce((max, n) => Math.max(max, n), 0);
   const nextId = typeof held.nextId === 'number' && held.nextId > highest ? held.nextId : highest + 1;
-  return { entities, facts, read, nextId };
+  const rejected = (Array.isArray(held.rejected) ? held.rejected : []).filter((item): item is Rejection =>
+    Boolean(item) && typeof (item as Rejection).subject === 'string' && typeof (item as Rejection).relation === 'string' && Array.isArray((item as Rejection).words));
+  const page = held.page as PageWritten | undefined;
+  const validPage = page && typeof page === 'object' && page.facts && typeof page.facts === 'object' && page.entities && typeof page.entities === 'object';
+  return { entities, facts, read, nextId, ...(rejected.length ? { rejected } : {}), ...(validPage ? { page } : {}) };
 }
 
 /** The user as e0, named as the profile names him. Renamed in place when the profile changes. */
@@ -378,6 +389,31 @@ const ADDRESSED = /\b(you|your|yours|yourself|i|me|my|mine)\b/i;
 /** Birthdays do not move; a second one for the same person is a correction. */
 const ONE_ONLY = new Set(['birthday', 'born on', 'date of birth', 'birth date']);
 
+/** The record of a fact he said is wrong: who it was about, what it tied them to, how it was said. */
+export function rejectionOf(fact: GraphFact, at: string, names: string[] = []): Rejection {
+  return {
+    subject: fact.subject, relation: relationKey(fact.relation), words: [...wordsBesides(fact.sentence, names)], at,
+    ...(fact.object ? { object: fact.object } : { value: searchable(fact.value ?? '').trim() }),
+  };
+}
+
+/** A sentence's content words without the names in it: what is said about them, not who. */
+export function wordsBesides(sentence: string, names: string[]): Set<string> {
+  const named = contentWords(names.join(' '));
+  return new Set([...contentWords(sentence)].filter(word => !named.has(word)));
+}
+
+/**
+ * Whether a draft is one he already said is wrong: the same subject and other
+ * side, said with the same relation or much the same words besides the names. "Tommy works at
+ * Umart" rejected does not block "Tommy buys parts from Umart".
+ */
+export function isRejected(rejected: Rejection[] | undefined, draft: { subject: string; object?: string; valueKey?: string; relation: string; words: Set<string> }): boolean {
+  return (rejected ?? []).some(no => no.subject === draft.subject
+    && (draft.object ? no.object === draft.object : Boolean(draft.valueKey) && no.value === draft.valueKey)
+    && (no.relation === draft.relation || overlap(new Set(no.words), draft.words) >= 0.5));
+}
+
 function relationKey(relation: string): string {
   return relation.toLowerCase().replace(/^(is|are|was|has been|have been)\s+/, '').replace(/[^a-z ]+/g, ' ').replace(/\s+/g, ' ').trim();
 }
@@ -407,6 +443,8 @@ export function applyExtraction(source: FactGraph, extraction: Extraction, { day
     facts: source.facts.map(fact => ({ ...fact })),
     read: { ...source.read },
     nextId: source.nextId,
+    ...(source.rejected ? { rejected: source.rejected } : {}),
+    ...(source.page ? { page: source.page } : {}),
   }, userName, day);
   const report: ApplyReport = { added: 0, confirmed: 0, ended: 0, rejected: [] };
   const hay = searchable(chunk);
@@ -525,6 +563,9 @@ export function applyExtraction(source: FactGraph, extraction: Extraction, { day
 
     const valueKey = value ? searchable(value).trim() : '';
     const words = contentWords(sentence);
+    // He deleted this from his page as wrong: whatever the day says, it is not learned again.
+    const namesOf = (id?: string) => graph.entities.filter(entity => entity.id === id).flatMap(entity => [entity.name, ...entity.aliases]);
+    if (isRejected(graph.rejected, { subject, object, valueKey, relation, words: wordsBesides(sentence, [...namesOf(subject), ...namesOf(object)]) })) { report.rejected.push(`${tag} (he said it is wrong)`); continue; }
     const same = graph.facts.find(fact => {
       if (!isCurrent(fact)) return false;
       const sameRelation = fact.subject === subject && relationKey(fact.relation) === relation;
