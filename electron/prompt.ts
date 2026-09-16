@@ -195,6 +195,8 @@ export type PromptState = {
   herRecentReplies: string[];
   /** Older exchanges found for this message — see recall.ts. Background, not an instruction. */
   recalled?: string;
+  /** The facts about who and what this message names, one step out — see factgraph.ts. Background, not an instruction. */
+  linked?: string;
   /**
    * They are asking about her, not about themselves (askingAboutHer).
    *
@@ -286,6 +288,7 @@ function systemBlocks(state: PromptState, away = false): SystemBlock[] {
     { stable: false, text: state.body ?? '' },
     { stable: false, text: state.herSleep ?? '' },
     { stable: false, text: state.recalled ?? '' },
+    { stable: false, text: state.linked ?? '' },
     // Query-selected memory, rendered per message (profileSummary in main.ts):
     // the human block shows what is relevant to this turn, so this is the
     // biggest of the dynamic blocks, and it has no business in the cached head.

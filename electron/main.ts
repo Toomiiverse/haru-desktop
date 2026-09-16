@@ -41,6 +41,7 @@ import { pdfPrompt, readPdf } from './pdf';
 import { classify, discard, extractAudio, extractFrames, findFfmpeg, OPENABLE, readText, type FileKind } from './attach';
 import { markTimeGaps, sinceLast, earlierDaysContext, earlierTurns, DAYS_OF_HISTORY, HISTORY_BUDGET_CHARS } from './history';
 import { exchangesFrom, pickRecalled, recallNote, RECALL_DAYS, type Exchange } from './recall';
+import { applyExtraction, dayChunks, emptyGraph, EXTRACTION_SCHEMA, extractionInput, extractionPrompt, knownBlock, linkedFacts, linkedNote, readExtraction } from './factgraph';
 import { correct, narrow, noteUsed, readHearing, remember } from './hearing';
 import { assumeItIsTheirs, identifyWork, noteWork, readFollowing, recogniseNow, summariseFollowing } from './following';
 import { lookUpPlace, readWindowsLocation, searchPlaces, type FoundPlace } from './location';
@@ -6922,6 +6923,11 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
     ? pickRecalled(olderExchanges(localDateKey(zonedNow(CHAT_TIMEZONE))), recallVectors, queryVector)
     : [];
   if (recalled.length) console.log(`[recall] ${recalled.map(entry => `${entry.exchange.day} (${entry.score.toFixed(2)})`).join(', ')}`);
+  // Who and what the message names, and one step further (factgraph.ts). A
+  // lookup, not a call — and nothing at all when nobody is named.
+  const factGraph = store.getFactGraph();
+  const linked = linkedFacts(factGraph, latest, { context: recentUserContext, userName: graphUserName() });
+  if (linked.length) console.log(`[graph] ${linked.length} linked fact(s) for ${[...new Set(linked.map(entry => entry.seed))].map(id => factGraph.entities.find(entity => entity.id === id)?.name).join(', ')}`);
   const promptNow = zonedNow(CHAT_TIMEZONE);
   // Written down every reply so the eight thresholds in VITAL_CUES can be
   // tuned from what actually fired rather than from what they were guessed to
@@ -7045,6 +7051,7 @@ const promptState = {
     fresh,
     herRecentReplies,
     recalled: recallNote(recalled, new Intl.DateTimeFormat('en-AU', { weekday: 'long', timeZone: 'UTC' })),
+    linked: linkedNote(factGraph, linked),
     // Her list is left out when the subject is her — see PromptState.aboutHer.
     aboutHer: Boolean(hers),
     movedJustNow,
@@ -7894,6 +7901,92 @@ async function refreshRecallVectors(): Promise<void> {
   } catch (error) {
     console.warn(`[recall] could not save what was embedded: ${error instanceof Error ? error.message : error}`);
   }
+}
+
+// -- who is who (factgraph.ts) ----------------------------------------------------
+//
+// Each finished day is read once into graph.json — the names in his life and the
+// facts between them — and every reply is handed the facts one step out from
+// whoever the message names. The reading is a hosted call per piece of a day;
+// the reply side is a lookup with no call at all.
+
+/** One day per tick at most: a backlog of weeks arrives as a trickle on the bill, not a burst. */
+const GRAPH_TICK_MS = 60_000;
+/** A day whose replies keep coming back unreadable is skipped after this many tries rather than paid for forever. */
+const GRAPH_TRIES = 3;
+let readingGraph = false;
+const graphFailures = new Map<string, number>();
+
+function graphUserName(): string {
+  return getProfile().nickname.trim() || 'the user';
+}
+
+/**
+ * The brain that reads a day: the hosted conversation route, and nothing when
+ * there is none. Not the local model — measured on the same prompt and the
+ * same days (2026-09-16), the 9B filed the Eiffel Tower as part of his life
+ * and wrote "Tommy works at a job"; a graph of that is worse than no graph.
+ */
+function graphBrain(): ProviderConfig | null {
+  if ((store.get('graph') as { enabled?: boolean } | undefined)?.enabled === false) return null;
+  return conversationRoute();
+}
+
+async function readGraphTick(): Promise<void> {
+  if (readingGraph) return;
+  const brain = graphBrain();
+  if (!brain) return;
+  const today = currentChatDayKey();
+  const archive = store.getArchive();
+  const read = store.getFactGraph().read;
+  // Oldest first, finished days only; a day that has grown since it was read is read again.
+  const day = Object.keys(archive).filter(key => !key.includes('#') && key < today).sort()
+    .find(key => read[key] !== (archive[key] ?? []).length);
+  if (!day) return;
+  readingGraph = true;
+  try {
+    const done = await readDayIntoGraph(day, (archive[day] ?? []) as { role?: string; content?: unknown }[], brain);
+    if (done) { graphFailures.delete(day); return; }
+    throw new Error('the reply could not be read');
+  } catch (error) {
+    const tries = (graphFailures.get(day) ?? 0) + 1;
+    graphFailures.set(day, tries);
+    console.warn(`[graph] could not read ${day} (try ${tries} of ${GRAPH_TRIES}): ${error instanceof Error ? error.message : error}`);
+    if (tries >= GRAPH_TRIES) {
+      const graph = store.getFactGraph();
+      store.setFactGraph({ ...graph, read: { ...graph.read, [day]: (archive[day] ?? []).length } });
+      console.warn(`[graph] skipping ${day} until it changes`);
+    }
+  } finally {
+    readingGraph = false;
+  }
+}
+
+/** Every piece of one day, in order. False when a reply could not be read — the day is then left unmarked to try again. */
+async function readDayIntoGraph(day: string, messages: { role?: string; content?: unknown }[], brain: ProviderConfig): Promise<boolean> {
+  const userName = graphUserName();
+  const chunks = dayChunks(messages, userName);
+  const totals = { added: 0, confirmed: 0, ended: 0, refused: 0 };
+  for (const chunk of chunks) {
+    const reply = await ollamaPost(
+      [{ role: 'system', content: extractionPrompt(userName) }, { role: 'user', content: extractionInput(day, knownBlock(store.getFactGraph(), chunk, userName), chunk) }],
+      brain,
+      { tools: false, temperature: 0.1, format: EXTRACTION_SCHEMA, maxTokens: 3000 },
+    );
+    const extraction = readExtraction(reply.content ?? '');
+    if (!extraction) return false;
+    const { graph, report } = applyExtraction(store.getFactGraph(), extraction, { day, chunk, userName });
+    store.setFactGraph(graph);
+    totals.added += report.added;
+    totals.confirmed += report.confirmed;
+    totals.ended += report.ended;
+    totals.refused += report.rejected.length;
+    if (report.rejected.length) console.log(`[graph] ${day}: refused ${report.rejected.slice(0, 4).join(' | ')}${report.rejected.length > 4 ? ` and ${report.rejected.length - 4} more` : ''}`);
+  }
+  const graph = store.getFactGraph();
+  store.setFactGraph({ ...graph, read: { ...graph.read, [day]: messages.length } });
+  console.log(`[graph] read ${day}: ${chunks.length} piece(s), +${totals.added} fact(s), ${totals.confirmed} confirmed, ${totals.ended} ended${totals.refused ? `, ${totals.refused} refused` : ''} — ${graph.facts.length} facts about ${graph.entities.length} names in all`);
+  return true;
 }
 
 function rantRoom(latest: string, mentioned = ''): string {
@@ -11344,6 +11437,8 @@ app.whenReady().then(() => {
   loadRecallVectors();
   setTimeout(() => { void refreshRecallVectors(); }, 90_000);
   setInterval(() => { void refreshRecallVectors(); }, 15 * 60_000);
+  // Who is who: the finished days not yet read, a day a minute until caught up.
+  setInterval(() => { void readGraphTick(); }, GRAPH_TICK_MS);
   setTimeout(() => publishToVault('startup'), 30_000);
   setInterval(() => publishToVault('tick'), VAULT_PUBLISH_MS);
   // A first pass shortly after boot so a backlog the desk sent overnight is
@@ -11510,7 +11605,13 @@ app.whenReady().then(() => {
     setBlocks(blocks.map(candidate => candidate.label === label ? reset : candidate));
     return reset;
   });
-  ipcMain.handle('memory:clear', () => { setMemories([]); return getMemories(); });
+  ipcMain.handle('memory:clear', () => {
+    setMemories([]);
+    // The graph is what she knows too. Which days were read is kept, or the
+    // next tick would rebuild all of it from the archive behind their back.
+    store.setFactGraph({ ...emptyGraph(), read: store.getFactGraph().read });
+    return getMemories();
+  });
   // Called when the message being sent was spoken rather than typed. Typed
   // messages deliberately do not do this: somebody at the keyboard has not asked
   // for the microphone.
