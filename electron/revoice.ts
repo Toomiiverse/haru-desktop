@@ -15,8 +15,9 @@
 // that did not happen. A rewrite may change the voice and nothing else, and
 // any new name, number or claim in it is grounds to drop it unread.
 
-export type Turn = { id?: string; role: string; content: string; at?: string };
-export type Exchange = { id: string; theirs: string; hers: string; at?: string };
+export type Turn = { id?: string; role: string; content: string; at?: string; reaction?: string };
+/** `reaction` is his thumb on her reply, when he gave one. */
+export type Exchange = { id: string; theirs: string; hers: string; at?: string; reaction?: 'up' | 'down' };
 export type Revoice = { id: string; original: string; text: string; at: string };
 export type RevoiceState = { lastAt: string | null; rewrites: Record<string, Revoice> };
 
@@ -48,7 +49,7 @@ export function exchangesFrom(turns: Turn[], limit = REVOICE_WINDOW): Exchange[]
     if (turn.role !== 'assistant' || !turn.id || !turn.content?.trim()) continue;
     let theirs = '';
     for (let j = i - 1; j >= 0; j--) { if (turns[j].role === 'user') { theirs = turns[j].content ?? ''; break; } }
-    out.push({ id: turn.id, theirs, hers: turn.content, ...(turn.at ? { at: turn.at } : {}) });
+    out.push({ id: turn.id, theirs, hers: turn.content, ...(turn.at ? { at: turn.at } : {}), ...(turn.reaction === 'up' || turn.reaction === 'down' ? { reaction: turn.reaction } : {}) });
   }
   return out.slice(-limit);
 }
@@ -66,11 +67,13 @@ export function revoicePrompt(persona: { identity: string; style: string }, howS
     `How she writes: ${howSheWrites}`,
     `What falls short, in his own words: "What's with your short replies" and "Kind of want you to act like you actually care." So the replies to rewrite are the ones where he shared news, effort, good news or a bad day and got a grunt or an order back ("Good. Now hand it over."); where he said he just wanted to talk and she treated it as an excuse; where she answered like an assistant; where she ended on a chore, an order, or a question handing the subject back to him; where the bite had no care under it. Leave alone anything that already reads as her, and leave alone anything factual she got wrong — that is not yours to fix. Rewrite at most ${limit}, the worst first.`,
     'A rewrite is a different reply, not a tidier one. It keeps the facts and changes the shape: what she notices, where the warmth shows, how it ends. If you would keep more than two thirds of the words, do not touch it — a copy-edit is worthless here and will be thrown away. Bite stays; it is bite with the care visible, said once and not taken back.',
+    'He has rated some of her replies himself. One marked "he said this fell flat" is the first to rewrite; one marked "he liked this one" is his favourite of hers as it stands — never rewrite it.',
     'Every rewrite is in her first person — "I", never her name, never third person about herself. She is the one who said it.',
     'A rewrite keeps every fact exactly: the same events, names, places, numbers, times, promises and opinions as the original, and nothing new — no new plans, no new claims about him or about her, nothing she did not say. About the same length as the original, never more than twice it. Her emoji are 😏 👀 😤 💢 😒 🔥 🙄, at most one, and only where it bites.',
     'Answer with JSON only, no prose and no code fence: an array of objects, each {"id": "<the id shown>", "text": "<her reply, rewritten>"}. An empty array if nothing needs it.',
   ].join('\n\n');
-  const user = exchanges.map(exchange => `#${exchange.id}\nHim: ${exchange.theirs || '(nothing — she spoke first)'}\nHer: ${exchange.hers}`).join('\n\n');
+  const rated = (exchange: Exchange) => (exchange.reaction === 'down' ? '\n(he said this fell flat)' : exchange.reaction === 'up' ? '\n(he liked this one)' : '');
+  const user = exchanges.map(exchange => `#${exchange.id}\nHim: ${exchange.theirs || '(nothing — she spoke first)'}\nHer: ${exchange.hers}${rated(exchange)}`).join('\n\n');
   return { system, user };
 }
 
@@ -89,6 +92,8 @@ export function parseRevoices(text: string, exchanges: Exchange[]): { id: string
     const id = String((item as { id?: unknown })?.id ?? '').replace(/^#/, '').trim();
     const rewritten = String((item as { text?: unknown })?.text ?? '').trim();
     if (!known.has(id) || seen.has(id) || !rewritten) continue;
+    // A reply he gave a thumbs up is his favourite of hers as it is, whatever the voice model thinks of it.
+    if (known.get(id)?.reaction === 'up') continue;
     seen.add(id);
     out.push({ id, text: rewritten });
   }

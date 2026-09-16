@@ -201,6 +201,10 @@ export type PromptState = {
   booked?: string;
   /** The freshest of her own unsaid thoughts — see thoughts.ts. Hers, private, not to be recited. */
   onHerMind?: string;
+  /** His own card on what just came up (lore.ts). Background, not an instruction. */
+  lore?: string;
+  /** A few old exchanges of her at her best, fixed for the day (examples.ts). */
+  examples?: string;
   /**
    * They are asking about her, not about themselves (askingAboutHer).
    *
@@ -293,6 +297,7 @@ function systemBlocks(state: PromptState, away = false): SystemBlock[] {
     { stable: false, text: state.herSleep ?? '' },
     { stable: false, text: state.recalled ?? '' },
     { stable: false, text: state.linked ?? '' },
+    { stable: false, text: state.lore ?? '' },
     { stable: false, text: state.booked ?? '' },
     { stable: false, text: state.onHerMind ?? '' },
     // Query-selected memory, rendered per message (profileSummary in main.ts):
@@ -384,6 +389,9 @@ function systemBlocks(state: PromptState, away = false): SystemBlock[] {
     // forgets, and her being Haru is a tone instruction above all.
     { stable: true, text: state.character.identity },
     { stable: true, text: state.character.style },
+    // Her voice shown, not described — beside the persona, and the same all day
+    // so the cached head is rebuilt once a day rather than every turn.
+    { stable: true, text: state.examples ?? '' },
     { stable: true, text: FIRST_PERSON_NOTE },
     // Her unprompted lines have always been told how long to be; her actual
     // replies never were, and it shows. A typical answer came back as four

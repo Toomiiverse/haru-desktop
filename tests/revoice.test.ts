@@ -79,3 +79,22 @@ test('the pass is due on the count he set, and the kept rewrites are capped newe
   assert.equal(state.lastAt, '2026-09-02T09:00:00Z');
   assert.deepEqual(readRevoiceState({ rewrites: { a: { text: 1 } } }).rewrites, {}, 'a broken record is not a rewrite');
 });
+
+test('his thumbs reach the voice model: a disliked reply is marked to go first, a liked one is marked and never rewritten', () => {
+  const turns = [
+    { id: 'u1', role: 'user', content: 'finished the build' },
+    { id: 'h1', role: 'assistant', content: 'Good. Now hand it over.', reaction: 'down' },
+    { id: 'u2', role: 'user', content: 'thanks harry' },
+    { id: 'h2', role: 'assistant', content: "It's Haru. You know this.", reaction: 'up' },
+    { id: 'u3', role: 'user', content: 'ok' },
+    { id: 'h3', role: 'assistant', content: 'Fine.' },
+  ];
+  const exchanges = exchangesFrom(turns);
+  assert.deepEqual(exchanges.map(exchange => exchange.reaction), ['down', 'up', undefined]);
+  const { system, user } = revoicePrompt({ identity: 'Haru.', style: 'Blunt.' }, 'Short.', exchanges);
+  assert.match(system, /fell flat" is the first to rewrite/);
+  assert.match(user, /#h1\nHim: finished the build\nHer: Good\. Now hand it over\.\n\(he said this fell flat\)/);
+  assert.match(user, /#h2\n[^#]*\(he liked this one\)/);
+  const parsed = parseRevoices('[{"id":"h1","text":"Finally. Took you long enough — go eat something."},{"id":"h2","text":"Haru. With one r. Months, Tommy."}]', exchanges);
+  assert.deepEqual(parsed.map(item => item.id), ['h1']);
+});

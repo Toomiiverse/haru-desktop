@@ -45,6 +45,8 @@ import { applyExtraction, dayChunks, emptyGraph, EXTRACTION_SCHEMA, extractionIn
 import { admitBooking, bookedNote, bookedPrompt, BOOKED_KIND, createScheduler, describeWhen, resolveBookingTime, zonedEpoch, type Job, type Outcome } from './scheduler';
 import { describeGap, isRumination, keepThoughts, lastSpoken, mayAsk, mayInitiate, mindNote, noteAsked, pendingTrigger, readThoughts, roundVector, scoreThought, spend, spokenOn as thoughtsSpokenOn, THINKING_RULES, thinkingInput, THOUGHT_LIMITS, thoughtPrompt, withoutClock, type ThinkingState, type Thought, type ThoughtState, type Trigger } from './thoughts';
 import { vitalsInstruction } from './vitals';
+import { activeCards, loreNote, parseLorePage, LORE_PAGE, type LoreCard } from './lore';
+import { examplePool, examplesNote, pickExamples, reusedExample, type Example, type ExampleTurn } from './examples';
 import { correct, narrow, noteUsed, readHearing, remember } from './hearing';
 import { assumeItIsTheirs, identifyWork, noteWork, readFollowing, recogniseNow, summariseFollowing } from './following';
 import { lookUpPlace, readWindowsLocation, searchPlaces, type FoundPlace } from './location';
@@ -6933,6 +6935,10 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   const factGraph = store.getFactGraph();
   const linked = linkedFacts(factGraph, latest, { context: recentUserContext, userName: graphUserName() });
   if (linked.length) console.log(`[graph] ${linked.length} linked fact(s) for ${[...new Set(linked.map(entry => entry.seed))].map(id => factGraph.entities.find(entity => entity.id === id)?.name).join(', ')}`);
+  // His own card on whatever just came up, and any still up from the last message or two (lore.ts).
+  const lore = activeCards(loreCards(), latest, loreMemory);
+  loreMemory = lore.memory;
+  if (lore.cards.length) console.log(`[lore] ${lore.cards.length} card(s) up${lore.triggered.length ? ` — just came up: ${lore.triggered.join('; ')}` : ''}`);
   const promptNow = zonedNow(CHAT_TIMEZONE);
   // Written down every reply so the eight thresholds in VITAL_CUES can be
   // tuned from what actually fired rather than from what they were guessed to
@@ -7057,6 +7063,8 @@ const promptState = {
     herRecentReplies,
     recalled: recallNote(recalled, new Intl.DateTimeFormat('en-AU', { weekday: 'long', timeZone: 'UTC' })),
     linked: linkedNote(factGraph, linked),
+    lore: loreNote(lore.cards),
+    examples: examplesNote(todaysExamples()),
     booked: bookedNote(scheduler.list(), Date.now(), CHAT_TIMEZONE),
     onHerMind: mindNote(store.getThoughts(), Date.now()),
     // Her list is left out when the subject is her — see PromptState.aboutHer.
@@ -7411,6 +7419,9 @@ const promptState = {
   // the cut was a repeat or a real sentence.
   if (touched && brain.hosted) recordBrief(`chat filtered (${brainName}) — as she wrote it, then as sent`, said, routeless);
   console.log(`[ai] chat reply in ${Date.now() - started}ms, ${content.length} chars — brain=${brainName} handed≈${handed}tok filters=${touched ? `touched(${said.trim().length - routeless.trim().length >= 0 ? '-' : '+'}${Math.abs(said.trim().length - routeless.trim().length)})` : 'untouched'}`);
+  // She copies what she can see: when a reply lifts eight words from one of today's examples, it is written down (examples.ts).
+  const lifted = reusedExample(content, todaysExamples());
+  if (lifted) console.log(`[examples] she reused a line from an example (${lifted.kind} ${lifted.id}): ${JSON.stringify(content.slice(0, 100))}`);
   if (messages.at(-1)?.role === 'user' && !brief && !choices) scheduleSecondThought({ hers: Boolean(hers), ranting, latest, reply: content, config });
   // Got up because of them and saying goodnight: that is her going back to bed, whether or not she called the tool.
   if (herKnockedAwakeNow() && readsAsGoodnight(content)) void goBackToSleepOnHerWord();
@@ -8267,6 +8278,47 @@ async function thoughtTick(): Promise<void> {
   } finally {
     thinkingNow = false;
   }
+}
+
+// -- his lore cards, and her voice at its best (lore.ts, examples.ts) ----------------
+
+let loreCache: { mtimeMs: number; cards: LoreCard[] } | null = null;
+/** Card id → how many more of his messages it stays up for. A restart lets them all drop, which costs a card for a message or two. */
+let loreMemory = new Map<string, number>();
+
+/** The cards on Lore.md at the vault root, read again only when the page has changed. */
+function loreCards(): LoreCard[] {
+  const vault = knowledge.vaultPath();
+  if (!vault) return [];
+  const file = path.join(vault, LORE_PAGE);
+  try {
+    const { mtimeMs } = statSync(file);
+    if (!loreCache || loreCache.mtimeMs !== mtimeMs) {
+      loreCache = { mtimeMs, cards: parseLorePage(readFileSync(file, 'utf8')) };
+      console.log(`[lore] ${loreCache.cards.length} card(s) on ${LORE_PAGE}`);
+    }
+    return loreCache.cards;
+  } catch {
+    return [];
+  }
+}
+
+let examplesCache: { key: string; examples: Example[] } | null = null;
+
+/** Today's few exchanges of her at her best: picked once a day, and again when a revoice pass adds rewrites. */
+function todaysExamples(): Example[] {
+  const local = zonedNow(CHAT_TIMEZONE);
+  const today = localDateKey(local);
+  const rewrites = revoiceState().rewrites;
+  const key = `${today}:${Object.keys(rewrites).length}`;
+  if (examplesCache?.key === key) return examplesCache.examples;
+  // Only days before yesterday: yesterday and today can still be in the history she is shown.
+  const yesterday = localDateKey(new Date(local.getFullYear(), local.getMonth(), local.getDate() - 1));
+  const pool = examplePool(store.getArchive() as unknown as Record<string, ExampleTurn[]>, rewrites, yesterday);
+  const examples = pickExamples(pool, today);
+  examplesCache = { key, examples };
+  console.log(`[examples] ${examples.length} of ${pool.length} for ${today}: ${examples.map(example => example.kind).join(', ') || 'none'}`);
+  return examples;
 }
 
 function rantRoom(latest: string, mentioned = ''): string {
