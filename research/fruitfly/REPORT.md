@@ -1,6 +1,6 @@
 # Can a fruit-fly brain improve Haru?
 
-**16 September 2026 · Australia/Perth · draft for the 08:00 report**
+**16 September 2026 · Australia/Perth · 08:00 report**
 
 ## Recommendation
 
@@ -82,6 +82,9 @@ Controls included exact cosine search, current Haru hybrid retrieval, FlyHash,
 an equally sized SimHash, the bridged input rates without the circuit, and
 shuffled wiring preserving **both** input and output degree sequences. Binary,
 synapse-weighted and normalized variants were retained, including failures.
+Equal bit counts do not imply equal encoding work: the SimHash control uses a
+dense projection, while the FlyHash-style prototype uses sparse inputs. Both
+operate on modern semantic embeddings and are engineering adaptations.
 
 ### Invented companion memories
 
@@ -213,17 +216,27 @@ exact-text echo component missed paraphrases but did not suppress those changed
 meanings. Haru's separate prompt-level repetition instructions were not measured
 by that component test. [Pair results](retrieval-results-5.json)
 
-### Live observations — final collection pending at 08:00
+### Live observations through 08:00
 
-At approximately 04:00, the service was healthy after the latest deployment.
-An observation process samples service health, HTTP status and attention metadata
-every ten minutes through 08:00. It does not send messages or stimulate Haru.
+The bounded monitor completed **24 successful health checks** between 04:15:30
+and 08:00:00 Perth. All returned HTTP 200 and an active service, with one unchanged
+process ID and a zero restart counter. Checks were approximately ten minutes
+apart; transient faults between checks are not directly observed.
 
-An important limitation is already clear: the recorded idle timer belongs to the
-**server OS**, currently around 12 days, and window focus belongs to its virtual
-desktop. These are not measurements of the user's PC or phone activity. Overnight
-agreement while resting cannot establish useful daytime attention. Final sample
-counts, numeric replay checks and service status will be inserted after collection.
+The policy-2 log contains **751 samples** from 03:01:26 through 07:59:51 across
+three complete sessions. All selected rest. There were zero shadow speech
+proposals, baseline speech-eligible samples, actual-aside events, interactions or
+feedback events in that log window. Replaying the numeric inputs reproduced every
+action and score within 1e-12; the largest floating-point difference was
+1.11e-16. The replay excluded entries after 08:00, including one subsequently
+copied sample. Mean policy computation was 0.0248 ms, maximum 0.6123 ms, excluding
+log I/O and model time. [Observation summary](observation-summary.json),
+[replay results](attention-replay-results.json)
+
+The recorded idle timer belongs to the **server OS**, around 12 days, and window
+focus belongs to its virtual desktop. These are not measurements of the user's
+PC or phone activity. Perfect agreement while resting therefore provides little
+evidence about useful daytime attention. The experiment remained shadow-only.
 
 ## 4. Moods: a real timing bug fixed
 
@@ -389,7 +402,8 @@ preferences in contexts never rated. No unique anatomical advantage emerged.
 
 Live metadata contained 63 feedback rows, 54 distinct reply IDs and only 53 valid
 latest ratings: **47 positive and six negative**, spanning three model
-configurations. These concern chat replies, not shadow proposals. This is far
+configurations; the final snapshot confirmed those counts. These concern chat
+replies, not shadow proposals. This is far
 less and more selected feedback than the simulation. Silence must not be treated
 as a negative rating. No online preference learner was activated.
 
@@ -405,6 +419,7 @@ The feature branch is `feat/attention-shadow` in
 | `f04fb52` | Elapsed-time mood drift | Corrected live mood timing |
 | `8e07a6f` | Determination/worry definitions | Complete live classifier prompt |
 | `0b79cf7` | Reproducible graph, retrieval, learning and affect research | Research files only; no application restart |
+| `0b5f8c6` | Independent public emotion checks and mood-context ablation | Research and documentation only |
 
 The listed commits were pushed and their changes applied to
 `toomii@haruserver:/home/toomii/haru-desktop`. The server's branch/HEAD was not
@@ -414,8 +429,18 @@ are under `/home/toomii/.local/state/haru-deployments/`.
 After the latest application change, **1,123 local tests and 1,520 server tests
 passed**, and builds passed. The server suite includes additional existing work,
 so its test count differs. Research evaluation checks also passed. Existing build
-warnings were unchanged. The service was restarted at 03:58:37 Perth; final health
-verification is pending the 08:00 snapshot.
+warnings were unchanged. The current service process started at 03:58:34 Perth.
+Final verification at 08:00:25 confirmed an active service, HTTP 200, zero
+restarts, and the same configured model used in the emotion experiments. The
+final knowledge inventory was 19 documents, 5,261 total chunks and **98 active
+chunks**; the earlier timing fixture used the 04:00 inventory's inactive count.
+[Final server metadata](live-metadata-final.json)
+
+Retrieval and patience baseline source files matched the server. The research
+included **2,968 isolated generation/classification calls**, 13,083 public
+benchmark embeddings and 240 invented-text embeddings. Repeated calls, seeds
+and contexts are not independent examples. The overnight monitor has finished;
+the application keeps its bounded shadow diagnostics enabled.
 
 ## Next steps, in order
 

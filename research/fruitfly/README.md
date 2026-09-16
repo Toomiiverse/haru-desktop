@@ -148,6 +148,8 @@ node scripts/attention-compare.cjs
 node scripts/attention-report.cjs /path/to/attention-shadow.jsonl
 node research/fruitfly/replay-shadow.cjs /path/to/attention-shadow.jsonl CACHE/replay.json
 node research/fruitfly/monitor-shadow.cjs observations.jsonl END_TIME_ISO
+node research/fruitfly/observation-report.cjs observations.jsonl CACHE/observation-summary.json
+node research/fruitfly/live-metadata.cjs CACHE/live-metadata.json
 ```
 
 The bounded monitor is server-specific, reads health and diagnostic metadata every

@@ -1,0 +1,57 @@
+{
+  "firstAt": "2026-09-15T20:15:30.093Z",
+  "lastAt": "2026-09-16T00:00:00.092Z",
+  "observations": 24,
+  "successfulObservations": 24,
+  "failures": [],
+  "maximumGapMinutes": 10.005216666666668,
+  "httpStatuses": [
+    200
+  ],
+  "serviceStates": [
+    "active"
+  ],
+  "distinctMainPids": 1,
+  "finalRestartCounter": "0",
+  "finalReport": {
+    "mode": "shadow",
+    "policy": 2,
+    "firstAt": "2026-09-15T19:01:26.482Z",
+    "lastAt": "2026-09-15T23:59:51.373Z",
+    "samples": 751,
+    "baselineEligible": 0,
+    "shadowSpeak": 0,
+    "agreement": 751,
+    "switches": 0,
+    "transitions": 748,
+    "actualAsides": 0,
+    "repeatBlocked": 0,
+    "interactions": 0,
+    "malformed": 0,
+    "actions": {
+      "rest": 751
+    },
+    "shortAsideGaps": 0,
+    "speechDecisionAgreement": 1,
+    "actionSwitchRate": 0,
+    "meanComputeMs": 0.024799250324304377,
+    "maxComputeMs": 0.6122899999900255,
+    "feedback": {
+      "up": 0,
+      "down": 0
+    },
+    "interpretation": "Observational only. Baseline eligibility is not delivery. Feedback concerns existing replies, not shadow actions. Compute time excludes log IO and model latency. Short aside gaps include reminders; they are not automatically unwanted interruptions."
+  },
+  "latestEnvironment": {
+    "hour": 7,
+    "idleSeconds": 1058352,
+    "onBattery": false,
+    "windowFocused": true
+  },
+  "latestSampleAt": "2026-09-15T23:59:51.373Z",
+  "limitations": [
+    "Point-in-time health checks; faults between observations are not directly observed",
+    "Final report counters are cumulative; snapshots have not been summed",
+    "Idle and focus refer to the server OS, not the user desktop or phone"
+  ]
+}
