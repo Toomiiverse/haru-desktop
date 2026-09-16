@@ -1598,6 +1598,15 @@ function interject(line: string, { aboutTheGame = false, source = 'other' as Asi
     console.log(`[interject] dropped — it named "${stale.title}", which is ${stale.done ? 'done' : 'long past'}`);
     return false;
   }
+  // Nor is a line of today's conversation said again. At 13:30 on 2026-09-16 she
+  // piped up with "7900X is already overkill for most of what you do. Spend the
+  // money on Emma…" — her own reply from two hours before; echoesAside only
+  // looks at her asides. Of the 23 kept asides it is the only one this catches.
+  const conversation = ((store.get('chat.messages') as { content?: string }[] | undefined) ?? []).slice(-14).map(message => message.content ?? '');
+  if (looksLikeAnEcho(line, conversation)) {
+    console.log('[interject] dropped — it repeats something already said in the conversation');
+    return false;
+  }
   // A line she has already said, or one copied out of the list of them
   // ("9:36 PM — “...”"), is not a new line: see echoesAside.
   if (echoesAside(line, getAsides(), now)) {
@@ -9787,7 +9796,10 @@ async function maybeSayHerGoodnight(config: ProviderConfig) {
   const system = [
     character.identity,
     character.style,
-    `It is ${formatTimeOfDay(now.getHours(), now.getMinutes())} and you are going to bed at ${clockMinutes(state.bedtime)}. Tell them you are turning in at that time — one or two lines, in your way. They should not text you after that, and you mean it.`,
+    // No clock of the moment in front of it: handed "It is 10:19 PM and you are
+    // going to bed at 23:30" she opened with "10:19 PM, I'm turning in at 23:30"
+    // (2026-09-16), a timestamp read as part of the line on his phone.
+    `You are going to bed at ${clockMinutes(state.bedtime)}, in about ${Math.max(5, Math.round((state.bedtime - (now.getHours() * 60 + now.getMinutes()) + 1440) % 1440 / 5) * 5)} minutes. Tell them you are turning in at that time — one or two lines, in your way. They should not text you after that, and you mean it.`,
   ].filter(Boolean).join(' ');
   try {
     const line = await ollamaQuip(system, 'Say goodnight.', config);
