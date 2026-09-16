@@ -30,7 +30,7 @@ import { apnsPayload, apnsSigner, readApnsConfig, readApnsDevices, sendApns, typ
 import { answersHerOwnQuestion, looksLikeAnEcho, parseSecondThought, readsAsTheirAnswer, secondThoughtDelay, secondThoughtNote, wantsSecondThought, SECOND_THOUGHT_GAP_MS } from './secondthought';
 import { applyRevoices, dueForRevoice, exchangesFrom as revoiceExchanges, grounded, parseRevoices, readRevoiceState, revoicePrompt, withRewrites, REVOICE_EVERY, type Revoice } from './revoice';
 import { decide, readEscalateConfig, type EscalateConfig } from './escalate';
-import { describeFailure, fromOpenAIReply, isOpenAIShaped, toOpenAIBody, DEFAULT_ENDPOINTS, type ChatTool, type Provider } from './provider';
+import { describeFailure, fromOpenAIReply, isOpenAIShaped, promptUsage, toOpenAIBody, DEFAULT_ENDPOINTS, type ChatTool, type Provider } from './provider';
 import { formatPage, formatResults, readSearchConfig, lookItUpInstruction, readWebPage, SearchBlocked, searchWeb, type SearchConfig, type SearchResult } from './search';
 import { mayWander, pickDestination, readRoamConfig, refugeFrom, speedFor, step, nextWanderDelay, type Point, type RoamConfig } from './roam';
 import { angleFor, mayNotice, noteNoticed, readNotices, type Page as NoticedPage, type PageState } from './noticing';
@@ -5178,8 +5178,19 @@ async function openAIPost(conversation: OllamaMessage[], config: ProviderConfig,
     }
     throw new Error(describeFailure(response.status, detail, (config.provider as Provider) ?? 'openai'));
   }
-  if (onChunk) return streamOpenAI(response, onChunk);
-  return fromOpenAIReply(await response.json()) as OllamaMessage;
+  if (onChunk) return streamOpenAI(response, onChunk, config.model);
+  const reply = await response.json();
+  notePromptCache(config.model, (reply as { usage?: unknown }).usage);
+  return fromOpenAIReply(reply) as OllamaMessage;
+}
+
+/**
+ * How much of a hosted prompt the endpoint had cached — the measure of whether
+ * the cached head is holding (see steadyTable). `[cache]` in haru.log.
+ */
+function notePromptCache(model: string, usage: unknown) {
+  const read = promptUsage(usage);
+  if (read && read.prompt >= 1000) console.log(`[cache] ${model}: ${read.cached} of ${read.prompt} prompt tokens cached (${Math.round(100 * read.cached / read.prompt)}%)`);
 }
 
 /**
@@ -5191,7 +5202,7 @@ async function openAIPost(conversation: OllamaMessage[], config: ProviderConfig,
  * reassembled here so the caller sees the same shape it would have got from a
  * non-streamed request.
  */
-async function streamOpenAI(response: Response, onChunk: (text: string) => void): Promise<OllamaMessage> {
+async function streamOpenAI(response: Response, onChunk: (text: string) => void, model = ''): Promise<OllamaMessage> {
   if (!response.body) throw new Error('The provider returned nothing to read.');
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
@@ -5209,8 +5220,9 @@ async function streamOpenAI(response: Response, onChunk: (text: string) => void)
       if (!line.startsWith('data:')) continue;
       const data = line.slice(5).trim();
       if (data === '[DONE]') { buffer = ''; break; }
-      let payload: { choices?: { delta?: { content?: string; tool_calls?: { index?: number; id?: string; function?: { name?: string; arguments?: string } }[] } }[] };
+      let payload: { usage?: unknown; choices?: { delta?: { content?: string; tool_calls?: { index?: number; id?: string; function?: { name?: string; arguments?: string } }[] } }[] };
       try { payload = JSON.parse(data) as typeof payload; } catch { continue; }
+      if (payload.usage) notePromptCache(model, payload.usage);
       const delta = payload.choices?.[0]?.delta;
       if (!delta) continue;
       if (delta.content) { content += delta.content; onChunk(delta.content); }

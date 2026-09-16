@@ -193,7 +193,21 @@ export function toOpenAIBody(options: {
     ...(options.maxTokens ? { [quirks.maxTokensKey]: options.maxTokens } : {}),
     ...(options.json ? { response_format: { type: 'json_object' } } : {}),
     stream: Boolean(options.stream),
+    // The usage chunk at the end of a stream is the only place the endpoint says
+    // how much of the prompt came from its cache.
+    ...(options.stream ? { stream_options: { include_usage: true } } : {}),
   };
+}
+
+/** What the endpoint said the prompt cost: its size and how much of it was cached. Null when it said nothing. */
+export function promptUsage(usage: unknown): { prompt: number; cached: number } | null {
+  if (!usage || typeof usage !== 'object') return null;
+  const record = usage as { prompt_tokens?: unknown; prompt_tokens_details?: { cached_tokens?: unknown }; cache_read_input_tokens?: unknown };
+  const prompt = typeof record.prompt_tokens === 'number' ? record.prompt_tokens : null;
+  if (prompt === null) return null;
+  const cached = typeof record.prompt_tokens_details?.cached_tokens === 'number' ? record.prompt_tokens_details.cached_tokens
+    : typeof record.cache_read_input_tokens === 'number' ? record.cache_read_input_tokens : 0;
+  return { prompt, cached };
 }
 
 /**
