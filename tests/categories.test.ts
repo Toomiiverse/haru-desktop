@@ -297,3 +297,13 @@ test('a memory formed with its category and day keeps them, and a repeat does no
   const noDay = rememberInto([], { text: 'Works at the cinema on weekends', kind: 'fact', id: 'c', now: NOW.toISOString(), category: 'identity', when: 'someday' });
   assert.equal('when' in noDay.record, false);
 });
+
+test('with many people on record, the ones the message is about are shown', async () => {
+  const { PEOPLE_LIMIT } = await import('../electron/blocks');
+  const people = Array.from({ length: PEOPLE_LIMIT + 6 }, (_, index) => record({ id: `p${index}`, text: `Person${'abcdefghijklmnopqrstuvwxyz'[index]} is a customer they know`, kind: 'relationship', category: 'person', importance: 0.8 }));
+  people.push(record({ id: 'logan', text: 'Logan is a customer whose MSI build would not boot', kind: 'relationship', category: 'person', importance: 0.8, lastSeenAt: '2026-08-01T00:00:00.000Z' }));
+  const { text } = formatMemoryBlocks(defaultMemoryBlocks(), { character: { identity: '', style: '' }, profile: { nickname: 'Tommy', occupation: '', about: '' }, memories: people, sessions: [], query: 'did Logan ever pick up his build', semantic: new Map([['logan', 0.6]]), now: NOW }, { omit: ['persona'], compact: true });
+  const section = text.match(/<relationship>[\s\S]*?<\/relationship>/)?.[0] ?? '';
+  assert.match(section, /Logan is a customer/);
+  assert.equal(section.split('\n').filter(line => line.startsWith('- ')).length, PEOPLE_LIMIT);
+});

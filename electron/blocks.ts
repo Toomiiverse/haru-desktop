@@ -246,6 +246,8 @@ export const SHARED_LIMIT = 6;
 export const MOMENT_LIMIT = 10;
 /** Plans ahead and things under way, for current_project. */
 export const PROJECT_LIMIT = 8;
+/** People: everyone while there are few, and once there are many, those this message is most about. */
+export const PEOPLE_LIMIT = 12;
 /** His own tastes, beside his rules for her: the best few for this message, not every opinion he has voiced. */
 export const TASTE_LIMIT = 8;
 /** Something under way not raised in this long is not current enough for current_project. */
@@ -419,9 +421,7 @@ export function resolveBlockValue(block: MemoryBlock, sources: BlockSources, sho
       return herStandingInstruction(herStandings(sources.memories));
     }
     case 'relationship': {
-      const now = sources.now ?? new Date();
-      const records = ofCategory(sources, 'person')
-        .sort((a, b) => importanceOf(b, now) - importanceOf(a, now));
+      const records = retrieved(ofCategory(sources, 'person'), sources, PEOPLE_LIMIT);
       return linesFromRecords(fresh(withoutRestatements(records), sources, shown));
     }
     case 'current_project': {
