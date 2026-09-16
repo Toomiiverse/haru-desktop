@@ -147,6 +147,7 @@ paired bootstrap intervals, with repeated emotion calls clustered by line.
 node scripts/attention-compare.cjs
 node scripts/attention-report.cjs /path/to/attention-shadow.jsonl
 node research/fruitfly/replay-shadow.cjs /path/to/attention-shadow.jsonl CACHE/replay.json
+node research/fruitfly/attention-input-audit.cjs /path/to/attention-shadow.jsonl CACHE/input-audit.json 2026-09-16T00:00:00Z
 node research/fruitfly/monitor-shadow.cjs observations.jsonl END_TIME_ISO
 node research/fruitfly/observation-report.cjs observations.jsonl CACHE/observation-summary.json
 node research/fruitfly/live-metadata.cjs CACHE/live-metadata.json
@@ -157,6 +158,13 @@ ten minutes, and exits at the requested time (at most eight hours). Its report
 counters are cumulative: **do not sum snapshots**. The server's local idle/focus
 readings do not establish activity on the user's desktop or phone. Shadow output
 does not control production behavior.
+
+The [daytime follow-up](DAYTIME-FOLLOWUP.md) adds observed input coverage and an
+offline sensitivity check. The optional start timestamp filters its report only;
+complete sessions still replay from their beginning. Save both log parts before
+running it: a live log can rotate during reading. The alternative holds recorded
+vitals and blockers fixed and cannot predict a complete alternate day. The mood
+probe is synthetic and separate. Neither experiment changes production behavior.
 
 ## Result interpretation
 

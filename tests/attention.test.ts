@@ -190,3 +190,61 @@ test('long silence cannot override exhaustion or maximum stress', () => {
     }
   }
 });
+
+test('reports separate silence agreement, proposals and missing client activity evidence', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'haru-attention-report-'));
+  try {
+    const file = join(dir, 'attention.jsonl');
+    const experiment = new AttentionExperiment(() => file);
+    experiment.observe(input({ sinceInteractionMs: 0, environment: { hour: 12, idleSeconds: 86400, onBattery: false, windowFocused: true } }));
+    experiment.observe(input({ now: 1_020_000, baselineReady: true, blocked: true }));
+    // Report fixtures cover all four decisions; overlap is descriptive, not accuracy.
+    const sample = JSON.parse(readFileSync(file, 'utf8').trim().split('\n')[0]);
+    for (const [action, baselineEligible] of [['speak', true], ['rest', true], ['speak', false]] as const) {
+      appendFileSync(file, JSON.stringify({ ...sample, action, baselineEligible, inputs: undefined }) + '\n');
+    }
+    const report = JSON.parse(execFileSync(process.execPath, [join(__dirname, '../../scripts/attention-report.cjs'), file], { encoding: 'utf8' }));
+    assert.deepEqual(report.speechDecisions, { bothPropose: 1, baselineOnly: 1, shadowOnly: 1, bothSilent: 2 });
+    assert.equal(report.baselineProposalOverlap, 0.5);
+    assert.equal(report.shadowProposalOverlap, 0.5);
+    assert.deepEqual(report.inputCoverage, { measured: 2, hostActive: 1, hostIdleOverFiveMinutes: 1,
+      hostWindowFocused: 1, recentDirectContact: 1, recentContactWhileHostIdle: 1, unblockedHostActive: 0 });
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('input sensitivity replays history before the reporting window and rejects corrupted results', () => {
+  const { audit, moodProbe } = require(join(__dirname, '../../research/fruitfly/attention-input-audit.cjs'));
+  const dir = mkdtempSync(join(tmpdir(), 'haru-attention-audit-'));
+  try {
+    const file = join(dir, 'attention.jsonl');
+    const experiment = new AttentionExperiment(() => file);
+    // Conversation every minute: correction cannot circumvent speech patience.
+    for (let seconds = 0; seconds <= 1200; seconds += 20) {
+      experiment.observe(input({ now: 1_000_000 + seconds * 1000, sinceInteractionMs: (seconds % 60) * 1000,
+        environment: { hour: 12, idleSeconds: 86400, onBattery: false, windowFocused: true } }));
+    }
+    const rows = readFileSync(file, 'utf8').trim().split('\n').map(line => JSON.parse(line));
+    const result = audit(rows, 1_600_000);
+    assert.equal(result.replayed, 61);
+    assert.equal(result.samples, 31);
+    assert.equal(result.recentContactWhileHostIdle, 31);
+    assert.equal(result.changedIdleReadings, 31);
+    assert.equal(result.contactAwareSpeech, 0);
+    assert.equal(result.changedActions, 0);
+    assert.equal(audit(rows.slice(1)).skippedPartialSessions, 1);
+    assert.equal(audit(rows.slice(1)).replayed, 0);
+    assert.throws(() => audit([{ ...rows[0], action: 'speak' }]), /replay mismatch/);
+    assert.throws(() => audit([{ ...rows[0], scores: { ...rows[0].scores, rest: 0.999 } }]), /replay mismatch/);
+    assert.throws(() => audit([{ ...rows[0], inputs: { ...rows[0].inputs, sinceInteractionMs: -1 } }]), /Invalid sample/);
+    const unknown = new AttentionExperiment(() => join(dir, 'unknown.jsonl'));
+    unknown.observe(input({ sinceInteractionMs: Infinity }));
+    const unknownRow = JSON.parse(readFileSync(join(dir, 'unknown.jsonl'), 'utf8'));
+    assert.equal(audit([unknownRow]).changedIdleReadings, 0);
+    const report = JSON.parse(execFileSync(process.execPath, [join(__dirname, '../../scripts/attention-report.cjs'), file], { encoding: 'utf8' }));
+    assert.equal(report.baselineProposalOverlap, null);
+    assert.equal(report.shadowProposalOverlap, null);
+    const probe = moodProbe().arms;
+    assert.ok(probe.contactIdleOnly.curiosity > probe.hostReadings.curiosity + 0.5);
+    assert.ok(probe.contactIdleWithoutHostFocus.focus < probe.contactIdleOnly.focus - 0.4);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
