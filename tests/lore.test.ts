@@ -30,6 +30,8 @@ test('the page: one bullet one card, keys lowercased, quotes and keyless lines s
 test('keys are whole words, a trailing star matches any ending, a plain key its plural', () => {
   assert.equal(keySaid('rego', 'need to do the rego thing'), true);
   assert.equal(keySaid('rego', 'oregon trail'), false);
+  assert.equal(keySaid('rego', 'did you remind me about the *rego*'), true, 'emphasis around a key still says it');
+  assert.equal(keySaid('psych*', '**psychologist** tomorrow'), true);
   assert.equal(keySaid('car*', 'my cars and cards'), true);
   assert.equal(keySaid('psych*', 'Psychologist at 8:45'), true);
   assert.equal(keySaid('sam', 'samsung phone'), false);

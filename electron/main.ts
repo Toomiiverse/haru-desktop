@@ -210,7 +210,12 @@ const GOOGLE_FOCUS_SYNC_MIN_GAP_MS = 30_000;
 // and spent once the day is distilled.
 const ARCHIVE_RETENTION_DAYS = 365;
 const ACTIVITY_RETENTION_DAYS = 90;
-const SESSIONS_KEPT = 365;
+// Summaries outlive the transcripts they distil by two months. pruneOldArchives
+// deletes a day only while its summary is still held, and with both at 365 a
+// day was deletable for a single 04:30 run — missed once (the app down that
+// night), it stayed for good, and every restart paid to summarise it again
+// (review, 2026-09-17). Sixty runs to catch it instead of one.
+const SESSIONS_KEPT = ARCHIVE_RETENTION_DAYS + 60;
 const EVENTS_PER_DAY = 3;
 
 const live2dRoots = new Map<string, string>();

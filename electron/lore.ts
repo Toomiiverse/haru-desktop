@@ -65,7 +65,9 @@ function searchable(text: string): string {
 
 /** Whether a key is said in the text: whole words, a trailing * matching any ending. */
 export function keySaid(key: string, text: string): boolean {
-  const hay = searchable(text);
+  // His text loses its asterisks — only a key's trailing * is a wildcard.
+  // Kept, "*rego*" or "**rego**" never matched the rego card (review, 2026-09-17).
+  const hay = searchable(String(text ?? '').replace(/\*/g, ' '));
   const wild = key.endsWith('*');
   const words = searchable(key.replace(/\*$/, '')).trim().split(' ').filter(Boolean);
   if (!words.length) return false;
