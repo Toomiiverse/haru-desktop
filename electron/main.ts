@@ -90,7 +90,7 @@ import { openEviSession } from './evibridge';
 import { setDefaultAutoSelectFamilyAttemptTimeout } from 'node:net';
 import { readBrowserControlConfig } from './browserctl';
 import { listSessions, openSession, readClaudeCodeConfig, readOpenedSessions, resolveSessionDir, sessionName, SESSIONS_KEPT as CLAUDE_SESSIONS_KEPT, stopSession, type SessionHost } from './claudesession';
-import { applyDecay, DEEP_RECALL_LIMIT, eventCandidates, eventsPrompt, findSuperseded, formatMemoryPrompt, isExplicitRecall, closeEvents, isWorthAnEvent, isWorthKeeping, isWorthRemembering, MEMORY_KINDS, migrateMemories, monthFoldPrompt, pruneMemories, readsAsSecondPerson, rememberInto, retrieveMemories, semanticSimilarities, summaryPrompt, supersede, THIRD_PERSON_AGAIN, vectorSimilarity, type ForgettingEntry, type MemoryKind, type MemoryRecord, type MemorySource, type RetrievalFactors, type ScoredMemory, type SessionSummary } from './memory';
+import { applyDecay, DEEP_RECALL_LIMIT, findSuperseded, formationPrompt, formationWindows, MEMORIES_PER_DAY, readFormation, type FormedNote, formatMemoryPrompt, isExplicitRecall, closeEvents, isWorthAnEvent, isWorthKeeping, isWorthRemembering, MEMORY_KINDS, migrateMemories, monthFoldPrompt, pruneMemories, readsAsSecondPerson, rememberInto, retrieveMemories, semanticSimilarities, summaryPrompt, supersede, THIRD_PERSON_AGAIN, vectorSimilarity, type ForgettingEntry, type MemoryKind, type MemoryRecord, type MemorySource, type RetrievalFactors, type ScoredMemory, type SessionSummary } from './memory';
 import { consolidateMemories, type ConsolidationChange } from './consolidation';
 import { appendToBlockValue, canEditBlock, findBlock, formatMemoryBlocks, replaceInBlockValue, resolveBlockValue, resetBlockToDerived, withEditedValue, type BlockSources, type MemoryBlock } from './blocks';
 import { forgetDevice, forgetEveryDevice, readWebAccess, setPassword, weakPassword, type WebAccess } from './web';
@@ -144,7 +144,7 @@ import type { Embedder } from './embeddings';
 import { retrieveContext } from './retrieveContext';
 import type { VaultSyncReport } from './obsidian';
 import { diaryNotes, herNote, indexNote, memoriesNote, nightNotes, placesNote, standingNote, writeNotes } from './vault';
-import { readSorting, sortInput, sortPrompt } from './categories';
+import { categoryOf, LEGACY_KIND, namesSomeoneElse, readSorting, sortInput, sortPrompt, type SortNote, type Sorted } from './categories';
 import { collectAll, collectDocker, collectDockerLight, collectGpu, collectGpuApps, collectProcesses, collectServices, collectSystem, diagnose, KNOWN_SERVICES, USER_SERVICES, type Diagnosis } from './system';
 import { carriedSamples, checkEvents, sampleFromCollectors, type EventThresholds, type SystemSample } from './systemState';
 
@@ -216,7 +216,6 @@ const ACTIVITY_RETENTION_DAYS = 90;
 // night), it stayed for good, and every restart paid to summarise it again
 // (review, 2026-09-17). Sixty runs to catch it instead of one.
 const SESSIONS_KEPT = ARCHIVE_RETENTION_DAYS + 60;
-const EVENTS_PER_DAY = 3;
 
 const live2dRoots = new Map<string, string>();
 let mainWindow: BrowserWindow | null = null;
@@ -648,15 +647,9 @@ function summariseSession(messages: { role?: string; content?: string }[], day: 
   // is summarised once, at the roll, over all of it — and re-summarising has to
   // be able to replace what the old behaviour left behind.
   if (!replace && getSessions().some(session => session.day === day)) return;
-  const said = foldAsleepExchanges(messages)
-    .filter(message => message.role === 'user' || message.role === 'assistant')
-    // Labelled `They:` and `Haru:` rather than `Them:` and `You:`. The note the
-    // model is about to write goes into her own system prompt, where "you" is
-    // her — so the input must not contain a second person at all, and the word
-    // the note should use for the user is the word its lines already carry.
-    .map(message => `${message.role === 'user' ? 'They' : 'Haru'}: ${String(message.content ?? '').slice(0, 300)}`)
-    .join('\n')
-    .slice(0, 6000);
+  const lines = dayLines(messages);
+  // The summary reads the start of the day; forming memories reads all of it (formDayMemories).
+  const said = lines.join('\n').slice(0, 6000);
   // Appended after the conversation is capped, so a long day at the keyboard
   // cannot push the day's talking out of the window.
   const transcript = [said, doing].filter(Boolean).join('\n\n');
@@ -683,7 +676,7 @@ function summariseSession(messages: { role?: string; content?: string }[], day: 
       .slice(-SESSIONS_KEPT);
     store.setSessions(kept);
     console.log(`[memory] summarised ${day} from ${messages.length} messages: ${summary}`);
-    extractDayEvents(messages, transcript, day, config);
+    void formDayMemories(lines, doing, day, config, messages.length);
   }).catch(error => console.warn('[memory] could not summarise session:', error instanceof Error ? error.message : error));
 }
 
@@ -729,33 +722,150 @@ function foldMonth(month: string, config: ProviderConfig, { attempt = 0 } = {}) 
 }
 
 /**
- * The second pass over a finished day: ask what happened that matters, gate the
- * answer, and promote it. Runs after the summary lands, in the same quiet
- * background rhythm — one more model call, never urgent.
+ * A day's conversation as the distilling passes read it. Labelled `They:` and
+ * `Haru:` rather than `Them:` and `You:`: the note the model is about to write
+ * goes into her own system prompt, where "you" is her — so the input must not
+ * contain a second person at all, and the word the note should use for the
+ * user is the word its lines already carry.
  */
-function extractDayEvents(messages: { role?: string; content?: string }[], transcript: string, day: string, config: ProviderConfig) {
-  // The transcript carries the day's activity as well as its conversation now,
-  // so a quiet day at a busy desk has something to mine. Guarding on the message
-  // count alone threw that away before looking at it.
-  if (messages.length < 4 && !transcript.trim()) return;
-  ollamaPost(
-    [{ role: 'system', content: eventsPrompt() }, { role: 'user', content: transcript }],
+function dayLines(messages: { role?: string; content?: string }[]): string[] {
+  return foldAsleepExchanges(messages)
+    .filter(message => message.role === 'user' || message.role === 'assistant')
+    .map(message => `${message.role === 'user' ? 'They' : 'Haru'}: ${String(message.content ?? '').slice(0, 300)}`);
+}
+
+/** Sort notes into categories on this machine's own model (categories.ts): new memories, and a day's formed notes as a second opinion. */
+async function sortNotes(notes: SortNote[]): Promise<Map<string, Sorted> | null> {
+  const config = store.get('ai.config') as ProviderConfig | undefined;
+  if (!config?.model || !notes.length) return null;
+  const message = await ollamaPost(
+    [{ role: 'system', content: sortPrompt(getProfile().nickname) }, { role: 'user', content: sortInput(notes, iso => localDateKey(zonedNow(CHAT_TIMEZONE, new Date(iso)))) }],
     config,
-    { tools: false, temperature: 0.2, maxTokens: 300 },
-  ).then(message => {
-    const candidates = eventCandidates(message.content ?? '');
-    if (!candidates.length) { console.log(`[memory] nothing eventful from ${day}`); return; }
-    let promoted = 0;
-    for (const line of candidates.slice(0, EVENTS_PER_DAY)) {
-      // The event gate is deliberately stricter than the general write path:
-      // extraction output is model prose, and "Haru to research X" or "Tommy
-      // cleaned up the room" is not an event in their life.
-      if (!isWorthAnEvent(line)) continue;
-      const saved = addMemory(line, 'event', undefined, { source: 'conversation', evidenceDetail: `from ${day}'s conversation`, emotion: localEmotion(line), emotionIntensity: readTone(line).heat });
-      if (saved?.record) { promoted += 1; console.log(`[memory] event from ${day}: "${line.slice(0, 60)}"`); }
+    { tools: false, temperature: 0, maxTokens: 40 * notes.length + 100 },
+  );
+  return readSorting(message.content ?? '', notes);
+}
+
+/**
+ * The second pass over a finished day: what it taught her about him, of every
+ * kind (memory.ts formationPrompt), read a window at a time over the whole day,
+ * gated, and kept with its category and day. Runs after the summary lands, in
+ * the same quiet background rhythm — never urgent.
+ */
+async function formDayMemories(lines: string[], doing: string, day: string, config: ProviderConfig, messageCount: number) {
+  if (forming) return;
+  if (lines.length < 4 && !doing) { markFormed(day, messageCount); return; }
+  forming = true;
+  try {
+    if (await formFrom(lines, doing, day, config)) markFormed(day, messageCount);
+  } finally {
+    forming = false;
+  }
+}
+
+/** Days already read for memories, with how many messages they had: a day that has grown is read again. */
+function formedDays(): Record<string, number> {
+  const saved = store.get('memory.formed');
+  return saved && typeof saved === 'object' && !Array.isArray(saved) ? saved as Record<string, number> : {};
+}
+
+function markFormed(day: string, messageCount: number): void {
+  store.set('memory.formed', { ...formedDays(), [day]: messageCount });
+}
+
+let forming = false;
+/** Older than this, a day's rules for her are left to his Preferences page (formFrom). */
+const OLD_RULE_DAYS = 7;
+/** How often the past is read for memories, a day at a time. */
+const FORMING_TICK_MS = 2 * 60_000;
+/** Nor while he is talking to her: each window is a call on the model her replies share. */
+const FORMING_QUIET_MS = 10 * 60_000;
+
+/**
+ * The days before typed memories existed, and any the day roll missed, read
+ * one at a time in the background — newest first, since the recent past is
+ * what she is most likely to be asked about. The same pass as the roll's.
+ */
+async function formingTick(): Promise<void> {
+  if (forming) return;
+  const config = store.get('ai.config') as ProviderConfig | undefined;
+  if (!config?.model) return;
+  const last = Date.parse(getMood().lastMessageAt ?? '');
+  if (Number.isFinite(last) && Date.now() - last < FORMING_QUIET_MS) return;
+  const today = currentChatDayKey();
+  const archive = store.getArchive();
+  const done = formedDays();
+  const day = Object.keys(archive).filter(key => !key.includes('#') && key < today).sort().reverse()
+    .find(key => done[key] !== (archive[key] ?? []).length);
+  if (!day) return;
+  const messages = (archive[day] ?? []) as { role?: string; content?: string }[];
+  await formDayMemories(dayLines(messages), activityDigest(day), day, config, messages.length);
+}
+
+/** One day's windows, gated, second-guessed and kept. False when the model could not be reached, so the day is tried again. */
+async function formFrom(lines: string[], doing: string, day: string, config: ProviderConfig): Promise<boolean> {
+  const userName = getProfile().nickname;
+  // A rule for her from more than a week back is not taken from the transcript:
+  // his Preferences page says what he wants now, and a rule he has since taken
+  // off it would come back from the day he first said it — and sit in every prompt.
+  const stale = Date.parse(`${day}T00:00:00Z`) < Date.now() - OLD_RULE_DAYS * 86_400_000;
+  // What she already holds that lasts, so a day does not write it down again.
+  const known = getMemories()
+    .filter(memory => !memory.supersededBy && memory.status !== 'archived' && ['identity', 'person', 'preference', 'instruction', 'shared', 'knowledge', 'ongoing'].includes(categoryOf(memory)))
+    .map(memory => memory.text)
+    .slice(-80);
+  const knownExactly = new Set(known.map(text => text.trim().toLowerCase()));
+  // The activity digest rides on the last window, so a long day of talk cannot push it out.
+  const windows = formationWindows(lines);
+  if (doing) {
+    if (windows.length) windows[windows.length - 1] += `\n\n${doing}`;
+    else windows.push(doing);
+  }
+  // Every window first, gated as ever; a person has to be somebody.
+  const candidates: FormedNote[] = [];
+  for (const part of windows) {
+    try {
+      const message = await ollamaPost([{ role: 'system', content: formationPrompt(day, known, userName) }, { role: 'user', content: part }], config, { tools: false, temperature: 0.2, maxTokens: 700 });
+      for (const note of readFormation(message.content ?? '')) {
+        if (knownExactly.has(note.note.trim().toLowerCase())) continue;   // copied off the list, not said that day
+        if (readsAsSecondPerson(note.note)) continue;
+        if (note.category === 'event' && !isWorthAnEvent(note.note)) continue;
+        if (note.category === 'person' && !namesSomeoneElse(note.note, userName)) continue;
+        candidates.push(note);
+      }
+    } catch (error) {
+      console.warn('[memory] could not form memories:', error instanceof Error ? error.message : error);
+      return false;
     }
-    if (!promoted) console.log(`[memory] no events survived the gate from ${day}`);
-  }).catch(error => console.warn('[memory] could not extract events:', error instanceof Error ? error.message : error));
+  }
+  // Then a second opinion from the sorter, which reads each note on its own:
+  // what it calls passing is dropped ("Apologized for slow replies while at
+  // work" had come back as an instruction, which would sit in every prompt),
+  // and where the two disagree on the kind its answer is taken — replayed, it
+  // was the better of the two ("Building a website" is under way, not a plan).
+  // Unreachable, the notes stand as formed.
+  const asked: SortNote[] = candidates.map((note, index) => ({ id: String(index), text: note.note, kind: LEGACY_KIND[note.category as keyof typeof LEGACY_KIND], createdAt: `${day}T12:00:00.000Z` }));
+  const second = await sortNotes(asked).catch(() => null);
+  let formed = 0;
+  let repeated = 0;
+  for (const [index, note] of candidates.entries()) {
+    if (formed >= MEMORIES_PER_DAY) break;
+    const opinion = second?.get(String(index));
+    if (opinion?.category === 'passing') { console.log(`[memory] set aside from ${day} as passing: "${note.note.slice(0, 80)}"`); continue; }
+    const category = opinion?.category ?? note.category;
+    if (category === 'instruction' && stale) { console.log(`[memory] set aside from ${day}, a rule too old to take from the transcript: "${note.note.slice(0, 80)}"`); continue; }
+    if (category === 'person' && !namesSomeoneElse(note.note, userName)) continue;
+    const when = category === 'plan' || category === 'event' ? opinion?.when ?? note.when : undefined;
+    const saved = addMemory(note.note, LEGACY_KIND[category as keyof typeof LEGACY_KIND], undefined, {
+      source: 'conversation', evidenceDetail: `from ${day}'s conversation`, category, when,
+      emotion: localEmotion(note.note), emotionIntensity: readTone(note.note).heat,
+    });
+    if (!saved?.record) continue;
+    if (saved.created) { formed += 1; console.log(`[memory] ${category} from ${day}: "${note.note.slice(0, 80)}"`); }
+    else repeated += 1;
+  }
+  if (!formed) console.log(`[memory] nothing new from ${day}${repeated ? ` (${repeated} already known)` : ''}`);
+  return true;
 }
 
 /**
@@ -4263,16 +4373,7 @@ const memoryStore = createMemoryStore({
   },
   // What each new memory is (categories.ts), sorted on this machine's own
   // model: a background job, twenty records a call, never urgent.
-  sort: async notes => {
-    const config = store.get('ai.config') as ProviderConfig | undefined;
-    if (!config?.model) return null;
-    const message = await ollamaPost(
-      [{ role: 'system', content: sortPrompt() }, { role: 'user', content: sortInput(notes, iso => localDateKey(zonedNow(CHAT_TIMEZONE, new Date(iso)))) }],
-      config,
-      { tools: false, temperature: 0, maxTokens: 40 * notes.length + 100 },
-    );
-    return readSorting(message.content ?? '', notes);
-  },
+  sort: notes => sortNotes(notes),
   // Her own life in one place — the her_own block renders it, so the chat
   // prompt no longer scatters the same lines separately. What is nearest in
   // time first: last night, the day's own reading, the week — then the things
@@ -12088,6 +12189,7 @@ app.whenReady().then(() => {
   setInterval(() => { void refreshRecallVectors(); }, 15 * 60_000);
   // Who is who: the finished days not yet read, a day a minute until caught up.
   setInterval(() => { void readGraphTick(); }, GRAPH_TICK_MS);
+  setInterval(() => { void formingTick(); }, FORMING_TICK_MS);
   // His page of what the graph believes: written at start, corrections read back hourly with the vault.
   setTimeout(() => syncGraphPage('startup'), 100_000);
   setTimeout(() => publishToVault('startup'), 30_000);

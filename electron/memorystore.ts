@@ -29,7 +29,7 @@ import { consolidateMemories, type ConsolidationChange } from './consolidation';
 import { mergeMemories, type MergeReport } from './memorysync';
 import { formatMemoryBlocks, type BlockSources, type MemoryBlock } from './blocks';
 import type { Embedder } from './embeddings';
-import { guessCategory, SORT_BATCH, type SortNote, type Sorted } from './categories';
+import { guessCategory, namesSomeoneElse, SORT_BATCH, type Category, type SortNote, type Sorted } from './categories';
 import type { EmotionName } from './emotion';
 
 /**
@@ -133,7 +133,7 @@ export function createMemoryStore(deps: MemoryStoreDeps) {
     text: string,
     kind: MemoryKind = 'fact',
     subject?: string,
-    extra: { source?: MemorySource; predicate?: string; object?: string; evidenceDetail?: string; emotion?: EmotionName; emotionIntensity?: number; resighting?: boolean } = {},
+    extra: { source?: MemorySource; predicate?: string; object?: string; evidenceDetail?: string; emotion?: EmotionName; emotionIntensity?: number; resighting?: boolean; category?: Category; when?: string } = {},
   ) {
     const fact = text.trim();
     if (!fact) return null;
@@ -155,6 +155,7 @@ export function createMemoryStore(deps: MemoryStoreDeps) {
       text: fact, kind, subject, id: randomUUID(), now: new Date().toISOString(),
       source: extra.source, predicate: extra.predicate, object: extra.object, evidenceDetail: extra.evidenceDetail,
       emotion: extra.emotion, emotionIntensity: extra.emotionIntensity, resighting: extra.resighting,
+      category: extra.category, when: extra.when,
     });
     const pruned = pruneMemories(memories, MAX_MEMORIES);
     if (pruned.evicted.length) {
@@ -240,7 +241,13 @@ export function createMemoryStore(deps: MemoryStoreDeps) {
         sorted += 1;
         // Raised on three separate days is not passing, whatever one read of
         // the line says: the pages he wrote himself are said again every day.
-        const category = answer.category === 'passing' && isRecurring(memory) ? guessCategory(memory) : answer.category;
+        // And a person has to be somebody: a note naming nobody but him is
+        // about him, and a person would be shown on every turn.
+        let category: Category = answer.category === 'passing' && isRecurring(memory) ? guessCategory(memory) : answer.category;
+        if (category === 'person' && !namesSomeoneElse(memory.text, deps.profile().nickname)) {
+          const guessed = guessCategory(memory);
+          category = guessed === 'person' ? 'identity' : guessed;
+        }
         const { when: _stale, ...rest } = memory;
         return answer.when && (category === 'plan' || category === 'event') ? { ...rest, category, when: answer.when } : { ...rest, category };
       });

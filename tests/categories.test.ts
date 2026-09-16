@@ -7,8 +7,8 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { CATEGORIES, CATEGORY_MEANING, categoryOf, guessCategory, isCategory, LEGACY_KIND, readSorting, sortInput, sortPrompt, UNDATED_PLAN_DAYS, type SortNote } from '../electron/categories';
-import { importanceOf, migrateMemories, pruneMemories, rememberInto, retrieveMemories, tidyEvidence, type MemoryRecord } from '../electron/memory';
+import { CATEGORIES, CATEGORY_MEANING, categoryOf, guessCategory, isCategory, LEGACY_KIND, namesSomeoneElse, readSorting, sortInput, sortPrompt, UNDATED_PLAN_DAYS, type SortNote } from '../electron/categories';
+import { formationPrompt, formationWindows, importanceOf, MEMORIES_PER_DAY, migrateMemories, pruneMemories, readFormation, rememberInto, retrieveMemories, tidyEvidence, type MemoryRecord } from '../electron/memory';
 import { defaultMemoryBlocks, formatMemoryBlocks, withoutRestatements } from '../electron/blocks';
 import { mergeMemories } from '../electron/memorysync';
 import { memoriesNote } from '../electron/vault';
@@ -144,11 +144,13 @@ test('a line read off the same page again is seen, not said again', () => {
   assert.equal(seen.record.evidence, undefined, 'no evidence entry for a resighting');
 });
 
-test('said again, a dormant or archived memory is current again — unless it was ticked off', () => {
+test('said again, a dormant memory is current again — not one ticked off, and not one shelved on purpose', () => {
   const dormant = record({ id: 'd', text: 'Is building a PC for Logan', status: 'dormant' });
   assert.equal(rememberInto([dormant], { text: 'Is building a PC for Logan', kind: 'fact', id: 'x', now: NOW.toISOString() }).record.status, 'active');
   const closed = record({ id: 'c', text: 'Pick up the motherboard from Umart', kind: 'event', status: 'dormant', evidence: [{ at: '2026-09-11T00:00:00.000Z', kind: 'closed', source: 'conversation' }] });
   assert.equal(rememberInto([closed], { text: 'Pick up the motherboard from Umart', kind: 'event', id: 'x', now: NOW.toISOString() }).record.status, 'dormant');
+  const retired = record({ id: 'r', text: 'Wants longer replies with actual content', kind: 'preference', status: 'archived', source: 'explicit' });
+  assert.equal(rememberInto([retired], { text: 'Wants longer replies with actual content', kind: 'preference', id: 'x', now: NOW.toISOString() }).record.status, 'archived');
 });
 
 test('the cap takes what was sorted as passing first, and never what is lasting', () => {
@@ -234,4 +236,74 @@ test('the vault page shows what a record was sorted as, and leaves out what is p
   assert.match(note.text, /- Works at Happytel on Sundays \*\(identity, 2026-09-10\)\*/);
   assert.doesNotMatch(note.text, /Discord/);
   assert.match(note.text, /count: 1/);
+});
+
+test('a person has to be somebody other than him, by name or by who they are to him', () => {
+  assert.equal(namesSomeoneElse('Tommy complained about build failing issues', 'Tommy'), false);
+  assert.equal(namesSomeoneElse("Tommy's mum — lives in Perth", 'Tommy'), true);
+  assert.equal(namesSomeoneElse('Ammie — friend; ordered a custom PC for her birthday', 'Tommy'), true);
+  assert.equal(namesSomeoneElse('Is in a relationship with Emma Wilson since June 2024', 'Tommy'), true);
+  assert.equal(namesSomeoneElse('They are late for work and tired', 'Tommy'), false);
+  assert.match(sortPrompt('Tommy'), /The user is Tommy: a note about Tommy is a note about them/);
+  assert.doesNotMatch(sortPrompt(), /The user is/);
+});
+
+test('a day is read whole, a window at a time, and each window is whole lines', () => {
+  const lines = Array.from({ length: 50 }, (_, index) => `They: line ${index} ${'x'.repeat(290)}`);
+  const windows = formationWindows(lines, 8000);
+  assert.ok(windows.length >= 2);
+  assert.ok(windows.every(part => part.length <= 8000));
+  assert.equal(windows.join('\n'), lines.join('\n'), 'nothing dropped, nothing split');
+  assert.deepEqual(formationWindows([]), []);
+  assert.ok(MEMORIES_PER_DAY > 3);
+});
+
+test('what a day formed is read in its shape, with a day only for plans and events', () => {
+  const notes = readFormation([
+    'event | 2026-09-10 | Fixed Logan’s build; the wrong boot drive was selected.',
+    '- person | - | Logan — a customer whose MSI X870E build would not boot',
+    '3. plan | 2026-09-09 | Will test the replacement RAM kit at 6000MHz',
+    'identity | 2026-09-10 | Works at Happytel Rockingham on Sundays',
+    'passing | - | Ordered McDonald’s',
+    'nothing notable',
+    'mood | - | Tired',
+  ].join('\n'));
+  assert.deepEqual(notes, [
+    { category: 'event', when: '2026-09-10', note: 'Fixed Logan’s build; the wrong boot drive was selected' },
+    { category: 'person', note: 'Logan — a customer whose MSI X870E build would not boot' },
+    { category: 'plan', when: '2026-09-09', note: 'Will test the replacement RAM kit at 6000MHz' },
+    { category: 'identity', note: 'Works at Happytel Rockingham on Sundays' },
+  ]);
+});
+
+test('the day prompt names the day, the user, every kind but passing, and what she already knows', () => {
+  const prompt = formationPrompt('2026-09-14', ['Works at Happytel Rockingham on Sundays'], 'Tommy');
+  assert.match(prompt, /This conversation was on Monday 2026-09-14/);
+  assert.match(prompt, /The user is Tommy\./);
+  assert.match(prompt, /^instruction — /m);
+  assert.doesNotMatch(prompt, /^passing — /m);
+  assert.match(prompt, /never write it as something they did/);
+  assert.match(prompt, /- Works at Happytel Rockingham on Sundays/);
+  assert.doesNotMatch(formationPrompt('2026-09-14', []), /already knows/);
+});
+
+test('a memory formed with its category and day keeps them, and a repeat does not unsort what was sorted', () => {
+  const formed = rememberInto([], { text: 'Has a dentist appointment on Wednesday', kind: 'event', id: 'd', now: NOW.toISOString(), category: 'plan', when: '2026-09-23' });
+  assert.equal(formed.record.category, 'plan');
+  assert.equal(formed.record.when, '2026-09-23');
+  const again = rememberInto([{ ...formed.record, category: 'event' }], { text: 'Has a dentist appointment on Wednesday', kind: 'event', id: 'x', now: NOW.toISOString(), category: 'plan', when: '2026-09-30' });
+  assert.equal(again.record.category, 'event');
+  assert.equal(again.record.when, '2026-09-23');
+  const noDay = rememberInto([], { text: 'Works at the cinema on weekends', kind: 'fact', id: 'c', now: NOW.toISOString(), category: 'identity', when: 'someday' });
+  assert.equal('when' in noDay.record, false);
+});
+
+test('with many people on record, the ones the message is about are shown', async () => {
+  const { PEOPLE_LIMIT } = await import('../electron/blocks');
+  const people = Array.from({ length: PEOPLE_LIMIT + 6 }, (_, index) => record({ id: `p${index}`, text: `Person${'abcdefghijklmnopqrstuvwxyz'[index]} is a customer they know`, kind: 'relationship', category: 'person', importance: 0.8 }));
+  people.push(record({ id: 'logan', text: 'Logan is a customer whose MSI build would not boot', kind: 'relationship', category: 'person', importance: 0.8, lastSeenAt: '2026-08-01T00:00:00.000Z' }));
+  const { text } = formatMemoryBlocks(defaultMemoryBlocks(), { character: { identity: '', style: '' }, profile: { nickname: 'Tommy', occupation: '', about: '' }, memories: people, sessions: [], query: 'did Logan ever pick up his build', semantic: new Map([['logan', 0.6]]), now: NOW }, { omit: ['persona'], compact: true });
+  const section = text.match(/<relationship>[\s\S]*?<\/relationship>/)?.[0] ?? '';
+  assert.match(section, /Logan is a customer/);
+  assert.equal(section.split('\n').filter(line => line.startsWith('- ')).length, PEOPLE_LIMIT);
 });

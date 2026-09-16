@@ -341,3 +341,16 @@ test('a page line synced again is a resighting, not another mention', () => {
   assert.equal(h.saved[0].mentions, 1);
   assert.equal(h.saved[0].evidence?.length, 1);
 });
+
+test('a note sorted as a person that names nobody but him is kept about him instead', async () => {
+  const h = harness({
+    memories: [
+      record({ id: 'him', text: 'Tom complained about the build failing again', kind: 'event' }),
+      record({ id: 'mum', text: "Tom's mum lives in Perth", kind: 'relationship' }),
+    ],
+    sort: async () => new Map([['him', { category: 'person' as const }], ['mum', { category: 'person' as const }]]),
+  });
+  await h.store.sortPending();
+  assert.equal(h.saved.find(memory => memory.id === 'him')?.category, 'event');
+  assert.equal(h.saved.find(memory => memory.id === 'mum')?.category, 'person');
+});
