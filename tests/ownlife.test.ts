@@ -102,6 +102,18 @@ test('wantsNote shows only the declared and working ones, with progress', () => 
   assert.doesNotMatch(note, /argue about Lain/);
 });
 
+test('wantsNote leaves out a declared want her tastes already say, and keeps one she has worked on', () => {
+  const interests = [{ name: 'Hades', wants: 'read what Zagreus says back to Charon' }, { name: 'Bebop', wants: 'to learn piano' }];
+  const note = wantsNote([
+    { id: '1', interest: 'Hades', text: 'read what Zagreus says back to Charon', since: 'd', nights: 0, status: 'declared' as const },
+    { id: '2', interest: 'Bebop', text: 'to learn piano', since: 'd', nights: 2, status: 'working' as const, note: 'the piano is the problem' },
+    { id: '3', interest: 'Lain', text: 'to find someone who has seen it', since: 'd', nights: 0, status: 'declared' as const },
+  ], interests);
+  assert.doesNotMatch(note, /Zagreus/, 'already in the tastes block');
+  assert.match(note, /Bebop: learn piano \(night 2\) — the piano is the problem/);
+  assert.match(note, /Lain: find someone who has seen it \(declared\)/, 'no interest states it, so it stays');
+});
+
 test('wantQuery turns the want into a search and the instruction names the attempt', () => {
   assert.equal(wantQuery({ id: '1', interest: 'Bebop', text: 'to learn piano just to play The Real Folk Blues badly', since: 'd', nights: 0, status: 'declared' }), 'how to learn piano just to play The Real Folk Blues badly');
   const instruction = wantInstruction({ id: '1', interest: 'Bebop', text: 'to learn piano', since: 'd', nights: 1, status: 'working' }, { kind: 'slog' }, 'the reading');

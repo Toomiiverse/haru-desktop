@@ -162,8 +162,15 @@ export function advanceWant(want: Want, outcome: WantOutcome, note: string): Wan
 }
 
 /** What the block shows of the wants she is still at. */
-export function wantsNote(wants: Want[]): string {
-  const active = wants.filter(want => want.status === 'declared' || want.status === 'working');
+export function wantsNote(wants: Want[], interests: { name: string; wants?: string }[] = []): string {
+  // A want she has only declared is already in her tastes, word for word, as
+  // the end of that interest's view ("I want to…"). Listed here as well it was
+  // said twice — seven of fifteen lines on 2026-09-17, about a thousand chars —
+  // and the block ran over its budget, which cuts from the tail: her diary.
+  // One she has worked on stays, for the nights and the note.
+  const stated = new Set(interests.filter(interest => interest.name && interest.wants).map(interest => wantKey(interest.name, interest.wants!)));
+  const active = wants.filter(want => want.status === 'working'
+    || (want.status === 'declared' && !stated.has(wantKey(want.interest ?? '', want.text))));
   if (!active.length) return '';
   const lines = active.map(want => {
     const bit = want.interest ? `${want.interest}: ${stripWant(want.text)}` : stripWant(want.text);

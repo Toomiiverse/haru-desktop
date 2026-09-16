@@ -4255,7 +4255,7 @@ const memoryStore = createMemoryStore({
       weekNote(getWeek(), today),
       tastesInstruction(interests),
       firstsNote(interests, today),
-      wantsNote(getWants()),
+      wantsNote(getWants(), interests),
       // Right behind the night, not at the tail: the block is cut from the
       // end when it is over budget, and this is the line that answers "what
       // chapter are you up to".

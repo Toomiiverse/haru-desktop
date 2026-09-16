@@ -185,6 +185,9 @@ export function deepen(interests: Interest[], id: string, next: { stance: string
  * that they survive contact with theirs. Told also where the edge of her
  * knowledge is, so a debate does not become an invention contest.
  */
+/** How a want that is not a verb phrase starts: a name, an article, "for them to…". */
+const NOT_A_VERB = /^(?:[A-Z]|(?:a|an|the|for|season|more|less|someone|people|them|his|her|their|my|some|any|no)\b)/;
+
 export function tastesInstruction(interests: Interest[]): string {
   const settled = interests.filter(interest => interest.stance);
   if (!settled.length) return '';
@@ -195,7 +198,12 @@ export function tastesInstruction(interests: Interest[]): string {
     if (interest.favourite) bits.push(`The bit of it I rate above the rest is ${sentence(interest.favourite)}.`);
     // First person, like the rest of her own views: written as "You want to see
     // Denji learn something" she said it straight back to him.
-    if (interest.wants) { const want = sentence(interest.wants); bits.push(`I want ${/^to\b/i.test(want) ? want : `to ${want}`}.`); }
+    // "I want to" only fits a verb: glued onto "For them to stop…" or "a proper
+    // English dub" it read "I want to For them to stop…" (2026-09-17).
+    if (interest.wants) {
+      const want = sentence(interest.wants);
+      bits.push(/^to\b/i.test(want) ? `I want ${want}.` : NOT_A_VERB.test(want) ? `What I want from it: ${want}.` : `I want to ${want}.`);
+    }
     // The fact under the view, dated, so "not finished" is never said from an
     // old want when the reading has since said otherwise.
     if (interest.stands) bits.push(`Where it stands, as I last read (${interest.lastAt.slice(0, 10)}): ${sentence(interest.stands)}.`);
