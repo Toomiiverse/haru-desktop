@@ -31,6 +31,13 @@ test('eventsPrompt asks for lasting events only', () => {
   assert.match(prompt, /Reply with the lines only/);
 });
 
+test('eventsPrompt keeps her own life out of his events', () => {
+  const prompt = eventsPrompt();
+  assert.match(prompt, /"They:" are the user, lines starting "Haru:" are you/);
+  assert.match(prompt, /what she read or watched, when she sleeps or logs off/);
+  assert.match(prompt, /never write it as something they did/);
+});
+
 test('isWorthAnEvent accepts real, nameable events', () => {
   assert.equal(isWorthAnEvent('Tommy downloaded Linux Arch'), true);
   assert.equal(isWorthAnEvent('Fired up the PC Project website'), true);

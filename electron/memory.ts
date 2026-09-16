@@ -977,7 +977,16 @@ export function isWorthKeeping(summary: string) {
 export function eventsPrompt() {
   return [
     'List the events from this conversation worth remembering, one per line, under 15 words each, as a note to your future self.',
+    // Her own life was being filed as his. On 2026-09-15 she said "I finally
+    // started Chainsaw Man last night" and "I'm logging off at 23:40", and the
+    // 9B wrote it down as "They started Chainsaw Man late at night despite
+    // logging off at 23:40" — every line had to be about them, so her lines
+    // became theirs. The labels were already right; the rule about them was
+    // never said.
+    'The transcript says who spoke: lines starting "They:" are the user, lines starting "Haru:" are you.',
     'Each line is about the user. Call them "they" — never "you" or "your", which in your own notes mean you, Haru.',
+    'What Haru says about herself — what she read or watched, when she sleeps or logs off, her plans and opinions — is your own life, not theirs: never write it as something they did.',
+    'Only note something about them that their own lines, or what they had open, show actually happened; not what Haru asked, guessed or suggested.',
     'Include only what will still matter in a month: decisions made, projects completed or changed, notable personal events, lasting changes to their setup or plans.',
     'Skip routine errands, reminders, small talk and passing feelings.',
     'If nothing qualifies, reply with exactly: nothing notable.',
