@@ -2,7 +2,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { applyExtraction, emptyGraph, isCurrent, type FactGraph } from '../electron/factgraph';
+import { applyExtraction, emptyGraph, isCurrent, isRejected, rejectionOf, type FactGraph } from '../electron/factgraph';
 import { applyGraphPage, pageReportLine, readGraphPage, renderGraphPage } from '../electron/graphpage';
 
 const NOW = new Date('2026-09-17T01:00:00Z');
@@ -108,4 +108,63 @@ test('a page that lost most of its lines at once, or was never written, changes 
   assert.equal(blank.graph.facts.length, graph().facts.length, 'a blank page is not a page of deletions');
   const never = applyGraphPage(graph(), readGraphPage(''), DAY, NOW);
   assert.equal(never.graph.facts.length, graph().facts.length);
+});
+
+test('a line struck whole, hidden mark and all, is history — not a deletion', () => {
+  // Found 2026-09-17: "- ~~Tommy uses Discord. %%f35%%~~" read as a line with
+  // no id, so the fact was forgotten and rejected instead of kept as history.
+  const text = renderGraphPage(graph(), NOW).text;
+  for (const struck of [
+    '- ~~Tommy works at Happytel Rockingham every Sunday from 12-4:30. %%f74%%~~',
+    '- ~~Tommy works at Happytel Rockingham every Sunday from 12-4:30.~~ %%f74%%',
+    '- ~~ Tommy works at Happytel Rockingham every Sunday from 12-4:30. %%f74%% ~~   ',
+  ]) {
+    const page = readGraphPage(text.replace('- Tommy works at Happytel Rockingham every Sunday from 12-4:30. %%f74%%', struck));
+    assert.deepEqual(page.facts.get('f74'), { text: 'Tommy works at Happytel Rockingham every Sunday from 12-4:30.', struck: true }, struck);
+    assert.deepEqual(page.added, [], 'not taken for a new bullet of his either');
+    const { graph: after, report } = applyGraphPage(written(), page, DAY, NOW);
+    assert.equal(after.facts.find(fact => fact.id === 'f74')?.until, DAY, struck);
+    assert.equal(after.rejected?.length ?? 0, 0, struck);
+    assert.equal(pageReportLine(report), '1 no longer true', struck);
+  }
+  // History written with its mark and date inside the strike is still the same history, unchanged.
+  const history = readGraphPage(text.replace('- ~~Tommy lives in Joondalup.~~ (until 2026-08-20) %%f9%%', '- ~~Tommy lives in Joondalup. (until 2026-08-20) %%f9%%~~'));
+  assert.deepEqual(history.facts.get('f9'), { text: 'Tommy lives in Joondalup.', struck: true });
+  assert.equal(pageReportLine(applyGraphPage(written(), history, DAY, NOW).report), '');
+});
+
+test('a rejection holds by name after the name itself was pruned, so a fresh id does not bring the fact back', () => {
+  const start = graph();
+  start.entities.push({ id: 'e61', name: 'Pharisees', kind: 'organisation', aliases: ['The Pharisees'], firstSeen: '2026-09-10', lastSeen: '2026-09-10' });
+  start.facts.push({ id: 'f62', subject: 'e0', relation: 'member of', object: 'e61', sentence: 'Tommy is a member of the Pharisees.', learned: '2026-09-10', confirmed: '2026-09-10', days: 1 });
+  const shown = { ...start, page: renderGraphPage(start, NOW).written };
+  const { graph: corrected } = applyGraphPage(shown, readGraphPage(renderGraphPage(start, NOW).text.replace('- Tommy is a member of the Pharisees. %%f62%%\n', '')), DAY, NOW);
+  assert.equal(corrected.entities.some(entity => entity.id === 'e61'), false, 'its only fact gone, the name went with it');
+  assert.deepEqual(corrected.rejected?.[0].objectNames, ['Pharisees']);
+  const chunk = 'Tommy: the Pharisees played again, still a member of the Pharisees somehow';
+  const { graph: next, report } = applyExtraction(corrected, {
+    entities: [{ name: 'The Pharisees', kind: 'organisation', aliases: [] }],
+    facts: [{ subject: 'Tommy', relation: 'member of', object: 'The Pharisees', sentence: 'Tommy is in the Pharisees.' }],
+    ended: [],
+  }, { day: '2026-09-18', chunk, userName: 'Tommy' });
+  assert.ok(report.rejected.some(line => line.includes('he said it is wrong')));
+  assert.equal(next.facts.some(fact => fact.sentence.includes('Pharisees')), false);
+  assert.equal(next.rejected?.length, 1);
+
+  // A rejection from before names were kept still refuses by id, and picks the names up while its entity is still here.
+  const { graph: deleted } = applyGraphPage(written(), readGraphPage(renderGraphPage(graph(), NOW).text.replace('- Tommy works at Umart. %%f31%%\n', '')), DAY, NOW);
+  const old = { ...deleted, rejected: deleted.rejected!.map(({ subjectNames, objectNames, ...rest }) => rest) };
+  const again = applyExtraction(old, {
+    entities: [{ name: 'Umart', kind: 'place', aliases: [] }],
+    facts: [{ subject: 'Tommy', relation: 'works at', object: 'Umart', sentence: 'Tommy works at Umart.' }],
+    ended: [],
+  }, { day: '2026-09-18', chunk: 'Tommy: back at Umart again, work was slow', userName: 'Tommy' });
+  assert.ok(again.report.rejected.some(line => line.includes('he said it is wrong')));
+  assert.deepEqual(again.graph.rejected?.[0].objectNames, ['Umart', 'U-Mart']);
+
+  // A name held by a rejection is a proper name: "the shop" is two places at once and names neither.
+  const shop = rejectionOf(graph().facts.find(fact => fact.id === 'f74')!, NOW.toISOString(), ['Tommy'], ['Happytel Rockingham', 'the shop']);
+  assert.deepEqual(shop.objectNames, ['Happytel Rockingham']);
+  assert.equal(isRejected([shop], { subject: 'e0', object: 'e5', relation: 'works at', words: new Set(['works']), subjectNames: ['Tommy'], objectNames: ['The PC Project', 'the shop'] }), false);
+  assert.equal(isRejected([shop], { subject: 'e0', object: 'e90', relation: 'works at', words: new Set(['works']), subjectNames: ['Tommy'], objectNames: ['happytel rockingham'] }), true, 'the same name, any case, under a new id');
 });

@@ -8154,6 +8154,13 @@ const GRAPH_TICK_MS = 60_000;
 const GRAPH_TRIES = 3;
 let readingGraph = false;
 const graphFailures = new Map<string, number>();
+/**
+ * Day → how far into it a read got before a piece failed, for the same
+ * messages under the same name, so a retry starts at the piece that failed
+ * instead of paying for the ones already folded in. Held in memory only: a
+ * restart mid-day pays for those pieces once more, which is rare and cheap.
+ */
+const graphPiecesRead = new Map<string, { of: string; pieces: number }>();
 
 function graphUserName(): string {
   return getProfile().nickname.trim() || 'the user';
@@ -8178,13 +8185,22 @@ async function readGraphTick(): Promise<void> {
   const archive = store.getArchive();
   const read = store.getFactGraph().read;
   // Oldest first, finished days only; a day that has grown since it was read is read again.
-  const day = Object.keys(archive).filter(key => !key.includes('#') && key < today).sort()
+  // Finished means before the chat's own day as well as the clock's: in the
+  // minute after 05:00 the clock has rolled but performChatResetIfDue has not,
+  // and a day he pressed New chat on already has an archive entry — half of it.
+  // Read then, it was paid for twice once the reset filed the rest (2026-09-17).
+  const day = Object.keys(archive).filter(key => !key.includes('#') && key < today && key < chatDayKey()).sort()
     .find(key => read[key] !== (archive[key] ?? []).length);
   if (!day) return;
   readingGraph = true;
   try {
-    const done = await readDayIntoGraph(day, (archive[day] ?? []) as { role?: string; content?: unknown }[], brain);
-    if (done) { graphFailures.delete(day); syncGraphPage(`read ${day}`); return; }
+    const outcome = await readDayIntoGraph(day, (archive[day] ?? []) as { role?: string; content?: unknown }[], brain);
+    if (outcome === 'read') { graphFailures.delete(day); graphPiecesRead.delete(day); syncGraphPage(`read ${day}`); return; }
+    // No answer at all — the network, an HTTP status, credit run out — says
+    // nothing about the day. Counting it spent all three tries in a three-minute
+    // outage and marked the day read for good, unread (2026-09-17). Only a reply
+    // that came back and could not be used is a try; this waits for the next tick.
+    if (outcome === 'unanswered') return;
     throw new Error('the reply could not be read');
   } catch (error) {
     const tries = (graphFailures.get(day) ?? 0) + 1;
@@ -8193,6 +8209,7 @@ async function readGraphTick(): Promise<void> {
     if (tries >= GRAPH_TRIES) {
       const graph = store.getFactGraph();
       store.setFactGraph({ ...graph, read: { ...graph.read, [day]: (archive[day] ?? []).length } });
+      graphPiecesRead.delete(day);
       console.warn(`[graph] skipping ${day} until it changes`);
     }
   } finally {
@@ -8226,19 +8243,32 @@ function syncGraphPage(reason: string): void {
   }
 }
 
-/** Every piece of one day, in order. False when a reply could not be read — the day is then left unmarked to try again. */
-async function readDayIntoGraph(day: string, messages: { role?: string; content?: unknown }[], brain: ProviderConfig): Promise<boolean> {
+/**
+ * Every piece of one day, in order. 'unreadable' when a reply came back that
+ * could not be used, 'unanswered' when a call got no reply at all — either way
+ * the day is left unmarked to try again, from the piece that failed.
+ */
+async function readDayIntoGraph(day: string, messages: { role?: string; content?: unknown }[], brain: ProviderConfig): Promise<'read' | 'unreadable' | 'unanswered'> {
   const userName = graphUserName();
   const chunks = dayChunks(messages, userName);
   const totals = { added: 0, confirmed: 0, ended: 0, refused: 0 };
-  for (const chunk of chunks) {
-    const reply = await ollamaPost(
-      [{ role: 'system', content: extractionPrompt(userName) }, { role: 'user', content: extractionInput(day, knownBlock(store.getFactGraph(), chunk, userName), chunk) }],
-      brain,
-      { tools: false, temperature: 0.1, format: EXTRACTION_SCHEMA, maxTokens: 3000 },
-    );
+  const of = `${messages.length}:${userName}`;
+  const already = graphPiecesRead.get(day)?.of === of ? graphPiecesRead.get(day)!.pieces : 0;
+  for (const [index, chunk] of chunks.entries()) {
+    if (index < already) continue;
+    let reply: Awaited<ReturnType<typeof ollamaPost>>;
+    try {
+      reply = await ollamaPost(
+        [{ role: 'system', content: extractionPrompt(userName) }, { role: 'user', content: extractionInput(day, knownBlock(store.getFactGraph(), chunk, userName), chunk) }],
+        brain,
+        { tools: false, temperature: 0.1, format: EXTRACTION_SCHEMA, maxTokens: 3000 },
+      );
+    } catch (error) {
+      console.warn(`[graph] no answer reading ${day} (piece ${index + 1} of ${chunks.length}), trying again next tick: ${error instanceof Error ? error.message : error}`);
+      return 'unanswered';
+    }
     const extraction = readExtraction(reply.content ?? '');
-    if (!extraction) return false;
+    if (!extraction) return 'unreadable';
     const { graph, report } = applyExtraction(store.getFactGraph(), extraction, { day, chunk, userName });
     store.setFactGraph(graph);
     totals.added += report.added;
@@ -8246,11 +8276,12 @@ async function readDayIntoGraph(day: string, messages: { role?: string; content?
     totals.ended += report.ended;
     totals.refused += report.rejected.length;
     if (report.rejected.length) console.log(`[graph] ${day}: refused ${report.rejected.slice(0, 4).join(' | ')}${report.rejected.length > 4 ? ` and ${report.rejected.length - 4} more` : ''}`);
+    graphPiecesRead.set(day, { of, pieces: index + 1 });
   }
   const graph = store.getFactGraph();
   store.setFactGraph({ ...graph, read: { ...graph.read, [day]: messages.length } });
-  console.log(`[graph] read ${day}: ${chunks.length} piece(s), +${totals.added} fact(s), ${totals.confirmed} confirmed, ${totals.ended} ended${totals.refused ? `, ${totals.refused} refused` : ''} — ${graph.facts.length} facts about ${graph.entities.length} names in all`);
-  return true;
+  console.log(`[graph] read ${day}: ${chunks.length} piece(s)${already ? ` (${already} read before a failed try)` : ''}, +${totals.added} fact(s), ${totals.confirmed} confirmed, ${totals.ended} ended${totals.refused ? `, ${totals.refused} refused` : ''} — ${graph.facts.length} facts about ${graph.entities.length} names in all`);
+  return 'read';
 }
 
 // -- things to come back to (scheduler.ts) ----------------------------------------

@@ -83,7 +83,15 @@ export type FactGraph = {
   page?: PageWritten;
 };
 
-export type Rejection = { subject: string; object?: string; value?: string; relation: string; words: string[]; at: string };
+/**
+ * subjectNames and objectNames are the names each side went by when he said no.
+ * The ids alone did not hold (2026-09-17): a fact that was the only one about
+ * somebody took that somebody with it when it was deleted, the next read of a
+ * day minted a fresh id for the same name, and the rejection was left pointing
+ * at nothing while the fact came back. Rejections from before carry no names
+ * and still match by id.
+ */
+export type Rejection = { subject: string; object?: string; value?: string; relation: string; words: string[]; at: string; subjectNames?: string[]; objectNames?: string[] };
 export type PageWritten = { at: string; facts: Record<string, { sentence: string; struck: boolean }>; entities: Record<string, string> };
 
 /** The user is always entity e0 — every day is about him. */
@@ -215,6 +223,80 @@ function containsTerm(haystack: string, term: string): boolean {
 
 function searchable(text: string): string {
   return ` ${String(text ?? '').normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[’`]/g, "'").replace(/'s\b/g, '').replace(/[^a-z0-9]+/g, ' ').trim()} `;
+}
+
+/**
+ * The commonest English words, three letters and up (shorter never match).
+ * A name that is one of these — Square the payment company, The Office once
+ * "the" falls away — is named by a message only where it is written with a
+ * capital mid-sentence; otherwise "back to square one" brings in Square. Kept
+ * to ordinary words on purpose: the people in his life (Emma, Sam, Logan,
+ * Ryan, Johnny) are not words, and a name that is a word as well as a name
+ * (Will, Mark) still counts when it is written as a name.
+ */
+const COMMON_WORDS = new Set(`
+the and for are but not you all any can had her was one our out day get has him his how man new now old see two way who did its let put say she too use
+that with have this will your from they know want been good much some time very when come here just like long make many more only over such take than them
+well were what where which while would there their these those then into about after again also back because before being below between both could down each
+even every few further having off once other ought ours own same should since still through under until upon why yet yes yeah yep nope okay lol haha
+gonna wanna gotta thanks thank please sorry hey hello bye maybe really actually probably pretty quite rather almost always never sometimes often usually
+already soon later today tonight tomorrow yesterday morning afternoon evening night week weekend month year hour minute second moment
+hers herself himself itself themselves yourself yours mine anyone anything anybody everyone everything everybody someone something somebody nobody nothing none
+three four five six seven eight nine ten twenty hundred thousand first third last next half
+ask become begin believe bring buy call care carry change check choose close cook cost cut decide die drink drive eat end enjoy explain fall feel fight fill
+find finish fit fix fly follow forget give grow happen hate hear help hide hit hold hope hurt keep kill laugh lay lead learn leave lie listen live look lose love
+mean meet miss move need open pass pay pick plan play pull push reach read remember rest return ride ring rise run save seem sell send set share show shut sing
+sit sleep smile sound speak spend stand start stay stop study talk teach tell think throw touch travel try turn understand visit wait wake walk wash watch wear
+win wish wonder work worry write
+said made went gone came took taken gave given got gotten told thought knew known felt left kept found saw seen done brought bought caught taught sent spent
+built held stood understood ran sat met lost paid heard meant led fell fallen grew grown drew drawn wrote written spoke spoken broke broken chose chosen drove
+driven ate eaten slept woke woken won sang sung began begun became forgot forgotten wore worn hid hidden shot hung stuck swam threw thrown flew flown rode
+ridden rose risen shook shaken fed fought sought laid lit dealt quit
+people person thing place world life home house room door car road street city town country school class job money food water game show movie film book
+story music song phone computer internet name word friend family kid child children baby girl boy woman men women guy dude mate team group company business
+shop store office part side point fact case idea problem question answer reason issue lot kind sort type number line top bottom front head face hand eye body
+heart mind window table bed chair floor wall kitchen bathroom garden yard dog cat bird fish tree fire air sun moon star sky rain snow weather heat summer
+winter spring autumn lunch dinner breakfast coffee tea beer bread meat chicken rice pizza power light voice picture photo video message text chat email news
+paper letter list project test exam grade lesson system program app site page screen level fun trip holiday gift present future past history war peace law
+rule government state area land sea river lake hill mountain island beach park field farm market bank hospital church club bar restaurant hotel station airport
+train bus plane boat bike ship truck board card box bag bottle cup glass plate key lock clock shirt shoes dress hat coat price bill cash deal sale order
+meeting interview result effect research science health doctor police army king art square mark
+great best better bad worse worst big small little large short high low young early late hard easy fast slow hot cold warm cool nice fine sure real true false
+right wrong full empty free busy ready happy sad glad angry tired sick dead alive clear dark bright black white red blue green yellow brown pink purple grey
+gray gold silver heavy strong weak rich poor cheap expensive clean dirty quiet loud safe dangerous simple important different whole main certain able likely
+possible impossible final major minor common basic entire perfect favourite favorite funny weird crazy cute beautiful ugly lovely awesome amazing boring
+interesting serious honest
+alone along anyway around away else enough especially ever everywhere far however instead least less near nearly outside inside perhaps quickly together
+`.split(/\s+/).filter(Boolean));
+
+/** Whether a word is one of the commonest, as written or with an ordinary ending taken off: "walking" is "walk", "parties" is "party". */
+function isCommonWord(word: string): boolean {
+  const stems = [
+    word,
+    word.replace(/s$/, ''), word.replace(/es$/, ''), word.replace(/ies$/, 'y'),
+    word.replace(/ed$/, ''), word.replace(/ed$/, 'e'), word.replace(/ied$/, 'y'), word.replace(/(.)\1ed$/, '$1'),
+    word.replace(/ing$/, ''), word.replace(/ing$/, 'e'), word.replace(/(.)\1ing$/, '$1'),
+  ];
+  return stems.some(stem => stem.length >= 3 && COMMON_WORDS.has(stem));
+}
+
+/**
+ * Whether the message writes this word with a capital where a sentence does
+ * not begin: "paid through Square" names it, "Square is down" and "square one"
+ * do not. The start of the text, of a line, and anything after . ! ? or : (a
+ * transcript line's "Tommy:" label) count as a sentence beginning.
+ */
+function capitalisedMidSentence(text: string, word: string): boolean {
+  const plain = String(text ?? '').normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[’`]/g, "'");
+  const pattern = new RegExp(`(?<![A-Za-z0-9])${word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:'s|s)?(?![A-Za-z0-9])`, 'gi');
+  for (const match of plain.matchAll(pattern)) {
+    if (!/^[A-Z]/.test(match[0])) continue;
+    const before = plain.slice(0, match.index);
+    const lead = before.match(/[\s"'“”‘(\[*_~•-]*$/)?.[0] ?? '';
+    const prior = before.slice(0, before.length - lead.length);
+    if (prior && !/[.!?:…]$/.test(prior) && !lead.includes('\n')) return true;
+  }
+  return false;
 }
 
 /**
@@ -389,12 +471,42 @@ const ADDRESSED = /\b(you|your|yours|yourself|i|me|my|mine)\b/i;
 /** Birthdays do not move; a second one for the same person is a correction. */
 const ONE_ONLY = new Set(['birthday', 'born on', 'date of birth', 'birth date']);
 
-/** The record of a fact he said is wrong: who it was about, what it tied them to, how it was said. */
-export function rejectionOf(fact: GraphFact, at: string, names: string[] = []): Rejection {
+/**
+ * The record of a fact he said is wrong: who it was about, what it tied them
+ * to, how it was said — and the names both sides went by, so the rejection
+ * outlives the ids (see Rejection).
+ */
+export function rejectionOf(fact: GraphFact, at: string, subjectNames: string[] = [], objectNames: string[] = []): Rejection {
+  const subjects = properNames(subjectNames);
+  const objects = fact.object ? properNames(objectNames) : [];
   return {
-    subject: fact.subject, relation: relationKey(fact.relation), words: [...wordsBesides(fact.sentence, names)], at,
+    subject: fact.subject, relation: relationKey(fact.relation), words: [...wordsBesides(fact.sentence, [...subjectNames, ...objectNames])], at,
     ...(fact.object ? { object: fact.object } : { value: searchable(fact.value ?? '').trim() }),
+    ...(subjects.length ? { subjectNames: subjects } : {}),
+    ...(objects.length ? { objectNames: objects } : {}),
   };
+}
+
+/**
+ * The names worth holding a rejection by: the ones with a capital, and family
+ * words — the same line matchTerms draws. A lowercase alias is a common noun,
+ * and on the live graph both The PC Project and Happytel Rockingham are "the
+ * shop": holding "Tommy works at Happytel Rockingham" rejected by "the shop"
+ * would refuse his real job at The PC Project too.
+ */
+function properNames(names: string[]): string[] {
+  return uniqueNames(names.filter(name => typeof name === 'string' && (/[A-Z0-9]/.test(withoutOwner(name, '')) || KIN.has(nameKey(name)))));
+}
+
+/** One side of a rejection and one side of a draft are the same one: the same id, or a name in common. */
+function sameSide(id: string | undefined, names: unknown, draftId: string | undefined, draftNames: string[] | undefined): boolean {
+  if (id !== undefined && id === draftId) return true;
+  if (!Array.isArray(names) || !draftNames?.length) return false;
+  // By nameKey — searchable() with a leading "the" and an owner dropped — so
+  // "The Pharisees" then is "Pharisees" now, in any case. The held side is
+  // proper names only (properNames), which is what keeps "the shop" out.
+  const held = new Set(names.filter((name): name is string => typeof name === 'string').map(name => nameKey(name)).filter(Boolean));
+  return draftNames.some(name => held.has(nameKey(name)));
 }
 
 /** A sentence's content words without the names in it: what is said about them, not who. */
@@ -406,11 +518,12 @@ export function wordsBesides(sentence: string, names: string[]): Set<string> {
 /**
  * Whether a draft is one he already said is wrong: the same subject and other
  * side, said with the same relation or much the same words besides the names. "Tommy works at
- * Umart" rejected does not block "Tommy buys parts from Umart".
+ * Umart" rejected does not block "Tommy buys parts from Umart". A side is the
+ * same by id, or by a name it went by then and goes by now — the id may be new.
  */
-export function isRejected(rejected: Rejection[] | undefined, draft: { subject: string; object?: string; valueKey?: string; relation: string; words: Set<string> }): boolean {
-  return (rejected ?? []).some(no => no.subject === draft.subject
-    && (draft.object ? no.object === draft.object : Boolean(draft.valueKey) && no.value === draft.valueKey)
+export function isRejected(rejected: Rejection[] | undefined, draft: { subject: string; object?: string; valueKey?: string; relation: string; words: Set<string>; subjectNames?: string[]; objectNames?: string[] }): boolean {
+  return (rejected ?? []).some(no => sameSide(no.subject, no.subjectNames, draft.subject, draft.subjectNames)
+    && (draft.object ? Boolean(no.object) && sameSide(no.object, no.objectNames, draft.object, draft.objectNames) : Boolean(draft.valueKey) && no.value === draft.valueKey)
     && (no.relation === draft.relation || overlap(new Set(no.words), draft.words) >= 0.5));
 }
 
@@ -565,7 +678,7 @@ export function applyExtraction(source: FactGraph, extraction: Extraction, { day
     const words = contentWords(sentence);
     // He deleted this from his page as wrong: whatever the day says, it is not learned again.
     const namesOf = (id?: string) => graph.entities.filter(entity => entity.id === id).flatMap(entity => [entity.name, ...entity.aliases]);
-    if (isRejected(graph.rejected, { subject, object, valueKey, relation, words: wordsBesides(sentence, [...namesOf(subject), ...namesOf(object)]) })) { report.rejected.push(`${tag} (he said it is wrong)`); continue; }
+    if (isRejected(graph.rejected, { subject, object, valueKey, relation, words: wordsBesides(sentence, [...namesOf(subject), ...namesOf(object)]), subjectNames: namesOf(subject), objectNames: namesOf(object) })) { report.rejected.push(`${tag} (he said it is wrong)`); continue; }
     const same = graph.facts.find(fact => {
       if (!isCurrent(fact)) return false;
       const sameRelation = fact.subject === subject && relationKey(fact.relation) === relation;
@@ -615,7 +728,16 @@ export function pruneGraph(graph: FactGraph, max = MAX_FACTS): FactGraph {
   }
   const used = new Set<string>([USER_ENTITY]);
   for (const fact of facts) for (const id of [fact.subject, fact.object, fact.claimedBy]) if (id) used.add(id);
-  return { ...graph, facts, entities: graph.entities.filter(entity => used.has(entity.id)) };
+  // A rejection made before rejections kept names (2026-09-17) takes them from
+  // its entities while they are still here, so the names outlast the entity.
+  const namesOf = (id?: string) => properNames(graph.entities.filter(entity => entity.id === id).flatMap(entity => [entity.name, ...entity.aliases]));
+  const rejected = graph.rejected?.map(no => {
+    if (no.subjectNames || no.objectNames) return no;
+    const subjects = namesOf(no.subject);
+    const objects = no.object ? namesOf(no.object) : [];
+    return subjects.length || objects.length ? { ...no, ...(subjects.length ? { subjectNames: subjects } : {}), ...(objects.length ? { objectNames: objects } : {}) } : no;
+  });
+  return { ...graph, facts, entities: graph.entities.filter(entity => used.has(entity.id)), ...(rejected ? { rejected } : {}) };
 }
 
 // -- reply time --------------------------------------------------------------------
@@ -624,10 +746,15 @@ export function pruneGraph(graph: FactGraph, max = MAX_FACTS): FactGraph {
 export function mentionedEntities(graph: FactGraph, text: string, userName = ''): GraphEntity[] {
   const hay = searchable(text);
   const terms = entityTerms(graph, userName);
+  // A name of one ordinary word is only a name where it is written as one — see
+  // COMMON_WORDS. Longer names, family words and words that are nothing but
+  // names (Emma, Happytel) match however he types them.
+  const names = (term: string) => containsTerm(hay, term)
+    && (term.includes(' ') || KIN.has(term) || !isCommonWord(term) || capitalisedMidSentence(text, term));
   const found: { entity: GraphEntity; length: number }[] = [];
   for (const entity of graph.entities) {
     if (entity.id === USER_ENTITY) continue;
-    const hits = (terms.get(entity.id) ?? []).filter(term => containsTerm(hay, term));
+    const hits = (terms.get(entity.id) ?? []).filter(names);
     if (hits.length) found.push({ entity, length: Math.max(...hits.map(term => term.length)) });
   }
   // "Emma Wilson" in a message should not also bring in an "Emma" who is somebody else.
@@ -645,6 +772,14 @@ const GENERIC_FIRST = new Set(['north', 'south', 'east', 'west', 'saint', 'mount
  * word is a name in itself and nobody else's: he says "happytel", not
  * "Happytel Rockingham". Shared first words stay out — two Emmas mean "emma"
  * names neither.
+ *
+ * And so do first words that are ordinary words. Titles are made of them, and
+ * the first word alone matched his messages rather than the title: "made"
+ * brought in Made in Abyss on 7 of his 1,393 real messages ("I made dinner"),
+ * "walking" brought in Walking Dead (measured 2026-09-17). Those are named by
+ * the whole name, or by an alias the reading of a day heard him use. Not even a
+ * capital lets an ordinary first word through: "Made" at the start of a
+ * sentence is the verb far more often than the show.
  */
 function entityTerms(graph: FactGraph, userName: string): Map<string, string[]> {
   const out = new Map(graph.entities.map(entity => [entity.id, matchTerms(entity, userName)] as const));
@@ -654,7 +789,7 @@ function entityTerms(graph: FactGraph, userName: string): Map<string, string[]> 
     const words = withoutOwner(entity.name, userName).split(/\s+/);
     if (words.length < 2 || !/^[A-Z][A-Za-z0-9]{3,}$/.test(words[0])) continue;
     const first = nameKey(words[0]);
-    if (GENERIC_FIRST.has(first) || first === nameKey(userName)) continue;
+    if (GENERIC_FIRST.has(first) || isCommonWord(first) || first === nameKey(userName)) continue;
     firsts.set(first, [...(firsts.get(first) ?? []), entity.id]);
   }
   const taken = new Set([...out.values()].flat());

@@ -271,3 +271,33 @@ test('past the cap, unconfirmed history goes first and nothing is left pointing 
   assert.equal(pruned.facts.length, graph.facts.length - 1);
   assert.equal(pruned.facts.some(fact => fact.id === graph.facts[0].id), false);
 });
+
+test('an ordinary word is not a name: the first word of a title, or a one-word name written as a word', () => {
+  // Measured 2026-09-17: "made" pulled Made in Abyss into 7 of his 1,393 real
+  // messages, "walking" pulled in Walking Dead, "square one" pulled in Square.
+  const graph = emptyGraph();
+  const day = '2026-09-01';
+  const names: [string, string, 'person' | 'media' | 'organisation' | 'place', string[]][] = [
+    ['e1', 'Made in Abyss', 'media', []], ['e2', 'Walking Dead', 'media', []], ['e3', 'Square', 'organisation', []],
+    ['e4', 'Sam', 'person', []], ['e5', 'Logan', 'person', []], ['e6', 'Ryan', 'person', []], ['e7', 'Emma Wilson', 'person', ['Emma']],
+    ['e8', 'Murdoch University', 'place', []], ['e9', "Tommy's mum", 'person', ['mum']],
+  ];
+  for (const [id, name, kind, aliases] of names) {
+    graph.entities.push({ id, name, kind, aliases, firstSeen: day, lastSeen: day });
+    graph.facts.push({ id: `f${id.slice(1)}`, subject: USER_ENTITY, relation: 'knows', object: id, sentence: `Tommy knows ${name}.`, learned: day, confirmed: day, days: 1 });
+  }
+  graph.entities.unshift({ id: USER_ENTITY, name: USER, kind: 'person', aliases: [], firstSeen: day, lastSeen: day });
+  graph.nextId = 20;
+  const named = (text: string) => mentionedEntities(graph, text, USER).map(entity => entity.name).sort();
+  for (const text of ['I made dinner', 'i was walking home', 'back to square one', 'Square is down again', 'Made it home', 'we walked there']) {
+    assert.deepEqual(named(text), [], text);
+    assert.equal(linkedFacts(graph, text, { userName: USER }).length, 0, text);
+  }
+  assert.deepEqual(named('finished made in abyss last night'), ['Made in Abyss'], 'the whole name, however it is typed');
+  assert.deepEqual(named('the walking dead finale was mid'), ['Walking Dead']);
+  assert.deepEqual(named('paid for it through Square'), ['Square'], 'a capital mid-sentence makes the word a name');
+  assert.deepEqual(named('sam and logan are coming, ryan too'), ['Logan', 'Ryan', 'Sam'], 'names that are not words match lowercase');
+  assert.deepEqual(named('emma said hi'), ['Emma Wilson']);
+  assert.deepEqual(named('at murdoch till 4'), ['Murdoch University'], 'a first word that is no ordinary word still stands for the name');
+  assert.deepEqual(named('mums cooking tonight'), ["Tommy's mum"], 'family words are somebody, lowercase and all');
+});

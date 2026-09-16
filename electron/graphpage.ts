@@ -62,11 +62,13 @@ function clean(text: string): string {
   return text.replace(/\s+/g, ' ').trim();
 }
 
-/** The sentence without strike marks or the "(until …)" note the page adds to history. */
+const UNTIL_NOTE = /\s*\(until \d{4}-\d{2}-\d{2}\)\s*$/;
+
+/** The sentence without strike marks or the "(until …)" note the page adds to history, wherever the strike put the note. */
 function sentenceOf(text: string): PageLine {
-  let body = clean(text).replace(/\s*\(until \d{4}-\d{2}-\d{2}\)\s*$/, '');
+  let body = clean(text).replace(UNTIL_NOTE, '');
   const struck = /^~~.*~~$/.test(body);
-  if (struck) body = body.slice(2, -2).trim();
+  if (struck) body = body.slice(2, -2).trim().replace(UNTIL_NOTE, '');
   return { text: body, struck };
 }
 
@@ -125,9 +127,16 @@ export function readGraphPage(text: string): ReadPage {
     if (/^#\s/.test(line)) { context = null; continue; }
     const bullet = line.match(/^[-*+]\s+(?:\[[ xX]\]\s+)?(.+)$/);
     if (!bullet) continue;
-    const marked = bullet[1].match(/^(.*?)\s*%%\s*(f\d+)\s*%%$/);
+    // The mark may sit inside the strike as well as after it. Selecting a whole
+    // line and striking it, or putting two tildes at each end of it, wraps the
+    // hidden mark too: "~~Tommy uses Discord. %%f35%%~~". Read only with the
+    // mark last, that line had no id, so the fact looked deleted and was
+    // forgotten and rejected — the opposite of what the page tells him striking
+    // does (found 2026-09-17). A strike closing after the mark closes the
+    // sentence, so both spellings read as struck.
+    const marked = bullet[1].match(/^(.*?)\s*%%\s*(f\d+)\s*%%\s*(~~)?$/);
     if (marked) {
-      const sentence = sentenceOf(marked[1]);
+      const sentence = sentenceOf(`${marked[1]}${marked[3] ?? ''}`);
       if (sentence.text) page.facts.set(marked[2], sentence);
       continue;
     }
@@ -169,8 +178,8 @@ export function applyGraphPage(source: FactGraph, page: ReadPage, day: string, n
     const line = page.facts.get(id);
     if (!line) {
       gone.add(id);
-      const names = graph.entities.filter(entity => entity.id === fact.subject || entity.id === fact.object).flatMap(entity => [entity.name, ...entity.aliases]);
-      graph.rejected!.push(rejectionOf(fact, now.toISOString(), names));
+      const namesOf = (id?: string) => graph.entities.filter(entity => entity.id === id).flatMap(entity => [entity.name, ...entity.aliases]);
+      graph.rejected!.push(rejectionOf(fact, now.toISOString(), namesOf(fact.subject), namesOf(fact.object)));
       report.forgot.push(fact.sentence);
       continue;
     }
