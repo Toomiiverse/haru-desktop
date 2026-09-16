@@ -17,6 +17,8 @@
 //     staleAfterMs; past that a one-off is dropped and a daily one waits for its
 //     next day
 //   - a handler may put its job off ("she is asleep" → her wake time)
+//   - a run that fails is tried again after 1, 5 and 15 minutes, then that
+//     occurrence is given up
 //   - one timer, to the earliest due job but never more than a minute away, so a
 //     job added from elsewhere or a clock that jumped is noticed within a minute
 //
@@ -47,19 +49,33 @@ export type Job = {
 
 export type RunOutcome = 'started' | 'done' | 'later' | 'failed' | 'missed' | 'expired' | 'interrupted';
 export type RunRecord = { key: string; kind: string; at: number; outcome: RunOutcome; detail?: string };
-export type ScheduleFile = { jobs: Job[]; runs: RunRecord[] };
+/** One of her bookings, remembered past its job — see noteBookings. */
+export type BookingRecord = { id: string; why: string; bookedAt: number; dueAt: number };
+/** `booked` is optional because files written before 2026-09-17 have none. */
+export type ScheduleFile = { jobs: Job[]; runs: RunRecord[]; booked?: BookingRecord[] };
 
 /** What a handler says happened. */
 export type Outcome = { done: true } | { later: number; reason: string } | { failed: string };
 
 export const RUNS_KEPT = 200;
-export const MAX_FAILURES = 3;
+/** The wait before each retry of a failed run. */
 export const RETRY_MS = [60_000, 5 * 60_000, 15 * 60_000];
+/**
+ * Failed tries at one occurrence before it is given up: the first, and one
+ * retry for each wait above. Until 2026-09-17 this was 3 against the same three
+ * waits, so the third failure gave up and the fifteen-minute wait was never
+ * used — retries came at 1 and 5 minutes, not the 1, 5 and 15 promised.
+ */
+export const MAX_FAILURES = RETRY_MS.length + 1;
 /** The longest the dispatcher sleeps without looking again. */
 export const MAX_SLEEP_MS = 60_000;
+/** Her bookings are remembered this long past both when she made them and when they were due… */
+export const BOOKED_KEPT_MS = 48 * 3_600_000;
+/** …and never more than this many. */
+export const BOOKED_KEPT = 40;
 
 export function emptySchedule(): ScheduleFile {
-  return { jobs: [], runs: [] };
+  return { jobs: [], runs: [], booked: [] };
 }
 
 const OUTCOMES: RunOutcome[] = ['started', 'done', 'later', 'failed', 'missed', 'expired', 'interrupted'];
@@ -78,7 +94,11 @@ export function normalizeSchedule(value: unknown): ScheduleFile {
   }).map(job => ({ ...job, failures: finite(job.failures) ? job.failures : 0, createdBy: job.createdBy === 'haru' ? 'haru' as const : 'app' as const, createdAt: finite(job.createdAt) ? job.createdAt : job.dueAt }));
   const runs = (Array.isArray(held.runs) ? held.runs : []).filter((run): run is RunRecord =>
     Boolean(run) && typeof (run as RunRecord).key === 'string' && finite((run as RunRecord).at) && OUTCOMES.includes((run as RunRecord).outcome));
-  return { jobs, runs: runs.slice(-RUNS_KEPT) };
+  const booked = (Array.isArray(held.booked) ? held.booked : []).filter((entry): entry is BookingRecord => {
+    const candidate = entry as BookingRecord | null;
+    return Boolean(candidate) && typeof candidate?.id === 'string' && typeof candidate.why === 'string' && finite(candidate.bookedAt) && finite(candidate.dueAt);
+  });
+  return { jobs, runs: runs.slice(-RUNS_KEPT), booked: booked.slice(-BOOKED_KEPT) };
 }
 
 // -- time --------------------------------------------------------------------------
@@ -97,9 +117,9 @@ export function zonedEpoch(day: string, minutes: number, timeZone: string): numb
   return wall - offset(first);
 }
 
-function nextDayKey(day: string): string {
+function nextDayKey(day: string, days = 1): string {
   const [year, month, date] = day.split('-').map(Number);
-  return new Date(Date.UTC(year, month - 1, date + 1)).toISOString().slice(0, 10);
+  return new Date(Date.UTC(year, month - 1, date + days)).toISOString().slice(0, 10);
 }
 
 /** The next time "HH:MM" comes round in that zone, strictly after `after`. */
@@ -142,9 +162,10 @@ export function createScheduler(deps: SchedulerDeps) {
 
   const write = (change: (file: ScheduleFile) => void) => {
     const file = deps.load();
-    const next: ScheduleFile = { jobs: [...file.jobs], runs: [...file.runs] };
+    const next: ScheduleFile = { jobs: [...file.jobs], runs: [...file.runs], booked: [...(file.booked ?? [])] };
     change(next);
     next.runs = next.runs.slice(-RUNS_KEPT);
+    next.booked = noteBookings(next.booked, next.jobs, now());
     deps.save(next);
     return next;
   };
@@ -179,14 +200,18 @@ export function createScheduler(deps: SchedulerDeps) {
       }
       if ('later' in outcome) {
         record('later', outcome.reason);
-        if (index >= 0) file.jobs[index] = { ...file.jobs[index], dueAt: Math.max(outcome.later, now() + 1000) };
+        // Put off is a fresh start: failures counted against the old time would
+        // otherwise eat into the retries of the new one, and a booking that failed
+        // twice before she fell asleep reached her wake time with most of its
+        // retries already spent (2026-09-17).
+        if (index >= 0) file.jobs[index] = { ...file.jobs[index], dueAt: Math.max(outcome.later, now() + 1000), failures: 0 };
         return;
       }
       if ('failed' in outcome) {
         record('failed', outcome.failed);
         if (index < 0) return;
         const failures = file.jobs[index].failures + 1;
-        if (failures < MAX_FAILURES) file.jobs[index] = { ...file.jobs[index], failures, dueAt: now() + RETRY_MS[Math.min(failures, RETRY_MS.length) - 1] };
+        if (failures < MAX_FAILURES) file.jobs[index] = { ...file.jobs[index], failures, dueAt: now() + RETRY_MS[failures - 1] };
         else advance(file, index);
         return;
       }
@@ -284,6 +309,10 @@ export function createScheduler(deps: SchedulerDeps) {
     runs(): RunRecord[] {
       return deps.load().runs;
     },
+    /** Her recent bookings, including the ones that have already come and gone. */
+    booked(): BookingRecord[] {
+      return deps.load().booked ?? [];
+    },
     /** A daily job of the app's own: added when missing, moved when its time changed, otherwise left alone. */
     ensureDaily(input: { id: string; kind: string; daily: string; timezone: string; staleAfterMs: number }) {
       const existing = deps.load().jobs.find(job => job.id === input.id);
@@ -317,10 +346,23 @@ export const BOOKING_LIMITS = {
   keepMs: 24 * 3_600_000,
 };
 
+/** "Tonight at 1 AM" is the small hours after this evening, up to the chat's 05:00 roll. */
+const NIGHT_ENDS_HOUR = 5;
+const WEEKDAY_WORDS = /^(?:this |next |on |this coming )?(?:sunday|monday|tuesday|wednesday|thursday|friday|saturday)$/;
+
 /**
  * When she meant, from the tool's arguments: a day in his words and a time, or
  * minutes from now. Resolved here rather than by the model, for the reason
  * resolveDate gives — it was reliably a day out.
+ *
+ * A day given with a time already gone used to come back as that instant in
+ * the past, and admitBooking answered "That is now, not later — just say it in
+ * this reply", which told her to say at 10 PM what she meant for tomorrow's
+ * small hours (2026-09-17). resolveDate reads "tonight" as today and a weekday
+ * as its next occurrence counting today, which is right for its other callers,
+ * so the booking's reading is settled here instead: "tonight" with a small-hours
+ * time is the next calendar day, a weekday whose time has gone today is a week
+ * on, and anything else already gone is refused in words that say so.
  */
 export function resolveBookingTime(input: { date?: string; time?: string; inMinutes?: number }, nowMs: number, timeZone: string): number | { error: string } {
   if (typeof input.inMinutes === 'number' && Number.isFinite(input.inMinutes) && input.inMinutes > 0) {
@@ -329,38 +371,82 @@ export function resolveBookingTime(input: { date?: string; time?: string; inMinu
   const clock = input.time ? parseTimeOfDay(input.time) : null;
   if (!clock) return { error: 'Give a time of day, like "6:00 PM", or minutes from now.' };
   const local = zonedNow(timeZone, new Date(nowMs));
-  const day = input.date ? resolveDate(input.date, local) : localDateKey(local);
+  const today = localDateKey(local);
+  const said = input.date ? input.date.trim().toLowerCase().replace(/\s+/g, ' ') : '';
+  let day = said ? resolveDate(said, local) : today;
   if (!day) return { error: `Could not tell which day "${input.date}" is — use "today", "tomorrow" or a weekday.` };
-  let at = zonedEpoch(day, clock.hour * 60 + clock.minute, timeZone);
+  // "Tonight at 1 AM" said at 10 PM is tomorrow's date; said at 00:30 it is
+  // already that night, and today's.
+  if (said === 'tonight' && clock.hour < NIGHT_ENDS_HOUR && local.getHours() >= NIGHT_ENDS_HOUR) day = nextDayKey(day);
+  const minutes = clock.hour * 60 + clock.minute;
+  const at = zonedEpoch(day, minutes, timeZone);
+  if (at > nowMs) return at;
   // A time already gone today, with no day given, is the next one.
-  if (!input.date && at <= nowMs) at = zonedEpoch(nextDayKey(day), clock.hour * 60 + clock.minute, timeZone);
-  return at;
+  if (!said) return zonedEpoch(nextDayKey(day), minutes, timeZone);
+  if (day === today && WEEKDAY_WORDS.test(said)) return zonedEpoch(nextDayKey(day, 7), minutes, timeZone);
+  if (day < today) return { error: `${input.date} has already gone. Pick a day still to come.` };
+  return { error: `${formatTimeOfDay(clock.hour, clock.minute)} ${said === 'tonight' ? 'tonight' : 'today'} has already passed. Pick a later time, or a later day.` };
 }
 
 function contentWords(text: string): Set<string> {
   return new Set(String(text ?? '').toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').split(/\s+/).filter(word => word.length >= 4));
 }
 
+const isHers = (job: Job) => job.kind === BOOKED_KIND && job.createdBy === 'haru';
+
+/**
+ * Her bookings, kept for a while after their jobs are gone. Run on every write
+ * the scheduler makes: a booking of hers not yet noted is added, a noted one
+ * still waiting follows its job's time as it is put off, and one past
+ * BOOKED_KEPT_MS on both its booking and its time is dropped.
+ *
+ * The limits on what she books used to look only at jobs still waiting, and a
+ * booking stops waiting the moment it is said. So "three new in a day" let
+ * through nine in twenty-five minutes, each said before the next was made, and
+ * "ask how the psych appointment went" was booked again at 18:01, a minute
+ * after it had come round (2026-09-17). Noting a booking when its job is
+ * written rather than when it leaves means every way out — said, let go,
+ * expired, missed, cut off by a restart, cancelled — is covered without a hook
+ * in each, and a job waiting in a file from before this is picked up too.
+ */
+export function noteBookings(booked: BookingRecord[] | undefined, jobs: Job[], nowMs: number): BookingRecord[] {
+  const hers = jobs.filter(isHers);
+  const noted = (booked ?? []).map(entry => {
+    const job = hers.find(candidate => candidate.id === entry.id);
+    return job && job.dueAt !== entry.dueAt ? { ...entry, dueAt: job.dueAt } : entry;
+  });
+  for (const job of hers) {
+    if (!noted.some(entry => entry.id === job.id)) noted.push({ id: job.id, why: String(job.payload?.why ?? ''), bookedAt: job.createdAt, dueAt: job.dueAt });
+  }
+  return noted.filter(entry => Math.max(entry.bookedAt, entry.dueAt) > nowMs - BOOKED_KEPT_MS).slice(-BOOKED_KEPT);
+}
+
 /**
  * Whether she may book this, and the job if so. The refusals are written to
  * her, because they come back to her as the tool's answer.
+ *
+ * `held` is the schedule: what is waiting counts against maxPending, and what
+ * she booked lately — waiting or already come and gone — against maxPerDay and
+ * the same-thing check (see noteBookings).
  */
-export function admitBooking(jobs: Job[], request: { at: number; why: string }, nowMs: number, id: string, limits = BOOKING_LIMITS): { job: Job } | { refused: string } {
+export function admitBooking(held: { jobs: Job[]; booked?: BookingRecord[] }, request: { at: number; why: string }, nowMs: number, id: string, limits = BOOKING_LIMITS): { job: Job } | { refused: string } {
   const why = String(request.why ?? '').replace(/\s+/g, ' ').trim();
   if (why.length < 4) return { refused: 'Say what you mean to come back to, in a few words.' };
   if (why.length > 240) return { refused: 'Keep it to one line — what you mean to ask or say.' };
   if (request.at < nowMs + limits.minLeadMs) return { refused: 'That is now, not later — just say it in this reply.' };
   if (request.at > nowMs + limits.maxLeadMs) return { refused: 'That is more than a week away. For something that far off, put it on their list with create_kept_item.' };
-  const hers = jobs.filter(job => job.kind === BOOKED_KIND && job.createdBy === 'haru');
+  const hers = held.jobs.filter(isHers);
   if (hers.length >= limits.maxPending) return { refused: `You already have ${hers.length} things waiting to come back to. Let one of them happen first.` };
-  if (hers.filter(job => nowMs - job.createdAt < 86_400_000).length >= limits.maxPerDay) return { refused: 'You have booked enough for today. Leave it — if it matters, it will come up.' };
+  const recent = noteBookings(held.booked, held.jobs, nowMs);
+  if (recent.filter(entry => nowMs - entry.bookedAt < 86_400_000).length >= limits.maxPerDay) return { refused: 'You have booked enough for today. Leave it — if it matters, it will come up.' };
   const words = contentWords(why);
-  const twin = hers.find(job => {
-    const held = contentWords(String(job.payload?.why ?? ''));
-    const shared = [...words].filter(word => held.has(word)).length;
-    return Math.abs(job.dueAt - request.at) < 6 * 3_600_000 && words.size > 0 && held.size > 0 && shared / Math.min(words.size, held.size) >= 0.6;
+  const twin = recent.find(entry => {
+    const noted = contentWords(entry.why);
+    const shared = [...words].filter(word => noted.has(word)).length;
+    return Math.abs(entry.dueAt - request.at) < 6 * 3_600_000 && words.size > 0 && noted.size > 0 && shared / Math.min(words.size, noted.size) >= 0.6;
   });
-  if (twin) return { refused: `You already have that booked: "${twin.payload?.why}". Nothing more to do.` };
+  if (twin && hers.some(job => job.id === twin.id)) return { refused: `You already have that booked: "${twin.why}". Nothing more to do.` };
+  if (twin) return { refused: `That has already come round: "${twin.why}". Leave it — if there is more to it, it will come up.` };
   return {
     job: {
       id, kind: BOOKED_KIND, schedule: { at: request.at }, dueAt: request.at,

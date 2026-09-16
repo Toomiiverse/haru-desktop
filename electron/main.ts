@@ -8268,11 +8268,22 @@ const scheduler = createScheduler({
   save: file => store.setSchedule(file),
   handlers: {
     maintenance: () => {
-      runMemoryConsolidation();
-      runMemoryDecay();
-      pruneOldArchives();
-      runHauntHygiene();
-      return { done: true };
+      // Each sweep on its own (2026-09-17): one throwing used to skip the rest
+      // for the day. The job is failed, and retried, only when every sweep
+      // threw. A retry reruns all four, the ones that worked included, and a
+      // sweep that throws is usually bad data or a bug that throws again a minute
+      // later — so one that fails alone is logged and tried again tomorrow.
+      const sweeps: [string, () => unknown][] = [['consolidation', runMemoryConsolidation], ['decay', runMemoryDecay], ['archive pruning', pruneOldArchives], ['haunt hygiene', runHauntHygiene]];
+      const failed = sweeps.filter(([name, sweep]) => {
+        try {
+          sweep();
+          return false;
+        } catch (error) {
+          console.warn(`[schedule] maintenance: ${name} failed — ${error instanceof Error ? error.message : String(error)}`);
+          return true;
+        }
+      });
+      return failed.length === sweeps.length ? { failed: 'every sweep failed' } : { done: true };
     },
     [BOOKED_KIND]: comeBackTo,
   },
@@ -8283,7 +8294,7 @@ function bookFollowUp(input: { why: string; date?: string; time?: string; inMinu
   const now = Date.now();
   const at = resolveBookingTime(input, now, CHAT_TIMEZONE);
   if (typeof at !== 'number') return { booked: false, reason: at.error };
-  const admitted = admitBooking(scheduler.list(), { at, why: input.why }, now, `booked-${randomUUID().slice(0, 8)}`);
+  const admitted = admitBooking({ jobs: scheduler.list(), booked: scheduler.booked() }, { at, why: input.why }, now, `booked-${randomUUID().slice(0, 8)}`);
   if ('refused' in admitted) {
     console.log(`[booked] refused ${JSON.stringify(input.why.slice(0, 80))}: ${admitted.refused}`);
     return { booked: false, reason: admitted.refused };
