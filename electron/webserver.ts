@@ -28,6 +28,8 @@ import type { CheckIn } from './checkins';
 import { MAX_SHOT_BYTES, type HeldShots } from './shotstore';
 
 export type WebDeps = {
+  /** Diagnostic input only; must not reset chat silence or trigger a nudge. */
+  attentionInput?(): void;
   readAccess(): WebAccess;
   saveAccess(access: WebAccess): void;
   /** Her real answer, through the same pipeline the desktop uses — minus hands.
@@ -548,6 +550,16 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
 
   if (req.method === 'GET' && path === '/api/chat') {
     return json(res, 200, { messages: deps.history().slice(-60) });
+  }
+
+  if (req.method === 'POST' && path === '/api/attention/input') {
+    const body = await readBody(req);
+    if (!body || typeof body !== 'object' || Array.isArray(body)
+        || Object.keys(body).length !== 1 || (body as { kind?: unknown }).kind !== 'input') {
+      return json(res, 400, { error: 'Expected an input signal.' });
+    }
+    deps.attentionInput?.();
+    return json(res, 200, { ok: true });
   }
 
   if (req.method === 'POST' && path === '/api/chat') {

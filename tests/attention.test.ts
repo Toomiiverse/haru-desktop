@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { appendFileSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { appendFileSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
@@ -246,5 +246,59 @@ test('input sensitivity replays history before the reporting window and rejects 
     const probe = moodProbe().arms;
     assert.ok(probe.contactIdleOnly.curiosity > probe.hostReadings.curiosity + 0.5);
     assert.ok(probe.contactIdleWithoutHostFocus.focus < probe.contactIdleOnly.focus - 0.4);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('web input expires to unknown, preserves cooldown across gaps and never changes the host policy', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'haru-web-input-'));
+  try {
+    const file = join(dir, 'attention.jsonl');
+    const experiment = new AttentionExperiment(() => file);
+    let original = newAttentionState();
+    const observe = (seconds: number) => {
+      const reading = input({ now: 1_000_000 + seconds * 1000,
+        environment: { hour: 12, idleSeconds: 86400, onBattery: false, windowFocused: true } });
+      original = stepAttention(original, reading);
+      experiment.observe(reading);
+      const rows = readFileSync(file, 'utf8').trim().split('\n').map(line => JSON.parse(line));
+      const row = rows.at(-1);
+      assert.equal(row.action, original.action);
+      assert.deepEqual(row.scores, original.scores);
+      return row;
+    };
+    assert.equal(observe(0).webShadow, null);
+    experiment.webInput(1_020_000);
+    assert.equal(observe(20).webShadow.action, 'speak');
+    assert.deepEqual(observe(320).webInput, { status: 'recent-input', ageMs: 300_000 });
+    const expired = observe(321);
+    assert.deepEqual(expired.webInput, { status: 'unknown', ageMs: null });
+    assert.equal(expired.webShadow, null);
+    experiment.webInput(1_400_000);
+    assert.notEqual(observe(400).webShadow.action, 'speak', 'unknown gap must not reset speech cooldown');
+    for (const invalid of [NaN, Infinity, -1, 1e25, 1_000_000]) experiment.webInput(invalid);
+    assert.equal(observe(401).webInput.ageMs, 1000, 'invalid or out-of-order receipt must not replace the latest');
+    experiment.webInput(1_700_000);
+    assert.equal(observe(700).webShadow.action, 'speak');
+    const replayPath = join(dir, 'replay.json');
+    const replayScript = join(__dirname, '../../research/fruitfly/replay-shadow.cjs');
+    execFileSync(process.execPath, [replayScript, file, replayPath]);
+    const replay = JSON.parse(readFileSync(replayPath, 'utf8'));
+    assert.equal(replay.webReplayed, 7);
+    assert.equal(replay.webActionMismatches + replay.webNumericMismatches + replay.actionMismatches, 0);
+    const report = JSON.parse(execFileSync(process.execPath, [join(__dirname, '../../scripts/attention-report.cjs'), file], { encoding: 'utf8' }));
+    assert.equal(report.webInputComparison.recentInput, 5);
+    assert.equal(report.webInputComparison.unknown, 2);
+    assert.equal(report.webInputComparison.webPolicySpeech, 2);
+    assert.equal(report.webInputComparison.hostPolicySpeechOnKnownInput, 0);
+    const rows = readFileSync(file, 'utf8').trim().split('\n').map(line => JSON.parse(line));
+    rows.at(-1).webShadow.scores.speak = 0.123;
+    writeFileSync(file, rows.map(row => JSON.stringify(row)).join('\n') + '\n');
+    assert.throws(() => execFileSync(process.execPath, [replayScript, file, replayPath], { stdio: 'pipe' }));
+    const disabled = new AttentionExperiment(() => join(dir, 'disabled'), false);
+    disabled.webInput(); disabled.observe(input());
+    assert.ok(!readdirSync(dir).includes('disabled'));
+    const restart = new AttentionExperiment(() => join(dir, 'restart'));
+    restart.observe(input());
+    assert.equal(JSON.parse(readFileSync(join(dir, 'restart'), 'utf8')).webShadow, null);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

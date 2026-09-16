@@ -166,6 +166,11 @@ running it: a live log can rotate during reading. The alternative holds recorded
 vitals and blockers fixed and cannot predict a complete alternate day. The mood
 probe is synthetic and separate. Neither experiment changes production behavior.
 
+The [client-input follow-up](CLIENT-INPUT-FOLLOWUP.md) adds authenticated,
+content-free browser input to a second shadow comparison. The ordinary report
+shows its known/unknown coverage, and the replay tool verifies both recorded
+policy states. Previously captured logs remain readable without these fields.
+
 ## Result interpretation
 
 Compare anatomical wiring with its matched rewiring control before attributing

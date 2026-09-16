@@ -12,6 +12,8 @@ async function main() {
   const speechDecisions = { bothPropose: 0, baselineOnly: 0, shadowOnly: 0, bothSilent: 0 };
   const inputCoverage = { measured: 0, hostActive: 0, hostIdleOverFiveMinutes: 0, hostWindowFocused: 0,
     recentDirectContact: 0, recentContactWhileHostIdle: 0, unblockedHostActive: 0 };
+  const webInputComparison = { instrumented: 0, recentInput: 0, unknown: 0, changedActions: 0,
+    hostIdleDespiteWebInput: 0, hostPolicySpeechOnKnownInput: 0, webPolicySpeech: 0 };
   let last, totalMs = 0, maxMs = 0, firstAt, lastAt, lastAside, shortAsideGaps = 0;
   for (const name of [file + '.1', file]) {
     if (!fs.existsSync(name)) { if (name === file) throw new Error('Log not found: ' + file); continue; }
@@ -45,6 +47,19 @@ async function main() {
           inputCoverage.recentContactWhileHostIdle += Number(direct && !active);
           inputCoverage.unblockedHostActive += Number(active && row.blocked === false);
         }
+        if (row.webInput) {
+          if (row.webInput.status === 'unknown' && row.webInput.ageMs === null && row.webShadow === null) {
+            webInputComparison.instrumented++; webInputComparison.unknown++;
+          } else if (row.webInput.status === 'recent-input' && Number.isFinite(row.webInput.ageMs)
+              && row.webInput.ageMs >= 0 && row.webInput.ageMs <= 300_000
+              && ['attend', 'investigate', 'speak', 'rest'].includes(row.webShadow?.action)) {
+            webInputComparison.instrumented++; webInputComparison.recentInput++;
+            webInputComparison.changedActions += Number(row.action !== row.webShadow.action);
+            webInputComparison.hostIdleDespiteWebInput += Number(environment?.idleSeconds > 300);
+            webInputComparison.hostPolicySpeechOnKnownInput += Number(row.action === 'speak');
+            webInputComparison.webPolicySpeech += Number(row.webShadow.action === 'speak');
+          } else counts.malformed++;
+        }
         if (last?.session === row.session) { counts.transitions++; counts.switches += Number(last.action !== row.action); }
         last = row;
         totalMs += row.computeMs; maxMs = Math.max(maxMs, row.computeMs);
@@ -59,7 +74,7 @@ async function main() {
   }
   console.log(JSON.stringify({
     mode: 'shadow', policy, firstAt, lastAt, ...counts, actions, shortAsideGaps,
-    speechDecisions, inputCoverage,
+    speechDecisions, inputCoverage, webInputComparison,
     baselineProposalOverlap: counts.baselineEligible ? speechDecisions.bothPropose / counts.baselineEligible : null,
     shadowProposalOverlap: counts.shadowSpeak ? speechDecisions.bothPropose / counts.shadowSpeak : null,
     speechDecisionAgreement: counts.samples ? counts.agreement / counts.samples : null,

@@ -84,21 +84,43 @@ export function stepAttention(previous: AttentionState, input: AttentionInput): 
 // Two bounded files, metadata only. A failed diagnostic must never break a turn.
 export class AttentionExperiment {
   private state = newAttentionState();
+  private webState = newAttentionState();
+  private lastWebInputAt: number | null = null;
   private disabled = false;
   private sequence = 0;
   private readonly session = Date.now().toString(36);
   constructor(private readonly file: () => string, private readonly enabled = true, private readonly maxBytes = 2 * 1024 * 1024) {}
+  // Authenticated browser-reported input, timestamped on receipt. No content,
+  // client clock, device identifier or write to Haru's conversational state.
+  webInput(now = Date.now()): void {
+    if (!this.enabled || this.disabled || !Number.isFinite(now) || now < 0 || now > 8.64e15) return;
+    if (this.lastWebInputAt === null || now >= this.lastWebInputAt) this.lastWebInputAt = now;
+  }
   observe(input: AttentionInput): void {
     if (!this.enabled || this.disabled) return;
     const started = performance.now();
     this.state = stepAttention(this.state, input);
+    const computeMs = performance.now() - started;
+    const webStarted = performance.now();
+    const age = this.lastWebInputAt === null ? Infinity : input.now - this.lastWebInputAt;
+    const recent = Number.isFinite(age) && age >= 0 && age <= 300_000;
+    // Run the same policy with client input, holding vitals and other inputs
+    // fixed. Unknown evidence cannot permit speech. Keep the state/cooldown
+    // across unknown gaps, but do not report a guessed action for those gaps.
+    this.webState = stepAttention(this.webState, { ...input,
+      environment: { ...input.environment, idleSeconds: recent ? age / 1000 : Infinity },
+      blocked: input.blocked || !recent,
+    });
+    const webComputeMs = performance.now() - webStarted;
     this.write({
       kind: 'sample', at: new Date(this.state.at).toISOString(),
       action: this.state.action, scores: this.state.scores, novelty: this.state.novelty,
       inputs: { vitals: input.vitals, environment: input.environment, sinceInteractionMs: Number.isFinite(input.sinceInteractionMs) ? input.sinceInteractionMs : null },
       activity: input.activity, baselineReady: input.baselineReady,
       blocked: input.blocked, baselineEligible: input.baselineReady && !input.blocked,
-      computeMs: performance.now() - started,
+      computeMs, webComputeMs,
+      webInput: { status: recent ? 'recent-input' : 'unknown', ageMs: recent ? age : null },
+      webShadow: recent ? { action: this.webState.action, scores: this.webState.scores, novelty: this.webState.novelty } : null,
     });
   }
   event(kind: 'interaction' | 'feedback' | 'aside' | 'repeat-blocked', details: { id?: string; source?: string; reaction?: string | null } = {}): void {

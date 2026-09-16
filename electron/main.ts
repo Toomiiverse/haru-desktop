@@ -9105,6 +9105,7 @@ function modelExpressions(): string[] {
  */
 function webDeps(): WebDeps {
   return {
+    attentionInput: () => attention.webInput(),
     readAccess: getWebAccess,
     saveAccess: saveWebAccess,
     history: () => {

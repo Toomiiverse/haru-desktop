@@ -71,6 +71,48 @@ network to test whether the wiring contributes anything.
 
 ## Deployment and rollback
 
+### Browser input comparison (16 September follow-up)
+
+The authenticated web page now reports trusted `pointerdown`, `keydown`, `input`
+and `wheel` events while visible, at most once per 30 seconds per page. The body
+is only `{"kind":"input"}`: no key, text, position, event type, device ID or URL.
+Loading a page, a visibility change and the existing history/nudge polling never
+produce this signal. Native fetch has a five-second timeout and no retry or queue.
+The server accepts only the exact body, behind its existing login and JSON gate.
+
+`AttentionExperiment.webInput()` keeps one receipt timestamp in memory. It does
+not call `noteUserSpoke`, reset conversation silence, update live vitals, save
+presence to the user store, or trigger any action. Browser `isTrusted` filters
+script-dispatched events; authenticated clients can still fabricate a request,
+so this is **browser-reported input**, not verified human attention.
+
+Each sample now has additive `webInput` and `webShadow` fields. For up to five
+minutes after receipt, the second policy receives the age of that input as idle
+time. After that, or following a restart/clock rollback, evidence is `unknown`
+and the reported alternative action is `null`. Unknown samples cannot propose
+speech. The internal policy continues stepping so its cooldown survives a gap.
+The original policy and all production decisions remain unchanged.
+
+Both policies still use the recorded host-driven vitals, category and blockers.
+This isolates the idle signal; it does not fix mood/focus inputs or predict the
+consequences of acting on the proposal. A recent tap also does not prove continued
+presence, and reading without input becomes unknown. Input outside Haru's web
+page, including other applications in the native desktop, is not measured.
+
+The report's `webInputComparison` separates known coverage, unknown coverage,
+disagreement and proposed speech. `research/fruitfly/replay-shadow.cjs` verifies
+both states where the additive fields exist and still reads earlier logs. Raw
+logs retain the same two-file, 2 MiB-per-file bound; larger samples mean a shorter
+retained time window. `computeMs` measures the original policy; `webComputeMs`
+measures the additional comparison. Neither includes file IO or model calls.
+
+Reload an already-open browser page once after deployment to load the reporter.
+No new login is required when the existing session remains valid. The global
+`HARU_ATTENTION_SHADOW=0` switch disables collection and both policy evaluations;
+the page's content-free requests may continue until the page is closed.
+
+### Applying a change
+
 Build and test the isolated feat/attention-shadow branch. Deploy its reviewed
 commit onto the server's current Haru branch (cherry-pick if it has additional
 server changes), build using the server's existing install procedure, and

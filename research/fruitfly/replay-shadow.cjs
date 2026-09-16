@@ -23,9 +23,10 @@ for (const rows of sessions.values()) {
   const complete = rows.every((row, index) => row.sequence === index + 1);
   const result = { firstAt: rows[0].at, lastAt: rows.at(-1).at, complete,
     samples: rows.filter(row => row.kind === 'sample').length, replayed: 0,
-    actionMismatches: 0, numericMismatches: 0, largestAbsoluteError: 0 };
+    actionMismatches: 0, numericMismatches: 0, largestAbsoluteError: 0,
+    webReplayed: 0, webActionMismatches: 0, webNumericMismatches: 0 };
   if (complete) {
-    let state = newAttentionState();
+    let state = newAttentionState(), webState = newAttentionState();
     for (const row of rows) {
       if (row.kind !== 'sample') continue;
       const input = row.inputs;
@@ -40,6 +41,23 @@ for (const rows of sessions.values()) {
       result.actionMismatches += Number(state.action !== row.action);
       result.numericMismatches += Number(error > 1e-12);
       result.largestAbsoluteError = Math.max(result.largestAbsoluteError, error);
+      if (row.webInput) {
+        const recent = row.webInput.status === 'recent-input';
+        if (!(recent && Number.isFinite(row.webInput.ageMs) && row.webInput.ageMs >= 0 && row.webInput.ageMs <= 300_000
+            || row.webInput.status === 'unknown' && row.webInput.ageMs === null && row.webShadow === null)) throw Error('Invalid web input evidence');
+        webState = stepAttention(webState, { now: Date.parse(row.at), vitals: input.vitals,
+          environment: { ...input.environment, idleSeconds: recent ? row.webInput.ageMs / 1000 : Infinity },
+          sinceInteractionMs: input.sinceInteractionMs ?? Infinity, activity: row.activity,
+          baselineReady: row.baselineReady, blocked: row.blocked || !recent });
+        result.webReplayed++;
+        if (recent) {
+          const webError = Math.max(Math.abs(webState.novelty - row.webShadow?.novelty),
+            ...Object.keys(webState.scores).map(key => Math.abs(webState.scores[key] - row.webShadow?.scores?.[key])));
+          if (!Number.isFinite(webError)) throw Error('Invalid web shadow state');
+          result.webActionMismatches += Number(webState.action !== row.webShadow.action);
+          result.webNumericMismatches += Number(webError > 1e-12);
+        }
+      }
     }
   }
   results.push(result);
@@ -49,9 +67,12 @@ const summary = { policy: 2, tolerance: 1e-12, malformed,
   replayed: results.reduce((n, row) => n + row.replayed, 0),
   actionMismatches: results.reduce((n, row) => n + row.actionMismatches, 0),
   numericMismatches: results.reduce((n, row) => n + row.numericMismatches, 0),
+  webReplayed: results.reduce((n, row) => n + row.webReplayed, 0),
+  webActionMismatches: results.reduce((n, row) => n + row.webActionMismatches, 0),
+  webNumericMismatches: results.reduce((n, row) => n + row.webNumericMismatches, 0),
   limitations: ['Only sessions with all sequence numbers starting at one are replayed',
     'Null silence is interpreted as Infinity, matching valid unknown-history production input',
     'Reproducing diagnostics does not establish desirable behavior or correct client presence'] };
 fs.writeFileSync(output, JSON.stringify(summary, null, 2) + '\n');
 console.log(JSON.stringify(summary, null, 2));
-if (summary.malformed || summary.actionMismatches || summary.numericMismatches) process.exitCode = 1;
+if (summary.malformed || summary.actionMismatches || summary.numericMismatches || summary.webActionMismatches || summary.webNumericMismatches) process.exitCode = 1;

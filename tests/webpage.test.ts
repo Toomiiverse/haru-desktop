@@ -20,6 +20,51 @@ import { appPage, loginPage } from '../electron/webpage';
 
 const PAGES: [string, string][] = [['the login page', loginPage()], ['the app page', appPage()]];
 
+test('input reporter ignores page visibility and synthetic events, throttles real input, and never retries', async () => {
+  const html = appPage();
+  const source = html.slice(html.indexOf('// ---- Shadow input evidence'), html.indexOf('// ---- End shadow input evidence'));
+  const listeners = new Map<string, (event: object) => Promise<void>>();
+  const timers = new Map<number, () => void>();
+  const sent: { url: string; options: RequestInit }[] = [];
+  let now = 0, timerId = 0, offline = false, hold = false;
+  const document = { visibilityState: 'visible', addEventListener(type: string, fn: (event: object) => Promise<void>, options: { passive: boolean }) {
+    assert.equal(options.passive, true); listeners.set(type, fn);
+  } };
+  vm.runInNewContext(source, { document, performance: { now: () => now }, AbortController,
+    setTimeout(fn: () => void, ms: number) { assert.equal(ms, 5000); timers.set(++timerId, fn); return timerId; },
+    clearTimeout(id: number) { timers.delete(id); },
+    fetch(url: string, options: RequestInit) {
+      sent.push({ url, options });
+      if (offline) return Promise.reject(Error('offline'));
+      if (hold) return new Promise((_resolve, reject) => options.signal!.addEventListener('abort', () => reject(Error('timeout'))));
+      return Promise.resolve({ ok: true });
+    },
+  });
+  assert.deepEqual([...listeners.keys()], ['pointerdown', 'keydown', 'input', 'wheel']);
+  assert.equal(sent.length, 0, 'loading the page must not report input');
+  const fire = (type: string, isTrusted = true) => listeners.get(type)!({ isTrusted, key: 'private', data: 'private' });
+  await fire('keydown', false);
+  document.visibilityState = 'hidden'; await fire('input');
+  assert.equal(sent.length, 0);
+  document.visibilityState = 'visible'; await fire('pointerdown');
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].url, '/api/attention/input');
+  assert.equal(sent[0].options.body, '{"kind":"input"}');
+  assert.equal(timers.size, 0);
+  now = 29_999; await fire('wheel'); assert.equal(sent.length, 1);
+  now = 30_000; offline = true; await fire('input');
+  assert.equal(sent.length, 2); assert.equal(timers.size, 0);
+  now = 90_000; assert.equal(sent.length, 2, 'time passing after failure does not retry');
+  offline = false; hold = true;
+  const pending = fire('keydown');
+  now = 150_000; await fire('wheel'); assert.equal(sent.length, 3, 'one request at a time');
+  for (const fn of timers.values()) fn();
+  await pending;
+  assert.equal(sent[2].options.signal!.aborted, true);
+  assert.equal(timers.size, 0);
+  hold = false; await fire('wheel'); assert.equal(sent.length, 4);
+});
+
 for (const [name, html] of PAGES) {
   test(`${name} reaches outside for nothing`, () => {
     // default-src 'none' and not one host named. Her portrait is served by us,

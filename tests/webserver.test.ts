@@ -170,10 +170,30 @@ test('a stranger gets the sign-in page and nothing else', async () => {
     assert.equal(front.status, 200);
     assert.ok((await front.text()).includes('Sign in to reach her'));
 
-    for (const path of ['/api/chat', '/api/agenda', '/api/status', '/api/diary', '/api/her', '/api/memory', '/api/memory/records', '/api/activity', '/api/activity/shots', '/api/journal', '/api/checkins', '/api/knowledge/stats', '/api/model', '/api/push', '/api/attach', '/api/where']) {
+    for (const path of ['/api/chat', '/api/attention/input', '/api/agenda', '/api/status', '/api/diary', '/api/her', '/api/memory', '/api/memory/records', '/api/activity', '/api/activity/shots', '/api/journal', '/api/checkins', '/api/knowledge/stats', '/api/model', '/api/push', '/api/attach', '/api/where']) {
       const refused = await web.call(path);
       assert.equal(refused.status, 401, `${path} answered a stranger`);
     }
+  } finally { await web.stop(); }
+});
+
+test('shadow input requires authentication and its exact content-free payload; page reads are not input', async () => {
+  let inputs = 0;
+  const web = await door({ attentionInput: () => { inputs++; } });
+  try {
+    const signal = { method: 'POST', body: JSON.stringify({ kind: 'input' }) };
+    assert.equal((await web.call('/api/attention/input', signal)).status, 401);
+    await web.signIn();
+    await web.call('/');
+    await web.call('/api/chat');
+    assert.equal(inputs, 0);
+    assert.equal((await web.call('/api/attention/input', { ...signal, headers: { 'content-type': 'text/plain' } })).status, 415);
+    for (const body of [null, [], {}, { kind: 'visible' }, { kind: 'input', key: 'private' }, { kind: 'input', at: 1 }]) {
+      assert.equal((await web.call('/api/attention/input', { method: 'POST', body: JSON.stringify(body) })).status, 400);
+    }
+    assert.equal(inputs, 0);
+    assert.equal((await web.call('/api/attention/input', signal)).status, 200);
+    assert.equal(inputs, 1);
   } finally { await web.stop(); }
 });
 
