@@ -79,20 +79,21 @@ lines.append('')
 checks = [
     (7860, 'breeze-server (TTS)'),
     (7861, 'breeze-server (alt)'),
-    (9880, 'GPT-SoVITS api_v2'),
     (9881, 'asr-server (STT)'),
     (8787, 'web door'),
-    (11434, 'ollama (tailscale)'),
-    (11435, 'ollama (local)'),
-    (11436, 'emotion llama-server'),
+    # The system Ollama binds the tailnet address, not loopback, so probing
+    # 127.0.0.1 reported it down while it was serving.
+    (11434, 'ollama (tailscale)', '100.123.135.10'),
+    # :11435 (ollama-vision) was retired 2026-09-16 — vision runs on the brain.
+    (11436, 'brain ollama (both GPUs)'),
 ]
 lines.append('### Services')
 lines.append('')
 lines.append('| Port | Service | Status |')
 lines.append('|---|---|---|')
 down = []
-for port, name in checks:
-    up = port_up(port)
+for port, name, *host in checks:
+    up = port_up(port, *host)
     lines.append('| %s | %s | %s |' % (port, name, 'up' if up else '**DOWN**'))
     if not up:
         down.append('%s (:%s)' % (name, port))
