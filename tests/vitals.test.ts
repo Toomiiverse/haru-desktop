@@ -130,7 +130,66 @@ test('driftVitals does not move anything on a zero-second tick', () => {
   }
 });
 
+test('a delayed life tick advances the same elapsed time as regular ticks', () => {
+  for (const env of [
+    { hour: 12, idleSeconds: 0, onBattery: false, windowFocused: true },
+    { hour: 2, idleSeconds: 3600, onBattery: false, windowFocused: false },
+  ]) {
+    const initial = { ...DEFAULT_VITALS, stress: 0.9, happiness: 0.2 };
+    let regular = initial;
+    for (let elapsed = 0; elapsed < 600; elapsed += 20) regular = driftVitals(regular, env, 20);
+    for (const cadence of [60, 300, 600]) {
+      let delayed = initial;
+      for (let elapsed = 0; elapsed < 600; elapsed += cadence) delayed = driftVitals(delayed, env, cadence);
+      assert.deepEqual(delayed, regular, `${cadence}s ticks should not slow her recovery`);
+    }
+  }
+});
+
+test('invalid or backwards elapsed time cannot corrupt vitals', () => {
+  const initial = Object.freeze({ ...DEFAULT_VITALS });
+  const env = { hour: 12, idleSeconds: 0, onBattery: false, windowFocused: true };
+  for (const elapsed of [NaN, Infinity, -Infinity, -20]) {
+    assert.deepEqual(driftVitals(initial, env, elapsed), initial);
+  }
+});
+
+test('even an extreme finite clock jump settles without unbounded catch-up work', { timeout: 1000 }, () => {
+  const env = { hour: 2, idleSeconds: 3600, onBattery: false, windowFocused: false };
+  const result = driftVitals(DEFAULT_VITALS, env, Number.MAX_VALUE);
+  assert.ok(result.sleepiness > 0.89);
+  assert.ok(result.stress < 0.11);
+  assert.ok(Object.values(result).every(value => Number.isFinite(value) && value >= 0 && value <= 1));
+});
+
 // ---- applyEvent: discrete nudges ----
+
+test('unknown activity preserves activity-driven mood while the body clock and events still work', () => {
+  const before = { ...DEFAULT_VITALS, curiosity: 0.65, focus: 0.6, affection: 0.8, stress: 0.7, sleepiness: 0.2 };
+  for (const idleSeconds of [null, NaN, Infinity, -1]) {
+    const environment: Environment = { hour: 0, idleSeconds, windowFocused: null, onBattery: null };
+    const after = driftVitals(before, environment, 3600);
+    for (const key of ['curiosity', 'focus', 'affection', 'stress'] as const) assert.equal(after[key], before[key], key);
+    assert.ok(after.sleepiness > 0.89);
+    assert.ok(after.energy < before.energy);
+    assert.ok(applyEvent(after, 'praised').affection > after.affection);
+  }
+});
+
+test('recent browser input changes curiosity without inventing focus or affection', () => {
+  const before = { ...DEFAULT_VITALS, curiosity: 0.2, focus: 0.3, affection: 0.4 };
+  const after = driftVitals(before, { hour: 12, idleSeconds: 5, windowFocused: null, onBattery: null }, 600);
+  assert.ok(after.curiosity > 0.6);
+  assert.equal(after.focus, before.focus);
+  assert.equal(after.affection, before.affection);
+});
+
+test('unknown activity does not enable the alone-only doze animation', () => {
+  for (let roll = 0; roll < 1; roll += 0.005) {
+    assert.notEqual(chooseIdleAction({ ...DEFAULT_VITALS, sleepiness: 1 },
+      { hour: 0, idleSeconds: null, windowFocused: null, onBattery: null }, () => roll), 'doze');
+  }
+});
 
 test('applyEvent: praised raises happiness, affection and energy', () => {
   const base: Vitals = { ...DEFAULT_VITALS, happiness: 0.5, affection: 0.5, energy: 0.5 };

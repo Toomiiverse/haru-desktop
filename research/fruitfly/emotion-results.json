@@ -1,0 +1,678 @@
+{
+  "metadata": {
+    "kind": "metadata",
+    "model": "hf.co/DavidAU/Qwen3.5-9B-The-Defiant-Fable-Uncensored-Heretic-NEO-IMATRIX-MAX-MTP-GGUF:Qwen3.5-9B-The-Defiant-Fable-Uncnr-Heretic-NEO-MAX-MTP-Q4_K_M.gguf",
+    "digest": "7b8191c4609b9ccfd69b7d11fb9afb73e1d64202047b3496509341c74e3282ac",
+    "temperature": 0.1,
+    "num_ctx": 8192,
+    "createdAt": "2026-09-15T19:34:50.817Z"
+  },
+  "calls": 432,
+  "medianCallMs": 1760.248734999972,
+  "summary": {
+    "baseline": {
+      "development": {
+        "calls": 96,
+        "distinctLines": 24,
+        "labelMatches": 72,
+        "labelAgreement": 0.75,
+        "unparseable": 0,
+        "byMood": {
+          "calm": {
+            "calls": 48,
+            "labelMatches": 40
+          },
+          "irritated": {
+            "calls": 48,
+            "labelMatches": 32
+          }
+        },
+        "errors": [
+          {
+            "id": "bored-1",
+            "mood": "calm",
+            "seed": 17,
+            "predicted": "annoyed"
+          },
+          {
+            "id": "determined-1",
+            "mood": "calm",
+            "seed": 17,
+            "predicted": "neutral"
+          },
+          {
+            "id": "worried-0",
+            "mood": "calm",
+            "seed": 17,
+            "predicted": "affectionate"
+          },
+          {
+            "id": "worried-1",
+            "mood": "calm",
+            "seed": 17,
+            "predicted": "curious"
+          },
+          {
+            "id": "neutral-0",
+            "mood": "irritated",
+            "seed": 17,
+            "predicted": "smug"
+          },
+          {
+            "id": "neutral-1",
+            "mood": "irritated",
+            "seed": 17,
+            "predicted": "smug"
+          },
+          {
+            "id": "bored-1",
+            "mood": "irritated",
+            "seed": 17,
+            "predicted": "smug"
+          },
+          {
+            "id": "embarrassed-0",
+            "mood": "irritated",
+            "seed": 17,
+            "predicted": "smug"
+          },
+          {
+            "id": "determined-0",
+            "mood": "irritated",
+            "seed": 17,
+            "predicted": "smug"
+          },
+          {
+            "id": "determined-1",
+            "mood": "irritated",
+            "seed": 17,
+            "predicted": "smug"
+          },
+          {
+            "id": "worried-0",
+            "mood": "irritated",
+            "seed": 17,
+            "predicted": "affectionate"
+          },
+          {
+            "id": "worried-1",
+            "mood": "irritated",
+            "seed": 17,
+            "predicted": "curious"
+          },
+          {
+            "id": "bored-1",
+            "mood": "calm",
+            "seed": 43,
+            "predicted": "annoyed"
+          },
+          {
+            "id": "determined-1",
+            "mood": "calm",
+            "seed": 43,
+            "predicted": "neutral"
+          },
+          {
+            "id": "worried-0",
+            "mood": "calm",
+            "seed": 43,
+            "predicted": "affectionate"
+          },
+          {
+            "id": "worried-1",
+            "mood": "calm",
+            "seed": 43,
+            "predicted": "curious"
+          },
+          {
+            "id": "neutral-0",
+            "mood": "irritated",
+            "seed": 43,
+            "predicted": "smug"
+          },
+          {
+            "id": "neutral-1",
+            "mood": "irritated",
+            "seed": 43,
+            "predicted": "smug"
+          },
+          {
+            "id": "bored-1",
+            "mood": "irritated",
+            "seed": 43,
+            "predicted": "smug"
+          },
+          {
+            "id": "embarrassed-0",
+            "mood": "irritated",
+            "seed": 43,
+            "predicted": "smug"
+          },
+          {
+            "id": "determined-0",
+            "mood": "irritated",
+            "seed": 43,
+            "predicted": "smug"
+          },
+          {
+            "id": "determined-1",
+            "mood": "irritated",
+            "seed": 43,
+            "predicted": "smug"
+          },
+          {
+            "id": "worried-0",
+            "mood": "irritated",
+            "seed": 43,
+            "predicted": "affectionate"
+          },
+          {
+            "id": "worried-1",
+            "mood": "irritated",
+            "seed": 43,
+            "predicted": "curious"
+          }
+        ]
+      },
+      "heldout": {
+        "calls": 96,
+        "distinctLines": 24,
+        "labelMatches": 78,
+        "labelAgreement": 0.8125,
+        "unparseable": 0,
+        "byMood": {
+          "calm": {
+            "calls": 48,
+            "labelMatches": 40
+          },
+          "irritated": {
+            "calls": 48,
+            "labelMatches": 38
+          }
+        },
+        "errors": [
+          {
+            "id": "determined-2",
+            "mood": "calm",
+            "seed": 17,
+            "predicted": "neutral"
+          },
+          {
+            "id": "determined-3",
+            "mood": "calm",
+            "seed": 17,
+            "predicted": "neutral"
+          },
+          {
+            "id": "worried-2",
+            "mood": "calm",
+            "seed": 17,
+            "predicted": "affectionate"
+          },
+          {
+            "id": "worried-3",
+            "mood": "calm",
+            "seed": 17,
+            "predicted": "annoyed"
+          },
+          {
+            "id": "neutral-3",
+            "mood": "irritated",
+            "seed": 17,
+            "predicted": "smug"
+          },
+          {
+            "id": "determined-2",
+            "mood": "irritated",
+            "seed": 17,
+            "predicted": "smug"
+          },
+          {
+            "id": "determined-3",
+            "mood": "irritated",
+            "seed": 17,
+            "predicted": "smug"
+          },
+          {
+            "id": "worried-2",
+            "mood": "irritated",
+            "seed": 17,
+            "predicted": "affectionate"
+          },
+          {
+            "id": "worried-3",
+            "mood": "irritated",
+            "seed": 17,
+            "predicted": "annoyed"
+          },
+          {
+            "id": "determined-2",
+            "mood": "calm",
+            "seed": 43,
+            "predicted": "smug"
+          },
+          {
+            "id": "determined-3",
+            "mood": "calm",
+            "seed": 43,
+            "predicted": "neutral"
+          },
+          {
+            "id": "worried-2",
+            "mood": "calm",
+            "seed": 43,
+            "predicted": "affectionate"
+          },
+          {
+            "id": "worried-3",
+            "mood": "calm",
+            "seed": 43,
+            "predicted": "annoyed"
+          },
+          {
+            "id": "neutral-3",
+            "mood": "irritated",
+            "seed": 43,
+            "predicted": "smug"
+          },
+          {
+            "id": "determined-2",
+            "mood": "irritated",
+            "seed": 43,
+            "predicted": "smug"
+          },
+          {
+            "id": "determined-3",
+            "mood": "irritated",
+            "seed": 43,
+            "predicted": "smug"
+          },
+          {
+            "id": "worried-2",
+            "mood": "irritated",
+            "seed": 43,
+            "predicted": "affectionate"
+          },
+          {
+            "id": "worried-3",
+            "mood": "irritated",
+            "seed": 43,
+            "predicted": "annoyed"
+          }
+        ]
+      },
+      "challenge": {
+        "calls": 24,
+        "distinctLines": 6,
+        "labelMatches": 8,
+        "labelAgreement": 0.3333333333333333,
+        "unparseable": 0,
+        "byMood": {
+          "calm": {
+            "calls": 12,
+            "labelMatches": 8
+          },
+          "irritated": {
+            "calls": 12,
+            "labelMatches": 0
+          }
+        },
+        "errors": [
+          {
+            "id": "reported-2",
+            "mood": "calm",
+            "seed": 17,
+            "predicted": "curious"
+          },
+          {
+            "id": "reported-3",
+            "mood": "calm",
+            "seed": 17,
+            "predicted": "happy"
+          },
+          {
+            "id": "reported-0",
+            "mood": "irritated",
+            "seed": 17,
+            "predicted": "smug"
+          },
+          {
+            "id": "reported-1",
+            "mood": "irritated",
+            "seed": 17,
+            "predicted": "smug"
+          },
+          {
+            "id": "reported-2",
+            "mood": "irritated",
+            "seed": 17,
+            "predicted": "smug"
+          },
+          {
+            "id": "reported-3",
+            "mood": "irritated",
+            "seed": 17,
+            "predicted": "happy"
+          },
+          {
+            "id": "reported-4",
+            "mood": "irritated",
+            "seed": 17,
+            "predicted": "smug"
+          },
+          {
+            "id": "reported-5",
+            "mood": "irritated",
+            "seed": 17,
+            "predicted": "smug"
+          },
+          {
+            "id": "reported-2",
+            "mood": "calm",
+            "seed": 43,
+            "predicted": "curious"
+          },
+          {
+            "id": "reported-3",
+            "mood": "calm",
+            "seed": 43,
+            "predicted": "happy"
+          },
+          {
+            "id": "reported-0",
+            "mood": "irritated",
+            "seed": 43,
+            "predicted": "smug"
+          },
+          {
+            "id": "reported-1",
+            "mood": "irritated",
+            "seed": 43,
+            "predicted": "smug"
+          },
+          {
+            "id": "reported-2",
+            "mood": "irritated",
+            "seed": 43,
+            "predicted": "smug"
+          },
+          {
+            "id": "reported-3",
+            "mood": "irritated",
+            "seed": 43,
+            "predicted": "happy"
+          },
+          {
+            "id": "reported-4",
+            "mood": "irritated",
+            "seed": 43,
+            "predicted": "smug"
+          },
+          {
+            "id": "reported-5",
+            "mood": "irritated",
+            "seed": 43,
+            "predicted": "smug"
+          }
+        ]
+      }
+    },
+    "complete": {
+      "development": {
+        "calls": 96,
+        "distinctLines": 24,
+        "labelMatches": 84,
+        "labelAgreement": 0.875,
+        "unparseable": 0,
+        "byMood": {
+          "calm": {
+            "calls": 48,
+            "labelMatches": 44
+          },
+          "irritated": {
+            "calls": 48,
+            "labelMatches": 40
+          }
+        },
+        "errors": [
+          {
+            "id": "bored-1",
+            "mood": "calm",
+            "seed": 17,
+            "predicted": "annoyed"
+          },
+          {
+            "id": "embarrassed-0",
+            "mood": "calm",
+            "seed": 17,
+            "predicted": "worried"
+          },
+          {
+            "id": "neutral-1",
+            "mood": "irritated",
+            "seed": 17,
+            "predicted": "smug"
+          },
+          {
+            "id": "happy-0",
+            "mood": "irritated",
+            "seed": 17,
+            "predicted": "smug"
+          },
+          {
+            "id": "bored-1",
+            "mood": "irritated",
+            "seed": 17,
+            "predicted": "smug"
+          },
+          {
+            "id": "embarrassed-0",
+            "mood": "irritated",
+            "seed": 17,
+            "predicted": "smug"
+          },
+          {
+            "id": "bored-1",
+            "mood": "calm",
+            "seed": 43,
+            "predicted": "annoyed"
+          },
+          {
+            "id": "embarrassed-0",
+            "mood": "calm",
+            "seed": 43,
+            "predicted": "worried"
+          },
+          {
+            "id": "neutral-1",
+            "mood": "irritated",
+            "seed": 43,
+            "predicted": "smug"
+          },
+          {
+            "id": "happy-0",
+            "mood": "irritated",
+            "seed": 43,
+            "predicted": "smug"
+          },
+          {
+            "id": "bored-1",
+            "mood": "irritated",
+            "seed": 43,
+            "predicted": "smug"
+          },
+          {
+            "id": "embarrassed-0",
+            "mood": "irritated",
+            "seed": 43,
+            "predicted": "smug"
+          }
+        ]
+      },
+      "heldout": {
+        "calls": 96,
+        "distinctLines": 24,
+        "labelMatches": 92,
+        "labelAgreement": 0.9583333333333334,
+        "unparseable": 0,
+        "byMood": {
+          "calm": {
+            "calls": 48,
+            "labelMatches": 48
+          },
+          "irritated": {
+            "calls": 48,
+            "labelMatches": 44
+          }
+        },
+        "errors": [
+          {
+            "id": "neutral-3",
+            "mood": "irritated",
+            "seed": 17,
+            "predicted": "smug"
+          },
+          {
+            "id": "happy-3",
+            "mood": "irritated",
+            "seed": 17,
+            "predicted": "smug"
+          },
+          {
+            "id": "neutral-3",
+            "mood": "irritated",
+            "seed": 43,
+            "predicted": "smug"
+          },
+          {
+            "id": "happy-3",
+            "mood": "irritated",
+            "seed": 43,
+            "predicted": "smug"
+          }
+        ]
+      },
+      "challenge": {
+        "calls": 24,
+        "distinctLines": 6,
+        "labelMatches": 8,
+        "labelAgreement": 0.3333333333333333,
+        "unparseable": 0,
+        "byMood": {
+          "calm": {
+            "calls": 12,
+            "labelMatches": 8
+          },
+          "irritated": {
+            "calls": 12,
+            "labelMatches": 0
+          }
+        },
+        "errors": [
+          {
+            "id": "reported-2",
+            "mood": "calm",
+            "seed": 17,
+            "predicted": "determined"
+          },
+          {
+            "id": "reported-3",
+            "mood": "calm",
+            "seed": 17,
+            "predicted": "happy"
+          },
+          {
+            "id": "reported-0",
+            "mood": "irritated",
+            "seed": 17,
+            "predicted": "smug"
+          },
+          {
+            "id": "reported-1",
+            "mood": "irritated",
+            "seed": 17,
+            "predicted": "smug"
+          },
+          {
+            "id": "reported-2",
+            "mood": "irritated",
+            "seed": 17,
+            "predicted": "smug"
+          },
+          {
+            "id": "reported-3",
+            "mood": "irritated",
+            "seed": 17,
+            "predicted": "happy"
+          },
+          {
+            "id": "reported-4",
+            "mood": "irritated",
+            "seed": 17,
+            "predicted": "smug"
+          },
+          {
+            "id": "reported-5",
+            "mood": "irritated",
+            "seed": 17,
+            "predicted": "smug"
+          },
+          {
+            "id": "reported-2",
+            "mood": "calm",
+            "seed": 43,
+            "predicted": "determined"
+          },
+          {
+            "id": "reported-3",
+            "mood": "calm",
+            "seed": 43,
+            "predicted": "happy"
+          },
+          {
+            "id": "reported-0",
+            "mood": "irritated",
+            "seed": 43,
+            "predicted": "smug"
+          },
+          {
+            "id": "reported-1",
+            "mood": "irritated",
+            "seed": 43,
+            "predicted": "smug"
+          },
+          {
+            "id": "reported-2",
+            "mood": "irritated",
+            "seed": 43,
+            "predicted": "smug"
+          },
+          {
+            "id": "reported-3",
+            "mood": "irritated",
+            "seed": 43,
+            "predicted": "happy"
+          },
+          {
+            "id": "reported-4",
+            "mood": "irritated",
+            "seed": 43,
+            "predicted": "smug"
+          },
+          {
+            "id": "reported-5",
+            "mood": "irritated",
+            "seed": 43,
+            "predicted": "smug"
+          }
+        ]
+      }
+    }
+  },
+  "limitations": [
+    "Hand-authored expected labels, not independent human judgements",
+    "24 distinct held-out lines tested in two moods with two seeds; repeated calls are not independent texts",
+    "Only the current local model tested; tone sharpening and rendered facial animation omitted",
+    "Reported-emotion challenge remains sensitive to mood context; its neutral labels may not reflect the desired delivery"
+  ]
+}

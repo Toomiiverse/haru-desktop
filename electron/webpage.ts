@@ -930,6 +930,31 @@ ${VOICE}
 const get=u=>window.haruNet.fetch(u).then(r=>r.ok?r.json():Promise.reject(r));
 const post=(u,b)=>window.haruNet.fetch(u,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(b||{})}).then(r=>r.ok?r.json():Promise.reject(r));
 
+// ---- Shadow input evidence -------------------------------------------------
+// Report only actual page input, never opening, visibility or a timer. Native
+// fetch deliberately bypasses the network helper's retry path: stale input
+// must not be queued and delivered as fresh evidence after reconnecting.
+(()=>{
+  let last=-Infinity, busy=false;
+  if(typeof crypto==='undefined'||!crypto.getRandomValues) return;
+  const client=Array.from(crypto.getRandomValues(new Uint8Array(16)),n=>n.toString(16).padStart(2,'0')).join('');
+  let sequence=0;
+  const report=async event=>{
+    if(event.isTrusted!==true||document.visibilityState!=='visible'||busy) return;
+    const now=performance.now();
+    if(now-last<30_000) return;
+    last=now; busy=true;
+    const controller=new AbortController();
+    const timeout=setTimeout(()=>controller.abort(),5000);
+    try{
+      await fetch('/api/attention/input',{method:'POST',headers:{'content-type':'application/json'},
+        body:JSON.stringify({kind:'input',client,sequence:++sequence}),signal:controller.signal});
+    }catch{}finally{ clearTimeout(timeout); busy=false; }
+  };
+  for(const type of ['pointerdown','keydown','input','wheel']) document.addEventListener(type,report,{passive:true});
+})();
+// ---- End shadow input evidence ---------------------------------------------
+
 $('out').onclick=()=>post('/api/logout').then(()=>location.reload());
 
 // Installed on an iPhone, the reported viewport stops short of the screen: the

@@ -28,6 +28,8 @@ import { mergeMemories } from '../electron/memorysync';
 import { mergeActivity, type ActivityLog } from '../electron/activitylog';
 import { heldShots, keepShot } from '../electron/shotstore';
 import type { MemoryRecord } from '../electron/memory';
+import { ActivityObservations } from '../electron/activity-observation';
+import { ActivityReporter } from '../electron/activity-reporter';
 
 const USERNAME = 'tom';
 const PASSWORD = 'a-long-enough-password';
@@ -183,10 +185,85 @@ test('a stranger gets the sign-in page and nothing else', async () => {
     assert.equal(front.status, 200);
     assert.ok((await front.text()).includes('Sign in to reach her'));
 
-    for (const path of ['/api/chat', '/api/agenda', '/api/status', '/api/diary', '/api/her', '/api/memory', '/api/memory/records', '/api/activity', '/api/activity/shots', '/api/journal', '/api/checkins', '/api/knowledge/stats', '/api/model', '/api/push', '/api/attach', '/api/where', '/api/evi/status']) {
+    for (const path of ['/api/chat', '/api/attention/input', '/api/agenda', '/api/status', '/api/diary', '/api/her', '/api/memory', '/api/memory/records', '/api/activity', '/api/activity/shots', '/api/journal', '/api/checkins', '/api/knowledge/stats', '/api/model', '/api/push', '/api/attach', '/api/where', '/api/evi/status']) {
       const refused = await web.call(path);
       assert.equal(refused.status, 401, `${path} answered a stranger`);
     }
+  } finally { await web.stop(); }
+});
+
+test('shadow input requires authentication and its exact content-free payload; page reads are not input', async () => {
+  let inputs = 0;
+  const web = await door({ attentionInput: () => { inputs++; } });
+  try {
+    const signal = { method: 'POST', body: JSON.stringify({ kind: 'input' }) };
+    assert.equal((await web.call('/api/attention/input', signal)).status, 401);
+    await web.signIn();
+    await web.call('/');
+    await web.call('/api/chat');
+    assert.equal(inputs, 0);
+    assert.equal((await web.call('/api/attention/input', { ...signal, headers: { 'content-type': 'text/plain' } })).status, 415);
+    for (const body of [null, [], {}, { kind: 'visible' }, { kind: 'input', key: 'private' }, { kind: 'input', at: 1 }]) {
+      assert.equal((await web.call('/api/attention/input', { method: 'POST', body: JSON.stringify(body) })).status, 400);
+    }
+    assert.equal(inputs, 0);
+    assert.equal((await web.call('/api/attention/input', signal)).status, 200);
+    assert.equal(inputs, 1);
+  } finally { await web.stop(); }
+});
+
+test('authenticated clients retain separate input sequences and cannot submit future clocks or window titles', async () => {
+  const observations = new ActivityObservations();
+  let now = 1000;
+  const web = await door({ attentionInput: (source, report) => { observations.note(source, report, now); } });
+  try {
+    await web.signIn();
+    const signal = { kind: 'input', client: 'same-client-id-0001', sequence: 10 };
+    const post = (body: unknown) => web.call('/api/attention/input', { method: 'POST', body: JSON.stringify(body) });
+    assert.equal((await post(signal)).status, 200);
+    now = 2000;
+    await post({ ...signal, sequence: 9 });
+    assert.equal(observations.read(now).idleSeconds, 1, 'out-of-order packet did not refresh receipt time');
+    const native = { kind: 'desktop', client: 'desktop-client-0001', sequence: 1, sampleAgeMs: 0,
+      idleSeconds: 1000, windowFocused: true, onBattery: false };
+    assert.equal((await post(native)).status, 200);
+    assert.equal(observations.read(now).source, 'browser');
+    assert.equal(observations.read(now).windowFocused, null);
+    for (const body of [{ ...native, title: 'private' }, { ...native, at: now + 999999 }, { ...native, sampleAgeMs: 6000 }]) {
+      assert.equal((await post(body)).status, 400);
+    }
+    // A second login on this same server is an independent authenticated source.
+    const login = await web.call('/api/login', { anonymous: true, method: 'POST',
+      body: JSON.stringify({ username: USERNAME, password: PASSWORD, remember: false }) });
+    const cookie = login.headers.getSetCookie().map(value => value.split(';')[0]).join('; ');
+    now = 3000;
+    assert.equal((await web.call('/api/attention/input', { anonymous: true, method: 'POST',
+      headers: { cookie }, body: JSON.stringify({ ...signal, sequence: 1 }) })).status, 200);
+    assert.equal(observations.read(now).idleSeconds, 0);
+    assert.equal(observations.read(now).freshSources, 3);
+  } finally { await web.stop(); }
+});
+
+test('native OS-shaped sample reaches the authenticated observation route without extra fields', async () => {
+  const observations = new ActivityObservations();
+  const web = await door({ attentionInput: (source, report) => { observations.note(source, report, 1000); } });
+  try {
+    await web.signIn();
+    const source = { url: 'http://100.100.10.1:8787', username: USERNAME };
+    let responseStatus = 0;
+    // Only transport is redirected to our local test server; the real sender,
+    // cookie authentication, payload validation and receiver all run.
+    const reporter = new ActivityReporter(async (_url, options) => {
+      const response = await fetch('http://127.0.0.1:' + web.port + '/api/attention/input', options);
+      responseStatus = response.status;
+      return response;
+    });
+    reporter.connected(source, web.cookie());
+    await reporter.report(source, () => ({ hour: 12, idleSeconds: 8, windowFocused: false,
+      onBattery: true, title: 'never transmit this' }), 0);
+    assert.equal(responseStatus, 200);
+    assert.deepEqual(observations.read(1000), { availability: 'recent-input', source: 'desktop',
+      idleSeconds: 8, windowFocused: false, onBattery: true, receivedAgeMs: 0, freshSources: 1 });
   } finally { await web.stop(); }
 });
 

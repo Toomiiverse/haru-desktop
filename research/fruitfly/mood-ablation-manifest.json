@@ -1,0 +1,979 @@
+{
+  "source": "https://github.com/google-research/google-research/tree/master/goemotions",
+  "sourceCommit": "2adf640a14f11025ae5a9d0ec493b78530d276d3",
+  "split": "official dev",
+  "sourceSha256": "575489c079c9de1097062a01738f998590d6b7ead66dd1c9fd1d2ba01fd8bc62",
+  "selection": "Up to 20 single-label examples/category by SHA-256 order of haru-mood-ablation-20260916:<id>",
+  "mapping": {
+    "neutral": "neutral",
+    "joy": "happy",
+    "curiosity": "curious",
+    "annoyance": "annoyed",
+    "embarrassment": "embarrassed",
+    "nervousness": "worried",
+    "surprise": "surprised"
+  },
+  "addedInstruction": "Use the words of the line as the main evidence. Background mood may resolve an ambiguous line, but must not override an emotion clearly expressed in the words.",
+  "prompts": [
+    {
+      "mood": "calm",
+      "current": "You label the emotional state behind a line of dialogue for an animated character. Read the line and report what the speaker felt as they said it, not what the listener would feel. The labels mean: determined: resolute, committed to acting or persisting through difficulty; worried: concerned, anxious that something may be wrong; neutral: matter-of-fact, nothing much felt; happy: pleased or delighted; curious: interested, wants to know more; smug: self-satisfied, pleased at being right; annoyed: irritated or impatient; bored: uninterested, cannot be bothered; sleepy: physically drowsy, nodding off, about to sleep — not merely quiet or low-energy; surprised: caught off guard; affectionate: warm toward the listener, fond of them, admitting they matter; embarrassed: flustered or caught out, often while admitting something. A quiet or short line is not automatically sleepy — only pick sleepy when the words are about tiredness or sleep. For context she is currently even-tempered and not especially smug. confidence is how sure you are of the label. energy is how animated the delivery is, 0 flat and 1 bouncing. intent is what she was doing: listen, explain, tease, dismiss, celebrate or soothe. focus is where her attention sits: user, self, task or away. Reply with the JSON object only.",
+      "words_first": "You label the emotional state behind a line of dialogue for an animated character. Read the line and report what the speaker felt as they said it, not what the listener would feel. The labels mean: determined: resolute, committed to acting or persisting through difficulty; worried: concerned, anxious that something may be wrong; neutral: matter-of-fact, nothing much felt; happy: pleased or delighted; curious: interested, wants to know more; smug: self-satisfied, pleased at being right; annoyed: irritated or impatient; bored: uninterested, cannot be bothered; sleepy: physically drowsy, nodding off, about to sleep — not merely quiet or low-energy; surprised: caught off guard; affectionate: warm toward the listener, fond of them, admitting they matter; embarrassed: flustered or caught out, often while admitting something. A quiet or short line is not automatically sleepy — only pick sleepy when the words are about tiredness or sleep. For context she is currently even-tempered and not especially smug. confidence is how sure you are of the label. energy is how animated the delivery is, 0 flat and 1 bouncing. intent is what she was doing: listen, explain, tease, dismiss, celebrate or soothe. focus is where her attention sits: user, self, task or away. Reply with the JSON object only. Use the words of the line as the main evidence. Background mood may resolve an ambiguous line, but must not override an emotion clearly expressed in the words.",
+      "no_mood": "You label the emotional state behind a line of dialogue for an animated character. Read the line and report what the speaker felt as they said it, not what the listener would feel. The labels mean: determined: resolute, committed to acting or persisting through difficulty; worried: concerned, anxious that something may be wrong; neutral: matter-of-fact, nothing much felt; happy: pleased or delighted; curious: interested, wants to know more; smug: self-satisfied, pleased at being right; annoyed: irritated or impatient; bored: uninterested, cannot be bothered; sleepy: physically drowsy, nodding off, about to sleep — not merely quiet or low-energy; surprised: caught off guard; affectionate: warm toward the listener, fond of them, admitting they matter; embarrassed: flustered or caught out, often while admitting something. A quiet or short line is not automatically sleepy — only pick sleepy when the words are about tiredness or sleep. confidence is how sure you are of the label. energy is how animated the delivery is, 0 flat and 1 bouncing. intent is what she was doing: listen, explain, tease, dismiss, celebrate or soothe. focus is where her attention sits: user, self, task or away. Reply with the JSON object only."
+    },
+    {
+      "mood": "irritated",
+      "current": "You label the emotional state behind a line of dialogue for an animated character. Read the line and report what the speaker felt as they said it, not what the listener would feel. The labels mean: determined: resolute, committed to acting or persisting through difficulty; worried: concerned, anxious that something may be wrong; neutral: matter-of-fact, nothing much felt; happy: pleased or delighted; curious: interested, wants to know more; smug: self-satisfied, pleased at being right; annoyed: irritated or impatient; bored: uninterested, cannot be bothered; sleepy: physically drowsy, nodding off, about to sleep — not merely quiet or low-energy; surprised: caught off guard; affectionate: warm toward the listener, fond of them, admitting they matter; embarrassed: flustered or caught out, often while admitting something. A quiet or short line is not automatically sleepy — only pick sleepy when the words are about tiredness or sleep. For context she is currently thoroughly fed up and insufferably pleased with herself. confidence is how sure you are of the label. energy is how animated the delivery is, 0 flat and 1 bouncing. intent is what she was doing: listen, explain, tease, dismiss, celebrate or soothe. focus is where her attention sits: user, self, task or away. Reply with the JSON object only.",
+      "words_first": "You label the emotional state behind a line of dialogue for an animated character. Read the line and report what the speaker felt as they said it, not what the listener would feel. The labels mean: determined: resolute, committed to acting or persisting through difficulty; worried: concerned, anxious that something may be wrong; neutral: matter-of-fact, nothing much felt; happy: pleased or delighted; curious: interested, wants to know more; smug: self-satisfied, pleased at being right; annoyed: irritated or impatient; bored: uninterested, cannot be bothered; sleepy: physically drowsy, nodding off, about to sleep — not merely quiet or low-energy; surprised: caught off guard; affectionate: warm toward the listener, fond of them, admitting they matter; embarrassed: flustered or caught out, often while admitting something. A quiet or short line is not automatically sleepy — only pick sleepy when the words are about tiredness or sleep. For context she is currently thoroughly fed up and insufferably pleased with herself. confidence is how sure you are of the label. energy is how animated the delivery is, 0 flat and 1 bouncing. intent is what she was doing: listen, explain, tease, dismiss, celebrate or soothe. focus is where her attention sits: user, self, task or away. Reply with the JSON object only. Use the words of the line as the main evidence. Background mood may resolve an ambiguous line, but must not override an emotion clearly expressed in the words.",
+      "no_mood": "You label the emotional state behind a line of dialogue for an animated character. Read the line and report what the speaker felt as they said it, not what the listener would feel. The labels mean: determined: resolute, committed to acting or persisting through difficulty; worried: concerned, anxious that something may be wrong; neutral: matter-of-fact, nothing much felt; happy: pleased or delighted; curious: interested, wants to know more; smug: self-satisfied, pleased at being right; annoyed: irritated or impatient; bored: uninterested, cannot be bothered; sleepy: physically drowsy, nodding off, about to sleep — not merely quiet or low-energy; surprised: caught off guard; affectionate: warm toward the listener, fond of them, admitting they matter; embarrassed: flustered or caught out, often while admitting something. A quiet or short line is not automatically sleepy — only pick sleepy when the words are about tiredness or sleep. confidence is how sure you are of the label. energy is how animated the delivery is, 0 flat and 1 bouncing. intent is what she was doing: listen, explain, tease, dismiss, celebrate or soothe. focus is where her attention sits: user, self, task or away. Reply with the JSON object only."
+    }
+  ],
+  "variants": [
+    "current",
+    "words_first",
+    "no_mood"
+  ],
+  "cases": [
+    {
+      "id": "ed3o748",
+      "expected": "neutral",
+      "originalLabel": "neutral",
+      "split": "public_dev",
+      "textSha256": "91713431bb0d80d7026e5153af8d8160d04a0a0e486d8c69338e51bfd1688d5b"
+    },
+    {
+      "id": "eczh8ym",
+      "expected": "neutral",
+      "originalLabel": "neutral",
+      "split": "public_dev",
+      "textSha256": "2e813256416b853b4653a45adeb789b2061b0bb2eb4e9095f1d3a4d8de799d3a"
+    },
+    {
+      "id": "eerxigr",
+      "expected": "neutral",
+      "originalLabel": "neutral",
+      "split": "public_dev",
+      "textSha256": "0878bd7d64c1eff551b4b72768634fa680b8dca17fdec92c86c2c214d2174c05"
+    },
+    {
+      "id": "eeggma7",
+      "expected": "neutral",
+      "originalLabel": "neutral",
+      "split": "public_dev",
+      "textSha256": "12952250227e48e0d93737bb922de3042f5c204924518c999ad8c35f7a73b765"
+    },
+    {
+      "id": "ed6sill",
+      "expected": "neutral",
+      "originalLabel": "neutral",
+      "split": "public_dev",
+      "textSha256": "331372681ebeb635662f4fb82275250f9845c76ce889db1e9ce836ee38cc0018"
+    },
+    {
+      "id": "eeptbkr",
+      "expected": "neutral",
+      "originalLabel": "neutral",
+      "split": "public_dev",
+      "textSha256": "2e03c5796b51eb4c142eb65d6b712b06b234b4f1d619f2f26547fc636d51c024"
+    },
+    {
+      "id": "eecn0nk",
+      "expected": "neutral",
+      "originalLabel": "neutral",
+      "split": "public_dev",
+      "textSha256": "224740b4395c33bf4eec4807501fda296e04060e191599ec198ed26c9bc3aa81"
+    },
+    {
+      "id": "ee5yybc",
+      "expected": "neutral",
+      "originalLabel": "neutral",
+      "split": "public_dev",
+      "textSha256": "441f88bf7360547a953c9be6a7a47939986a75dc3f129f9eabb8a6f3691c9883"
+    },
+    {
+      "id": "ee2okxk",
+      "expected": "neutral",
+      "originalLabel": "neutral",
+      "split": "public_dev",
+      "textSha256": "a72f0d5b2afc927cbcb8e4cb6744632f407a303b9572faf0a714973e46594229"
+    },
+    {
+      "id": "eey8kon",
+      "expected": "neutral",
+      "originalLabel": "neutral",
+      "split": "public_dev",
+      "textSha256": "1502d3c5c161620ee696dad7eb09e04e63ed6acd5fbc95c23586ebe069048d47"
+    },
+    {
+      "id": "eekirom",
+      "expected": "neutral",
+      "originalLabel": "neutral",
+      "split": "public_dev",
+      "textSha256": "850bdca66429a70d0b3809ef4119e2d74bf380e592a444c96583c1f821a36a66"
+    },
+    {
+      "id": "eezinyp",
+      "expected": "neutral",
+      "originalLabel": "neutral",
+      "split": "public_dev",
+      "textSha256": "cb76c7b816200d77cb853c72c7a6ebfbe310aa72301f70ac09e1080fb8fc544e"
+    },
+    {
+      "id": "edkmo4f",
+      "expected": "neutral",
+      "originalLabel": "neutral",
+      "split": "public_dev",
+      "textSha256": "7f42989e0ea775d262ed01b9b11e499a562d4fd36f4821738284e2880f547403"
+    },
+    {
+      "id": "efgtqxs",
+      "expected": "neutral",
+      "originalLabel": "neutral",
+      "split": "public_dev",
+      "textSha256": "4100eafc39b9d433858d34ccb870a27e81e4e2146012367bc091f98e5d7b014c"
+    },
+    {
+      "id": "ed5g82p",
+      "expected": "neutral",
+      "originalLabel": "neutral",
+      "split": "public_dev",
+      "textSha256": "5a0769b51d913219926b88ee74f53c721c9cd0a5908d200f44fac8299e5bd4d6"
+    },
+    {
+      "id": "edpj77o",
+      "expected": "neutral",
+      "originalLabel": "neutral",
+      "split": "public_dev",
+      "textSha256": "695413f1d696280462405a58c7914d50e5364835ad4562582e7bf4a5e32462e2"
+    },
+    {
+      "id": "ed2r3a0",
+      "expected": "neutral",
+      "originalLabel": "neutral",
+      "split": "public_dev",
+      "textSha256": "280e06404e5d5ea1e1f947e1000eb0f09647fb26e959783e18d32f7be7497248"
+    },
+    {
+      "id": "edcnlah",
+      "expected": "neutral",
+      "originalLabel": "neutral",
+      "split": "public_dev",
+      "textSha256": "e82a072a44f72e5b46768cc0a85e6e0cdd7b236cef1bd84e0623c252a94ef6b4"
+    },
+    {
+      "id": "efgb529",
+      "expected": "neutral",
+      "originalLabel": "neutral",
+      "split": "public_dev",
+      "textSha256": "c3d8796a9b25d936ed549c9729b8da3f254411e8ccdd680ff7741137ac00d05a"
+    },
+    {
+      "id": "ee9rqmp",
+      "expected": "neutral",
+      "originalLabel": "neutral",
+      "split": "public_dev",
+      "textSha256": "48d5e0e09ee5f386c45000215742480b735f17661553dae8ff9fe2ba6e259b8d"
+    },
+    {
+      "id": "edf65ig",
+      "expected": "happy",
+      "originalLabel": "joy",
+      "split": "public_dev",
+      "textSha256": "f36ccc89dc8be480657cd483213239cdc340a0cdb477e50c0f64f01b2af0ca15"
+    },
+    {
+      "id": "ee5wzwr",
+      "expected": "happy",
+      "originalLabel": "joy",
+      "split": "public_dev",
+      "textSha256": "cb116d070a91a86798c7dbc10c69ba930465a624bb41369de923197c2cbc4120"
+    },
+    {
+      "id": "ee2csg8",
+      "expected": "happy",
+      "originalLabel": "joy",
+      "split": "public_dev",
+      "textSha256": "e6786cf11437419779b6f0fa2b1d3ce027daaadcd983b2a5e5bdfa2c9586cbb5"
+    },
+    {
+      "id": "ee4buzn",
+      "expected": "happy",
+      "originalLabel": "joy",
+      "split": "public_dev",
+      "textSha256": "aca0fd0cc0172e3c79fa0a2786cfffb6aaaa67bf6b732fa04f8a67c276ef00b4"
+    },
+    {
+      "id": "eepkwed",
+      "expected": "happy",
+      "originalLabel": "joy",
+      "split": "public_dev",
+      "textSha256": "b1d5d69fa21808b7cf2c82da0f462ed724589815e3d710b4accdafef07a298b2"
+    },
+    {
+      "id": "edobyt7",
+      "expected": "happy",
+      "originalLabel": "joy",
+      "split": "public_dev",
+      "textSha256": "916415e7465c62a73a113bba9ee3db556c515c3ca484b4b7e44d09b6b0705ee4"
+    },
+    {
+      "id": "edpgjsw",
+      "expected": "happy",
+      "originalLabel": "joy",
+      "split": "public_dev",
+      "textSha256": "660ef838ef984d94e4799474f1dbc8560cc9421355b7ab0e224536478e393213"
+    },
+    {
+      "id": "eev7958",
+      "expected": "happy",
+      "originalLabel": "joy",
+      "split": "public_dev",
+      "textSha256": "33499541378c990c29f8327bfdc70c123203aa36dd30c1275534a33e33e1939f"
+    },
+    {
+      "id": "ed1suhl",
+      "expected": "happy",
+      "originalLabel": "joy",
+      "split": "public_dev",
+      "textSha256": "e3c7b08d709c845faa29abd4d3ebbacdc8933573752b3fab59d0f04b574ac475"
+    },
+    {
+      "id": "edd70xy",
+      "expected": "happy",
+      "originalLabel": "joy",
+      "split": "public_dev",
+      "textSha256": "47c3e1caa6f9d279d67b535a6e8aec695f79235f6f87ce13d3e3784c689ddffd"
+    },
+    {
+      "id": "ef88ag9",
+      "expected": "happy",
+      "originalLabel": "joy",
+      "split": "public_dev",
+      "textSha256": "f5c71d5486b9988661356880bbeab710aa9f0bc08d4b95b25034b8a1e86e59cf"
+    },
+    {
+      "id": "eemhb9t",
+      "expected": "happy",
+      "originalLabel": "joy",
+      "split": "public_dev",
+      "textSha256": "055fb84b29a3a626d71b2c6248f81104704143863ea4c7f2fb516abb7611ee11"
+    },
+    {
+      "id": "ee3vf5i",
+      "expected": "happy",
+      "originalLabel": "joy",
+      "split": "public_dev",
+      "textSha256": "0f94fac9cddacde95e57cf63808c4c4ad474444c443c1738cfdf277f39f3328e"
+    },
+    {
+      "id": "ed7y43m",
+      "expected": "happy",
+      "originalLabel": "joy",
+      "split": "public_dev",
+      "textSha256": "d870373c10727801a8e9a760c927d8eb8fc2aa39b266f2ab74797b14b60a144f"
+    },
+    {
+      "id": "efacciv",
+      "expected": "happy",
+      "originalLabel": "joy",
+      "split": "public_dev",
+      "textSha256": "01746fd74ebd680d09f30584891359a38660f91f1c13bba03900fbaa32dc073d"
+    },
+    {
+      "id": "ee9fdsx",
+      "expected": "happy",
+      "originalLabel": "joy",
+      "split": "public_dev",
+      "textSha256": "d6075f295cf41ba150d3ec3722902920016fb3b58cb787fcd1af653925b058b4"
+    },
+    {
+      "id": "eechsrw",
+      "expected": "happy",
+      "originalLabel": "joy",
+      "split": "public_dev",
+      "textSha256": "b24fab992bf0259c77dd59f14277d52f25c4c30c1b710721b58a574f5632230f"
+    },
+    {
+      "id": "efc05gk",
+      "expected": "happy",
+      "originalLabel": "joy",
+      "split": "public_dev",
+      "textSha256": "6c368967f33132e7ffccb48feb7bef791106ef7411b795c0390587066045af2e"
+    },
+    {
+      "id": "ee7t6zk",
+      "expected": "happy",
+      "originalLabel": "joy",
+      "split": "public_dev",
+      "textSha256": "11f0f9e4ec689f2183e6081d06f81b97943cf55e9d6353ecbcd30bab79709d2a"
+    },
+    {
+      "id": "ef18or6",
+      "expected": "happy",
+      "originalLabel": "joy",
+      "split": "public_dev",
+      "textSha256": "3386325c4f12412b82208f9ece5ff9601103ccc8e557e06b0188a9d454b8cdd6"
+    },
+    {
+      "id": "edjldcm",
+      "expected": "curious",
+      "originalLabel": "curiosity",
+      "split": "public_dev",
+      "textSha256": "d1e54caf42e260615bcc9dccb757213604c492aded4c1f9ab3aff2e0121542ca"
+    },
+    {
+      "id": "ef9yi7a",
+      "expected": "curious",
+      "originalLabel": "curiosity",
+      "split": "public_dev",
+      "textSha256": "0948a885c65950c10fc6ea8a421e9c9538db9b9fff89c486a877e29cecfea25a"
+    },
+    {
+      "id": "ee27kmr",
+      "expected": "curious",
+      "originalLabel": "curiosity",
+      "split": "public_dev",
+      "textSha256": "b5b7f2c090a50f8da5b7e4b702136f2b7930391071f18138b4681ebf1a260285"
+    },
+    {
+      "id": "efcplj3",
+      "expected": "curious",
+      "originalLabel": "curiosity",
+      "split": "public_dev",
+      "textSha256": "127604afa216faca04fb443e42b7ac82d025ae3ffb02f89b29c806dcbc891f13"
+    },
+    {
+      "id": "ed74ybw",
+      "expected": "curious",
+      "originalLabel": "curiosity",
+      "split": "public_dev",
+      "textSha256": "553a798025d24961a44143e458d775cd7f88265e6191796dfc395f5dd630c16f"
+    },
+    {
+      "id": "edmvyf0",
+      "expected": "curious",
+      "originalLabel": "curiosity",
+      "split": "public_dev",
+      "textSha256": "4e239821080deded396636511f9ad1b345cb0c55b809bbf7a123e4e3b5f21a82"
+    },
+    {
+      "id": "edki5r7",
+      "expected": "curious",
+      "originalLabel": "curiosity",
+      "split": "public_dev",
+      "textSha256": "2390d44dd70e6fd861386f509d24213e1a02b3fc884f1d3c1d7e6675510c9d28"
+    },
+    {
+      "id": "edjzcf0",
+      "expected": "curious",
+      "originalLabel": "curiosity",
+      "split": "public_dev",
+      "textSha256": "27a44d68fb177eced1dba9aaf5f0cad19874eabc152b556b8cbbd20032a45e56"
+    },
+    {
+      "id": "ed3v8zr",
+      "expected": "curious",
+      "originalLabel": "curiosity",
+      "split": "public_dev",
+      "textSha256": "9723915cbf0268eec7a1332dda7cc538b596cce87573b3d762a390bb0ed06896"
+    },
+    {
+      "id": "ed51i23",
+      "expected": "curious",
+      "originalLabel": "curiosity",
+      "split": "public_dev",
+      "textSha256": "ca7637973e458ee122341289cdec830ffaf154b9d27caf049715f5dc922fa0a1"
+    },
+    {
+      "id": "eeyazvb",
+      "expected": "curious",
+      "originalLabel": "curiosity",
+      "split": "public_dev",
+      "textSha256": "9fe245c6403cf8fce1fa1be9bfe4ce805c7131074b76ddeb80de119ab450636a"
+    },
+    {
+      "id": "een361l",
+      "expected": "curious",
+      "originalLabel": "curiosity",
+      "split": "public_dev",
+      "textSha256": "6096b6ee1fe39dc8bb33dc921139e65fb93c8b9cd4ef09f247ffc7aa9348db0d"
+    },
+    {
+      "id": "ef40uup",
+      "expected": "curious",
+      "originalLabel": "curiosity",
+      "split": "public_dev",
+      "textSha256": "3ab6b419edc9858e914d178a10a8572ef2b13ddf6e215e9114717fc533d87bb7"
+    },
+    {
+      "id": "edp3os0",
+      "expected": "curious",
+      "originalLabel": "curiosity",
+      "split": "public_dev",
+      "textSha256": "8f874b8255f3815e8ed9e9e5aaf21e66a8450cbcfc36ba0a304c0f0f1397f85d"
+    },
+    {
+      "id": "ed8jhbd",
+      "expected": "curious",
+      "originalLabel": "curiosity",
+      "split": "public_dev",
+      "textSha256": "dcefc72f126b0232177591a138dabbd2b11f88b35eb9ff02775fd3720ce4d74f"
+    },
+    {
+      "id": "eddfus0",
+      "expected": "curious",
+      "originalLabel": "curiosity",
+      "split": "public_dev",
+      "textSha256": "ee2e97d19e6df7a010c815311cd7d13e493ccdb7edb58b7c09f0cb61d19fcc57"
+    },
+    {
+      "id": "eepjx2q",
+      "expected": "curious",
+      "originalLabel": "curiosity",
+      "split": "public_dev",
+      "textSha256": "d76832caf042ded0b601e028f802e4dbb741b02ef9580bf5a5ec15b0718722af"
+    },
+    {
+      "id": "eda83rh",
+      "expected": "curious",
+      "originalLabel": "curiosity",
+      "split": "public_dev",
+      "textSha256": "ef1b0884055e65742e5103e4cba418d491c213cc02a777f8c6d0113f05637d5f"
+    },
+    {
+      "id": "ee5xfyq",
+      "expected": "curious",
+      "originalLabel": "curiosity",
+      "split": "public_dev",
+      "textSha256": "4314488bbc71359ca3071301fbb8798747e4c00f216b521b42b43b3a7d6d9945"
+    },
+    {
+      "id": "eengaqh",
+      "expected": "curious",
+      "originalLabel": "curiosity",
+      "split": "public_dev",
+      "textSha256": "ae1d791637bac478b28a2cf869b2386ab196fb06a33893be7e467bbd56904f7c"
+    },
+    {
+      "id": "edngdyn",
+      "expected": "annoyed",
+      "originalLabel": "annoyance",
+      "split": "public_dev",
+      "textSha256": "0d02cac257f9c68a4c0f039fff521bb76290034446e771a1d07e68f1ffd96551"
+    },
+    {
+      "id": "efc0sd8",
+      "expected": "annoyed",
+      "originalLabel": "annoyance",
+      "split": "public_dev",
+      "textSha256": "c95d7e7c0554d5aa1ff28f44dad239c7d04f99bf5795f220462acfe822b63347"
+    },
+    {
+      "id": "ed4p1u6",
+      "expected": "annoyed",
+      "originalLabel": "annoyance",
+      "split": "public_dev",
+      "textSha256": "e4865993ba435b1087e8045144ce54b9f7c4fe4669de7133696b5116097c0a9d"
+    },
+    {
+      "id": "efc2esx",
+      "expected": "annoyed",
+      "originalLabel": "annoyance",
+      "split": "public_dev",
+      "textSha256": "9296c185c215b509b05cec76f5fc59b46cc26ec6f5146790222fdf8d26044b3a"
+    },
+    {
+      "id": "edzl3ki",
+      "expected": "annoyed",
+      "originalLabel": "annoyance",
+      "split": "public_dev",
+      "textSha256": "439b4173ee2ba276e8dd75ce8c33b5df791eec491f7dbab1ae521bb1266b6708"
+    },
+    {
+      "id": "eehtcr1",
+      "expected": "annoyed",
+      "originalLabel": "annoyance",
+      "split": "public_dev",
+      "textSha256": "6b9511c964e48a567069ae1b77fa56c6d3e5a2421c2612197d46887e892a1c5f"
+    },
+    {
+      "id": "eerk9lf",
+      "expected": "annoyed",
+      "originalLabel": "annoyance",
+      "split": "public_dev",
+      "textSha256": "ce01878ebfc109f47a4850a47d5259f366b0b89c2fa596bacc7e34f914c53d9a"
+    },
+    {
+      "id": "ef7l6mu",
+      "expected": "annoyed",
+      "originalLabel": "annoyance",
+      "split": "public_dev",
+      "textSha256": "da0c34b92013b82a12c31203f5c6f4224517f33b12428420800dc1ac15b4ed70"
+    },
+    {
+      "id": "ee65dgs",
+      "expected": "annoyed",
+      "originalLabel": "annoyance",
+      "split": "public_dev",
+      "textSha256": "d5edcac123d5ff049579d46656acccbaf2aa7d86ce06f2fb96f9515edd04c3c4"
+    },
+    {
+      "id": "eeq36jl",
+      "expected": "annoyed",
+      "originalLabel": "annoyance",
+      "split": "public_dev",
+      "textSha256": "83a474f5fdf2f033ba1207343870b1d46e8b839410b96aca38aa4a0ab8c846b7"
+    },
+    {
+      "id": "ed3cx2l",
+      "expected": "annoyed",
+      "originalLabel": "annoyance",
+      "split": "public_dev",
+      "textSha256": "132d38116f636e22d511fd3fca5bc584be59aacf0a6bfe7b68b9413f43d37bdf"
+    },
+    {
+      "id": "ed7pf30",
+      "expected": "annoyed",
+      "originalLabel": "annoyance",
+      "split": "public_dev",
+      "textSha256": "d3c08c7b1b0a123d9c2491c1aa562f769b5cd27917b29ca55e0b7ea362199848"
+    },
+    {
+      "id": "eeextyn",
+      "expected": "annoyed",
+      "originalLabel": "annoyance",
+      "split": "public_dev",
+      "textSha256": "4dfd19c17296c10f917219726feeed44e04dd19ed616838e2b503794b770bd93"
+    },
+    {
+      "id": "ef6oa94",
+      "expected": "annoyed",
+      "originalLabel": "annoyance",
+      "split": "public_dev",
+      "textSha256": "d38015a81285c6ab46ddab2446ea0c24c87954183a0e1b35c38da831b0adfdcd"
+    },
+    {
+      "id": "eebo8e2",
+      "expected": "annoyed",
+      "originalLabel": "annoyance",
+      "split": "public_dev",
+      "textSha256": "71924f243f3e631695f143582f668f8adec149676508dcf94ce5d6359bacc6e8"
+    },
+    {
+      "id": "eez9g38",
+      "expected": "annoyed",
+      "originalLabel": "annoyance",
+      "split": "public_dev",
+      "textSha256": "aa55b2a004d2d00d9f75969e80b4b367abf5baa91516a040e876069d2d84882d"
+    },
+    {
+      "id": "ef9ruw0",
+      "expected": "annoyed",
+      "originalLabel": "annoyance",
+      "split": "public_dev",
+      "textSha256": "108336414777ed9c63946e0e7381006390be7e0258648187c9d6247ee15937ea"
+    },
+    {
+      "id": "ed8ja96",
+      "expected": "annoyed",
+      "originalLabel": "annoyance",
+      "split": "public_dev",
+      "textSha256": "f4cc48396a1456e920d09d769786e642456ca86489107f80f6ee3eca5f9a9280"
+    },
+    {
+      "id": "edj480r",
+      "expected": "annoyed",
+      "originalLabel": "annoyance",
+      "split": "public_dev",
+      "textSha256": "fa6182c16f927f3392b621165d243ac25e8a67eaa1a3f1c4fbb43657675f03a5"
+    },
+    {
+      "id": "edxrgjo",
+      "expected": "annoyed",
+      "originalLabel": "annoyance",
+      "split": "public_dev",
+      "textSha256": "bdd409764eac66a82439f9ee064da9e40ec422c3ebb399b9ede8d10a11cf9c6c"
+    },
+    {
+      "id": "eerjl1v",
+      "expected": "embarrassed",
+      "originalLabel": "embarrassment",
+      "split": "public_dev",
+      "textSha256": "6ab50e269bf514bc8b94dac7994183c22fa1ec6258e55986ff63508c05072b6a"
+    },
+    {
+      "id": "eesxxeu",
+      "expected": "embarrassed",
+      "originalLabel": "embarrassment",
+      "split": "public_dev",
+      "textSha256": "502500e0f099d9c212dc93093f091f978a0d77bdac5fdea1077c66f1b3360cc3"
+    },
+    {
+      "id": "ee3ztta",
+      "expected": "embarrassed",
+      "originalLabel": "embarrassment",
+      "split": "public_dev",
+      "textSha256": "d8267b3ac317e1a995f0accd54b875b671ac4ec51332dc5b632bbfcc2f545ce9"
+    },
+    {
+      "id": "eew9um5",
+      "expected": "embarrassed",
+      "originalLabel": "embarrassment",
+      "split": "public_dev",
+      "textSha256": "b51fdd98a18cf1d90fee1ae30e93c324e3e48b6cdae9f027494e3f8bf4ff7d8a"
+    },
+    {
+      "id": "edfozau",
+      "expected": "embarrassed",
+      "originalLabel": "embarrassment",
+      "split": "public_dev",
+      "textSha256": "b4f369e942a74d2ed4acf95e3b24e5b95eef39e6f01aaf139a9f167fb4e32aa2"
+    },
+    {
+      "id": "efavv2e",
+      "expected": "embarrassed",
+      "originalLabel": "embarrassment",
+      "split": "public_dev",
+      "textSha256": "1c4ffd462e6f104c3da01600f8e7cef0eb0851623e9b131dcec0bfd24b9728b7"
+    },
+    {
+      "id": "edh3lnr",
+      "expected": "embarrassed",
+      "originalLabel": "embarrassment",
+      "split": "public_dev",
+      "textSha256": "cb7a47e067ba8b34a03488990c474694b2c5a5be32e70e7cc093542e3e433b2d"
+    },
+    {
+      "id": "edkeqxu",
+      "expected": "embarrassed",
+      "originalLabel": "embarrassment",
+      "split": "public_dev",
+      "textSha256": "3955e447157247dc7f23a41e8d81cd14ffc6676e1447d237454fcfa9a0fc98e5"
+    },
+    {
+      "id": "eeh5aip",
+      "expected": "embarrassed",
+      "originalLabel": "embarrassment",
+      "split": "public_dev",
+      "textSha256": "2b85afadeabeb4fa2399f89b8521f6e7b96283baa9459778ce01096aea674ca6"
+    },
+    {
+      "id": "efgzld0",
+      "expected": "embarrassed",
+      "originalLabel": "embarrassment",
+      "split": "public_dev",
+      "textSha256": "ec0d6bf44af4d3ce0b38a714de13fc3def0445eece86f15d9f2e525ae62fedb5"
+    },
+    {
+      "id": "edm8a4a",
+      "expected": "embarrassed",
+      "originalLabel": "embarrassment",
+      "split": "public_dev",
+      "textSha256": "be116af548f24a92fa145f7f0f470cf33d39149d78407eb3d0caf3829e33aeeb"
+    },
+    {
+      "id": "eeecj1w",
+      "expected": "embarrassed",
+      "originalLabel": "embarrassment",
+      "split": "public_dev",
+      "textSha256": "6ce158b1a6405c9bf2dab817da620f1fda0c9dd2b20f2dfa8dd350c3109e5208"
+    },
+    {
+      "id": "eeapyt5",
+      "expected": "embarrassed",
+      "originalLabel": "embarrassment",
+      "split": "public_dev",
+      "textSha256": "9ef5d38581596f717a78b160c1670022909973e58615a57000df943d068762fb"
+    },
+    {
+      "id": "eee5n9f",
+      "expected": "embarrassed",
+      "originalLabel": "embarrassment",
+      "split": "public_dev",
+      "textSha256": "87eaf0e14906d3491b1c2779f781bfe4693453ceae3c16a9904bd748b8e5b0de"
+    },
+    {
+      "id": "edrhrs3",
+      "expected": "embarrassed",
+      "originalLabel": "embarrassment",
+      "split": "public_dev",
+      "textSha256": "a19fef18c2f67882bda0a780a6c89c46f3e4caaa6ca60695b20982e00a72d93c"
+    },
+    {
+      "id": "eeynqjj",
+      "expected": "embarrassed",
+      "originalLabel": "embarrassment",
+      "split": "public_dev",
+      "textSha256": "6890bbf5bdcab3adbef974fc5787ad5dd8cf92f29e1726efaf964a574107d91c"
+    },
+    {
+      "id": "efbgp81",
+      "expected": "embarrassed",
+      "originalLabel": "embarrassment",
+      "split": "public_dev",
+      "textSha256": "c2af744e09885f97fcf51a0d6753ff71b289f9715f120b151db03eaf1ed42696"
+    },
+    {
+      "id": "eemw27z",
+      "expected": "embarrassed",
+      "originalLabel": "embarrassment",
+      "split": "public_dev",
+      "textSha256": "2dcd29c3036cc3f5babe6de014cf6dabe61966e0c93a129d3d1812a14883d642"
+    },
+    {
+      "id": "eemq43n",
+      "expected": "embarrassed",
+      "originalLabel": "embarrassment",
+      "split": "public_dev",
+      "textSha256": "1f2fe260c963ec22992ebb75325e5238bc404cb8d2dc617c1c136dcb89303a19"
+    },
+    {
+      "id": "edmm57v",
+      "expected": "embarrassed",
+      "originalLabel": "embarrassment",
+      "split": "public_dev",
+      "textSha256": "b8bbbffd61b547c0395fb404802009a65a7329c0365affb944c200099cce4de2"
+    },
+    {
+      "id": "eegj1ea",
+      "expected": "worried",
+      "originalLabel": "nervousness",
+      "split": "public_dev",
+      "textSha256": "0834c3a648d013dcf4f8df12a0d138333abd9cadf61183df106d591bba32435b"
+    },
+    {
+      "id": "eeduqfx",
+      "expected": "worried",
+      "originalLabel": "nervousness",
+      "split": "public_dev",
+      "textSha256": "db14c08eeca5e842fa588901ba7c800dbf1a099d2ad1940a11ff131de7094076"
+    },
+    {
+      "id": "eemt5cf",
+      "expected": "worried",
+      "originalLabel": "nervousness",
+      "split": "public_dev",
+      "textSha256": "9a83e85d75576b17dfa0d9d55ea5973da936981b4daf2ab8f7efeb5e5ca91877"
+    },
+    {
+      "id": "ednr7vr",
+      "expected": "worried",
+      "originalLabel": "nervousness",
+      "split": "public_dev",
+      "textSha256": "ad2d973ad77652eea278e0f6be276b754b3e062c499a930f7faf37508e30892b"
+    },
+    {
+      "id": "ed0qc9b",
+      "expected": "worried",
+      "originalLabel": "nervousness",
+      "split": "public_dev",
+      "textSha256": "596de61c027e33b90277e0a907db3ef54fa7a81d74e6e3171e0eeeff779e03fd"
+    },
+    {
+      "id": "edlyqkr",
+      "expected": "worried",
+      "originalLabel": "nervousness",
+      "split": "public_dev",
+      "textSha256": "eb9c624140a7d971feb6f51602baffb3525e66d85929885991bbd47dc7036b88"
+    },
+    {
+      "id": "ed6q46k",
+      "expected": "worried",
+      "originalLabel": "nervousness",
+      "split": "public_dev",
+      "textSha256": "c4d0807a82bdfdb1dd4cd40955c5cb7b8a1e6e3bf5183ddbbefd2cc3a69161ed"
+    },
+    {
+      "id": "eeaqrj7",
+      "expected": "worried",
+      "originalLabel": "nervousness",
+      "split": "public_dev",
+      "textSha256": "56ab24f7bcc9a0df3f4bf2fdf41826c6d531568da2ebe31cf592c191da8051be"
+    },
+    {
+      "id": "ef6e8gu",
+      "expected": "surprised",
+      "originalLabel": "surprise",
+      "split": "public_dev",
+      "textSha256": "cd0ee26dd7dffe6bf639b13c24daaddc8f590883bd2cdd57213e0ea103432f51"
+    },
+    {
+      "id": "eegp95p",
+      "expected": "surprised",
+      "originalLabel": "surprise",
+      "split": "public_dev",
+      "textSha256": "8e9b5d122735af24b53060baa2c796e67a0c39fd976716e3d4464ccf359d89dd"
+    },
+    {
+      "id": "edlp66i",
+      "expected": "surprised",
+      "originalLabel": "surprise",
+      "split": "public_dev",
+      "textSha256": "6d3a17ce8d16c733d6857d2d0b5d7c29ce183a58e162ef1b1addaae0a289ec8e"
+    },
+    {
+      "id": "edho03w",
+      "expected": "surprised",
+      "originalLabel": "surprise",
+      "split": "public_dev",
+      "textSha256": "d2c94bc40bc368f970ee6e241f03a13ff0edcf13cd3e5cd727f1eaac6d3ec740"
+    },
+    {
+      "id": "edgpo6r",
+      "expected": "surprised",
+      "originalLabel": "surprise",
+      "split": "public_dev",
+      "textSha256": "301ef2e6a0f7d96592f57dec6b505c2f2ee5b528689b43ac0c60826449df944b"
+    },
+    {
+      "id": "edm0eak",
+      "expected": "surprised",
+      "originalLabel": "surprise",
+      "split": "public_dev",
+      "textSha256": "638fa1a3c84c3dbe4a51098a2b0a1c6ff5817c03213b969058c031c4fdf9fa79"
+    },
+    {
+      "id": "ef8ym2z",
+      "expected": "surprised",
+      "originalLabel": "surprise",
+      "split": "public_dev",
+      "textSha256": "ea2e1dd1094bcb6d3cb26b940d338d7592bcba02e33462bbe6808e3b63eefba4"
+    },
+    {
+      "id": "eex0tm9",
+      "expected": "surprised",
+      "originalLabel": "surprise",
+      "split": "public_dev",
+      "textSha256": "ace0473c2ee5dd31f9fa4562667e5917a77d55875223961b5590f19f18722648"
+    },
+    {
+      "id": "eczegcw",
+      "expected": "surprised",
+      "originalLabel": "surprise",
+      "split": "public_dev",
+      "textSha256": "064de0487892acf1b01afb2839f79e7439507ad6065182b52de3b34553ee6047"
+    },
+    {
+      "id": "edqsf8p",
+      "expected": "surprised",
+      "originalLabel": "surprise",
+      "split": "public_dev",
+      "textSha256": "b52fce43f1ee623609b29ca491dbb19757c121980ab1da69d46d635375fb2bc4"
+    },
+    {
+      "id": "edd50m4",
+      "expected": "surprised",
+      "originalLabel": "surprise",
+      "split": "public_dev",
+      "textSha256": "04bf64038ffad3ef4a170551658f0de17c453c94d011bb5075d8f0bd754b5a97"
+    },
+    {
+      "id": "eejecv1",
+      "expected": "surprised",
+      "originalLabel": "surprise",
+      "split": "public_dev",
+      "textSha256": "ca5b125e8abae69fb07e7d65a532cef006c860d94582dc9acfc5b758906597da"
+    },
+    {
+      "id": "eczu82a",
+      "expected": "surprised",
+      "originalLabel": "surprise",
+      "split": "public_dev",
+      "textSha256": "6a127dae346ac32f1bcf7db8ee78e6f38d5dc4bdcd46ab72959710be81b3392d"
+    },
+    {
+      "id": "edzh5rz",
+      "expected": "surprised",
+      "originalLabel": "surprise",
+      "split": "public_dev",
+      "textSha256": "be3fd79c9fb956a17241d2afa64e463da064c66be276d31e70cdf5a2236e53dc"
+    },
+    {
+      "id": "ee74jew",
+      "expected": "surprised",
+      "originalLabel": "surprise",
+      "split": "public_dev",
+      "textSha256": "fca8f1974f133b533e210cb1a05440df7ae32102f43afd654f62c44e4784be1d"
+    },
+    {
+      "id": "eesbc6e",
+      "expected": "surprised",
+      "originalLabel": "surprise",
+      "split": "public_dev",
+      "textSha256": "da1d1190334b2c06460c69851780a00c4e170a5a87d1cc97abb37710641b814d"
+    },
+    {
+      "id": "eew49rj",
+      "expected": "surprised",
+      "originalLabel": "surprise",
+      "split": "public_dev",
+      "textSha256": "488fd1f3889a07b67306124898a6e437f105b43f9c631c491ba2ea1085ba4efc"
+    },
+    {
+      "id": "edq2uz8",
+      "expected": "surprised",
+      "originalLabel": "surprise",
+      "split": "public_dev",
+      "textSha256": "f3f19f3d0158a45bea656cd9be6cfabfb4f2e91f6bd31e5d1b07ea2ad0d66d9c"
+    },
+    {
+      "id": "ef0xb1c",
+      "expected": "surprised",
+      "originalLabel": "surprise",
+      "split": "public_dev",
+      "textSha256": "431cafe599203bd6d0575ac83d07cfe19244eb12222028491dad9bd0600ce998"
+    },
+    {
+      "id": "eemucb6",
+      "expected": "surprised",
+      "originalLabel": "surprise",
+      "split": "public_dev",
+      "textSha256": "74852f83d5485c0d4e6b16c2bcd2e61b8e16ac12f6f6f56e10a0856d210166c3"
+    },
+    {
+      "id": "reported-0",
+      "expected": "neutral",
+      "split": "challenge",
+      "textSha256": "9a50a68ccbb4f4b8a5472c84547258b5b0ac72e4a7e83f382c882390cea8b378"
+    },
+    {
+      "id": "reported-1",
+      "expected": "neutral",
+      "split": "challenge",
+      "textSha256": "c15e8541989fdf0b43222ff42aeb90daa77e154ad4159a130e69659e05789c2a"
+    },
+    {
+      "id": "reported-2",
+      "expected": "neutral",
+      "split": "challenge",
+      "textSha256": "480e75fc237dbd5c7c0f85b6cb8bb5730b69fa22d4c6a65c0057a74a3c3ebeba"
+    },
+    {
+      "id": "reported-3",
+      "expected": "neutral",
+      "split": "challenge",
+      "textSha256": "280892cd95c30b9c5521ceea401ba61f1ba5d686d961c1ad7e6568a92911040d"
+    },
+    {
+      "id": "reported-4",
+      "expected": "neutral",
+      "split": "challenge",
+      "textSha256": "ed179aab62ee45b91489b80d7fda41f99f2f94fecbc3efd8f309151084f685d1"
+    },
+    {
+      "id": "reported-5",
+      "expected": "neutral",
+      "split": "challenge",
+      "textSha256": "396a4b293e9339bcc2acc92d65b0010d59eebd823ab3f2a902359c1642b5c300"
+    }
+  ],
+  "calls": 1608,
+  "limitations": [
+    "Exploratory follow-up motivated by an earlier separate-split result",
+    "Mapped Reddit labels do not establish preferable companion delivery",
+    "Unequal category sizes: eight nervousness examples and twenty for each other category",
+    "No-mood prompts are identical across nominal moods; those repetitions are duplicate controls",
+    "Six reported-emotion challenge lines were previously seen; reported separately",
+    "No production prompt or personality change from this experiment"
+  ]
+}

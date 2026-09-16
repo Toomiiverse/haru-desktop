@@ -1,0 +1,341 @@
+{
+  "policy": 3,
+  "method": "Eight synthetic one-hour scenarios, 100 seeded baseline runs each. Same corrected observations/vitals for all three policies. Simple means first eligible opportunity. No model calls or messages. Proposal counts are not helpfulness scores.",
+  "limitations": [
+    "Controlled assumptions, not observed user sessions",
+    "Live baseline still uses existing host delivery gates during this shadow-only milestone",
+    "Unknown may mean quiet reading, disconnection or absence; these are not distinguished",
+    "Final mood is a synthetic fixed-hour comparison, not a reconstruction of Haru's live state",
+    "Compute timing is illustrative and excludes logging, IO and model generation"
+  ],
+  "results": [
+    {
+      "scenario": "active-desktop",
+      "proposals": {
+        "baseline": {
+          "mean": 5.82,
+          "min": 5,
+          "max": 7
+        },
+        "simple": {
+          "mean": 7,
+          "min": 7,
+          "max": 7
+        },
+        "fly": {
+          "mean": 3,
+          "min": 3,
+          "max": 3
+        }
+      },
+      "knownTicks": 180,
+      "unknownTicks": 0,
+      "correctedMood": {
+        "energy": 0.8799999999999999,
+        "happiness": 0.7590000000027919,
+        "curiosity": 0.7499999999999998,
+        "affection": 0.4,
+        "sleepiness": 0.12000000000000002,
+        "stress": 0.2499999999981785,
+        "focus": 0.40000000000000013
+      },
+      "oldVirtualHostMood": {
+        "energy": 0.8499999999999999,
+        "happiness": 0.8849999985841351,
+        "curiosity": 0.15000000000000002,
+        "affection": 0.6999999982591034,
+        "sleepiness": 0.15000000000000002,
+        "stress": 0.10000000000364292,
+        "focus": 0.8999999999999999
+      },
+      "meanComputeMs": 0.00034833333333344915
+    },
+    {
+      "scenario": "active-browser",
+      "proposals": {
+        "baseline": {
+          "mean": 5.82,
+          "min": 5,
+          "max": 7
+        },
+        "simple": {
+          "mean": 7,
+          "min": 7,
+          "max": 7
+        },
+        "fly": {
+          "mean": 3,
+          "min": 3,
+          "max": 3
+        }
+      },
+      "knownTicks": 180,
+      "unknownTicks": 0,
+      "correctedMood": {
+        "energy": 0.8799999999999999,
+        "happiness": 0.7590000000027919,
+        "curiosity": 0.7499999999999998,
+        "affection": 0.4,
+        "sleepiness": 0.12000000000000002,
+        "stress": 0.2499999999981785,
+        "focus": 0.5
+      },
+      "oldVirtualHostMood": {
+        "energy": 0.8499999999999999,
+        "happiness": 0.8849999985841351,
+        "curiosity": 0.15000000000000002,
+        "affection": 0.6999999982591034,
+        "sleepiness": 0.15000000000000002,
+        "stress": 0.10000000000364292,
+        "focus": 0.8999999999999999
+      },
+      "meanComputeMs": 0.0003383333333331172
+    },
+    {
+      "scenario": "conversation",
+      "proposals": {
+        "baseline": {
+          "mean": 0,
+          "min": 0,
+          "max": 0
+        },
+        "simple": {
+          "mean": 0,
+          "min": 0,
+          "max": 0
+        },
+        "fly": {
+          "mean": 0,
+          "min": 0,
+          "max": 0
+        }
+      },
+      "knownTicks": 180,
+      "unknownTicks": 0,
+      "correctedMood": {
+        "energy": 0.8799999999999999,
+        "happiness": 0.7590000000027919,
+        "curiosity": 0.7499999999999998,
+        "affection": 0.4,
+        "sleepiness": 0.12000000000000002,
+        "stress": 0.2499999999981785,
+        "focus": 0.5
+      },
+      "oldVirtualHostMood": {
+        "energy": 0.8499999999999999,
+        "happiness": 0.8849999985841351,
+        "curiosity": 0.15000000000000002,
+        "affection": 0.6999999982591034,
+        "sleepiness": 0.15000000000000002,
+        "stress": 0.10000000000364292,
+        "focus": 0.8999999999999999
+      },
+      "meanComputeMs": 0.0005233333333333373
+    },
+    {
+      "scenario": "quiet-reading-no-input",
+      "proposals": {
+        "baseline": {
+          "mean": 0,
+          "min": 0,
+          "max": 0
+        },
+        "simple": {
+          "mean": 0,
+          "min": 0,
+          "max": 0
+        },
+        "fly": {
+          "mean": 0,
+          "min": 0,
+          "max": 0
+        }
+      },
+      "knownTicks": 0,
+      "unknownTicks": 180,
+      "correctedMood": {
+        "energy": 0.8499999999999999,
+        "happiness": 0.7649999999999436,
+        "curiosity": 0.5,
+        "affection": 0.4,
+        "sleepiness": 0.15000000000000002,
+        "stress": 0.2,
+        "focus": 0.5
+      },
+      "oldVirtualHostMood": {
+        "energy": 0.8499999999999999,
+        "happiness": 0.8849999985841351,
+        "curiosity": 0.15000000000000002,
+        "affection": 0.6999999982591034,
+        "sleepiness": 0.15000000000000002,
+        "stress": 0.10000000000364292,
+        "focus": 0.8999999999999999
+      },
+      "meanComputeMs": 0.0005522222222212905
+    },
+    {
+      "scenario": "idle-desktop",
+      "proposals": {
+        "baseline": {
+          "mean": 0,
+          "min": 0,
+          "max": 0
+        },
+        "simple": {
+          "mean": 0,
+          "min": 0,
+          "max": 0
+        },
+        "fly": {
+          "mean": 0,
+          "min": 0,
+          "max": 0
+        }
+      },
+      "knownTicks": 180,
+      "unknownTicks": 0,
+      "correctedMood": {
+        "energy": 0.8499999999999999,
+        "happiness": 0.7500000006992792,
+        "curiosity": 0.15000000000000002,
+        "affection": 0.25000000087044827,
+        "sleepiness": 0.15000000000000002,
+        "stress": 0.10000000000364292,
+        "focus": 0.15000000000000002
+      },
+      "oldVirtualHostMood": {
+        "energy": 0.8499999999999999,
+        "happiness": 0.8849999985841351,
+        "curiosity": 0.15000000000000002,
+        "affection": 0.6999999982591034,
+        "sleepiness": 0.15000000000000002,
+        "stress": 0.10000000000364292,
+        "focus": 0.8999999999999999
+      },
+      "meanComputeMs": 0.00037166666666684655
+    },
+    {
+      "scenario": "overnight-unknown",
+      "proposals": {
+        "baseline": {
+          "mean": 0,
+          "min": 0,
+          "max": 0
+        },
+        "simple": {
+          "mean": 0,
+          "min": 0,
+          "max": 0
+        },
+        "fly": {
+          "mean": 0,
+          "min": 0,
+          "max": 0
+        }
+      },
+      "knownTicks": 0,
+      "unknownTicks": 180,
+      "correctedMood": {
+        "energy": 0.10000000000000012,
+        "happiness": 0.5400000000001444,
+        "curiosity": 0.5,
+        "affection": 0.4,
+        "sleepiness": 0.8999999999999999,
+        "stress": 0.2,
+        "focus": 0.5
+      },
+      "oldVirtualHostMood": {
+        "energy": 0.10000000000000012,
+        "happiness": 0.6599999985843359,
+        "curiosity": 0.15000000000000002,
+        "affection": 0.6999999982591034,
+        "sleepiness": 0.8999999999999999,
+        "stress": 0.10000000000364292,
+        "focus": 0.8999999999999999
+      },
+      "meanComputeMs": 0.0003650000000007481
+    },
+    {
+      "scenario": "offline-reconnect",
+      "proposals": {
+        "baseline": {
+          "mean": 4.35,
+          "min": 3,
+          "max": 6
+        },
+        "simple": {
+          "mean": 6,
+          "min": 6,
+          "max": 6
+        },
+        "fly": {
+          "mean": 3,
+          "min": 3,
+          "max": 3
+        }
+      },
+      "knownTicks": 125,
+      "unknownTicks": 55,
+      "correctedMood": {
+        "energy": 0.8799999999969566,
+        "happiness": 0.7589999888351896,
+        "curiosity": 0.7499999999993459,
+        "affection": 0.4,
+        "sleepiness": 0.12000000000012814,
+        "stress": 0.2499999971817687,
+        "focus": 0.39999999999953284
+      },
+      "oldVirtualHostMood": {
+        "energy": 0.8499999999999999,
+        "happiness": 0.8849999985841351,
+        "curiosity": 0.15000000000000002,
+        "affection": 0.6999999982591034,
+        "sleepiness": 0.15000000000000002,
+        "stress": 0.10000000000364292,
+        "focus": 0.8999999999999999
+      },
+      "meanComputeMs": 0.00039555555555621265
+    },
+    {
+      "scenario": "delayed-ticks",
+      "proposals": {
+        "baseline": {
+          "mean": 4.09,
+          "min": 2,
+          "max": 6
+        },
+        "simple": {
+          "mean": 7,
+          "min": 7,
+          "max": 7
+        },
+        "fly": {
+          "mean": 3,
+          "min": 3,
+          "max": 3
+        }
+      },
+      "knownTicks": 60,
+      "unknownTicks": 0,
+      "correctedMood": {
+        "energy": 0.8799999999999999,
+        "happiness": 0.7590000000027919,
+        "curiosity": 0.7499999999999998,
+        "affection": 0.4,
+        "sleepiness": 0.12000000000000002,
+        "stress": 0.2499999999981785,
+        "focus": 0.40000000000000013
+      },
+      "oldVirtualHostMood": {
+        "energy": 0.8499999999999999,
+        "happiness": 0.8849999985841351,
+        "curiosity": 0.15000000000000002,
+        "affection": 0.6999999982591034,
+        "sleepiness": 0.15000000000000002,
+        "stress": 0.10000000000364292,
+        "focus": 0.8999999999999999
+      },
+      "meanComputeMs": 0.0003949999999998492
+    }
+  ]
+}

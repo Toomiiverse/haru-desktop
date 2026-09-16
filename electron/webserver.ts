@@ -33,8 +33,11 @@ import { isDeviceToken } from './apns';
 import { emotionFile } from './emotions';
 import type { CheckIn } from './checkins';
 import { MAX_SHOT_BYTES, type HeldShots } from './shotstore';
+import { readActivityReport, type ActivityReport } from './activity-observation';
 
 export type WebDeps = {
+  /** Diagnostic input only; must not reset chat silence or trigger a nudge. */
+  attentionInput?(source: string, report: ActivityReport): void;
   readAccess(): WebAccess;
   saveAccess(access: WebAccess): void;
   /** Her real answer, through the same pipeline the desktop uses — minus hands.
@@ -451,11 +454,11 @@ function whoIsThis(req: IncomingMessage, access: WebAccess, now: Date) {
   const session = cookies[SESSION_COOKIE];
   if (session) {
     const until = sessions.get(session);
-    if (until && until > now.getTime()) return { allowed: true as const, device: null };
+    if (until && until > now.getTime()) return { allowed: true as const, device: null, source: session };
     if (until) sessions.delete(session);
   }
   const device = deviceFor(access, cookies[DEVICE_COOKIE] ?? '', now);
-  return device ? { allowed: true as const, device } : { allowed: false as const, device: null };
+  return device ? { allowed: true as const, device, source: device.id } : { allowed: false as const, device: null, source: '' };
 }
 
 export function startWebServer(port: number, deps: WebDeps): Promise<{ port: number; stop(): Promise<void> }> {
@@ -812,6 +815,17 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
   // Whether a call can be placed, on which engine, and how much of today's allowance is left.
   if (req.method === 'GET' && (path === '/api/call/status' || path === '/api/evi/status')) {
     return json(res, 200, deps.evi ? deps.evi.status() : { enabled: false, engine: 'none', minutesToday: 0, cap: 0, reason: 'not built' });
+  }
+
+  if (req.method === 'POST' && path === '/api/attention/input') {
+    const report = readActivityReport(await readBody(req));
+    if (!report) {
+      return json(res, 400, { error: 'Expected an input signal.' });
+    }
+    // The source stays in memory inside the observation registry, never in
+    // diagnostic output. Scope client sequence numbers to authenticated callers.
+    deps.attentionInput?.(me.source, report);
+    return json(res, 200, { ok: true });
   }
 
   if (req.method === 'POST' && path === '/api/chat') {

@@ -1,0 +1,255 @@
+{
+  "environment": {
+    "hour": 12,
+    "idleSeconds": 0,
+    "windowFocused": false,
+    "onBattery": false
+  },
+  "settled": {
+    "energy": 0.8799999999999999,
+    "happiness": 0.7590000000027919,
+    "curiosity": 0.7499999999999998,
+    "affection": 0.4,
+    "sleepiness": 0.12000000000000002,
+    "stress": 0.2499999999981785,
+    "focus": 0.40000000000000013
+  },
+  "results": {
+    "neutral_20s": {
+      "events": 15,
+      "firstStressAtLeast095Seconds": null,
+      "peakStress": 0.24999999999999398,
+      "minimumHappiness": 0.7327555570975126,
+      "stressWithin005OfBaselineAfterBurstSeconds": 0,
+      "stateAt300Seconds": {
+        "energy": 0.7891821880967468,
+        "happiness": 0.7327555570975126,
+        "curiosity": 0.7499999999999998,
+        "affection": 0.4,
+        "sleepiness": 0.12000000000000002,
+        "stress": 0.2499999999997289,
+        "focus": 0.40000000000000013
+      },
+      "stateAt900Seconds": {
+        "energy": 0.8799606699768451,
+        "happiness": 0.758358873874626,
+        "curiosity": 0.7499999999999998,
+        "affection": 0.4,
+        "sleepiness": 0.12000000000000002,
+        "stress": 0.24999999999999398,
+        "focus": 0.40000000000000013
+      },
+      "cueSampleCounts": {}
+    },
+    "worried_10s": {
+      "events": 30,
+      "firstStressAtLeast095Seconds": 30,
+      "peakStress": 1,
+      "minimumHappiness": 0.6709842395126979,
+      "stressWithin005OfBaselineAfterBurstSeconds": 420,
+      "stateAt300Seconds": {
+        "energy": 0.6767006029715423,
+        "happiness": 0.6709842395126979,
+        "curiosity": 0.7499999999999998,
+        "affection": 1,
+        "sleepiness": 0.12000000000000002,
+        "stress": 0.953857421875,
+        "focus": 0.40000000000000013
+      },
+      "stateAt900Seconds": {
+        "energy": 0.8799119581299643,
+        "happiness": 0.9207492087025824,
+        "curiosity": 0.7499999999999998,
+        "affection": 1,
+        "sleepiness": 0.12000000000000002,
+        "stress": 0.26559159539201255,
+        "focus": 0.40000000000000013
+      },
+      "cueSampleCounts": {
+        "on edge": 85,
+        "fond": 173,
+        "bright": 59
+      }
+    },
+    "worried_60s": {
+      "events": 5,
+      "firstStressAtLeast095Seconds": null,
+      "peakStress": 0.7873327027906876,
+      "minimumHappiness": 0.726129414166095,
+      "stressWithin005OfBaselineAfterBurstSeconds": 315,
+      "stateAt300Seconds": {
+        "energy": 0.8196439402137067,
+        "happiness": 0.7390898871940582,
+        "curiosity": 0.7499999999999998,
+        "affection": 0.8999999999999999,
+        "sleepiness": 0.12000000000000002,
+        "stress": 0.6170995560491906,
+        "focus": 0.40000000000000013
+      },
+      "stateAt900Seconds": {
+        "energy": 0.8799738618980221,
+        "happiness": 0.899362282630021,
+        "curiosity": 0.7499999999999998,
+        "affection": 0.8999999999999999,
+        "sleepiness": 0.12000000000000002,
+        "stress": 0.2581318567775546,
+        "focus": 0.40000000000000013
+      },
+      "cueSampleCounts": {
+        "on edge": 47,
+        "fond": 133,
+        "bright": 67
+      }
+    },
+    "annoyed_10s": {
+      "events": 30,
+      "firstStressAtLeast095Seconds": 50,
+      "peakStress": 1,
+      "minimumHappiness": 0,
+      "stressWithin005OfBaselineAfterBurstSeconds": 420,
+      "stateAt300Seconds": {
+        "energy": 0.7566498040501493,
+        "happiness": 0.03725956621593715,
+        "curiosity": 0.7499999999999998,
+        "affection": 0.4,
+        "sleepiness": 0.12000000000000002,
+        "stress": 0.953857421875,
+        "focus": 0.40000000000000013
+      },
+      "stateAt900Seconds": {
+        "energy": 0.8799465813372817,
+        "happiness": 0.7364556852224976,
+        "curiosity": 0.7499999999999998,
+        "affection": 0.4,
+        "sleepiness": 0.12000000000000002,
+        "stress": 0.26559159539201255,
+        "focus": 0.40000000000000013
+      },
+      "cueSampleCounts": {
+        "on edge": 83,
+        "foul": 74
+      }
+    },
+    "alternating_10s": {
+      "events": 30,
+      "firstStressAtLeast095Seconds": 130,
+      "peakStress": 1,
+      "minimumHappiness": 0.5936674113500617,
+      "stressWithin005OfBaselineAfterBurstSeconds": 420,
+      "stateAt300Seconds": {
+        "energy": 0.8175542740374798,
+        "happiness": 0.6049632841294225,
+        "curiosity": 0.7499999999999998,
+        "affection": 0.4,
+        "sleepiness": 0.12000000000000002,
+        "stress": 0.953857421875,
+        "focus": 0.40000000000000013
+      },
+      "stateAt900Seconds": {
+        "energy": 0.8799729569365684,
+        "happiness": 0.7424900897766519,
+        "curiosity": 0.7499999999999998,
+        "affection": 0.4,
+        "sleepiness": 0.12000000000000002,
+        "stress": 0.26559159539201255,
+        "focus": 0.40000000000000013
+      },
+      "cueSampleCounts": {
+        "bright": 19,
+        "on edge": 77
+      }
+    },
+    "praise_20s": {
+      "events": 15,
+      "firstStressAtLeast095Seconds": null,
+      "peakStress": 0.24999999999999398,
+      "minimumHappiness": 0.9399590714597289,
+      "stressWithin005OfBaselineAfterBurstSeconds": 0,
+      "stateAt300Seconds": {
+        "energy": 0.9726971435546875,
+        "happiness": 0.9956931533447387,
+        "curiosity": 0.7499999999999998,
+        "affection": 1,
+        "sleepiness": 0.12000000000000002,
+        "stress": 0.2499999999997289,
+        "focus": 0.40000000000000013
+      },
+      "stateAt900Seconds": {
+        "energy": 0.8800401438960705,
+        "happiness": 0.9399590714597289,
+        "curiosity": 0.7499999999999998,
+        "affection": 1,
+        "sleepiness": 0.12000000000000002,
+        "stress": 0.24999999999999398,
+        "focus": 0.40000000000000013
+      },
+      "cueSampleCounts": {
+        "bright": 181,
+        "fond": 173
+      }
+    },
+    "criticism_20s": {
+      "events": 15,
+      "firstStressAtLeast095Seconds": 80,
+      "peakStress": 1,
+      "minimumHappiness": 0,
+      "stressWithin005OfBaselineAfterBurstSeconds": 410,
+      "stateAt300Seconds": {
+        "energy": 0.8799999999999999,
+        "happiness": 0.07816604711637497,
+        "curiosity": 0.7499999999999998,
+        "affection": 0.4,
+        "sleepiness": 0.12000000000000002,
+        "stress": 0.9105536937713623,
+        "focus": 0.40000000000000013
+      },
+      "stateAt900Seconds": {
+        "energy": 0.8799999999999999,
+        "happiness": 0.7382834560043402,
+        "curiosity": 0.7499999999999998,
+        "affection": 0.4,
+        "sleepiness": 0.12000000000000002,
+        "stress": 0.2646323468473868,
+        "focus": 0.40000000000000013
+      },
+      "cueSampleCounts": {
+        "on edge": 81,
+        "foul": 68
+      }
+    },
+    "single_worry_then_happy": {
+      "events": 2,
+      "firstStressAtLeast095Seconds": null,
+      "peakStress": 0.4499999999981785,
+      "minimumHappiness": 0.7450799371200609,
+      "stressWithin005OfBaselineAfterBurstSeconds": 0,
+      "stateAt300Seconds": {
+        "energy": 0.8821031454394921,
+        "happiness": 0.8476468470650993,
+        "curiosity": 0.7499999999999998,
+        "affection": 0.5,
+        "sleepiness": 0.12000000000000002,
+        "stress": 0.2797668532581062,
+        "focus": 0.40000000000000013
+      },
+      "stateAt900Seconds": {
+        "energy": 0.8800009107988521,
+        "happiness": 0.7889851643151397,
+        "curiosity": 0.7499999999999998,
+        "affection": 0.5,
+        "sleepiness": 0.12000000000000002,
+        "stress": 0.25065938458226017,
+        "focus": 0.40000000000000013
+      },
+      "cueSampleCounts": {
+        "bright": 24
+      }
+    }
+  },
+  "limitations": [
+    "Synthetic event streams with maximal classification confidence",
+    "Fixed active environment; affection is intentionally retained there",
+    "Five-second numerical sampling",
+    "No alternative affect controller deployed; lower saturation is not automatically a better personality"
+  ]
+}
