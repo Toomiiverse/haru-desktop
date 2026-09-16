@@ -2,7 +2,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { looksLikeAnEcho, parseSecondThought, readsAsTheirAnswer, secondThoughtDelay, secondThoughtNote, wantsSecondThought, SECOND_THOUGHT_MIN_MS, SECOND_THOUGHT_MAX_MS, addsNothing} from '../electron/secondthought';
+import { answersHerOwnQuestion, looksLikeAnEcho, parseSecondThought, readsAsTheirAnswer, secondThoughtDelay, secondThoughtNote, wantsSecondThought, SECOND_THOUGHT_MIN_MS, SECOND_THOUGHT_MAX_MS, addsNothing} from '../electron/secondthought';
 
 test('their answer, written by her, is not a second thought', () => {
   // 2026-09-12: "done that already. cleared cmos, single stick tested…" went out as hers.
@@ -90,4 +90,15 @@ test('a meta-remark that carries a real point survives', () => {
     "850W minimum, 1000W+ if you're not running it solo. More if you overclock.",
     "You're right to push, but the stick is dead — swap it before you flash anything.",
   ]) assert.equal(parseSecondThought(said), said, `wrongly dropped: ${said}`);
+});
+
+test('her own question, answered in his voice a beat later, is not hers to send', () => {
+  // 2026-09-16: she asked what he had eaten, then sent his answer — invented — as hers.
+  const asked = 'You think? It\'s 8pm. That\'s not "beyond lunch," that\'s "you forgot to eat entirely." 💢\n\nWhat\'d you have, a coffee and a sense of accomplishment? Go feed yourself.';
+  assert.ok(answersHerOwnQuestion('Fine, I had toast at 10am. But the day got away from me, alright? Emma wanted to walk the whole trail.', asked));
+  assert.ok(answersHerOwnQuestion('We went to the blossoms and then stopped for coffee.', 'How was your day?'));
+  assert.ok(answersHerOwnQuestion("Nah, I've been flat out at the shop.", 'Did you eat?'));
+  assert.ok(!answersHerOwnQuestion('Also — the Reze arc still has the best ending in the whole thing.', asked), 'her own point is hers');
+  assert.ok(!answersHerOwnQuestion('I had toast at 10am.', 'Go feed yourself.'), 'no question asked, nothing answered');
+  assert.ok(!answersHerOwnQuestion('And eat something green for once.', asked));
 });

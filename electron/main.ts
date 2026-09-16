@@ -27,7 +27,7 @@ import { looksLikeNothing, readListenConfig, transcribe, type ListenConfig } fro
 import { spokenVocabulary } from './vocabulary';
 import { herNameFrom } from './hername';
 import { apnsPayload, apnsSigner, readApnsConfig, readApnsDevices, sendApns, type ApnsDevice } from './apns';
-import { looksLikeAnEcho, parseSecondThought, readsAsTheirAnswer, secondThoughtDelay, secondThoughtNote, wantsSecondThought, SECOND_THOUGHT_GAP_MS } from './secondthought';
+import { answersHerOwnQuestion, looksLikeAnEcho, parseSecondThought, readsAsTheirAnswer, secondThoughtDelay, secondThoughtNote, wantsSecondThought, SECOND_THOUGHT_GAP_MS } from './secondthought';
 import { applyRevoices, dueForRevoice, exchangesFrom as revoiceExchanges, grounded, parseRevoices, readRevoiceState, revoicePrompt, withRewrites, REVOICE_EVERY, type Revoice } from './revoice';
 import { decide, readEscalateConfig, type EscalateConfig } from './escalate';
 import { describeFailure, fromOpenAIReply, isOpenAIShaped, toOpenAIBody, DEFAULT_ENDPOINTS, type ChatTool, type Provider } from './provider';
@@ -6616,7 +6616,7 @@ async function secondThought(repliedAt: number, input: { latest: string; reply: 
     ]);
     const line = parseSecondThought(oneEmojiAtMost(dropOverusedEmoji(dropRoleHeader(dropStageDirections(answer.content ?? '')), [input.reply], HER_EMOJI), HER_EMOJI));
     if (!line) { console.log('[followup] she had nothing to add'); return; }
-    if (readsAsTheirAnswer(line)) { console.log(`[followup] dropped — it is their side of the conversation, not hers: ${JSON.stringify(line.slice(0, 80))}`); return; }
+    if (readsAsTheirAnswer(line) || answersHerOwnQuestion(line, input.reply)) { console.log(`[followup] dropped — it is their side of the conversation, not hers: ${JSON.stringify(line.slice(0, 80))}`); return; }
     if (looksLikeAnEcho(line, [...messages.map(message => message.content), input.latest])) { console.log(`[followup] dropped — it repeats what was said: ${JSON.stringify(line.slice(0, 80))}`); return; }
     if (lastUserActivityAt > repliedAt) { console.log('[followup] they answered while she was thinking — kept to herself'); return; }
     lastSecondThoughtAt = Date.now();
@@ -6850,7 +6850,7 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // Her subjects, so a mention of one of them is recognised as being about her:
   // what she was up to last night, and the things she has taken up.
   const herSubject = messages.at(-1)?.role === 'user'
-    ? askingAboutHer(latest, [...getNights().map(night => night.interest ?? night.game ?? '').filter(Boolean), ...getInterests().map(interest => interest.name), ...namesIn(getNights().map(night => `${night.about} ${night.note}`))])
+    ? askingAboutHer(latest, [...getNights().map(night => night.interest ?? night.game ?? '').filter(Boolean), ...getInterests().map(interest => interest.name), ...namesIn(getNights().map(night => `${night.about} ${night.note}`), everydayWords())])
     : '';
   // Named the thing itself — not merely asked her opinion in general — and the
   // room is hers without a roll: that is the opening, and she should take it.
@@ -7951,6 +7951,27 @@ function chatIndex(todayKey: string): ChatIndex {
   const key = `${todayKey}|${days.length}|${days[0] ?? ''}|${days.at(-1) ?? ''}|${archive[days.at(-1) ?? '']?.length ?? 0}`;
   if (chatIndexCache?.key !== key) chatIndexCache = { key, index: buildChatIndex(keptExchanges(todayKey)) };
   return chatIndexCache.index;
+}
+
+/**
+ * The words she writes in lowercase in her kept replies — evidence that a
+ * capitalised one in her night notes ("Think" of "Think Pol") is a word and not
+ * a name (room.ts namesIn). Rebuilt with the chat index.
+ */
+let everydayWordsCache: { index: ChatIndex; words: Set<string> } | null = null;
+function everydayWords(): Set<string> {
+  const index = chatIndex(localDateKey(zonedNow(CHAT_TIMEZONE)));
+  if (everydayWordsCache?.index !== index) {
+    const words = new Set<string>();
+    for (const exchange of index.exchanges) {
+      for (const line of exchange.text.split('\n')) {
+        if (!line.startsWith('You: ')) continue;
+        for (const word of line.slice(5).match(/[A-Za-z]+/g) ?? []) if (/^[a-z]/.test(word)) words.add(word);
+      }
+    }
+    everydayWordsCache = { index, words };
+  }
+  return everydayWordsCache.words;
 }
 
 /** search_chats (tools.ts): words and meaning over every kept day, dated finds with their neighbours. */

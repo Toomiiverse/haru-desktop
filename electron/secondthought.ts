@@ -50,6 +50,25 @@ export function readsAsTheirAnswer(line: string): boolean {
   return THEIR_ANSWER.test(line ?? '');
 }
 
+/**
+ * Her own question, answered in his voice.
+ *
+ * "What'd you have, a coffee and a sense of accomplishment? Go feed yourself."
+ * — and a minute later, sent as hers: "Fine, I had toast at 10am. But the day
+ * got away from me, alright? Emma wanted to walk the whole trail…" Nothing he
+ * said: his answer, invented, from her (2026-09-16). When her reply asked him
+ * something and the beat later opens by reporting in the first person, it is
+ * the answer to that question, and not hers to give. Broad on purpose — a real
+ * "I was reading Lain again" lost after a question costs one optional aside;
+ * his words in her mouth cost what he believes happened.
+ */
+const ASKED_THEM = /\byou(?:r|rs|rself|['’](?:d|re|ve|ll))?\b[^.!\n]*\?/i;
+const REPORTS_IN = /^[\s"'“‘*_]*(?:(?:fine|okay|ok|alright|well|look|yeah|yes|yep|no|nah|nope|honestly|tch|ugh|so|um+|uh+)\b[\s,.!…—–-]*)*(?:i|we)(?:['’](?:ve|m|d))?\s+(?:had|have|did|was|were|went|ate|got|made|grabbed|ordered|just|already|actually|finished|spent|tried|stopped|took|found|forgot|skipped|been|am|didn['’]?t|haven['’]?t|wasn['’]?t)\b/i;
+
+export function answersHerOwnQuestion(line: string, reply: string): boolean {
+  return ASKED_THEM.test(reply ?? '') && REPORTS_IN.test(line ?? '');
+}
+
 /** What she said, or null when she chose not to. */
 export function parseSecondThought(text: string): string | null {
   let line = (text ?? '').trim().replace(/^["'“”‘’]+|["'“”‘’]+$/g, '').trim();

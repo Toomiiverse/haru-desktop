@@ -357,14 +357,39 @@ export function askingAboutHer(latest: string, subjects: string[]): string {
 // ones that open English sentences.
 const NOT_A_NAME = new Set(['this','that','these','those','there','then','they','their','them','when','what','where','which','while','would','could','should','because','after','before','every','most','some','just','only','even','still','also','both','yeah','well','fine','okay','look','stop','sure','honestly','anyway','maybe','probably','actually','nothing','something','everyone','nobody','your','yours','you','the','and','but','for','with','from','have','been','about','over','into','than','then','more','less','best','better','worst','worse']);
 
-export function namesIn(notes: string[]): string[] {
+const CALENDAR = /^(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|january|february|march|april|june|july|august|september|october|november|december)$/i;
+
+export function namesIn(notes: string[], everyday: ReadonlySet<string> = new Set()): string[] {
+  // A word her notes also use in lowercase is a word, not a name. "Think Pol"
+  // (Ghost in the Shell) gave her the subject "Think", and "I think lunch is
+  // beyond me" became him asking about her things — which armed a second
+  // thought that answered her own question in his voice (2026-09-16). "Reading",
+  // "People", "Real" and "Control" were her subjects the same way.
+  // `everyday` is more of the same evidence from further afield: the words she
+  // writes in lowercase in her own replies, since twenty short notes rarely use
+  // "think" in the middle of a sentence.
+  const lowercase = new Set<string>(everyday);
+  for (const note of notes) for (const word of (note ?? '').match(/[A-Za-z]+/g) ?? []) if (/^[a-z]/.test(word)) lowercase.add(word.toLowerCase());
   const seen = new Set<string>();
   for (const note of notes) {
+    let run: string[] = [];
+    const close = () => {
+      // A run of names is also kept whole — "Think Pol", "Real Folk Blues" —
+      // so the phrase counts even when no word of it counts alone.
+      if (run.length > 1) seen.add(run.join(' '));
+      run = [];
+    };
     for (const word of (note ?? '').split(/\s+/)) {
-      const name = word.replace(/[^A-Za-z'-]/g, '');
+      const name = word.replace(/['’]s$/i, '').replace(/[^A-Za-z'-]/g, '');
+      if (!/^[A-Z][a-z]/.test(name)) { close(); continue; }
+      const lower = name.toLowerCase();
+      const opener = NOT_A_NAME.has(lower) || /ly$/i.test(name);
+      if (!opener) run.push(name);
       // No adverb is a name, and they open sentences constantly — Obviously, Honestly, Frankly.
-      if (name.length >= 4 && /^[A-Z][a-z]/.test(name) && !/ly$/i.test(name) && !NOT_A_NAME.has(name.toLowerCase())) seen.add(name);
+      if (name.length >= 4 && !opener && !lowercase.has(lower) && !CALENDAR.test(name)) seen.add(name);
+      if (opener || /[.!?,:;]$/.test(word)) close();
     }
+    close();
   }
   return [...seen].slice(0, 40);
 }

@@ -128,6 +128,11 @@ test('the names inside her own notes count as her subject, and so does asking wh
   assert.ok(!found.includes('Obviously') && !found.includes('This'), 'ordinary sentence openers are not names');
   assert.equal(askingAboutHer('so whats good about the Reze arc then', ['Chainsaw Man', ...found]), 'Reze');
   assert.equal(askingAboutHer("what's so good about it", ['Chainsaw Man']), 'what you are into');
+  // A word her notes use in lowercase is not a name, and a run of names stays whole (2026-09-16).
+  const shell = namesIn(['Think Pol is the part I keep coming back to. I think Takashi’s arc is the real point.', 'Reading Control again on Tuesday.'], new Set(['reading']));
+  assert.ok(shell.includes('Think Pol') && shell.includes('Takashi') && shell.includes('Control'), shell.join(','));
+  assert.ok(!shell.includes('Think') && !shell.includes('Reading') && !shell.includes('Tuesday'), shell.join(','));
+  assert.equal(askingAboutHer('Well I mean it’s now 8pm. I think lunch is beyond me', ['Chainsaw Man', ...shell]), '');
   assert.equal(askingAboutHer('why do you rate it over Detroit', ['Chainsaw Man']), 'what you are into');
 });
 
