@@ -57,6 +57,10 @@ test('two times come out of her answer, clamped to the sane ranges', () => {
   assert.deepEqual(parseDecidedTimes('bedtime is 23:45 and I will be up at 7:30am'), { bedtime: 23 * 60 + 45, wake: 7 * 60 + 30 });
   assert.equal(parseDecidedTimes('whenever I feel like it'), null);
   assert.equal(parseDecidedTimes('23:30'), null);
+  // The military way, as she answered on 2026-09-15 — only when it is the whole answer.
+  assert.deepEqual(parseDecidedTimes('2300 0800'), { bedtime: 23 * 60, wake: 8 * 60 });
+  assert.deepEqual(parseDecidedTimes(' 0030 0730 '), { bedtime: 24 * 60 + 30, wake: 7 * 60 + 30 });
+  assert.equal(parseDecidedTimes('it is 2026 and I sleep 1000 hours'), null);
 });
 
 test('the fallback keeps her times hers-shaped: tired nights are earlier, never out of range', () => {
