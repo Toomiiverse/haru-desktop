@@ -40,7 +40,7 @@ import { buildGameIndex, gameFor } from './steam';
 import { pdfPrompt, readPdf } from './pdf';
 import { classify, discard, extractAudio, extractFrames, findFfmpeg, OPENABLE, readText, type FileKind } from './attach';
 import { markTimeGaps, sinceLast, earlierDaysContext, earlierTurns, DAYS_OF_HISTORY, HISTORY_BUDGET_CHARS } from './history';
-import { exchangesFrom, pickRecalled, recallNote, RECALL_DAYS, type Exchange } from './recall';
+import { exchangesFrom, pickRecalled, recallNote, type Exchange } from './recall';
 import { applyExtraction, dayChunks, emptyGraph, EXTRACTION_SCHEMA, extractionInput, extractionPrompt, knownBlock, linkedFacts, linkedNote, readExtraction } from './factgraph';
 import { admitBooking, bookedNote, bookedPrompt, BOOKED_KIND, createScheduler, describeWhen, resolveBookingTime, zonedEpoch, type Job, type Outcome } from './scheduler';
 import { describeGap, isRumination, keepThoughts, lastSpoken, mayAsk, mayInitiate, mindNote, noteAsked, pendingTrigger, readThoughts, roundVector, scoreThought, spend, spokenOn as thoughtsSpokenOn, THINKING_RULES, thinkingInput, THOUGHT_LIMITS, thoughtPrompt, withoutClock, type ThinkingState, type Thought, type ThoughtState, type Trigger } from './thoughts';
@@ -198,10 +198,16 @@ const GOOGLE_SYNC_INTERVAL_MS = 15 * 60_000;
 // call is not competing with startup.
 const GOOGLE_SYNC_STARTUP_DELAY_MS = 10_000;
 const GOOGLE_FOCUS_SYNC_MIN_GAP_MS = 30_000;
-// Raw transcripts are kept for a season, then rolled into their day summaries
-// only. The summaries are the long-term record; an archive that never shrank
-// would hold the sensitive past forever for no recall benefit.
-const ARCHIVE_RETENTION_DAYS = 90;
+// Raw transcripts are kept for a year, then rolled into their day summaries
+// only. It was a season at first — an archive that never shrank would hold the
+// sensitive past for ever — and on 2026-09-17 he chose a year: long enough to
+// read old days again with a better model (factgraph.ts), to keep the pool of
+// her best exchanges growing (examples.ts) and for recall to reach that far
+// back, and still not for ever. The activity log of window titles and the
+// screenshots stay on the season's clock: the most sensitive record there is,
+// and spent once the day is distilled.
+const ARCHIVE_RETENTION_DAYS = 365;
+const ACTIVITY_RETENTION_DAYS = 90;
 const SESSIONS_KEPT = 365;
 const EVENTS_PER_DAY = 3;
 
@@ -778,7 +784,7 @@ function pruneOldArchives() {
  */
 function pruneOldActivity() {
   const log = store.getActivityLog();
-  const cutoff = localDateKey(new Date(Date.now() - ARCHIVE_RETENTION_DAYS * 86_400_000));
+  const cutoff = localDateKey(new Date(Date.now() - ACTIVITY_RETENTION_DAYS * 86_400_000));
   const sessions = getSessions();
   let dropped = 0;
   for (const day of Object.keys(log)) {
@@ -791,14 +797,14 @@ function pruneOldActivity() {
   }
   if (dropped) {
     store.setActivityLog(log);
-    console.log(`[activity] pruned ${dropped} logged day(s) older than ${ARCHIVE_RETENTION_DAYS} days`);
+    console.log(`[activity] pruned ${dropped} logged day(s) older than ${ACTIVITY_RETENTION_DAYS} days`);
   }
   // The images go on the same clock, and by the cutoff alone rather than by
   // which days survived above: a day kept because it was never distilled still
   // does not need its screenshots held for ever, and they are the largest thing
   // on the disk by a wide margin.
   const shotsDropped = pruneShots(shotStoreRoot(), cutoff);
-  if (shotsDropped) console.log(`[activity] pruned ${shotsDropped} day(s) of screenshots older than ${ARCHIVE_RETENTION_DAYS} days`);
+  if (shotsDropped) console.log(`[activity] pruned ${shotsDropped} day(s) of screenshots older than ${ACTIVITY_RETENTION_DAYS} days`);
   // And what she made of them, on the same clock. The list is capped at 400 so
   // this was never a leak, but a caption whose picture and whose day are both
   // gone is a note about nothing.
@@ -6244,7 +6250,7 @@ async function pushScreenshots(serverUrl: string, headers: Record<string, string
   const folder = screenshotFolder();
   if (!existsSync(folder)) return;
 
-  const mine = localShots(folder, at => localDateKey(at), looksLikeScreenshot, new Date(), ARCHIVE_RETENTION_DAYS);
+  const mine = localShots(folder, at => localDateKey(at), looksLikeScreenshot, new Date(), ACTIVITY_RETENTION_DAYS);
   if (!mine.length) return;
 
   const asked = await net.fetch(serverUrl + '/api/activity/shots', { headers });
@@ -7905,14 +7911,31 @@ function daysAlreadyShown(todayKey: string): string[] {
   return Object.keys(store.getArchive()).filter(day => day < todayKey).sort().slice(-DAYS_OF_HISTORY);
 }
 
+/** As far back as the chats are kept — his choice, 2026-09-17 — rather than recall.ts's two months. */
 function olderExchanges(todayKey: string): Exchange[] {
-  return exchangesFrom(store.getArchive() as unknown as Record<string, { role?: string; content?: string }[]>, daysAlreadyShown(todayKey), todayKey, RECALL_DAYS);
+  return exchangesFrom(store.getArchive() as unknown as Record<string, { role?: string; content?: string }[]>, daysAlreadyShown(todayKey), todayKey, ARCHIVE_RETENTION_DAYS);
 }
+
+/**
+ * Four decimals is all a cosine needs, and a year of exchanges kept at full
+ * double precision in JSON is a hundred megabytes read at every start: 1,162 of
+ * them were 11 MB (2026-09-17).
+ */
+function roundedVector(vector: number[]): number[] {
+  return vector.map(value => Math.round(value * 1e4) / 1e4);
+}
+/** Set when the cache on disk should be written even with nothing new: rounded on load, or pruned. */
+let recallCacheStale = false;
 
 function loadRecallVectors(): void {
   try {
     const saved = JSON.parse(readFileSync(RECALL_CACHE(), 'utf8')) as Record<string, number[]>;
-    for (const [id, vector] of Object.entries(saved)) if (Array.isArray(vector)) recallVectors.set(id, vector);
+    for (const [id, vector] of Object.entries(saved)) {
+      if (!Array.isArray(vector)) continue;
+      const rounded = roundedVector(vector);
+      if (!recallCacheStale && rounded.some((value, index) => value !== vector[index])) recallCacheStale = true;
+      recallVectors.set(id, rounded);
+    }
     console.log(`[recall] ${recallVectors.size} older exchanges already embedded`);
   } catch { /* nothing embedded yet, which is the state on a first run */ }
 }
@@ -7920,14 +7943,18 @@ function loadRecallVectors(): void {
 async function refreshRecallVectors(): Promise<void> {
   const todayKey = localDateKey(zonedNow(CHAT_TIMEZONE));
   const all = olderExchanges(todayKey);
+  // Vectors for exchanges whose day has left the archive go with it. The days
+  // already in front of her whole are not searched but are still kept.
+  const kept = new Set(exchangesFrom(store.getArchive() as unknown as Record<string, { role?: string; content?: string }[]>, [], todayKey, ARCHIVE_RETENTION_DAYS).map(exchange => exchange.id));
+  for (const id of [...recallVectors.keys()]) if (!kept.has(id)) { recallVectors.delete(id); recallCacheStale = true; }
   const missing = all.filter(exchange => !recallVectors.has(exchange.id)).slice(0, RECALL_BATCH);
-  if (!missing.length) return;
   let done = 0;
   for (const exchange of missing) {
     const vector = await tryEmbedQuery(exchange.text);
-    if (vector) { recallVectors.set(exchange.id, vector); done++; }
+    if (vector) { recallVectors.set(exchange.id, roundedVector(vector)); done++; }
   }
-  if (!done) return;
+  if (!done && !recallCacheStale) return;
+  recallCacheStale = false;
   try {
     writeFileSync(RECALL_CACHE(), JSON.stringify(Object.fromEntries(recallVectors)), 'utf8');
     console.log(`[recall] embedded ${done} more — ${recallVectors.size} of ${all.length} older exchanges searchable`);
