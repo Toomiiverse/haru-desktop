@@ -128,7 +128,7 @@ export function deepenInstruction(interest: Interest, query: string, found: stri
     before,
     'Write your view of it now, as yourself, in the first person: two or three sentences, with an actual position — what is good, what is not, what you would defend against somebody who rates something else. It may sharpen, soften, or turn on what you read.',
     'Then on its own line: FAVOURITE: the character, moment or part you rate above the rest, or "none yet".',
-    'Then on its own line: STANDS: where it stands, only as the reading says it — finished (and when, if said), still going (and how far it has got), or "unclear". Say which part: a manga that has ended is not the anime that is still being made.',
+    'Then on its own line: STANDS: where it stands, only as the reading says it — finished (and when, if said), still going (and how far it has got), or "unclear". Say which part: a manga that has ended is not the anime that is still being made. One short line, under 20 words: keep anything still to come, like a sequel or a new season; leave out release history, old release dates, sales and viewing figures.',
     'Then on its own line: WANT: one thing you would like about it — to see it through if it is still going, to argue it with them, even something you cannot do yourself, like playing it. If STANDS says it has ended, wanting to see it through is off the table; want something about the ending you read. A wish is allowed; a claim to have done it is not. Or "nothing".',
     'Only from what is above and what you thought before. No invented details, nothing you happen to remember from elsewhere, no saying you played, watched or went anywhere — you read.',
   ].join('\n');
@@ -185,6 +185,11 @@ export function deepen(interests: Interest[], id: string, next: { stance: string
  * that they survive contact with theirs. Told also where the edge of her
  * knowledge is, so a debate does not become an invention contest.
  */
+/** A reading's aside in brackets, gone: "finished (Season 1 premiered 23 April 2020; …)" is "finished". */
+function withoutAsides(text: string): string {
+  return text.replace(/\s*\([^()]*\)/g, '').replace(/\s+([,;.])/g, '$1').replace(/\s{2,}/g, ' ').trim();
+}
+
 /** How a want that is not a verb phrase starts: a name, an article, "for them to…". */
 const NOT_A_VERB = /^(?:[A-Z]|(?:a|an|the|for|season|more|less|someone|people|them|his|her|their|my|some|any|no)\b)/;
 
@@ -206,7 +211,11 @@ export function tastesInstruction(interests: Interest[]): string {
     }
     // The fact under the view, dated, so "not finished" is never said from an
     // old want when the reading has since said otherwise.
-    if (interest.stands) bits.push(`Where it stands, as I last read (${interest.lastAt.slice(0, 10)}): ${sentence(interest.stands)}.`);
+    // Short, because it is seven of these in a block that runs near its budget:
+    // the lead-in was 46 chars each, and the readings brought release history in
+    // brackets — premiere dates, a Blu-ray week's streaming hours (2026-09-17).
+    // What it is for survives: finished or still going, and what is still to come.
+    if (interest.stands) bits.push(`Last I read (${interest.lastAt.slice(0, 10)}): ${sentence(withoutAsides(interest.stands))}.`);
     return `- ${bits.join(' ')}`;
   });
   return [

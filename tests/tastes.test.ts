@@ -145,6 +145,9 @@ test('where it stands is asked for, kept, dated and shown', () => {
   assert.equal(kept[0].stands, 'finished in 2017');
   const again = deepen(kept, 'a', { stance: 'Another view that is long enough to count as one.' }, '2026-09-04T10:00:00.000Z');
   assert.equal(again[0].stands, 'finished in 2017');
-  assert.match(tastesInstruction(again), /Where it stands, as I last read \(2026-09-04\): finished in 2017\./);
-  assert.equal(tastesInstruction([interest()]).includes('Where it stands'), false);
+  assert.match(tastesInstruction(again), /Last I read \(2026-09-04\): finished in 2017\./);
+  assert.equal(tastesInstruction([interest()]).includes('Last I read'), false);
+  const long = deepen(kept, 'a', { stance: 'A view that is long enough to count as one.', stands: 'finished, dropped on Blu-ray (first week Netflix top ten with 14.88 million hours), and there is a Season 2 coming this fall' }, '2026-09-05T10:00:00.000Z');
+  assert.match(tastesInstruction(long), /Last I read \(2026-09-05\): finished, dropped on Blu-ray, and there is a Season 2 coming this fall\./, 'the aside goes, what is still to come stays');
+  assert.match(deepenInstruction(interest(), 'q', 'f'), /under 20 words: keep anything still to come/);
 });
