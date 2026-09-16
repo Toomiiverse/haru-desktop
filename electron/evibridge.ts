@@ -1,7 +1,7 @@
 // The socket to Hume, one per open call.
 //
 // Kept apart from evi.ts so that file stays pure and testable. This one holds
-// a WebSocket, which is the same reason discord.ts and browserctl.ts use
+// a WebSocket, which is the same reason browserctl.ts uses
 // Node's own client: no library, one connection, a handful of events.
 //
 // The phone's audio arrives before Hume has answered the handshake more often

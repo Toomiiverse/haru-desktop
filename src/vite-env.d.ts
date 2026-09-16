@@ -39,7 +39,6 @@ interface Window {
       pathFor(file: File): string;
     };
     gaming: { get(): Promise<import('./types').GamingConfig>; set(config: import('./types').GamingConfig): Promise<import('./types').GamingConfig> };
-    discord: { status(): Promise<{ enabled: boolean; ownerId: string; pesterHours: number; hasToken: boolean; connected: boolean; botName: string; trouble: string; checkInChannel: string }>; setToken(token: string): Promise<boolean>; set(next: { ownerId: string; pesterHours: number; enabled: boolean; checkInChannel?: string }): Promise<{ enabled: boolean; connected: boolean }> };
     web: { status(): Promise<import('./types').WebStatus>; setPassword(username: string, password: string): Promise<boolean>; setEnabled(enabled: boolean): Promise<boolean>; forgetDevice(id: string): Promise<import('./types').WebDevice[]> };
     ui: { page(page: string): Promise<void> };
     journal: {

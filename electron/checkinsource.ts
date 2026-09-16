@@ -1,6 +1,6 @@
 // Reading her check-ins off another machine.
 //
-// Discord moved to the server, so a note jotted on the phone now lands in the
+// The phone talks to the server, so a note jotted on it lands in the
 // server's config while the end-of-day review happens at the desk and reads the
 // desktop's. Two halves of one day, in two places, neither aware of the other —
 // which quietly breaks the whole point of taking the notes.

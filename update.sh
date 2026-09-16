@@ -72,7 +72,7 @@ printf '    %s\n' "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:878
 #
 # Nothing else starts her any more, so an update that quietly finishes with her
 # not running is the one failure nobody notices — until she stops answering on
-# Discord hours later and it looks like a different problem entirely.
+# the phone hours later and it looks like a different problem entirely.
 echo "==> still running:"
 if pgrep -f "electron \." >/dev/null; then
   printf '    yes\n'

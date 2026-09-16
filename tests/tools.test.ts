@@ -167,7 +167,7 @@ test('switched off means not on the table', () => {
 
 test('a Claude session is offered when switched on and asked about — from any door, hands or not', () => {
   assert.ok(!offered(NOTHING).includes('claude_session'));
-  // The phone and Discord answer with hands off; opening one from the phone is the point.
+  // The phone answers with hands off; opening one from the phone is the point.
   const phone = chatTools({ ...NOTHING, claude: true, hands: false, web: true }, 'can you open me a claude session?').map(tool => tool.function.name);
   assert.ok(phone.includes('claude_session'));
   assert.ok(chatTools({ ...NOTHING, claude: true }, 'start remote control in haru-desktop').some(tool => tool.function.name === 'claude_session'));

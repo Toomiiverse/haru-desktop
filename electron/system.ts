@@ -207,7 +207,7 @@ export function parseSystemctlState(output: string): ServiceStatus['state'] {
 
 // ---- Known services ---------------------------------------------------------
 
-export const USER_SERVICES = ['haru', 'gpt-sovits', 'obsidian', 'xvfb', 'x11vnc', 'haru-asr', 'haru-discord-bot'];
+export const USER_SERVICES = ['haru', 'gpt-sovits', 'obsidian', 'xvfb', 'x11vnc', 'haru-asr'];
 export const SYSTEM_READABLE = ['ollama'];
 export const KNOWN_SERVICES = [...USER_SERVICES, ...SYSTEM_READABLE];
 

@@ -451,7 +451,7 @@ export const SYSTEM_TOOLS: ChatTool[] = [
     type: 'function',
     function: {
       name: 'get_service_status',
-      description: 'The status of a named service — the user services (haru, gpt-sovits, obsidian, xvfb, x11vnc, haru-asr, haru-discord-bot) and the ollama service. For whether something is running.',
+      description: 'The status of a named service — the user services (haru, gpt-sovits, obsidian, xvfb, x11vnc, haru-asr) and the ollama service. For whether something is running.',
       parameters: {
         type: 'object',
         properties: { name: { type: 'string', description: 'The service name, e.g. "haru" or "ollama". Leave out to check them all.' } },
@@ -500,7 +500,7 @@ export const SYSTEM_ACTION_TOOLS: ChatTool[] = [
     type: 'function',
     function: {
       name: 'start_service',
-      description: 'Start a named user service (haru, gpt-sovits, obsidian, xvfb, x11vnc, haru-asr, haru-discord-bot). Disruptive — explicit confirmation required.',
+      description: 'Start a named user service (haru, gpt-sovits, obsidian, xvfb, x11vnc, haru-asr). Disruptive — explicit confirmation required.',
       parameters: {
         type: 'object',
         properties: {
@@ -515,7 +515,7 @@ export const SYSTEM_ACTION_TOOLS: ChatTool[] = [
     type: 'function',
     function: {
       name: 'stop_service',
-      description: 'Stop a named user service (haru, gpt-sovits, obsidian, xvfb, x11vnc, haru-asr, haru-discord-bot). Disruptive — explicit confirmation required.',
+      description: 'Stop a named user service (haru, gpt-sovits, obsidian, xvfb, x11vnc, haru-asr). Disruptive — explicit confirmation required.',
       parameters: {
         type: 'object',
         properties: {

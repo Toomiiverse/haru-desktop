@@ -6,7 +6,7 @@
 // the Claude app, behind his own account and its own permission prompts.
 //
 // That is why she never hands a session a task. Her hands are off on the phone
-// and on Discord because what she reads there can be somebody else's words
+// because what she reads there can be somebody else's words
 // (see handsAllowed in main.ts). An idle session nobody but him can drive is
 // safe to open from anywhere; a session that starts working on a sentence she
 // wrote is a shell a web page could reach. So: open, list, stop — nothing else.

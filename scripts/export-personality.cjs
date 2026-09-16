@@ -22,7 +22,7 @@ const SOURCE = process.env.HARU_CONFIG_FILE
     : path.join(os.homedir(), '.config', 'haru-desktop', 'config.json'));
 
 // The keys that describe this machine rather than her, so they never travel.
-const THIS_MACHINE = ['webAccess', 'ai', 'voice', 'live2d', 'listen', 'google', 'search', 'searchApiKey', 'remoteApiKey', 'openaiApiKey', 'veniceApiKey', 'selfHostedApiKey', 'escalate', 'screenshots', 'watching', 'desktop', 'gaming', 'roam', 'startup', 'companion', 'audio', 'vision', 'voiceLauncher', 'jellyfin', 'checkinSource', 'checkinSourcePassword', 'discordToken'];
+const THIS_MACHINE = ['webAccess', 'ai', 'voice', 'live2d', 'listen', 'google', 'search', 'searchApiKey', 'remoteApiKey', 'openaiApiKey', 'veniceApiKey', 'selfHostedApiKey', 'escalate', 'screenshots', 'watching', 'desktop', 'gaming', 'roam', 'startup', 'companion', 'audio', 'vision', 'voiceLauncher', 'jellyfin', 'checkinSource', 'checkinSourcePassword'];
 
 const withChat = process.argv.includes('--with-chat');
 const withCheckins = process.argv.includes('--with-checkins');

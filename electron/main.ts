@@ -112,8 +112,6 @@ import { describePull, isTailnetAddress, mergeCheckIns, readCheckInSource } from
 import { describeMerge } from './memorysync';
 import { describeShot, mergeActivity, noteActivity, noteScreenshot, summariseDay } from './activitylog';
 import { heldShots, keepShot, localShots, missingFrom, pruneShots, readShot, MAX_SHOT_BYTES } from './shotstore';
-import { DiscordLink, looksLikeUserId, readDiscordConfig, useOfChannel, type DiscordConfig } from './discord';
-import { reactedPrompt, readReaction, REACTION_COOLDOWN_MS } from './reacted';
 import { startWebServer, type WebDeps } from './webserver';
 import { openingInstruction, openingsDueNow, type DueOpening } from './standingtime';
 import { parseVaultMemoryPage, VAULT_MEMORY_PAGES, type VaultMemoryPage } from './vaultmemories';
@@ -1368,9 +1366,8 @@ function noteAside(text: string, source: AsideSource, about = ''): Aside | null 
   if (pendingAsk && source === 'idle') { if (/\?/.test(line)) console.log(`[push] she asked ${pendingAsk} — the next thing they say answers it`); pendingAsk = null; }
   store.set('chat.asides', asides);
   sendToWindows('chat:aside', aside);
-  // Fire-and-forget: a Discord or push hiccup must not hold up the desk or the
-  // phone over a line that has already been said there.
-  void forwardAsideToDiscord(aside);
+  // Fire-and-forget: a push hiccup must not hold up the desk or the phone over
+  // a line that has already been said there.
   void forwardAsideToPush(aside);
   return aside;
 }
@@ -4015,7 +4012,7 @@ const OLLAMA_KEEP_ALIVE = -1;
 // anything else — which is the right trade here, where nothing else wants it.
 // A machine that shares the card should set it lower, and a headless one that
 // is only spoken to a few times a day may prefer the cold start.
-// A reply sent somewhere she is not — a phone, Discord — is read on a screen
+// A reply sent somewhere she is not — the phone — is read on a screen
 // that is not the desk, where every extra sentence is extra tokens before the
 // reader sees anything. Capped so a far-away turn stays a line or two; the desk
 // keeps the full leash, because a conversation in front of her is allowed to
@@ -4024,8 +4021,8 @@ const OLLAMA_KEEP_ALIVE = -1;
 const AWAY_MAX_TOKENS = 240;
 
 /**
- * How many of today's turns a reply sent somewhere she is not — a phone,
- * Discord — may carry into the prompt. The desk sends everything; an away
+ * How many of today's turns a reply sent somewhere she is not — the phone —
+ * may carry into the prompt. The desk sends everything; an away
  * reply is read on a screen where every extra token is time before the first
  * word, and a long day's thread was most of the ~10k-token prompt the hosted
  * model reads before it answers. The recent thread keeps her anchored in the
@@ -4685,7 +4682,7 @@ async function composeOpening(): Promise<string | null> {
     irritation: mood.irritation,
     ego: mood.ego,
     // Only the ones she is still entitled to ask about — the same count the
-    // idle line and the Discord nudge use, so no angle opens on a thing the
+    // idle line uses, so no angle opens on a thing the
     // agenda block has already said to leave.
     overdue: chaseableOverdue(items, now, todayKey),
     dueToday: dueTodayCount(items, statuses, todayKey, raised),
@@ -6048,7 +6045,7 @@ async function noticePage(page: NoticedPage) {
 /**
  * Goes and gets what she was told while away from this desk.
  *
- * Discord lives on the server now, so a note sent from the phone is written
+ * The phone talks to the server now, so a note sent from it is written
  * there and the evening review here would never see it — the day arriving in
  * two halves that never meet. This is the desk going to ask.
  *
@@ -6621,7 +6618,7 @@ function conversationRoute(): ProviderConfig | null {
  * other attached file goes out on the same terms: the user's rule is that the
  * hosted model is for what they hand her, and nothing else.
  *
- * A message from the phone or Discord used to be a third forcing reason, on the
+ * A message from the phone used to be a third forcing reason, on the
  * theory that a wait in a chat app reads as broken. Withdrawn: the user wants
  * their words answered by the local model wherever they are said from, and the
  * hosted one kept for uploads. That is a rule about cost and about where a
@@ -6671,7 +6668,7 @@ function brainFor(
 }
 
 // There used to be a fastBrain() here that sent the one-shot composers — the
-// phone's nudges, Discord's check-in and reaction replies, the phone's read of
+// phone's nudges and the phone's read of
 // her expression — to the hosted model, on the theory that a cold start on a
 // chat app reads as her being broken. Withdrawn with the away-forcing in
 // brainFor above, for the same reason: the hosted model is for uploads and
@@ -6725,7 +6722,7 @@ async function withAttachments<T extends { role: string; content: string; at?: s
 
 async function ollamaChat(messages: { role: string; content: string; at?: string; attachments?: Attachment[] }[], config: ProviderConfig, { hands = true, web = false, brief = false, choices = false, call = false, away = '', aside = '', onChunk, onChunkReset, onToolCall, onSending, traceId }: { hands?: boolean; web?: boolean; brief?: boolean; choices?: boolean; call?: boolean; away?: string; aside?: string; onChunk?: (text: string) => void; onChunkReset?: () => void; onToolCall?: (name: string) => void; onSending?: () => void; traceId?: string } = {}) {
   const latest = messages.at(-1)?.content ?? '';
-  // A message from outside the desk — a phone, Discord — gets a short leash on
+  // A message from outside the desk — the phone — gets a short leash on
   // the conversation as well as on the reply: a long day's thread is most of
   // the tokens the hosted model reads before its first word, and the reader
   // is watching a chat app. The recent thread stays, the desk sends everything.
@@ -7183,7 +7180,7 @@ const promptState = {
     // The conversation is the one local call that wants the whole window;
     // everything else shares the side jobs' runner (sideNumCtx).
     numCtx: chatNumCtx(),
-    // A message from outside the desk — a phone, Discord — gets a short leash.
+    // A message from outside the desk — the phone — gets a short leash.
     // The reader is watching a chat app, a long reply is a long wait, and
     // away-turns were found to run long: the cap keeps her concise without
     // touching the desk, where a full answer is the point of the window.
@@ -7762,85 +7759,7 @@ async function nudgeForPhone(): Promise<{ line: string; about: string; eventId: 
   }
 }
 
-// ---- Reaching her from Discord --------------------------------------------
-
-/**
- * Discord is switched off in this build, on request, while the rest of the way
- * in is being worked on.
- *
- * Done here rather than by clearing the setting, because the setting is theirs:
- * the token stays encrypted where it was, the owner id and the channel roles
- * stay written down, and turning it back on is this one constant rather than
- * setting the whole thing up again. Every path out to Discord — answering,
- * pestering, forwarding an aside — already checks that the link exists, so
- * refusing to open it is the whole of the off switch.
- */
-const DISCORD_DISABLED = true;
-
-let discord: DiscordLink | null = null;
-let discordUser = '';
-let discordTrouble = '';
-let pesterTimer: ReturnType<typeof setInterval> | null = null;
-
-function getDiscordConfig(): DiscordConfig {
-  return readDiscordConfig(store.get('discord'));
-}
-
-function saveDiscordConfig(config: DiscordConfig) {
-  store.set('discord', config);
-}
-
-/** Where she DMs the user, opening the channel the first time it is needed. */
-async function discordDmChannel(config: DiscordConfig): Promise<string> {
-  if (config.dmChannelId) return config.dmChannelId;
-  const channel = await discord!.dmChannel();
-  saveDiscordConfig({ ...config, dmChannelId: channel });
-  return channel;
-}
-
-/**
- * The bot token, kept the way every other credential here is: encrypted by the
- * OS, never handed back to the renderer, never written to a log.
- */
-function saveDiscordToken(token: string) {
-  const value = token.trim();
-  if (!value) { store.delete('discordToken' as never); return; }
-  store.set('discordToken', encryptSecret(value));
-}
-
-function getDiscordToken(): string {
-  return decryptSecret(store.get('discordToken') as string | undefined);
-}
-
-/**
- * Her side of a Discord conversation.
- *
- * The same ollamaChat as everywhere else, with the same hands withheld. Nothing
- * about her is different here — a second, thinner Haru answering on Discord
- * would drift from the one at the desk within a week, and the drift would be
- * invisible until it was large.
- */
-/**
- * A number in a check-in, only when it is unmistakably a rating.
- *
- * Three shapes: said out of ten, sitting at the end of the line, or opening it
- * before a comma. Anything else is left alone, because "took 2 paracetamol" and
- * "about a 6" are the same shape to a regular expression and only one of them is
- * a number about how they feel.
- *
- * Erring toward reading none is the right way round. A missed rating leaves a
- * note with no number, which is still the note; an invented one puts a wrong
- * figure into the record they are keeping precisely to see a pattern in.
- */
-function ratingIn(text: string): number | undefined {
-  const outOfTen = text.match(/\b([1-9]|10)\s*(?:\/\s*10|out of 10)\b/i);
-  if (outOfTen) return Number(outOfTen[1]);
-  const trailing = text.match(/[,\s-]\s*([1-9]|10)\s*[.!]?\s*$/);
-  if (trailing) return Number(trailing[1]);
-  const leading = text.match(/^\s*([1-9]|10)\s*[,.]/);
-  if (leading) return Number(leading[1]);
-  return undefined;
-}
+// ---- The quick route ---------------------------------------------------
 
 /**
  * The deterministic route: canned FAQ, templates, then the lookups the model
@@ -7888,364 +7807,6 @@ function quickHit(text: string, history: { role?: string; content?: string }[]) 
 function announceQuick(hit: { reply: string; tier: number }, text: string) {
   sendToWindows('chat:fromPhone', { text, reply: hit.reply, ignored: false });
   console.log(`[quick] tier ${hit.tier} — "${text.slice(0, 60)}" → ${hit.reply.length} chars`);
-}
-
-async function answerOnDiscord(text: string, channelId = '') {
-  const config = store.get('ai.config') as ProviderConfig | undefined;
-  if (!config?.model) return { reply: '', ignored: true };
-  const asleep = herAsleepNow();
-
-  // In a channel set aside for check-ins, the message is one. Written down in
-  // code rather than left to her to notice: the whole point of giving a channel
-  // a purpose is that nothing has to be inferred, and a check-in that depends on
-  // a model spotting it is a check-in that is sometimes lost.
-  if (channelId && useOfChannel(getDiscordConfig(), channelId) === 'checkin') {
-    const now = zonedNow(CHAT_TIMEZONE);
-    // A number said anywhere in the line, so "rough morning, 7" and "7, rough
-    // morning" both count. Only 1-10, and only on its own — the 7 in "7am" is
-    // not an anxiety rating.
-    const anxiety = ratingIn(text);
-    setCheckIns(addCheckIn(getCheckIns(), text, anxiety, new Date(), localDateKey(now)));
-    const today = checkInsOn(getCheckIns(), localDateKey(now));
-    console.log(`[discord] check-in noted${anxiety ? ` (anxiety ${anxiety}/10)` : ''} — ${today.length} today`);
-    // The note is kept even while she is asleep; only the answer waits.
-    if (asleep) { const line = knockWhileAsleep(); if (line) return { reply: line, ignored: false }; }
-    const character = getActiveCharacter();
-    const system = [
-      character.identity,
-      character.style,
-      'They have just jotted a check-in at you — a note about how they are, taken while the day is still going. It is already written down; you do not need to record it and must not say you will.',
-      today.length > 1 ? `That is ${today.length} today.` : '',
-      'Answer in one short line. Take it seriously without making a fuss of it, and do not ask them to elaborate unless it sounds bad.',
-    ].filter(Boolean).join(' ');
-    try {
-      const line = await ollamaQuip(system, `They wrote: "${text.slice(0, 500)}"`, nudgeBrain() ?? config);
-      return { reply: line, ignored: false };
-    } catch {
-      // The note is what matters and it is already saved. Silence beats an error.
-      return { reply: '', ignored: true };
-    }
-  }
-  // Her night: unreachable until she wakes, Discord included.
-  if (asleep) { const line = knockWhileAsleep(); if (line) return { reply: line, ignored: false }; }
-  const history = (store.get('chat.messages') as { role: string; content: string; at?: string }[] ?? []);
-  // The deterministic route earns its keep here first: a Discord notification
-  // that turns out to be a greeting or a time check should be instant, and if
-  // the routing answers, the model is never even asked. Falls through silently
-  // when the message needs any judgement at all.
-  const trace = newTrace();
-  const quick = quickHit(text, history);
-  trace.mark('intent');
-  if (quick) {
-    announceQuick(quick, text);
-    trace.done('discord', { tier: quick.tier, chars: quick.reply.length });
-    return { reply: quick.reply, ignored: false };
-  }
-  const messages = [...history, { role: 'user', content: text, at: new Date().toISOString() }];
-  // Out to the hosted model rather than to whatever answers at the desk.
-  //
-  // Her own machine is the right place for a conversation you are sitting in
-  // front of, where a few seconds of thinking looks like thinking. Discord is
-  // not that: it is a chat app on a phone, the reply arrives as a notification
-  // or it does not, and there is nothing on screen to say she is working. Since
-  // the local model became a serverless pod that gap became a cold start, and a
-  // cold start there is indistinguishable from her being down.
-  //
-  // Still routed rather than forced: no second model configured, or a credential
-  // sitting in the recent transcript, and this comes straight back home.
-  const started = Date.now();
-  const answer = await ollamaChat(messages, config, { hands: false, away: 'it came in over Discord', traceId: trace.id });
-  const reply = stripDelivery(answer.content ?? '');
-  trace.mark('reply');
-  // Lands in the desktop transcript too, so coming back to the desk does not
-  // mean finding half a conversation missing.
-  sendToWindows('chat:fromPhone', { text, reply, ignored: Boolean(answer.ignored) });
-  // The transcript length is here beside the timing on purpose. Every message
-  // sends the whole of chat.messages back to the model — untrimmed, as far back
-  // as the last daily wipe — and whether that is worth doing something about
-  // depends entirely on how long it actually gets in a day, which nobody has
-  // ever measured.
-  console.log(`[discord] answered ${text.length} chars with ${reply.length} in ${Date.now() - started}ms (${messages.length} messages of history)`);
-  trace.done('discord', { tier: 'llm', chars: reply.length });
-  return { reply, ignored: answer.ignored };
-}
-
-/**
- * The same answer, with the words arriving while she is still writing them.
- *
- * The one difference from answerOnDiscord is onChunk: the Discord link posts a
- * placeholder the moment the message lands and rewrites it as each stretch of
- * the reply arrives. Everything else — the routing, the mood, the check-in
- * channel, the transcript entry — is the same path.
- */
-async function answerOnDiscordStreamed(text: string, channelId: string, onChunk: (chunk: string) => void) {
-  const started = Date.now();
-  const config = store.get('ai.config') as ProviderConfig | undefined;
-  if (!config?.model) return { reply: '', ignored: true };
-  const door = herAsleepNow() ? knockWhileAsleep() : null;
-  if (door) {
-    onChunk(door);
-    return { reply: door, ignored: false };
-  }
-  // A check-in channel answers with a one-line quip through ollamaQuip, which
-  // has no streaming of its own — the placeholder is already up, so the line is
-  // handed over whole, which is one edit and reads identically.
-  if (channelId && useOfChannel(getDiscordConfig(), channelId) === 'checkin') {
-    const answer = await answerOnDiscord(text, channelId);
-    if (!answer.ignored && answer.reply.trim()) onChunk(answer.reply);
-    return answer;
-  }
-  const history = (store.get('chat.messages') as { role: string; content: string; at?: string }[] ?? []);
-  const trace = newTrace();
-  const quick = quickHit(text, history);
-  trace.mark('intent');
-  if (quick) {
-    // The whole reply is one chunk: the placeholder is already up, so the edit
-    // reads the same as a stream that happened to finish instantly.
-    onChunk(quick.reply);
-    announceQuick(quick, text);
-    trace.done('discord', { tier: quick.tier, chars: quick.reply.length });
-    return { reply: quick.reply, ignored: false };
-  }
-  const messages = [...history, { role: 'user', content: text, at: new Date().toISOString() }];
-  const answer = await ollamaChat(messages, config, {
-    hands: false,
-    away: 'it came in over Discord',
-    traceId: trace.id,
-    onChunk: chunk => { trace.mark('first'); onChunk(chunk); },
-    // A round thrown away after showing words never stood: TTFT is measured on
-    // what the reader actually keeps, so the stamp goes back with the text.
-    onChunkReset: () => { trace.unmark('first'); onChunk('\uFFFD'); },
-  });
-  const reply = stripDelivery(answer.content ?? '');
-  trace.mark('reply');
-  sendToWindows('chat:fromPhone', { text, reply, ignored: Boolean(answer.ignored) });
-  console.log(`[discord] streamed ${text.length} chars in ${Date.now() - started}ms, ${reply.length} chars (${messages.length} messages of history)`);
-  trace.done('discord', { tier: 'llm', chars: reply.length });
-  return { reply, ignored: answer.ignored };
-}
-
-/** Last time an emoji earned a line, so a handful of them earns one. */
-let reactedAt = 0;
-
-/**
- * They put an emoji on something she said.
- *
- * Treated as a reply rather than as telemetry, because that is what it is: an
- * emoji is what people send instead of typing "that was funny", and answering it
- * with silence is answering a reply with silence. The tone is read from the
- * emoji, the sentence is left to her.
- *
- * Moves her mood exactly as a thumb in her own window does. A heart on Discord
- * and a thumbs-up at the desk are the same gesture through different glass, and
- * having only one of them count would make her mood depend on where you were
- * standing.
- */
-async function reactedOnDiscord(emoji: string, custom: boolean, herLine: string, where = 'discord') {
-  const tag = `[${where}]`;
-  const now = Date.now();
-  // Reacting is cheap and people do it in handfuls. The first one gets the line.
-  if (now - reactedAt < REACTION_COOLDOWN_MS) {
-    console.log(tag + ' reaction noted, no reply — she answered one a moment ago');
-    return { reply: '', ignored: true };
-  }
-  const config = store.get('ai.config') as ProviderConfig | undefined;
-  if (!config?.model) return { reply: '', ignored: true };
-
-  const reading = readReaction(emoji, custom);
-  // Before the reply is written, and whether or not one gets written: the mood
-  // is the durable part, and a reaction that only counted when she happened to
-  // be off cooldown would make her temper a function of her rate limiter.
-  if (reading.shift) {
-    const mood = getMood();
-    setMood({ ...mood, irritation: nextIrritation(mood.irritation, reading.shift), ego: nextEgo(mood.ego, reading.shift) });
-    nudgeVitals(reading.shift === 'liked' ? 'praised' : 'criticised');
-  }
-  // Reacting is them addressing her, so it starts the quiet period a message
-  // does — otherwise she takes a heart as her cue to bring up something else.
-  noteUserSpoke();
-  reactedAt = now;
-
-  const mood = getMood();
-  if (isIgnoring(mood.irritation)) return { reply: '', ignored: true };
-
-  const character = getActiveCharacter();
-  const system = [
-    character.identity,
-    character.style,
-    rightNow(),
-    moodInstruction(mood.irritation),
-    egoInstruction(mood.ego),
-  ].filter(Boolean).join(' ');
-  try {
-    const line = await ollamaQuip(system, reactedPrompt(reading, herLine), config);
-    console.log(`${tag} reacted to ${custom ? 'a custom emoji' : emoji} — taken as ${reading.taken}`);
-    return { reply: line, ignored: false };
-  } catch (error) {
-    console.warn(tag + ' could not answer a reaction:', error instanceof Error ? error.message : error);
-    return { reply: '', ignored: true };
-  }
-}
-
-/**
- * What she would say first, unprompted and about nothing in particular, over
- * Discord — the away counterpart to considerPipingUp.
- *
- * considerPipingUp gates on machineIdleSeconds, which is right for a desk she
- * might or might not be sitting at. Over Discord there is no desk: being
- * pestered on the phone is itself the "someone's there" signal, the same way
- * nudgeForPhone treats it for reminders. So this shares the angle-picking and
- * the character prompt with considerPipingUp, just without asking whether the
- * machine has been touched recently.
- */
-async function spontaneousDiscordNudge(): Promise<string | null> {
-  const config = nudgeBrain() ?? (store.get('ai.config') as ProviderConfig | undefined);
-  if (!config?.model) return null;
-  const mood = getMood();
-  // Stonewalling means stonewalling here too.
-  if (isIgnoring(mood.irritation)) return null;
-  try {
-    const now = zonedNow(CHAT_TIMEZONE);
-    const todayKey = localDateKey(now);
-    const items = getKept();
-    const statuses = items.map(item => itemStatus(item, now, todayKey));
-    const angle = pickAngle(openingAngles({
-      hour: now.getHours(),
-      irritation: mood.irritation,
-      ego: mood.ego,
-      overdue: chaseableOverdue(items, now, todayKey),
-      dueToday: dueTodayCount(items, statuses, todayKey, raisedRecently(herLinesLastDay(Date.now()), openItems(items, todayKey))),
-      doneToday: items.filter((item, index) => statuses[index] === 'done' && item.date === todayKey).length,
-      hasHistory: getSessions().length > 0,
-      knowsThings: getMemories().length > 0,
-      kind: 'return',
-    }));
-    const character = getActiveCharacter();
-    const system = [
-      character.identity,
-      `It is ${formatTimeOfDay(now.getHours(), now.getMinutes())} on ${new Intl.DateTimeFormat('en-US', { weekday: 'long' }).format(now)} ${todayKey}.`,
-      profileSummary(''),
-      keptSummary(now),
-      character.style,
-      moodInstruction(mood.irritation),
-      egoInstruction(mood.ego),
-      'They are away from their desk, reachable only on their phone over Discord. You are messaging them first — nothing they said prompted this.',
-      NO_ABANDON_THREAD,
-      NO_INVENTED_HISTORY,
-      unpromptedContext(),
-      'One or two short lines. No quotation marks, no stage directions. Do not greet them and do not ask if they are there.',
-      angle ? `Open on this in particular: ${angle.instruction}` : '',
-    ].filter(Boolean).join(' ');
-    return await ollamaQuip(system, 'Say something.', config);
-  } catch (error) {
-    console.warn('[discord] could not compose a spontaneous nudge:', error instanceof Error ? error.message : error);
-    return null;
-  }
-}
-
-// Rolled once per pester tick, only when there was no reminder to send instead
-// — so a random nudge never crowds out something she was actually asked to
-// chase. Not every tick producing a message is the point: a message every
-// pesterHours on the dot would read as a scheduler, not a companion.
-const SPONTANEOUS_NUDGE_CHANCE = 0.4;
-
-/**
- * The pestering, on the long interval this channel deserves.
- *
- * Discord makes a noise on a phone, which is the whole point and also the whole
- * risk: the same nudge that is welcome three times a day is an app that gets
- * muted at twenty. It shares the chase ladder with the desk and the web, so
- * being chased in one place still counts as being chased. When there is
- * nothing to chase, she sometimes says something anyway — see
- * spontaneousDiscordNudge — the same way she would pipe up unprompted at a
- * desk, just without a desk to be idle at.
- */
-async function pesterOnDiscord() {
-  if (herAsleepNow()) return;
-  const config = getDiscordConfig();
-  if (!config.enabled || !discord || !config.ownerId) return;
-  const said = await nudgeForPhone();
-  if (said) {
-    try {
-      const channel = await discordDmChannel(config);
-      await discord.send(channel, said.line);
-      console.log('[discord] pestered about "' + said.about + '"');
-    } catch (error) {
-      console.warn('[discord] could not pester:', error instanceof Error ? error.message : error);
-    }
-    return;
-  }
-  // Same gates nudgeForPhone opens with — it may have returned null because of
-  // these rather than because there was nothing to chase, and either way a
-  // spontaneous line should not fire where a reminder would have been refused.
-  if (chasing || Date.now() - lastRemindedAt < REMINDER_SPACING_MS) return;
-  if (isSilenced(store.get('pushback') as Pushback | undefined, Date.now())) return;
-  if (Math.random() >= SPONTANEOUS_NUDGE_CHANCE) return;
-  const line = await spontaneousDiscordNudge();
-  if (!line) return;
-  lastRemindedAt = Date.now();
-  // interject() writes it to the aside log and forwards it to Discord itself
-  // — see noteAside / DISCORD_WORTHY_ASIDES — so there is no separate send here.
-  if (interject(line, { source: 'idle' })) console.log('[discord] sent a spontaneous nudge');
-}
-
-/**
- * Which asides are worth a Discord DM, versus staying in her own log.
- *
- * Most of what she says off her own back is narrating the screen back to
- * itself — nobody needs a phone buzz for a jab about a tab. These three are the
- * ones actually meant to reach the user rather than just record what she
- * noticed: a reminder chasing something overdue, the daily journal ask, and a
- * line said to break a long silence. All three already went nowhere if nobody
- * was at the machine or the phone page to see them — which was the bug: she
- * "said" them, and they were gone.
- */
-const DISCORD_WORTHY_ASIDES: ReadonlySet<AsideSource> = new Set(['reminder', 'journal', 'idle', 'system']);
-
-/** Forwards an aside to Discord, when it is one of the ones worth a DM for. */
-async function forwardAsideToDiscord(aside: Aside) {
-  if (!DISCORD_WORTHY_ASIDES.has(aside.source)) return;
-  const config = getDiscordConfig();
-  if (!config.enabled || !discord || !config.ownerId) return;
-  try {
-    const channel = await discordDmChannel(config);
-    await discord.send(channel, aside.text);
-  } catch (error) {
-    console.warn('[discord] could not forward an aside:', error instanceof Error ? error.message : error);
-  }
-}
-
-async function startDiscord() {
-  if (DISCORD_DISABLED) {
-    // Said out loud in the settings panel, so the toggle does not look broken.
-    discordTrouble = 'Switched off in this build.';
-    console.log('[discord] not connecting — switched off in this build');
-    return;
-  }
-  const config = getDiscordConfig();
-  const token = getDiscordToken();
-  if (!config.enabled || !token || !config.ownerId) return;
-  if (discord) return;
-  discordTrouble = '';
-  discord = new DiscordLink(token, config.ownerId, {
-    answer: (text, channelId) => answerOnDiscord(text, channelId),
-    answerStream: (text, channelId, onChunk) => answerOnDiscordStreamed(text, channelId, onChunk),
-    reacted: (emoji, custom, herLine) => reactedOnDiscord(emoji, custom, herLine),
-    onReady: name => { discordUser = name; discordTrouble = ''; },
-    onTrouble: why => { discordTrouble = why; },
-    onIgnored: why => { discordTrouble = why; },
-  });
-  discord.start();
-  if (pesterTimer) clearInterval(pesterTimer);
-  pesterTimer = setInterval(() => { void pesterOnDiscord(); }, config.pesterHours * 60 * 60_000);
-}
-
-function stopDiscord() {
-  discordUser = '';
-  if (pesterTimer) clearInterval(pesterTimer);
-  pesterTimer = null;
-  discord?.stop();
-  discord = null;
 }
 
 // ---- Reaching the phone when nothing of hers is open -----------------------
@@ -8665,9 +8226,8 @@ async function pushToPhone(kind: 'random' | 'events' | 'system' | 'weather', tex
 }
 
 /**
- * Which asides buzz the phone, and as which kind — the same judgement
- * DISCORD_WORTHY_ASIDES makes, split by kind so the preferences can refuse
- * one sort of interruption without silencing the rest.
+ * Which asides buzz the phone, and as which kind — split by kind so the
+ * preferences can refuse one sort of interruption without silencing the rest.
  */
 const PUSH_KIND: Partial<Record<AsideSource, 'random' | 'events' | 'system' | 'weather'>> = {
   reminder: 'events',
@@ -8722,18 +8282,15 @@ async function forwardAsideToPush(aside: Aside) {
   store.set('chat.asides', markReached(getAsides(), aside.id, reached));
 }
 
-// The interval Discord defaults to, for the same reason it is floored there:
-// this is the channel that makes a noise on a phone, and a companion that
-// buzzes every ten minutes gets muted.
+// Hours apart, because this is the channel that makes a noise on a phone,
+// and a companion that buzzes every ten minutes gets muted.
 // ponytail: fixed interval; make it a preference if 3h ever proves wrong.
 let pushPesterTimer: ReturnType<typeof setTimeout> | null = null;
 
 /**
- * The pestering, without Discord: her chasing reminders and occasionally
- * piping up while nobody has the page open. The composers are shared with the
- * other away channels — nudgeForPhone for the chase, spontaneousDiscordNudge
- * for the unprompted line — so being chased here still counts as being chased
- * everywhere, through the same spacing record.
+ * The pestering: her chasing reminders and occasionally piping up while
+ * nobody has the page open. nudgeForPhone does the chase, so being chased here
+ * still counts as being chased everywhere, through the same spacing record.
  */
 /** What she has brought up lately, so a long silence does not get the same jab four times. */
 const broughtUp: string[] = [];
@@ -10818,8 +10375,8 @@ function webDeps(): WebDeps {
         return { reply: quick.reply, ignored: false };
       }
       const messages = [...history, { role: 'user', content: text, at: new Date().toISOString(), ...(files.length ? { attachments: files } : {}) }];
-      // Out to the hosted model, for the same reason Discord is: this is a
-      // phone. There is no window to show that she is thinking, the tab is
+      // Out to the hosted model, because this is a phone. There is no window
+      // to show that she is thinking, the tab is
       // often not even in front of them, and since the local model became a
       // serverless pod the first message of a session pays a cold start. The
       // desk keeps the local one — that is what the GPU is for.
@@ -12117,30 +11674,6 @@ app.whenReady().then(() => {
 
   // The web door. The password only ever travels inwards: it is hashed here and
   // the renderer is told nothing but whether one exists.
-  ipcMain.handle('discord:status', () => {
-    const config = getDiscordConfig();
-    return { enabled: config.enabled, ownerId: config.ownerId, pesterHours: config.pesterHours, hasToken: Boolean(getDiscordToken()), connected: Boolean(discord), botName: discordUser, trouble: discordTrouble, checkInChannel: Object.keys(config.channels).find(id => config.channels[id] === 'checkin') ?? '' };
-  });
-  ipcMain.handle('discord:setToken', (_e, token: string) => { saveDiscordToken(String(token ?? '')); return Boolean(getDiscordToken()); });
-  ipcMain.handle('discord:set', async (_e, next: { ownerId: string; pesterHours: number; enabled: boolean; checkInChannel?: string }) => {
-    const current = getDiscordConfig();
-    const ownerId = String(next?.ownerId ?? '').trim();
-    if (next?.enabled && !ownerId) throw new Error('She needs your Discord user ID, or she would answer anyone.');
-    if (ownerId && !looksLikeUserId(ownerId)) throw new Error(`"${ownerId}" is a username, not a user ID. Turn on Developer Mode in Discord, right-click yourself and Copy User ID — it is about eighteen digits.`);
-    if (next?.enabled && !getDiscordToken()) throw new Error('Set the bot token first.');
-    // The DM channel belongs to a person; changing who she answers must not
-    // leave her still messaging the last one.
-    const dmChannelId = ownerId === current.ownerId ? current.dmChannelId : '';
-    const channel = String(next?.checkInChannel ?? '').trim();
-    if (channel && !looksLikeUserId(channel)) throw new Error('A channel id is about eighteen digits. Right-click the channel and Copy Channel ID.');
-    // One channel at a time, replaced rather than accumulated: pointing her at a
-    // new one should stop the old one silently swallowing messages as check-ins.
-    const channels = channel ? { [channel]: 'checkin' as const } : {};
-    saveDiscordConfig(readDiscordConfig({ ...current, ...next, ownerId, dmChannelId, channels }));
-    stopDiscord();
-    if (getDiscordConfig().enabled) await startDiscord();
-    return { enabled: getDiscordConfig().enabled, connected: Boolean(discord) };
-  });
   ipcMain.handle('web:status', () => {
     const access = getWebAccess();
     return {
@@ -12526,7 +12059,7 @@ app.whenReady().then(() => {
     const answer = await ollamaChat(messages, config, { brief: true, choices: true });
     const reply = stripDelivery(answer.content ?? '');
     const choices = [...pendingChoices];
-    // The same channel the phone and Discord use, so the desk transcript picks
+    // The same channel the phone uses, so the desk transcript picks
     // it up and coming back to the window does not mean finding half a
     // conversation missing. ollamaChat has already spoken it and pushed the
     // caption on its way through.
@@ -12580,7 +12113,11 @@ app.whenReady().then(() => {
   // is: doing it inside the settings handler means it only ever starts for
   // somebody who opens settings, which is nobody on the second day.
   void startWebDoor();
-  void startDiscord();
+  // Discord was taken out on 2026-09-16. Its settings and encrypted bot token
+  // go with it, so nothing of it is left in the config to export or sync.
+  for (const key of ['discord', 'discordToken']) {
+    if (store.get(key) !== undefined) { store.delete(key as never); console.log(`[startup] removed the old ${key} setting`); }
+  }
   // Her voice is a separate program, and opening Haru is the moment to notice it
   // is not running.
   void reviveVoiceServer();
@@ -12652,7 +12189,6 @@ app.on('before-quit', () => {
   try { releaseDuck(); } catch (error) { noteCrash('releasing the duck', error); }
   try { helper?.stdin?.write('quit\n'); } catch (error) { noteCrash('telling the helper to quit', error); }
   try { helper?.kill(); } catch (error) { noteCrash('killing the helper', error); }
-  try { stopDiscord(); } catch (error) { noteCrash('closing Discord', error); }
   void stopWebDoor().catch(error => noteCrash('closing the web door', error));
 });
 
