@@ -4267,7 +4267,7 @@ const memoryStore = createMemoryStore({
     const config = store.get('ai.config') as ProviderConfig | undefined;
     if (!config?.model) return null;
     const message = await ollamaPost(
-      [{ role: 'system', content: sortPrompt() }, { role: 'user', content: sortInput(notes, iso => localDateKey(zonedNow(CHAT_TIMEZONE, new Date(iso)))) }],
+      [{ role: 'system', content: sortPrompt(getProfile().nickname) }, { role: 'user', content: sortInput(notes, iso => localDateKey(zonedNow(CHAT_TIMEZONE, new Date(iso)))) }],
       config,
       { tools: false, temperature: 0, maxTokens: 40 * notes.length + 100 },
     );

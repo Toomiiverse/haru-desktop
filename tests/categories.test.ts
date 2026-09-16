@@ -7,7 +7,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { CATEGORIES, CATEGORY_MEANING, categoryOf, guessCategory, isCategory, LEGACY_KIND, readSorting, sortInput, sortPrompt, UNDATED_PLAN_DAYS, type SortNote } from '../electron/categories';
+import { CATEGORIES, CATEGORY_MEANING, categoryOf, guessCategory, isCategory, LEGACY_KIND, namesSomeoneElse, readSorting, sortInput, sortPrompt, UNDATED_PLAN_DAYS, type SortNote } from '../electron/categories';
 import { importanceOf, migrateMemories, pruneMemories, rememberInto, retrieveMemories, tidyEvidence, type MemoryRecord } from '../electron/memory';
 import { defaultMemoryBlocks, formatMemoryBlocks, withoutRestatements } from '../electron/blocks';
 import { mergeMemories } from '../electron/memorysync';
@@ -234,4 +234,14 @@ test('the vault page shows what a record was sorted as, and leaves out what is p
   assert.match(note.text, /- Works at Happytel on Sundays \*\(identity, 2026-09-10\)\*/);
   assert.doesNotMatch(note.text, /Discord/);
   assert.match(note.text, /count: 1/);
+});
+
+test('a person has to be somebody other than him, by name or by who they are to him', () => {
+  assert.equal(namesSomeoneElse('Tommy complained about build failing issues', 'Tommy'), false);
+  assert.equal(namesSomeoneElse("Tommy's mum — lives in Perth", 'Tommy'), true);
+  assert.equal(namesSomeoneElse('Ammie — friend; ordered a custom PC for her birthday', 'Tommy'), true);
+  assert.equal(namesSomeoneElse('Is in a relationship with Emma Wilson since June 2024', 'Tommy'), true);
+  assert.equal(namesSomeoneElse('They are late for work and tired', 'Tommy'), false);
+  assert.match(sortPrompt('Tommy'), /The user is Tommy: a note about Tommy is a note about them/);
+  assert.doesNotMatch(sortPrompt(), /The user is/);
 });

@@ -106,6 +106,25 @@ export function categoryOf(record: Pick<MemoryRecord, 'kind' | 'text' | 'subject
   return Number.isFinite(seen) && now.getTime() - seen > UNDATED_PLAN_DAYS * 86_400_000 ? 'event' : 'plan';
 }
 
+// Who someone in his life can be called, when no name is given.
+const RELATION = /\b(mum|mom|mother|dad|father|parents?|sisters?|brothers?|siblings?|girlfriend|boyfriend|partner|wife|husband|fianc[eé]e?|friends?|mates?|cat|dog|pets?|puppy|kitten|step-?(father|mother|dad|mum|mom)|aunt|uncle|cousins?|nan|nana|grandma|grandpa|grandmother|grandfather|boss|manager|colleagues?|co-?workers?|customers?|clients?|flatmates?|roommates?|neighbou?rs?|psychologist|doctor|therapist|teacher)\b/i;
+// Capitalised words that open a note or a clause without naming anyone.
+const NOT_A_NAME = new Set(['they', 'their', 'them', 'the', 'this', 'that', 'these', 'he', 'she', 'his', 'her', 'is', 'has', 'had', 'was', 'are', 'were', 'likes', 'loves', 'hates', 'prefers', 'wants', 'does', 'doesn', 'don', 'did', 'went', 'got', 'a', 'an', 'in', 'on', 'at', 'for', 'with', 'and', 'but', 'haru', 'also', 'currently', 'lives', 'live', 'works', 'plans', 'decided']);
+
+/**
+ * Whether a note names somebody other than the user — by name, or by who they
+ * are to him. A person record that does not is a note about him: "Tommy
+ * complained about build failing issues" came back from the sorter as a person,
+ * and people are shown on every turn (2026-09-17).
+ */
+export function namesSomeoneElse(text: string, userName = ''): boolean {
+  if (RELATION.test(text)) return true;
+  const user = userName.trim().toLowerCase();
+  return (text.match(/\b[A-Z][a-z]+(?:['’]s)?\b/g) ?? [])
+    .map(word => word.replace(/['’]s$/, '').toLowerCase())
+    .some(word => word.length >= 3 && word !== user && !NOT_A_NAME.has(word));
+}
+
 // -- sorting ------------------------------------------------------------------
 
 /** How many notes go to the model at once: enough to be worth the call, few
@@ -115,9 +134,11 @@ export const SORT_BATCH = 20;
 export type SortNote = { id: string; text: string; kind: MemoryKind; subject?: string; createdAt: string };
 export type Sorted = { category: Category; when?: string };
 
-export function sortPrompt(): string {
+export function sortPrompt(userName = ''): string {
+  const name = userName.trim();
   return [
     'You sort the notes Haru keeps about the user she lives with into exactly one category each.',
+    ...(name ? [`The user is ${name}: a note about ${name} is a note about them, never a person in their life.`] : []),
     '',
     ...CATEGORIES.map(category => `${category} — ${CATEGORY_MEANING[category]}.`),
     '',
