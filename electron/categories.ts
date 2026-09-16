@@ -29,14 +29,14 @@ export type Category = typeof CATEGORIES[number];
  */
 export const CATEGORY_MEANING: Record<Category, string> = {
   identity: 'a lasting fact about them or their own things: work and jobs, study, health, where and how they live, their business and how it runs, money, what they own or use, a habit that is part of who they are',
-  person: 'someone in their life, or a pet, and who that is to them — family, partner, friends, colleagues, customers they know by name',
+  person: 'someone in their life, or a pet, and who that is to them — family, partner, friends, colleagues, customers they know by name; not a passing detail about someone',
   preference: 'their own taste: what they like, dislike, love, hate, rate or would rather have — about anything except how Haru behaves',
   instruction: 'how they want Haru to treat them, talk to them or behave: a rule, a request, something they asked her to do for them regularly, or a permission or setting they gave her — how long she may talk, what she may bring up, when she may interrupt',
   plan: 'something still ahead of them: an appointment, a pickup, a deadline, a trip, something they intend, promised or decided to do and have not done yet',
   event: 'something that happened on a particular day: something they did, went to, bought, fixed, finished or decided, or that happened to them',
   ongoing: 'something they are in the middle of that will change or end: a project, a build, a show or book partway through, a situation still running',
   shared: 'something between them and Haru: a running joke, a moment the two of them had, a house rule of theirs, a promise or bet between them',
-  knowledge: 'something about the world, a product, a place or other people\'s things that they told Haru or corrected her on, not about themselves',
+  knowledge: 'something about the world, a product, a place or other people\'s things that they told Haru or corrected her on, not about themselves — never something Haru explained, looked up or claimed',
   passing: 'not worth keeping: a line in Haru\'s own voice, a to-do Haru wrote for herself, or her own life and opinions; Haru\'s judgement of them; a small action at the computer (opened or closed an app, changed an icon, took a screenshot, set an option); a passing mood or state; small talk; how often something comes up; a note about the conversation itself; several unrelated notes welded into one',
 };
 
