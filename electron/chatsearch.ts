@@ -160,8 +160,15 @@ export const SEARCH_LIMIT = 5;
 
 export type ChatHit = { exchange: Exchange; score: number; before?: Exchange; after?: Exchange };
 
-const DAY = /^\d{4}-\d{2}-\d{2}$/;
+/** A real calendar day: "2026-13-01" has the shape and would have thrown in shiftDay, failing the whole reply. */
+export function isDay(value: unknown): value is string {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const at = Date.parse(`${value}T00:00:00Z`);
+  return Number.isFinite(at) && new Date(at).toISOString().slice(0, 10) === value;
+}
 const shiftDay = (day: string, by: number) => new Date(Date.parse(`${day}T00:00:00Z`) + by * 86_400_000).toISOString().slice(0, 10);
+/** Words only — no vectors to go on — a name he uses often is still a find: "Emma" is in 28 of 1,187 exchanges. */
+const WORD_SHARE_WITHOUT_MEANING = 0.05;
 
 /**
  * The best few exchanges for a query, each with its neighbours.
@@ -173,12 +180,9 @@ const shiftDay = (day: string, by: number) => new Date(Date.parse(`${day}T00:00:
  * the model works the dates out itself and is known to land a day out.
  */
 export function searchChats(index: ChatIndex, input: { query: string; queryVector?: number[] | null; vectors: Map<string, number[]>; from?: string; to?: string; limit?: number }): ChatHit[] {
-  const from = input.from && DAY.test(input.from) ? shiftDay(input.from, -1) : '';
-  const to = input.to && DAY.test(input.to) ? shiftDay(input.to, 1) : '';
+  const from = isDay(input.from) ? shiftDay(input.from, -1) : '';
+  const to = isDay(input.to) ? shiftDay(input.to, 1) : '';
   const words = keywordScores(index, input.query);
-  const telling = Math.max(RARE_FLOOR, Math.round(index.exchanges.length * WORD_SHARE));
-  const specific = new Set(chatTerms(input.query).filter(term => (index.spread.get(term) ?? 0) <= telling));
-  const sharesSpecific = (at: number) => words[at] > 0 && mentionsAny(index, index.exchanges[at].id, specific) && (!near.has(at) || (near.get(at) ?? 0) >= WORD_FLOOR);
   const near = new Map<number, number>();
   const inRange: number[] = [];
   index.exchanges.forEach((exchange, at) => {
@@ -187,6 +191,12 @@ export function searchChats(index: ChatIndex, input: { query: string; queryVecto
     const vector = input.queryVector ? input.vectors.get(exchange.id) : undefined;
     if (vector && input.queryVector) near.set(at, cosine(vector, input.queryVector));
   });
+  // Inside a date range he named, any shared word will do — the days already
+  // narrowed it. Without vectors, a common name still counts.
+  const share = from || to ? 1 : near.size ? WORD_SHARE : WORD_SHARE_WITHOUT_MEANING;
+  const telling = Math.max(RARE_FLOOR, Math.round(index.exchanges.length * share));
+  const specific = new Set(chatTerms(input.query).filter(term => (index.spread.get(term) ?? 0) <= telling));
+  const sharesSpecific = (at: number) => words[at] > 0 && mentionsAny(index, index.exchanges[at].id, specific) && (!near.has(at) || (near.get(at) ?? 0) >= WORD_FLOOR);
   const fused = new Map<number, number>();
   const fuse = (ranked: number[]) => ranked.slice(0, 100).forEach((at, rank) => fused.set(at, (fused.get(at) ?? 0) + 1 / (60 + rank + 1)));
   fuse(inRange.filter(at => words[at] > 0).sort((a, b) => words[b] - words[a]));
@@ -201,8 +211,21 @@ export function searchChats(index: ChatIndex, input: { query: string; queryVecto
     const beside = (other: number) => !shown.has(other) && index.exchanges[other]?.day === exchange.day ? index.exchanges[other] : undefined;
     const before = beside(at - 1);
     const after = beside(at + 1);
-    [at - 1, at, at + 1].forEach(place => shown.add(place));
+    // Only what is actually on show: a neighbour refused for being another day's
+    // used to be marked shown anyway, and a strong find just across midnight was
+    // skipped for it (review, 2026-09-17).
+    shown.add(at);
+    if (before) shown.add(at - 1);
+    if (after) shown.add(at + 1);
     hits.push({ exchange, score, before, after });
+  }
+  // "What did we talk about on the 10th": a day or two named and nothing that
+  // matched the words — the day itself is the answer, a few exchanges across it.
+  const span = from && to ? Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000) : Infinity;
+  if (!hits.length && span <= 4 && inRange.length) {
+    const limit = input.limit ?? SEARCH_LIMIT;
+    const step = Math.max(1, Math.floor(inRange.length / limit));
+    for (let pick = 0; pick < inRange.length && hits.length < limit; pick += step) hits.push({ exchange: index.exchanges[inRange[pick]], score: 0 });
   }
   return hits;
 }

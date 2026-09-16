@@ -38,6 +38,7 @@ import { findItem, readsAsNotDone } from './agenda';
 import { localDateKey, resolveDate, zonedNow } from './dates';
 import { collectAll, collectDocker, collectGpu, collectProcesses, collectServices, collectSystem, diagnose, KNOWN_SERVICES, USER_SERVICES } from './system';
 import { retrieveContext } from './retrieveContext';
+import { isDay } from './chatsearch';
 import { KNOWLEDGE_CATEGORIES, type KnowledgeCategory, type KnowledgeStore } from './knowledge';
 import { localEmotion } from './emotion';
 import { readTone } from './tone';
@@ -368,7 +369,7 @@ export const CHATS_TOOL: ChatTool = {
  * LATER_TALK: a stray match costs one tool on the table, a miss costs her
  * making up what he said last week.
  */
-const PAST_TALK = /\b(?:remember|recall|forgot|forget|mention(?:ed)?|told you|i said|you said|we said|talked|spoke|conversation|earlier|before|ago|last (?:time|night|week|weekend|month|year)|yesterday|the other (?:day|night|week)|back (?:when|then)|that time|again)\b|\b(?:what|when|where|who|how|which|why)\b[^.?!]{0,40}\b(?:was|were|did|had|said|told|happened)\b/i;
+const PAST_TALK = /\b(?:remember|recall|forgot|forget|mention(?:ed)?|told you|i said|you said|we said|talked|spoke|conversation|earlier|before|ago|last (?:time|night|week|weekend|month|year)|yesterday|the other (?:day|night|week)|back (?:when|then)|that time|again|tell you|did (?:i|we|you)|last (?:mon|tues|wednes|thurs|fri|satur|sun)day)\b|\b(?:what|when|where|who|how|which|why)\b[^.?!]{0,40}\b(?:was|were|did|had|said|told|happened)\b/i;
 
 export function pastRelevant(message: string): boolean {
   return PAST_TALK.test(message ?? '');
@@ -1010,7 +1011,7 @@ export type ToolDeps = {
   /** Back to bed at her word, while she is up because they knocked (hersleep.ts); null when she is not. */
   goBackToSleep(input: { block: boolean }): { asleep: boolean; blocked: boolean } | null;
   /** Her old chats (chatsearch.ts): the finds, already dated and written out, or null when there is no archive to search. */
-  chats?: { search(input: { query: string; from?: string; to?: string }): Promise<{ found: number; text: string }> } | null;
+  chats?: { search(input: { query: string; from?: string; to?: string }): Promise<{ found: number; text: string; wordsOnly?: boolean }> } | null;
   /** Her own follow-ups (scheduler.ts), or null when there is nowhere to keep them. */
   booking?: { book(input: { why: string; date?: string; time?: string; inMinutes?: number }): { booked: true; when: string } | { booked: false; reason: string } } | null;
   /** Claude Code sessions for his phone (claudesession.ts), or null when switched off. */
@@ -1696,11 +1697,13 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
     if (!deps.chats) return JSON.stringify({ error: 'Your old chats cannot be searched right now. Say you cannot check — do not guess what was said.' });
     const query = typeof args.query === 'string' ? args.query.trim() : '';
     if (!query) return JSON.stringify({ error: 'query is required: the words you expect in what was said.' });
-    const day = (value: unknown) => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value.trim()) ? value.trim() : undefined;
+    const day = (value: unknown) => typeof value === 'string' && isDay(value.trim()) ? value.trim() : undefined;
     const result = await deps.chats.search({ query: query.slice(0, 200), from: day(args.from), to: day(args.to) });
+    // Words only (the embedder down, or still re-embedding): a miss is weaker evidence, and she is told so.
+    const wordsOnly = result.wordsOnly ? ' This search could only match exact words just now, so something said in other words may be missed.' : '';
     return JSON.stringify(result.found
-      ? { found: result.found, chats: result.text, note: 'Word for word from your chats with them, under the day each was said ("Them" is them, "You" is you). Answer from these in your own voice and say when it was. Only the one that is actually what they mean counts; none of it is necessarily still true.' }
-      : { found: 0, note: 'Nothing in the kept chats matches. Say plainly you cannot find it — never make up what was said. If it might have been worded differently, you may search once more with other words.' });
+      ? { found: result.found, chats: result.text, note: `Word for word from your chats with them, under the day each was said ("Them" is them, "You" is you). Answer from these in your own voice and say when it was. Only the one that is actually what they mean counts; none of it is necessarily still true.${wordsOnly}` }
+      : { found: 0, note: `Nothing in the kept chats matches. Say plainly you cannot find it — never make up what was said. If it might have been worded differently, you may search once more with other words.${wordsOnly}` });
   }
   if (name === 'look_up_knowledge') {
     const query = typeof args.query === 'string' ? args.query.trim() : '';

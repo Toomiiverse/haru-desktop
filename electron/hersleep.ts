@@ -336,7 +336,7 @@ export function parseDecidedTimes(line: string): { bedtime: number; wake: number
   // Asked for 24-hour times she has twice answered the military way, "2300 0800",
   // and fell back to a random night for it (2026-09-15). Read that only when it
   // is the whole answer, so a year or a count elsewhere in a sentence is not a time.
-  const military = /^\s*([01]\d|2[0-3])([0-5]\d)\D+([01]\d|2[0-3])([0-5]\d)\s*$/.exec(line ?? '');
+  const military = /^\s*([01]\d|2[0-3])([0-5]\d)\D+([01]\d|2[0-3])([0-5]\d)\s*[.!]?\s*$/.exec(line ?? '');
   if (found.length < 2 && military) found.splice(0, found.length, Number(military[1]) * 60 + Number(military[2]), Number(military[3]) * 60 + Number(military[4]));
   if (found.length < 2) return null;
   let [bed, wake] = found;

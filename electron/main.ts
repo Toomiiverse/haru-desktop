@@ -1608,7 +1608,9 @@ function interject(line: string, { aboutTheGame = false, source = 'other' as Asi
   // piped up with "7900X is already overkill for most of what you do. Spend the
   // money on Emma…" — her own reply from two hours before; echoesAside only
   // looks at her asides. Of the 23 kept asides it is the only one this catches.
-  const conversation = ((store.get('chat.messages') as { content?: string }[] | undefined) ?? []).slice(-14).map(message => message.content ?? '');
+  // Her own replies only: a phrase of his inside her line ("how was your day")
+  // is her asking back, not her repeating herself.
+  const conversation = ((store.get('chat.messages') as { role?: string; content?: string }[] | undefined) ?? []).slice(-14).filter(message => message.role === 'assistant').map(message => message.content ?? '');
   if (looksLikeAnEcho(line, conversation)) {
     console.log('[interject] dropped — it repeats something already said in the conversation');
     return false;
@@ -8022,20 +8024,33 @@ let everydayWordsCache: { index: ChatIndex; words: Set<string> } | null = null;
 function everydayWords(): Set<string> {
   const index = chatIndex(localDateKey(zonedNow(CHAT_TIMEZONE)));
   if (everydayWordsCache?.index !== index) {
-    const words = new Set<string>();
+    // Counted, not merely seen: she writes "david's death? cheap…" in lowercase
+    // now and then, and a single sighting took David and Lucy off her subjects.
+    // A word is everyday when she writes it lowercase at least twice, and twice
+    // as often as she capitalises it mid-sentence: "think" 72 to 0, "control"
+    // 6 to 3, but "lucy" 3 to 2 stays a name (review, 2026-09-17).
+    const lower = new Map<string, number>();
+    const upper = new Map<string, number>();
+    const add = (map: Map<string, number>, word: string) => map.set(word, (map.get(word) ?? 0) + 1);
     for (const exchange of index.exchanges) {
       for (const line of exchange.text.split('\n')) {
         if (!line.startsWith('You: ')) continue;
-        for (const word of line.slice(5).match(/[A-Za-z]+/g) ?? []) if (/^[a-z]/.test(word)) words.add(word);
+        for (const match of line.slice(5).matchAll(/[A-Za-z]+/g)) {
+          const word = match[0];
+          const before = line.slice(5, 5 + (match.index ?? 0)).trimEnd();
+          if (/^[a-z]/.test(word)) add(lower, word);
+          else if (/^[A-Z][a-z]/.test(word) && before && !/[.!?…]$/.test(before)) add(upper, word.toLowerCase());
+        }
       }
     }
+    const words = new Set([...lower].filter(([word, count]) => count >= 2 && count >= 2 * (upper.get(word) ?? 0)).map(([word]) => word));
     everydayWordsCache = { index, words };
   }
   return everydayWordsCache.words;
 }
 
 /** search_chats (tools.ts): words and meaning over every kept day, dated finds with their neighbours. */
-async function searchOldChats(input: { query: string; from?: string; to?: string }): Promise<{ found: number; text: string }> {
+async function searchOldChats(input: { query: string; from?: string; to?: string }): Promise<{ found: number; text: string; wordsOnly: boolean }> {
   const index = chatIndex(localDateKey(zonedNow(CHAT_TIMEZONE)));
   const model = getKnowledgeEmbedder()?.model;
   // Meaning only counts when the vectors were made the way this query is; words always do.
@@ -8043,7 +8058,7 @@ async function searchOldChats(input: { query: string; from?: string; to?: string
   const hits = searchChats(index, { query: input.query, queryVector, vectors: recallVectors, from: input.from, to: input.to });
   const range = input.from || input.to ? ` (${input.from ?? '…'} to ${input.to ?? '…'})` : '';
   console.log(`[chats] "${input.query.slice(0, 60)}"${range} -> ${hits.length ? hits.map(hit => `${hit.exchange.day} (${hit.score.toFixed(3)})`).join(', ') : 'nothing'}${queryVector ? '' : ' [words only]'}`);
-  return { found: hits.length, text: chatHitsNote(hits, new Intl.DateTimeFormat('en-AU', { weekday: 'long', timeZone: 'UTC' })) };
+  return { found: hits.length, text: chatHitsNote(hits, new Intl.DateTimeFormat('en-AU', { weekday: 'long', timeZone: 'UTC' })), wordsOnly: !queryVector };
 }
 
 /**

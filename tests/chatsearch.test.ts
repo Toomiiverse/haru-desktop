@@ -2,7 +2,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildChatIndex, chatHitsNote, chatTerms, embedFormat, embedText, keywordScores, mentionsAny, rareTerms, searchChats, SEARCH_FLOOR } from '../electron/chatsearch';
+import { buildChatIndex, chatHitsNote, chatTerms, embedFormat, embedText, isDay, keywordScores, mentionsAny, rareTerms, searchChats, SEARCH_FLOOR } from '../electron/chatsearch';
 import { exchangesFrom, pickRecalled, recallNote } from '../electron/recall';
 import { withRelativeDates } from '../electron/dates';
 import { chatTools, pastRelevant, runChatTool, type ToolAvailability, type ToolDeps } from '../electron/tools';
@@ -126,7 +126,7 @@ const NOTHING = {
 const offers = (latest: string, chats = true) => chatTools({ ...NOTHING, chats }, latest).some(tool => tool.function.name === 'search_chats');
 
 test('search_chats is on the table when he might be referring back, and only when it is switched on', () => {
-  for (const said of ["what was wrong with Logan's pc again?", 'do you remember the verge collection', 'when did I say I was going',
+  for (const said of ["what was wrong with Logan's pc again?", 'do you remember the verge collection', 'when did I say I was going', 'Did I tell you about the rego', 'what about last tuesday',
     'the thing I told you about last week', 'how much was that motherboard', 'where did we go for fathers day']) {
     assert.ok(pastRelevant(said), said);
     assert.ok(offers(said), said);
@@ -154,4 +154,32 @@ test('the handler searches, and says to admit it when nothing is found', async (
   assert.match(none.note, /cannot find it/);
   assert.match(JSON.parse(await runChatTool(call({}), '', deps)).error, /query is required/);
   assert.match(JSON.parse(await runChatTool(call({ query: 'x' }), '', { onWeb: () => false, chats: null } as unknown as ToolDeps)).error, /cannot be searched/);
+});
+
+test('a bad date is no date, a find across midnight is not lost, and a named day with no matching words is shown anyway', () => {
+  assert.ok(isDay('2026-09-10'));
+  assert.ok(!isDay('2026-13-01') && !isDay('2026-09-00') && !isDay('2026-02-30') && !isDay('yesterday'));
+  assert.doesNotThrow(() => searchChats(index, { query: 'BIOS', vectors: new Map(), from: '2026-13-01', to: '2026-09-00' }));
+  // The Ocarina exchange opens 09-11; the Thai one closes 09-10. Both match; neither hides the other.
+  const both = searchChats(index, { query: 'Thai Ocarina', vectors: new Map() });
+  assert.deepEqual(both.map(hit => hit.exchange.day).sort(), ['2026-09-10', '2026-09-11']);
+  const day = searchChats(index, { query: 'what did we talk about', vectors: new Map(), from: '2026-09-08', to: '2026-09-08' });
+  assert.ok(day.length >= 1 && day.every(hit => hit.exchange.day >= '2026-09-07' && hit.exchange.day <= '2026-09-09'), 'the day itself, a few exchanges across it');
+});
+
+test('without vectors a name he uses often still finds; with them it needs meaning too', () => {
+  const lines: Record<string, { role: string; content: string }[]> = {};
+  for (let d = 0; d < 60; d++) {
+    const day = `2026-07-${String(d % 30 + 1).padStart(2, '0')}`;
+    const key = d < 30 ? day : day.replace('-07-', '-06-');
+    lines[key] = [];
+    for (let n = 0; n < 10; n++) {
+      const withEmma = n === 0 && d % 5 === 0;
+      lines[key].push({ role: 'user', content: withEmma ? `Emma and I went to the markets number ${d}` : `ordinary message about work number ${d} ${n}` }, { role: 'assistant', content: 'Fine.' });
+    }
+  }
+  const big = buildChatIndex(exchangesFrom(lines, [], '2026-08-01', 365));
+  assert.equal(big.exchanges.length, 600);
+  assert.equal(big.spread.get('emma'), 12, '2% of exchanges: over the 1% a word needs when there is meaning to check it');
+  assert.equal(searchChats(big, { query: 'Emma', vectors: new Map() }).length, 5, 'words only: found');
 });
