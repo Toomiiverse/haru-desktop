@@ -21,6 +21,8 @@ export type SystemCollected = {
   processes: ProcessInfo[];
   docker: DockerStatus | null;
   services: ServiceStatus[];
+  /** What is computing on the GPU (collectGpuApps), when it was asked. */
+  gpuApps?: string[];
 };
 export type Diagnosis = { target: string; status: 'ok' | 'warning' | 'critical'; findings: string[] };
 
@@ -270,6 +272,12 @@ export async function collectCpu(): Promise<CpuInfo | null> {
 export async function collectGpu(): Promise<GpuInfo | null> {
   const out = await run('nvidia-smi', ['--query-gpu=name,memory.total,memory.used,utilization.gpu,temperature.gpu', '--format=csv,noheader,nounits']);
   return out.trim() ? parseNvidiaSmi(out) : null;
+}
+
+/** The processes computing on the GPU, by executable path — nvidia-smi's compute apps. */
+export async function collectGpuApps(): Promise<string[]> {
+  const out = await run('nvidia-smi', ['--query-compute-apps=process_name', '--format=csv,noheader']);
+  return out.split('\n').map(line => line.trim()).filter(Boolean);
 }
 
 export async function collectMemory(): Promise<MemoryInfo | null> {

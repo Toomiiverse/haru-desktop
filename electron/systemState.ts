@@ -11,6 +11,8 @@ export type SystemSample = {
   /** Container names that are not running, restarting, or unhealthy. */
   docker_problems: string[];
   docker_problem: boolean;
+  /** Everything computing on the GPU is one of her own model servers (ownGpuWork). Absent when not asked. */
+  gpu_own?: boolean;
   at: string;
 };
 
@@ -57,6 +59,17 @@ export type EventThresholds = {
 
 export type SystemEvent = { kind: string; message: string; at: string };
 
+/**
+ * Her own model servers: Ollama's llama-server (her brain and her eyes, on both
+ * cards since 2026-09-16), breeze-server (her voice) and the ASR server in the
+ * gpt-sovits Python env (her ears).
+ */
+const OWN_GPU_WORK = /(?:^|[\/\\])(?:llama-server|ollama[\w.-]*|breeze-server)(?:\.exe)?$|[\/\\]envs[\/\\]gpt-sovits[\/\\]/i;
+
+export function ownGpuWork(apps: string[]): boolean {
+  return apps.length > 0 && apps.every(app => OWN_GPU_WORK.test(app));
+}
+
 export function sampleFromCollectors(collected: SystemCollected, now: Date = new Date()): SystemSample {
   const disk = (collected.disk ?? []).find(mount => mount.mount === '/') ?? (collected.disk ?? [])[0];
   const gpu = collected.gpu?.[0];
@@ -78,6 +91,7 @@ export function sampleFromCollectors(collected: SystemCollected, now: Date = new
     network_status: collected.network?.status ?? 'unknown',
     docker_problems: dockerProblems,
     docker_problem: dockerProblems.length > 0,
+    ...(collected.gpuApps ? { gpu_own: ownGpuWork(collected.gpuApps) } : {}),
     at: now.toISOString(),
   };
 }
@@ -130,8 +144,12 @@ export function checkEvents(
     return sustainedSpan(previous, previousAt, pred) < seconds * 1000;
   };
 
+  // A GPU busy with her own thinking is not news. Since the 27B brain went onto
+  // both cards (2026-09-16) a page of manga or a long local call holds GPU 0
+  // above 90% for over a minute, and "Your GPU has been above 90% utilisation"
+  // reached his phone at 20:54 that night. Something else on the card still warns.
   if (thresholds.gpu_percent) {
-    if (newlySustained(sample => sample.gpu_percent >= (thresholds.gpu_percent?.value ?? 0), thresholds.gpu_percent.seconds ?? 0)) fire('gpu_percent', `Your GPU has been above ${thresholds.gpu_percent.value}% utilisation for the last ${thresholds.gpu_percent.seconds} seconds.`);
+    if (newlySustained(sample => sample.gpu_percent >= (thresholds.gpu_percent?.value ?? 0) && !sample.gpu_own, thresholds.gpu_percent.seconds ?? 0)) fire('gpu_percent', `Your GPU has been above ${thresholds.gpu_percent.value}% utilisation for the last ${thresholds.gpu_percent.seconds} seconds.`);
   }
 
   if (thresholds.ram_percent) {

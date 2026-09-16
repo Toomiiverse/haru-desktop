@@ -20,7 +20,7 @@ import {
   type SystemCollected,
   type Diagnosis,
 } from '../electron/system';
-import { sampleFromCollectors, checkEvents, carriedSamples, SAMPLES_CARRIED_MS, type SystemSample } from '../electron/systemState';
+import { sampleFromCollectors, checkEvents, carriedSamples, ownGpuWork, SAMPLES_CARRIED_MS, type SystemSample } from '../electron/systemState';
 
 // ---- parsers ---------------------------------------------------------------
 
@@ -189,6 +189,16 @@ test('a sustained GPU overload fires exactly once', () => {
   assert.equal(events.length, 1);
   assert.equal(events[0].kind, 'gpu_percent');
   assert.ok(/above 90%/.test(events[0].message));
+});
+
+test('a GPU busy with her own model servers does not fire; anything else on it still does', () => {
+  const apps = ['/usr/local/lib/ollama/llama-server', '/home/toomii/Breeze-TTS-2.cpp/build/breeze-server', '/home/toomii/miniconda3/envs/gpt-sovits/bin/python'];
+  assert.ok(ownGpuWork(apps));
+  assert.ok(!ownGpuWork([...apps, '/usr/bin/python3']), 'a job of his beside hers is not hers');
+  assert.ok(!ownGpuWork([]), 'nothing listed is not evidence');
+  const busy = (own: boolean) => [70, 40, 10].map(ago => ({ ...base, gpu_percent: 97, gpu_own: own, at: at(ago) }));
+  assert.equal(checkEvents(busy(true), { gpu_percent: { value: 90, seconds: 60 } }, new Date(), 0, {}).length, 0);
+  assert.equal(checkEvents(busy(false), { gpu_percent: { value: 90, seconds: 60 } }, new Date(), 0, {}).length, 1);
 });
 
 test('a single spike does not fire', () => {

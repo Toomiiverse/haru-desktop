@@ -144,7 +144,7 @@ import type { Embedder } from './embeddings';
 import { retrieveContext } from './retrieveContext';
 import type { VaultSyncReport } from './obsidian';
 import { diaryNotes, herNote, indexNote, memoriesNote, nightNotes, placesNote, standingNote, writeNotes } from './vault';
-import { collectAll, collectDocker, collectDockerLight, collectGpu, collectProcesses, collectServices, collectSystem, diagnose, KNOWN_SERVICES, USER_SERVICES, type Diagnosis } from './system';
+import { collectAll, collectDocker, collectDockerLight, collectGpu, collectGpuApps, collectProcesses, collectServices, collectSystem, diagnose, KNOWN_SERVICES, USER_SERVICES, type Diagnosis } from './system';
 import { carriedSamples, checkEvents, sampleFromCollectors, type EventThresholds, type SystemSample } from './systemState';
 
 type Bounds = { x: number; y: number; width: number; height: number };
@@ -4351,12 +4351,13 @@ async function sampleSystem() {
   systemCollecting = true;
   try {
     if (!readSystemConfig().enabled || !readSystemEvents().enabled) return;
-    const [light, gpu, docker] = await Promise.all([
+    const [light, gpu, docker, gpuApps] = await Promise.all([
       collectSystem(),
       collectGpu(),
       collectDockerLight(),
+      collectGpuApps(),
     ]);
-    const sample = sampleFromCollectors({ ...light, gpu, docker, processes: [], services: [] }, new Date());
+    const sample = sampleFromCollectors({ ...light, gpu, docker, gpuApps, processes: [], services: [] }, new Date());
     systemSamples.push(sample);
     if (systemSamples.length > 8) systemSamples = systemSamples.slice(-8);
     if (++systemSampleCount % SAMPLES_WRITTEN_EVERY === 0) store.set('system.samples', systemSamples);
