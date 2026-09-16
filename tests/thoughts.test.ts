@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  describeGap, emptyThoughtState, isRumination, keepThoughts, lastSpoken, mayAsk, mayInitiate, mindNote, normalizeThoughtState,
+  describeGap, emptyThoughtState, isRumination, keepThoughts, lastSpoken, mayAsk, mayInitiate, mindNote, normalizeThoughtState, stillCurrent,
   noteAsked, pendingTrigger, readThoughts, scoreThought, spend, spokenOn, thinkingInput, thoughtPrompt, THOUGHT_LIMITS, withoutClock,
   type Thought, type TriggerInput,
 } from '../electron/thoughts';
@@ -80,6 +80,12 @@ test('what she is handed is in words, with empty sections left out', () => {
   assert.equal(withoutClock('10:19 PM, I’m turning in at 23:30.'), 'I’m turning in at 23:30.');
   assert.equal(withoutClock('8:37 PM — Nearest Coles'), 'Nearest Coles');
   assert.equal(withoutClock('Twenty past nine, fine.'), 'Twenty past nine, fine.');
+  // Real lines the first pattern cut the hour off (review, 2026-09-17).
+  assert.equal(withoutClock('10:16 PM. I’m turning in'), 'I’m turning in');
+  assert.equal(withoutClock('11:30 was an hour ago'), '11:30 was an hour ago', 'a time inside the sentence is the sentence');
+  assert.equal(withoutClock('7:45am you up?'), '7:45am you up?');
+  assert.equal(withoutClock('9pm, done'), 'done');
+  assert.equal(withoutClock('2. the second point'), '2. the second point', 'a numbered line is not a clock');
   assert.equal(text.includes('Already on your mind'), false);
   assert.equal(text.includes('not answered'), false);
 });
@@ -141,4 +147,19 @@ test('the note that turns a thought into a message, and the file read defensivel
   assert.deepEqual(state.asked, { day: '', count: 0 });
   assert.equal(state.lastAskedAt, 0);
   assert.deepEqual(normalizeThoughtState(null), emptyThoughtState());
+});
+
+test('a silence she slept through is not news when she wakes, and a thought about something over drops out', () => {
+  const HOUR_ = 3_600_000, MIN_ = 60_000;
+  const wokeAt = Date.parse('2026-09-18T00:00:00Z');
+  const now = wokeAt + 27 * MIN_;
+  const base = { now, ownLife: [], agenda: [], seen: [`wake:${wokeAt}`] };
+  assert.equal(pendingTrigger({ ...base, lastMessageAt: wokeAt - 9 * HOUR_ + 27 * MIN_, wokeAt }), null, 'he wrote at 23:00, eight hours passed at 07:27 while she slept');
+  assert.equal(pendingTrigger({ ...base, lastMessageAt: now - 3 * HOUR_ - 5 * MIN_, wokeAt: now - 5 * HOUR_ })?.kind, 'silence', 'a silence that began after she woke still counts');
+  const at = Date.parse('2026-09-18T01:00:00Z');
+  assert.ok(!stillCurrent({ at, trigger: 'silence', why: 'he has not written for 3 hours' }, at + HOUR_, at + 10 * MIN_), 'he has written since');
+  assert.ok(stillCurrent({ at, trigger: 'silence', why: 'he has not written for 3 hours' }, at + HOUR_, at - HOUR_));
+  assert.ok(!stillCurrent({ at, trigger: 'agenda', why: '"Dentist" is coming up in about 20 minutes' }, at + 2 * HOUR_), 'the appointment is long over');
+  assert.ok(stillCurrent({ at, trigger: 'agenda', why: '"Dentist" is coming up in about 20 minutes' }, at + 30 * MIN_));
+  assert.ok(stillCurrent({ at, trigger: 'wake', why: 'you have just woken up' }, at + 5 * HOUR_));
 });

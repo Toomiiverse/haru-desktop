@@ -164,7 +164,11 @@ export function pendingTrigger(input: TriggerInput, limits = THOUGHT_LIMITS): Tr
     const quiet = now - input.lastMessageAt;
     const crossed = limits.silenceMilestonesMs.filter(ms => quiet >= ms && quiet - ms <= limits.silenceWindowMs);
     const longest = crossed.at(-1);
-    if (longest !== undefined) {
+    // A milestone passed while she slept is not news when she wakes: he wrote at
+    // 23:00, she woke at 08:00, and the wake thought was followed at 08:27 by
+    // "he has not written for 9 hours" (review, 2026-09-17).
+    const sleptThrough = longest !== undefined && input.wokeAt !== undefined && input.lastMessageAt < input.wokeAt && input.lastMessageAt + longest <= input.wokeAt;
+    if (longest !== undefined && !sleptThrough) {
       const key = `silence:${input.lastMessageAt}:${longest}`;
       const later = limits.silenceMilestonesMs.filter(ms => ms > longest).some(ms => seen.has(`silence:${input.lastMessageAt}:${ms}`));
       if (!seen.has(key) && !later) return { kind: 'silence', key, detail: `he has not written for ${describeGap(quiet)}` };
@@ -246,7 +250,11 @@ export function thinkingInput(state: ThinkingState): string {
  * names for the 9B, here with a comma instead of a dash.
  */
 export function withoutClock(text: string): string {
-  return String(text ?? '').replace(/^\s*\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)?\s*[,\u2014\u2013:-]\s*/i, '').trim();
+  // A clock is minutes or a meridiem, whole, then a separator and a space. The
+  // first version let the hour alone stand for the clock with its colon as the
+  // separator, so "10:16 PM. I'm turning in" came out "16 PM. I'm turning in"
+  // and "11:30 was an hour ago" lost its "11:" (review, 2026-09-17).
+  return String(text ?? '').replace(/^\s*\d{1,2}(?:(?::\d{2})(?![\d:])\s*(?:am|pm|a\.m\.|p\.m\.)?|\s*(?:am|pm|a\.m\.|p\.m\.))\s*[,.\u2014\u2013-]\s+/i, '').trim();
 }
 
 export type ThoughtDraft = { thought: string; say: string; relevance: number; urgency: number; novelty: number };
@@ -371,12 +379,26 @@ export function keepThoughts(state: ThoughtState, add: Thought[], now: number, l
 }
 
 /**
- * What rides in front of her replies: the freshest couple of thoughts she has
- * not said, from the last twelve hours, marked as hers and as not to be recited.
+ * Whether a thought is still about something current. One about his silence is
+ * over once he has written; one about something on his list is over half an
+ * hour after it was due — "His dentist is in twenty minutes" nine hours later
+ * is a thought about nothing (review, 2026-09-17).
  */
-export function mindNote(state: ThoughtState, now: number, count = 2): string {
+export function stillCurrent(thought: Pick<Thought, 'at' | 'trigger' | 'why'>, now: number, lastMessageAt?: number): boolean {
+  if (thought.trigger === 'silence' && lastMessageAt !== undefined && lastMessageAt > thought.at) return false;
+  const due = thought.trigger === 'agenda' ? /in about (\d+) minutes?/.exec(thought.why) : null;
+  if (due && now > thought.at + (Number(due[1]) + 30) * MIN) return false;
+  return true;
+}
+
+/**
+ * What rides in front of her replies: the freshest couple of thoughts she has
+ * not said, from the last twelve hours and still about something current,
+ * marked as hers and as not to be recited.
+ */
+export function mindNote(state: ThoughtState, now: number, count = 2, lastMessageAt?: number): string {
   const fresh = state.thoughts
-    .filter(t => t.decision !== 'rumination' && t.decision !== 'said' && now - t.at <= 12 * HOUR && t.score >= 2.5)
+    .filter(t => t.decision !== 'rumination' && t.decision !== 'said' && now - t.at <= 12 * HOUR && t.score >= 2.5 && stillCurrent(t, now, lastMessageAt))
     .sort((a, b) => b.score - a.score || b.at - a.at)
     .slice(0, count)
     .sort((a, b) => a.at - b.at);

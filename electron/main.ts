@@ -7152,7 +7152,7 @@ const promptState = {
     lore: loreNote(lore.cards),
     examples: examplesNote(todaysExamples()),
     booked: bookedNote(scheduler.list(), Date.now(), CHAT_TIMEZONE),
-    onHerMind: mindNote(store.getThoughts(), Date.now()),
+    onHerMind: mindNote(store.getThoughts(), Date.now(), 2, Number.isFinite(Date.parse(getMood().lastMessageAt ?? '')) ? Date.parse(getMood().lastMessageAt!) : undefined),
     // Her list is left out when the subject is her — see PromptState.aboutHer.
     aboutHer: Boolean(hers),
     movedJustNow,
@@ -8424,7 +8424,9 @@ function thinkingState(trigger: Trigger, now: number, lastMessageAt: number | un
 async function thoughtTick(): Promise<void> {
   if (thinkingNow) return;
   const settings = thoughtsConfig();
-  if (!settings.enabled || herAsleepNow()) return;
+  // Knocked awake is not woken: the knock moves her wake time, and the wake
+  // trigger fired at 02:50 and again at 08:02 (review, 2026-09-17).
+  if (!settings.enabled || herAsleepNow() || herKnockedAwakeNow()) return;
   const brain = nudgeBrain();
   if (!brain) return;
   const now = Date.now();
@@ -8445,15 +8447,20 @@ async function thoughtTick(): Promise<void> {
   // A trigger held back by the spacing is still there on the next tick.
   if (!trigger || !mayAsk(state, now, today)) return;
   thinkingNow = true;
-  state = noteAsked({ ...state, seen: spend(state.seen, trigger) }, now, today);
-  store.setThoughts(state);
   try {
+    // Inside the try, like the call: a write that throws, or a brain that never
+    // answers, used to leave thinkingNow set and the loop stopped until a restart.
+    state = noteAsked({ ...state, seen: spend(state.seen, trigger) }, now, today);
+    store.setThoughts(state);
     const character = getActiveCharacter();
-    const reply = await ollamaPost(
-      [{ role: 'system', content: `${character.identity}\n\n${THINKING_RULES}` }, { role: 'user', content: thinkingInput(thinkingState(trigger, now, lastMessageAt, state)) }],
-      brain,
-      { tools: false, temperature: 0.8, format: 'json', maxTokens: 500 },
-    );
+    const reply = await Promise.race([
+      ollamaPost(
+        [{ role: 'system', content: `${character.identity}\n\n${THINKING_RULES}` }, { role: 'user', content: thinkingInput(thinkingState(trigger, now, lastMessageAt, state)) }],
+        brain,
+        { tools: false, temperature: 0.8, format: 'json', maxTokens: 500 },
+      ),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('no answer in 90s')), 90_000)),
+    ]);
     const drafts = readThoughts(reply.content ?? '').sort((a, b) => scoreThought(b) - scoreThought(a));
     if (!drafts.length) {
       console.log(`[thought] ${trigger.kind} (${trigger.detail}): nothing on her mind`);
