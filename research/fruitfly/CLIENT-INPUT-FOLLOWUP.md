@@ -57,3 +57,25 @@ better nudges or more natural behavior still require a later live preference
 comparison; this deployment does not establish them.
 
 Operational details and rollback: [attention experiment](../../docs/ATTENTION-EXPERIMENT.md).
+
+## Deployment verified
+
+Commit `a19e41b` was pushed and transferred to `haruserver`. Three overlapping
+sections were adapted to its newer code (HEAD `2eba05b`), preserving the server's
+other changes. Its full build and **1,555 tests passed**. At 23:03:28 Perth,
+a fresh sample included the new fields; the service was active, HTTP returned
+200, and its automatic restart counter was zero.
+
+The saved post-deployment snapshot contains 4,058 samples from complete sessions.
+All original decisions replayed without action or numeric mismatches. Five
+instrumented samples replayed the additional state; all five had **unknown**
+browser input, so this verifies startup and logging, not live client coverage or
+the desirability of any proposal. The known-input path is covered by the
+automated browser, authenticated HTTP and policy checks above.
+
+Results: [replay](client-input-deployment-replay.json),
+[coverage](client-input-deployment-summary.json).
+Backup: `/home/toomii/.local/state/haru-deployments/web-input-a19e41b-4`.
+Raw snapshot: `/home/toomii/.local/state/haru-research/web-input-a19e41b`.
+
+**Reload an already-open Haru browser page once** to load the input reporter.
