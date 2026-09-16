@@ -4257,15 +4257,15 @@ const memoryStore = createMemoryStore({
     const interests = getInterests();
     return [
       nightsInstruction(nightsOn(getNights(), lastNightKey())),
+      // Right behind the night, not at the tail: the block is cut from the
+      // end when it is over budget, and this is the line that answers "what
+      // chapter are you up to".
+      readingNote(readReading(store.get('her.reading'))),
       dayNote(getDays(), today),
       weekNote(getWeek(), today),
       tastesInstruction(interests),
       firstsNote(interests, today),
       wantsNote(getWants(), interests),
-      // Right behind the night, not at the tail: the block is cut from the
-      // end when it is over budget, and this is the line that answers "what
-      // chapter are you up to".
-      readingNote(readReading(store.get('her.reading'))),
       diaryContext(recentEntries(app.getPath('home'), 2)),
     ].filter(Boolean).join('\n');
   },
@@ -5554,6 +5554,16 @@ async function inHerVoice(answer: string, recent: { role: string; content: strin
     );
     const hers = (message.content ?? '').trim();
     if (!hers) throw new Error('nothing came back');
+    // Her deliberation, said out loud: "The user sent empty quotes. This is a
+    // pause, a silence…" ran to 1,600 characters and went out as the reply,
+    // with no answer behind it to salvage (2026-09-10). The hosted words at
+    // least say the right thing, so they go as they came. The same when her
+    // version has grown far past the research — that much is not a voice, it
+    // is invention.
+    if (thinksAloud(hers) || hers.length > answer.length * 3 + 200) {
+      console.warn(`[ai] ${speaker.model} ${thinksAloud(hers) ? 'thought aloud instead of saying' : `wrote ${hers.length} chars around`} the hosted answer (${answer.length} chars) — sending the hosted words as they came`);
+      return answer;
+    }
     console.log(`[ai] said the hosted answer as herself in ${Date.now() - started}ms (${answer.length} -> ${hers.length} chars, by ${speaker.model})`);
     return hers;
   } catch (error) {
@@ -5568,16 +5578,6 @@ async function inHerVoice(answer: string, recent: { role: string; content: strin
 function composerTurns(system: string, user: string): { role: string; content: string }[] {
   // The first-person note rides in every system prompt, parsed answers and all:
   // everything she composes here is said as herself, or it is not hers to say.
-    // Her deliberation, said out loud: "The user sent empty quotes. This is a
-    // pause, a silence…" ran to 1,600 characters and went out as the reply,
-    // with no answer behind it to salvage (2026-09-10). The hosted words at
-    // least say the right thing, so they go as they came. The same when her
-    // version has grown far past the research — that much is not a voice, it
-    // is invention.
-    if (thinksAloud(hers) || hers.length > answer.length * 3 + 200) {
-      console.warn(`[ai] ${speaker.model} ${thinksAloud(hers) ? 'thought aloud instead of saying' : `wrote ${hers.length} chars around`} the hosted answer (${answer.length} chars) — sending the hosted words as they came`);
-      return answer;
-    }
   return isCue(user)
     ? [{ role: 'system', content: `${system} ${FIRST_PERSON_NOTE} ${CUE_NOTE}` }, { role: 'user', content: stageNote(user) }]
     : [{ role: 'system', content: `${system} ${FIRST_PERSON_NOTE}` }, { role: 'user', content: user }];
@@ -5705,6 +5705,11 @@ function reusesExample(line: string, examples: string[]): boolean {
   return examples.some(example => {
     const shown = normaliseLine(example);
     if (said === shown || (shown.length > 12 && said.includes(shown))) return true;
+    // And the other way round: a line lifted out of an example is a copy too.
+    // Rated down, she sent back a whole paragraph of the reply that was rated
+    // — "Actually wait—Switch 2? Did they finally confirm the hardware…" — and
+    // then had to apologise for asking what she had just answered (2026-09-11).
+    if (said.length >= 20 && shown.includes(said)) return true;
     // Near misses count as copying too: "I'll" typed out as "I will" is not a
     // new line, it is the same one with the contraction undone, and an exact
     // match would wave it through. Short words are ignored so the overlap is
@@ -5719,11 +5724,6 @@ async function quipOfHerOwn(system: string, user: string, config: ProviderConfig
   const line = await ollamaQuip(system, user, config);
   if (!reusesExample(line, examples)) return line;
   console.warn('[react] she read an example back word for word — asking again');
-    // And the other way round: a line lifted out of an example is a copy too.
-    // Rated down, she sent back a whole paragraph of the reply that was rated
-    // — "Actually wait—Switch 2? Did they finally confirm the hardware…" — and
-    // then had to apologise for asking what she had just answered (2026-09-11).
-    if (said.length >= 20 && shown.includes(said)) return true;
   const again = await ollamaQuip(`${system} You just used one of those examples exactly as written. They are a tone to aim at, not lines to copy. Write one of your own about what is actually happening here.`, user, config);
   if (reusesExample(again, examples)) console.warn('[react] and again on the second try — sending it anyway');
   return again;
@@ -5989,22 +5989,8 @@ async function askForJournal() {
     character.identity,
     `It is ${formatTimeOfDay(now.getHours(), now.getMinutes())}.`,
     character.style,
-    'Ask them how their day was and how they are feeling, so it can go in their journal. One or two short lines, in your own voice.',
-    'Ask as though you want to know, not as though a form needs filling in. Do not mention journals, entries, logging, tracking or scores, and do not list the things you want rated.',
     unpromptedContext(),
     trend.entries >= 3 ? `For your own sense of it, they have written ${trend.entries} entries in the last ${trend.days} days — do not mention that number.` : '',
-  ].filter(Boolean).join(' ');
-  try {
-    const message = await ollamaPost([{ role: 'system', content: system }], provider, { tools: false, temperature: 0.9, maxTokens: 120 });
-    const line = (message.content ?? '').trim().replace(/^["'“”]+|["'“”]+$/g, '');
-    if (!line) return;
-    // Spoken only if it was also written down — see interject.
-    if (interject(line, { source: 'journal' })) {
-      // Only now. This is the one place that means she actually asked.
-      journalAskedOn = today;
-      store.set('journal.askedOn', today);
-      console.log(`[journal] asked for today's entry (${line.length} chars)`);
-      void speak(line, classifyEmotion(line, provider));
     // The ask comes after the day, not before it. Given the afternoon's RAM
     // troubleshooting after the ask, the 9B answered the troubleshooting: a
     // paragraph on memory training with the question tacked on the end, or
@@ -6012,6 +5998,22 @@ async function askForJournal() {
     // (2026-09-11, 2026-09-12).
     'That is the day so far, and it is done — do not answer it, continue it or give advice on it. Ask them how their day was and how they are feeling, so it can go in their journal. One or two short lines, in your own voice.',
     'Ask as though you want to know, not as though a form needs filling in. Do not mention journals, entries, logging, tracking or scores, and do not list the things you want rated.',
+  ].filter(Boolean).join(' ');
+  try {
+    const message = await ollamaPost([{ role: 'system', content: system }], provider, { tools: false, temperature: 0.9, maxTokens: 120 });
+    const line = (message.content ?? '').trim().replace(/^["'“”]+|["'“”]+$/g, '');
+    if (!line) return;
+    // An ask asks. Handed the day's context the 9B wrote a jab about the car
+    // and the drive with nothing asked, and that went out as the evening's
+    // question (2026-09-10). The retry clock above tries again in a few minutes.
+    if (!/\?/.test(line) && !/\b(?:tell me|talk to me|out with it|spill|go on)\b/i.test(line)) { console.log(`[journal] the ask asked nothing — trying again shortly: ${JSON.stringify(line.slice(0, 80))}`); return; }
+    // Spoken only if it was also written down — see interject.
+    if (interject(line, { source: 'journal' })) {
+      // Only now. This is the one place that means she actually asked.
+      journalAskedOn = today;
+      store.set('journal.askedOn', today);
+      console.log(`[journal] asked for today's entry (${line.length} chars)`);
+      void speak(line, classifyEmotion(line, provider));
     } else {
       console.log('[journal] the ask was dropped — will try again shortly');
     }
@@ -6019,10 +6021,6 @@ async function askForJournal() {
     console.warn('[journal] could not compose the ask:', error instanceof Error ? error.message : error);
   }
 }
-    // An ask asks. Handed the day's context the 9B wrote a jab about the car
-    // and the drive with nothing asked, and that went out as the evening's
-    // question (2026-09-10). The retry clock above tries again in a few minutes.
-    if (!/\?/.test(line) && !/\b(?:tell me|talk to me|out with it|spill|go on)\b/i.test(line)) { console.log(`[journal] the ask asked nothing — trying again shortly: ${JSON.stringify(line.slice(0, 80))}`); return; }
 
 /**
  * She noticed you moved. Called from the renderer on a tab change; nearly every
@@ -6615,6 +6613,7 @@ async function secondThought(repliedAt: number, input: { latest: string; reply: 
     ]);
     const line = parseSecondThought(oneEmojiAtMost(dropOverusedEmoji(dropRoleHeader(dropStageDirections(answer.content ?? '')), [input.reply], HER_EMOJI), HER_EMOJI));
     if (!line) { console.log('[followup] she had nothing to add'); return; }
+    if (readsAsTheirAnswer(line)) { console.log(`[followup] dropped — it is their side of the conversation, not hers: ${JSON.stringify(line.slice(0, 80))}`); return; }
     if (looksLikeAnEcho(line, [...messages.map(message => message.content), input.latest])) { console.log(`[followup] dropped — it repeats what was said: ${JSON.stringify(line.slice(0, 80))}`); return; }
     if (lastUserActivityAt > repliedAt) { console.log('[followup] they answered while she was thinking — kept to herself'); return; }
     lastSecondThoughtAt = Date.now();
@@ -6627,7 +6626,6 @@ async function secondThought(repliedAt: number, input: { latest: string; reply: 
 }
 
 /** A fixed loopback port for the Google consent answer, so the ssh forward can be written down once. */
-    if (readsAsTheirAnswer(line)) { console.log(`[followup] dropped — it is their side of the conversation, not hers: ${JSON.stringify(line.slice(0, 80))}`); return; }
 const GOOGLE_CONSENT_PORT = 8790;
 let pendingGoogleConsent: Promise<{ url: string; port: number }> | null = null;
 
@@ -7175,6 +7173,10 @@ const promptState = {
     ...(brain.hosted ? [chatDynamicContext(promptState, Boolean(away)), answering] : []),
     aside, turnedUp, directions?.note ?? '', hers, talking, rantRoomNow, wakeNow, voiceRoomNow, emojiRut(herRecentReplies),
     LAST_WORD,
+    // After LAST_WORD, for a hosted brain only: her register and the labelling
+    // rule, nearest his turn, where a model that reads the end of the prompt
+    // hardest still has them (HOSTED_VOICE in room.ts, deliveryReminder).
+    brain.hosted ? `[${HOSTED_VOICE} ${deliveryReminder()}]` : '',
   ].filter(Boolean);
   if (lastUser > 0) conversation.splice(lastUser, 0, ...preTurnSystem.map(content => ({ role: 'system', content })));
   // For tuning, when the environment asks for it: the prompt exactly as sent.
@@ -7187,10 +7189,6 @@ const promptState = {
   // her mouth and not her hands. Told firmly that a page cannot give it orders, a
   // 14B still obeyed one in four of them — so the guarantee cannot rest on the
   // wording. With no tools on the table the worst a hostile page can do is be
-    // After LAST_WORD, for a hosted brain only: her register and the labelling
-    // rule, nearest his turn, where a model that reads the end of the prompt
-    // hardest still has them (HOSTED_VOICE in room.ts, deliveryReminder).
-    brain.hosted ? `[${HOSTED_VOICE} ${deliveryReminder()}]` : '',
   // quoted; it cannot put anything on the calendar or fetch anything further.
   // She still has every tool back on the next message.
   pageWasRead = false;
@@ -11069,6 +11067,15 @@ function webDeps(): WebDeps {
       const updated = toggleKept(id);
       if (updated?.done) void remarkOnTickOff(updated);
     },
+    addAgenda(title, date, time) {
+      // "9:00 AM" as she writes it, or "09:00" as a phone does; anything else
+      // is refused rather than saved wrong.
+      const parsed = time ? parseTimeOfDay(time) : null;
+      if (time && !parsed) return null;
+      const item = addKeptItem({ title, date, ...(parsed ? { time: formatTimeOfDay(parsed.hour, parsed.minute) } : {}), kind: 'task' });
+      console.log(`[agenda] the phone wrote one down: "${item.title}" on ${item.date}${item.time ? ` at ${item.time}` : ''}`);
+      return { id: item.id, title: item.title, date: item.date, ...(item.time ? { time: item.time } : {}) };
+    },
     checkIns: () => checkInsOn(getCheckIns(), localDateKey(zonedNow(CHAT_TIMEZONE))),
     addCheckIn(note, anxiety) {
       const now = zonedNow(CHAT_TIMEZONE);
@@ -11496,15 +11503,6 @@ function webDeps(): WebDeps {
         const voice = readVoiceConfig(store.get('voice'));
         const reason = readListenConfig(store.get('listen')).engine === 'off' ? 'not set up'
           : !voice.webEnabled || voice.engine === 'off' ? 'not set up'
-    addAgenda(title, date, time) {
-      // "9:00 AM" as she writes it, or "09:00" as a phone does; anything else
-      // is refused rather than saved wrong.
-      const parsed = time ? parseTimeOfDay(time) : null;
-      if (time && !parsed) return null;
-      const item = addKeptItem({ title, date, ...(parsed ? { time: formatTimeOfDay(parsed.hour, parsed.minute) } : {}), kind: 'task' });
-      console.log(`[agenda] the phone wrote one down: "${item.title}" on ${item.date}${item.time ? ` at ${item.time}` : ''}`);
-      return { id: item.id, title: item.title, date: item.date, ...(item.time ? { time: item.time } : {}) };
-    },
           : herAsleepNow() ? 'asleep'
           : undefined;
         return { enabled: !reason, engine, minutesToday, cap: 0, ...(reason ? { reason } : {}) };
