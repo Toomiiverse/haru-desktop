@@ -1700,6 +1700,19 @@ const LOCAL_MODELS = 'http://localhost:11434';
  * moment it is not. For anyone whose chat model is local — everyone, until now —
  * this changes nothing.
  */
+/**
+ * How long a look holds the eyes. A vision model with its own Ollama may let
+ * go after a while; when the eyes are her brain — the same model at the same
+ * address as ai.config, since 2026-09-16 — a short hold overrides the brain's
+ * keep-forever, and after a manga read or a game scene the next thing she said
+ * paid a twenty-second cold load of the 27B.
+ */
+function eyesHold(vision: VisionConfig, wanted: string): string | number {
+  const brain = store.get('ai.config') as ProviderConfig | undefined;
+  if (!brain?.model || vision.model !== brain.model) return wanted;
+  return trimEndpoint(visionEndpoint(brain, vision)) === trimEndpoint(brain.endpoint ?? '') ? OLLAMA_KEEP_ALIVE : wanted;
+}
+
 function visionEndpoint(provider: ProviderConfig | undefined, vision?: VisionConfig): string {
   // Her own address first, when she has been given one — a second Ollama on
   // another card, say. Held to the same rule as the chat model below it: a
@@ -1843,7 +1856,7 @@ async function glanceAtScreen() {
     // question about the fight is answered from the screen. See sceneAsk.
     const sighting = await look(encoded, vision, visionEndpoint(provider, vision), modelHeaders(visionEndpoint(provider, vision)), net.fetch, {
       ask: sceneAsk(title),
-      keepAlive: '30m',
+      keepAlive: eyesHold(vision, '30m'),
       numPredict: 160,
     });
     const scene = sighting.description;
@@ -9865,7 +9878,7 @@ async function readSomeManga(config: ProviderConfig) {
         if (!bytes) continue;
         // Held between pages: a cold start costs more than the page does.
         const sighting = await look(bytes.toString('base64'), vision, endpoint, modelHeaders(endpoint), net.fetch,
-          { ask: PAGE_PROMPT, keepAlive: '10m', timeoutMs: 180_000 });
+          { ask: PAGE_PROMPT, keepAlive: eyesHold(vision, '10m'), timeoutMs: 180_000 });
         const text = sighting.description.trim();
         if (text) read.push(`PAGE ${page + 1}\n${text}`);
       } catch (error) {

@@ -85,8 +85,8 @@ export type LookOptions = {
   ask?: string;
   /** Hotter than a description wants, for a call that has to say something. */
   temperature?: number;
-  /** How long Ollama holds the model. The default drops it after five minutes. */
-  keepAlive?: string;
+  /** How long Ollama holds the model — '10m', or -1 for good. The default drops it after five minutes. */
+  keepAlive?: string | number;
   /** Room for the image plus the answer. Raise for very large screens. */
   numCtx?: number;
   /** How long this look may take. The default is sized for a background pass; a look somebody is waiting on should say less. */
