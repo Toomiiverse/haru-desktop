@@ -199,6 +199,8 @@ export type PromptState = {
   linked?: string;
   /** What she has booked herself to come back to — see scheduler.ts. Background, so she neither books twice nor says it early. */
   booked?: string;
+  /** The freshest of her own unsaid thoughts — see thoughts.ts. Hers, private, not to be recited. */
+  onHerMind?: string;
   /**
    * They are asking about her, not about themselves (askingAboutHer).
    *
@@ -292,6 +294,7 @@ function systemBlocks(state: PromptState, away = false): SystemBlock[] {
     { stable: false, text: state.recalled ?? '' },
     { stable: false, text: state.linked ?? '' },
     { stable: false, text: state.booked ?? '' },
+    { stable: false, text: state.onHerMind ?? '' },
     // Query-selected memory, rendered per message (profileSummary in main.ts):
     // the human block shows what is relevant to this turn, so this is the
     // biggest of the dynamic blocks, and it has no business in the cached head.

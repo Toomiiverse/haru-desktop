@@ -17,7 +17,7 @@ import { addAside, markReached, readAsides, markAsked, openAsk, answerAsk, asked
 const EVERY_SOURCE: Record<AsideSource, true> = {
   screen: true, screenshot: true, activity: true, fullscreen: true, reminder: true,
   idle: true, journal: true, page: true, poke: true, kept: true, system: true,
-  hanging: true, weather: true, upcoming: true, followup: true, goodnight: true, other: true, booked: true,
+  hanging: true, weather: true, upcoming: true, followup: true, goodnight: true, other: true, booked: true, thought: true,
 };
 
 const sources = Object.keys(EVERY_SOURCE) as AsideSource[];

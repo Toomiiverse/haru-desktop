@@ -3,7 +3,8 @@
 // for structured memory, archive.json for the day-by-day transcripts,
 // memories.json for what she actually remembers, activity.json for the day at
 // the desk, graph.json for who is who in his life (factgraph.ts), schedule.json
-// for what is to be done later (scheduler.ts).
+// for what is to be done later (scheduler.ts), thoughts.json for what is on her
+// mind (thoughts.ts).
 //
 // Four files rather than one, and the split is not filing tidiness.
 // electron-store rewrites the whole of config.json on every set, and the life
@@ -46,6 +47,7 @@ import { loadArchive, normalizeArchive, saveArchive, type Archive } from './arch
 import { normalizeActivityLog, type ActivityLog } from './activitylog';
 import { normalizeGraph, type FactGraph } from './factgraph';
 import { normalizeSchedule, type ScheduleFile } from './scheduler';
+import { normalizeThoughtState, type ThoughtState } from './thoughts';
 import { mergeBlockDefaults, type MemoryBlock } from './blocks';
 import { migrateMemories, type ForgettingEntry, type MemoryRecord, type MonthNote, type SessionSummary } from './memory';
 
@@ -185,6 +187,8 @@ export type HaruStoreOptions = {
   graphFile?: string;
   /** Where schedule.json lives — jobs for later and their runs (scheduler.ts). Beside config.json too. */
   scheduleFile?: string;
+  /** Where thoughts.json lives — her thoughts between messages (thoughts.ts). Beside config.json too. */
+  thoughtsFile?: string;
   /** Only used in tests — overrides where the config file lives. */
   cwd?: string;
   configName?: string;
@@ -214,6 +218,7 @@ export class HaruStore {
   private readonly activityFile: string;
   private readonly graphFile: string;
   private readonly scheduleFile: string;
+  private readonly thoughtsFile: string;
   private readonly maxBackups: number;
   /** Read once, then kept. This process is the only writer, so the copy in
    *  memory cannot go stale, and the alternative is parsing half a megabyte of
@@ -229,6 +234,8 @@ export class HaruStore {
   private graphCache: FactGraph | null = null;
   /** Read once, then kept: the dispatcher looks at it every minute. */
   private scheduleCache: ScheduleFile | null = null;
+  /** Read once, then kept: every reply reads the freshest of them. */
+  private thoughtsCache: ThoughtState | null = null;
 
   constructor(options: HaruStoreOptions) {
     this.knowledgeFile = options.knowledgeFile;
@@ -242,6 +249,7 @@ export class HaruStore {
     this.activityFile = options.activityFile ?? path.join(path.dirname(this.electron.path), 'activity.json');
     this.graphFile = options.graphFile ?? path.join(path.dirname(this.electron.path), 'graph.json');
     this.scheduleFile = options.scheduleFile ?? path.join(path.dirname(this.electron.path), 'schedule.json');
+    this.thoughtsFile = options.thoughtsFile ?? path.join(path.dirname(this.electron.path), 'thoughts.json');
   }
 
   // -- generic access. Same surface as electron-store so existing callers and
@@ -433,6 +441,28 @@ export class HaruStore {
     renameSync(tmp, this.scheduleFile);
   }
 
+  // -- on her mind. Its own file, written each time she thinks something through.
+
+  getThoughts(): ThoughtState {
+    if (!this.thoughtsCache) {
+      try {
+        this.thoughtsCache = existsSync(this.thoughtsFile) ? normalizeThoughtState(JSON.parse(readFileSync(this.thoughtsFile, 'utf8'))) : normalizeThoughtState(null);
+      } catch (error) {
+        console.warn(`[store] could not read ${this.thoughtsFile}:`, error instanceof Error ? error.message : error);
+        this.thoughtsCache = normalizeThoughtState(null);
+      }
+    }
+    return this.thoughtsCache;
+  }
+
+  setThoughts(state: ThoughtState): void {
+    this.thoughtsCache = state;
+    mkdirSync(path.dirname(this.thoughtsFile), { recursive: true });
+    const tmp = `${this.thoughtsFile}.tmp-${process.pid}-${Date.now().toString(36)}`;
+    writeFileSync(tmp, JSON.stringify(state));
+    renameSync(tmp, this.thoughtsFile);
+  }
+
   // -- knowledge. The file is read and written only here; main.ts holds its own
   //    in-memory copy and hands it over through these two methods.
 
@@ -497,7 +527,7 @@ export class HaruStore {
    */
   backup(reason: string): string[] {
     const made: string[] = [];
-    for (const file of [this.electron.path, this.knowledgeFile, this.archiveFile, this.memoriesFile, this.activityFile, this.graphFile, this.scheduleFile]) {
+    for (const file of [this.electron.path, this.knowledgeFile, this.archiveFile, this.memoriesFile, this.activityFile, this.graphFile, this.scheduleFile, this.thoughtsFile]) {
       if (!existsSync(file)) continue;
       const target = `${file}.before-${reason}-${backupStamp()}`;
       try {
@@ -544,7 +574,7 @@ export class HaruStore {
         return false;
       }
     };
-    return ok(this.electron.path) && ok(this.knowledgeFile) && ok(this.archiveFile) && ok(this.memoriesFile) && ok(this.activityFile) && ok(this.graphFile) && ok(this.scheduleFile);
+    return ok(this.electron.path) && ok(this.knowledgeFile) && ok(this.archiveFile) && ok(this.memoriesFile) && ok(this.activityFile) && ok(this.graphFile) && ok(this.scheduleFile) && ok(this.thoughtsFile);
   }
 
   /**
@@ -554,7 +584,7 @@ export class HaruStore {
    */
   static recoverBackups(options: HaruStoreOptions): boolean {
     let restored = false;
-    for (const file of [path.join(options.cwd ?? '', options.configName ? `${options.configName}.json` : 'config.json'), options.knowledgeFile, options.archiveFile ?? path.join(options.cwd ?? '', 'archive.json'), options.memoriesFile ?? path.join(options.cwd ?? '', 'memories.json'), options.activityFile ?? path.join(options.cwd ?? '', 'activity.json'), options.graphFile ?? path.join(options.cwd ?? '', 'graph.json'), options.scheduleFile ?? path.join(options.cwd ?? '', 'schedule.json')]) {
+    for (const file of [path.join(options.cwd ?? '', options.configName ? `${options.configName}.json` : 'config.json'), options.knowledgeFile, options.archiveFile ?? path.join(options.cwd ?? '', 'archive.json'), options.memoriesFile ?? path.join(options.cwd ?? '', 'memories.json'), options.activityFile ?? path.join(options.cwd ?? '', 'activity.json'), options.graphFile ?? path.join(options.cwd ?? '', 'graph.json'), options.scheduleFile ?? path.join(options.cwd ?? '', 'schedule.json'), options.thoughtsFile ?? path.join(options.cwd ?? '', 'thoughts.json')]) {
       if (!existsSync(file)) continue;
       const newest = this.newestBackup(file);
       if (!newest) continue;
@@ -579,7 +609,7 @@ export class HaruStore {
     // Every store file, not just the two that existed when this was written:
     // archive.json is ninety days of what was said and memories.json is what
     // she knows about them, and neither is less private than config.json.
-    const targets = [this.electron.path, this.knowledgeFile, this.archiveFile, this.memoriesFile, this.activityFile, this.graphFile, this.scheduleFile].filter(existsSync);
+    const targets = [this.electron.path, this.knowledgeFile, this.archiveFile, this.memoriesFile, this.activityFile, this.graphFile, this.scheduleFile, this.thoughtsFile].filter(existsSync);
     if (!targets.length) return;
     const user = os.userInfo().username;
     const args = (file: string) => [file, '/inheritance:r', '/grant:r', `${user}:(F)`, 'SYSTEM:(F)', 'Administrators:(F)'];

@@ -43,6 +43,8 @@ import { markTimeGaps, sinceLast, earlierDaysContext, earlierTurns, DAYS_OF_HIST
 import { exchangesFrom, pickRecalled, recallNote, RECALL_DAYS, type Exchange } from './recall';
 import { applyExtraction, dayChunks, emptyGraph, EXTRACTION_SCHEMA, extractionInput, extractionPrompt, knownBlock, linkedFacts, linkedNote, readExtraction } from './factgraph';
 import { admitBooking, bookedNote, bookedPrompt, BOOKED_KIND, createScheduler, describeWhen, resolveBookingTime, zonedEpoch, type Job, type Outcome } from './scheduler';
+import { describeGap, isRumination, keepThoughts, lastSpoken, mayAsk, mayInitiate, mindNote, noteAsked, pendingTrigger, readThoughts, roundVector, scoreThought, spend, spokenOn as thoughtsSpokenOn, THINKING_RULES, thinkingInput, THOUGHT_LIMITS, thoughtPrompt, withoutClock, type ThinkingState, type Thought, type ThoughtState, type Trigger } from './thoughts';
+import { vitalsInstruction } from './vitals';
 import { correct, narrow, noteUsed, readHearing, remember } from './hearing';
 import { assumeItIsTheirs, identifyWork, noteWork, readFollowing, recogniseNow, summariseFollowing } from './following';
 import { lookUpPlace, readWindowsLocation, searchPlaces, type FoundPlace } from './location';
@@ -7056,6 +7058,7 @@ const promptState = {
     recalled: recallNote(recalled, new Intl.DateTimeFormat('en-AU', { weekday: 'long', timeZone: 'UTC' })),
     linked: linkedNote(factGraph, linked),
     booked: bookedNote(scheduler.list(), Date.now(), CHAT_TIMEZONE),
+    onHerMind: mindNote(store.getThoughts(), Date.now()),
     // Her list is left out when the subject is her — see PromptState.aboutHer.
     aboutHer: Boolean(hers),
     movedJustNow,
@@ -8044,6 +8047,36 @@ function herWakeAt(): number | null {
 }
 
 /**
+ * A line of hers, unprompted: the conversation route over today's conversation
+ * with a note saying why, under the second thought's guards. Null when she lets
+ * it go (a dash), when it is his side of the conversation rather than hers, or
+ * when it repeats something already said. Throws when there is no brain to ask.
+ * Shared by her bookings and her thoughts.
+ */
+async function composeUnprompted(note: string): Promise<string | null> {
+  const route = conversationRoute() ?? (store.get('ai.config') as ProviderConfig | undefined);
+  if (!route?.model) throw new Error('no brain to say it with');
+  const messages = ((store.get('chat.messages') as { role: string; content: string }[] | undefined) ?? []).slice(-14);
+  const character = getActiveCharacter();
+  const conversation: OllamaMessage[] = [
+    { role: 'system', content: [character.identity, character.style, FIRST_PERSON_NOTE, NATURAL, NO_INVENTED_HISTORY].join('\n\n') },
+    ...messages.map(message => ({ role: message.role as OllamaMessage['role'], content: message.content })),
+    { role: 'system', content: note },
+  ];
+  const answer = await Promise.race([
+    sendToProvider(conversation, route, { tools: false, temperature: 0.8, maxTokens: 220 }),
+    new Promise<never>((_, reject) => setTimeout(() => reject(new Error('no answer in 40s')), 40_000)),
+  ]);
+  const line = parseSecondThought(oneEmojiAtMost(dropOverusedEmoji(dropRoleHeader(dropStageDirections(answer.content ?? '')), [], HER_EMOJI), HER_EMOJI));
+  if (!line) return null;
+  if (readsAsTheirAnswer(line) || looksLikeAnEcho(line, messages.map(message => message.content)) || echoesAside(line, getAsides(), Date.now())) {
+    console.log(`[unprompted] dropped — not hers to say, or already said: ${JSON.stringify(line.slice(0, 80))}`);
+    return null;
+  }
+  return line;
+}
+
+/**
  * A booking of hers, come due. Put off rather than dropped when the moment is
  * wrong — asleep, his quiet hours, him not up, the two of them mid-conversation,
  * a game on — and written by the conversation route when it is right, under the
@@ -8063,26 +8096,9 @@ async function comeBackTo(job: Job): Promise<Outcome> {
   if (lastUserActivityAt && now - lastUserActivityAt < QUIET_AFTER_USER_MS) return { later: now + 10 * 60_000, reason: 'they are talking to her' };
   if (now - lastInterjectionAt < INTERJECT_GAP_MS) return { later: now + 5 * 60_000, reason: 'she only just spoke' };
   if (readGamingConfig(store.get('gaming')).quiet && gameIsRunning()) return { later: now + 20 * 60_000, reason: 'they are playing something' };
-  const route = conversationRoute() ?? (store.get('ai.config') as ProviderConfig | undefined);
-  if (!route?.model) return { failed: 'no brain to say it with' };
-  const messages = ((store.get('chat.messages') as { role: string; content: string }[] | undefined) ?? []).slice(-14);
-  const character = getActiveCharacter();
-  const conversation: OllamaMessage[] = [
-    { role: 'system', content: [character.identity, character.style, FIRST_PERSON_NOTE, NATURAL, NO_INVENTED_HISTORY].join('\n\n') },
-    ...messages.map(message => ({ role: message.role as OllamaMessage['role'], content: message.content })),
-    { role: 'system', content: bookedPrompt(why, Number(job.payload?.bookedAt ?? job.createdAt), now, CHAT_TIMEZONE) },
-  ];
-  const answer = await Promise.race([
-    sendToProvider(conversation, route, { tools: false, temperature: 0.8, maxTokens: 220 }),
-    new Promise<never>((_, reject) => setTimeout(() => reject(new Error('no answer in 40s')), 40_000)),
-  ]);
-  const line = parseSecondThought(oneEmojiAtMost(dropOverusedEmoji(dropRoleHeader(dropStageDirections(answer.content ?? '')), [], HER_EMOJI), HER_EMOJI));
+  const line = await composeUnprompted(bookedPrompt(why, Number(job.payload?.bookedAt ?? job.createdAt), now, CHAT_TIMEZONE));
   if (!line) {
     console.log(`[booked] she let it go: ${JSON.stringify(why)}`);
-    return { done: true };
-  }
-  if (readsAsTheirAnswer(line) || looksLikeAnEcho(line, messages.map(message => message.content)) || echoesAside(line, getAsides(), Date.now())) {
-    console.log(`[booked] dropped — not hers to say, or already said: ${JSON.stringify(line.slice(0, 80))}`);
     return { done: true };
   }
   // They may have started talking while she was writing it.
@@ -8091,6 +8107,166 @@ async function comeBackTo(job: Job): Promise<Outcome> {
   noteAside(line, 'booked', why.slice(0, 80));
   console.log(`[booked] came back to ${JSON.stringify(why)}: ${JSON.stringify(line.slice(0, 120))}`);
   return { done: true };
+}
+
+// -- what is on her mind (thoughts.ts) ---------------------------------------------
+//
+// Between messages she forms thoughts when something happens — a silence after
+// they talked, one of her own passes finishing, something on his list coming up,
+// waking — on the nudge brain, and keeps them two days. The freshest ride in
+// front of her replies. Whether one would have become a message is logged; it
+// only becomes one when thoughts.speak is on.
+
+/** How often the triggers are looked at. Looking is free; the brain is only asked when one has fired. */
+const THOUGHT_TICK_MS = 5 * 60_000;
+let thinkingNow = false;
+
+function thoughtsConfig(): { enabled: boolean; speak: boolean } {
+  const saved = store.get('thoughts') as { enabled?: boolean; speak?: boolean } | undefined;
+  return { enabled: saved?.enabled !== false, speak: saved?.speak === true };
+}
+
+/** The app's reasons she should not start a conversation now, in words, most basic first. */
+function initiativeBlockers(): string[] {
+  const now = Date.now();
+  const out: string[] = [];
+  if (herAsleepNow() || herKnockedAwakeNow()) out.push('she is asleep');
+  if (herHasSaidGoodnight()) out.push('she has said goodnight');
+  if (isSilenced(store.get('pushback') as Pushback | undefined, now)) out.push('she has been told to stop');
+  if (inQuietHours(getPush().prefs, zonedNow(CHAT_TIMEZONE))) out.push('quiet hours');
+  if (!theyAreUpNow()) out.push('they are not up');
+  if (lastUserActivityAt && now - lastUserActivityAt < TALKING_RECENTLY_MS) out.push('they were talking to her just now');
+  if (now - lastInterjectionAt < INTERJECT_GAP_MS) out.push('she only just spoke');
+  if (readGamingConfig(store.get('gaming')).quiet && gameIsRunning()) out.push('they are playing something');
+  return out;
+}
+
+function clipped(text: string, max: number): string {
+  const flat = String(text ?? '').replace(/\s+/g, ' ').trim();
+  return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
+}
+
+/** What she is handed to think over, in words. */
+function thinkingState(trigger: Trigger, now: number, lastMessageAt: number | undefined, state: ThoughtState): ThinkingState {
+  const local = zonedNow(CHAT_TIMEZONE);
+  const today = localDateKey(local);
+  const tomorrow = localDateKey(new Date(local.getFullYear(), local.getMonth(), local.getDate() + 1));
+  const messages = (store.get('chat.messages') as { role: string; content: string }[] | undefined) ?? [];
+  const his = [...messages].reverse().find(message => message.role === 'user');
+  const hers = [...messages].reverse().find(message => message.role === 'assistant');
+  const lastExchange = his
+    ? `The last thing he said to you${lastMessageAt ? `, ${describeGap(now - lastMessageAt)} ago` : ''}: "${clipped(his.content, 240)}"${hers ? `\nThe last thing you said to him: "${clipped(hers.content, 240)}"` : ''}`
+    : 'You two have not talked yet today.';
+  // Her own lines only, without the clock on their front (withoutClock) — a machine warning is not something she said.
+  const asides = getAsides().filter(aside => aside.source !== 'system');
+  const within = (at: string, ms: number) => Number.isFinite(Date.parse(at)) && now - Date.parse(at) <= ms;
+  const mood = getMood();
+  const day = getDays().at(-1);
+  const night = getNights().at(-1);
+  const week = getWeek();
+  return {
+    now: `${formatTimeOfDay(local.getHours(), local.getMinutes())} on ${new Intl.DateTimeFormat('en-US', { weekday: 'long' }).format(local)}`,
+    trigger,
+    lastExchange,
+    unanswered: lastMessageAt ? asides.filter(aside => Date.parse(aside.at) > lastMessageAt).slice(-4).map(aside => clipped(withoutClock(aside.text), 160)) : [],
+    agenda: getKept().filter(item => !item.done && (item.date === today || item.date === tomorrow)).slice(0, 6)
+      .map(item => `${item.date === today ? 'today' : 'tomorrow'}${item.time ? ` at ${item.time}` : ''} — ${item.title}`),
+    ownLife: [
+      day && within(day.at, 36 * 3_600_000) ? `your reading today, about ${day.about}: ${clipped(day.note, 200)}` : '',
+      night && within(night.at, 36 * 3_600_000) ? `last night, ${night.about}: ${clipped(night.note, 200)}` : '',
+      week ? `your week: ${clipped(week.summary, 200)}` : '',
+    ].filter(Boolean),
+    preferences: getMemories().filter(memory => memory.kind === 'preference' && memory.status !== 'archived' && !memory.supersededBy).slice(0, 8).map(memory => clipped(memory.text, 160)),
+    // Words, never the counts behind them: handed a number she says the number.
+    mood: [vitalsInstruction(vitals, mood.irritation), grudgeInstruction(mood.grudge ?? 0)].filter(Boolean).join(' '),
+    recentThoughts: state.thoughts.filter(t => t.decision !== 'rumination').slice(-8).map(t => `(${describeGap(Math.max(60_000, now - t.at))} ago) ${t.thought}`),
+    recentLines: asides.filter(aside => within(aside.at, 24 * 3_600_000)).slice(-8).map(aside => clipped(withoutClock(aside.text), 160)),
+  };
+}
+
+async function thoughtTick(): Promise<void> {
+  if (thinkingNow) return;
+  const settings = thoughtsConfig();
+  if (!settings.enabled || herAsleepNow()) return;
+  const brain = nudgeBrain();
+  if (!brain) return;
+  const now = Date.now();
+  const local = zonedNow(CHAT_TIMEZONE);
+  const today = localDateKey(local);
+  let state = store.getThoughts();
+  const lastMessageAt = getMood().lastMessageAt ? Date.parse(getMood().lastMessageAt!) : undefined;
+  const ownLife = [
+    ...getDays().map(entry => ({ key: `day:${entry.day}`, at: Date.parse(entry.at), detail: `you have just finished your own reading, about ${entry.about}` })),
+    ...getNights().map(entry => ({ key: `night:${entry.day}`, at: Date.parse(entry.at), detail: `you have just spent the night on ${entry.about}` })),
+  ].filter(entry => Number.isFinite(entry.at)).sort((a, b) => b.at - a.at);
+  const agenda = getKept().filter(item => !item.done && item.time && item.date === today).flatMap(item => {
+    const clock = parseTimeOfDay(item.time!);
+    return clock ? [{ id: item.id, title: item.title, at: zonedEpoch(item.date, clock.hour * 60 + clock.minute, CHAT_TIMEZONE) }] : [];
+  });
+  const wake = herWakeAt();
+  const trigger = pendingTrigger({ now, lastMessageAt: Number.isFinite(lastMessageAt) ? lastMessageAt : undefined, ownLife, agenda, wokeAt: wake !== null && wake <= now ? wake : undefined, seen: state.seen });
+  // A trigger held back by the spacing is still there on the next tick.
+  if (!trigger || !mayAsk(state, now, today)) return;
+  thinkingNow = true;
+  state = noteAsked({ ...state, seen: spend(state.seen, trigger) }, now, today);
+  store.setThoughts(state);
+  try {
+    const character = getActiveCharacter();
+    const reply = await ollamaPost(
+      [{ role: 'system', content: `${character.identity}\n\n${THINKING_RULES}` }, { role: 'user', content: thinkingInput(thinkingState(trigger, now, lastMessageAt, state)) }],
+      brain,
+      { tools: false, temperature: 0.8, format: 'json', maxTokens: 500 },
+    );
+    const drafts = readThoughts(reply.content ?? '').sort((a, b) => scoreThought(b) - scoreThought(a));
+    if (!drafts.length) {
+      console.log(`[thought] ${trigger.kind} (${trigger.detail}): nothing on her mind`);
+      return;
+    }
+    const lines = getAsides().filter(aside => now - Date.parse(aside.at) <= 24 * 3_600_000).map(aside => ({ text: aside.text }));
+    const dayStart = zonedEpoch(today, 0, CHAT_TIMEZONE);
+    const made: Thought[] = [];
+    let spoke = false;
+    for (const draft of drafts) {
+      const vector = roundVector(await tryEmbedQuery(draft.thought));
+      const thought: Thought = { id: `th${state.nextId++}`, at: now, trigger: trigger.kind, why: trigger.detail, ...draft, score: scoreThought(draft), decision: 'kept', ...(vector ? { vector } : {}) };
+      const earlier = [...state.thoughts, ...made].filter(t => now - t.at <= THOUGHT_LIMITS.keepMs).map(t => ({ text: t.thought, vector: t.vector }));
+      if (isRumination({ text: draft.thought, vector }, [...earlier, ...lines])) {
+        made.push({ ...thought, decision: 'rumination' });
+        console.log(`[thought] ${trigger.kind}: the same thought again, let go — ${JSON.stringify(clipped(draft.thought, 120))}`);
+        continue;
+      }
+      const last = lastSpoken(state);
+      const verdict = spoke
+        ? { ok: false as const, why: 'another thought of this moment went first' }
+        : mayInitiate({ thought, now, spokenToday: thoughtsSpokenOn(state, dayStart, dayStart + 86_400_000).length, lastSpokenAt: last?.at, lastAnswered: last ? (lastMessageAt ?? 0) > last.at : undefined, blockers: initiativeBlockers() });
+      if (!verdict.ok) {
+        made.push({ ...thought, heldBy: verdict.why });
+        console.log(`[thought] ${trigger.kind} (score ${thought.score}): ${JSON.stringify(clipped(draft.thought, 140))} — kept to herself: ${verdict.why}`);
+        continue;
+      }
+      spoke = true;
+      if (!settings.speak) {
+        made.push({ ...thought, decision: 'would-say' });
+        console.log(`[thought] ${trigger.kind} (score ${thought.score}): ${JSON.stringify(clipped(draft.thought, 140))} — WOULD SAY (shadow): ${JSON.stringify(clipped(draft.say, 160))}`);
+        continue;
+      }
+      const line = await composeUnprompted(thoughtPrompt(thought));
+      if (!line || lastUserActivityAt > now) {
+        made.push({ ...thought, heldBy: line ? 'he started talking while she wrote it' : 'she let it go when it came to writing it' });
+        console.log(`[thought] ${trigger.kind}: went to say it, and did not — ${line ? 'he started talking' : 'she let it go'}`);
+        continue;
+      }
+      lastInterjectionAt = Date.now();
+      noteAside(line, 'thought', clipped(draft.thought, 80));
+      made.push({ ...thought, decision: 'said', spokenAt: Date.now(), line });
+      console.log(`[thought] ${trigger.kind} (score ${thought.score}): said ${JSON.stringify(clipped(line, 160))}`);
+    }
+    store.setThoughts(keepThoughts({ ...store.getThoughts(), nextId: state.nextId }, made, Date.now()));
+  } catch (error) {
+    console.warn(`[thought] could not think it through: ${error instanceof Error ? error.message : error}`);
+  } finally {
+    thinkingNow = false;
+  }
 }
 
 function rantRoom(latest: string, mentioned = ''): string {
@@ -8445,6 +8621,7 @@ const PUSH_KIND: Partial<Record<AsideSource, 'random' | 'events' | 'system' | 'w
   goodnight: 'random',
   system: 'system',
   booked: 'random',
+  thought: 'random',
 };
 
 /**
@@ -11527,6 +11704,9 @@ app.whenReady().then(() => {
   // dispatcher brings her own bookings back to her.
   scheduler.ensureDaily({ id: 'maintenance', kind: 'maintenance', daily: MAINTENANCE_AT, timezone: CHAT_TIMEZONE, staleAfterMs: 20 * 60 * 60_000 });
   setTimeout(() => scheduler.start(), 30_000);
+  // Her thoughts between messages (thoughts.ts): triggers looked at every five
+  // minutes, the brain asked only when one has fired.
+  setInterval(() => { void thoughtTick(); }, THOUGHT_TICK_MS);
   const knowledgeSummary = knowledgeStats(knowledge.current());
   console.log(`[knowledge] loaded ${knowledgeSummary.documents} document(s), ${knowledgeSummary.chunks} chunk(s) from ${knowledgeFile}${knowledgeSummary.embedModels.length ? ` (${knowledgeSummary.embedModels.join(', ')})` : ''}`);
   // A saved vault keeps itself current without being asked: a first check a
