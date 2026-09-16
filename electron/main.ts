@@ -8161,6 +8161,15 @@ const graphFailures = new Map<string, number>();
  * restart mid-day pays for those pieces once more, which is rare and cheap.
  */
 const graphPiecesRead = new Map<string, { of: string; pieces: number }>();
+/**
+ * No answer, in a row, and when to look again. Waiting out an outage must not
+ * be a call a minute for as long as it lasts, nor a day whose request is
+ * refused every time (a 400 on its content) holding every later day back for
+ * good: the wait doubles to half an hour, and the tenth no-answer in a row
+ * counts as one of the day's tries.
+ */
+const graphUnanswered = { count: 0, until: 0 };
+const GRAPH_UNANSWERED_AS_TRY = 10;
 
 function graphUserName(): string {
   return getProfile().nickname.trim() || 'the user';
@@ -8178,7 +8187,7 @@ function graphBrain(): ProviderConfig | null {
 }
 
 async function readGraphTick(): Promise<void> {
-  if (readingGraph) return;
+  if (readingGraph || Date.now() < graphUnanswered.until) return;
   const brain = graphBrain();
   if (!brain) return;
   const today = currentChatDayKey();
@@ -8195,12 +8204,18 @@ async function readGraphTick(): Promise<void> {
   readingGraph = true;
   try {
     const outcome = await readDayIntoGraph(day, (archive[day] ?? []) as { role?: string; content?: unknown }[], brain);
+    if (outcome !== 'unanswered') graphUnanswered.count = 0;
     if (outcome === 'read') { graphFailures.delete(day); graphPiecesRead.delete(day); syncGraphPage(`read ${day}`); return; }
     // No answer at all — the network, an HTTP status, credit run out — says
     // nothing about the day. Counting it spent all three tries in a three-minute
     // outage and marked the day read for good, unread (2026-09-17). Only a reply
     // that came back and could not be used is a try; this waits for the next tick.
-    if (outcome === 'unanswered') return;
+    if (outcome === 'unanswered') {
+      graphUnanswered.count += 1;
+      graphUnanswered.until = Date.now() + Math.min(30, 2 ** Math.min(graphUnanswered.count - 1, 5)) * 60_000;
+      if (graphUnanswered.count < GRAPH_UNANSWERED_AS_TRY) return;
+      graphUnanswered.count = 0;
+    }
     throw new Error('the reply could not be read');
   } catch (error) {
     const tries = (graphFailures.get(day) ?? 0) + 1;
