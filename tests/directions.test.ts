@@ -162,6 +162,20 @@ test('an errand takes the address they gave a message earlier; an address alone,
   assert.equal(directionsAskFrom('check the traffic', []), null, 'told, but nowhere named or implied');
   assert.equal(directionsAskFrom('check the traffic lights on the mac window', []), null, 'window buttons are not roads');
   assert.equal(directionsAskFrom('I checked the traffic cam at work', []), null);
+  // Then "Haru check traffic to get back home", and "Check again" after it.
+  assert.deepEqual(directionsAskFrom('Haru check traffic to get back home', []), { destination: 'home', nearest: false });
+  assert.deepEqual(directionsAskFrom("what's traffic like on the freeway home?", []), { destination: 'home', nearest: false });
+  assert.equal(directionsAsk('check traffic to get to Umart')?.destination, 'Umart');
+  assert.deepEqual(directionsAskFrom('Check again', ['No - I called you it', 'Haru check the traffic going back to home']), { destination: 'home', nearest: false });
+  assert.deepEqual(directionsAskFrom('try again please', ['directions to Bunnings Rockingham', 'ok']), { destination: 'Bunnings Rockingham', nearest: false });
+  assert.equal(directionsAskFrom('check again', ['what a day']), null, 'again, after nothing about the roads, is nothing');
+  assert.equal(directionsAskFrom('the traffic was awful going home', []), null, 'a statement about the day is not an ask');
+  assert.equal(directionsAskFrom('can you check the website traffic from home?', []), null, 'site traffic is not roads');
+  for (const text of ["how's the drive home looking?", 'is the drive home bad', 'check the roads home', "how's the commute home looking", "how long till I'm home", 'Haru how long will it take me to get home']) {
+    assert.deepEqual(directionsAskFrom(text, []), { destination: 'home', nearest: false }, text);
+  }
+  assert.equal(directionsAskFrom('check my google drive at home', []), null, 'a drive that is not a road');
+  assert.equal(directionsAskFrom("i'm home, traffic was bad", []), null);
   // "How long to get home" is home, not a place called "get".
   assert.equal(directionsAsk('how long to get home')?.destination, 'home');
   assert.equal(directionsAsk('how long will it take to drive back home?')?.destination, 'home');
