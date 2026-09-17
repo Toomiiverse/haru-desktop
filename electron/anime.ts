@@ -26,6 +26,7 @@
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
+import type { ImportCandidate, ImportFile } from './animefetch';
 
 export type AnimeConfig = {
   enabled: boolean;
@@ -249,8 +250,13 @@ export class AnimeLink {
     private readonly config: AnimeConfig,
     private readonly keys: Keys,
     private readonly fetcher: Fetcher,
-    private readonly memory: { fetches(): Fetch[]; keep(fetch: Fetch): void },
+    private readonly memory: { fetches(): Fetch[]; keep(fetch: Fetch): void; markImported?(seriesId: number, atIso: string): void },
   ) {}
+
+  /** The import step (animefetch.ts) says the show is filed; "how's it going" stops calling it stalled. */
+  markImported(seriesId: number, atIso = new Date().toISOString()): void {
+    this.memory.markImported?.(seriesId, atIso);
+  }
 
   private async json<T>(url: string, init: { method?: string; headers?: Record<string, string>; body?: string } = {}, timeoutMs = QUICK_MS): Promise<T> {
     const response = await this.fetcher(url, { ...init, signal: AbortSignal.timeout(timeoutMs) });
@@ -367,6 +373,32 @@ export class AnimeLink {
   async queue(): Promise<SonarrQueueItem[]> {
     const page = await this.sonarr<{ records?: SonarrQueueItem[] }>('/queue?includeUnknownSeriesItems=true&pageSize=100');
     return page?.records ?? [];
+  }
+
+  async show(seriesId: number): Promise<SonarrSeries | null> {
+    return this.sonarr<SonarrSeries | null>(`/series/${seriesId}`).catch(() => null);
+  }
+
+  /**
+   * The files in a finished download, read with the show named. Named is the
+   * whole trick: without it Sonarr cannot place a pack it could not parse;
+   * with it, each file's own number is enough (animefetch.ts).
+   */
+  async importCandidates(downloadId: string, seriesId: number): Promise<ImportCandidate[]> {
+    return (await this.sonarr<ImportCandidate[]>(`/manualimport?downloadId=${encodeURIComponent(downloadId)}&seriesId=${seriesId}&filterExistingFiles=true`, {}, SEARCH_MS)) ?? [];
+  }
+
+  async manualImport(files: ImportFile[]): Promise<void> {
+    await this.sonarr('/command', { method: 'POST', body: JSON.stringify({ name: 'ManualImport', files, importMode: 'auto' }) });
+  }
+
+  /** How many episodes of the show Jellyfin has, by its own name for it; 0 when it is not there yet. */
+  async episodesOnServer(title: string): Promise<{ series: string; episodes: number } | null> {
+    const series = await this.findOnServer(title);
+    if (!series) return null;
+    const user = encodeURIComponent(this.keys.jellyfinUserId);
+    const page = await this.jf<{ TotalRecordCount?: number }>(`/Items?userId=${user}&ParentId=${encodeURIComponent(series.Id)}&IncludeItemTypes=Episode&Recursive=true&Limit=1`);
+    return { series: series.Name, episodes: page?.TotalRecordCount ?? 0 };
   }
 
   // Prowlarr ------------------------------------------------------------------
