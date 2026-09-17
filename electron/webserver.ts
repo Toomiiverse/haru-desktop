@@ -803,7 +803,7 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
   // request from her own page rather than a form somebody else submitted.
   // A recording and an attached file are the two things posted here that are
   // not JSON; each checks its own body below rather than being waved through.
-  if (req.method === 'POST' && path !== '/api/listen' && path !== '/api/attach' && path !== '/api/activity/shots' && !/^application\/json/.test(req.headers['content-type'] ?? '')) {
+  if (req.method === 'POST' && path !== '/api/listen' && path !== '/api/attach' && path !== '/api/activity/shots' && path !== '/api/voice/enrol' && !/^application\/json/.test(req.headers['content-type'] ?? '')) {
     return json(res, 415, { error: 'Send JSON.' });
   }
 
