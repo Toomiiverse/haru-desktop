@@ -99,6 +99,7 @@ import { addCheckIn, checkInInstruction, checkInsOn, readCheckIns, type CheckIn 
 import { standingFrom } from './standing';
 import { herFrom } from './her';
 import { computeRoute, fixStatedRoute, routeWords, type Route } from './routes';
+import { easedEnough, easedFallback, easedPrompt, gaveUpFallback, gaveUpPrompt, stopsTrafficWatch, trafficWatchAsk, TRAFFIC_WATCH_KIND, WATCH_EVERY_MS, WATCH_FOR_MS, watchJob, watchNote } from './trafficwatch';
 import { placeAsk, placeNote, placeWords, searchGooglePlaces, type GooglePlace } from './placeinfo';
 import { addAside, alreadySaidRecently, echoesAside, asideContext, asidesOn, markReached, pruneAsides, readAsides, type Aside, type AsideSource, markAsked, openAsk, answerAsk, askedRecently, unansweredAsksNote } from './asides';
 import { attachmentsInPlay, describeAttached, READ_IT_ALL_PROMPT, readAttachments, type Attachment, type Opened } from './attachments';
@@ -8433,6 +8434,7 @@ const scheduler = createScheduler({
       return failed.length === sweeps.length ? { failed: 'every sweep failed' } : { done: true };
     },
     [BOOKED_KIND]: comeBackTo,
+    [TRAFFIC_WATCH_KIND]: watchTraffic,
   },
   log: line => console.log(line),
 });
@@ -8521,6 +8523,80 @@ async function comeBackTo(job: Job): Promise<Outcome> {
   lastInterjectionAt = Date.now();
   noteAside(line, 'booked', why.slice(0, 80));
   console.log(`[booked] came back to ${JSON.stringify(why)}: ${JSON.stringify(line.slice(0, 120))}`);
+  return { done: true };
+}
+
+/**
+ * "Let me know when the traffic eases", asked: a watch on the scheduler, unless
+ * the road has already eased or cannot be read. Returns what she is told, so
+ * what she says about it is what the app will actually do (trafficwatch.ts).
+ */
+function startTrafficWatch(destination: string, found: FoundPlace | null, route: Route | null): string {
+  const now = Date.now();
+  if (route && easedEnough(route)) {
+    console.log(`[traffic] no watch needed — ${route.minutes} min now, ${route.typicalMinutes} usual`);
+    return watchNote(destination, route, now, CHAT_TIMEZONE, false);
+  }
+  if (!found || !getGoogleMapsKey()) {
+    console.log(`[traffic] cannot watch "${destination}" — ${found ? 'no maps key' : 'the place was not found'}`);
+    return watchNote(destination, null, now, CHAT_TIMEZONE, false);
+  }
+  scheduler.add(watchJob(destination, { name: found.name, lat: found.lat, lon: found.lon }, now));
+  console.log(`[traffic] watching the way to "${destination}" every ${WATCH_EVERY_MS / 60_000} min${route ? ` — ${route.minutes} min now, ${route.typicalMinutes} usual` : ''}`);
+  return watchNote(destination, route, now, CHAT_TIMEZONE, true);
+}
+
+/**
+ * The road read again for a watch. Again in a few minutes while it is still
+ * slow; her line, with the directions button, once it is back near normal; and
+ * a line saying it never cleared when the watch runs out. Asked for, so said:
+ * a plain line stands in when her brain lets it go or cannot be reached.
+ */
+async function watchTraffic(job: Job): Promise<Outcome> {
+  const payload = job.payload ?? {};
+  const destination = String(payload.destination ?? 'home');
+  const target = { name: String(payload.name ?? destination), lat: Number(payload.lat), lon: Number(payload.lon) };
+  const startedAt = Number(payload.startedAt ?? job.createdAt);
+  const until = Number(payload.until ?? startedAt + WATCH_FOR_MS);
+  const now = Date.now();
+  if (!Number.isFinite(target.lat) || !Number.isFinite(target.lon) || !getGoogleMapsKey()) return { done: true };
+  if (isSilenced(store.get('pushback') as Pushback | undefined, now)) {
+    console.log('[traffic] watch let go — she has been told to stop');
+    return { done: true };
+  }
+  const last = now + WATCH_EVERY_MS > until;
+  const from = startingPoint(getWhereabouts());
+  if (!from) {
+    console.log('[traffic] watch stopped — nowhere to measure from');
+    return { done: true };
+  }
+  if (distanceM(from, target) < 500) {
+    // At the place already, or no fresh fix and home is both ends: nothing to read.
+    if (from.known === 'here') {
+      console.log(`[traffic] watch done — they are at "${destination}"`);
+      return { done: true };
+    }
+    return last ? { done: true } : { later: now + WATCH_EVERY_MS, reason: 'no fresh position to measure from' };
+  }
+  let route: Route | null = null;
+  try {
+    route = await computeRoute(from, target, getGoogleMapsKey(), (url, init) => fetch(url, init));
+    console.log(`[traffic] the way to "${destination}": ${route.minutes} min now / ${route.typicalMinutes} typical`);
+  } catch (error) {
+    console.warn(`[traffic] no route this time: ${(error as Error).message}`);
+  }
+  const eased = route !== null && easedEnough(route);
+  if (!eased && !last) return { later: now + WATCH_EVERY_MS, reason: route ? `${route.minutes} min, ${route.typicalMinutes} usual` : 'no route this time' };
+  let line: string | null = null;
+  try {
+    line = await composeUnprompted(eased && route ? easedPrompt(destination, route, startedAt, now) : gaveUpPrompt(destination, route, startedAt, now));
+  } catch (error) {
+    console.warn(`[traffic] no brain for the line: ${(error as Error).message}`);
+  }
+  const said = line ?? (eased && route ? easedFallback(destination, route) : gaveUpFallback(destination, route));
+  lastInterjectionAt = Date.now();
+  noteAside(eased ? withDirections(said, target, route ?? undefined) : said, 'booked', `traffic ${destination}`.slice(0, 80));
+  console.log(`[traffic] ${eased ? 'eased' : 'gave up'}: ${JSON.stringify(said.slice(0, 120))}`);
   return { done: true };
 }
 
@@ -8811,7 +8887,14 @@ function publishToVault(reason: string): void {
 }
 
 async function directionsFor(latest: string, recentUser: string[] = []): Promise<{ ask: DirectionsAsk; found: FoundPlace | null; route: Route | null; note: string; about?: true } | null> {
-  const ask = directionsAskFrom(latest, recentUser);
+  // "Never mind" or "I'm leaving now" calls off a traffic watch (trafficwatch.ts).
+  if (stopsTrafficWatch(latest) && scheduler.list().some(job => job.kind === TRAFFIC_WATCH_KIND)) {
+    scheduler.cancel(TRAFFIC_WATCH_KIND);
+    console.log('[traffic] watch called off');
+  }
+  // "Let me know when the traffic eases" is the road now, and a watch after.
+  const watchAsk = trafficWatchAsk(latest);
+  const ask = directionsAskFrom(latest, recentUser) ?? (watchAsk ? { destination: watchAsk.destination, nearest: false } : null);
   const where = getWhereabouts();
   const weekday = zonedNow(CHAT_TIMEZONE).getDay();
   // The nearest of what came back when she knows where they are; never something
@@ -8888,7 +8971,8 @@ async function directionsFor(latest: string, recentUser: string[] = []): Promise
     }
   }
   console.log(`[maps] the way to "${ask.destination}": ${found ? found.name : 'not found'}`);
-  return { ask, found, route, note: directionsNote(ask, found, where, Date.now(), road, facts) };
+  const note = directionsNote(ask, found, where, Date.now(), road, facts);
+  return { ask, found, route, note: watchAsk ? `${note}\n\n${startTrafficWatch(watchAsk.destination, found, route)}` : note };
 }
 
 function getWhereabouts(): Whereabouts {
