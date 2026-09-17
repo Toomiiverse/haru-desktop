@@ -11933,6 +11933,13 @@ function webDeps(): WebDeps {
   // Speech to speech: a call through Hume's EVI, her words from the same place
   // the phone's typed messages go. See evi.ts for the shape; the mic button on
   // the phone is the only thing that opens one.
+  // Her sleep, for the phone's standby: asleep now, and when she wakes, so the
+  // phone can stop listening for her name and start again on its own.
+  const sleepForPhone = () => {
+    const asleep = herAsleepNow();
+    const wakeAt = asleep ? herWakeAt() : null;
+    return { asleep, wakesAt: wakeAt ? new Date(wakeAt).toISOString() : null };
+  };
   deps.evi = {
     status() {
       const engine = readCallConfig(store.get('call')).engine;
@@ -11945,14 +11952,14 @@ function webDeps(): WebDeps {
           : !voice.webEnabled || voice.engine === 'off' ? 'not set up'
           : herAsleepNow() ? 'asleep'
           : undefined;
-        return { enabled: !reason, engine, minutesToday, cap: 0, ...(reason ? { reason } : {}) };
+        return { enabled: !reason, engine, minutesToday, cap: 0, ...(reason ? { reason } : {}), ...sleepForPhone() };
       }
       const reason = !evi.enabled || !evi.configId ? 'off'
         : !getHumeKey() || !getEviSecret() ? 'not set up'
         : herAsleepNow() ? 'asleep'
         : !underCap(store.get('evi.usage'), today, evi.dailyMinutesCap) ? 'cap'
         : undefined;
-      return { enabled: !reason, engine, minutesToday, cap: evi.dailyMinutesCap, ...(reason ? { reason } : {}) };
+      return { enabled: !reason, engine, minutesToday, cap: evi.dailyMinutesCap, ...(reason ? { reason } : {}), ...sleepForPhone() };
     },
     secret: getEviSecret,
     async open(deviceId, handlers) {
