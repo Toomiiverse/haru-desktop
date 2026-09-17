@@ -11795,6 +11795,14 @@ function webDeps(): WebDeps {
       store.set('hearing', kept);
       return kept.corrections;
     },
+    async keepVoiceTake(wav) {
+      const dir = path.join(app.getPath('userData'), 'voice-takes');
+      mkdirSync(dir, { recursive: true });
+      const name = `${new Date().toISOString().replace(/[:.]/g, '-')}.wav`;
+      writeFileSync(path.join(dir, name), wav);
+      console.log(`[voice] kept a take of his voice: ${name} (${wav.length} bytes)`);
+      return name;
+    },
     async hear(audio, mime) {
       const listen = readListenConfig(store.get('listen'));
       const vocabulary = wordsToListenFor();

@@ -199,6 +199,8 @@ export type WebDeps = {
   wake(): { line: string; emotion: string };
   /** What they just said, through the same ears and the same corrections as the desktop. */
   hear(audio: Uint8Array, mime: string): Promise<string>;
+  /** A take of his voice saying her name, from the phone's enrolment: kept for the wake-word model of his voice. Returns the file name. */
+  keepVoiceTake?(wav: Uint8Array): Promise<string>;
   /** What she has been taught she mishears — see hearing.ts. */
   corrections(): Correction[];
   /** Teaching her ears from the phone: what came back against what was said. The pair she kept, if there was one. */
@@ -1007,6 +1009,21 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
   // Her ears. The body is a recording rather than JSON, so it is read raw and
   // capped far higher — the JSON limit is sized for a message, not for a minute
   // of audio.
+  // The phone teaching her his voice (VoiceGate.swift): each "Hey Haru" he
+  // says lands here as a WAV, the seeds of a wake-word model of his own voice.
+  if (req.method === 'POST' && path === '/api/voice/enrol') {
+    const mime = String(req.headers['content-type'] ?? '').split(';')[0];
+    if (!/^audio\//.test(mime)) return json(res, 415, { error: 'Send audio.' });
+    let wav: Buffer;
+    try { wav = await readRaw(req, MAX_AUDIO); } catch {
+      res.setHeader('Connection', 'close');
+      return json(res, 413, { error: 'That take is too long.' });
+    }
+    if (wav.length < 1000) return json(res, 400, { error: 'The take was empty.' });
+    if (!deps.keepVoiceTake) return json(res, 501, { error: 'This server keeps no voice takes.' });
+    return json(res, 200, { kept: await deps.keepVoiceTake(wav) });
+  }
+
   if (req.method === 'POST' && path === '/api/listen') {
     const mime = String(req.headers['content-type'] ?? 'audio/webm').split(';')[0];
     if (!/^audio\//.test(mime)) return json(res, 415, { error: 'Send audio.' });
