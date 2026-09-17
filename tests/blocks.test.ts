@@ -24,7 +24,7 @@ function record(overrides: Partial<MemoryRecord> & { id: string; text: string; k
 
 test('defaultMemoryBlocks has the standard set with unique lowercase labels', () => {
   const blocks = defaultMemoryBlocks();
-  assert.deepEqual(blocks.map(b => b.label), ['persona', 'human', 'preferences', 'her_standing', 'relationship', 'current_project', 'working_state', 'her_own']);
+  assert.deepEqual(blocks.map(b => b.label), ['persona', 'human', 'preferences', 'her_standing', 'relationship', 'shared_history', 'current_project', 'working_state', 'her_own']);
   assert.equal(new Set(blocks.map(b => b.label)).size, blocks.length);
   for (const block of blocks) {
     assert.equal(blockLabelValid(block.label), true);
@@ -60,7 +60,7 @@ test('mergeBlockDefaults keeps custom blocks and adds missing defaults', () => {
   const merged = mergeBlockDefaults(saved);
   assert.ok(findBlock(merged, 'custom'));
   assert.equal(findBlock(merged, 'custom')!.limit, 1234);
-  for (const label of ['persona', 'human', 'preferences', 'her_standing', 'relationship', 'current_project', 'working_state', 'her_own']) {
+  for (const label of ['persona', 'human', 'preferences', 'her_standing', 'relationship', 'shared_history', 'current_project', 'working_state', 'her_own']) {
     assert.ok(findBlock(merged, label), `missing default ${label}`);
   }
 });
@@ -307,6 +307,40 @@ test('each record renders once, in its most specific block, and never when the p
   assert.ok(!text.includes('Is the founder of a company'));
   // Resolved on its own, the block is whole — the tools and inspector see everything.
   assert.ok(resolveBlockValue(findBlock(blocks, 'current_project')!, sources).includes('Wants 6 mailboxes'));
+});
+
+test('what the two of them share renders as their shared history, not among his facts', () => {
+  // 2026-09-17: her own name's spelling sat in the human block under his bio,
+  // and she told him six times that he had named her.
+  const blocks = defaultMemoryBlocks();
+  const sources = {
+    character: { identity: '', style: '' },
+    profile: { nickname: 'Tommy', occupation: '', about: 'Was born in Thailand.' },
+    memories: [
+      record({ id: 'who', text: 'Starts a new job as a mobile phone technician', kind: 'fact', importance: 0.7, category: 'identity' }),
+      record({ id: 'gag', text: 'Haru, with one r — he once spelled her name "Harru". It is one r. Like the season.', kind: 'fact', importance: 0.6, category: 'shared', mentions: 354 }),
+    ],
+    sessions: [] as SessionSummary[],
+  };
+  const { text } = formatMemoryBlocks(blocks, sources, { omit: ['persona'], compact: true });
+  const section = (label: string) => text.match(new RegExp(`<${label}>[\\s\\S]*?</${label}>`))?.[0] ?? '';
+  assert.ok(section('human').includes('mobile phone technician'));
+  assert.ok(!section('human').includes('one r'));
+  assert.ok(section('shared_history').includes('Haru, with one r'));
+  assert.ok(text.indexOf('<shared_history>') > text.indexOf('<human>'));
+});
+
+test('a saved set gains a missing default beside its neighbour, not at the end', () => {
+  // The live config saved six blocks before her_standing, shared_history and
+  // her_own existed; each lands where a fresh install has it.
+  const saved = ['persona', 'human', 'preferences', 'relationship', 'current_project', 'working_state']
+    .map(label => ({ label, description: label, limit: 1000, read_only: false }));
+  assert.deepEqual(mergeBlockDefaults(saved).map(block => block.label), defaultMemoryBlocks().map(block => block.label));
+  // A custom block keeps its place; with no default to stand beside, a default goes last.
+  const custom = mergeBlockDefaults([{ label: 'custom', description: 'mine', limit: 100, read_only: false }, ...saved]);
+  assert.equal(custom[0].label, 'custom');
+  assert.deepEqual(mergeBlockDefaults([{ label: 'custom', description: 'mine', limit: 100, read_only: false }]).map(block => block.label),
+    ['custom', ...defaultMemoryBlocks().map(block => block.label)]);
 });
 
 test('the human block uses the semantic map when one is supplied', () => {

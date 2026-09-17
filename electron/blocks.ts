@@ -145,6 +145,20 @@ export function defaultMemoryBlocks(): MemoryBlock[] {
       read_only: false,
     },
     {
+      id: blockIdFor('shared_history'),
+      label: 'shared_history',
+      // Running jokes, house rules and moments between the two of them used to
+      // render inside `human`, and the chat prompt shows only the tag. So "Haru,
+      // with one r — he once spelled her name 'Harru'" (Us.md) sat among his
+      // facts, right under his bio, and she read her own name as something he
+      // gave her: "You named me Haru. One r. Like the season. It's in your
+      // preferences" — six times in two minutes, against him saying she named
+      // herself (2026-09-17). The tag is the framing, so it says whose this is.
+      description: 'The history Haru and the user share — running jokes, house rules, moments between the two of them. It belongs to both of them; none of it is a fact about the user alone.',
+      limit: 1500,
+      read_only: false,
+    },
+    {
       id: blockIdFor('current_project'),
       label: 'current_project',
       description: 'What the user is working on — long-term projects and active work. Reference it when it is relevant to what they are doing.',
@@ -198,9 +212,17 @@ export function mergeBlockDefaults(saved: unknown): MemoryBlock[] {
   const parsed = Array.isArray(saved) ? saved.map(asBlock).filter((block): block is MemoryBlock => block !== null) : [];
   const seen = new Set(parsed.map(block => block.label));
   const out = [...parsed];
-  for (const block of defaultMemoryBlocks()) {
-    if (!seen.has(block.label)) out.push(block);
-  }
+  const defaults = defaultMemoryBlocks();
+  defaults.forEach((block, index) => {
+    if (seen.has(block.label)) return;
+    // Beside its neighbour in the default order, not at the end: a saved set
+    // gains a new block where a fresh install has it, instead of after
+    // her_own, the last and longest thing in the section.
+    const neighbour = defaults.slice(0, index).reverse().find(candidate => seen.has(candidate.label));
+    const at = neighbour ? out.findIndex(candidate => candidate.label === neighbour.label) + 1 : out.length;
+    out.splice(at, 0, block);
+    seen.add(block.label);
+  });
   return out;
 }
 
@@ -397,11 +419,11 @@ export function resolveBlockValue(block: MemoryBlock, sources: BlockSources, sho
       if (sources.profile.nickname.trim()) lines.push(`- Goes by ${sources.profile.nickname.trim()}.`);
       if (sources.profile.occupation.trim()) lines.push(`- Work: ${sources.profile.occupation.trim()}.`);
       if (sources.profile.about.trim()) lines.push(`- ${wrap(sources.profile.about.trim(), 160)}`);
-      // Who they are, then the two of them, then whatever this message is about.
+      // Who they are, then whatever this message is about. What the two of
+      // them share is not about him alone: it has its own block.
       const identity = fresh(retrieved(ofCategory(sources, 'identity'), sources, IDENTITY_LIMIT), sources, shown);
-      const shared = fresh(retrieved(ofCategory(sources, 'shared'), sources, SHARED_LIMIT), sources, shown);
       const moment = fresh(retrieved(ofCategory(sources, ...MOMENT), sources, MOMENT_LIMIT, MOMENT_FLOOR), sources, shown);
-      const records = [...withoutRestatements(identity), ...shared, ...moment];
+      const records = [...withoutRestatements(identity), ...moment];
       if (records.length) lines.push(datedLines(records, sources.now ?? new Date()));
       return lines.join('\n');
     }
@@ -423,6 +445,10 @@ export function resolveBlockValue(block: MemoryBlock, sources: BlockSources, sho
     case 'relationship': {
       const records = retrieved(ofCategory(sources, 'person'), sources, PEOPLE_LIMIT);
       return linesFromRecords(fresh(withoutRestatements(records), sources, shown));
+    }
+    case 'shared_history': {
+      const records = fresh(retrieved(ofCategory(sources, 'shared'), sources, SHARED_LIMIT), sources, shown);
+      return records.length ? datedLines(records, sources.now ?? new Date()) : '';
     }
     case 'current_project': {
       const lines: string[] = [];

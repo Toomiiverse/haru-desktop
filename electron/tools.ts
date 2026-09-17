@@ -97,7 +97,7 @@ function kindForBlock(label: string): MemoryKind {
 
 /** Default labels keep their derived view; custom blocks persist explicit
  *  values, since nothing in the engine would otherwise surface them. */
-const DEFAULT_BLOCK_LABELS = new Set(['persona', 'human', 'preferences', 'relationship', 'current_project', 'working_state']);
+const DEFAULT_BLOCK_LABELS = new Set(['persona', 'human', 'preferences', 'relationship', 'shared_history', 'current_project', 'working_state']);
 
 export function coerceKnowledgeCategory(value: unknown): KnowledgeCategory | undefined {
   if (typeof value !== 'string') return undefined;

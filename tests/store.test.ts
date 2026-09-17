@@ -117,7 +117,7 @@ test('migration v3 creates memory blocks without touching existing memory', () =
   const report = store.migrate();
   assert.equal(report.to, SCHEMA_VERSION);
   const blocks = store.getBlocks();
-  assert.deepEqual(blocks.map(b => b.label), ['persona', 'human', 'preferences', 'her_standing', 'relationship', 'current_project', 'working_state', 'her_own']);
+  assert.deepEqual(blocks.map(b => b.label), ['persona', 'human', 'preferences', 'her_standing', 'relationship', 'shared_history', 'current_project', 'working_state', 'her_own']);
   assert.equal(blocks.find(b => b.label === 'persona')!.read_only, true);
   assert.equal(store.getMemories()[0].text, 'Dislikes being nagged');
   assert.equal(store.getSessions().length, 1);
@@ -184,7 +184,7 @@ test('a half-written forgetting entry is skipped rather than handed back', () =>
 test('blocks come back with the standard set filled in, and keep what was saved', () => {
   const { store } = makeStore();
   const labels = store.getBlocks().map(block => block.label);
-  for (const label of ['persona', 'human', 'preferences', 'her_standing', 'relationship', 'current_project', 'working_state', 'her_own']) {
+  for (const label of ['persona', 'human', 'preferences', 'her_standing', 'relationship', 'shared_history', 'current_project', 'working_state', 'her_own']) {
     assert.ok(labels.includes(label), `${label} is missing from a fresh store`);
   }
   assert.equal(store.getBlocks().find(block => block.label === 'persona')?.read_only, true,
