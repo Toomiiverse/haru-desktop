@@ -212,7 +212,7 @@ export type WebDeps = {
    * words are asked of the brain hook below. Absent when this build has none.
    */
   evi?: {
-    status(): { enabled: boolean; engine: string; minutesToday: number; cap: number; reason?: string asleep?: boolean; wakesAt?: string | null };
+    status(): { enabled: boolean; engine: string; minutesToday: number; cap: number; reason?: string; asleep?: boolean; wakesAt?: string | null };
     /** The bearer Hume must present at the brain hook; '' when none is set. */
     secret(): string;
     /**
