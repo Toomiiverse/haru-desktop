@@ -140,3 +140,12 @@ test('nothing worth keeping is nothing', () => {
   assert.equal(parseReadingTake('ok'), null);
   assert.equal(parseReadingTake('STANDS: chapter 3'), null, 'a bookmark alone is not a thought');
 });
+
+test('a bookmark on her shelf keeps its source and manga id', () => {
+  const kept = readReading({ seriesId: '1', title: 'Chainsaw Man', chapter: '1', chapterId: '1', page: 0, pages: 53, startedAt: '', lastAt: '', finished: 0, source: 'suwayomi', mangaId: 1 })!;
+  assert.equal(kept.source, 'suwayomi');
+  assert.equal(kept.mangaId, 1);
+  const old = readReading({ seriesId: 'abc', chapterId: 'def' })!;
+  assert.equal(old.source, undefined);
+  assert.equal(old.mangaId, undefined);
+});

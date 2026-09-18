@@ -53,6 +53,10 @@ export type Reading = {
   lastAt: string;
   /** Chapters finished, so she can say how far in she is without counting. */
   finished: number;
+  /** Where the pages come from: MangaDex directly (the old way) or her shelf on Suwayomi. */
+  source?: 'mangadex' | 'suwayomi';
+  /** The manga's id on Suwayomi, for chapters, pages and her mirrored bookmark. */
+  mangaId?: number;
 };
 
 export function searchUrl(title: string): string {
@@ -107,6 +111,8 @@ export function readReading(saved: unknown): Reading | null {
     startedAt: typeof r.startedAt === 'string' ? r.startedAt : '',
     lastAt: typeof r.lastAt === 'string' ? r.lastAt : '',
     finished: typeof r.finished === 'number' && r.finished >= 0 ? Math.floor(r.finished) : 0,
+    ...(r.source === 'suwayomi' || r.source === 'mangadex' ? { source: r.source } : {}),
+    ...(typeof r.mangaId === 'number' && Number.isFinite(r.mangaId) ? { mangaId: r.mangaId } : {}),
   };
 }
 

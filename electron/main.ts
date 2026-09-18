@@ -91,6 +91,7 @@ import { setDefaultAutoSelectFamilyAttemptTimeout } from 'node:net';
 import { readBrowserControlConfig } from './browserctl';
 import { listSessions, openSession, readClaudeCodeConfig, readOpenedSessions, resolveSessionDir, sessionName, SESSIONS_KEPT as CLAUDE_SESSIONS_KEPT, stopSession, type SessionHost } from './claudesession';
 import { ShellGate, SERVER_NOTE, denied, ledgerEntry, readShellConfig, runCommand } from './shell';
+import { Suwayomi, readSuwayomiConfig, type ShelfChapter } from './suwayomi';
 import { serverLookNote } from './prompt';
 import { Downloads, downloadsReady, readDownloadsConfig } from './downloads';
 import { applyDecay, DEEP_RECALL_LIMIT, findSuperseded, formationPrompt, formationWindows, MEMORIES_PER_DAY, readFormation, type FormedNote, formatMemoryPrompt, isExplicitRecall, closeEvents, isWorthAnEvent, isWorthKeeping, isWorthRemembering, MEMORY_KINDS, migrateMemories, monthFoldPrompt, pruneMemories, readsAsSecondPerson, rememberInto, retrieveMemories, semanticSimilarities, summaryPrompt, supersede, THIRD_PERSON_AGAIN, vectorSimilarity, type ForgettingEntry, type MemoryKind, type MemoryRecord, type MemorySource, type RetrievalFactors, type ScoredMemory, type SessionSummary } from './memory';
@@ -10445,31 +10446,119 @@ function rememberDelivery(raw: string, clean: string): void {
   while (deliveredMoods.size > DELIVERY_KEPT) deliveredMoods.delete(deliveredMoods.keys().next().value as string);
 }
 
-async function readSomeManga(config: ProviderConfig) {
+/**
+ * Her shelf on Suwayomi (suwayomi.ts), when the server's password file is
+ * there. One client for the process, so the login is kept; null when the
+ * block is switched off or the file is missing — then she reads MangaDex
+ * directly as before.
+ */
+let suwayomiClient: Suwayomi | null = null;
+function suwayomiLink(): Suwayomi | null {
+  const config = readSuwayomiConfig(store.get('manga'));
+  if (!config || !existsSync(config.passwordFile)) { suwayomiClient = null; return null; }
+  if (!suwayomiClient) suwayomiClient = new Suwayomi(config, (url, init) => net.fetch(url, init), { log: line => console.log(line) });
+  return suwayomiClient;
+}
+
+/** A Suwayomi chapter as the bookmark's ChapterRef. */
+const shelfChapterRef = (chapter: ShelfChapter): ChapterRef => ({ id: String(chapter.id), chapter: String(chapter.number), title: chapter.name, pages: chapter.pages > 0 ? chapter.pages : 0 });
+
+/** A title taken up on her shelf: searched, put in her category, chapters fetched, bookmark at the first. */
+async function startReadingOnShelf(link: Suwayomi, title: string): Promise<Reading | null> {
+  const found = await link.search(title);
+  const hit = found[0];
+  if (!hit) return null;
+  await link.takeUp(hit.id);
+  const chapters = await link.chapters(hit.id);
+  if (!chapters.length) return null;
+  const first = shelfChapterRef(chapters[0]);
+  const now = new Date().toISOString();
+  console.log(`[manga] taking up ${hit.title} on her shelf — ${chapters.length} chapter(s)`);
+  return { seriesId: String(hit.id), title: hit.title, chapter: first.chapter, chapterId: first.id, page: 0, pages: first.pages, startedAt: now, lastAt: now, finished: 0, source: 'suwayomi', mangaId: hit.id };
+}
+
+/**
+ * The bookmark she had on MangaDex, carried to the same chapter on her shelf
+ * the first time the shelf is there, so a change of server is not a lost
+ * place. Best effort: if the title or the chapter is not found she reads on
+ * where she was.
+ */
+async function carryReadingToShelf(link: Suwayomi, reading: Reading): Promise<Reading> {
+  try {
+    const found = await link.search(reading.title);
+    const hit = found.find(item => item.title.toLowerCase() === reading.title.toLowerCase()) ?? found[0];
+    if (!hit) return reading;
+    await link.takeUp(hit.id);
+    const chapters = await link.chapters(hit.id);
+    const same = chapters.find(chapter => String(chapter.number) === reading.chapter) ?? chapters[0];
+    if (!same) return reading;
+    const moved: Reading = { ...reading, seriesId: String(hit.id), title: hit.title, chapter: String(same.number), chapterId: String(same.id), pages: same.pages > 0 ? same.pages : 0, page: String(same.number) === reading.chapter ? reading.page : 0, source: 'suwayomi', mangaId: hit.id };
+    store.set('her.reading', moved);
+    await link.mark(hit.id, moved.chapter, moved.page).catch(() => {});
+    console.log(`[manga] carried ${reading.title} to her shelf — chapter ${moved.chapter}, page ${moved.page + 1}`);
+    return moved;
+  } catch (error) {
+    console.warn('[manga] could not carry her bookmark to the shelf:', error instanceof Error ? error.message : error);
+    return reading;
+  }
+}
+
+/** A series taken up by name — on her shelf when there is one, MangaDex otherwise. */
+async function startReading(title: string): Promise<Reading | null> {
+  const link = suwayomiLink();
+  if (link) return startReadingOnShelf(link, title);
+  const found = await mangaGet(searchUrl(title)) as { data?: { id: string; attributes?: { title?: Record<string, string> } }[] } | null;
+  const hit = found?.data?.[0];
+  if (!hit) return null;
+  const chapters = await chaptersOf(hit.id);
+  if (!chapters.length) return null;
+  const first = chapters[0];
+  const name = hit.attributes?.title?.en ?? title;
+  console.log(`[manga] taking up ${name} — ${chapters.length} readable chapter(s)`);
+  const now = new Date().toISOString();
+  return { seriesId: hit.id, title: name, chapter: first.chapter, chapterId: first.id, page: 0, pages: first.pages, startedAt: now, lastAt: now, finished: 0, source: 'mangadex' };
+}
+
+type MangaRead = { title: string; chapter: string; pages: [number, number]; note: string; stands: string };
+
+async function readSomeManga(config: ProviderConfig, options: { force?: boolean; title?: string; pages?: number } = {}): Promise<MangaRead | null> {
   const now = zonedNow(CHAT_TIMEZONE);
   const { prefs } = getPush();
-  if (!inQuietHours(prefs, now)) return;
-  if (readingMangaNow) return;
+  if (!options.force && !inQuietHours(prefs, now)) return null;
+  if (readingMangaNow) return null;
   const vision = readVisionConfig(store.get('vision'));
-  if (!vision.enabled) return;
+  if (!vision.enabled) return null;
   const today = nightKey(now);
-  if ((store.get('her.readingOn') as string | undefined) === today) return;
+  if (!options.force && (store.get('her.readingOn') as string | undefined) === today) return null;
 
   let reading = readReading(store.get('her.reading'));
   readingMangaNow = true;
   try {
+    const link = suwayomiLink();
+    if (options.title && (!reading || reading.title.toLowerCase() !== options.title.toLowerCase())) reading = await startReading(options.title);
     if (!reading) reading = await pickSomethingToRead();
-    if (!reading) return;
-    const { from, to } = tonightsPages(reading);
-    if (to <= from) return;
-    const at = await mangaGet(pagesUrl(reading.chapterId)) as { baseUrl?: string; chapter?: { hash?: string; data?: string[] } } | null;
-    const files = at?.chapter?.data ?? [];
-    if (!at?.baseUrl || !at.chapter?.hash || !files.length) { console.warn(`[manga] no pages came back for ${reading.title} ch ${reading.chapter}`); return; }
+    if (!reading) return null;
+    // A bookmark from before the shelf: carried over once, to the same chapter.
+    if (link && reading.source !== 'suwayomi') reading = await carryReadingToShelf(link, reading);
+    const onShelf = link !== null && reading.source === 'suwayomi' && typeof reading.mangaId === 'number';
+    // The pages: from her shelf with her token, or from MangaDex as before.
+    let files: string[] = [];
+    if (onShelf) {
+      files = await link!.pages(Number(reading.chapterId));
+      // Suwayomi does not count pages until they are fetched.
+      if (reading.pages <= 0 && files.length) { reading = { ...reading, pages: files.length }; store.set('her.reading', reading); }
+    } else {
+      const at = await mangaGet(pagesUrl(reading.chapterId)) as { baseUrl?: string; chapter?: { hash?: string; data?: string[] } } | null;
+      files = at?.baseUrl && at.chapter?.hash ? (at.chapter.data ?? []).map(file => `${at.baseUrl}/data/${at.chapter!.hash}/${file}`) : [];
+    }
+    const { from, to } = tonightsPages(reading, options.pages);
+    if (to <= from) return null;
+    if (!files.length) { console.warn(`[manga] no pages came back for ${reading.title} ch ${reading.chapter}`); return null; }
     const endpoint = visionEndpoint(store.get('ai.config') as ProviderConfig | undefined, vision);
     const read: string[] = [];
     for (let page = from; page < Math.min(to, files.length); page++) {
       try {
-        const bytes = await mangaBytes(`${at.baseUrl}/data/${at.chapter.hash}/${files[page]}`);
+        const bytes = onShelf ? await link!.page(files[page]) : await mangaBytes(files[page]);
         if (!bytes) continue;
         // Held between pages: a cold start costs more than the page does.
         const sighting = await look(bytes.toString('base64'), vision, endpoint, modelHeaders(endpoint), net.fetch,
@@ -10480,7 +10569,7 @@ async function readSomeManga(config: ProviderConfig) {
         console.warn(`[manga] could not read page ${page + 1}:`, error instanceof Error ? error.message : error);
       }
     }
-    if (!read.length) { console.warn('[manga] nothing came off the pages tonight'); return; }
+    if (!read.length) { console.warn('[manga] nothing came off the pages tonight'); return null; }
     // Where she got to, not how many came back. Two of tonight's twelve pages
     // timed out, and counting successes moved the bookmark to 10 — which skips
     // the two that failed for ever and re-reads the two after them tomorrow. A
@@ -10492,16 +10581,25 @@ async function readSomeManga(config: ProviderConfig) {
     const take = parseReadingTake(raw);
     // The bookmark moves whether or not she had anything to say: the pages were
     // read either way, and re-reading them tomorrow is the one outcome to avoid.
-    const chapters = await chaptersOf(reading.seriesId);
-    const next = chapters[chapters.findIndex(c => c.id === reading!.chapterId) + 1] ?? null;
+    let next: ChapterRef | null = null;
+    if (onShelf) {
+      const chapters = await link!.chapters(reading.mangaId!);
+      const index = chapters.findIndex(c => String(c.id) === reading!.chapterId);
+      next = index >= 0 && chapters[index + 1] ? shelfChapterRef(chapters[index + 1]) : null;
+    } else {
+      const chapters = await chaptersOf(reading.seriesId);
+      next = chapters[chapters.findIndex(c => c.id === reading!.chapterId) + 1] ?? null;
+    }
     const moved = afterReading(reading, readTo, next, new Date().toISOString());
     store.set('her.reading', moved);
     store.set('her.readingOn', today);
-    if (!take) { console.log(`[manga] read ${reading.title} ch ${reading.chapter} pp.${from + 1}-${readTo}, nothing to say about it`); return; }
+    // Her place, mirrored where his reader never looks (suwayomi.ts).
+    if (onShelf) await link!.mark(reading.mangaId!, moved.chapter, moved.page).catch(error => console.warn('[manga] could not mirror her bookmark:', error instanceof Error ? error.message : error));
+    if (!take) { console.log(`[manga] read ${reading.title} ch ${reading.chapter} pp.${from + 1}-${readTo}, nothing to say about it`); return { title: reading.title, chapter: reading.chapter, pages: [from + 1, readTo], note: '', stands: '' }; }
     store.set('nights', keepNights(getNights(), {
       day: today, at: new Date().toISOString(),
       about: `${reading.title}, chapter ${reading.chapter}`,
-      note: take.note, sources: [`https://mangadex.org/chapter/${reading.chapterId}`], interest: reading.title,
+      note: take.note, sources: [onShelf ? `${readSuwayomiConfig(store.get('manga'))?.url ?? ''}/manga/${reading.mangaId}` : `https://mangadex.org/chapter/${reading.chapterId}`], interest: reading.title,
     }));
     if (take.stands) {
       const held = getInterests();
@@ -10510,12 +10608,14 @@ async function readSomeManga(config: ProviderConfig) {
       // is the fault this whole pass exists to correct.
       if (mine) setInterests(held.map(entry => (entry.id === mine.id ? { ...entry, stands: take.stands, lastAt: new Date().toISOString() } : entry)));
     }
-    console.log(`[manga] read ${reading.title} ch ${reading.chapter} pp.${from + 1}-${readTo} — ${take.note.length} chars${take.stands ? ` — stands: ${take.stands.slice(0, 60)}` : ''}`);
+    console.log(`[manga] read ${reading.title} ch ${reading.chapter} pp.${from + 1}-${readTo}${onShelf ? ' (her shelf)' : ''} — ${take.note.length} chars${take.stands ? ` — stands: ${take.stands.slice(0, 60)}` : ''}`);
+    return { title: reading.title, chapter: reading.chapter, pages: [from + 1, readTo], note: take.note, stands: take.stands || '' };
   } catch (error) {
     console.warn('[manga] the night\'s reading came to nothing:', error instanceof Error ? error.message : error);
   } finally {
     readingMangaNow = false;
   }
+  return null;
 }
 
 /** Their public API asks for a real name and a gentle hand; this gives both. */
@@ -10553,7 +10653,17 @@ async function chaptersOf(seriesId: string): Promise<ChapterRef[]> {
  * them is the same interest by another route.
  */
 async function pickSomethingToRead(): Promise<Reading | null> {
+  const link = suwayomiLink();
   for (const interest of getInterests()) {
+    if (link) {
+      try {
+        const taken = await startReadingOnShelf(link, interest.name);
+        if (taken) return taken;
+      } catch (error) {
+        console.warn(`[manga] her shelf would not take ${interest.name}:`, error instanceof Error ? error.message : error);
+      }
+      continue;
+    }
     const found = await mangaGet(searchUrl(interest.name)) as { data?: { id: string; attributes?: { title?: Record<string, string> } }[] } | null;
     const hit = found?.data?.[0];
     if (!hit) continue;
