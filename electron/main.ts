@@ -91,7 +91,7 @@ import { setDefaultAutoSelectFamilyAttemptTimeout } from 'node:net';
 import { readBrowserControlConfig } from './browserctl';
 import { listSessions, openSession, readClaudeCodeConfig, readOpenedSessions, resolveSessionDir, sessionName, SESSIONS_KEPT as CLAUDE_SESSIONS_KEPT, stopSession, type SessionHost } from './claudesession';
 import { ShellGate, SERVER_NOTE, denied, ledgerEntry, readShellConfig, runCommand } from './shell';
-import { SERVER_LOOK_NOTE } from './prompt';
+import { serverLookNote } from './prompt';
 import { Downloads, downloadsReady, readDownloadsConfig } from './downloads';
 import { applyDecay, DEEP_RECALL_LIMIT, findSuperseded, formationPrompt, formationWindows, MEMORIES_PER_DAY, readFormation, type FormedNote, formatMemoryPrompt, isExplicitRecall, closeEvents, isWorthAnEvent, isWorthKeeping, isWorthRemembering, MEMORY_KINDS, migrateMemories, monthFoldPrompt, pruneMemories, readsAsSecondPerson, rememberInto, retrieveMemories, semanticSimilarities, summaryPrompt, supersede, THIRD_PERSON_AGAIN, vectorSimilarity, type ForgettingEntry, type MemoryKind, type MemoryRecord, type MemorySource, type RetrievalFactors, type ScoredMemory, type SessionSummary } from './memory';
 import { consolidateMemories, type ConsolidationChange } from './consolidation';
@@ -7358,7 +7358,7 @@ const promptState = {
     tastes: tastesInstruction(getInterests()),
     diary: diaryContext(recentEntries(app.getPath('home'), 2)),
     directionsNote: directions?.note,
-    serverNote: shellTurn ? SERVER_NOTE : machineTurn ? SERVER_LOOK_NOTE : '',
+    serverNote: shellTurn ? SERVER_NOTE : machineTurn ? serverLookNote(readSystemConfig().level) : '',
   };
   // A hosted brain reads the whole prompt before its first word, so its system
   // message holds only the invariant blocks — her rules and her persona — and
