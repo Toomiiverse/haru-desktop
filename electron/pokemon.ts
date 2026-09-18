@@ -155,7 +155,13 @@ export function describeGame(state: GameState, map: string, screen: string[], la
   const lines: string[] = [];
   const player = state.player ?? {};
   const position = player.position ?? {};
-  lines.push(`Where: ${whereIs(state)} at (${position.x ?? '?'}, ${position.y ?? '?'}), facing ${player.facing ?? '?'}. Badges: ${badgeCount(state)}${player.badges?.length ? ` (${player.badges.join(', ')})` : ''}. Money: ${player.money ?? 0}.`);
+  // Before a game exists the worker reads uninitialised memory — "Pallet Town
+  // at 0,0", a name of question marks — and she walked about on the copyright
+  // screen for three turns (2026-09-18). No name and no words: it is the title.
+  if (notStarted(state) && !screen.length) {
+    return ['The game has not started yet: the boot or title screen is up, and you are not anywhere. Press start to get to the menu — ["press_start", "wait_120", "press_start", "wait_120"] — then NEW GAME will be on the screen to choose with press_a.', lastThought ? `Last turn you thought: "${lastThought}"` : ''].filter(Boolean).join('\n');
+  }
+  lines.push(`Where: ${notStarted(state) ? 'nowhere yet — the game is just beginning' : whereIs(state)} at (${position.x ?? '?'}, ${position.y ?? '?'}), facing ${player.facing ?? '?'}. Badges: ${badgeCount(state)}${player.badges?.length ? ` (${player.badges.join(', ')})` : ''}. Money: ${player.money ?? 0}.`);
   const party = state.party ?? [];
   lines.push(party.length
     ? `Party: ${party.map(mon => `${mon.nickname || mon.species || '?'} (${mon.species ?? '?'}) L${mon.level ?? '?'} ${mon.hp ?? '?'}/${mon.max_hp ?? '?'} HP${mon.status ? ` [${mon.status}]` : ''}${mon.moves?.length ? ` — ${mon.moves.join(', ')}` : ''}`).join('; ')}.`
@@ -184,6 +190,8 @@ export function newSitting(now: number, state: GameState, startedBy: 'her' | 'hi
 }
 
 const whereIs = (state: GameState) => state.map?.map_name ?? `map ${state.map?.map_id ?? '?'}`;
+/** No save and no name yet: the worker's reads mean nothing until she has been named. */
+export const notStarted = (state: GameState) => !state.player?.name || /^\?+$/.test(state.player.name.trim());
 const badgeCount = (state: GameState) => state.player?.badge_count ?? state.player?.badges?.length ?? 0;
 const spot = (state: GameState, screen: string[] = []) => `${state.map?.map_id}:${state.player?.position?.x},${state.player?.position?.y}:${screen.join('|')}:${state.battle?.in_battle ? 'b' : ''}`;
 

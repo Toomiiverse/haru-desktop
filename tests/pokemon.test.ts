@@ -41,6 +41,14 @@ test('the game is put into words: where, who, the text box, the battle, the scre
   assert.match(menu, /  >NEW GAME\n  OPTION/);
   assert.match(text, /Last turn you thought: "Heading for the gym\."/);
   assert.match(text, /not moved for a few turns/);
+  // Before a game exists the worker reads junk ("Pallet Town at 0,0", a name of question marks): she is told it is the title screen.
+  const boot = describeGame({ player: { name: '???????????', position: { x: 0, y: 0 } }, map: { map_id: 0, map_name: 'Pallet Town' }, party: [] }, '. @ .', [], '', false);
+  assert.match(boot, /has not started yet/);
+  assert.match(boot, /press_start/);
+  assert.doesNotMatch(boot, /Pallet Town/);
+  const intro = describeGame({ player: { name: '???????????' }, map: { map_id: 0, map_name: 'Pallet Town' }, party: [] }, '', ['Hello there!', 'Welcome to the'], '', false);
+  assert.match(intro, /nowhere yet/);
+  assert.match(intro, /Hello there!/);
   const fight = describeGame({ ...STATE, dialog: null, battle: { in_battle: true, type: 'wild', enemy: { species: 'Rattata', level: 3, hp: 9, max_hp: 12 } } }, '', [], '', false);
   assert.match(fight, /IN A BATTLE \(wild\): against Rattata L3 9\/12 HP\./);
 });
