@@ -2478,7 +2478,13 @@ function startLinuxHelper() {
   const pollDesktop = async () => {
     if (!tools.foreground) return;
     const win = await linuxActiveWindow();
-    if (!win) { lastForeground = ''; return; }
+    if (!win) {
+      // The window she was watching is gone — closed, or the desktop is bare.
+      // Without this she stays stepped aside for a film that is no longer on.
+      lastForeground = '';
+      if (wasFullscreen) { wasFullscreen = false; handleHelperLine('fullscreen off'); }
+      return;
+    }
     const line = `${win.process}|${win.title}|`;
     if (line !== lastForeground) {
       lastForeground = line;

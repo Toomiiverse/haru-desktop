@@ -234,10 +234,15 @@ export function findApps(
 
 /**
  * Opened through `gio`, which understands the entry's own `Exec` line —
- * including the field codes, which a hand-rolled split would mangle.
+ * including the field codes, which a hand-rolled split would mangle. Where
+ * `gio` is not installed, `gtk-launch` does the same job by desktop id.
  */
-export function launch(app: App): void {
-  const child = spawn('gio', ['launch', app.target], { detached: true, stdio: 'ignore' });
+export function launch(app: App, pathEnv = process.env.PATH ?? ''): void {
+  const id = path.basename(app.target).replace(/\.desktop$/i, '');
+  const choice: { file: string; args: string[] } = onPath('gio', pathEnv)
+    ? { file: 'gio', args: ['launch', app.target] }
+    : { file: 'gtk-launch', args: [id] };
+  const child = spawn(choice.file, choice.args, { detached: true, stdio: 'ignore' });
   child.unref();
 }
 
