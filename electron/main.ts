@@ -76,7 +76,7 @@ import { createDesktopShortcut, desktopShortcutPath, isAutoStartEnabled, setAuto
 import { answersThePrompt, CUE_NOTE, isCue, stageNote, dropRoleHeader, dropTackedOnParagraphs, dropInventedContact, dropInventedScreenTalk, dropRepeatedAgendaMentions, dropRepeatedParagraphs, dropStageDirections, dropRepeatedOpener, dropEchoOpener, dropRepeatedSentences, fixStatedClock, fixStatedReminderTime, fixStatedMinutes, dropOverusedEmoji, oneEmojiAtMost, dropClosingOrder, thinksAloud } from './reply';
 import { runToolLoop } from './toolloop';
 import { chatTools, coerceKnowledgeCategory, downloadsRelevant, machineRelevant, runChatTool, shellRelevant, steadyTable, type ToolAvailability, type ToolDeps } from './tools';
-import { describeMyself, describeSettings, readSelfSnapshot } from './self';
+import { describeMyself, describeSettings, planChange, readSelfSnapshot, SETTINGS, type SettingPlan } from './self';
 import { pickBreath } from './breaths';
 import { createMemoryStore } from './memorystore';
 import { createKnowledgeStore } from './knowledgestore';
@@ -140,7 +140,7 @@ import { inQuietHours, newVapidKeys, pushRequest, readPushDevices, readPushPrefs
 import { CHECK_EVERY_MS, describeUpdate, progressStep, whyNotCheck, type UpdateState } from './updates';
 import { BREVITY, summonedLine } from './summoned';
 import { CHOICES_TOOL, readChoices } from './choices';
-import { quickAnswer, type AgendaLine } from './quick';
+import { quickAnswer, settingCommand, type AgendaLine } from './quick';
 import { newTrace } from './trace';
 import { KNOWLEDGE_CATEGORIES, knowledgeStats, type KnowledgeCategory } from './knowledge';
 import type { IngestResult } from './ingestion';
@@ -5144,16 +5144,7 @@ function toolDeps(): ToolDeps {
         return null;
       }
     },
-    changeMySetting: async plan => {
-      // A backup first, as any hand edit of config.json gets; then the value,
-      // which every reader of these keys picks up on its next look; then the
-      // vault page that says how she runs.
-      store.backup(`her-edit-${plan.name}`);
-      store.set(plan.path, plan.to);
-      console.log(`[self] changed ${plan.name} (${plan.path}): ${JSON.stringify(plan.from)} -> ${JSON.stringify(plan.to)}, at their word`);
-      refreshConfigurationNote();
-      return { ok: true, note: 'In effect now.' };
-    },
+    changeMySetting: plan => applyPlanAtTheirWord(plan),
     lastResults: () => lastResults,
     lastSearchQuery: () => lastSearchQuery,
     rememberSearch: (query, results) => { lastSearchQuery = query; lastResults = results; },
@@ -8081,6 +8072,35 @@ async function nudgeForPhone(): Promise<{ line: string; about: string; eventId: 
  * still gates from outside: while she is ignoring, quick.ts answers nothing
  * and the caller lets the full path carry the silence.
  */
+/**
+ * A setting changed in code at his explicit word, before any model is asked
+ * (quick.ts settingCommand). The same backup, write, log and note as the
+ * change_setting tool's path — that is applyPlanAtTheirWord — and a scripted
+ * line back, in her register, since the model would not do it (2026-09-18).
+ */
+async function settingSaid(text: string): Promise<{ reply: string; tier: 2 } | null> {
+  const command = settingCommand(text);
+  if (!command) return null;
+  const setting = SETTINGS[command.name];
+  const verdict = planChange(command.name, command.value, store.get(setting.path));
+  if (!verdict.ok) return { reply: verdict.error, tier: 2 };
+  const meaning = (level: number) => level >= 3 ? 'I run what you hand me, once you have said yes to each one' : level === 2 ? 'I look, and act when you say the word' : 'I look and tell you what I see';
+  if (verdict.unchanged) return { reply: `It is already at ${command.value} — ${meaning(command.value)}.`, tier: 2 };
+  await applyPlanAtTheirWord(verdict.plan);
+  return { reply: `Done. Level ${command.value} now — ${meaning(command.value)}. Do not make it boring.`, tier: 2 };
+}
+
+async function applyPlanAtTheirWord(plan: SettingPlan): Promise<{ ok: boolean; note: string }> {
+  // A backup first, as any hand edit of config.json gets; then the value,
+  // which every reader of these keys picks up on its next look; then the
+  // vault page that says how she runs.
+  store.backup(`her-edit-${plan.name}`);
+  store.set(plan.path, plan.to);
+  console.log(`[self] changed ${plan.name} (${plan.path}): ${JSON.stringify(plan.from)} -> ${JSON.stringify(plan.to)}, at their word`);
+  refreshConfigurationNote();
+  return { ok: true, note: 'In effect now.' };
+}
+
 function quickHit(text: string, history: { role?: string; content?: string }[]) {
   const mood = getMood();
   const now = zonedNow(CHAT_TIMEZONE);
@@ -11391,7 +11411,7 @@ function webDeps(): WebDeps {
       // start a hosted pod pays. Falls through when the message needs judgement
       // — and a message carrying a file always does.
       const trace = newTrace();
-      const quick = files.length ? null : quickHit(text, history);
+      const quick = files.length ? null : (await settingSaid(text)) ?? quickHit(text, history);
       trace.mark('intent');
       if (quick) {
         announceQuick(quick, text);
@@ -11443,7 +11463,7 @@ function webDeps(): WebDeps {
         return { reply: line, ignored: false };
       }
       const trace = newTrace();
-      const quick = files.length ? null : quickHit(text, history);
+      const quick = files.length ? null : (await settingSaid(text)) ?? quickHit(text, history);
       trace.mark('intent');
       if (quick) {
         onChunk(quick.reply);
