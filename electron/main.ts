@@ -8980,6 +8980,7 @@ function currentStanding() {
   const days = getSessions().map(session => session.day).filter(Boolean).sort();
   return standingFrom({
     vitals,
+    asleep: herAsleepNow(),
     irritation: mood.irritation,
     ego: mood.ego,
     grudge: mood.grudge ?? 0,

@@ -121,6 +121,20 @@ test('nothing known yet still renders', () => {
   assert.match(screen.grudge.note, /Nothing held against you/);
 });
 
+test('asleep, the face is the sleeping one whatever the meters say', () => {
+  const base = {
+    vitals: { ...DEFAULT_VITALS, happiness: 0.95, energy: 0.95, sleepiness: 0 }, irritation: 0, ego: 0, grudge: 0, ignoredToday: 0,
+    daysTalked: 0, kept: [], weekday: new Intl.DateTimeFormat('en-AU', { weekday: 'long', timeZone: 'UTC' }), now: Date.parse('2026-08-29T11:30:00.000Z'), today: '2026-08-29',
+  };
+  const awake = standingFrom(base);
+  assert.equal(awake.asleep, false);
+  assert.notEqual(awake.face, 'sleepy');
+  const asleep = standingFrom({ ...base, asleep: true });
+  assert.equal(asleep.asleep, true);
+  assert.equal(asleep.face, 'sleepy');
+  assert.match(asleep.mood, /^Asleep/);
+});
+
 test('the list she is waiting on agrees with the window she chases in', () => {
   const weekday = new Intl.DateTimeFormat('en-AU', { weekday: 'long', timeZone: 'UTC' });
   const items = [

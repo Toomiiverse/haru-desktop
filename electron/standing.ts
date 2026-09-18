@@ -88,6 +88,8 @@ export function waitingFrom(
 }
 
 export type Standing = {
+  /** Asleep by her own schedule; the phone holds her sleeping face while it is true. */
+  asleep: boolean;
   emotion: EmotionName;
   face: HaruEmotion;
   mood: string;
@@ -104,6 +106,8 @@ export type Standing = {
 
 export type StandingInput = {
   vitals: Vitals;
+  /** She is in her own sleeping hours: whatever the meters say, the face is the sleeping one. */
+  asleep?: boolean;
   irritation: number;
   ego: number;
   grudge: number;
@@ -226,12 +230,14 @@ export function daysApart(from: string, to: string): number {
 
 export function standingFrom(input: StandingInput): Standing {
   const { vitals } = input;
-  const emotion = restingEmotion(vitals, input.irritation, input.ego);
+  const asleep = input.asleep === true;
+  const emotion = asleep ? 'sleepy' : restingEmotion(vitals, input.irritation, input.ego);
   const spoke = Date.parse(input.lastMessageAt ?? '');
   return {
+    asleep,
     emotion,
     face: MOOD_TO_EMOTION[emotion],
-    mood: moodLine(emotion, input.irritation, input.grudge),
+    mood: asleep ? 'Asleep. She will answer when she wakes.' : moodLine(emotion, input.irritation, input.grudge),
     bond: bondFrom(vitals, input.grudge, input.daysTalked),
     // Ordered by how much each one changes the way she answers, not
     // alphabetically and not by the shape of the Vitals type.
