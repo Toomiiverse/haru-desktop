@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Haru
+GenericName=Desktop Companion
+Comment=Desktop companion
+Exec=__HOME__/.local/bin/haru
+Icon=__APP_DIR__/build/icon.png
+Terminal=false
+Categories=Utility;
+StartupNotify=true
+StartupWMClass=haru-desktop

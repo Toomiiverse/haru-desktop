@@ -90,4 +90,22 @@ module.exports = {
         }
       : {}),
   },
+  // The Linux half of the same build. AppImage because it is the one thing that
+  // runs on any distribution without a package manager knowing her, and deb
+  // because that is what the distribution this was written on installs. The
+  // desktop entry is generated from the block below, so she appears in the menu
+  // with an icon the launcher can find.
+  linux: {
+    icon: 'build/icon.png',
+    category: 'Utility',
+    target: ['AppImage', 'deb'],
+    maintainer: 'Toomiiverse <toomii@haruserver.tail6da04d.ts.net>',
+    synopsis: 'A desktop companion who lives on your machine',
+    desktop: {
+      Name: 'Haru',
+      Comment: 'Desktop companion',
+      Categories: 'Utility;',
+      StartupWMClass: 'haru-desktop',
+    },
+  },
 };

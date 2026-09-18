@@ -1,0 +1,45 @@
+#!/bin/bash
+# Launch (or bring back) Haru — a systemd user service.
+#
+# Closing her window with a keyboard shortcut leaves the app resident but
+# windowless, so `systemctl start` is a no-op and focusing finds nothing. In
+# that case ask the resident instance to show her window again by starting a
+# second instance, which surfaces the first and exits (the app's own
+# `second-instance` handling). A service restart is the fallback.
+set -u
+
+APP="__APP_DIR__"
+
+focus() {
+  if command -v hyprctl >/dev/null 2>&1; then
+    if hyprctl -j clients 2>/dev/null | grep -qi '"class": *"haru-desktop"'; then
+      hyprctl dispatch focuswindow 'class:^(haru-desktop|Electron)$' >/dev/null 2>&1
+      return 0
+    fi
+  fi
+  if command -v omarchy-hyprland-focus-app >/dev/null 2>&1; then
+    omarchy-hyprland-focus-app haru-desktop 2>/dev/null && return 0
+  fi
+  return 1
+}
+
+if ! systemctl --user is-active --quiet haru.service; then
+  systemctl --user start haru.service
+elif ! focus; then
+  ( cd "$APP" && setsid "$APP/node_modules/.bin/electron" . --no-sandbox >/dev/null 2>&1 & )
+fi
+
+for _ in $(seq 1 80); do
+  focus && exit 0
+  sleep 0.25
+done
+
+# Fallback: a restart always recreates the window (see the unit's pkill guards).
+systemctl --user restart haru.service
+for _ in $(seq 1 80); do
+  focus && exit 0
+  sleep 0.25
+done
+
+notify-send "Haru" "Could not open her window. Try: systemctl --user restart haru.service" 2>/dev/null || true
+exit 1

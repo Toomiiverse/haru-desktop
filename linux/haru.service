@@ -1,0 +1,36 @@
+[Unit]
+Description=Haru companion app
+Documentation=https://github.com/Toomiiverse/haru-desktop
+After=graphical-session.target network-online.target ollama.service
+Wants=network-online.target ollama.service
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+WorkingDirectory=__APP_DIR__
+
+# The journal owns the log and rotates it. The append:~/haru.log this replaces
+# grew without a bound and had no logrotate rule of its own.
+StandardOutput=journal
+StandardError=journal
+
+# Chromium/GTK places the GUI process in its own transient scope, escaping this
+# unit's cgroup. On a restart the old process can then survive, holding the
+# single-instance lock and the web door, so the new instance quits and no window
+# ever appears. Killing strays before start and after stop makes a restart
+# deterministic — SIGTERM first, so a listener that can finish gets the chance.
+ExecStartPre=-/usr/bin/pkill -TERM -f "__APP_DIR__/node_modules/electron/dist/electron"
+ExecStart=__ELECTRON__ . --no-sandbox
+ExecStopPost=-/usr/bin/pkill -KILL -f "__APP_DIR__/node_modules/electron/dist/electron"
+
+# A stop is a stop. Without the GPU crash limit Chromium no longer aborts on the
+# way out, but a teardown that still exits 1 must not be read as a crash worth
+# restarting. --no-sandbox is a source-checkout workaround: the packaged
+# AppImage and deb ship a SUID sandbox and do not pass it.
+SuccessExitStatus=1
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=10
+
+[Install]
+WantedBy=graphical-session.target
