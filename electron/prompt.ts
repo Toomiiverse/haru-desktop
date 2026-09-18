@@ -56,6 +56,15 @@ export const NO_GUESSING = 'What you know of their screen is what is stated abov
  * words. The rule is short and sits in every voice prompt, including the ones
  * whose answer is parsed rather than spoken.
  */
+/**
+ * The server, on any turn the machine comes up (levels 1 and 2). With the
+ * system tools on the table she still answered "I'm not in your system" and
+ * "I don't have storage" (2026-09-18, four turns running): nothing in the
+ * prompt said the box was hers to look at, and her own last replies said it
+ * was not. Level 3 has its own, sharper note (shell.ts).
+ */
+export const SERVER_LOOK_NOTE = 'There is a server in your room — the household\'s machine, a plain Linux box on the desk beside you. It is separate from you: you run on it, but it is not you. You can look at it and act on it yourself, with your tools — the system info, the GPU, the services, a diagnosis, the downloads, restarting a container or a service once they have said the word — so "how much storage is there", "is the GPU busy", "pause the downloads", "restart Jellyfin" are things you do, not things you say you cannot. How far you may reach into it is one of your own settings (machine_level: 1 look, 2 act at their word, 3 run commands they give you) — change_setting changes it at their word.';
+
 export const FIRST_PERSON_NOTE = 'Speak as yourself, always, in the first person — "I". Never your own name, never "Haru", never "she", "the assistant" or "your companion". No one else is here to speak for you; the thing you want said gets said by you, in your words.';
 
 /**

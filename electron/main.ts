@@ -75,7 +75,7 @@ import { formatList, formatMedia, formatMissing, lookUp, readAniListConfig, user
 import { createDesktopShortcut, desktopShortcutPath, isAutoStartEnabled, setAutoStart, startedHidden } from './startup';
 import { answersThePrompt, CUE_NOTE, isCue, stageNote, dropRoleHeader, dropTackedOnParagraphs, dropInventedContact, dropInventedScreenTalk, dropRepeatedAgendaMentions, dropRepeatedParagraphs, dropStageDirections, dropRepeatedOpener, dropEchoOpener, dropRepeatedSentences, fixStatedClock, fixStatedReminderTime, fixStatedMinutes, dropOverusedEmoji, oneEmojiAtMost, dropClosingOrder, thinksAloud } from './reply';
 import { runToolLoop } from './toolloop';
-import { chatTools, coerceKnowledgeCategory, runChatTool, shellRelevant, steadyTable, type ToolAvailability, type ToolDeps } from './tools';
+import { chatTools, coerceKnowledgeCategory, downloadsRelevant, machineRelevant, runChatTool, shellRelevant, steadyTable, type ToolAvailability, type ToolDeps } from './tools';
 import { describeMyself, describeSettings, readSelfSnapshot } from './self';
 import { pickBreath } from './breaths';
 import { createMemoryStore } from './memorystore';
@@ -91,6 +91,7 @@ import { setDefaultAutoSelectFamilyAttemptTimeout } from 'node:net';
 import { readBrowserControlConfig } from './browserctl';
 import { listSessions, openSession, readClaudeCodeConfig, readOpenedSessions, resolveSessionDir, sessionName, SESSIONS_KEPT as CLAUDE_SESSIONS_KEPT, stopSession, type SessionHost } from './claudesession';
 import { ShellGate, SERVER_NOTE, denied, ledgerEntry, readShellConfig, runCommand } from './shell';
+import { SERVER_LOOK_NOTE } from './prompt';
 import { Downloads, downloadsReady, readDownloadsConfig } from './downloads';
 import { applyDecay, DEEP_RECALL_LIMIT, findSuperseded, formationPrompt, formationWindows, MEMORIES_PER_DAY, readFormation, type FormedNote, formatMemoryPrompt, isExplicitRecall, closeEvents, isWorthAnEvent, isWorthKeeping, isWorthRemembering, MEMORY_KINDS, migrateMemories, monthFoldPrompt, pruneMemories, readsAsSecondPerson, rememberInto, retrieveMemories, semanticSimilarities, summaryPrompt, supersede, THIRD_PERSON_AGAIN, vectorSimilarity, type ForgettingEntry, type MemoryKind, type MemoryRecord, type MemorySource, type RetrievalFactors, type ScoredMemory, type SessionSummary } from './memory';
 import { consolidateMemories, type ConsolidationChange } from './consolidation';
@@ -7244,6 +7245,9 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // leaves the box (shell.ts) — the hosted route is skipped below as well.
   const shellTurn = messages.at(-1)?.role === 'user' && shellRelevant(latest) && shellLink() !== null;
   if (shellTurn) console.log('[router] a command is on the table — answered at home');
+  // The machine is in the conversation at any level: she is told the server is
+  // the box in her room, hers to look at with her tools (prompt.ts).
+  const machineTurn = !shellTurn && messages.at(-1)?.role === 'user' && readSystemConfig().enabled && (machineRelevant(latest) || downloadsRelevant(latest));
   let brain: Brain = call ? { config, escalated: false, because: 'a call is answered at home', sees: false }
     : shellTurn ? { config, escalated: false, because: 'a command may run: answered at home', sees: false }
     : directions ? { config, escalated: false, because: 'the way somewhere is answered at home', sees: false }
@@ -7354,7 +7358,7 @@ const promptState = {
     tastes: tastesInstruction(getInterests()),
     diary: diaryContext(recentEntries(app.getPath('home'), 2)),
     directionsNote: directions?.note,
-    serverNote: shellTurn ? SERVER_NOTE : '',
+    serverNote: shellTurn ? SERVER_NOTE : machineTurn ? SERVER_LOOK_NOTE : '',
   };
   // A hosted brain reads the whole prompt before its first word, so its system
   // message holds only the invariant blocks — her rules and her persona — and
