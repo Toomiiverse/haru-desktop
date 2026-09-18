@@ -414,12 +414,20 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
         const reader = voice.stream.getReader();
         let bytes = 0;
         let whole = false;
+        // Whole samples per frame: an odd-length chunk put every later sample
+        // on the phone half a sample out — static — until the next odd one.
+        let carry: Uint8Array | null = null;
         try {
           for (;;) {
             const { value, done } = await reader.read();
             if (done) { whole = true; break; }
             if (generation !== myGeneration || closed) { await reader.cancel().catch(() => {}); break; }
-            if (value?.byteLength) { bytes += value.byteLength; handlers.onAudio(value); }
+            if (!value?.byteLength) continue;
+            bytes += value.byteLength;
+            let frame = value;
+            if (carry) { const joined = new Uint8Array(carry.byteLength + value.byteLength); joined.set(carry); joined.set(value, carry.byteLength); frame = joined; carry = null; }
+            if (frame.byteLength & 1) { carry = frame.subarray(frame.byteLength - 1); frame = frame.subarray(0, frame.byteLength - 1); }
+            if (frame.byteLength) handlers.onAudio(frame);
           }
         } catch (error) {
           log(`[call] her voice broke off: ${error instanceof Error ? error.message : String(error)}`);
