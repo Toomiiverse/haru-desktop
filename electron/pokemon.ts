@@ -45,12 +45,15 @@ export function readPokemonConfig(games: unknown): PokemonConfig {
 // -- what the worker says ------------------------------------------------------
 
 export type PartyMon = { nickname?: string; species?: string; level?: number; hp?: number; max_hp?: number; status?: string | null; moves?: string[] };
+/** The worker's state as it really comes (checked against a running game 2026-09-18, not its README). */
 export type GameState = {
-  player?: { name?: string; money?: number; badges?: number; badges_list?: string[]; facing?: string; position?: { map_id?: number; map_name?: string; x?: number; y?: number }; play_time?: { hours?: number; minutes?: number } };
+  player?: { name?: string; money?: number; badges?: string[]; badge_count?: number; facing?: string; position?: { x?: number; y?: number }; play_time?: string };
+  map?: { map_id?: number; map_name?: string };
   party?: PartyMon[];
   bag?: { item?: string; quantity?: number }[];
   battle?: { in_battle?: boolean; type?: string; enemy?: { species?: string; level?: number; hp?: number; max_hp?: number } } | null;
-  dialog?: { active?: boolean; text?: string | null } | null;
+  /** A flag only — and one that stays false through Oak's intro. The words come from text(). */
+  dialog?: { active?: boolean } | null;
 };
 
 export type Fetcher = (url: string, init?: { method?: string; headers?: Record<string, string>; body?: string }) => Promise<{ ok: boolean; status: number; text(): Promise<string> }>;
@@ -77,6 +80,16 @@ export class PokemonLink {
   /** The walkability grid around her, from the game's own collision data. */
   async map(): Promise<string> {
     try { return await this.call('/map/ascii'); } catch { return ''; }
+  }
+
+  /** The words on the screen right now — dialog, menus with their cursor ('>'), battle text (serve.py /screen/text). */
+  async text(): Promise<string[]> {
+    try {
+      const lines = (JSON.parse(await this.call('/screen/text')) as { lines?: unknown }).lines;
+      return Array.isArray(lines) ? lines.filter((line): line is string => typeof line === 'string') : [];
+    } catch {
+      return [];
+    }
   }
 
   async act(actions: string[]): Promise<GameState | null> {
@@ -130,19 +143,19 @@ export function parseMove(raw: string): Move | null {
 /** The rules of play, after her persona. */
 export const PLAY_RULES = [
   'This is your own time and your own game: Pokémon Red, on the Game Boy on your desk. Nobody is watching and nobody is being addressed.',
-  'You are shown the game as it is right now — where you are, your party, what the text box says, the battle if there is one, and a map of the screen (@ is you, . is walkable, # is blocked, up is north).',
+  'You are shown the game as it is right now — where you are, your party, the words on the screen (a menu's cursor is ">"), the battle if there is one, and a map of the screen (@ is you, . is walkable, # is blocked, up is north).',
   'Answer with one JSON object and nothing else: {"thought": "a short line in your own voice about what you are doing or what just happened", "actions": ["..."]}.',
   `Actions, at most ${MOVES_PER_TURN} a turn: walk_up, walk_down, walk_left, walk_right (one tile each); press_a, press_b, press_start, press_select, press_up, press_down, press_left, press_right (menus and battles); a_until_dialog_end (read through a text box); wait_60 (a second). Nothing else exists.`,
-  'When a text box is up, read it and press on. In a battle, pick moves from the menu. If you walked into a wall last turn, go another way — the map does not lie.',
+  'When there are words on the screen, read them and press_a to go on (press_b backs out of a menu; in a menu, press_up and press_down move the cursor). While words are up you cannot walk. In a battle, pick from the menu. If you walked into a wall last turn, go another way — the map does not lie.',
   'Play it the way you would: your own names, your own favourites, your own grudges against that one Rattata.',
 ].join(' ');
 
 /** The game, in words, for one turn. */
-export function describeGame(state: GameState, map: string, lastThought: string, stuck: boolean): string {
+export function describeGame(state: GameState, map: string, screen: string[], lastThought: string, stuck: boolean): string {
   const lines: string[] = [];
   const player = state.player ?? {};
   const position = player.position ?? {};
-  lines.push(`Where: ${position.map_name ?? `map ${position.map_id ?? '?'}`} at (${position.x ?? '?'}, ${position.y ?? '?'}), facing ${player.facing ?? '?'}. Badges: ${player.badges ?? 0}${player.badges_list?.length ? ` (${player.badges_list.join(', ')})` : ''}. Money: ${player.money ?? 0}.`);
+  lines.push(`Where: ${whereIs(state)} at (${position.x ?? '?'}, ${position.y ?? '?'}), facing ${player.facing ?? '?'}. Badges: ${badgeCount(state)}${player.badges?.length ? ` (${player.badges.join(', ')})` : ''}. Money: ${player.money ?? 0}.`);
   const party = state.party ?? [];
   lines.push(party.length
     ? `Party: ${party.map(mon => `${mon.nickname || mon.species || '?'} (${mon.species ?? '?'}) L${mon.level ?? '?'} ${mon.hp ?? '?'}/${mon.max_hp ?? '?'} HP${mon.status ? ` [${mon.status}]` : ''}${mon.moves?.length ? ` — ${mon.moves.join(', ')}` : ''}`).join('; ')}.`
@@ -153,8 +166,10 @@ export function describeGame(state: GameState, map: string, lastThought: string,
     const enemy = state.battle.enemy ?? {};
     lines.push(`IN A BATTLE (${state.battle.type ?? '?'}): against ${enemy.species ?? 'something'} L${enemy.level ?? '?'}${enemy.hp !== undefined ? ` ${enemy.hp}/${enemy.max_hp ?? '?'} HP` : ''}.`);
   }
-  if (state.dialog?.active) lines.push(`Text box: ${state.dialog.text ? `"${state.dialog.text.replace(/\s+/g, ' ').trim()}"` : '(something is being said)'}`);
-  if (map.trim()) lines.push(`The screen:\n${map.trim()}`);
+  if (screen.length) lines.push(`Words on the screen:\n${screen.map(line => `  ${line}`).join('\n')}`);
+  else if (state.dialog?.active) lines.push('Something is being said (press_a to go on).');
+  // With words up she cannot walk, and the grid is only noise.
+  if (map.trim() && !screen.length) lines.push(`The screen:\n${map.trim()}`);
   if (lastThought) lines.push(`Last turn you thought: "${lastThought}"`);
   if (stuck) lines.push('You have not moved for a few turns. Whatever you were doing is not working: try something else.');
   return lines.join('\n');
@@ -168,11 +183,13 @@ export function newSitting(now: number, state: GameState, startedBy: 'her' | 'hi
   return { startedAt: now, turns: 0, lastThought: '', from: whereIs(state), stillFor: 0, lastSpot: spot(state), moves: 0, startedBy };
 }
 
-const whereIs = (state: GameState) => state.player?.position?.map_name ?? `map ${state.player?.position?.map_id ?? '?'}`;
-const spot = (state: GameState) => `${state.player?.position?.map_id}:${state.player?.position?.x},${state.player?.position?.y}:${state.dialog?.active ? 'd' : ''}${state.battle?.in_battle ? 'b' : ''}`;
+const whereIs = (state: GameState) => state.map?.map_name ?? `map ${state.map?.map_id ?? '?'}`;
+const badgeCount = (state: GameState) => state.player?.badge_count ?? state.player?.badges?.length ?? 0;
+const spot = (state: GameState, screen: string[] = []) => `${state.map?.map_id}:${state.player?.position?.x},${state.player?.position?.y}:${screen.join('|')}:${state.battle?.in_battle ? 'b' : ''}`;
 
-export function afterTurn(sitting: Sitting, move: Move | null, state: GameState): Sitting {
-  const here = spot(state);
+export function afterTurn(sitting: Sitting, move: Move | null, state: GameState, screen: string[] = []): Sitting {
+  // The words count: a text box that moved on is not standing still.
+  const here = spot(state, screen);
   return { ...sitting, turns: sitting.turns + 1, moves: sitting.moves + (move?.actions.length ?? 0), lastThought: move?.thought || sitting.lastThought, stillFor: here === sitting.lastSpot ? sitting.stillFor + 1 : 0, lastSpot: here };
 }
 
@@ -203,12 +220,12 @@ export function sittingSummary(sitting: Sitting, state: GameState, now: number, 
   const minutes = Math.max(1, Math.round((now - sitting.startedAt) / 60_000));
   const party = (state.party ?? []).map(mon => `${mon.nickname || mon.species} L${mon.level}`).join(', ') || 'no party yet';
   const to = whereIs(state);
-  return `Played for ${minutes} min (${sitting.turns} turns): ${sitting.from === to ? `around ${to}` : `${sitting.from} → ${to}`}; ${state.player?.badges ?? 0} badge(s); party ${party}. Stopped because ${why}.${sitting.lastThought ? ` Last thought: "${sitting.lastThought}"` : ''}`;
+  return `Played for ${minutes} min (${sitting.turns} turns): ${sitting.from === to ? `around ${to}` : `${sitting.from} → ${to}`}; ${badgeCount(state)} badge(s); party ${party}. Stopped because ${why}.${sitting.lastThought ? ` Last thought: "${sitting.lastThought}"` : ''}`;
 }
 
 /** One line for her own-life block: where her run stands. */
 export function runNote(state: GameState | null, lastSummary: string, playing: boolean): string {
   if (!state) return '';
   const party = (state.party ?? []).map(mon => `${mon.nickname || mon.species} L${mon.level}`).join(', ');
-  return `Your Pokémon Red run (yours, on your own Game Boy — these are facts, read off the game): ${state.player?.badges ?? 0} badge(s), ${party ? `party ${party}` : 'no Pokémon yet'}, last seen in ${whereIs(state)}.${playing ? ' You are in the middle of a sitting right now.' : ''}${lastSummary ? ` Last sitting: ${lastSummary}` : ''}`;
+  return `Your Pokémon Red run (yours, on your own Game Boy — these are facts, read off the game): ${badgeCount(state)} badge(s), ${party ? `party ${party}` : 'no Pokémon yet'}, last seen in ${whereIs(state)}.${playing ? ' You are in the middle of a sitting right now.' : ''}${lastSummary ? ` Last sitting: ${lastSummary}` : ''}`;
 }

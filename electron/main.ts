@@ -10561,8 +10561,8 @@ async function startPokemon(startedBy: 'her' | 'him'): Promise<Record<string, un
   const state = await link.state();
   pokemonSitting = newSitting(Date.now(), state, startedBy);
   store.set('her.pokemon.lastState', state);
-  console.log(`[pokemon] she sat down to play (${startedBy === 'him' ? 'at his word' : 'her own idea'}) — ${state.player?.position?.map_name ?? 'somewhere'}, ${state.player?.badges ?? 0} badge(s)`);
-  return { started: true, where: state.player?.position?.map_name, badges: state.player?.badges ?? 0, note: `You have sat down to play; it goes on in the background for up to ${config.sessionMinutes} minutes and stops when they talk to you. Say you are off to play — do not narrate moves you have not made yet.` };
+  console.log(`[pokemon] she sat down to play (${startedBy === 'him' ? 'at his word' : 'her own idea'}) — ${state.map?.map_name ?? 'somewhere'}, ${state.player?.badge_count ?? 0} badge(s)`);
+  return { started: true, where: state.map?.map_name, badges: state.player?.badge_count ?? 0, note: `You have sat down to play; it goes on in the background for up to ${config.sessionMinutes} minutes and stops when they talk to you. Say you are off to play — do not narrate moves you have not made yet.` };
 }
 async function endPokemon(why: string): Promise<string> {
   const sitting = pokemonSitting;
@@ -10592,13 +10592,15 @@ async function pokemonTick(): Promise<void> {
     if (!brain?.model) return;
     const state = await link.state();
     const map = await link.map();
+    // The words on the screen: /state carries none, and its dialog flag sleeps through Oak's intro.
+    const screen = await link.text();
     const character = getActiveCharacter();
-    const raw = await ollamaQuipLong([character.identity, character.style, POKEMON_PLAY_RULES].join('\n\n'), describeGame(state, map, pokemonSitting.lastThought, pokemonSitting.stillFor >= 3), brain);
-    // Nothing usable from her: a text box is read through, anything else waits a turn.
-    const move = parseMove(raw) ?? (state.dialog?.active ? { thought: '', actions: ['a_until_dialog_end'] } : null);
+    const raw = await ollamaQuipLong([character.identity, character.style, POKEMON_PLAY_RULES].join('\n\n'), describeGame(state, map, screen, pokemonSitting.lastThought, pokemonSitting.stillFor >= 3), brain);
+    // Nothing usable from her: words on the screen are pressed past, anything else waits a turn.
+    const move = parseMove(raw) ?? (screen.length || state.dialog?.active ? { thought: '', actions: ['press_a'] } : null);
     if (!pokemonSitting) return;
     const after = move ? await link.act(move.actions) : state;
-    pokemonSitting = afterTurn(pokemonSitting, move, after ?? state);
+    pokemonSitting = afterTurn(pokemonSitting, move, after ?? state, move ? await link.text() : screen);
     store.set('her.pokemon.lastState', after ?? state);
     if (move) console.log(`[pokemon] turn ${pokemonSitting.turns}: ${move.thought || '…'} — ${move.actions.join(' ')}`);
     if (pokemonSitting.turns % config.saveEvery === 0) await link.save('haru-auto').catch(() => {});
