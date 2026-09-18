@@ -31,6 +31,7 @@ const EVERYTHING: ToolAvailability = {
   system: { enabled: true, level: 2 },
   downloads: true,
   shell: true,
+  mangaShelf: true,
   hands: true,
   desktop: { launch: true, power: true },
   knockedAwake: true,
@@ -147,7 +148,7 @@ test('no handler is dead code — every one is reachable from some setting', asy
     'get_system_info', 'get_gpu_info', 'get_processes', 'get_docker_status',
     'get_service_status', 'diagnose_system', 'restart_docker_container',
     'start_service', 'stop_service', 'restart_haru', 'look_up_knowledge', 'adopt_interest', 'browser_control',
-    'describe_myself', 'change_setting', 'vault_list', 'vault_read', 'vault_write', 'vault_folder', 'go_back_to_sleep', 'downloads', 'run_command',
+    'describe_myself', 'change_setting', 'vault_list', 'vault_read', 'vault_write', 'vault_folder', 'go_back_to_sleep', 'downloads', 'run_command', 'get_manga',
   ];
   for (const name of handled) {
     assert.ok(reachable.has(name), `${name} has a handler but is never offered to anyone`);
@@ -564,4 +565,21 @@ test('the terminal hands the command, his words and the door through, and report
   assert.match(JSON.parse(await run('run_command', {}, 'run it', { shell })).error, /command is required/);
   const broken = { run: async () => { throw new Error('spawn EACCES'); } };
   assert.match(JSON.parse(await run('run_command', { command: 'ls' }, 'ls', { shell: broken })).error, /did not answer \(spawn EACCES\)/);
+});
+
+test('fetching a manga for him is offered from any door when it comes up, and hands the ask through', async () => {
+  assert.ok(!offered(NOTHING).includes('get_manga'));
+  assert.ok(chatTools({ ...NOTHING, mangaShelf: true, hands: false, web: true }, 'I want to read Berserk, download it for me please').some(tool => tool.function.name === 'get_manga'));
+  assert.ok(!chatTools({ ...NOTHING, mangaShelf: true }, 'what did you have for lunch').some(tool => tool.function.name === 'get_manga'));
+  const asked: unknown[] = [];
+  const mangaShelf: NonNullable<ToolDeps['mangaShelf']> = {
+    get: async input => { asked.push(input); return { outcome: 'fetching', title: 'Berserk', chapters: 375, queued: 375 }; },
+    status: async title => { asked.push({ status: title }); return { outcome: 'status', title, total: 375, downloaded: 10 }; },
+  };
+  assert.equal(JSON.parse(await run('get_manga', { title: ' Berserk ' }, 'download berserk', { mangaShelf })).outcome, 'fetching');
+  await run('get_manga', { title: 'Berserk', action: 'status' }, 'how is berserk going', { mangaShelf });
+  await run('get_manga', { title: 'Berserk', mangaId: 90, confirm: true }, 'that one, yes', { mangaShelf });
+  assert.deepEqual(asked, [{ title: 'Berserk', mangaId: undefined, confirm: false }, { status: 'Berserk' }, { title: 'Berserk', mangaId: 90, confirm: true }]);
+  assert.match(JSON.parse(await run('get_manga', { title: 'Berserk' }, 'get berserk', { mangaShelf: null })).error, /not wired up/);
+  assert.match(JSON.parse(await run('get_manga', {}, 'get it', { mangaShelf })).error, /title is required/);
 });

@@ -36,6 +36,8 @@ export type SuwayomiConfig = {
   keepFreeGb: number;
   /** The address his links use, when the server's own address only works from the box. */
   linkUrl: string;
+  /** Where the downloads land on this box, for the disk guard. */
+  downloadsDir: string;
 };
 
 /** The store's package for each source she may install. */
@@ -59,6 +61,7 @@ export const DEFAULT_SUWAYOMI: SuwayomiConfig = {
   sources: ['MangaDex', 'Weeb Central', 'Comick (Unoriginal)'],
   keepFreeGb: 50,
   linkUrl: '',
+  downloadsDir: '/mnt/storage1/anime-server/data/media/manga',
 };
 
 /** The `manga.suwayomi` block, read forward; null when it is off. */
@@ -77,6 +80,7 @@ export function readSuwayomiConfig(manga: unknown): SuwayomiConfig | null {
     sources: Array.isArray(raw.sources) && raw.sources.some(item => typeof item === 'string' && item.trim()) ? raw.sources.filter((item): item is string => typeof item === 'string' && !!item.trim()).map(item => item.trim()) : DEFAULT_SUWAYOMI.sources,
     keepFreeGb: typeof raw.keepFreeGb === 'number' && Number.isFinite(raw.keepFreeGb) ? Math.max(0, raw.keepFreeGb) : DEFAULT_SUWAYOMI.keepFreeGb,
     linkUrl: text(raw.linkUrl, '').replace(/\/+$/, ''),
+    downloadsDir: text(raw.downloadsDir, DEFAULT_SUWAYOMI.downloadsDir),
   };
 }
 

@@ -38,7 +38,7 @@ function fake() {
     ] } } });
     return respond(400, { errors: [{ message: `unexpected: ${query.slice(0, 40)}` }] });
   };
-  const client = new Suwayomi({ url: 'http://s:4567', username: 'toomii', passwordFile: '/pw', shelf: 'Haru', extension: 'eu.kanade.tachiyomi.extension.all.mangadex', source: 'MangaDex', lang: 'en', sources: ['MangaDex', 'Weeb Central', 'Comick (Unoriginal)'], keepFreeGb: 50, linkUrl: 'http://100.1.2.3:4567' }, fetch, { readFile: () => 'pw\n' });
+  const client = new Suwayomi({ url: 'http://s:4567', username: 'toomii', passwordFile: '/pw', shelf: 'Haru', extension: 'eu.kanade.tachiyomi.extension.all.mangadex', source: 'MangaDex', lang: 'en', sources: ['MangaDex', 'Weeb Central', 'Comick (Unoriginal)'], keepFreeGb: 50, linkUrl: 'http://100.1.2.3:4567', downloadsDir: '/tmp' }, fetch, { readFile: () => 'pw\n' });
   return { client, calls, logins: () => logins, installed: () => installed };
 }
 
@@ -108,7 +108,7 @@ test('the note says where he is, how she sits against him, and holds the spoiler
 
 test('a wrong password is an error, and a lapsed token logs in again once', async () => {
   const { client } = fake();
-  const wrong = new Suwayomi({ url: 'http://s:4567', username: 'toomii', passwordFile: '/pw', shelf: 'Haru', extension: 'x', source: 'MangaDex', lang: 'en', sources: ['MangaDex'], keepFreeGb: 50, linkUrl: '' }, (client as unknown as { fetch: Fetcher }).fetch, { readFile: () => 'nope' });
+  const wrong = new Suwayomi({ url: 'http://s:4567', username: 'toomii', passwordFile: '/pw', shelf: 'Haru', extension: 'x', source: 'MangaDex', lang: 'en', sources: ['MangaDex'], keepFreeGb: 50, linkUrl: '', downloadsDir: '/tmp' }, (client as unknown as { fetch: Fetcher }).fetch, { readFile: () => 'nope' });
   await assert.rejects(() => wrong.library(), /refused the login/);
 });
 

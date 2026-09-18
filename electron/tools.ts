@@ -886,6 +886,36 @@ export function shellRelevant(message: string): boolean {
   return SHELL_TALK.test(message ?? '');
 }
 
+/**
+ * A manga for him (suwayomi.ts): found on the sources in turn, put on his
+ * shelf, and fetched whole unless the disk is running low — then his word.
+ * The same shape as watching: one tool for "get it" and "how is it going".
+ */
+export const GET_MANGA_TOOL: ChatTool = {
+  type: 'function',
+  function: {
+    name: 'get_manga',
+    description: 'Fetch a manga for them onto the server, or say how a fetch is going. Call this whenever they ask you to download, get or grab a manga for them — "I want to read Berserk, download it for me", "get Vagabond", "how\'s Berserk coming along". It finds the title, puts it on their shelf and downloads every chapter; you really can, so never say you cannot, and never say it is fetching without calling this. It is their shelf, not yours — your own reading is read_manga.',
+    parameters: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'The manga, as they said it — "Berserk", not the whole sentence.' },
+        action: { type: 'string', enum: ['get', 'status'], description: '"get" to fetch it (the default); "status" when they ask how the download is going.' },
+        mangaId: { type: 'number', description: 'Only after this tool listed choices and they picked one: that choice\'s mangaId.' },
+        confirm: { type: 'boolean', description: 'Only after this tool asked for their word on the disk space and they gave it: true.' },
+      },
+      required: ['title'],
+    },
+  },
+};
+
+/** Whether the message could be about manga — theirs to fetch or hers to read. */
+const MANGA_TALK = /\b(?:manga|manhwa|manhua|chapter|mangadex|weeb ?central|comick|suwayomi|volume|read(?:ing)? (?:some|the next|a bit|more|it)|to read\b)/i;
+
+export function mangaRelevant(message: string): boolean {
+  return MANGA_TALK.test(message ?? '');
+}
+
 /** The shape of an agenda entry the dispatcher touches. */
 type KeptLike = { id: string; title: string; date: string; time?: string; kind: 'task' | 'event'; done: boolean };
 
@@ -910,6 +940,8 @@ export type ToolAvailability = {
   downloads?: boolean;
   /** Whether she may run commands on the server (system.config.level 3 with its shell block on). Optional so fixtures need not name it. */
   shell?: boolean;
+  /** Whether manga can be fetched for him (suwayomi.ts is wired). Optional so fixtures need not name it. */
+  mangaShelf?: boolean;
   /** Whether she can book herself a follow-up (scheduler.ts). Optional so fixtures need not name it. */
   booking?: boolean;
   /** Whether her old chats can be searched (chatsearch.ts). Optional so fixtures need not name it. */
@@ -976,6 +1008,8 @@ export function chatTools(available: ToolAvailability, latest = ''): ChatTool[] 
   if (available.downloads && (!latest || downloadsRelevant(latest))) tools.push(DOWNLOADS_TOOL);
   // Level 3, any door: his word is checked in code (shell.ts), so hands need not gate it.
   if (available.shell && (!latest || shellRelevant(latest))) tools.push(SHELL_TOOL);
+  // Fetching for him: any door, like watching — "download Berserk for me" from the phone is the point.
+  if (available.mangaShelf && (!latest || mangaRelevant(latest))) tools.push(GET_MANGA_TOOL);
   if (available.system.enabled && machine) {
     tools.push(...SYSTEM_TOOLS);
     if (available.system.level >= 2) tools.push(...SYSTEM_ACTION_TOOLS);
@@ -1078,6 +1112,8 @@ export type ToolDeps = {
   downloads?: { status(): Promise<Record<string, unknown>>; pause(title?: string): Promise<Record<string, unknown>>; resume(title?: string): Promise<Record<string, unknown>> } | null;
   /** The terminal on the server (shell.ts): his word is checked inside, against his real message. */
   shell?: { run(input: { command: string; said: string; door: 'desk' | 'phone' }): Promise<Record<string, unknown>> } | null;
+  /** His manga shelf (suwayomi.ts): a title found and fetched for him, and how it is going. */
+  mangaShelf?: { get(input: { title: string; mangaId?: number; confirm?: boolean }): Promise<Record<string, unknown>>; status(title: string): Promise<Record<string, unknown>> } | null;
   /** Her old chats (chatsearch.ts): the finds, already dated and written out, or null when there is no archive to search. */
   chats?: { search(input: { query: string; from?: string; to?: string }): Promise<{ found: number; text: string; wordsOnly?: boolean }> } | null;
   /** Her own follow-ups (scheduler.ts), or null when there is nowhere to keep them. */
@@ -1423,6 +1459,24 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
       const reason = error instanceof Error ? error.message : String(error);
       console.warn(`[shell] run_command failed: ${reason}`);
       return JSON.stringify({ error: `The terminal did not answer (${reason}). Say so plainly rather than pretending it ran.` });
+    }
+  }
+  if (name === 'get_manga') {
+    // Re-checked here: a model can name a tool it was never offered.
+    if (!deps.mangaShelf) return JSON.stringify({ error: 'The manga server is not wired up to you — say so plainly, in your own words.' });
+    const title = typeof args.title === 'string' ? args.title.trim() : '';
+    if (!title) return JSON.stringify({ error: 'title is required — the manga they named.' });
+    const action = args.action === 'status' ? 'status' : 'get';
+    try {
+      const result = action === 'status'
+        ? await deps.mangaShelf.status(title)
+        : await deps.mangaShelf.get({ title, mangaId: typeof args.mangaId === 'number' ? args.mangaId : undefined, confirm: args.confirm === true });
+      console.log(`[manga] ${action} "${title}" for him -> ${String(result.outcome ?? result.error ?? '?')}`);
+      return JSON.stringify(result);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      console.warn(`[manga] ${action} "${title}" failed: ${reason}`);
+      return JSON.stringify({ error: `The manga server is not answering (${reason}). Say so plainly rather than pretending it is fetching.` });
     }
   }
   if (name === 'browser_control') {

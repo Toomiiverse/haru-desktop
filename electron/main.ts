@@ -2,7 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain, Menu, type MenuItemConstructorOpti
 import path from 'node:path';
 import os from 'node:os';
 import { createHash, randomUUID } from 'node:crypto';
-import { appendFileSync, copyFileSync, existsSync, readdirSync, mkdirSync, readFileSync, rmSync, statSync, watch, writeFileSync, type FSWatcher } from 'node:fs';
+import { appendFileSync, copyFileSync, existsSync, readdirSync, mkdirSync, readFileSync, rmSync, statSync, statfsSync, watch, writeFileSync, type FSWatcher } from 'node:fs';
 import { execFile, spawn } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import AdmZip from 'adm-zip';
@@ -91,7 +91,7 @@ import { setDefaultAutoSelectFamilyAttemptTimeout } from 'node:net';
 import { readBrowserControlConfig } from './browserctl';
 import { listSessions, openSession, readClaudeCodeConfig, readOpenedSessions, resolveSessionDir, sessionName, SESSIONS_KEPT as CLAUDE_SESSIONS_KEPT, stopSession, type SessionHost } from './claudesession';
 import { ShellGate, SERVER_NOTE, denied, ledgerEntry, readShellConfig, runCommand } from './shell';
-import { Suwayomi, hisReading, hisReadingNote, readSuwayomiConfig, spiteful, type HisTitle, type ShelfChapter } from './suwayomi';
+import { Suwayomi, fetchFits, fetchSummary, hisReading, hisReadingNote, matchManga, readerLink, readSuwayomiConfig, spiteful, type HisTitle, type ShelfChapter } from './suwayomi';
 import { serverLookNote } from './prompt';
 import { Downloads, downloadsReady, readDownloadsConfig } from './downloads';
 import { applyDecay, DEEP_RECALL_LIMIT, findSuperseded, formationPrompt, formationWindows, MEMORIES_PER_DAY, readFormation, type FormedNote, formatMemoryPrompt, isExplicitRecall, closeEvents, isWorthAnEvent, isWorthKeeping, isWorthRemembering, MEMORY_KINDS, migrateMemories, monthFoldPrompt, pruneMemories, readsAsSecondPerson, rememberInto, retrieveMemories, semanticSimilarities, summaryPrompt, supersede, THIRD_PERSON_AGAIN, vectorSimilarity, type ForgettingEntry, type MemoryKind, type MemoryRecord, type MemorySource, type RetrievalFactors, type ScoredMemory, type SessionSummary } from './memory';
@@ -4976,6 +4976,7 @@ function availableTools(): ToolAvailability {
     claude: readClaudeCodeConfig(store.get('claudeCode')).enabled,
     downloads: downloadsLink() !== null,
     shell: shellLink() !== null,
+    mangaShelf: mangaShelfLink() !== null,
     system: { enabled: systemConfig.enabled, level: systemConfig.level },
     hands: handsAllowed,
     desktop: supportedDesktop(readDesktopConfig(store.get('desktop'))),
@@ -5132,6 +5133,8 @@ function toolDeps(): ToolDeps {
     downloads: (link => link ? { status: () => link.status(), pause: title => link.pause(title), resume: title => link.resume(title) } : null)(downloadsLink()),
     // The terminal on the server (shell.ts), level 3.
     shell: shellLink(),
+    // His manga, fetched at his word (suwayomi.ts).
+    mangaShelf: mangaShelfLink(),
     // Their vault on disk, and the re-read that makes a note she wrote searchable at once.
     vault: { root: () => knowledge.vaultPath(), afterWrite: () => { void syncVaultAndRetire(); } },
     // Herself, and what of herself she may change (self.ts).
@@ -10473,6 +10476,54 @@ function hisReadingLine(): string {
   const spite = spiteful(grudge, Math.random());
   if (spite && hisShelf.titles.length) console.log(`[manga] spiteful today — grudge ${grudge}, a spoiler is on the table`);
   return hisReadingNote(hisShelf.titles, readReading(store.get('her.reading')), Date.now(), grudge, spite);
+}
+
+/**
+ * His manga shelf as the get_manga tool sees it (suwayomi.ts): a title found
+ * on the sources in turn, put in his category, fetched whole — unless the
+ * disk would dip under what he keeps free, when it waits for his word.
+ */
+function mangaShelfLink(): ToolDeps['mangaShelf'] {
+  const link = suwayomiLink();
+  const config = readSuwayomiConfig(store.get('manga'));
+  if (!link || !config) return null;
+  const freeGb = () => { try { const fs = statfsSync(config.downloadsDir); return (fs.bavail * fs.bsize) / 2 ** 30; } catch { return Number.POSITIVE_INFINITY; } };
+  const shelfTitle = async (title: string) => {
+    const library = await link.library();
+    const match = matchManga(title, library.filter(manga => manga.categories.some(name => name.toLowerCase() !== config.shelf.toLowerCase())));
+    return match && 'one' in match ? match.one : null;
+  };
+  return {
+    get: async ({ title, mangaId, confirm }) => {
+      let id = mangaId ?? null;
+      let name = title;
+      if (id === null) {
+        const found = await link.find(title);
+        if (!found) return { outcome: 'not-found', title, note: `Nothing called "${title}" on ${config.sources.join(', ')}. Say so — do not pretend to fetch something else.` };
+        if ('several' in found) return { outcome: 'choose', title, choices: found.several.map(item => ({ mangaId: item.id, title: item.title, source: item.source })), note: 'Not the title itself, only things near it. List these and ask which they meant; call again with that mangaId.' };
+        id = found.one.id;
+        name = found.one.title;
+      }
+      await link.takeUpForHim(id);
+      const chapters = await link.chapters(id);
+      const pending = chapters.filter(chapter => !chapter.downloaded);
+      if (!chapters.length) return { outcome: 'empty', title: name, note: 'It is on their shelf but the source lists no chapters yet. Say so.' };
+      if (!pending.length) return { outcome: 'have', title: name, chapters: chapters.length, link: readerLink(config, id), note: 'Every chapter is already on the server. Give them the link.' };
+      const fit = fetchFits(pending.length, freeGb(), config.keepFreeGb);
+      if (!fit.fits && !confirm) {
+        return { outcome: 'needs-word', title: name, chapters: pending.length, gb: fit.gb, freeGb: Math.round(freeGb()), keepFreeGb: config.keepFreeGb, note: `Storage is running low: ${pending.length} chapters is about ${fit.gb} GB and the disk has ${Math.round(freeGb())} GB free against the ${config.keepFreeGb} GB they keep. Tell them, and fetch only if they say to (confirm: true).` };
+      }
+      await link.download(pending.map(chapter => chapter.id));
+      console.log(`[manga] fetching ${name} for him — ${pending.length} of ${chapters.length} chapters queued (~${fit.gb} GB)`);
+      return { outcome: 'fetching', title: name, chapters: chapters.length, queued: pending.length, gb: fit.gb, link: readerLink(config, id), note: 'It is on their shelf and downloading. Say so in your own words — the title, how many chapters, that the first ones will be readable in minutes — and give the link.' };
+    },
+    status: async title => {
+      const manga = await shelfTitle(title);
+      if (!manga) return { outcome: 'not-on-shelf', title, note: `"${title}" is not on their shelf. Say so; offer to fetch it.` };
+      const summary = fetchSummary(await link.chapters(manga.id), await link.queue(manga.id));
+      return { outcome: 'status', title: manga.title, ...summary, link: readerLink(config, manga.id), note: 'Say how it is going in your own words: how many chapters are on the server, what is downloading now, how many are queued.' };
+    },
+  };
 }
 
 /**

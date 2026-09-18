@@ -79,6 +79,8 @@ const DEEDS: Record<string, (args: Record<string, unknown>) => string> = {
   downloads: a => (a.action === 'pause' || a.action === 'resume' ? `${a.action === 'pause' ? 'paused' : 'resumed'} the downloads${text(a.title) ? ` for ${text(a.title)}` : ''}` : ''),
   // Proposing and running both reach for it; the ledger has which.
   run_command: a => `used the terminal on the server${text(a.command) ? `: ${text(a.command).slice(0, 60)}` : ''}`,
+  // Asking how it is going is looking; fetching it is the deed.
+  get_manga: a => (a.action === 'status' ? '' : `saw to "${text(a.title, 'a manga')}" for them — put it on their shelf and started fetching it`),
   convert_picture: a => `converted a picture to ${text(a.format, 'another format')}`,
 };
 
