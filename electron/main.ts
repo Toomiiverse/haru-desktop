@@ -401,6 +401,22 @@ protocol.registerSchemesAsPrivileged([
 // Chromium's autoplay policy exists to stop. Must be set before the app is ready.
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 
+if (process.platform === 'linux') {
+  // Let Chromium choose Wayland when the session offers it and X11 when it does
+  // not, rather than depending on ELECTRON_OZONE_PLATFORM_HINT being imported
+  // into a systemd unit that starts before the session has exported it.
+  app.commandLine.appendSwitch('ozone-platform-hint', 'auto');
+
+  // Every ordinary stop used to leave a 14 MB core dump and exit 1, because on
+  // the way out Chromium tears the network service and zygote down first, then
+  // decides the GPU process is unusable and deliberately aborts — the log line
+  // is "GPU process isn't usable. Goodbye.", the signal is SIGILL, and a fresh
+  // core landed in /var/lib/systemd/coredump every restart. The crash limit is
+  // what turns a failed relaunch during teardown into that abort; without it a
+  // machine that is only trying to quit is allowed to finish quitting.
+  app.commandLine.appendSwitch('disable-gpu-process-crash-limit');
+}
+
 function modelResult(modelPath: string): Live2DModel {
   const id = createHash('sha256').update(modelPath).digest('hex');
   const root = path.dirname(modelPath);
@@ -1851,7 +1867,7 @@ const LOCAL_MODELS = 'http://localhost:11434';
 function eyesHold(vision: VisionConfig, wanted: string): string | number {
   const brain = store.get('ai.config') as ProviderConfig | undefined;
   if (!brain?.model || vision.model !== brain.model) return wanted;
-  return trimEndpoint(visionEndpoint(brain, vision)) === trimEndpoint(brain.endpoint ?? '') ? OLLAMA_KEEP_ALIVE : wanted;
+  return trimEndpoint(visionEndpoint(brain, vision)) === trimEndpoint(brain.endpoint ?? '') ? ollamaKeepAlive() : wanted;
 }
 
 function visionEndpoint(provider: ProviderConfig | undefined, vision?: VisionConfig): string {
@@ -4163,16 +4179,42 @@ function sideNumCtx(): number {
 // How long the local model is kept resident after a request. Without this, an
 // idle machine's model is evicted and the next phone message pays a cold start
 // on top of everything else — which is exactly the wait this whole change is
-// about. Forever: this box does nothing else with that VRAM, and thirty
-// minutes meant the first word after any longer silence cost eight seconds.
-// Game time still unloads her explicitly (keep_alive: 0, below).
-const OLLAMA_KEEP_ALIVE = -1;
-// What that costs, measured on this box: the model is 11 GB of the 3060's 12,
-// and loading it takes 9.8s against 0.4s warm. So the thirty minutes buys a
-// reply that starts talking, at the price of the card being unavailable for
-// anything else — which is the right trade here, where nothing else wants it.
-// A machine that shares the card should set it lower, and a headless one that
-// is only spoken to a few times a day may prefer the cold start.
+// about. Game time still unloads her explicitly (keep_alive: 0, below).
+//
+// On mains, forever: an always-on box does nothing else with that VRAM, and
+// thirty minutes meant the first word after any longer silence cost eight
+// seconds. On a laptop it is the wrong trade — the same forever-residency pins
+// the model on the discrete card, keeps it out of runtime suspend, and holds
+// the machine's own memory even while she is idle. Measured here, a 9B pinned
+// at keep_alive -1 sat at 4.9 GB of the 3060's 6 GB, spilling 42% of its
+// layers to CPU, and the card never slept. So the hold follows the power
+// source: forever plugged in, five minutes on battery — long enough that a
+// reply still starts talking, short enough that the card is released between
+// conversations. HARU_OLLAMA_KEEP_ALIVE overrides both, as seconds or a
+// duration ("10m", "0" for a machine that shares the card).
+const OLLAMA_KEEP_ALIVE_MAINS = -1;
+const OLLAMA_KEEP_ALIVE_BATTERY = '5m';
+
+function ollamaKeepAlive(): number | string {
+  const override = (process.env.HARU_OLLAMA_KEEP_ALIVE ?? '').trim();
+  if (override) return /^-?\d+$/.test(override) ? Number(override) : override;
+  return powerMonitor.isOnBatteryPower() ? OLLAMA_KEEP_ALIVE_BATTERY : OLLAMA_KEEP_ALIVE_MAINS;
+}
+
+/**
+ * Which way the residency rule is leaning, said at startup and whenever the
+ * plug moves. A policy that changes with the power source is invisible
+ * otherwise — "why did the first word take eight seconds" has an answer, and
+ * it belongs in the log rather than in a guess.
+ */
+function reportKeepAlive(): void {
+  const override = (process.env.HARU_OLLAMA_KEEP_ALIVE ?? '').trim();
+  if (override) { console.log(`[ai] the local model is held for ${override} (HARU_OLLAMA_KEEP_ALIVE)`); return; }
+  console.log(powerMonitor.isOnBatteryPower()
+    ? `[ai] on battery — the local model is released ${OLLAMA_KEEP_ALIVE_BATTERY} after a request`
+    : '[ai] on mains — the local model is held resident');
+}
+
 // A reply sent somewhere she is not — the phone — is read on a screen
 // that is not the desk, where every extra sentence is extra tokens before the
 // reader sees anything. Capped so a far-away turn stays a line or two; the desk
@@ -5603,7 +5645,7 @@ async function sendToProvider(conversation: OllamaMessage[], config: ProviderCon
           // asking for sixty seconds in options and being given a thirty-minute
           // expiry, then sixty seconds exactly when it moved out here.
           // releaseModelForGame had it in the right place all along.
-          keep_alive: OLLAMA_KEEP_ALIVE,
+          keep_alive: ollamaKeepAlive(),
           options: { temperature, num_ctx: numCtx ?? sideNumCtx(), ...(maxTokens ? { num_predict: maxTokens } : {}) },
         }),
       });
@@ -13529,6 +13571,11 @@ app.whenReady().then(() => {
   if (!startedHidden() || !store.get('live2d.model')) createWindow();
   createCompanionWindow();
   reportCapabilities();
+  reportKeepAlive();
+  // The residency rule follows the plug, so a change of source is worth saying
+  // out loud — and it is why the next reply may or may not pay a cold load.
+  powerMonitor.on('on-battery', reportKeepAlive);
+  powerMonitor.on('on-ac', reportKeepAlive);
   startWindowsHelper();
   watchScreenshots();
   startWatchingScreen();
