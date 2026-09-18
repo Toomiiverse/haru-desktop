@@ -60,41 +60,50 @@ If her model is larger than the card's memory — a 9B on a 6 GB laptop GPU, say
 — Ollama spills layers to CPU and the card stays awake even at `keep_alive: -1`.
 A model that fits is the single biggest saving on a laptop.
 
+### What this line does not run
+
+- **Her voice.** TTS is not part of the laptop version; the engine is left off
+  and nothing speech-related starts.
+- **A local vision model.** The eyes are hosted, set in **Setup → Showing her
+  pictures** (endpoint, provider, model). That is why the brain below is
+  **text-only**: a vision projector is reserved at load even when nothing looks
+  at a picture, and on a 6 GB card those ~0.87 GB are the difference between a
+  Q4 model and a Q3 one.
+
 ### Fitting a 9B onto a 6 GB card
 
-Measured on a 6 GB RTX 3060 Laptop, running the desktop on the integrated GPU so
-the whole card belongs to Ollama. The budget that matters is not the weights
-alone: a vision projector is reserved at load (worst case ~870 MB), plus the KV
-cache and compute buffer, so weights must be ≤ ~5.2 GB to keep tools and vision.
+Measured on a 6 GB RTX 3060 Laptop, with the desktop on the integrated GPU so
+the whole card belongs to Ollama. With no projector, the budget is weights plus
+KV and compute — about 0.3 GB — which puts the ceiling at **~6.0 GB of weights**
+for a whole-GPU load.
 
 The recipe used here:
 
 ```bash
-# 1. A Q3_K_L quant of a Qwen3.5-9B heretic, with its Q8 vision projector.
-ollama pull hf.co/mradermacher/Qwen3.5-9B-ultimate-irrefusable-heretic-GGUF:Qwen3.5-9B-ultimate-irrefusable-heretic.Q3_K_L.gguf
+# 1. A Q4_K_M quant of a Qwen3.5-9B heretic (5.6 GB weights).
+ollama pull hf.co/mradermacher/Qwen3.5-9B-ultimate-irrefusable-heretic-GGUF:Qwen3.5-9B-ultimate-irrefusable-heretic.Q4_K_M.gguf
 
-# 2. q8_0 KV — halves the cache against f16, nearly lossless, and buys the
-#    headroom for the last layers. In the ollama user unit:
+# 2. q8_0 KV — halves the cache against f16, nearly lossless, and buys headroom.
+#    In the ollama user unit:
 #      Environment=OLLAMA_KV_CACHE_TYPE=q8_0
 
-# 3. Ollama's own estimator is conservative: it split this model 28/33 and left
-#    500 MB unused. Bake the measured layer count in so it loads whole.
-cat > Modelfile <<'EOF'
-FROM hf.co/mradermacher/Qwen3.5-9B-ultimate-irrefusable-heretic-GGUF:Qwen3.5-9B-ultimate-irrefusable-heretic.Q3_K_L.gguf
-PARAMETER num_gpu 33
-EOF
-ollama create haru-heretic -f Modelfile
+# 3. Build a TEXT-ONLY model from the weights blob alone, so no projector is
+#    inherited. `ollama show <pulled> --modelfile` prints two FROM lines: the
+#    first is the weights, the second the projector. Keep only the first.
+LLM=$(ollama show hf.co/mradermacher/Qwen3.5-9B-ultimate-irrefusable-heretic-GGUF:Qwen3.5-9B-ultimate-irrefusable-heretic.Q4_K_M.gguf --modelfile | grep ^FROM | head -1 | awk '{print $2}')
+printf 'FROM %s\nPARAMETER num_gpu 33\n' "$LLM" > Modelfile
+ollama create haru-brain -f Modelfile
 ```
 
-Then point `ai.config.model` and `ai.conversation.model` at `haru-heretic`. The
+Then point `ai.config.model` and `ai.conversation.model` at `haru-brain`. The
 startup log says which it is: `load_tensors: offloaded 33/33 layers to GPU`, and
-the app's own line, `the model is 5.4 GB and the card has 6.0 GB — it fits whole`.
+the app's own line, `the model is 5.6 GB and the card has 6.0 GB — it fits whole`.
 
-The same math rules out more than it lets in: a 9B at Q4 (~5.7 GB) is a layer or
-two short even with the projector at Q8, and a 9B at IQ2 (4.9 GB) fits whole but
-costs more in quality than Q3_K_L costs in layers. A 4B-class multimodal model
-(Gemma 4 E4B, ~4–5 GB) is the comfortable alternative when the brain can be
-smaller.
+Ollama's estimator is the thing to watch, not the card: on both the Q3 and Q4
+builds it split the model and left more than 500 MB unused. `num_gpu` is set to
+the measured layer count for that reason — check `ollama ps` says `100% GPU`
+rather than trusting it. A Q5 (7.7 GB) does not fit at all; a 4B-class
+alternative (Gemma 4 E4B, ~4–5 GB) is the fallback if the brain can be smaller.
 
 ## Packaging
 
