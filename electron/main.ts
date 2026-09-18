@@ -63,7 +63,8 @@ import { directionsAskFrom, directionsNote, dropRouteTalk, matchNamedPlace, star
 import { absorb, describeWhereabouts, distanceM, forgetPlace, homeOf, namePlace, placeAt, readSpot, readWhereabouts, whereForPage, type Whereabouts, SPOT_STALE_MS, saidTheyWereGoing, unannouncedArrivalNote, withoutWhereDenials, type Arrival } from './whereabouts';
 import { bodyForPage, describeBody, readBody as readBodyState, readBodyReport, type Body } from './body';
 import { convertImage, normaliseFormat, FORMATS } from './convert';
-import { cancelPower, closeApp, findApps, isCancellable, launch, listRunning, matchApp, matchRunning, normalisePower, POWER_DELAY_S, readDesktopConfig, runPower, supportedDesktop, type DesktopConfig } from './desktop';
+import { cancelPower, closeApp, findApps, isCancellable, launch, listRunning, matchApp, matchRunning, normalisePower, readDesktopConfig, runPower, supportedDesktop, type DesktopConfig } from './desktop';
+import { activeWindow as linuxActiveWindow, detectLinuxSupport, readVolume as linuxReadVolume, setVolume as linuxSetVolume } from './linuxdesktop';
 import { looksLikeScreenshot, maySpeak, readScreenshotConfig, screenshotPrompt, SETTLE_MS, SETTLE_TRIES, type ScreenshotConfig } from './screenshots';
 import { look, photoName, readShotDescription, readVisionConfig, whileLooking, type VisionConfig } from './vision';
 import { CAPTION_MAX_CHARS, describedShots, forgetCaptions, moreThanOnePass, noteCaption, noteFailure, readCaptions, shotsNeedingALook } from './seen';
@@ -2451,6 +2452,73 @@ function startWindowsHelper() {
 }
 
 /**
+ * The same job on Linux, done from here rather than through a PowerShell
+ * script. `hyprctl` answers what is in front of them — including whether it is
+ * fullscreen, which is the case ducking and standing aside both care about —
+ * and the PipeWire mixer answers the output volume. Both speak the same line
+ * protocol the Windows helper does, straight into `handleHelperLine`, so the
+ * rest of the app never learns which machine it is on.
+ *
+ * Polled rather than event-driven: Hyprland's event socket is one more thing to
+ * lose, and a second between polls is shorter than the two the Windows helper
+ * takes for the same question.
+ */
+let linuxHelperTimer: ReturnType<typeof setInterval> | undefined;
+let linuxVolumeTimer: ReturnType<typeof setInterval> | undefined;
+
+function startLinuxHelper() {
+  const tools = detectLinuxSupport();
+  // The capability report already said, once, what is missing. Nothing to do
+  // here but stay quiet rather than spawn a command that is not there.
+  if (!tools.foreground && !tools.audio) return;
+  let lastForeground = '';
+  let wasFullscreen = false;
+  let lastVolume: number | null = null;
+
+  const pollDesktop = async () => {
+    if (!tools.foreground) return;
+    const win = await linuxActiveWindow();
+    if (!win) { lastForeground = ''; return; }
+    const line = `${win.process}|${win.title}|`;
+    if (line !== lastForeground) {
+      lastForeground = line;
+      handleHelperLine(`foreground ${line}`);
+    }
+    if (win.fullscreen !== wasFullscreen) {
+      wasFullscreen = win.fullscreen;
+      handleHelperLine(win.fullscreen
+        ? `fullscreen on ${win.left} ${win.top} ${win.right} ${win.bottom} ${win.title}`
+        : 'fullscreen off');
+    }
+  };
+
+  const pollVolume = async () => {
+    const level = await linuxReadVolume();
+    if (level === null || level === lastVolume) return;
+    lastVolume = level;
+    // Never while we are the ones holding it down, exactly as the helper on
+    // Windows: a duck must not be remembered as the user's chosen level.
+    if (!ducked) handleHelperLine(`volume ${level.toFixed(3)}`);
+  };
+
+  void linuxReadVolume().then(level => {
+    if (level !== null) { lastVolume = level; if (!ducked) systemVolume = level; }
+    // Ready only after the first reading, so the stranded-duck restore in
+    // handleHelperLine has a real level to compare against.
+    handleHelperLine('ready');
+  });
+  linuxHelperTimer = setInterval(() => { void pollDesktop(); }, 1000);
+  if (tools.audio) linuxVolumeTimer = setInterval(() => { void pollVolume(); }, 4000);
+  console.log(`[helper] watching the Linux desktop${tools.foreground ? ' (foreground, fullscreen)' : ''}${tools.audio ? ' and the output volume' : ''}`);
+}
+
+/** One name, whichever platform is underneath, so the startup reads the same. */
+function startHelper() {
+  if (process.platform === 'win32') startWindowsHelper();
+  else if (process.platform === 'linux') startLinuxHelper();
+}
+
+/**
  * Starting her voice again when it is not there.
  *
  * The speech server is a separate program that has always been started by hand
@@ -2650,6 +2718,13 @@ function handleHelperLine(line: string) {
 }
 
 function setSystemVolume(level: number) {
+  // On Linux there is no helper stdin to write to; the mixer is a command. The
+  // acknowledgement is the command finishing, which is the same promise the
+  // Windows helper makes with `volume-set`.
+  if (process.platform === 'linux') {
+    void linuxSetVolume(level).then(() => handleHelperLine(`volume-set ${level.toFixed(3)}`));
+    return;
+  }
   helper?.stdin?.write(`volume ${level.toFixed(3)}\n`);
 }
 
@@ -13576,7 +13651,7 @@ app.whenReady().then(() => {
   // out loud — and it is why the next reply may or may not pay a cold load.
   powerMonitor.on('on-battery', reportKeepAlive);
   powerMonitor.on('on-ac', reportKeepAlive);
-  startWindowsHelper();
+  startHelper();
   watchScreenshots();
   startWatchingScreen();
   // Opened at boot when it was left on, for the same reason the screen watcher
@@ -13659,6 +13734,10 @@ app.on('before-quit', () => {
   try { releaseDuck(); } catch (error) { noteCrash('releasing the duck', error); }
   try { helper?.stdin?.write('quit\n'); } catch (error) { noteCrash('telling the helper to quit', error); }
   try { helper?.kill(); } catch (error) { noteCrash('killing the helper', error); }
+  try {
+    if (linuxHelperTimer) clearInterval(linuxHelperTimer);
+    if (linuxVolumeTimer) clearInterval(linuxVolumeTimer);
+  } catch (error) { noteCrash('stopping the Linux desktop watch', error); }
   void stopWebDoor().catch(error => noteCrash('closing the web door', error));
 });
 

@@ -26,7 +26,7 @@ import { CHOICES_TOOL, readChoices } from './choices';
 import { readJournalConfig, SCALE_MAX, type JournalEntry } from './journal';
 import { formatMedia, formatMissing, lookUp, readAniListConfig, type MediaKind } from './anilist';
 import { convertImage, FORMATS, normaliseFormat } from './convert';
-import { cancelPower, closeApp, desktopSupported, findApps, isCancellable, launch, listRunning, matchApp, matchRunning, normalisePower, POWER_DELAY_S, readDesktopConfig, runPower } from './desktop';
+import { cancelPower, closeApp, desktopSupported, findApps, isCancellable, launch, listRunning, matchApp, matchRunning, normalisePower, powerDelaySeconds, readDesktopConfig, runPower } from './desktop';
 import { formatPage, formatResults, readSearchConfig, readWebPage, SearchBlocked, searchWeb, type SearchConfig, type SearchResult } from './search';
 import { fetchTranscript, formatTranscript, titleFrom, transcriptInstruction, videoIdFrom, watchUrl } from './transcripts';
 import { findSuperseded, semanticSimilarities, supersede, MEMORY_KINDS, type MemoryKind, type MemoryRecord } from './memory';
@@ -1294,18 +1294,18 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
     // Re-checked here, not only where the tools are assembled. A model can name
     // a tool it was never offered, and this is the one place that actually runs.
     if (!handsAllowed()) return JSON.stringify({ error: 'Not now — say it to me directly and I will.' });
-    if (!desktopSupported()) return JSON.stringify({ error: 'I cannot open programs on this machine — that only works on Windows. Say so plainly.' });
+    if (!desktopSupported()) return JSON.stringify({ error: 'I cannot open programs on this machine. Say so plainly.' });
     if (!readDesktopConfig(store.get('desktop')).launch) return JSON.stringify({ error: 'Opening programs is switched off in Setup.' });
     const wanted = String(args.name ?? '').trim();
     const app = matchApp(wanted, findApps());
-    if (!app) return JSON.stringify({ error: `There is nothing called "${wanted}" in the Start Menu. Say so rather than guessing at another program.` });
+    if (!app) return JSON.stringify({ error: `There is nothing called "${wanted}" that I can open. Say so rather than guessing at another program.` });
     launch(app);
     console.log(`[desktop] opened ${app.name}`);
     return JSON.stringify({ opened: app.name });
   }
   if (name === 'close_app') {
     if (!handsAllowed()) return JSON.stringify({ error: 'Not now — say it to me directly and I will.' });
-    if (!desktopSupported()) return JSON.stringify({ error: 'I cannot close programs on this machine — that only works on Windows. Say so plainly.' });
+    if (!desktopSupported()) return JSON.stringify({ error: 'I cannot close programs on this machine. Say so plainly.' });
     if (!readDesktopConfig(store.get('desktop')).launch) return JSON.stringify({ error: 'Closing programs is switched off in Setup.' });
     const wanted = String(args.name ?? '').trim();
     const app = matchRunning(wanted, await listRunning());
@@ -1316,7 +1316,7 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
   }
   if (name === 'power') {
     if (!handsAllowed()) return JSON.stringify({ error: 'Not now — say it to me directly and I will.' });
-    if (!desktopSupported()) return JSON.stringify({ error: 'I cannot power this machine — that only works on Windows. Say so plainly.' });
+    if (!desktopSupported()) return JSON.stringify({ error: 'I cannot power this machine. Say so plainly.' });
     if (!readDesktopConfig(store.get('desktop')).power) return JSON.stringify({ error: 'Shutting the machine down is switched off in Setup.' });
     const asked = String(args.action ?? '').trim().toLowerCase();
     if (asked === 'cancel') {
@@ -1327,9 +1327,10 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
     const action = normalisePower(asked);
     if (!action) return JSON.stringify({ error: `I can shut down, restart, sleep or lock — not "${args.action}".` });
     runPower(action);
-    console.log(`[desktop] ${action}${isCancellable(action) ? ` in ${POWER_DELAY_S}s` : ''}`);
+    const delay = powerDelaySeconds();
+    console.log(`[desktop] ${action}${isCancellable(action) ? ` in ${delay}s` : ''}`);
     return JSON.stringify(isCancellable(action)
-      ? { started: action, seconds: POWER_DELAY_S, tell_them: `Tell them it is ${action === 'shutdown' ? 'shutting down' : 'restarting'} in ${POWER_DELAY_S} seconds and that saying "cancel" stops it.` }
+      ? { started: action, seconds: delay, tell_them: `Tell them it is ${action === 'shutdown' ? 'shutting down' : 'restarting'} in ${delay} seconds and that saying "cancel" stops it.` }
       : { done: action });
   }
   if (name === 'read_web_page') {

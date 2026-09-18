@@ -20,6 +20,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+// The Linux half, kept apart the same way the Windows half is kept in this
+// file's own commands: this file decides which platform is speaking, that one
+// knows how a Linux desktop answers.
+import * as linux from './linuxdesktop';
 
 export type DesktopConfig = {
   /** Launching things. Off until asked for. */
@@ -31,8 +35,10 @@ export type DesktopConfig = {
 export const DEFAULT_DESKTOP: DesktopConfig = { launch: false, power: false };
 
 /**
- * Every action in this module speaks to Windows — cmd, taskkill, shutdown,
- * PowerShell — so anywhere else it is not switched off, it is absent.
+ * Where she can open, close and power the machine: Windows through
+ * cmd/taskkill/shutdown/PowerShell, Linux through the compositor, systemd and
+ * the freedesktop entries (linuxdesktop.ts). Anywhere else it is not switched
+ * off, it is absent.
  *
  * Kept as a question rather than a scatter of `process.platform` checks so the
  * startup report in capabilities.ts and the guards here can never disagree
@@ -41,7 +47,7 @@ export const DEFAULT_DESKTOP: DesktopConfig = { launch: false, power: false };
  * be able to turn off a setting on the machine where it works.
  */
 export function desktopSupported(platform: NodeJS.Platform = process.platform): boolean {
-  return platform === 'win32';
+  return platform === 'win32' || platform === 'linux';
 }
 
 export function readDesktopConfig(saved: unknown): DesktopConfig {
@@ -81,6 +87,9 @@ const START_MENUS = [
 const NOT_AN_APP = /(uninstall|readme|release notes|help|documentation|website|homepage|manual|support|report a bug|licence|license)/i;
 
 export function findApps(roots = START_MENUS, readdir = fs.readdirSync, exists = fs.existsSync): App[] {
+  // A Linux menu is `.desktop` files, not `.lnk` ones; the scan is the same
+  // question asked of a different directory.
+  if (process.platform === 'linux') return linux.findApps();
   const found = new Map<string, App>();
   const walk = (dir: string, depth: number) => {
     if (depth < 0 || !exists(dir)) return;
@@ -128,7 +137,8 @@ export function matchApp(asked: string, apps: App[]): App | null {
  * that crosses this boundary is which entry of the allowlist to open.
  */
 export function launch(app: App): void {
-  if (!desktopSupported()) { console.warn(`[desktop] cannot open ${app.name} — that is Windows only`); return; }
+  if (!desktopSupported()) { console.warn(`[desktop] cannot open ${app.name} — this platform has no way to`); return; }
+  if (process.platform === 'linux') { linux.launch(app); return; }
   // start with an empty title argument, because start treats a first quoted
   // argument as the window title and would otherwise open a console instead.
   const child = spawn('cmd.exe', ['/c', 'start', '', app.target], { windowsHide: true, detached: true, stdio: 'ignore' });
@@ -160,9 +170,10 @@ export function parseRunning(output: string): Running[] {
 
 export function listRunning(): Promise<Running[]> {
   // An empty list here used to mean two different things — nothing is open, or
-  // this is not Windows — and the second one is not something to answer a
-  // question with. The startup report says it once; nothing else asks.
+  // this is not a platform that can see — and the second one is not something to
+  // answer a question with. The startup report says it once; nothing else asks.
   if (!desktopSupported()) return Promise.resolve([]);
+  if (process.platform === 'linux') return linux.running();
   return new Promise(resolve => {
     const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
       "Get-Process | Where-Object { $_.MainWindowTitle } | ForEach-Object { \"$($_.ProcessName)`t$($_.MainWindowTitle)\" }"],
@@ -203,7 +214,8 @@ export function matchRunning(asked: string, running: Running[]): Running | null 
  * companion should be able to do to a document.
  */
 export function closeApp(app: Running): void {
-  if (!desktopSupported()) { console.warn(`[desktop] cannot close ${app.name} — that is Windows only`); return; }
+  if (!desktopSupported()) { console.warn(`[desktop] cannot close ${app.name} — this platform has no way to`); return; }
+  if (process.platform === 'linux') { void linux.closeApp(app); return; }
   const child = spawn('taskkill.exe', ['/IM', `${app.name}.exe`], { windowsHide: true, detached: true, stdio: 'ignore' });
   child.unref();
 }
@@ -250,7 +262,8 @@ export function powerCommand(action: PowerAction): { file: string; args: string[
 }
 
 export function runPower(action: PowerAction): void {
-  if (!desktopSupported()) { console.warn(`[desktop] cannot ${action} — that is Windows only`); return; }
+  if (!desktopSupported()) { console.warn(`[desktop] cannot ${action} — this platform has no way to`); return; }
+  if (process.platform === 'linux') { void linux.runPower(action); return; }
   const { file, args } = powerCommand(action);
   const child = spawn(file, args, { windowsHide: true, detached: true, stdio: 'ignore' });
   child.unref();
@@ -259,6 +272,7 @@ export function runPower(action: PowerAction): void {
 /** Calling off a shutdown or restart that has not happened yet. */
 export function cancelPower(): void {
   if (!desktopSupported()) return;
+  if (process.platform === 'linux') { void linux.cancelPower(); return; }
   const child = spawn('shutdown.exe', ['/a'], { windowsHide: true, detached: true, stdio: 'ignore' });
   child.unref();
 }
@@ -266,4 +280,14 @@ export function cancelPower(): void {
 /** Whether the action is one that can still be called off once started. */
 export function isCancellable(action: PowerAction): boolean {
   return action === 'shutdown' || action === 'restart';
+}
+
+/**
+ * How long the machine waits before it goes, as the platform can express it.
+ * Windows takes a countdown of exactly twenty seconds. systemd's scheduler only
+ * speaks in minutes, so Linux gets a minute and posts its own wall warning —
+ * and saying "cancel" stops it either way, which is the part that matters.
+ */
+export function powerDelaySeconds(platform: NodeJS.Platform = process.platform): number {
+  return platform === 'linux' ? 60 : POWER_DELAY_S;
 }
