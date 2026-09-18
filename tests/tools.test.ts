@@ -30,6 +30,7 @@ const EVERYTHING: ToolAvailability = {
   claude: true,
   system: { enabled: true, level: 2 },
   downloads: true,
+  shell: true,
   hands: true,
   desktop: { launch: true, power: true },
   knockedAwake: true,
@@ -146,7 +147,7 @@ test('no handler is dead code — every one is reachable from some setting', asy
     'get_system_info', 'get_gpu_info', 'get_processes', 'get_docker_status',
     'get_service_status', 'diagnose_system', 'restart_docker_container',
     'start_service', 'stop_service', 'restart_haru', 'look_up_knowledge', 'adopt_interest', 'browser_control',
-    'describe_myself', 'change_setting', 'vault_list', 'vault_read', 'vault_write', 'vault_folder', 'go_back_to_sleep', 'downloads',
+    'describe_myself', 'change_setting', 'vault_list', 'vault_read', 'vault_write', 'vault_folder', 'go_back_to_sleep', 'downloads', 'run_command',
   ];
   for (const name of handled) {
     assert.ok(reachable.has(name), `${name} has a handler but is never offered to anyone`);
@@ -541,4 +542,26 @@ test('the downloads tool hands the ask through, one show or all', async () => {
   assert.deepEqual(asked, ['pause:Naruto', 'resume:*', 'status']);
   const broken = { ...downloads, status: async () => { throw new Error('ECONNREFUSED'); } };
   assert.match(JSON.parse(await run('downloads', { action: 'status' }, '', { downloads: broken })).error, /not answering \(ECONNREFUSED\)/);
+});
+
+test('the terminal is offered at level 3 from any door when asked about, and refused by name when off', async () => {
+  assert.ok(!offered(NOTHING).includes('run_command'));
+  const phone = chatTools({ ...NOTHING, shell: true, hands: false, web: true }, 'reboot the system').map(tool => tool.function.name);
+  assert.ok(phone.includes('run_command'));
+  assert.ok(chatTools({ ...NOTHING, shell: true }, 'run `df -h` for me').some(tool => tool.function.name === 'run_command'));
+  assert.ok(!chatTools({ ...NOTHING, shell: true }, 'what did you have for lunch').some(tool => tool.function.name === 'run_command'));
+  assert.match(JSON.parse(await run('run_command', { command: 'df -h' }, 'run df -h', { shell: null })).error, /switched off/);
+});
+
+test('the terminal hands the command, his words and the door through, and reports a failure plainly', async () => {
+  const asked: { command: string; said: string; door: string }[] = [];
+  const shell: NonNullable<ToolDeps['shell']> = { run: async input => { asked.push(input); return { confirm: true, command: input.command }; } };
+  const parked = JSON.parse(await run('run_command', { command: ' sudo -n reboot ' }, 'reboot the system', { shell }));
+  assert.equal(parked.confirm, true);
+  assert.deepEqual(asked, [{ command: 'sudo -n reboot', said: 'reboot the system', door: 'desk' }]);
+  await run('run_command', { command: 'df -h' }, 'run df -h', { shell, onWeb: () => true });
+  assert.equal(asked[1].door, 'phone');
+  assert.match(JSON.parse(await run('run_command', {}, 'run it', { shell })).error, /command is required/);
+  const broken = { run: async () => { throw new Error('spawn EACCES'); } };
+  assert.match(JSON.parse(await run('run_command', { command: 'ls' }, 'ls', { shell: broken })).error, /did not answer \(spawn EACCES\)/);
 });

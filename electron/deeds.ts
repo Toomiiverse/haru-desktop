@@ -77,6 +77,8 @@ const DEEDS: Record<string, (args: Record<string, unknown>) => string> = {
     : a.action === 'stop' ? 'stopped a Claude Code session' : ''),
   // Asking how they are going is looking; pausing and resuming are the deeds.
   downloads: a => (a.action === 'pause' || a.action === 'resume' ? `${a.action === 'pause' ? 'paused' : 'resumed'} the downloads${text(a.title) ? ` for ${text(a.title)}` : ''}` : ''),
+  // Proposing and running both reach for it; the ledger has which.
+  run_command: a => `used the terminal on the server${text(a.command) ? `: ${text(a.command).slice(0, 60)}` : ''}`,
   convert_picture: a => `converted a picture to ${text(a.format, 'another format')}`,
 };
 

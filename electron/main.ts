@@ -75,7 +75,7 @@ import { formatList, formatMedia, formatMissing, lookUp, readAniListConfig, user
 import { createDesktopShortcut, desktopShortcutPath, isAutoStartEnabled, setAutoStart, startedHidden } from './startup';
 import { answersThePrompt, CUE_NOTE, isCue, stageNote, dropRoleHeader, dropTackedOnParagraphs, dropInventedContact, dropInventedScreenTalk, dropRepeatedAgendaMentions, dropRepeatedParagraphs, dropStageDirections, dropRepeatedOpener, dropEchoOpener, dropRepeatedSentences, fixStatedClock, fixStatedReminderTime, fixStatedMinutes, dropOverusedEmoji, oneEmojiAtMost, dropClosingOrder, thinksAloud } from './reply';
 import { runToolLoop } from './toolloop';
-import { chatTools, coerceKnowledgeCategory, runChatTool, steadyTable, type ToolAvailability, type ToolDeps } from './tools';
+import { chatTools, coerceKnowledgeCategory, runChatTool, shellRelevant, steadyTable, type ToolAvailability, type ToolDeps } from './tools';
 import { describeMyself, describeSettings, readSelfSnapshot } from './self';
 import { pickBreath } from './breaths';
 import { createMemoryStore } from './memorystore';
@@ -90,6 +90,7 @@ import { openEviSession } from './evibridge';
 import { setDefaultAutoSelectFamilyAttemptTimeout } from 'node:net';
 import { readBrowserControlConfig } from './browserctl';
 import { listSessions, openSession, readClaudeCodeConfig, readOpenedSessions, resolveSessionDir, sessionName, SESSIONS_KEPT as CLAUDE_SESSIONS_KEPT, stopSession, type SessionHost } from './claudesession';
+import { ShellGate, SERVER_NOTE, denied, ledgerEntry, readShellConfig, runCommand } from './shell';
 import { Downloads, downloadsReady, readDownloadsConfig } from './downloads';
 import { applyDecay, DEEP_RECALL_LIMIT, findSuperseded, formationPrompt, formationWindows, MEMORIES_PER_DAY, readFormation, type FormedNote, formatMemoryPrompt, isExplicitRecall, closeEvents, isWorthAnEvent, isWorthKeeping, isWorthRemembering, MEMORY_KINDS, migrateMemories, monthFoldPrompt, pruneMemories, readsAsSecondPerson, rememberInto, retrieveMemories, semanticSimilarities, summaryPrompt, supersede, THIRD_PERSON_AGAIN, vectorSimilarity, type ForgettingEntry, type MemoryKind, type MemoryRecord, type MemorySource, type RetrievalFactors, type ScoredMemory, type SessionSummary } from './memory';
 import { consolidateMemories, type ConsolidationChange } from './consolidation';
@@ -4425,13 +4426,14 @@ const scheduleMemoryVectorRefresh = memoryStore.scheduleVectorRefresh;
 const runMemoryConsolidation = memoryStore.consolidate;
 const runMemoryDecay = memoryStore.decay;
 
-type SystemConfig = { enabled: boolean; level: 1 | 2; allowlist: string[] };
+// Level 3: a terminal on the box, at his word (shell.ts).
+type SystemConfig = { enabled: boolean; level: 1 | 2 | 3; allowlist: string[] };
 const DEFAULT_SYSTEM_CONFIG: SystemConfig = { enabled: true, level: 2, allowlist: ['restart_docker_container', 'start_service', 'stop_service', 'restart_haru'] };
 
 function readSystemConfig(): SystemConfig {
   const saved = store.get('system.config') as Partial<SystemConfig> | undefined;
   if (!saved || typeof saved !== 'object') return DEFAULT_SYSTEM_CONFIG;
-  const level = saved.level === 2 ? 2 : saved.level === 1 ? 1 : DEFAULT_SYSTEM_CONFIG.level;
+  const level = saved.level === 3 ? 3 : saved.level === 2 ? 2 : saved.level === 1 ? 1 : DEFAULT_SYSTEM_CONFIG.level;
   return {
     enabled: saved.enabled === true,
     level,
@@ -4969,6 +4971,7 @@ function availableTools(): ToolAvailability {
     browser: readBrowserControlConfig(store.get('browser')).enabled,
     claude: readClaudeCodeConfig(store.get('claudeCode')).enabled,
     downloads: downloadsLink() !== null,
+    shell: shellLink() !== null,
     system: { enabled: systemConfig.enabled, level: systemConfig.level },
     hands: handsAllowed,
     desktop: supportedDesktop(readDesktopConfig(store.get('desktop'))),
@@ -4989,6 +4992,44 @@ function refreshConfigurationNote() {
     if (error) console.warn('[self] could not refresh the configuration note:', error.message);
     else console.log('[self] refreshed the configuration note');
   });
+}
+
+/**
+ * The terminal on the server (shell.ts), at level 3. One gate for the whole
+ * process, so a command proposed on one turn is what the next turn's yes is
+ * measured against. Null below level 3 or with the shell block switched off —
+ * then the tool is not on the table at all.
+ */
+const shellGate = new ShellGate();
+function shellLink(): ToolDeps['shell'] {
+  const system = readSystemConfig();
+  const shell = readShellConfig(store.get('system.config'));
+  if (!system.enabled || system.level < 3 || !shell.enabled) return null;
+  return {
+    run: async ({ command, said, door }) => {
+      const refused = denied(command, shell.deny);
+      if (refused) {
+        console.log(`[shell] refused "${command.slice(0, 80)}" — ${refused}`);
+        return { error: `Refused: ${refused}. Say so plainly, and do not look for another way round it.` };
+      }
+      const verdict = shellGate.consider({ command, said, door, now: Date.now() });
+      if (!verdict.run) return { confirm: true, command, note: verdict.note };
+      const ran = await runCommand(command, shell);
+      const at = new Date().toISOString();
+      try {
+        const dir = path.join(os.homedir(), '.config', 'haru');
+        mkdirSync(dir, { recursive: true });
+        appendFileSync(path.join(dir, 'shell.log'), ledgerEntry({ at, door, command, ran }));
+      } catch (error) {
+        console.warn('[shell] ledger not written:', error instanceof Error ? error.message : error);
+      }
+      console.log(`[shell] ${door} (${verdict.because}) $ ${command.slice(0, 120)} -> exit ${ran.exit ?? ran.signal ?? '?'}${ran.timedOut ? ' (timed out)' : ''} in ${ran.ms}ms`);
+      return {
+        ran: true, command, exit: ran.exit, timedOut: ran.timedOut, truncated: ran.truncated, output: ran.output,
+        note: ran.exit === 0 ? 'It ran. Tell them what it said in your own words, quoting the lines that matter.' : 'It did not finish cleanly — tell them what it said and the exit code, plainly.',
+      };
+    },
+  };
 }
 
 /**
@@ -5085,6 +5126,8 @@ function toolDeps(): ToolDeps {
     claude: claudeSessions(),
     // The downloads, asked of qBittorrent at call time (downloads.ts).
     downloads: (link => link ? { status: () => link.status(), pause: title => link.pause(title), resume: title => link.resume(title) } : null)(downloadsLink()),
+    // The terminal on the server (shell.ts), level 3.
+    shell: shellLink(),
     // Their vault on disk, and the re-read that makes a note she wrote searchable at once.
     vault: { root: () => knowledge.vaultPath(), afterWrite: () => { void syncVaultAndRetire(); } },
     // Herself, and what of herself she may change (self.ts).
@@ -7197,7 +7240,12 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // and the rewrite that says it as herself is a second wait on top — one
   // spoken question with two question marks in it was sent out as "several
   // questions at once" and took 16 s to come back.
+  // A command may run this turn: answered at home, so what it prints never
+  // leaves the box (shell.ts) — the hosted route is skipped below as well.
+  const shellTurn = messages.at(-1)?.role === 'user' && shellRelevant(latest) && shellLink() !== null;
+  if (shellTurn) console.log('[router] a command is on the table — answered at home');
   let brain: Brain = call ? { config, escalated: false, because: 'a call is answered at home', sees: false }
+    : shellTurn ? { config, escalated: false, because: 'a command may run: answered at home', sees: false }
     : directions ? { config, escalated: false, because: 'the way somewhere is answered at home', sees: false }
     : video ? { config, escalated: false, because: 'a video is read at home, where the transcript tool is', sees: false }
     : brainFor(latest, config, messages, { pictures, files: arrived.length > 0 });
@@ -7205,7 +7253,7 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // Their turn, not escalated, not a one-shot composer: the conversation route
   // answers as her, if one is set and this conversation may leave the box.
   const home = config;
-  const route = !brain.escalated && !brief && !choices && messages.at(-1)?.role === 'user' ? conversationRoute() : null;
+  const route = !brain.escalated && !shellTurn && !brief && !choices && messages.at(-1)?.role === 'user' ? conversationRoute() : null;
   if (route) {
     // A page she fetched last turn does not keep this turn at home. The flag
     // is set when a page is read and only cleared below, after this gate — so
@@ -7306,6 +7354,7 @@ const promptState = {
     tastes: tastesInstruction(getInterests()),
     diary: diaryContext(recentEntries(app.getPath('home'), 2)),
     directionsNote: directions?.note,
+    serverNote: shellTurn ? SERVER_NOTE : '',
   };
   // A hosted brain reads the whole prompt before its first word, so its system
   // message holds only the invariant blocks — her rules and her persona — and

@@ -153,6 +153,7 @@ export const SETTINGS = {
   weather_pushes: { path: 'push.prefs.weather', kind: 'boolean', what: 'whether the weather turning reaches their phone' },
   history_budget: { path: 'ai.historyChars', kind: 'number', min: 2000, max: 40_000, what: 'how many characters of earlier days you keep in front of you' },
   summary_days: { path: 'ai.summaryDays', kind: 'number', min: 0, max: 30, what: 'how many days of your own day notes you keep in front of you' },
+  machine_level: { path: 'system.config.level', kind: 'number', min: 1, max: 3, what: 'how far you may reach into the server: 1 look, 2 act with their word, 3 run commands they give you' },
 } as const satisfies Record<string, Setting>;
 
 export type SettingName = keyof typeof SETTINGS;

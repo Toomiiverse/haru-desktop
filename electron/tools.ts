@@ -858,6 +858,34 @@ export function downloadsRelevant(message: string): boolean {
   return DOWNLOADS_TALK.test(message ?? '');
 }
 
+/**
+ * The terminal on the server (shell.ts), at level 3. Described as the machine
+ * in her room, hers to operate: "reboot the system" is about that box, not
+ * about her. The guard — his word, checked in code against his real message —
+ * is in shell.ts, where a model cannot talk its way past it.
+ */
+export const SHELL_TOOL: ChatTool = {
+  type: 'function',
+  function: {
+    name: 'run_command',
+    description: 'Run a command on the server — the machine in your room that the household runs on, a separate box from you, and yours to operate. Call this whenever they ask you to do something on it that no other tool covers, or hand you a command: "reboot the system" (sudo -n reboot), "update the packages", "how much space is left in the anime folder", "run df -h". When they did not write the command themselves, this tool will first tell you to show them the exact command and ask for their word — do that, then call it again with the same command once they have said yes. You really can — so never say you cannot, and never say it is done without calling this.',
+    parameters: {
+      type: 'object',
+      properties: {
+        command: { type: 'string', description: 'The exact shell command, as it would be typed — one line, nothing else.' },
+      },
+      required: ['command'],
+    },
+  },
+};
+
+/** Whether the message could be asking for something on the server's terminal. Broad, like the machine gate. */
+const SHELL_TALK = /`[^`]+`|^\s*\$\s|\b(?:run|execute|command|terminal|shell|bash|script|reboot|update|upgrade|install|apt|git|docker|systemctl|journalctl|df|du|ls|cat|grep|tail|ps|top|kill|ping|curl|wget|chmod|chown|mkdir|mv|cp|rm|nvidia-smi|uptime|free|whoami|folder|directory|disk|space|the server|the system|the box|the machine|the pc)\b/i;
+
+export function shellRelevant(message: string): boolean {
+  return SHELL_TALK.test(message ?? '');
+}
+
 /** The shape of an agenda entry the dispatcher touches. */
 type KeptLike = { id: string; title: string; date: string; time?: string; kind: 'task' | 'event'; done: boolean };
 
@@ -880,6 +908,8 @@ export type ToolAvailability = {
   claude: boolean;
   /** Whether the downloads can be asked (downloads.ts): the anime stack is on and her qBittorrent password file exists. Optional so fixtures need not name it. */
   downloads?: boolean;
+  /** Whether she may run commands on the server (system.config.level 3 with its shell block on). Optional so fixtures need not name it. */
+  shell?: boolean;
   /** Whether she can book herself a follow-up (scheduler.ts). Optional so fixtures need not name it. */
   booking?: boolean;
   /** Whether her old chats can be searched (chatsearch.ts). Optional so fixtures need not name it. */
@@ -944,6 +974,8 @@ export function chatTools(available: ToolAvailability, latest = ''): ChatTool[] 
   // is nothing a page could turn against him — see claudesession.ts.
   if (available.claude && (!latest || claudeRelevant(latest))) tools.push(CLAUDE_SESSION_TOOL);
   if (available.downloads && (!latest || downloadsRelevant(latest))) tools.push(DOWNLOADS_TOOL);
+  // Level 3, any door: his word is checked in code (shell.ts), so hands need not gate it.
+  if (available.shell && (!latest || shellRelevant(latest))) tools.push(SHELL_TOOL);
   if (available.system.enabled && machine) {
     tools.push(...SYSTEM_TOOLS);
     if (available.system.level >= 2) tools.push(...SYSTEM_ACTION_TOOLS);
@@ -1044,6 +1076,8 @@ export type ToolDeps = {
   goBackToSleep(input: { block: boolean }): { asleep: boolean; blocked: boolean } | null;
   /** The downloads (downloads.ts): qBittorrent asked directly; null when the stack is off or her password file is missing. */
   downloads?: { status(): Promise<Record<string, unknown>>; pause(title?: string): Promise<Record<string, unknown>>; resume(title?: string): Promise<Record<string, unknown>> } | null;
+  /** The terminal on the server (shell.ts): his word is checked inside, against his real message. */
+  shell?: { run(input: { command: string; said: string; door: 'desk' | 'phone' }): Promise<Record<string, unknown>> } | null;
   /** Her old chats (chatsearch.ts): the finds, already dated and written out, or null when there is no archive to search. */
   chats?: { search(input: { query: string; from?: string; to?: string }): Promise<{ found: number; text: string; wordsOnly?: boolean }> } | null;
   /** Her own follow-ups (scheduler.ts), or null when there is nowhere to keep them. */
@@ -1376,6 +1410,19 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
       const reason = error instanceof Error ? error.message : String(error);
       console.warn(`[downloads] ${action} failed: ${reason}`);
       return JSON.stringify({ error: `qBittorrent is not answering (${reason}). Say so plainly rather than pretending it is done.` });
+    }
+  }
+  if (name === 'run_command') {
+    // Re-checked here: a model can name a tool it was never offered.
+    if (!deps.shell) return JSON.stringify({ error: 'Running commands on the server is switched off — say so plainly, in your own words.' });
+    const command = typeof args.command === 'string' ? args.command.trim() : '';
+    if (!command) return JSON.stringify({ error: 'command is required — the exact command, on one line.' });
+    try {
+      return JSON.stringify(await deps.shell.run({ command, said: latestUserMessage, door: onWeb() ? 'phone' : 'desk' }));
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      console.warn(`[shell] run_command failed: ${reason}`);
+      return JSON.stringify({ error: `The terminal did not answer (${reason}). Say so plainly rather than pretending it ran.` });
     }
   }
   if (name === 'browser_control') {

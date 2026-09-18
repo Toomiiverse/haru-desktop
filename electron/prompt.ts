@@ -231,6 +231,8 @@ export type PromptState = {
   herSleep?: string;
   /** The way somewhere, when they asked for it: what was found and what the app will attach (directions.ts). */
   directionsNote?: string;
+  /** The server in her room, on the turns a command is on the table (shell.ts). */
+  serverNote?: string;
 };
 
 /**
@@ -383,6 +385,7 @@ function systemBlocks(state: PromptState, away = false): SystemBlock[] {
     // the same moment it is told the tools exist.
     { stable: false, text: state.machineNote },
     { stable: false, text: state.directionsNote ?? '' },
+    { stable: false, text: state.serverNote ?? '' },
     // Kept last so the tone instruction is the final thing read before replying,
     // which is what the drawer promises. The persona sits with it for the same
     // reason: a long prompt makes the opening lines the ones a small model
