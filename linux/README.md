@@ -60,6 +60,42 @@ If her model is larger than the card's memory — a 9B on a 6 GB laptop GPU, say
 — Ollama spills layers to CPU and the card stays awake even at `keep_alive: -1`.
 A model that fits is the single biggest saving on a laptop.
 
+### Fitting a 9B onto a 6 GB card
+
+Measured on a 6 GB RTX 3060 Laptop, running the desktop on the integrated GPU so
+the whole card belongs to Ollama. The budget that matters is not the weights
+alone: a vision projector is reserved at load (worst case ~870 MB), plus the KV
+cache and compute buffer, so weights must be ≤ ~5.2 GB to keep tools and vision.
+
+The recipe used here:
+
+```bash
+# 1. A Q3_K_L quant of a Qwen3.5-9B heretic, with its Q8 vision projector.
+ollama pull hf.co/mradermacher/Qwen3.5-9B-ultimate-irrefusable-heretic-GGUF:Qwen3.5-9B-ultimate-irrefusable-heretic.Q3_K_L.gguf
+
+# 2. q8_0 KV — halves the cache against f16, nearly lossless, and buys the
+#    headroom for the last layers. In the ollama user unit:
+#      Environment=OLLAMA_KV_CACHE_TYPE=q8_0
+
+# 3. Ollama's own estimator is conservative: it split this model 28/33 and left
+#    500 MB unused. Bake the measured layer count in so it loads whole.
+cat > Modelfile <<'EOF'
+FROM hf.co/mradermacher/Qwen3.5-9B-ultimate-irrefusable-heretic-GGUF:Qwen3.5-9B-ultimate-irrefusable-heretic.Q3_K_L.gguf
+PARAMETER num_gpu 33
+EOF
+ollama create haru-heretic -f Modelfile
+```
+
+Then point `ai.config.model` and `ai.conversation.model` at `haru-heretic`. The
+startup log says which it is: `load_tensors: offloaded 33/33 layers to GPU`, and
+the app's own line, `the model is 5.4 GB and the card has 6.0 GB — it fits whole`.
+
+The same math rules out more than it lets in: a 9B at Q4 (~5.7 GB) is a layer or
+two short even with the projector at Q8, and a 9B at IQ2 (4.9 GB) fits whole but
+costs more in quality than Q3_K_L costs in layers. A 4B-class multimodal model
+(Gemma 4 E4B, ~4–5 GB) is the comfortable alternative when the brain can be
+smaller.
+
 ## Packaging
 
 ```bash
