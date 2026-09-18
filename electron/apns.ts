@@ -76,7 +76,12 @@ export function apnsPayload(title: string, body: string, url: string, topic: str
   const category: ApnsCategory = extra.eventId ? 'HARU_EVENT' : 'HARU_LINE';
   const haru: Record<string, string> = { kind: extra.kind, url };
   if (extra.eventId) haru.eventId = extra.eventId;
-  return JSON.stringify({ aps: { alert: { title, body: body.slice(0, 1000) }, sound: 'default', 'thread-id': topic, category }, url, haru });
+  // A reminder about a thing on the list is allowed through a Focus and the
+  // scheduled summary (the app holds the time-sensitive entitlement); by the
+  // same test as the category, so a journal line or a line out of the blue
+  // stays as held as the phone wants it.
+  const level = extra.eventId ? 'time-sensitive' : 'active';
+  return JSON.stringify({ aps: { alert: { title, body: body.slice(0, 1000) }, sound: 'default', 'thread-id': topic, category, 'interruption-level': level }, url, haru });
 }
 
 export type ApnsResult = { status: number; reason?: string; gone: boolean };
