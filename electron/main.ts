@@ -91,7 +91,7 @@ import { setDefaultAutoSelectFamilyAttemptTimeout } from 'node:net';
 import { readBrowserControlConfig } from './browserctl';
 import { listSessions, openSession, readClaudeCodeConfig, readOpenedSessions, resolveSessionDir, sessionName, SESSIONS_KEPT as CLAUDE_SESSIONS_KEPT, stopSession, type SessionHost } from './claudesession';
 import { ShellGate, SERVER_NOTE, denied, ledgerEntry, readShellConfig, runCommand } from './shell';
-import { Suwayomi, fetchFits, fetchSummary, hisReading, hisReadingNote, matchManga, readerLink, readSuwayomiConfig, spiteful, type HisTitle, type ShelfChapter } from './suwayomi';
+import { Suwayomi, fetchFits, fetchSummary, hisReading, hisReadingNote, matchManga, onHisShelf, readerLink, readSuwayomiConfig, spiteful, type HisTitle, type ShelfChapter } from './suwayomi';
 import { serverLookNote } from './prompt';
 import { Downloads, downloadsReady, readDownloadsConfig } from './downloads';
 import { applyDecay, DEEP_RECALL_LIMIT, findSuperseded, formationPrompt, formationWindows, MEMORIES_PER_DAY, readFormation, type FormedNote, formatMemoryPrompt, isExplicitRecall, closeEvents, isWorthAnEvent, isWorthKeeping, isWorthRemembering, MEMORY_KINDS, migrateMemories, monthFoldPrompt, pruneMemories, readsAsSecondPerson, rememberInto, retrieveMemories, semanticSimilarities, summaryPrompt, supersede, THIRD_PERSON_AGAIN, vectorSimilarity, type ForgettingEntry, type MemoryKind, type MemoryRecord, type MemorySource, type RetrievalFactors, type ScoredMemory, type SessionSummary } from './memory';
@@ -10490,7 +10490,7 @@ function mangaShelfLink(): ToolDeps['mangaShelf'] {
   const freeGb = () => { try { const fs = statfsSync(config.downloadsDir); return (fs.bavail * fs.bsize) / 2 ** 30; } catch { return Number.POSITIVE_INFINITY; } };
   const shelfTitle = async (title: string) => {
     const library = await link.library();
-    const match = matchManga(title, library.filter(manga => manga.categories.some(name => name.toLowerCase() !== config.shelf.toLowerCase())));
+    const match = matchManga(title, library.filter(manga => onHisShelf(manga, config.shelf)));
     return match && 'one' in match ? match.one : null;
   };
   return {

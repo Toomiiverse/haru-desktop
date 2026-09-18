@@ -294,10 +294,15 @@ export class Suwayomi {
 
 export type HisTitle = { title: string; chapter: number; page: number; at: number | null; highest: number | null };
 
+/** Whether a title sits on one of his shelves. Suwayomi's Default category is implicit: no category at all is Default. */
+export function onHisShelf(manga: Pick<ShelfManga, 'categories'>, shelf: string): boolean {
+  return manga.categories.length === 0 || manga.categories.some(name => name.toLowerCase() !== shelf.toLowerCase());
+}
+
 /** His titles: on his shelves, with a marker of his. Hers-only titles are not his reading. */
 export function hisReading(library: ShelfManga[], shelf: string): HisTitle[] {
   return library
-    .filter(manga => manga.his && manga.categories.some(name => name.toLowerCase() !== shelf.toLowerCase()))
+    .filter(manga => manga.his && onHisShelf(manga, shelf))
     .map(manga => ({ title: manga.title, chapter: manga.his!.chapter, page: manga.his!.page, at: manga.his!.at, highest: manga.highest }))
     .sort((a, b) => (b.at ?? 0) - (a.at ?? 0));
 }

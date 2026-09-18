@@ -2,7 +2,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { Suwayomi, SPITE_GRUDGE, fetchFits, fetchSummary, hisReading, hisReadingNote, matchManga, readerLink, readSuwayomiConfig, spiteful, type Fetcher, type ShelfManga } from '../electron/suwayomi';
+import { Suwayomi, SPITE_GRUDGE, fetchFits, fetchSummary, hisReading, hisReadingNote, matchManga, onHisShelf, readerLink, readSuwayomiConfig, spiteful, type Fetcher, type ShelfManga } from '../electron/suwayomi';
 
 function fake() {
   const calls: { query: string; variables: Record<string, unknown> }[] = [];
@@ -87,6 +87,10 @@ test('his reading is his shelves with a bookmark of his; hers-only titles are no
   const library = await client.library();
   const his = hisReading(library, 'Haru');
   assert.deepEqual(his.map(h => [h.title, h.chapter, h.page]), [['Berserk', 3, 12]]);
+  // Suwayomi's Default category is implicit: Berserk fetched for him came back with no category at all (2026-09-18).
+  assert.equal(onHisShelf({ categories: [] }, 'Haru'), true);
+  assert.equal(onHisShelf({ categories: ['Haru'] }, 'Haru'), false);
+  assert.equal(onHisShelf({ categories: ['Haru', 'Default'] }, 'Haru'), true);
   assert.equal(library.find(m => m.title === 'Chainsaw Man')!.meta['haru.chapter'], '2');
 });
 
