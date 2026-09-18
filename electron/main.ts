@@ -10571,7 +10571,7 @@ async function herHandsTick(): Promise<void> {
   const last = ledger.at(-1);
   const why = whyNotAct({
     level: system.level, config: hands, minutes: now.getHours() * 60 + now.getMinutes(),
-    asleep: herAsleepNow(), speaking: speakingNow, idleMs: Date.now() - lastUserActivityAt,
+    asleep: herAsleepNow(), speaking: speakingNow, idleMs: Date.now() - hisLastWordMs(),
     sinceLastMs: last ? Date.now() - Date.parse(last.at) : Number.MAX_SAFE_INTEGER,
     doneToday: handsToday(ledger, today, dayOf), busy: herHandsBusy || pokemonSitting !== null || readingMangaNow,
   });
@@ -10674,6 +10674,18 @@ function mangaLink(): ToolDeps['manga'] {
  * he speaks, at bedtime, on time, or on her share of the day, and what came
  * of it goes into her game memory and her own-life block.
  */
+/**
+ * When he last said anything, by any door. The live stamp is only set on the
+ * model path and starts at zero: five minutes after "set your machine level
+ * to 4" — answered in code, right after a restart — her own time opened as
+ * though he had been silent for ever (2026-09-18). The transcript knows.
+ */
+function hisLastWordMs(): number {
+  const messages = (store.get('chat.messages') as { role?: string; at?: string }[] | undefined) ?? [];
+  const last = [...messages].reverse().find(message => message.role === 'user' && message.at);
+  return Math.max(lastUserActivityAt, last?.at ? Date.parse(last.at) || 0 : 0);
+}
+
 let pokemonSitting: Sitting | null = null;
 let pokemonTicking = false;
 function pokemonLink(): PokemonLink | null {
@@ -10685,7 +10697,7 @@ function pokemonPlayedToday(): number {
   return saved?.day === currentChatDayKey() ? Number(saved.ms ?? 0) : 0;
 }
 async function pokemonMoment(link: PokemonLink): Promise<PokemonMoment> {
-  return { now: Date.now(), lastUserActivityAt, asleep: herAsleepNow(), speaking: false, workerUp: await link.up(), playedTodayMs: pokemonPlayedToday() };
+  return { now: Date.now(), lastUserActivityAt: hisLastWordMs(), asleep: herAsleepNow(), speaking: false, workerUp: await link.up(), playedTodayMs: pokemonPlayedToday() };
 }
 async function startPokemon(startedBy: 'her' | 'him'): Promise<Record<string, unknown>> {
   const link = pokemonLink();
