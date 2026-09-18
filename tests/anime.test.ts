@@ -248,6 +248,33 @@ test('the pick squeezes the disk: their word first, then the grab', async () => 
   assert.ok(calls.includes('POST /api/v1/search'));
 });
 
+test('a 500-episode pack is 500 queue rows: every page is read and they fold to one line per download', async () => {
+  const pages: number[] = [];
+  const rows = (n: number, downloadId: string, title: string) => Array.from({ length: n }, (_, i) => ({ title, downloadId, seriesId: 3, size: 56 * 2 ** 30, sizeleft: 50 * 2 ** 30, episodeId: i }));
+  const all = [...rows(500, 'DE2F', 'Shippuden pack'), { title: 'Naruto pack', downloadId: '58D9', size: 65 * 2 ** 30, sizeleft: 60 * 2 ** 30 }];
+  const stack = link({
+    '/api/v3/queue': url => {
+      const page = Number(url.searchParams.get('page') ?? 1);
+      pages.push(page);
+      return { totalRecords: all.length, records: all.slice((page - 1) * 500, page * 500) };
+    },
+  });
+  const lines = await stack.queue();
+  assert.deepEqual(pages, [1, 2]);
+  assert.deepEqual(lines.map(line => line.downloadId), ['DE2F', '58D9']);
+  assert.equal(Math.round(await stack.inFlightGb()), 110, 'what is still coming, once per download, not once per episode');
+});
+
+test('what is still downloading counts against the space for the next fetch', async () => {
+  const stack = link(fetchRoutes({
+    '/api/v3/rootfolder': () => [{ path: '/data/media/anime', freeSpace: 150 * 2 ** 30 }],
+    '/api/v3/queue': () => ({ totalRecords: 1, records: [{ title: 'Other pack', downloadId: 'AAAA', seriesId: 9, size: 60 * 2 ** 30, sizeleft: 55 * 2 ** 30 }] }),
+  }));
+  const asked = await stack.watch({ title: 'Naruto' });
+  assert.equal(asked.outcome, 'needs-word', '150 free less 55 in flight is 95, and a 65 GB pack would leave less than 50');
+  assert.equal(asked.freeGb, 95);
+});
+
 test('already on its way: the progress, and no second grab', async () => {
   const calls: string[] = [];
   const stack = link(fetchRoutes({

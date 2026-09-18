@@ -391,9 +391,34 @@ export class AnimeLink {
     return (root?.freeSpace ?? 0) / GB;
   }
 
+  /**
+   * The queue, one line per download.
+   *
+   * Sonarr lists a pack once per episode it holds — a 500-episode pack is 500
+   * rows — so a page of 100 can hold one pack and nothing else. Seen live
+   * 2026-09-18: Naruto Shippuden's rows would have pushed Naruto's one row off
+   * the page, and the watch would have called it vanished. Every page is read,
+   * and the rows fold to one per download id, which is what a fetch is.
+   */
   async queue(): Promise<SonarrQueueItem[]> {
-    const page = await this.sonarr<{ records?: SonarrQueueItem[] }>('/queue?includeUnknownSeriesItems=true&pageSize=100');
-    return page?.records ?? [];
+    const lines: SonarrQueueItem[] = [];
+    const seen = new Set<string>();
+    for (let page = 1; page <= 10; page++) {
+      const got = await this.sonarr<{ records?: SonarrQueueItem[]; totalRecords?: number }>(`/queue?includeUnknownSeriesItems=true&pageSize=500&page=${page}`);
+      for (const item of got?.records ?? []) {
+        const key = item.downloadId ?? `${item.title ?? ''}#${item.seriesId ?? ''}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        lines.push(item);
+      }
+      if ((got?.records?.length ?? 0) < 500 || page * 500 >= (got?.totalRecords ?? 0)) break;
+    }
+    return lines;
+  }
+
+  /** Bytes still to come across everything downloading, which the free-space figure does not know about yet. */
+  async inFlightGb(): Promise<number> {
+    return (await this.queue()).reduce((sum, item) => sum + (item.sizeleft ?? 0), 0) / GB;
   }
 
   async show(seriesId: number): Promise<SonarrSeries | null> {
@@ -560,7 +585,11 @@ export class AnimeLink {
   private async fetch(show: SonarrSeries, asked: string, input: WatchInput, justAdded = false): Promise<Record<string, unknown>> {
     const episodes = await this.episodes(show.id);
     const next = episodes.filter(episode => episode.seasonNumber > 0 && !episode.hasFile).sort((a, b) => (a.absoluteEpisodeNumber ?? 9999) - (b.absoluteEpisodeNumber ?? 9999) || a.seasonNumber - b.seasonNumber || a.episodeNumber - b.episodeNumber)[0];
-    const want: Want = { title: show.title, absolute: next?.absoluteEpisodeNumber ?? 1, season: next?.seasonNumber ?? 1, freeGb: await this.freeGb(), keepFreeGb: this.config.keepFreeGb };
+    // What is still coming down counts as spent: the disk does not know yet,
+    // but it will. Two 60 GB packs asked for a minute apart (2026-09-18) were
+    // each judged against the full free space.
+    const freeGb = Math.max(0, (await this.freeGb()) - (await this.inFlightGb().catch(() => 0)));
+    const want: Want = { title: show.title, absolute: next?.absoluteEpisodeNumber ?? 1, season: next?.seasonNumber ?? 1, freeGb, keepFreeGb: this.config.keepFreeGb };
     const results = await this.search(show.title);
     const promising = results.filter(release => (release.seeders ?? 0) >= 2).sort((a, b) => (b.seeders ?? 0) - (a.seeders ?? 0)).slice(0, 25);
     const rated: Rated[] = [];
