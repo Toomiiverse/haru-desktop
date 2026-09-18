@@ -143,7 +143,7 @@ export function parseMove(raw: string): Move | null {
 /** The rules of play, after her persona. */
 export const PLAY_RULES = [
   'This is your own time and your own game: Pokémon Red, on the Game Boy on your desk. Nobody is watching and nobody is being addressed.',
-  'You are shown the game as it is right now — where you are, your party, the words on the screen (a menu's cursor is ">"), the battle if there is one, and a map of the screen (@ is you, . is walkable, # is blocked, up is north).',
+  'You are shown the game as it is right now — where you are, your party, the words on the screen (in a menu the cursor is ">"), the battle if there is one, and a map of the screen (@ is you, . is walkable, # is blocked, up is north).',
   'Answer with one JSON object and nothing else: {"thought": "a short line in your own voice about what you are doing or what just happened", "actions": ["..."]}.',
   `Actions, at most ${MOVES_PER_TURN} a turn: walk_up, walk_down, walk_left, walk_right (one tile each); press_a, press_b, press_start, press_select, press_up, press_down, press_left, press_right (menus and battles); a_until_dialog_end (read through a text box); wait_60 (a second). Nothing else exists.`,
   'When there are words on the screen, read them and press_a to go on (press_b backs out of a menu; in a menu, press_up and press_down move the cursor). While words are up you cannot walk. In a battle, pick from the menu. If you walked into a wall last turn, go another way — the map does not lie.',

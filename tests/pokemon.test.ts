@@ -95,7 +95,7 @@ test('the link speaks the worker\'s API, and a worker that is not there is simpl
   assert.equal((await link.state()).player?.name, 'HARU');
   assert.equal(await link.map(), '. @ .');
   assert.deepEqual(await link.text(), ['>NEW GAME', 'OPTION']);
-  assert.equal((await link.act(['walk_up']))?.player?.badges, 1);
+  assert.equal((await link.act(['walk_up']))?.player?.badge_count, 1);
   await link.save('auto');
   assert.deepEqual(JSON.parse(calls.find(c => c.url.endsWith('/action'))!.body!), { actions: ['walk_up'] });
   assert.deepEqual(JSON.parse(calls.find(c => c.url.endsWith('/save'))!.body!), { name: 'auto' });
