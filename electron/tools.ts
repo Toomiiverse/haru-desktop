@@ -516,7 +516,7 @@ export const SYSTEM_TOOLS: ChatTool[] = [
     type: 'function',
     function: {
       name: 'get_service_status',
-      description: 'The status of a named service — the user services (haru, gpt-sovits, obsidian, xvfb, x11vnc, haru-asr) and the ollama service. For whether something is running.',
+      description: 'The status of a named service — the user services (haru, breeze-tts, haru-asr, ollama-emotion, obsidian, chrome, xvfb, x11vnc, pc-project-ops) and the ollama service. For whether something is running.',
       parameters: {
         type: 'object',
         properties: { name: { type: 'string', description: 'The service name, e.g. "haru" or "ollama". Leave out to check them all.' } },
@@ -565,7 +565,7 @@ export const SYSTEM_ACTION_TOOLS: ChatTool[] = [
     type: 'function',
     function: {
       name: 'start_service',
-      description: 'Start a named user service (haru, gpt-sovits, obsidian, xvfb, x11vnc, haru-asr). Disruptive — explicit confirmation required.',
+      description: 'Start a named user service (haru, breeze-tts, haru-asr, ollama-emotion, obsidian, chrome, xvfb, x11vnc, pc-project-ops). Disruptive — explicit confirmation required.',
       parameters: {
         type: 'object',
         properties: {
@@ -580,7 +580,7 @@ export const SYSTEM_ACTION_TOOLS: ChatTool[] = [
     type: 'function',
     function: {
       name: 'stop_service',
-      description: 'Stop a named user service (haru, gpt-sovits, obsidian, xvfb, x11vnc, haru-asr). Disruptive — explicit confirmation required.',
+      description: 'Stop a named user service (haru, breeze-tts, haru-asr, ollama-emotion, obsidian, chrome, xvfb, x11vnc, pc-project-ops). Disruptive — explicit confirmation required.',
       parameters: {
         type: 'object',
         properties: {
@@ -829,6 +829,35 @@ export const CLAUDE_SESSION_TOOL: ChatTool = {
   },
 };
 
+/**
+ * The downloads (downloads.ts): what qBittorrent is fetching and how far,
+ * paused or started again — all of them or one show. Not gated on hands, like
+ * watching: "pause the downloads" from the phone is the point, and the worst a
+ * page could do is pause a torrent he is then told about.
+ */
+export const DOWNLOADS_TOOL: ChatTool = {
+  type: 'function',
+  function: {
+    name: 'downloads',
+    description: 'The downloads on the server — what is downloading and how far along, and pausing or starting them again, all of them or one show. Call this whenever they ask how the downloads are going, to pause or stop the downloads (the internet is slow, they are on a call, Jellyfin is stuttering), or to start them again. You really can — so never say you cannot, and never say it is done without calling this.',
+    parameters: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', enum: ['status', 'pause', 'resume'], description: '"status" for how they are going, "pause" to stop them, "resume" to start them again.' },
+        title: { type: 'string', description: 'One show, as they said it — "Naruto". Leave it out for all of the downloads.' },
+      },
+      required: ['action'],
+    },
+  },
+};
+
+/** Whether the message could be about the downloads. Broad, like the machine gate. */
+const DOWNLOADS_TALK = /\b(?:downloads?|downloading|torrents?|qbittorrent|seed(?:ing)?|fetch(?:es|ing)?|pause|paus(?:ed|ing)|resume|unpause|bandwidth|internet|jellyfin|sonarr)\b/i;
+
+export function downloadsRelevant(message: string): boolean {
+  return DOWNLOADS_TALK.test(message ?? '');
+}
+
 /** The shape of an agenda entry the dispatcher touches. */
 type KeptLike = { id: string; title: string; date: string; time?: string; kind: 'task' | 'event'; done: boolean };
 
@@ -849,6 +878,8 @@ export type ToolAvailability = {
   browser: boolean;
   /** Whether she can open Claude Code sessions for the Claude app (claudeCode.enabled). */
   claude: boolean;
+  /** Whether the downloads can be asked (downloads.ts): the anime stack is on and her qBittorrent password file exists. Optional so fixtures need not name it. */
+  downloads?: boolean;
   /** Whether she can book herself a follow-up (scheduler.ts). Optional so fixtures need not name it. */
   booking?: boolean;
   /** Whether her old chats can be searched (chatsearch.ts). Optional so fixtures need not name it. */
@@ -912,6 +943,7 @@ export function chatTools(available: ToolAvailability, latest = ''): ChatTool[] 
   // point is to open one from the phone, and an idle session only he can drive
   // is nothing a page could turn against him — see claudesession.ts.
   if (available.claude && (!latest || claudeRelevant(latest))) tools.push(CLAUDE_SESSION_TOOL);
+  if (available.downloads && (!latest || downloadsRelevant(latest))) tools.push(DOWNLOADS_TOOL);
   if (available.system.enabled && machine) {
     tools.push(...SYSTEM_TOOLS);
     if (available.system.level >= 2) tools.push(...SYSTEM_ACTION_TOOLS);
@@ -1010,6 +1042,8 @@ export type ToolDeps = {
   changeMySetting(plan: SettingPlan): Promise<{ ok: boolean; note: string }>;
   /** Back to bed at her word, while she is up because they knocked (hersleep.ts); null when she is not. */
   goBackToSleep(input: { block: boolean }): { asleep: boolean; blocked: boolean } | null;
+  /** The downloads (downloads.ts): qBittorrent asked directly; null when the stack is off or her password file is missing. */
+  downloads?: { status(): Promise<Record<string, unknown>>; pause(title?: string): Promise<Record<string, unknown>>; resume(title?: string): Promise<Record<string, unknown>> } | null;
   /** Her old chats (chatsearch.ts): the finds, already dated and written out, or null when there is no archive to search. */
   chats?: { search(input: { query: string; from?: string; to?: string }): Promise<{ found: number; text: string; wordsOnly?: boolean }> } | null;
   /** Her own follow-ups (scheduler.ts), or null when there is nowhere to keep them. */
@@ -1327,6 +1361,21 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
     } catch (error) {
       console.warn('[claude] session tool failed:', error instanceof Error ? error.message : error);
       return JSON.stringify({ error: `Claude is not answering (${error instanceof Error ? error.message : error}). Say so plainly rather than pretending it opened.` });
+    }
+  }
+  if (name === 'downloads') {
+    // Re-checked here: a model can name a tool it was never offered.
+    if (!deps.downloads) return JSON.stringify({ error: 'The downloads are not wired up to you — say so plainly, in your own words.' });
+    const action = args.action === 'pause' || args.action === 'resume' ? args.action : 'status';
+    const title = typeof args.title === 'string' ? args.title.trim() : '';
+    try {
+      const result = action === 'status' ? await deps.downloads.status() : action === 'pause' ? await deps.downloads.pause(title || undefined) : await deps.downloads.resume(title || undefined);
+      console.log(`[downloads] ${action}${title ? ` "${title}"` : ''} -> ${'error' in result ? String(result.error) : Object.keys(result).filter(k => k !== 'note').map(k => `${k}=${JSON.stringify(result[k])}`).join(' ').slice(0, 160)}`);
+      return JSON.stringify(result);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      console.warn(`[downloads] ${action} failed: ${reason}`);
+      return JSON.stringify({ error: `qBittorrent is not answering (${reason}). Say so plainly rather than pretending it is done.` });
     }
   }
   if (name === 'browser_control') {

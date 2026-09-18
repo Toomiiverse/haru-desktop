@@ -209,7 +209,8 @@ export function parseSystemctlState(output: string): ServiceStatus['state'] {
 
 // ---- Known services ---------------------------------------------------------
 
-export const USER_SERVICES = ['haru', 'gpt-sovits', 'obsidian', 'xvfb', 'x11vnc', 'haru-asr'];
+// Refreshed 2026-09-18: gpt-sovits is parked; Breeze, the emotion model, Chrome and the PC Project app run now.
+export const USER_SERVICES = ['haru', 'breeze-tts', 'haru-asr', 'ollama-emotion', 'obsidian', 'chrome', 'xvfb', 'x11vnc', 'pc-project-ops'];
 export const SYSTEM_READABLE = ['ollama'];
 export const KNOWN_SERVICES = [...USER_SERVICES, ...SYSTEM_READABLE];
 

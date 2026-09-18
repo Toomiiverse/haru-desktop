@@ -90,6 +90,7 @@ import { openEviSession } from './evibridge';
 import { setDefaultAutoSelectFamilyAttemptTimeout } from 'node:net';
 import { readBrowserControlConfig } from './browserctl';
 import { listSessions, openSession, readClaudeCodeConfig, readOpenedSessions, resolveSessionDir, sessionName, SESSIONS_KEPT as CLAUDE_SESSIONS_KEPT, stopSession, type SessionHost } from './claudesession';
+import { Downloads, downloadsReady, readDownloadsConfig } from './downloads';
 import { applyDecay, DEEP_RECALL_LIMIT, findSuperseded, formationPrompt, formationWindows, MEMORIES_PER_DAY, readFormation, type FormedNote, formatMemoryPrompt, isExplicitRecall, closeEvents, isWorthAnEvent, isWorthKeeping, isWorthRemembering, MEMORY_KINDS, migrateMemories, monthFoldPrompt, pruneMemories, readsAsSecondPerson, rememberInto, retrieveMemories, semanticSimilarities, summaryPrompt, supersede, THIRD_PERSON_AGAIN, vectorSimilarity, type ForgettingEntry, type MemoryKind, type MemoryRecord, type MemorySource, type RetrievalFactors, type ScoredMemory, type SessionSummary } from './memory';
 import { consolidateMemories, type ConsolidationChange } from './consolidation';
 import { appendToBlockValue, canEditBlock, findBlock, formatMemoryBlocks, replaceInBlockValue, resolveBlockValue, resetBlockToDerived, withEditedValue, type BlockSources, type MemoryBlock } from './blocks';
@@ -4967,6 +4968,7 @@ function availableTools(): ToolAvailability {
     knowledge: getKnowledgeConfig().enabled,
     browser: readBrowserControlConfig(store.get('browser')).enabled,
     claude: readClaudeCodeConfig(store.get('claudeCode')).enabled,
+    downloads: downloadsLink() !== null,
     system: { enabled: systemConfig.enabled, level: systemConfig.level },
     hands: handsAllowed,
     desktop: supportedDesktop(readDesktopConfig(store.get('desktop'))),
@@ -4986,6 +4988,26 @@ function refreshConfigurationNote() {
   execFile('bash', [script], { timeout: 60_000 }, error => {
     if (error) console.warn('[self] could not refresh the configuration note:', error.message);
     else console.log('[self] refreshed the configuration note');
+  });
+}
+
+/**
+ * The downloads (downloads.ts): qBittorrent under anime.qbittorrent, with the
+ * password read from his file each time, like the Servarr keys. Null when the
+ * anime stack is off or the file is not there — then the tool is not offered
+ * at all rather than failing on the first ask.
+ */
+function downloadsLink(): Downloads | null {
+  const config = readDownloadsConfig(store.get('anime'));
+  if (!downloadsReady(config)) return null;
+  return new Downloads(config!, {
+    fetch: (url, init) => net.fetch(url, init),
+    known: () => {
+      const saved = store.get('anime.fetches');
+      return Array.isArray(saved)
+        ? saved.filter((item): item is { title: string; infoHash?: string } => !!item && typeof item === 'object' && typeof (item as { title?: unknown }).title === 'string')
+        : [];
+    },
   });
 }
 
@@ -5061,6 +5083,8 @@ function toolDeps(): ToolDeps {
     chats: { search: searchOldChats },
     // Claude Code sessions he picks up in the Claude app (claudesession.ts).
     claude: claudeSessions(),
+    // The downloads, asked of qBittorrent at call time (downloads.ts).
+    downloads: (link => link ? { status: () => link.status(), pause: title => link.pause(title), resume: title => link.resume(title) } : null)(downloadsLink()),
     // Their vault on disk, and the re-read that makes a note she wrote searchable at once.
     vault: { root: () => knowledge.vaultPath(), afterWrite: () => { void syncVaultAndRetire(); } },
     // Herself, and what of herself she may change (self.ts).

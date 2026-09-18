@@ -75,6 +75,8 @@ const DEEDS: Record<string, (args: Record<string, unknown>) => string> = {
   // Listing is looking; opening and stopping are the deeds.
   claude_session: a => (a.action === 'open' ? `opened a Claude Code session for them${text(a.folder) ? ` in ${text(a.folder)}` : ''}`
     : a.action === 'stop' ? 'stopped a Claude Code session' : ''),
+  // Asking how they are going is looking; pausing and resuming are the deeds.
+  downloads: a => (a.action === 'pause' || a.action === 'resume' ? `${a.action === 'pause' ? 'paused' : 'resumed'} the downloads${text(a.title) ? ` for ${text(a.title)}` : ''}` : ''),
   convert_picture: a => `converted a picture to ${text(a.format, 'another format')}`,
 };
 

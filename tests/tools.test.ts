@@ -29,6 +29,7 @@ const EVERYTHING: ToolAvailability = {
   browser: true,
   claude: true,
   system: { enabled: true, level: 2 },
+  downloads: true,
   hands: true,
   desktop: { launch: true, power: true },
   knockedAwake: true,
@@ -145,7 +146,7 @@ test('no handler is dead code — every one is reachable from some setting', asy
     'get_system_info', 'get_gpu_info', 'get_processes', 'get_docker_status',
     'get_service_status', 'diagnose_system', 'restart_docker_container',
     'start_service', 'stop_service', 'restart_haru', 'look_up_knowledge', 'adopt_interest', 'browser_control',
-    'describe_myself', 'change_setting', 'vault_list', 'vault_read', 'vault_write', 'vault_folder', 'go_back_to_sleep',
+    'describe_myself', 'change_setting', 'vault_list', 'vault_read', 'vault_write', 'vault_folder', 'go_back_to_sleep', 'downloads',
   ];
   for (const name of handled) {
     assert.ok(reachable.has(name), `${name} has a handler but is never offered to anyone`);
@@ -516,4 +517,28 @@ test('going back to sleep is on the table only while she is up because they knoc
   assert.deepEqual(asked, { block: true });
   assert.equal(done.asleep, true);
   assert.match(done.note, /one short goodnight/);
+});
+
+test('the downloads are offered from any door when asked about, and refused by name when off', async () => {
+  assert.ok(!offered(NOTHING).includes('downloads'));
+  const phone = chatTools({ ...NOTHING, downloads: true, hands: false, web: true }, 'pause the downloads, jellyfin is stuttering').map(tool => tool.function.name);
+  assert.ok(phone.includes('downloads'));
+  assert.ok(chatTools({ ...NOTHING, downloads: true }, 'how is naruto downloading?').some(tool => tool.function.name === 'downloads'));
+  assert.ok(!chatTools({ ...NOTHING, downloads: true }, 'what did you have for lunch').some(tool => tool.function.name === 'downloads'));
+  assert.match(JSON.parse(await run('downloads', { action: 'pause' }, 'pause the downloads', { downloads: null })).error, /not wired up/);
+});
+
+test('the downloads tool hands the ask through, one show or all', async () => {
+  const asked: string[] = [];
+  const downloads: NonNullable<ToolDeps['downloads']> = {
+    status: async () => { asked.push('status'); return { torrents: [], downloading: 0 }; },
+    pause: async title => { asked.push(`pause:${title ?? '*'}`); return { paused: ['Naruto'] }; },
+    resume: async title => { asked.push(`resume:${title ?? '*'}`); return { resumed: [] }; },
+  };
+  assert.deepEqual(JSON.parse(await run('downloads', { action: 'pause', title: ' Naruto ' }, 'pause naruto', { downloads })).paused, ['Naruto']);
+  await run('downloads', { action: 'resume' }, 'start them again', { downloads });
+  await run('downloads', { action: 'nonsense' }, 'how are they going', { downloads });
+  assert.deepEqual(asked, ['pause:Naruto', 'resume:*', 'status']);
+  const broken = { ...downloads, status: async () => { throw new Error('ECONNREFUSED'); } };
+  assert.match(JSON.parse(await run('downloads', { action: 'status' }, '', { downloads: broken })).error, /not answering \(ECONNREFUSED\)/);
 });
