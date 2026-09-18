@@ -241,7 +241,28 @@ export function pickRelease(rated: Rated[]): { pick: Rated; needsWord: boolean }
 
 // -- the link ----------------------------------------------------------------
 
-export type WatchInput = { title: string; tvdbId?: number; confirm?: boolean };
+export type WatchInput = { title: string; tvdbId?: number; confirm?: boolean; where?: string };
+
+/** What a Jellyfin session calls itself, read for the kind of thing it is running on. */
+const PHONE = /\b(?:iphone|ipad|ios|android|mobile|safari|swiftfin|streamyfin|findroid|infuse)\b/i;
+const DESK = /\b(?:chrome|chromium|firefox|edge|opera|brave|windows|desktop|media player|jellyfin desktop|linux|macos)\b/i;
+const TV = /\b(?:tv|television|telly|roku|shield|fire|tizen|webos|android tv|apple tv|chromecast|bravia)\b/i;
+
+/**
+ * The players that are where they said. "Phone" is any session that reads as
+ * a phone, "desk" or "pc" anything that reads as a computer, "tv" a
+ * television; anything else is matched against the device's own name. No
+ * word, every player.
+ */
+export function playersWhere<T extends { Client?: string; DeviceName?: string }>(players: T[], where: string | undefined): T[] {
+  const said = (where ?? '').trim().toLowerCase();
+  if (!said) return players;
+  const label = (player: T) => `${player.DeviceName ?? ''} ${player.Client ?? ''}`;
+  if (/^(?:my )?(?:phone|mobile|iphone|ipad|tablet)$/.test(said)) return players.filter(player => PHONE.test(label(player)));
+  if (/^(?:my )?(?:desk|desktop|pc|computer|laptop|browser|chrome)$/.test(said)) return players.filter(player => DESK.test(label(player)) && !PHONE.test(label(player)));
+  if (/^(?:my |the )?(?:tv|telly|television)$/.test(said)) return players.filter(player => TV.test(label(player)));
+  return players.filter(player => label(player).toLowerCase().includes(said));
+}
 
 export class AnimeLink {
   private serverId = '';
@@ -438,7 +459,7 @@ export class AnimeLink {
   async watch(input: WatchInput): Promise<Record<string, unknown>> {
     const title = input.title.trim();
     const onServer = await this.findOnServer(title);
-    if (onServer) return this.putOn(onServer);
+    if (onServer) return this.putOn(onServer, input.where);
 
     // Not on the server. In Sonarr already?
     const shows = await this.shows();
@@ -491,16 +512,21 @@ export class AnimeLink {
     return { ok: true, outcome: 'nothing', show: show.title, note: 'Sonarr knows the show but nothing is downloading or on disk. Say so; offer to fetch it.' };
   }
 
-  private async putOn(series: JellyfinItem): Promise<Record<string, unknown>> {
+  private async putOn(series: JellyfinItem, where?: string): Promise<Record<string, unknown>> {
     const next = await this.nextEpisode(series.Id);
     if (!next) return { ok: false, outcome: 'empty', show: series.Name, note: `${series.Name} is on the server but has no episodes in it yet. Say so.` };
     const { episode } = next;
-    const where = episode.ParentIndexNumber != null && episode.IndexNumber != null ? `S${episode.ParentIndexNumber}E${episode.IndexNumber}` : '';
-    const label = `${where ? `${where} ` : ''}"${episode.Name}"`;
+    const number = episode.ParentIndexNumber != null && episode.IndexNumber != null ? `S${episode.ParentIndexNumber}E${episode.IndexNumber}` : '';
+    const label = `${number ? `${number} ` : ''}"${episode.Name}"`;
     const link = await this.link(episode.Id);
-    const players = await this.players();
+    const everyone = await this.players();
+    const players = playersWhere(everyone, where);
     if (!players.length) {
-      return { ok: true, outcome: 'ready', show: series.Name, episode: label, link, note: `Nothing of theirs has Jellyfin open, so nothing could be started. Say ${label} is up next and give them the link exactly as written: ${link}` };
+      const elsewhere = everyone.map(player => player.DeviceName || player.Client || 'a player').join(', ');
+      const because = where
+        ? `Nothing on their ${where.replace(/^my /, '')} has Jellyfin open${elsewhere ? ` (open right now: ${elsewhere})` : ''}, so nothing could be started there. Say so, and that Jellyfin has to be open and signed in on it first`
+        : 'Nothing of theirs has Jellyfin open, so nothing could be started. Say so';
+      return { ok: true, outcome: 'ready', show: series.Name, episode: label, link, openElsewhere: everyone.map(player => player.DeviceName || player.Client || ''), note: `${because}. Say ${label} is up next and give them the link exactly as written: ${link}` };
     }
     const player = players[0];
     await this.play(player.Id, episode.Id);

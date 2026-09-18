@@ -6,7 +6,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { AnimeLink, apiKeyFrom, matchTitle, pickRelease, rateRelease, readAnimeConfig, sameShow, type Fetch, type ProwlarrRelease, type Want } from '../electron/anime';
+import { AnimeLink, apiKeyFrom, matchTitle, pickRelease, playersWhere, rateRelease, readAnimeConfig, sameShow, type Fetch, type ProwlarrRelease, type Want } from '../electron/anime';
 import { chatTools, runChatTool, watchRelevant, type ToolAvailability } from '../electron/tools';
 import { deedFrom } from '../electron/deeds';
 
@@ -122,6 +122,34 @@ test('on the server with a player open: the next episode is started there', asyn
   assert.equal(result.episode, 'S2E2 "Capital of the Unreturned"');
   assert.equal(result.on, 'Chrome');
   assert.ok(calls.includes('POST /Sessions/chrome/Playing'), 'the play command went to his player, not hers');
+});
+
+test('"on my phone" goes to the phone, not the PC that was used last; no phone open means the link and the reason', async () => {
+  const chrome = { Id: 'chrome', Client: 'Jellyfin Web', DeviceName: 'Chrome', SupportsRemoteControl: true, LastActivityDate: '2026-09-18T01:00:00Z' };
+  const phone = { Id: 'phone', Client: 'Jellyfin Web', DeviceName: 'Mobile Safari', SupportsRemoteControl: true, LastActivityDate: '2026-09-18T00:50:00Z' };
+  const swiftfin = { Id: 'sf', Client: 'Swiftfin iOS', DeviceName: 'iPhone', SupportsRemoteControl: true, LastActivityDate: '2026-09-18T00:40:00Z' };
+  assert.deepEqual(playersWhere([chrome, phone, swiftfin], 'my phone').map(p => p.Id), ['phone', 'sf']);
+  assert.deepEqual(playersWhere([chrome, phone, swiftfin], 'desk').map(p => p.Id), ['chrome']);
+  assert.deepEqual(playersWhere([chrome, phone, swiftfin], 'tv').map(p => p.Id), []);
+  assert.deepEqual(playersWhere([chrome, phone, swiftfin], 'iphone').map(p => p.Id), ['phone', 'sf'], 'a kind of device, not a name');
+  assert.deepEqual(playersWhere([chrome, phone, swiftfin], 'safari').map(p => p.Id), ['phone'], 'a name');
+  assert.deepEqual(playersWhere([chrome, phone], undefined).map(p => p.Id), ['chrome', 'phone']);
+  const calls: string[] = [];
+  const routes = {
+    '/Items': () => ({ Items: [{ Id: 's1', Name: 'Made in Abyss' }] }),
+    '/Shows/NextUp': () => ({ Items: [episode] }),
+    '/Sessions': () => [chrome, phone],
+    'POST /Sessions/phone/Playing': () => undefined,
+    '/System/Info': () => ({ Id: 'srv' }),
+  };
+  const played = await link(routes, calls).watch({ title: 'Made in Abyss', where: 'phone' });
+  assert.equal(played.outcome, 'playing');
+  assert.equal(played.on, 'Mobile Safari');
+  assert.ok(calls.includes('POST /Sessions/phone/Playing') && !calls.includes('POST /Sessions/chrome/Playing'));
+  const none = await link({ ...routes, '/Sessions': () => [chrome] }, []).watch({ title: 'Made in Abyss', where: 'phone' });
+  assert.equal(none.outcome, 'ready');
+  assert.match(String(none.note), /Nothing on their phone has Jellyfin open \(open right now: Chrome\)/);
+  assert.deepEqual(none.openElsewhere, ['Chrome']);
 });
 
 test('on the server with nothing open: the link, and no claim of playing', async () => {
@@ -253,6 +281,8 @@ test('the tool is on the table when the stack is wired up and the message is abo
   assert.ok(!names({ ...NOTHING, anime: true }, 'how was your day').includes('watch_anime'));
   assert.ok(watchRelevant('put the next episode on'));
   assert.ok(watchRelevant('can you get Naruto downloaded'));
+  assert.ok(watchRelevant('open it on my phone'));
+  assert.ok(watchRelevant('can you put that on the tv'));
   assert.ok(!watchRelevant('what did you have for lunch'));
 });
 
