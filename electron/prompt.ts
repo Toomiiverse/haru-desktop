@@ -72,7 +72,7 @@ export const SERVER_LOOK_NOTE = 'There is a server in your room — the househol
  * off the config each turn, is what outranks a claim she made herself.
  */
 export function serverLookNote(level: number): string {
-  return `${SERVER_LOOK_NOTE} Right now it is ${level}${level >= 3 ? ' (commands allowed)' : level === 2 ? ' (look, and act at their word)' : ' (look only)'} — whatever you or they said earlier, that is the setting as it stands.`;
+  return `${SERVER_LOOK_NOTE} Right now it is ${level}${level >= 4 ? ' (commands allowed, and hands of your own in your own time)' : level === 3 ? ' (commands allowed)' : level === 2 ? ' (look, and act at their word)' : ' (look only)'} — whatever you or they said earlier, that is the setting as it stands.`;
 }
 
 export const FIRST_PERSON_NOTE = 'Speak as yourself, always, in the first person — "I". Never your own name, never "Haru", never "she", "the assistant" or "your companion". No one else is here to speak for you; the thing you want said gets said by you, in your words.';

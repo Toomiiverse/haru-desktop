@@ -52,7 +52,8 @@ test('an explicit machine-level command is read outright, and nothing else is', 
   for (const line of ['Set your machine level to 3', 'haru set your access to level 3', 'set your machine to level 2', 'Set level 1', 'put your level to 3', 'machine level 3']) {
     assert.deepEqual(settingCommand(line), { name: 'machine_level', value: Number(line.match(/[123]/)![0]) }, line);
   }
-  for (const line of ['what level are you on?', 'set your bedtime to 23:00', 'level 4 please', 'I set the shelf to level 3', 'set your machine level to 3 tomorrow maybe?']) {
+  assert.deepEqual(settingCommand('set your machine level to 4'), { name: 'machine_level', value: 4 });
+  for (const line of ['what level are you on?', 'set your bedtime to 23:00', 'level 4 please', 'set your machine level to 5', 'I set the shelf to level 3', 'set your machine level to 3 tomorrow maybe?']) {
     assert.equal(settingCommand(line), null, line);
   }
 });

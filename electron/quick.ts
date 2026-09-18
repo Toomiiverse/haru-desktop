@@ -204,8 +204,8 @@ function agendaLine(label: string, lines: AgendaLine[], data: QuickData): string
  */
 export function settingCommand(text: string): { name: 'machine_level'; value: number } | null {
   const said = text.trim();
-  const level = /^(?:haru[,!]?\s*)?(?:please\s+)?(?:set|put|change|switch)\s+(?:your|the|it)?\s*(?:(?:machine|access|system|permission)\s+)?level\s+(?:to\s+)?(?:level\s+)?([123])\s*(?:please|now)?[.!]*\s*$/i.exec(said)
-    ?? /^(?:haru[,!]?\s*)?(?:please\s+)?(?:set|put|change|switch)\s+(?:your|the)?\s*(?:machine|access|system)\s+(?:to\s+)?level\s+([123])\s*(?:please|now)?[.!]*\s*$/i.exec(said)
-    ?? /^(?:haru[,!]?\s*)?(?:machine|access)\s+level\s+([123])\s*[.!]?$/i.exec(said);
+  const level = /^(?:haru[,!]?\s*)?(?:please\s+)?(?:set|put|change|switch)\s+(?:your|the|it)?\s*(?:(?:machine|access|system|permission)\s+)?level\s+(?:to\s+)?(?:level\s+)?([1-4])\s*(?:please|now)?[.!]*\s*$/i.exec(said)
+    ?? /^(?:haru[,!]?\s*)?(?:please\s+)?(?:set|put|change|switch)\s+(?:your|the)?\s*(?:machine|access|system)\s+(?:to\s+)?level\s+([1-4])\s*(?:please|now)?[.!]*\s*$/i.exec(said)
+    ?? /^(?:haru[,!]?\s*)?(?:machine|access)\s+level\s+([1-4])\s*[.!]?$/i.exec(said);
   return level ? { name: 'machine_level', value: Number(level[1]) } : null;
 }
