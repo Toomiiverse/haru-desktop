@@ -10,7 +10,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { addAside, markReached, readAsides, markAsked, openAsk, answerAsk, askedRecently, unansweredAsks, unansweredAsksNote, echoesAside, ASK_OPEN_MS, type Aside, type AsideSource, asideContext } from '../electron/asides';
+import { spliceRecentAsides, splicedAsidesNote, addAside, markReached, readAsides, markAsked, openAsk, answerAsk, askedRecently, unansweredAsks, unansweredAsksNote, echoesAside, ASK_OPEN_MS, type Aside, type AsideSource, asideContext } from '../electron/asides';
 
 // Every member of AsideSource. This is a Record over the union, so adding a
 // source without adding it here fails to compile.
@@ -109,4 +109,28 @@ test('a nudge that repeats a recent remark, or quotes one back with its clock st
   // implementation strips the log-row trappings and compares the text underneath,
   // with no minimum length — a two-word aside quoted back is an echo too.
   assert.equal(echoesAside('Fine. 😒 Go to bed.', [{ id: 'b', at: '2026-09-02T14:00:00.000Z', day: '2026-09-02', source: 'idle', text: 'Fine. 😒' }], now), true);
+});
+
+test('a notification he answers is the conversation: her line goes in before his, for that turn', () => {
+  const now = Date.parse('2026-09-18T08:27:27Z');
+  const pushed = { id: 'a1', text: 'I caught a Pidgey and named it after you. It keeps missing.', source: 'followup', at: '2026-09-18T08:22:19Z', day: '2026-09-18', about: '' } as unknown as Aside;
+  const messages = [
+    { role: 'user', content: "How's your game going", at: '2026-09-18T08:21:05Z' },
+    { role: 'assistant', content: 'Give it an hour.', at: '2026-09-18T08:21:05Z' },
+    { role: 'user', content: 'Hahah did you actually??', at: '2026-09-18T08:27:27Z' },
+  ];
+  const { messages: seen, spliced } = spliceRecentAsides(messages, [pushed], now);
+  assert.deepEqual(seen.map(m => [m.role, m.content.slice(0, 16)]), [['user', "How's your game "], ['assistant', 'Give it an hour.'], ['assistant', 'I caught a Pidge'], ['user', 'Hahah did you ac']]);
+  assert.equal(spliced.length, 1);
+  assert.equal(messages.length, 3, 'the transcript itself is not touched');
+  const note = splicedAsidesNote(spliced);
+  assert.match(note, /a notification on their phone/);
+  assert.match(note, /Do not say the line again/);
+  // Older than the window, already answered, already in the conversation, or no message of his: nothing is spliced.
+  assert.equal(spliceRecentAsides(messages, [{ ...pushed, at: '2026-09-18T07:00:00Z' }], now).spliced.length, 0);
+  assert.equal(spliceRecentAsides(messages, [{ ...pushed, at: '2026-09-18T08:20:00Z' }], now).spliced.length, 0, 'sent before her last reply: that exchange has moved on');
+  assert.equal(spliceRecentAsides([...messages.slice(0, 2), { role: 'assistant', content: pushed.text, at: pushed.at }, messages[2]], [pushed], now).spliced.length, 0);
+  assert.equal(spliceRecentAsides(messages.slice(0, 2), [pushed], now).spliced.length, 0);
+  assert.equal(splicedAsidesNote([]), '');
+  assert.match(splicedAsidesNote([{ ...pushed, about: 'car rego' } as Aside]), /chasing "car rego" off their list/);
 });

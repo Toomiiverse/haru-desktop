@@ -106,7 +106,7 @@ import { herFrom } from './her';
 import { computeRoute, fixStatedRoute, routeWords, type Route } from './routes';
 import { easedEnough, easedFallback, easedPrompt, gaveUpFallback, gaveUpPrompt, stopsTrafficWatch, trafficWatchAsk, TRAFFIC_WATCH_KIND, WATCH_EVERY_MS, WATCH_FOR_MS, watchJob, watchNote } from './trafficwatch';
 import { placeAsk, placeNote, placeWords, searchGooglePlaces, type GooglePlace } from './placeinfo';
-import { addAside, alreadySaidRecently, echoesAside, asideContext, asidesOn, markReached, pruneAsides, readAsides, type Aside, type AsideSource, markAsked, openAsk, answerAsk, askedRecently, unansweredAsksNote } from './asides';
+import { addAside, alreadySaidRecently, echoesAside, asideContext, asidesOn, spliceRecentAsides, markReached, pruneAsides, readAsides, type Aside, type AsideSource, markAsked, openAsk, answerAsk, askedRecently, unansweredAsksNote } from './asides';
 import { attachmentsInPlay, describeAttached, READ_IT_ALL_PROMPT, readAttachments, type Attachment, type Opened } from './attachments';
 import { forOllama, withoutOldest } from './ollamaturns';
 import { seedEmoji, seedOffTheOrders } from './seed';
@@ -6986,6 +6986,11 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // the tokens the hosted model reads before its first word, and the reader
   // is watching a chat app. The recent thread stays, the desk sends everything.
   if (away) messages = messages.slice(-awayTurns());
+  // A notification he answers is the conversation: her unprompted lines since her last reply go in
+  // right before his message, for this turn only, instead of riding beside it as a quoted note —
+  // quoted back at her, she said the line again word for word (asides.ts spliceRecentAsides).
+  const notified = spliceRecentAsides(messages, getAsides(), Date.now());
+  if (notified.spliced.length) { messages = notified.messages; console.log(`[ai] his message answers ${notified.spliced.length} line(s) she sent unprompted — they are in the conversation for this turn`); }
   // They are talking to her, so the silence she was waiting out is over.
   noteUserSpoke();
   tickOffSpoken(latest);
@@ -7326,7 +7331,9 @@ const promptState = {
     journal: getJournal(),
     checkInsToday: checkInsOn(getCheckIns(), localDateKey(promptNow)),
     screen: { label: currentActivity?.label, haunt: currentPlace ? getHaunts()[currentPlace] : undefined, scene: sceneNow(), memory: gameMemoryNow() },
-    asides: getAsides(),
+    // The spliced ones are in the conversation already; quoting them beside it as well is what made her repeat one.
+    asides: getAsides().filter(aside => !notified.spliced.some(other => other.id === aside.id)),
+    splicedAsides: notified.spliced,
     rated: (store.get('chat.messages') as RatedReply[] | undefined) ?? [],
     kept: getKept(),
     search: readSearchConfig(store.get('search')),

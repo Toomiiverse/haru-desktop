@@ -313,3 +313,53 @@ export function echoesAside(line: string, asides: Aside[], now: number): boolean
     return Boolean(said) && (candidate === said || candidate.includes(said) || said.includes(candidate));
   });
 }
+
+// -- a notification he answers is the conversation ------------------------------
+
+/**
+ * The lines she sent him unprompted, put into the conversation the model sees
+ * — for this turn only — as the things she said, right before his message.
+ *
+ * They used to ride beside his message as a quoted note ("You said this a
+ * moment ago… it is not written in the conversation below"). She pushed "I
+ * caught a Pidgey and named it after you", he tapped the notification and
+ * wrote "Hahah did you actually??" — and with her own line handed back to her
+ * in quotes, outside the conversation, she answered by saying it again, word
+ * for word (2026-09-18). A notification he answers IS the conversation: his
+ * reply follows her line, and she follows the thread.
+ *
+ * Only for the turn: the transcript is not touched, and an aside older than
+ * the context window is not spliced, so a remark from an hour ago still does
+ * not come back as though it were hanging in the air.
+ */
+export function spliceRecentAsides<T extends { role: string; content: string; at?: string }>(messages: T[], asides: Aside[], now: number): { messages: T[]; spliced: Aside[] } {
+  const last = messages.at(-1);
+  if (!last || last.role !== 'user') return { messages, spliced: [] };
+  const before = Date.parse(messages.at(-2)?.at ?? '');
+  const theirs = Date.parse(last.at ?? '');
+  const flat = (text: string) => text.toLowerCase().replace(/\s+/g, ' ').trim();
+  const said = new Set(messages.slice(-8).filter(message => message.role === 'assistant').map(message => flat(message.content)));
+  const spliced = asides
+    .filter(aside => {
+      const at = Date.parse(aside.at);
+      if (!Number.isFinite(at) || now - at < 0 || now - at >= ASIDE_CONTEXT_MS) return false;
+      if (Number.isFinite(before) && at <= before) return false;
+      if (Number.isFinite(theirs) && at > theirs) return false;
+      return !said.has(flat(aside.text));
+    })
+    .slice(-ASIDE_CONTEXT_LIMIT);
+  if (!spliced.length) return { messages, spliced: [] };
+  const hers = spliced.map(aside => ({ role: 'assistant', content: aside.text, at: aside.at }) as unknown as T);
+  return { messages: [...messages.slice(0, -1), ...hers, last], spliced };
+}
+
+/** What she is told about the lines that were spliced in: follow the thread. */
+export function splicedAsidesNote(spliced: Aside[]): string {
+  if (!spliced.length) return '';
+  const about = spliced.filter(aside => aside.about).map(aside => `"${aside.text.replace(/\s+/g, ' ').slice(0, 80)}" was you chasing "${aside.about}" off their list`);
+  return [
+    `The last ${spliced.length === 1 ? 'thing' : `${spliced.length} things`} you said in the conversation below ${spliced.length === 1 ? 'was a line' : 'were lines'} you sent them unprompted — a notification on their phone — and what they have just written is most likely their answer to it.`,
+    'Follow that thread: answer what they said about it. Do not say the line again, do not start on something else, and if they ask whether it was true, say honestly whether it was.',
+    about.length ? `(${about.join('; ')}.)` : '',
+  ].filter(Boolean).join(' ');
+}

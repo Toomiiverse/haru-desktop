@@ -19,7 +19,7 @@
 // itself — arrives already rendered. Everything else is plain data.
 
 import { checkInInstruction, type CheckIn } from './checkins';
-import { asideContext, type Aside } from './asides';
+import { asideContext, splicedAsidesNote, type Aside } from './asides';
 import { NO_FAKE_CHECKING, emojiRut, NATURAL } from './room';
 import { egoInstruction, goodnightInstruction, leverageInstruction, moodInstruction, notTwiceInstruction, shoutInstruction, type ShoutState } from './mood';
 import { vitalsInstruction, type Vitals } from './vitals';
@@ -195,6 +195,8 @@ export type PromptState = {
   checkInsToday: CheckIn[];
   screen: { label?: string; haunt?: Haunt; scene?: string; memory?: string };
   asides: Aside[];
+  /** Her unprompted lines that were put into this turn's conversation, right before his message (asides.ts). */
+  splicedAsides?: Aside[];
   rated: RatedReply[];
   kept: (AgendaItem & { kind: 'task' | 'event' })[];
   search: SearchConfig;
@@ -350,6 +352,8 @@ function systemBlocks(state: PromptState, away = false): SystemBlock[] {
     // transcript: a note lasts a quarter of an hour, a message lasts until the
     // day is archived and then turns up in the summary.
     { stable: false, text: asideContext(state.asides, nowMs) },
+    // A notification he answered: it is in the conversation, and she follows that thread.
+    { stable: false, text: splicedAsidesNote(state.splicedAsides ?? []) },
     { stable: false, text: feedbackSummary(state.rated) },
     { stable: false, text: state.aboutHer ? '' : formatAgenda(state.kept, now, today) },
     { stable: false, text: state.aboutHer ? '' : 'Answer questions about what is coming up from that list, and never say nothing is saved without checking it first.' },
