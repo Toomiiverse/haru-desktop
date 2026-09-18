@@ -14,7 +14,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {
+import { followCalendar,
   chaseableOverdue,
   doneClause,
   findItem,
@@ -667,4 +667,18 @@ test('movedSaid makes good on "I have moved it" when nothing moved', () => {
   // A time alone keeps the day; a bare "Rescheduled." is her saying so.
   const later = movedSaid('can we make Sam 3pm instead', 'Rescheduled. 3 PM.', '', open, null, now);
   assert.deepEqual(later && { id: later.item.id, date: later.date, time: later.time }, { id: 'sam', date: '2026-09-11', time: '3:00 PM' });
+});
+
+test('a calendar event moved to a new day is a new occasion: the tick does not ride along', () => {
+  const seen = { id: '1', title: 'Sam Psychologist', date: '2026-09-18', time: '5:15 PM', kind: 'event' as const, done: true, completedAt: '2026-09-18T10:00:00Z', heardAbout: '2026-09-18', googleEventId: 'g1' };
+  const next = followCalendar(seen, { title: 'Sam Psychologist', date: '2026-10-15', time: '11:30 AM' }, '2026-09-18');
+  assert.equal(next.done, false);
+  assert.equal(next.completedAt, undefined);
+  assert.equal(next.heardAbout, undefined);
+  assert.equal(next.date, '2026-10-15');
+  assert.equal(next.googleEventId, 'g1');
+  // The same day with a new time, or a rename: it is still the thing she ticked.
+  assert.equal(followCalendar(seen, { title: 'Sam (psych)', date: '2026-09-18', time: '6:00 PM' }, '2026-09-18').done, true);
+  // Moved into the past: left as it was, not reopened to be chased.
+  assert.equal(followCalendar(seen, { title: 'Sam Psychologist', date: '2026-09-10', time: '9:00 AM' }, '2026-09-18').done, true);
 });

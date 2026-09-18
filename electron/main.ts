@@ -15,7 +15,7 @@ import { applyEvent, chooseIdleAction, cueLog, DEFAULT_VITALS, driftVitals, next
 import { classificationPrompt, EMOTION_SCHEMA, EMOTIONS, NEUTRAL_EMOTION, parseEmotion, type Emotion, type EmotionName, faceForEmotion, localEmotion } from './emotion';
 import { withDiscoveredExpressions } from './expressions';
 import { reportCapabilities, seesItsOwnScreen } from './capabilities';
-import { chaseableOverdue, findItem, shiftDays, formatAgenda, itemStatus, missedInstruction, movedSaid, putOffInstruction, putOffUntil, relevantItems, readsAsAnswerToHer, readsAsBareReport, tickOffInstruction, readsAsDone, doneClause, readsAsNotDone, relativeDay, staleItemNamed, inventedTimeFor, raisedRecently, type ItemStatus, underwayClause, isUnderway, FOLLOW_UP_MS } from './agenda';
+import { followCalendar, chaseableOverdue, findItem, shiftDays, formatAgenda, itemStatus, missedInstruction, movedSaid, putOffInstruction, putOffUntil, relevantItems, readsAsAnswerToHer, readsAsBareReport, tickOffInstruction, readsAsDone, doneClause, readsAsNotDone, relativeDay, staleItemNamed, inventedTimeFor, raisedRecently, type ItemStatus, underwayClause, isUnderway, FOLLOW_UP_MS } from './agenda';
 import { isRelaunchNotReturn, openingAngles, pickAngle, shouldPipeUp } from './opening';
 import { allDayDueMinutes, isEveningCheck, reminderInstruction, reminderTier, reminderVolume, shouldRemind, type ReminderState } from './reminders';
 import { isHeated, readTone, sharpen, toneGesture, tonePose } from './tone';
@@ -4038,7 +4038,8 @@ async function performSync() {
   for (const event of events) {
     const match = byGoogleId.get(event.id);
     if (match) {
-      Object.assign(match, { title: event.title, date: event.date, time: event.time });
+      // A new date is a new occasion: the tick stays with the day it was for (agenda.ts followCalendar).
+      Object.assign(match, followCalendar(match, event, today));
       continue;
     }
     merged.push({ id: randomUUID(), title: event.title, date: event.date, time: event.time, kind: 'event', done: false, googleEventId: event.id });

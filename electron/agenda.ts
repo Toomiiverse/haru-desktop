@@ -927,3 +927,23 @@ export function staleItemNamed(line: string, items: AgendaItem[], todayKey: stri
   if (!stale.length) return null;
   return findItem(stale, line, { whole: true }) ?? null;
 }
+
+/**
+ * A calendar event she already tracks, as Google has it now.
+ *
+ * He saw Sam on 2026-09-18 and then moved the same calendar event to 15
+ * October for the next session. The sync copied the new date onto her entry
+ * and nothing else, so the tick from that afternoon rode along: the next
+ * session arrived already done, and she argued with him that evening about
+ * whether he had been at all. A new date is a new occasion — the tick, the
+ * "heard about it" and the "underway" belonged to the old one. Moved into the
+ * past it is left as it was: reopening that would only have her chase a day
+ * that has gone.
+ */
+export function followCalendar<T extends { title: string; date: string; time?: string; done: boolean; completedAt?: string; heardAbout?: string; underway?: string }>(
+  item: T, event: { title: string; date: string; time?: string }, today: string,
+): T {
+  const reopened = event.date !== item.date && event.date >= today;
+  return { ...item, title: event.title, date: event.date, time: event.time, ...(reopened ? { done: false, completedAt: undefined, heardAbout: undefined, underway: undefined } : {}) };
+}
+
