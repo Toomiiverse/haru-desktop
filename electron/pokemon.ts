@@ -147,6 +147,7 @@ export const PLAY_RULES = [
   'Answer with one JSON object and nothing else: {"thought": "a short line in your own voice about what you are doing or what just happened", "actions": ["..."]}.',
   `Actions, at most ${MOVES_PER_TURN} a turn: walk_up, walk_down, walk_left, walk_right (one tile each); press_a, press_b, press_start, press_select, press_up, press_down, press_left, press_right (menus and battles); a_until_dialog_end (read through a text box); wait_60 (a second). Nothing else exists.`,
   'When there are words on the screen, read them and press_a to go on (press_b backs out of a menu; in a menu, press_up and press_down move the cursor). While words are up you cannot walk. In a battle, pick from the menu. If you walked into a wall last turn, go another way — the map does not lie.',
+  'On a naming screen the list of ready-made names is the quick way (press_down to move, press_a to take one); NEW NAME opens a letter grid where the cursor starts on A, press_right and press_down move it, press_a types the letter, and press_start finishes the name. Keep a name short.',
   'Play it the way you would: your own names, your own favourites, your own grudges against that one Rattata.',
 ].join(' ');
 

@@ -10567,6 +10567,7 @@ async function startPokemon(startedBy: 'her' | 'him'): Promise<Record<string, un
 async function endPokemon(why: string): Promise<string> {
   const sitting = pokemonSitting;
   pokemonSitting = null;
+  store.set('her.pokemon.sitting', null);
   if (!sitting) return '';
   const link = pokemonLink();
   let state = (store.get('her.pokemon.lastState') ?? {}) as GameState;
@@ -10604,6 +10605,8 @@ async function pokemonTick(): Promise<void> {
     if (!pokemonSitting) return;
     const after = move ? await link.act(move.actions) : state;
     pokemonSitting = afterTurn(pokemonSitting, move, after ?? state, move ? await link.text() : screen);
+    // Kept between turns: a restart mid-game used to lose the sitting without a word in her game memory (2026-09-18, 106 turns).
+    store.set('her.pokemon.sitting', pokemonSitting);
     store.set('her.pokemon.lastState', after ?? state);
     if (move) console.log(`[pokemon] turn ${pokemonSitting.turns}: ${move.thought || '…'} — ${move.actions.join(' ')}`);
     if (pokemonSitting.turns % config.saveEvery === 0) await link.save('haru-auto').catch(() => {});
@@ -10613,6 +10616,17 @@ async function pokemonTick(): Promise<void> {
     pokemonTicking = false;
   }
 }
+/** A sitting that was cut off by a restart is closed out properly: summary, save, her share of the day. */
+async function recoverPokemonSitting(): Promise<void> {
+  const saved = store.get('her.pokemon.sitting') as Sitting | null | undefined;
+  if (!saved || typeof saved !== 'object' || typeof saved.startedAt !== 'number' || pokemonSitting) return;
+  pokemonSitting = saved;
+  // The clock stopped when she did: the sitting is as long as it had run, not as long as she was down.
+  const ranMs = Math.max(0, Math.min(Date.now() - saved.startedAt, saved.turns * readPokemonConfig(store.get('games')).tickSeconds * 1000));
+  pokemonSitting = { ...saved, startedAt: Date.now() - ranMs };
+  await endPokemon('she was restarted in the middle of it');
+}
+
 function pokemonDeps(): ToolDeps['pokemon'] {
   if (!pokemonLink()) return null;
   return {
@@ -12679,6 +12693,7 @@ app.whenReady().then(() => {
   scheduler.ensureDaily({ id: 'maintenance', kind: 'maintenance', daily: MAINTENANCE_AT, timezone: CHAT_TIMEZONE, staleAfterMs: 20 * 60 * 60_000 });
   // Her Game Boy: one move per tick while a sitting is on (pokemon.ts).
   setInterval(() => { void pokemonTick(); }, readPokemonConfig(store.get('games')).tickSeconds * 1000);
+  void recoverPokemonSitting();
   setTimeout(() => scheduler.start(), 30_000);
   // Her thoughts between messages (thoughts.ts): triggers looked at every five
   // minutes, the brain asked only when one has fired.
