@@ -91,7 +91,7 @@ import { setDefaultAutoSelectFamilyAttemptTimeout } from 'node:net';
 import { readBrowserControlConfig } from './browserctl';
 import { listSessions, openSession, readClaudeCodeConfig, readOpenedSessions, resolveSessionDir, sessionName, SESSIONS_KEPT as CLAUDE_SESSIONS_KEPT, stopSession, type SessionHost } from './claudesession';
 import { ShellGate, SERVER_NOTE, denied, ledgerEntry, readShellConfig, runCommand } from './shell';
-import { Suwayomi, readSuwayomiConfig, type ShelfChapter } from './suwayomi';
+import { Suwayomi, hisReading, hisReadingNote, readSuwayomiConfig, spiteful, type HisTitle, type ShelfChapter } from './suwayomi';
 import { serverLookNote } from './prompt';
 import { Downloads, downloadsReady, readDownloadsConfig } from './downloads';
 import { applyDecay, DEEP_RECALL_LIMIT, findSuperseded, formationPrompt, formationWindows, MEMORIES_PER_DAY, readFormation, type FormedNote, formatMemoryPrompt, isExplicitRecall, closeEvents, isWorthAnEvent, isWorthKeeping, isWorthRemembering, MEMORY_KINDS, migrateMemories, monthFoldPrompt, pruneMemories, readsAsSecondPerson, rememberInto, retrieveMemories, semanticSimilarities, summaryPrompt, supersede, THIRD_PERSON_AGAIN, vectorSimilarity, type ForgettingEntry, type MemoryKind, type MemoryRecord, type MemorySource, type RetrievalFactors, type ScoredMemory, type SessionSummary } from './memory';
@@ -4397,6 +4397,8 @@ const memoryStore = createMemoryStore({
       // end when it is over budget, and this is the line that answers "what
       // chapter are you up to".
       readingNote(readReading(store.get('her.reading'))),
+      // His shelf beside hers: where he is up to, and the spoiler line (suwayomi.ts).
+      hisReadingLine(),
       dayNote(getDays(), today),
       weekNote(getWeek(), today),
       tastesInstruction(interests),
@@ -10444,6 +10446,33 @@ function rememberDelivery(raw: string, clean: string): void {
   // lands, not wherever the paragraph wandered to.
   deliveredMoods.set(clean.trim(), moods[0]);
   while (deliveredMoods.size > DELIVERY_KEPT) deliveredMoods.delete(deliveredMoods.keys().next().value as string);
+}
+
+/**
+ * What he is reading, off his shelves (suwayomi.ts), refreshed every ten
+ * minutes rather than on every prompt: a library call is cheap but not
+ * free, and his bookmark does not move between two of her replies. The
+ * spite roll is per prompt, so a high grudge is a chance each turn, not a
+ * standing licence.
+ */
+let hisShelf: { at: number; titles: HisTitle[] } = { at: 0, titles: [] };
+async function refreshHisShelf(): Promise<void> {
+  const link = suwayomiLink();
+  if (!link) { hisShelf = { at: Date.now(), titles: [] }; return; }
+  try {
+    const config = readSuwayomiConfig(store.get('manga'))!;
+    hisShelf = { at: Date.now(), titles: hisReading(await link.library(), config.shelf) };
+  } catch (error) {
+    console.warn('[manga] could not read his shelf:', error instanceof Error ? error.message : error);
+    hisShelf = { at: Date.now(), titles: hisShelf.titles };
+  }
+}
+function hisReadingLine(): string {
+  if (Date.now() - hisShelf.at > 10 * 60_000) void refreshHisShelf();
+  const grudge = getMood().grudge ?? 0;
+  const spite = spiteful(grudge, Math.random());
+  if (spite && hisShelf.titles.length) console.log(`[manga] spiteful today — grudge ${grudge}, a spoiler is on the table`);
+  return hisReadingNote(hisShelf.titles, readReading(store.get('her.reading')), Date.now(), grudge, spite);
 }
 
 /**
