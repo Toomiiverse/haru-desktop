@@ -235,12 +235,16 @@ test('talking over her drops her voice, tells the phone, and the next turn knows
   // Over her: louder than the room by more than the raised ratio.
   h.feed(0.5, 600);
   await settle(10);
-  assert.ok(h.types().includes('user_interruption'), 'the phone is told to hush');
+  // Not yet: a sound over her could be her own voice back through the phone.
+  assert.ok(!h.types().includes('user_interruption'), 'a sound over her is a suspicion until the words are known');
+  assert.ok(!h.voices[0].cancelled(), 'her voice goes on meanwhile');
+  h.feed(0.002, 700);
+  await settle(10);
+  assert.ok(h.types().includes('user_interruption'), 'his words, heard: the phone is told to hush');
   assert.ok(h.voices[0].cancelled(), 'the stream of her voice is cancelled');
   const sentBefore = h.audio.length;
   await settle(10);
   assert.equal(h.audio.length, sentBefore, 'no more of that line goes down');
-  h.feed(0.002, 700);
   release!();
   await settle(60);
   assert.deepEqual(answers.map(a => a.interrupted), [false, true], 'the next turn is told she was cut off');
@@ -249,7 +253,69 @@ test('talking over her drops her voice, tells the phone, and the next turn knows
   assert.equal(h.saids.length, 1);
   assert.equal(h.saids[0][0], LONG_LINE);
   assert.ok(h.saids[0][1].startsWith('A long line') && h.saids[0][1].endsWith('—'), h.saids[0][1]);
-  assert.ok(h.saids[0][1].length <= 45, `about two seconds' worth, not the twenty seconds that were sent: ${h.saids[0][1]}`);
+  assert.ok(h.saids[0][1].length <= 70, `about three seconds' worth — the utterance is heard out first — not the twenty seconds that were sent: ${h.saids[0][1]}`);
+});
+
+test('her own voice back through the phone is not an interruption', async () => {
+  let release: (() => void) | null = null;
+  const answers: string[] = [];
+  const h = harness({
+    answer: async (text, options) => {
+      answers.push(text);
+      options.onSentence(LONG_LINE, 'neutral');
+      await new Promise<void>(resolve => { release = resolve; });
+      return { reply: LONG_LINE };
+    },
+    // What the speaker fed back into the microphone: her line, as the ears heard it (2026-09-18, "Psychologist.").
+    hear: async () => (answers.length ? 'the website and the shop.' : 'First thing.'),
+    speak: async () => { const v = voice(400, 2400); h.voices.push(v); return { stream: v.stream, sampleRate: 24000 }; },
+    moodNow: () => null,
+  });
+  h.feed(0.002, 2000); h.feed(0.3, 600); h.feed(0.002, 700);
+  await settle(30);
+  assert.ok(h.audio.length > 0, 'her voice is going out');
+  h.advance(2000);
+  h.feed(0.5, 600); h.feed(0.002, 700);
+  await settle(20);
+  assert.ok(!h.types().includes('user_interruption'), 'her echo does not hush her');
+  assert.ok(!h.voices[0].cancelled(), 'her voice goes on');
+  assert.equal(h.types().filter(t => t === 'user_message').length, 1, 'the echo is not a message of his');
+  assert.equal(answers.length, 1, 'and not a turn');
+  release!();
+  h.call.close();
+});
+
+test('a long stretch of his words over her cuts her off before he has finished', async () => {
+  let release: (() => void) | null = null;
+  const answers: { text: string; interrupted: boolean }[] = [];
+  const h = harness({
+    answer: async (text, options) => {
+      answers.push({ text, interrupted: options.interrupted });
+      if (text === 'First thing.') {
+        options.onSentence(LONG_LINE, 'neutral');
+        await new Promise<void>(resolve => { release = resolve; });
+        return { reply: LONG_LINE };
+      }
+      options.onSentence('Fine, what.', 'annoyed');
+      return { reply: 'Fine, what.' };
+    },
+    hear: async () => (answers.length ? 'Hang on, wrong appointment, stop.' : 'First thing.'),
+    speak: async text => { const v = voice(text.startsWith('A long') ? 400 : 3, text.startsWith('A long') ? 2400 : 480); h.voices.push(v); return { stream: v.stream, sampleRate: 24000 }; },
+    moodNow: () => null,
+  });
+  h.feed(0.002, 2000); h.feed(0.3, 600); h.feed(0.002, 700);
+  await settle(30);
+  h.advance(2000);
+  // He keeps talking over her: after 1.2 s the start of it goes to her ears, and his words stop her.
+  h.feed(0.5, 1400);
+  await settle(10);
+  assert.ok(h.types().includes('user_interruption'), 'cut off on the probe, before his utterance ends');
+  assert.ok(h.voices[0].cancelled());
+  h.feed(0.002, 700);
+  release!();
+  await settle(60);
+  assert.deepEqual(answers.map(a => a.interrupted), [false, true], 'his whole utterance is the next turn, told she was cut off');
+  assert.equal(h.types().filter(t => t === 'user_interruption').length, 1, 'cut off once, not again at the end');
 });
 
 test('a reply that streamed no sentence is still said, whole', async () => {

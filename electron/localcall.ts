@@ -34,6 +34,12 @@ const RING_SECONDS = 20;
 const HER_ECHO_MS = 500;
 /** While she is audible, how much louder than the room they must be to count. */
 const OVER_HER_RATIO = 7;
+/** Over her voice, this much of an utterance is heard before she is cut off. */
+const PROBE_MS = 1200;
+/** Her lines kept for the echo check: what the phone may still be playing. */
+const HER_LINES_KEPT = 3;
+/** Words too common to tell his speech from hers coming back. */
+const SMALL_WORDS = new Set(['the', 'and', 'you', 'your', 'that', 'this', 'for', 'with', 'are', 'was', 'but', 'not', 'have', 'its', "it's", "i'm", 'just', 'like', 'what', 'yeah', 'okay']);
 /** How long a sentence that reads as unfinished waits for its other half. */
 export const UNFINISHED_HOLD_MS = 700;
 /**
@@ -178,6 +184,17 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
   let pending = '';
   let holdUntil = 0;              // sample time; a held fragment is answered alone once this passes in quiet
   let transcribing = 0;           // utterances at her ears right now; a held fragment waits for them
+  // Words over her voice are not an interruption until they are known not to
+  // be hers. On 2026-09-18 she said "Your psychologist appointment…", the
+  // phone's speaker fed "Psychologist." back into its microphone past the
+  // echo cancelling, the detector took it for him, and the rest of the reply
+  // was dropped. So a start over her is a suspicion: a probe after PROBE_MS
+  // and the whole utterance at its end go to her ears first, and only words
+  // that are not in her recent lines cut her off.
+  let overHer: 'no' | 'suspect' | 'his' = 'no';
+  let overHerAt = 0;              // sample time the suspect utterance began
+  let probing = false;
+  const herLines: string[] = [];  // the last few lines sent to the phone
 
   const emit = (event: CallEvent) => { if (!closed) handlers.onEvent(event); };
   const hers = () => phoneHearsHer || sending || now() < herEchoUntil;
@@ -200,10 +217,42 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
       holdUntil = 0;
       commit(text);
     }
+    if (overHer === 'suspect' && !probing && !event && vad.speaking() && t - overHerAt >= PROBE_MS) {
+      probing = true;
+      void probe(cut(Math.max(0, overHerAt - 300), t));
+    }
     if (!event) return;
-    if (event.type === 'start') { spokeOver(); return; }
-    if (event.type === 'drop') return;
-    void heard(cut(event.from, event.to));
+    if (event.type === 'start') {
+      if (hers()) { overHer = 'suspect'; overHerAt = t; probing = false; } else { overHer = 'no'; spokeOver(); }
+      return;
+    }
+    if (event.type === 'drop') { overHer = 'no'; return; }
+    const suspect = overHer === 'suspect';
+    overHer = 'no';
+    void heard(cut(event.from, event.to), suspect);
+  }
+
+  /** Words heard over her: hers, coming back through the phone, or his? */
+  function echoOfHers(text: string): boolean {
+    const words = (line: string) => line.toLowerCase().replace(/[^a-z0-9' ]+/g, ' ').split(/\s+/).filter(Boolean);
+    const heardWords = words(text);
+    if (!heardWords.length) return true;
+    const hers = new Set(herLines.flatMap(words));
+    const content = heardWords.filter(w => w.length >= 3 && !SMALL_WORDS.has(w));
+    const judged = content.length ? content : heardWords;
+    const found = judged.filter(w => hers.has(w)).length;
+    return found / judged.length >= 0.6;
+  }
+
+  /** The first stretch of an utterance over her, heard early so his words stop her soon. */
+  async function probe(wav: Uint8Array) {
+    let text = '';
+    try { text = await deps.hear(wav); } catch { return; }
+    if (closed || overHer !== 'suspect') return;
+    if (echoOfHers(text)) { log(`[call] heard herself over her line: "${text.slice(0, 40)}"`); return; }
+    overHer = 'his';
+    log(`[call] words over her: "${text.slice(0, 40)}"`);
+    spokeOver();
   }
 
   /** The frames between two sample-times, as one WAV for her ears. */
@@ -253,11 +302,16 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
 
   // -- a turn --------------------------------------------------------------------------
 
-  async function heard(wav: Uint8Array) {
+  async function heard(wav: Uint8Array, suspect = false) {
     let text = '';
     transcribing++;
     try { text = await deps.hear(wav); } catch (error) { log(`[call] her ears failed: ${error instanceof Error ? error.message : String(error)}`); return; } finally { transcribing--; }
     if (closed) return;
+    if (suspect) {
+      if (echoOfHers(text)) { log(`[call] heard herself: "${text.slice(0, 40)}" — not an interruption`); return; }
+      log(`[call] words over her: "${text.slice(0, 40)}"`);
+      spokeOver();
+    }
     if (!text) { log('[call] heard nothing worth answering'); return; }
     text = pending ? `${pending} ${text}` : text;
     pending = '';
@@ -408,6 +462,8 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
         if (!voice || generation !== myGeneration || closed) { if (voice) void voice.stream.cancel().catch(() => {}); continue; }
         const id = String(lineId);
         const rate = voice.sampleRate || VOICE_RATE;
+        herLines.push(line.text);
+        if (herLines.length > HER_LINES_KEPT) herLines.shift();
         emit({ type: 'audio_start', id, sampleRate: rate });
         const playingSince = now();
         sending = true;

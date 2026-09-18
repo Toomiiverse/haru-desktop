@@ -11756,7 +11756,11 @@ function webDeps(): WebDeps {
       // it progressively. Same clone + instruction as the buffered path.
       if (voice.engine === 'breeze') {
         const mood: EmotionName = herGroggyNow() ? 'sleepy' : emotion && (EMOTIONS as readonly string[]).includes(emotion) ? emotion as EmotionName : localEmotion(text);
-        return synthesiseBreezeStream(voice, referenceFor(voice, mood), spokenCase(speakableText(text)), mood, options?.seed);
+        // A sentence that is all emoji or marks has nothing to say aloud;
+        // Breeze answered it with 400 "text is required" (2026-09-18).
+        const spoken = spokenCase(speakableText(text));
+        if (!spoken.trim()) return null;
+        return synthesiseBreezeStream(voice, referenceFor(voice, mood), spoken, mood, options?.seed);
       }
       if (voice.engine !== 'hume') return null;
       const key = getHumeKey();
