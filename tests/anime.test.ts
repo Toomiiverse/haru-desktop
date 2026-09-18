@@ -7,8 +7,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { AnimeLink, apiKeyFrom, matchTitle, pickRelease, playersWhere, rateRelease, readAnimeConfig, sameShow, type Fetch, type ProwlarrRelease, type Want } from '../electron/anime';
-import { chatTools, runChatTool, watchRelevant, type ToolAvailability } from '../electron/tools';
-import { deedFrom } from '../electron/deeds';
 
 test('config falls back to the stack on this box, and keeps what is set', () => {
   const plain = readAnimeConfig(undefined);
@@ -292,39 +290,10 @@ test('already on its way: the progress, and no second grab', async () => {
 });
 
 // -- the tool around it ---------------------------------------------------------
-
-const NOTHING: ToolAvailability = {
-  choices: false, journal: false, anilist: false, web: false,
-  search: { enabled: false, readPages: false, transcripts: false },
-  knowledge: false, browser: false, claude: false, system: { enabled: false, level: 0 },
-  hands: false, desktop: { launch: false, power: false }, knockedAwake: false, minecraft: false,
-};
-
-test('the tool is on the table when the stack is wired up and the message is about watching, hands or not', () => {
-  const names = (available: ToolAvailability, said?: string) => chatTools(available, said).map(tool => tool.function.name);
-  assert.ok(!names(NOTHING).includes('watch_anime'));
-  assert.ok(names({ ...NOTHING, anime: true }).includes('watch_anime'));
-  assert.ok(names({ ...NOTHING, anime: true, web: true }, "let's watch some naruto").includes('watch_anime'));
-  assert.ok(!names({ ...NOTHING, anime: true }, 'how was your day').includes('watch_anime'));
-  assert.ok(watchRelevant('put the next episode on'));
-  assert.ok(watchRelevant('can you get Naruto downloaded'));
-  assert.ok(watchRelevant('open it on my phone'));
-  assert.ok(watchRelevant('can you put that on the tv'));
-  assert.ok(!watchRelevant('what did you have for lunch'));
-});
-
-test('called without the stack, the handler says so rather than pretending', async () => {
-  const result = JSON.parse(await runChatTool(
-    { id: 'c1', function: { name: 'watch_anime', arguments: { title: 'Naruto' } } },
-    "let's watch naruto",
-    // Only what the handler touches; the rest is never reached.
-    { anime: null, onWeb: () => false } as never,
-  ));
-  assert.match(result.error, /not wired up/);
-});
-
-test('putting it on or fetching it is a deed; asking how it is going is not', () => {
-  assert.match(deedFrom('watch_anime', { title: 'Naruto' }, false, '2026-09-18T01:00:00Z')?.what ?? '', /"Naruto"/);
-  assert.equal(deedFrom('watch_anime', { title: 'Naruto', action: 'status' }, false, '2026-09-18T01:00:00Z'), null);
-  assert.equal(deedFrom('watch_anime', { title: 'Naruto' }, true, '2026-09-18T01:00:00Z'), null);
-});
+//
+// The `watch_anime` tool, its `anime` availability flag and the Deed it writes
+// are not on this branch. They were written in the server checkout's working
+// tree and never made it into the history — the same unfinished work the top
+// two commits of this line lean on. The module above is what shipped, and it is
+// what these tests cover; the tool's round trip belongs with the rest of that
+// work when it lands, and its three tests go with it.
