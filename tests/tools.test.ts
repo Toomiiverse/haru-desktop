@@ -33,6 +33,7 @@ const EVERYTHING: ToolAvailability = {
   shell: true,
   mangaShelf: true,
   pokemon: true,
+  manga: true,
   hands: true,
   desktop: { launch: true, power: true },
   knockedAwake: true,
@@ -149,7 +150,7 @@ test('no handler is dead code — every one is reachable from some setting', asy
     'get_system_info', 'get_gpu_info', 'get_processes', 'get_docker_status',
     'get_service_status', 'diagnose_system', 'restart_docker_container',
     'start_service', 'stop_service', 'restart_haru', 'look_up_knowledge', 'adopt_interest', 'browser_control',
-    'describe_myself', 'change_setting', 'vault_list', 'vault_read', 'vault_write', 'vault_folder', 'go_back_to_sleep', 'downloads', 'run_command', 'get_manga', 'play_pokemon',
+    'describe_myself', 'change_setting', 'vault_list', 'vault_read', 'vault_write', 'vault_folder', 'go_back_to_sleep', 'downloads', 'run_command', 'get_manga', 'play_pokemon', 'read_manga',
   ];
   for (const name of handled) {
     assert.ok(reachable.has(name), `${name} has a handler but is never offered to anyone`);
@@ -601,4 +602,18 @@ test('her Game Boy is offered from any door when it comes up, and opens, closes 
   await run('play_pokemon', { action: 'dance' }, 'how is it going', { pokemon });
   assert.deepEqual(asked, ['start', 'stop', 'status']);
   assert.match(JSON.parse(await run('play_pokemon', { action: 'start' }, 'go play', { pokemon: null })).error, /switched off/);
+});
+
+
+test('her own reading is offered when her eyes are on and manga comes up, and hands the ask through', async () => {
+  assert.ok(!offered(NOTHING).includes('read_manga'));
+  assert.ok(chatTools({ ...NOTHING, manga: true, hands: false, web: true }, 'go read some manga').some(tool => tool.function.name === 'read_manga'));
+  assert.ok(!chatTools({ ...NOTHING, manga: true }, 'what did you have for lunch').some(tool => tool.function.name === 'read_manga'));
+  const asked: { title?: string; wait?: boolean }[] = [];
+  const manga: NonNullable<ToolDeps['manga']> = { read: async input => { asked.push(input); return { started: true }; } };
+  assert.equal(JSON.parse(await run('read_manga', { title: ' Chainsaw Man ' }, 'read chainsaw man', { manga })).started, true);
+  await run('read_manga', {}, 'go read', { manga });
+  await run('read_manga', { wait: true }, '', { manga });
+  assert.deepEqual(asked, [{ title: 'Chainsaw Man', wait: false }, { wait: false }, { wait: true }]);
+  assert.match(JSON.parse(await run('read_manga', {}, 'go read', { manga: null })).error, /eyes are switched off/);
 });

@@ -942,6 +942,27 @@ export function pokemonRelevant(message: string): boolean {
   return POKEMON_TALK.test(message ?? '');
 }
 
+/**
+ * Her own reading, now rather than in the small hours (manga.ts, her shelf on
+ * Suwayomi). Real pages through her own eyes, so a stretch takes minutes: on a
+ * chat turn it starts and she says so; in her own time it runs to the end, so
+ * what she says about it is what she read.
+ */
+export const READ_MANGA_TOOL: ChatTool = {
+  type: 'function',
+  function: {
+    name: 'read_manga',
+    description: 'Read the next stretch of your own manga now — the series you are partway through, or a new one by name, which goes on your shelf. Use it when they tell you to go and read, or when it is your own time and you feel like it. It takes a few minutes of actually reading pages; you are told when it has started and, when it ran to the end, what you read. Fetching a manga for THEM is get_manga, not this.',
+    parameters: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'A series to take up, by name. Leave it out to carry on with the one you are reading.' },
+      },
+      required: [],
+    },
+  },
+};
+
 /** The shape of an agenda entry the dispatcher touches. */
 type KeptLike = { id: string; title: string; date: string; time?: string; kind: 'task' | 'event'; done: boolean };
 
@@ -970,6 +991,8 @@ export type ToolAvailability = {
   mangaShelf?: boolean;
   /** Whether her Game Boy is switched on (games.pokemon). Optional so fixtures need not name it. */
   pokemon?: boolean;
+  /** Whether she can read manga pages herself (her eyes are on). Optional so fixtures need not name it. */
+  manga?: boolean;
   /** Whether she can book herself a follow-up (scheduler.ts). Optional so fixtures need not name it. */
   booking?: boolean;
   /** Whether her old chats can be searched (chatsearch.ts). Optional so fixtures need not name it. */
@@ -1040,6 +1063,7 @@ export function chatTools(available: ToolAvailability, latest = ''): ChatTool[] 
   if (available.mangaShelf && (!latest || mangaRelevant(latest))) tools.push(GET_MANGA_TOOL);
   // Her own game: any door — "go play your Pokémon" from the phone is as good as from the desk.
   if (available.pokemon && (!latest || pokemonRelevant(latest))) tools.push(PLAY_POKEMON_TOOL);
+  if (available.manga && (!latest || mangaRelevant(latest))) tools.push(READ_MANGA_TOOL);
   if (available.system.enabled && machine) {
     tools.push(...SYSTEM_TOOLS);
     if (available.system.level >= 2) tools.push(...SYSTEM_ACTION_TOOLS);
@@ -1146,6 +1170,8 @@ export type ToolDeps = {
   mangaShelf?: { get(input: { title: string; mangaId?: number; confirm?: boolean }): Promise<Record<string, unknown>>; status(title: string): Promise<Record<string, unknown>> } | null;
   /** Her Game Boy (pokemon.ts): a sitting started or stopped, and how the run stands. */
   pokemon?: { start(): Promise<Record<string, unknown>>; stop(): Promise<Record<string, unknown>>; status(): Promise<Record<string, unknown>> } | null;
+  /** Her own reading, now (manga.ts). `wait` runs the stretch to its end; otherwise it starts and answers at once. */
+  manga?: { read(input: { title?: string; wait?: boolean }): Promise<Record<string, unknown>> } | null;
   /** Her old chats (chatsearch.ts): the finds, already dated and written out, or null when there is no archive to search. */
   chats?: { search(input: { query: string; from?: string; to?: string }): Promise<{ found: number; text: string; wordsOnly?: boolean }> } | null;
   /** Her own follow-ups (scheduler.ts), or null when there is nowhere to keep them. */
@@ -1521,6 +1547,19 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       return JSON.stringify({ error: `The Game Boy is not answering (${reason}). Say so plainly rather than describing a game you are not playing.` });
+    }
+  }
+  if (name === 'read_manga') {
+    // Re-checked here: a model can name a tool it was never offered.
+    if (!deps.manga) return JSON.stringify({ error: 'You cannot read pages right now — your eyes are switched off. Say so plainly.' });
+    const title = typeof args.title === 'string' ? args.title.trim() : '';
+    try {
+      const result = await deps.manga.read({ ...(title ? { title } : {}), wait: args.wait === true });
+      console.log(`[manga] read_manga${title ? ` "${title}"` : ''} -> ${'error' in result ? String(result.error) : Object.keys(result).filter(key => key !== 'note').join(',')}`);
+      return JSON.stringify(result);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      return JSON.stringify({ error: `The pages did not come (${reason}). Say so plainly rather than describing pages you have not read.` });
     }
   }
   if (name === 'browser_control') {

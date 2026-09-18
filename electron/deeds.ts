@@ -82,6 +82,7 @@ const DEEDS: Record<string, (args: Record<string, unknown>) => string> = {
   // Asking how it is going is looking; fetching it is the deed.
   get_manga: a => (a.action === 'status' ? '' : `saw to "${text(a.title, 'a manga')}" for them — put it on their shelf and started fetching it`),
   play_pokemon: a => (a.action === 'start' ? 'sat down to play your Pokémon Red' : a.action === 'stop' ? 'put the Game Boy down' : ''),
+  read_manga: a => `sat down to read your manga${text(a.title) ? ` — ${text(a.title)}` : ''}`,
   convert_picture: a => `converted a picture to ${text(a.format, 'another format')}`,
 };
 

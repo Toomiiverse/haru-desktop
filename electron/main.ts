@@ -4982,6 +4982,7 @@ function availableTools(): ToolAvailability {
     shell: shellLink() !== null,
     mangaShelf: mangaShelfLink() !== null,
     pokemon: pokemonLink() !== null,
+    manga: mangaLink() !== null,
     system: { enabled: systemConfig.enabled, level: systemConfig.level },
     hands: handsAllowed,
     desktop: supportedDesktop(readDesktopConfig(store.get('desktop'))),
@@ -5142,6 +5143,8 @@ function toolDeps(): ToolDeps {
     mangaShelf: mangaShelfLink(),
     // Her Game Boy (pokemon.ts).
     pokemon: pokemonDeps(),
+    // Her own reading, now (manga.ts).
+    manga: mangaLink(),
     // Their vault on disk, and the re-read that makes a note she wrote searchable at once.
     vault: { root: () => knowledge.vaultPath(), afterWrite: () => { void syncVaultAndRetire(); } },
     // Herself, and what of herself she may change (self.ts).
@@ -10538,6 +10541,31 @@ function mangaShelfLink(): ToolDeps['mangaShelf'] {
       if (!manga) return { outcome: 'not-on-shelf', title, note: `"${title}" is not on their shelf. Say so; offer to fetch it.` };
       const summary = fetchSummary(await link.chapters(manga.id), await link.queue(manga.id));
       return { outcome: 'status', title: manga.title, ...summary, link: readerLink(config, manga.id), note: 'Say how it is going in your own words: how many chapters are on the server, what is downloading now, how many are queued.' };
+    },
+  };
+}
+
+/**
+ * Her own reading as a tool (tools.ts read_manga): the same pass as the small
+ * hours, run now. On a chat turn it starts and answers at once — a stretch is
+ * minutes of her eyes on pages — and in her own time (herHandsTick) it runs to
+ * the end, a few pages, so what she says about it is what she read.
+ */
+const HANDS_PAGES = 4;
+function mangaLink(): ToolDeps['manga'] {
+  const vision = readVisionConfig(store.get('vision'));
+  const config = store.get('ai.config') as ProviderConfig | undefined;
+  if (!vision.enabled || !config?.model) return null;
+  return {
+    read: async ({ title, wait }) => {
+      if (readingMangaNow) return { error: 'You are already partway through a stretch of reading. Say so.' };
+      const run = readSomeManga(config, { force: true, title, pages: wait ? HANDS_PAGES : undefined });
+      if (!wait) {
+        void run.then(got => { if (!got) console.log('[manga] the read she started came to nothing'); }).catch(error => console.warn('[manga] the read she started failed:', error instanceof Error ? error.message : error));
+        return { started: true, title: title || readReading(store.get('her.reading'))?.title || 'your manga', note: 'It has started and takes a few minutes. Say you are off to read — do not describe pages you have not read yet.' };
+      }
+      const got = await run;
+      return got ? { read: true, ...got } : { error: 'Nothing came of it — the pages did not come back, or that title matched nothing. Say so plainly.' };
     },
   };
 }
