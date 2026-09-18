@@ -916,6 +916,32 @@ export function mangaRelevant(message: string): boolean {
   return MANGA_TALK.test(message ?? '');
 }
 
+/**
+ * Her Game Boy (pokemon.ts). Starting a sitting at his word — "go play your
+ * Pokémon" — stopping one, or saying how the run stands. The play itself is
+ * a loop of her own in main.ts; this only opens and closes it.
+ */
+export const PLAY_POKEMON_TOOL: ChatTool = {
+  type: 'function',
+  function: {
+    name: 'play_pokemon',
+    description: 'Your own Pokémon Red run, on the Game Boy on your desk. "start" sits you down to play (it goes on by itself in the background, a move at a time, and stops when they talk to you); "stop" puts it down; "status" says where your run stands — badges, party, where you are. Call it when they tell you to go play, ask you to stop, or ask how your run is going. Never describe playing you have not done: status is the truth.',
+    parameters: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', enum: ['start', 'stop', 'status'], description: '"start" to play, "stop" to put it down, "status" for how the run stands.' },
+      },
+      required: ['action'],
+    },
+  },
+};
+
+const POKEMON_TALK = /\b(?:pok[eé]mon|game ?boy|your (?:run|game|save)|go (?:and )?play|play(?:ing)? (?:your|some|a) game|badges?|gym leader)\b/i;
+
+export function pokemonRelevant(message: string): boolean {
+  return POKEMON_TALK.test(message ?? '');
+}
+
 /** The shape of an agenda entry the dispatcher touches. */
 type KeptLike = { id: string; title: string; date: string; time?: string; kind: 'task' | 'event'; done: boolean };
 
@@ -942,6 +968,8 @@ export type ToolAvailability = {
   shell?: boolean;
   /** Whether manga can be fetched for him (suwayomi.ts is wired). Optional so fixtures need not name it. */
   mangaShelf?: boolean;
+  /** Whether her Game Boy is switched on (games.pokemon). Optional so fixtures need not name it. */
+  pokemon?: boolean;
   /** Whether she can book herself a follow-up (scheduler.ts). Optional so fixtures need not name it. */
   booking?: boolean;
   /** Whether her old chats can be searched (chatsearch.ts). Optional so fixtures need not name it. */
@@ -1010,6 +1038,8 @@ export function chatTools(available: ToolAvailability, latest = ''): ChatTool[] 
   if (available.shell && (!latest || shellRelevant(latest))) tools.push(SHELL_TOOL);
   // Fetching for him: any door, like watching — "download Berserk for me" from the phone is the point.
   if (available.mangaShelf && (!latest || mangaRelevant(latest))) tools.push(GET_MANGA_TOOL);
+  // Her own game: any door — "go play your Pokémon" from the phone is as good as from the desk.
+  if (available.pokemon && (!latest || pokemonRelevant(latest))) tools.push(PLAY_POKEMON_TOOL);
   if (available.system.enabled && machine) {
     tools.push(...SYSTEM_TOOLS);
     if (available.system.level >= 2) tools.push(...SYSTEM_ACTION_TOOLS);
@@ -1114,6 +1144,8 @@ export type ToolDeps = {
   shell?: { run(input: { command: string; said: string; door: 'desk' | 'phone' }): Promise<Record<string, unknown>> } | null;
   /** His manga shelf (suwayomi.ts): a title found and fetched for him, and how it is going. */
   mangaShelf?: { get(input: { title: string; mangaId?: number; confirm?: boolean }): Promise<Record<string, unknown>>; status(title: string): Promise<Record<string, unknown>> } | null;
+  /** Her Game Boy (pokemon.ts): a sitting started or stopped, and how the run stands. */
+  pokemon?: { start(): Promise<Record<string, unknown>>; stop(): Promise<Record<string, unknown>>; status(): Promise<Record<string, unknown>> } | null;
   /** Her old chats (chatsearch.ts): the finds, already dated and written out, or null when there is no archive to search. */
   chats?: { search(input: { query: string; from?: string; to?: string }): Promise<{ found: number; text: string; wordsOnly?: boolean }> } | null;
   /** Her own follow-ups (scheduler.ts), or null when there is nowhere to keep them. */
@@ -1477,6 +1509,18 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
       const reason = error instanceof Error ? error.message : String(error);
       console.warn(`[manga] ${action} "${title}" failed: ${reason}`);
       return JSON.stringify({ error: `The manga server is not answering (${reason}). Say so plainly rather than pretending it is fetching.` });
+    }
+  }
+  if (name === 'play_pokemon') {
+    // Re-checked here: a model can name a tool it was never offered.
+    if (!deps.pokemon) return JSON.stringify({ error: 'Your Game Boy is switched off — say so plainly, in your own words.' });
+    const action = args.action === 'start' || args.action === 'stop' ? args.action : 'status';
+    try {
+      const result = action === 'start' ? await deps.pokemon.start() : action === 'stop' ? await deps.pokemon.stop() : await deps.pokemon.status();
+      return JSON.stringify(result);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      return JSON.stringify({ error: `The Game Boy is not answering (${reason}). Say so plainly rather than describing a game you are not playing.` });
     }
   }
   if (name === 'browser_control') {

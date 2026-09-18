@@ -32,6 +32,7 @@ const EVERYTHING: ToolAvailability = {
   downloads: true,
   shell: true,
   mangaShelf: true,
+  pokemon: true,
   hands: true,
   desktop: { launch: true, power: true },
   knockedAwake: true,
@@ -148,7 +149,7 @@ test('no handler is dead code — every one is reachable from some setting', asy
     'get_system_info', 'get_gpu_info', 'get_processes', 'get_docker_status',
     'get_service_status', 'diagnose_system', 'restart_docker_container',
     'start_service', 'stop_service', 'restart_haru', 'look_up_knowledge', 'adopt_interest', 'browser_control',
-    'describe_myself', 'change_setting', 'vault_list', 'vault_read', 'vault_write', 'vault_folder', 'go_back_to_sleep', 'downloads', 'run_command', 'get_manga',
+    'describe_myself', 'change_setting', 'vault_list', 'vault_read', 'vault_write', 'vault_folder', 'go_back_to_sleep', 'downloads', 'run_command', 'get_manga', 'play_pokemon',
   ];
   for (const name of handled) {
     assert.ok(reachable.has(name), `${name} has a handler but is never offered to anyone`);
@@ -582,4 +583,22 @@ test('fetching a manga for him is offered from any door when it comes up, and ha
   assert.deepEqual(asked, [{ title: 'Berserk', mangaId: undefined, confirm: false }, { status: 'Berserk' }, { title: 'Berserk', mangaId: 90, confirm: true }]);
   assert.match(JSON.parse(await run('get_manga', { title: 'Berserk' }, 'get berserk', { mangaShelf: null })).error, /not wired up/);
   assert.match(JSON.parse(await run('get_manga', {}, 'get it', { mangaShelf })).error, /title is required/);
+});
+
+test('her Game Boy is offered from any door when it comes up, and opens, closes and reports a sitting', async () => {
+  assert.ok(!offered(NOTHING).includes('play_pokemon'));
+  assert.ok(chatTools({ ...NOTHING, pokemon: true, hands: false, web: true }, 'go play your pokemon for a bit').some(tool => tool.function.name === 'play_pokemon'));
+  assert.ok(chatTools({ ...NOTHING, pokemon: true }, "how's your run going?").some(tool => tool.function.name === 'play_pokemon'));
+  assert.ok(!chatTools({ ...NOTHING, pokemon: true }, 'what did you have for lunch').some(tool => tool.function.name === 'play_pokemon'));
+  const asked: string[] = [];
+  const pokemon: NonNullable<ToolDeps['pokemon']> = {
+    start: async () => { asked.push('start'); return { started: true }; },
+    stop: async () => { asked.push('stop'); return { stopped: true }; },
+    status: async () => { asked.push('status'); return { outcome: 'status' }; },
+  };
+  assert.equal(JSON.parse(await run('play_pokemon', { action: 'start' }, 'go play', { pokemon })).started, true);
+  await run('play_pokemon', { action: 'stop' }, 'stop playing', { pokemon });
+  await run('play_pokemon', { action: 'dance' }, 'how is it going', { pokemon });
+  assert.deepEqual(asked, ['start', 'stop', 'status']);
+  assert.match(JSON.parse(await run('play_pokemon', { action: 'start' }, 'go play', { pokemon: null })).error, /switched off/);
 });

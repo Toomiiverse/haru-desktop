@@ -91,6 +91,7 @@ import { setDefaultAutoSelectFamilyAttemptTimeout } from 'node:net';
 import { readBrowserControlConfig } from './browserctl';
 import { listSessions, openSession, readClaudeCodeConfig, readOpenedSessions, resolveSessionDir, sessionName, SESSIONS_KEPT as CLAUDE_SESSIONS_KEPT, stopSession, type SessionHost } from './claudesession';
 import { ShellGate, SERVER_NOTE, denied, ledgerEntry, readShellConfig, runCommand } from './shell';
+import { PokemonLink, PLAY_RULES as POKEMON_PLAY_RULES, afterTurn, describeGame, newSitting, parseMove, readPokemonConfig, runNote, sittingSummary, whyNotStart as whyNotStartPokemon, whyStop as whyStopPokemon, type GameState, type Moment as PokemonMoment, type Sitting } from './pokemon';
 import { Suwayomi, fetchFits, fetchSummary, hisReading, hisReadingNote, matchManga, onHisShelf, readerLink, readSuwayomiConfig, spiteful, type HisTitle, type ShelfChapter } from './suwayomi';
 import { serverLookNote } from './prompt';
 import { Downloads, downloadsReady, readDownloadsConfig } from './downloads';
@@ -4399,6 +4400,8 @@ const memoryStore = createMemoryStore({
       readingNote(readReading(store.get('her.reading'))),
       // His shelf beside hers: where he is up to, and the spoiler line (suwayomi.ts).
       hisReadingLine(),
+      // Her own game: where the run stands, read off the game (pokemon.ts).
+      runNote((store.get('her.pokemon.lastState') as GameState | undefined) ?? null, String(store.get('her.pokemon.lastSummary') ?? ''), pokemonSitting !== null),
       dayNote(getDays(), today),
       weekNote(getWeek(), today),
       tastesInstruction(interests),
@@ -4977,6 +4980,7 @@ function availableTools(): ToolAvailability {
     downloads: downloadsLink() !== null,
     shell: shellLink() !== null,
     mangaShelf: mangaShelfLink() !== null,
+    pokemon: pokemonLink() !== null,
     system: { enabled: systemConfig.enabled, level: systemConfig.level },
     hands: handsAllowed,
     desktop: supportedDesktop(readDesktopConfig(store.get('desktop'))),
@@ -5135,6 +5139,8 @@ function toolDeps(): ToolDeps {
     shell: shellLink(),
     // His manga, fetched at his word (suwayomi.ts).
     mangaShelf: mangaShelfLink(),
+    // Her Game Boy (pokemon.ts).
+    pokemon: pokemonDeps(),
     // Their vault on disk, and the re-read that makes a note she wrote searchable at once.
     vault: { root: () => knowledge.vaultPath(), afterWrite: () => { void syncVaultAndRetire(); } },
     // Herself, and what of herself she may change (self.ts).
@@ -10527,6 +10533,97 @@ function mangaShelfLink(): ToolDeps['mangaShelf'] {
 }
 
 /**
+ * Her Game Boy (pokemon.ts): the worker at ~/haru-pokemon, and the loop that
+ * plays it. One move per tick from the local brain — her persona, the rules
+ * of play, the game in words — while a sitting is on; the sitting ends when
+ * he speaks, at bedtime, on time, or on her share of the day, and what came
+ * of it goes into her game memory and her own-life block.
+ */
+let pokemonSitting: Sitting | null = null;
+let pokemonTicking = false;
+function pokemonLink(): PokemonLink | null {
+  const config = readPokemonConfig(store.get('games'));
+  return config.enabled ? new PokemonLink(config, (url, init) => net.fetch(url, init)) : null;
+}
+function pokemonPlayedToday(): number {
+  const saved = store.get('her.pokemon.played') as { day?: string; ms?: number } | undefined;
+  return saved?.day === currentChatDayKey() ? Number(saved.ms ?? 0) : 0;
+}
+async function pokemonMoment(link: PokemonLink): Promise<PokemonMoment> {
+  return { now: Date.now(), lastUserActivityAt, asleep: herAsleepNow(), speaking: false, workerUp: await link.up(), playedTodayMs: pokemonPlayedToday() };
+}
+async function startPokemon(startedBy: 'her' | 'him'): Promise<Record<string, unknown>> {
+  const link = pokemonLink();
+  if (!link) return { error: 'Your Game Boy is switched off.' };
+  const config = readPokemonConfig(store.get('games'));
+  const why = whyNotStartPokemon(await pokemonMoment(link), config, pokemonSitting);
+  if (why) return { started: false, note: `Not now: ${why}. Say so plainly.` };
+  const state = await link.state();
+  pokemonSitting = newSitting(Date.now(), state, startedBy);
+  store.set('her.pokemon.lastState', state);
+  console.log(`[pokemon] she sat down to play (${startedBy === 'him' ? 'at his word' : 'her own idea'}) — ${state.player?.position?.map_name ?? 'somewhere'}, ${state.player?.badges ?? 0} badge(s)`);
+  return { started: true, where: state.player?.position?.map_name, badges: state.player?.badges ?? 0, note: `You have sat down to play; it goes on in the background for up to ${config.sessionMinutes} minutes and stops when they talk to you. Say you are off to play — do not narrate moves you have not made yet.` };
+}
+async function endPokemon(why: string): Promise<string> {
+  const sitting = pokemonSitting;
+  pokemonSitting = null;
+  if (!sitting) return '';
+  const link = pokemonLink();
+  let state = (store.get('her.pokemon.lastState') ?? {}) as GameState;
+  try { if (link) { state = await link.state(); await link.save('haru-last'); } } catch { /* the worker went away: the last state she saw stands */ }
+  const summary = sittingSummary(sitting, state, Date.now(), why);
+  store.set('her.pokemon.lastState', state);
+  store.set('her.pokemon.lastSummary', summary);
+  store.set('her.pokemon.played', { day: currentChatDayKey(), ms: pokemonPlayedToday() + (Date.now() - sitting.startedAt) });
+  try { noteInGameMemory(gamesRoot(), 'Pokemon Red', summary, new Date()); } catch (error) { console.warn('[pokemon] could not write her game memory:', error instanceof Error ? error.message : error); }
+  console.log(`[pokemon] sitting over — ${summary}`);
+  return summary;
+}
+async function pokemonTick(): Promise<void> {
+  if (!pokemonSitting || pokemonTicking) return;
+  pokemonTicking = true;
+  try {
+    const link = pokemonLink();
+    const config = readPokemonConfig(store.get('games'));
+    if (!link) { await endPokemon('it was switched off'); return; }
+    const stop = whyStopPokemon(pokemonSitting, await pokemonMoment(link), config);
+    if (stop) { await endPokemon(stop); return; }
+    const brain = store.get('ai.config') as ProviderConfig | undefined;
+    if (!brain?.model) return;
+    const state = await link.state();
+    const map = await link.map();
+    const character = getActiveCharacter();
+    const raw = await ollamaQuipLong([character.identity, character.style, POKEMON_PLAY_RULES].join('\n\n'), describeGame(state, map, pokemonSitting.lastThought, pokemonSitting.stillFor >= 3), brain);
+    // Nothing usable from her: a text box is read through, anything else waits a turn.
+    const move = parseMove(raw) ?? (state.dialog?.active ? { thought: '', actions: ['a_until_dialog_end'] } : null);
+    if (!pokemonSitting) return;
+    const after = move ? await link.act(move.actions) : state;
+    pokemonSitting = afterTurn(pokemonSitting, move, after ?? state);
+    store.set('her.pokemon.lastState', after ?? state);
+    if (move) console.log(`[pokemon] turn ${pokemonSitting.turns}: ${move.thought || '…'} — ${move.actions.join(' ')}`);
+    if (pokemonSitting.turns % config.saveEvery === 0) await link.save('haru-auto').catch(() => {});
+  } catch (error) {
+    console.warn('[pokemon] a turn came to nothing:', error instanceof Error ? error.message : error);
+  } finally {
+    pokemonTicking = false;
+  }
+}
+function pokemonDeps(): ToolDeps['pokemon'] {
+  if (!pokemonLink()) return null;
+  return {
+    start: () => startPokemon('him'),
+    stop: async () => { const summary = await endPokemon('they asked her to stop'); return summary ? { stopped: true, summary } : { stopped: false, note: 'You were not playing.' }; },
+    status: async () => {
+      const link = pokemonLink()!;
+      const up = await link.up();
+      const state = up ? await link.state() : (store.get('her.pokemon.lastState') as GameState | undefined) ?? null;
+      if (!state) return { outcome: 'no-run', note: up ? 'The Game Boy is on but you have not started a game.' : 'The Game Boy is not running — there is no ROM in it yet. Say so plainly.' };
+      return { outcome: 'status', playing: pokemonSitting !== null, workerUp: up, playedTodayMinutes: Math.round(pokemonPlayedToday() / 60_000), run: runNote(state, String(store.get('her.pokemon.lastSummary') ?? ''), pokemonSitting !== null), note: 'Say how your run stands in your own words, from these facts only.' };
+    },
+  };
+}
+
+/**
  * Her shelf on Suwayomi (suwayomi.ts), when the server's password file is
  * there. One client for the process, so the login is kept; null when the
  * block is switched off or the file is missing — then she reads MangaDex
@@ -12575,6 +12672,8 @@ app.whenReady().then(() => {
   // Missed while down, the day's sweep runs at the next start. The same
   // dispatcher brings her own bookings back to her.
   scheduler.ensureDaily({ id: 'maintenance', kind: 'maintenance', daily: MAINTENANCE_AT, timezone: CHAT_TIMEZONE, staleAfterMs: 20 * 60 * 60_000 });
+  // Her Game Boy: one move per tick while a sitting is on (pokemon.ts).
+  setInterval(() => { void pokemonTick(); }, readPokemonConfig(store.get('games')).tickSeconds * 1000);
   setTimeout(() => scheduler.start(), 30_000);
   // Her thoughts between messages (thoughts.ts): triggers looked at every five
   // minutes, the brain asked only when one has fired.
