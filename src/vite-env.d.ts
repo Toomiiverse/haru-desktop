@@ -71,7 +71,7 @@ interface Window {
       get(): Promise<import('./types').SearchConfig & { hasKey: boolean }>;
       set(config: import('./types').SearchConfig): Promise<import('./types').SearchConfig & { hasKey: boolean }>;
       setKey(apiKey: string): Promise<boolean>;
-      locate(): Promise<{ place: string; accuracy: number }>;
+      locate(): Promise<{ place: string; accuracy: number; source: 'sensor' | 'place' }>;
       test(): Promise<number>;
     };
     chat: { getMessages(): Promise<import('./types').Message[]>; setMessages(messages: import('./types').Message[]): Promise<void>; getArchive(): Promise<Record<string, import('./types').Message[]>>; newConversation(): Promise<void>; opening(): Promise<string | null>; onReset(callback: () => void): () => void; onRatedFromPhone(callback: (turn: { id: string; reaction?: import('./types').Reaction; note?: string }) => void): () => void; onSaidFromPhone(callback: (turn: { reply: string; said: string }) => void): () => void; onInterject(callback: (line: string) => void): () => void; onVoiceFailed(callback: (why: string) => void): () => void; onFellBack(callback: (why: string) => void): () => void; onFromPhone(callback: (turn: { text: string; reply: string; ignored: boolean; retry?: boolean; attachments?: import('./types').Attachment[] }) => void): () => void; onExpectReply(callback: () => void): () => void; expectAnswer(): Promise<void>; getAsides(): Promise<import('./types').Aside[]>; clearAsides(): Promise<import('./types').Aside[]>; onAside(callback: (aside: import('./types').Aside) => void): () => void; onAsidesCleared(callback: () => void): () => void };

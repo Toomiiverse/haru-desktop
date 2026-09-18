@@ -60,7 +60,7 @@ const NEEDS: Record<keyof PlatformSupport, (platform: NodeJS.Platform) => string
     ? 'a freedesktop launcher and systemd (gio, systemctl or loginctl)'
     : 'Windows (cmd, taskkill, shutdown)',
   location: platform => platform === 'linux'
-    ? 'the GeoClue location portal, which is not wired yet'
+    ? 'a location sensor (GeoClue or the desktop portal) — the place set in Setup is used as a stand-in'
     : 'the Windows location service',
   gameDetection: platform => platform === 'linux'
     ? 'the Hyprland compositor (hyprctl)'

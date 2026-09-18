@@ -87,7 +87,7 @@ contextBridge.exposeInMainWorld('haru', {
     get: () => ipcRenderer.invoke('search:get') as Promise<SearchConfig & { hasKey: boolean }>,
     set: (config: SearchConfig) => ipcRenderer.invoke('search:set', config) as Promise<SearchConfig & { hasKey: boolean }>,
     setKey: (apiKey: string) => ipcRenderer.invoke('search:setKey', apiKey) as Promise<boolean>,
-    locate: () => ipcRenderer.invoke('search:locate') as Promise<{ place: string; accuracy: number }>,
+    locate: () => ipcRenderer.invoke('search:locate') as Promise<{ place: string; accuracy: number; source: 'sensor' | 'place' }>,
     test: () => ipcRenderer.invoke('search:test') as Promise<number>,
   },
   roam: {

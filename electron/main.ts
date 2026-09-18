@@ -4304,6 +4304,54 @@ function reportKeepAlive(): void {
     : '[ai] on mains — the local model is held resident');
 }
 
+/** The largest card's memory in MiB, or 0 when there is no NVIDIA card to ask. */
+function gpuMemoryTotalMb(): Promise<number> {
+  return new Promise(resolve => {
+    execFile('nvidia-smi', ['--query-gpu=memory.total', '--format=csv,noheader,nounits'], { timeout: 4000 }, (error, stdout) => {
+      if (error) { resolve(0); return; }
+      const values = String(stdout ?? '').split(/\r?\n/).map(line => Number(line.trim())).filter(Number.isFinite);
+      resolve(values.length ? Math.max(...values) : 0);
+    });
+  });
+}
+
+/**
+ * Whether her model fits the card, said once at startup.
+ *
+ * A model larger than the GPU's memory cannot be loaded whole: Ollama splits
+ * it, runs the rest on the CPU, and holds the card awake for as long as it is
+ * resident. None of that is visible from inside the app — a reply is just
+ * slower, and the battery drains for a card that is only partly working — so
+ * the two sizes are compared and the shortfall named, with the one thing that
+ * fixes it. Measured here: a 9B quant of 7.4 GB on a 6 GB card, split 42/58.
+ */
+async function reportModelFit(): Promise<void> {
+  const config = store.get('ai.config') as ProviderConfig | undefined;
+  if (!config?.model || !config.endpoint) return;
+  const endpoint = trimEndpoint(config.endpoint);
+  // Only a model on this machine is this machine's memory to worry about.
+  if (!/^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])/i.test(endpoint)) return;
+  const totalMb = await gpuMemoryTotalMb();
+  if (!totalMb) return;
+  try {
+    const response = await net.fetch(`${endpoint}/api/tags`, { signal: AbortSignal.timeout(5000) });
+    if (!response.ok) return;
+    const payload = await response.json() as { models?: { name?: string; size?: number }[] };
+    const wanted = config.model.split(':')[0];
+    const found = (payload.models ?? []).find(entry => entry.name === config.model || entry.name?.split(':')[0] === wanted);
+    if (!found?.size) return;
+    const modelGb = found.size / 1e9;
+    const cardGb = totalMb / 1024;
+    if (found.size > totalMb * 1024 * 1024 * 0.98) {
+      console.warn(`[ai] ${config.model} is ${modelGb.toFixed(1)} GB and the card has ${cardGb.toFixed(1)} GB — Ollama will split it across GPU and CPU, and the card cannot rest while it is loaded. A quant that fits removes the split.`);
+    } else {
+      console.log(`[ai] the model is ${modelGb.toFixed(1)} GB and the card has ${cardGb.toFixed(1)} GB — it fits whole`);
+    }
+  } catch (error) {
+    console.warn('[ai] could not compare the model to the card:', whyItFailed(error));
+  }
+}
+
 // A reply sent somewhere she is not — the phone — is read on a screen
 // that is not the desk, where every extra sentence is extra tokens before the
 // reader sees anything. Capped so a far-away turn stays a line or two; the desk
@@ -13205,11 +13253,24 @@ app.whenReady().then(() => {
    * the coordinates are gone and the searches are words again.
    */
   ipcMain.handle('search:locate', async () => {
+    // Windows has a sensor. Linux has none on this machine, and the honest
+    // substitute is the place they already typed — not an IP lookup, which was
+    // measured here putting this laptop in a different state entirely. The
+    // answer says which it was, so "within 0m" never stands in for a guess.
+    if (process.platform !== 'win32') {
+      const configured = readSearchConfig(store.get('search')).place.trim();
+      if (!configured) throw new Error('There is no location sensor on this machine — set your place in Setup → Search and I will use that.');
+      const hits = await searchPlaces(configured, net.fetch as never, null, '');
+      const first = hits[0];
+      if (!first) throw new Error(`Could not place "${configured}" — check it in Setup → Search.`);
+      console.log(`[location] using the place you set: ${first.name}`);
+      return { place: first.name, accuracy: 0, source: 'place' as const };
+    }
     const fix = await readWindowsLocation();
     const place = await lookUpPlace(fix, net.fetch as never);
     // The accuracy is logged; the position is not. A log outlives the moment.
     console.log(`[location] resolved to ${place} (Windows was accurate to ${Math.round(fix.accuracy)}m)`);
-    return { place, accuracy: Math.round(fix.accuracy) };
+    return { place, accuracy: Math.round(fix.accuracy), source: 'sensor' as const };
   });
   // Proves the key works before she needs it, so a bad one surfaces here rather
   // than as her saying she could not look something up.
@@ -13679,6 +13740,7 @@ app.whenReady().then(() => {
   createCompanionWindow();
   reportCapabilities();
   reportKeepAlive();
+  void reportModelFit();
   // The residency rule follows the plug, so a change of source is worth saying
   // out loud — and it is why the next reply may or may not pay a cold load.
   powerMonitor.on('on-battery', reportKeepAlive);

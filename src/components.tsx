@@ -997,7 +997,9 @@ function SearchField() {
     try {
       const found = await window.haru!.search.locate();
       await save({ place: found.place });
-      setLocated(`Windows put you within ${found.accuracy}m. Change it if that is not right.`);
+      setLocated(found.source === 'place'
+        ? `Using the place you set: ${found.place}. Change it if that is not right.`
+        : `Windows put you within ${found.accuracy}m. Change it if that is not right.`);
     } catch (problem) {
       setLocated(problem instanceof Error ? problem.message.replace(/^Error invoking remote method .[^.]*.:\s*(Error:\s*)?/, '') : String(problem));
     } finally { setLocating(false); }
@@ -1009,7 +1011,7 @@ function SearchField() {
       const hasKey = await window.haru!.search.setKey(key);
       setConfig(current => current && { ...current, hasKey });
       setKey('');
-      setMessage({ text: hasKey ? 'Key saved, encrypted by Windows.' : 'Key cleared.' });
+      setMessage({ text: hasKey ? 'Key saved, encrypted on this machine.' : 'Key cleared.' });
     } catch (error) {
       setMessage({ text: error instanceof Error ? error.message : 'Could not save the key.', error: true });
     } finally { setBusy(false); }
@@ -1050,7 +1052,7 @@ function SearchField() {
           <p className="status-note">Free and immediate, but it is a public page being read by a program — search enough in a short stretch and it stops answering and asks for a picture of a duck instead. She will say so when that happens rather than pretending she found nothing. If it keeps happening, switch to one of the others.</p>}
         {config.provider !== 'duckduckgo' && <>
           {config.provider === 'brave'
-            ? <p className="status-note">A proper API, so no challenge pages. Get a free key at <code>brave.com/search/api</code> — the free tier is a couple of thousand searches a month, far more than she will use. Stored encrypted by Windows and never leaves this machine.</p>
+            ? <p className="status-note">A proper API, so no challenge pages. Get a free key at <code>brave.com/search/api</code> — the free tier is a couple of thousand searches a month, far more than she will use. Stored encrypted on this machine and never leaves it.</p>
             : <p className="status-note">Google's Programmable Search, which is the sanctioned way in — reading google.com with a program is both against its terms and detected far harder than DuckDuckGo. Two things needed, both free: an API key from <code>console.cloud.google.com</code> with "Custom Search API" enabled, and a search engine ID from <code>programmablesearchengine.google.com</code> set to search the whole web. The free tier is 100 searches a day, which is the tightest of the three.</p>}
           <div className="form-grid">
             <input type="password" value={key} disabled={busy} placeholder={config.hasKey ? 'A key is saved — type a new one to replace it' : 'Paste the API key here'} onChange={event => setKey(event.target.value)}/>
@@ -1069,7 +1071,7 @@ function SearchField() {
             ? `Added to questions that only make sense somewhere — "where can I buy this", "the nearest one", "still open". Everything else is searched as asked, and naming a different place yourself wins over this. Nothing but those words is sent, and only on those searches: no coordinates, no address.`
             : 'Left empty, "where can I buy this" is searched with no idea where you are, which usually answers for America.'}</span>
           <div className="row-actions">
-            <button className="ghost" disabled={busy || locating} onClick={() => void locate()}>{locating ? 'Asking Windows…' : 'Use my location'}</button>
+            <button className="ghost" disabled={busy || locating} onClick={() => void locate()}>{locating ? 'Locating…' : 'Use my location'}</button>
             {located && <span className="status-note">{located}</span>}
           </div>
           <span className="status-note">Pressing that asks Windows where this machine is, then sends the coordinates <strong>once</strong> to OpenStreetMap to turn them into a suburb name — they are rounded to about 110 metres first, which is as precise as the reading itself. The name lands in the box above and is all that is kept; the coordinates are never saved and never go into a search. Type it yourself instead if you would rather nobody was asked at all.</span>
@@ -1226,7 +1228,7 @@ function SecondBrainField() {
                 setHasKey(saved);
                 setKey('');
                 setMessage(saved
-                  ? { text: 'Key saved, encrypted by Windows.' }
+                  ? { text: 'Key saved, encrypted on this machine.' }
                   : { text: 'Nothing was saved — the box was empty.', error: true });
               })
               .catch(problem => setMessage({
