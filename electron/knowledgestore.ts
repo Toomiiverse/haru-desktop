@@ -47,6 +47,9 @@ export type KnowledgeStoreDeps = {
   fetch: Fetcher;
   /** The bearer token for an endpoint, which lives with the provider config. */
   apiKeyFor(endpoint: string): string;
+  /** How long the embedding model is held after a request. Absent means
+   *  forever; the app passes the same power-following hold as the chat model. */
+  keepAlive?(): number | string;
   /** The vault pages (People.md, Preferences.md, Us.md) as memory records.
    *  Wired by the app to the memory store's admission; absent, the pages are
    *  still searchable knowledge but never standing context. */
@@ -128,6 +131,7 @@ export function createKnowledgeStore(deps: KnowledgeStoreDeps) {
       model: config().embedModel,
       provider: isOpenAIShaped(ai.provider) ? 'openai' : 'ollama',
       apiKey: deps.apiKeyFor(endpoint),
+      keepAlive: deps.keepAlive?.(),
     }, deps.fetch);
     return cachedEmbedder(built, embeddingCache);
   }

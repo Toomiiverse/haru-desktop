@@ -4421,6 +4421,10 @@ const knowledge = createKnowledgeStore({
   store,
   fetch: net.fetch,
   apiKeyFor: keyFor,
+  // The embedder is small and CPU-only, but 350 MB of resident memory is still
+  // memory: it follows the same power rule as the chat model rather than
+  // sitting there forever on a laptop.
+  keepAlive: () => ollamaKeepAlive(),
   // The vault pages become standing memories. Wired after the memory store
   // exists below — the knowledge store is created first because the memory
   // store embeds through it, so this is a mutable ref, not a direct call.

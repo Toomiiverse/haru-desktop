@@ -11,13 +11,16 @@ export type EmbedderOptions = {
   model: string;
   provider?: 'ollama' | 'openai';
   apiKey?: string;
+  /** How long Ollama holds the embedding model after a request. -1 (forever) on
+   *  mains; the caller passes a shorter hold on battery, like the chat model. */
+  keepAlive?: number | string;
 };
 
 function describe(response: Response, detail: string): string {
   return `embedding failed (${response.status}) — ${detail}`;
 }
 
-export function ollamaEmbedder(endpoint: string, model: string, fetchImpl: FetchLike): Embedder {
+export function ollamaEmbedder(endpoint: string, model: string, fetchImpl: FetchLike, keepAlive: number | string = -1): Embedder {
   const embedOnce = async (texts: string[]): Promise<number[][]> => {
     const response = await fetchImpl(`${endpoint.replace(/\/+$/, '')}/api/embed`, {
       method: 'POST',
@@ -25,8 +28,10 @@ export function ollamaEmbedder(endpoint: string, model: string, fetchImpl: Fetch
       // On the CPU, and kept there: the embedder is 350 MB and a text takes it
       // 50 ms, while on the GPU it did not fit beside the 9B at its Q6 size —
       // Ollama evicted one to load the other, eight seconds a swap, several
-      // swaps a conversation. Nothing she says waits on this.
-      body: JSON.stringify({ model, input: texts, keep_alive: -1, options: { num_gpu: 0 } }),
+      // swaps a conversation. Nothing she says waits on this. Held forever on
+      // mains; the caller shortens that on battery, where 350 MB of resident
+      // memory is worth more than the half-second reload.
+      body: JSON.stringify({ model, input: texts, keep_alive: keepAlive, options: { num_gpu: 0 } }),
     });
     const body = await response.text().catch(() => '');
     if (!response.ok) {
@@ -80,7 +85,7 @@ export function openAIEmbedder(endpoint: string, model: string, apiKey: string |
 export function createEmbedder(options: EmbedderOptions, fetchImpl: FetchLike): Embedder {
   return options.provider === 'openai'
     ? openAIEmbedder(options.endpoint, options.model, options.apiKey, fetchImpl)
-    : ollamaEmbedder(options.endpoint, options.model, fetchImpl);
+    : ollamaEmbedder(options.endpoint, options.model, fetchImpl, options.keepAlive ?? -1);
 }
 
 export class EmbeddingCache {
