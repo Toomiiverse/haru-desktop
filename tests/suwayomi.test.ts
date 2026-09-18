@@ -2,11 +2,12 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { Suwayomi, SPITE_GRUDGE, hisReading, hisReadingNote, readSuwayomiConfig, spiteful, type Fetcher, type ShelfManga } from '../electron/suwayomi';
+import { Suwayomi, SPITE_GRUDGE, fetchFits, fetchSummary, hisReading, hisReadingNote, matchManga, readerLink, readSuwayomiConfig, spiteful, type Fetcher, type ShelfManga } from '../electron/suwayomi';
 
 function fake() {
   const calls: { query: string; variables: Record<string, unknown> }[] = [];
   let installed = false;
+  let weeb = false;
   let shelfMade = false;
   let logins = 0;
   const respond = (status: number, body: unknown) => ({ ok: status < 400, status, text: async () => JSON.stringify(body), arrayBuffer: async () => new ArrayBuffer(4) });
@@ -16,12 +17,18 @@ function fake() {
     calls.push({ query, variables });
     if (query.includes('login(')) { logins++; return variables.p === 'pw' ? respond(200, { data: { login: { accessToken: 'tok' } } }) : respond(401, { errors: [{ message: 'bad' }] }); }
     if (init?.headers?.Authorization !== 'Bearer tok') return respond(401, {});
-    if (query.startsWith('query { sources')) return respond(200, { data: { sources: { nodes: installed ? [{ id: '2499283573021220255', name: 'MangaDex', lang: 'en' }] : [{ id: '0', name: 'Local source', lang: 'localsourcelang' }] } } });
-    if (query.includes('updateExtension')) { installed = true; return respond(200, { data: { updateExtension: { clientMutationId: null } } }); }
+    if (query.startsWith('query { sources')) return respond(200, { data: { sources: { nodes: [...(installed ? [{ id: '2499283573021220255', name: 'MangaDex', lang: 'en' }] : []), ...(weeb ? [{ id: '77', name: 'Weeb Central', lang: 'en' }] : []), { id: '0', name: 'Local source', lang: 'localsourcelang' }] } } });
+    if (query.includes('updateExtension')) { if (variables.id === 'eu.kanade.tachiyomi.extension.en.weebcentral') weeb = true; else installed = true; return respond(200, { data: { updateExtension: { clientMutationId: null } } }); }
     if (query.includes('fetchExtensions')) return respond(200, { data: { fetchExtensions: { clientMutationId: null } } });
-    if (query.startsWith('query { categories')) return respond(200, { data: { categories: { nodes: [{ id: 0, name: 'Default' }, ...(shelfMade ? [{ id: 7, name: 'Haru' }] : [])] } } });
+    if (query.startsWith('query { categories')) return respond(200, { data: { categories: { nodes: [{ id: 0, name: 'Default', default: true }, ...(shelfMade ? [{ id: 7, name: 'Haru', default: false }] : [])] } } });
     if (query.includes('createCategory')) { shelfMade = true; return respond(200, { data: { createCategory: { category: { id: 7, name: 'Haru' } } } }); }
-    if (query.includes('fetchSourceManga')) return respond(200, { data: { fetchSourceManga: { mangas: [{ id: 42, title: 'Chainsaw Man' }] } } });
+    if (query.includes('fetchSourceManga')) {
+      if (variables.source === '77') return respond(200, { data: { fetchSourceManga: { mangas: variables.query === 'Berserk' ? [{ id: 90, title: 'Berserk' }] : [] } } });
+      if (variables.query === 'Berserk') return respond(200, { data: { fetchSourceManga: { mangas: [{ id: 11, title: 'Berserk of Gluttony' }, { id: 12, title: "The Berserker's Second Playthrough" }] } } });
+      return respond(200, { data: { fetchSourceManga: { mangas: [{ id: 42, title: 'Chainsaw Man' }] } } });
+    }
+    if (query.includes('enqueueChapterDownloads') || query.includes('startDownloader')) return respond(200, { data: { x: { clientMutationId: null } } });
+    if (query.includes('downloadStatus')) return respond(200, { data: { downloadStatus: { state: 'STARTED', queue: [{ progress: 0.4, state: 'DOWNLOADING', chapter: { id: 3, name: 'Ch. 2', mangaId: 42 } }, { progress: 0, state: 'QUEUED', chapter: { id: 4, name: 'Ch. 3', mangaId: 42 } }, { progress: 0, state: 'QUEUED', chapter: { id: 99, name: 'x', mangaId: 1 } }] } } });
     if (query.includes('updateManga(') || query.includes('updateMangaCategories') || query.includes('fetchMangaAndChapters') || query.includes('setMangaMeta')) return respond(200, { data: { x: { clientMutationId: null } } });
     if (query.includes('chapters(condition')) return respond(200, { data: { chapters: { nodes: [{ id: 3, name: 'Ch. 2', chapterNumber: 2, pageCount: 20, isRead: false, lastPageRead: 0, isDownloaded: false }, { id: 2, name: 'Ch. 1', chapterNumber: 1, pageCount: 19, isRead: true, lastPageRead: 19, isDownloaded: true }] } } });
     if (query.includes('fetchChapterPages')) return respond(200, { data: { fetchChapterPages: { pages: ['/api/v1/manga/42/chapter/1/page/0', '/api/v1/manga/42/chapter/1/page/1'] } } });
@@ -31,7 +38,7 @@ function fake() {
     ] } } });
     return respond(400, { errors: [{ message: `unexpected: ${query.slice(0, 40)}` }] });
   };
-  const client = new Suwayomi({ url: 'http://s:4567', username: 'toomii', passwordFile: '/pw', shelf: 'Haru', extension: 'eu.kanade.tachiyomi.extension.all.mangadex', source: 'MangaDex', lang: 'en' }, fetch, { readFile: () => 'pw\n' });
+  const client = new Suwayomi({ url: 'http://s:4567', username: 'toomii', passwordFile: '/pw', shelf: 'Haru', extension: 'eu.kanade.tachiyomi.extension.all.mangadex', source: 'MangaDex', lang: 'en', sources: ['MangaDex', 'Weeb Central', 'Comick (Unoriginal)'], keepFreeGb: 50, linkUrl: 'http://100.1.2.3:4567' }, fetch, { readFile: () => 'pw\n' });
   return { client, calls, logins: () => logins, installed: () => installed };
 }
 
@@ -101,6 +108,34 @@ test('the note says where he is, how she sits against him, and holds the spoiler
 
 test('a wrong password is an error, and a lapsed token logs in again once', async () => {
   const { client } = fake();
-  const wrong = new Suwayomi({ url: 'http://s:4567', username: 'toomii', passwordFile: '/pw', shelf: 'Haru', extension: 'x', source: 'MangaDex', lang: 'en' }, (client as unknown as { fetch: Fetcher }).fetch, { readFile: () => 'nope' });
+  const wrong = new Suwayomi({ url: 'http://s:4567', username: 'toomii', passwordFile: '/pw', shelf: 'Haru', extension: 'x', source: 'MangaDex', lang: 'en', sources: ['MangaDex'], keepFreeGb: 50, linkUrl: '' }, (client as unknown as { fetch: Fetcher }).fetch, { readFile: () => 'nope' });
   await assert.rejects(() => wrong.library(), /refused the login/);
+});
+
+
+test('a title for him is found on the first source that has it outright, installing the next source on the way; look-alikes are choices', async () => {
+  const { client, calls } = fake();
+  const found = await client.find('Berserk');
+  assert.deepEqual(found, { one: { id: 90, title: 'Berserk', source: 'Weeb Central' } });
+  assert.ok(calls.some(c => c.query.includes('updateExtension') && c.variables.id === 'eu.kanade.tachiyomi.extension.en.weebcentral'), 'Weeb Central was installed when MangaDex had only look-alikes');
+  assert.deepEqual(await client.find('Chainsaw Man'), { one: { id: 42, title: 'Chainsaw Man', source: 'MangaDex' } });
+  assert.equal(await client.find('Zzz Nothing'), null);
+  assert.deepEqual(matchManga('Berserk', [{ title: 'Berserk of Gluttony' }, { title: 'REAL PLAY: BERSERKER' }]), { several: [{ title: 'Berserk of Gluttony' }] });
+  assert.deepEqual(matchManga('berserk', [{ title: 'Berserk of Gluttony' }, { title: 'Berserk' }]), { one: { title: 'Berserk' } });
+});
+
+test('his shelf is the default category, downloads queue and start, and the summary reads the queue', async () => {
+  const { client, calls } = fake();
+  await client.takeUpForHim(42);
+  assert.deepEqual(calls.find(c => c.query.includes('updateMangaCategories'))!.variables, { id: 42, cat: [0] });
+  await client.download([2, 3, 4]);
+  assert.deepEqual(calls.find(c => c.query.includes('enqueueChapterDownloads'))!.variables, { ids: [2, 3, 4] });
+  assert.ok(calls.some(c => c.query.includes('startDownloader')));
+  const queue = await client.queue(42);
+  assert.equal(queue.length, 2, 'only this title');
+  const summary = fetchSummary(await client.chapters(42), queue);
+  assert.deepEqual(summary, { total: 2, downloaded: 1, downloading: { name: 'Ch. 2', percent: 40 }, queued: 1, failed: 0 });
+  assert.deepEqual(fetchFits(375, 617, 50), { fits: true, gb: 5.6 });
+  assert.deepEqual(fetchFits(375, 54, 50), { fits: false, gb: 5.6 });
+  assert.equal(readerLink({ ...client['config'], linkUrl: 'http://100.1.2.3:4567' }, 42), 'http://100.1.2.3:4567/manga/42');
 });
