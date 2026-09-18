@@ -47,7 +47,7 @@ export function readPokemonConfig(games: unknown): PokemonConfig {
 export type PartyMon = { nickname?: string; species?: string; level?: number; hp?: number; max_hp?: number; status?: string | null; moves?: string[] };
 /** The worker's state as it really comes (checked against a running game 2026-09-18, not its README). */
 export type GameState = {
-  player?: { name?: string; money?: number; badges?: string[]; badge_count?: number; facing?: string; position?: { x?: number; y?: number }; play_time?: string };
+  player?: { name?: string; rival_name?: string; money?: number; badges?: string[]; badge_count?: number; facing?: string; position?: { x?: number; y?: number }; play_time?: string };
   map?: { map_id?: number; map_name?: string };
   party?: PartyMon[];
   bag?: { item?: string; quantity?: number }[];
@@ -161,7 +161,12 @@ export function describeGame(state: GameState, map: string, screen: string[], la
   if (notStarted(state) && !screen.length) {
     return ['The game has not started yet: the boot or title screen is up, and you are not anywhere. Press start to get to the menu — ["press_start", "wait_120", "press_start", "wait_120"] — then NEW GAME will be on the screen to choose with press_a.', lastThought ? `Last turn you thought: "${lastThought}"` : ''].filter(Boolean).join('\n');
   }
-  lines.push(`Where: ${notStarted(state) ? 'nowhere yet — the game is just beginning' : whereIs(state)} at (${position.x ?? '?'}, ${position.y ?? '?'}), facing ${player.facing ?? '?'}. Badges: ${badgeCount(state)}${player.badges?.length ? ` (${player.badges.join(', ')})` : ''}. Money: ${player.money ?? 0}.`);
+  // Oak's speech runs with the game's placeholder names (NINTEN and SONY) and her bedroom already
+  // set as the map: between his text boxes she took herself to be standing in it and tried to walk.
+  if (inIntro(state) && !screen.length) {
+    return ['Professor Oak is still introducing the game — you are not in your room yet, whatever the map says, and you cannot walk. Nothing is on the screen this instant: ["wait_60", "press_a"] and see what he says next.', lastThought ? `Last turn you thought: "${lastThought}"` : ''].filter(Boolean).join('\n');
+  }
+  lines.push(`Where: ${notStarted(state) || inIntro(state) ? 'nowhere yet — the game is just beginning (Professor Oak is talking)' : whereIs(state)} at (${position.x ?? '?'}, ${position.y ?? '?'}), facing ${player.facing ?? '?'}. Badges: ${badgeCount(state)}${player.badges?.length ? ` (${player.badges.join(', ')})` : ''}. Money: ${player.money ?? 0}.`);
   const party = state.party ?? [];
   lines.push(party.length
     ? `Party: ${party.map(mon => `${mon.nickname || mon.species || '?'} (${mon.species ?? '?'}) L${mon.level ?? '?'} ${mon.hp ?? '?'}/${mon.max_hp ?? '?'} HP${mon.status ? ` [${mon.status}]` : ''}${mon.moves?.length ? ` — ${mon.moves.join(', ')}` : ''}`).join('; ')}.`
@@ -192,6 +197,8 @@ export function newSitting(now: number, state: GameState, startedBy: 'her' | 'hi
 const whereIs = (state: GameState) => state.map?.map_name ?? `map ${state.map?.map_id ?? '?'}`;
 /** No save and no name yet: the worker's reads mean nothing until she has been named. */
 export const notStarted = (state: GameState) => !state.player?.name || /^\?+$/.test(state.player.name.trim());
+/** Oak's speech: the placeholder names are still in, and nobody has been chosen. */
+export const inIntro = (state: GameState) => state.player?.name?.trim() === 'NINTEN' && state.player?.rival_name?.trim() === 'SONY' && !(state.party ?? []).length;
 const badgeCount = (state: GameState) => state.player?.badge_count ?? state.player?.badges?.length ?? 0;
 const spot = (state: GameState, screen: string[] = []) => `${state.map?.map_id}:${state.player?.position?.x},${state.player?.position?.y}:${screen.join('|')}:${state.battle?.in_battle ? 'b' : ''}`;
 

@@ -49,6 +49,14 @@ test('the game is put into words: where, who, the text box, the battle, the scre
   const intro = describeGame({ player: { name: '???????????' }, map: { map_id: 0, map_name: 'Pallet Town' }, party: [] }, '', ['Hello there!', 'Welcome to the'], '', false);
   assert.match(intro, /nowhere yet/);
   assert.match(intro, /Hello there!/);
+  // Oak's speech: placeholder names, her bedroom already the map. Between his text boxes she is not in it.
+  const oak = { player: { name: 'NINTEN', rival_name: 'SONY', position: { x: 3, y: 6 } }, map: { map_id: 38, map_name: "Red's House 2F" }, party: [] };
+  const gap = describeGame(oak, '. @ .', [], '', false);
+  assert.match(gap, /still introducing the game/);
+  assert.doesNotMatch(gap, /Red's House/);
+  assert.match(describeGame(oak, '', ['Hello there!'], '', false), /nowhere yet/);
+  // A real name, or a party: she is in the game.
+  assert.match(describeGame({ ...oak, player: { ...oak.player, name: 'HARU' } }, '. @ .', [], '', false), /Red's House 2F/);
   const fight = describeGame({ ...STATE, dialog: null, battle: { in_battle: true, type: 'wild', enemy: { species: 'Rattata', level: 3, hp: 9, max_hp: 12 } } }, '', [], '', false);
   assert.match(fight, /IN A BATTLE \(wild\): against Rattata L3 9\/12 HP\./);
 });
