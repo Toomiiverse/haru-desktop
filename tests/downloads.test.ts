@@ -10,19 +10,21 @@ const TORRENTS = [
   { hash: 'aa11', name: '[Judas] Made in Abyss S1 [BD 1080p]', state: 'stoppedUP', progress: 1, dlspeed: 0, upspeed: 0, eta: 8640000, size: 12e9 },
 ];
 
-function fake(options: { stopMissing?: boolean; lapse?: boolean } = {}) {
+function fake(options: { stopMissing?: boolean; lapse?: boolean; newLogin?: boolean } = {}) {
   const calls: { url: string; method: string; body?: string; cookie?: string }[] = [];
   let logins = 0;
   let lapsed = options.lapse ?? false;
   const fetch = async (url: string, init?: { method?: string; headers?: Record<string, string>; body?: string }) => {
     calls.push({ url, method: init?.method ?? 'GET', body: init?.body, cookie: init?.headers?.Cookie });
-    const respond = (status: number, body: string, headers: Record<string, string> = {}) => new Response(body, { status, headers });
+    const respond = (status: number, body: string, headers: Record<string, string> = {}) => new Response(body === '' ? null : body, { status, headers });
     if (url.endsWith('/auth/login')) {
       logins++;
       const params = new URLSearchParams(init?.body ?? '');
-      return params.get('password') === 'hunter2' ? respond(200, 'Ok.', { 'set-cookie': 'SID=abc123; HttpOnly; path=/' }) : respond(200, 'Fails.');
+      if (params.get('password') !== 'hunter2') return options.newLogin ? respond(401, 'Unauthorized') : respond(200, 'Fails.');
+      // qBittorrent 4 says "Ok." with 200; 5.2 says nothing with 204.
+      return options.newLogin ? respond(204, '', { 'set-cookie': 'QBT_SID_8080=abc123; HttpOnly; SameSite=Strict; path=/' }) : respond(200, 'Ok.', { 'set-cookie': 'SID=abc123; HttpOnly; path=/' });
     }
-    if (init?.headers?.Cookie !== 'SID=abc123') return respond(403, 'Forbidden');
+    if (init?.headers?.Cookie !== (options.newLogin ? 'QBT_SID_8080=abc123' : 'SID=abc123')) return respond(403, 'Forbidden');
     if (lapsed) { lapsed = false; return respond(403, 'Forbidden'); }
     if (url.endsWith('/torrents/info')) return respond(200, JSON.stringify(TORRENTS));
     if (url.endsWith('/torrents/stop') || url.endsWith('/torrents/start')) return options.stopMissing ? respond(404, '') : respond(200, '');
@@ -106,6 +108,16 @@ test('resuming acts only on what is paused, and an older qBittorrent gets pause/
   await old.downloads.pause();
   assert.ok(old.calls.some(c => c.url.endsWith('/torrents/stop')));
   assert.ok(old.calls.some(c => c.url.endsWith('/torrents/pause')), 'fell back to the old name');
+});
+
+test('qBittorrent 5.2 logs in with an empty 204, and refuses with a 401', async () => {
+  const { downloads, logins } = fake({ newLogin: true });
+  const status = await downloads.status() as { torrents: unknown[] };
+  assert.equal(status.torrents.length, 3);
+  assert.equal(logins(), 1);
+  const { host } = fake({ newLogin: true });
+  const wrong = new Downloads({ url: 'http://qb:8080', username: 'admin', passwordFile: '/pw' }, { fetch: host.fetch, readFile: () => 'nope' });
+  await assert.rejects(() => wrong.status(), /refused the login \(401/);
 });
 
 test('a lapsed session logs in again once', async () => {

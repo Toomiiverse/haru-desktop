@@ -98,19 +98,23 @@ export class Downloads {
       body: new URLSearchParams({ username: this.config.username, password }).toString(),
     });
     const body = (await response.text()).trim();
-    const cookie = response.headers.get('set-cookie') ?? '';
-    const sid = /SID=([^;]+)/.exec(cookie)?.[1];
-    if (!response.ok || body !== 'Ok.' || !sid) throw new Error(`qBittorrent refused the login (${response.status}${body ? `: ${body}` : ''})`);
-    this.sid = sid;
+    // The session cookie, whatever it is called: SID in qBittorrent 4,
+    // QBT_SID_<port> in 5.2.
+    const pair = (response.headers.get('set-cookie') ?? '').split(';')[0].trim();
+    // 4.x said "Ok." with 200; 5.2 says nothing with 204. A wrong password is 401.
+    if (!response.ok || /^fails/i.test(body)) throw new Error(`qBittorrent refused the login (${response.status}${body ? `: ${body}` : ''})`);
+    // No cookie header to read (Electron's net keeps it in its own jar): the
+    // session carries it, and no Cookie header of ours gets in the way.
+    this.sid = /^[\w-]+=.+/.test(pair) ? pair : '';
   }
 
   /** One call, logged in first and once more if the session had lapsed. */
   private async call(endpoint: string, form?: Record<string, string>): Promise<Response> {
     for (let attempt = 0; ; attempt++) {
-      if (!this.sid) await this.login();
+      if (this.sid === null) await this.login();
       const response = await this.host.fetch(`${this.config.url}/api/v2/${endpoint}`, {
         method: form ? 'POST' : 'GET',
-        headers: { Cookie: `SID=${this.sid}`, Referer: this.config.url, ...(form ? { 'Content-Type': 'application/x-www-form-urlencoded' } : {}) },
+        headers: { ...(this.sid ? { Cookie: this.sid } : {}), Referer: this.config.url, ...(form ? { 'Content-Type': 'application/x-www-form-urlencoded' } : {}) },
         ...(form ? { body: new URLSearchParams(form).toString() } : {}),
       });
       if (response.status === 403 && attempt === 0) { this.sid = null; continue; }
