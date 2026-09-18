@@ -65,7 +65,7 @@ import { bodyForPage, describeBody, readBody as readBodyState, readBodyReport, t
 import { convertImage, normaliseFormat, FORMATS } from './convert';
 import { cancelPower, closeApp, findApps, isCancellable, launch, listRunning, matchApp, matchRunning, normalisePower, readDesktopConfig, runPower, supportedDesktop, type DesktopConfig } from './desktop';
 import { activeWindow as linuxActiveWindow, detectLinuxSupport, readVolume as linuxReadVolume, setVolume as linuxSetVolume } from './linuxdesktop';
-import { cursorPollDelay, KEEP_ALIVE_BATTERY, resolveKeepAlive } from './power';
+import { cursorPollDelay, KEEP_ALIVE_BATTERY, readLinuxPowerSource, resolveKeepAlive } from './power';
 import { looksLikeScreenshot, maySpeak, readScreenshotConfig, screenshotPrompt, SETTLE_MS, SETTLE_TRIES, type ScreenshotConfig } from './screenshots';
 import { look, photoName, readShotDescription, readVisionConfig, whileLooking, type VisionConfig } from './vision';
 import { CAPTION_MAX_CHARS, describedShots, forgetCaptions, moreThanOnePass, noteCaption, noteFailure, readCaptions, shotsNeedingALook } from './seen';
@@ -4273,8 +4273,21 @@ function sideNumCtx(): number {
 // reply still starts talking, short enough that the card is released between
 // conversations. HARU_OLLAMA_KEEP_ALIVE overrides both, as seconds or a
 // duration ("10m", "0" for a machine that shares the card).
+/**
+ * Whether the machine is on its own battery.
+ *
+ * Electron is asked everywhere it can be trusted; on Linux it cannot, so the
+ * kernel's own reading is used instead. See readLinuxPowerSource for the
+ * measurement: this laptop answers "on mains" through powerMonitor while
+ * discharging on an unplugged charger.
+ */
+function onBatteryNow(): boolean {
+  if (process.platform === 'linux') return readLinuxPowerSource() === 'battery';
+  return powerMonitor.isOnBatteryPower();
+}
+
 function ollamaKeepAlive(): number | string {
-  return resolveKeepAlive(process.env.HARU_OLLAMA_KEEP_ALIVE, powerMonitor.isOnBatteryPower());
+  return resolveKeepAlive(process.env.HARU_OLLAMA_KEEP_ALIVE, onBatteryNow());
 }
 
 /**
@@ -4286,7 +4299,7 @@ function ollamaKeepAlive(): number | string {
 function reportKeepAlive(): void {
   const override = (process.env.HARU_OLLAMA_KEEP_ALIVE ?? '').trim();
   if (override) { console.log(`[ai] the local model is held for ${override} (HARU_OLLAMA_KEEP_ALIVE)`); return; }
-  console.log(powerMonitor.isOnBatteryPower()
+  console.log(onBatteryNow()
     ? `[ai] on battery — the local model is released ${KEEP_ALIVE_BATTERY} after a request`
     : '[ai] on mains — the local model is held resident');
 }
