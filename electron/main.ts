@@ -65,6 +65,7 @@ import { bodyForPage, describeBody, readBody as readBodyState, readBodyReport, t
 import { convertImage, normaliseFormat, FORMATS } from './convert';
 import { cancelPower, closeApp, findApps, isCancellable, launch, listRunning, matchApp, matchRunning, normalisePower, readDesktopConfig, runPower, supportedDesktop, type DesktopConfig } from './desktop';
 import { activeWindow as linuxActiveWindow, detectLinuxSupport, readVolume as linuxReadVolume, setVolume as linuxSetVolume } from './linuxdesktop';
+import { cursorPollDelay, KEEP_ALIVE_BATTERY, resolveKeepAlive } from './power';
 import { looksLikeScreenshot, maySpeak, readScreenshotConfig, screenshotPrompt, SETTLE_MS, SETTLE_TRIES, type ScreenshotConfig } from './screenshots';
 import { look, photoName, readShotDescription, readVisionConfig, whileLooking, type VisionConfig } from './vision';
 import { CAPTION_MAX_CHARS, describedShots, forgetCaptions, moreThanOnePass, noteCaption, noteFailure, readCaptions, shotsNeedingALook } from './seen';
@@ -197,7 +198,6 @@ const COMPANION_ASPECT = 360 / 300;
 const COMPANION_MIN_WIDTH = 140;
 const COMPANION_MAX_WIDTH = 900;
 const COMPANION_MARGIN = 60;
-const CURSOR_POLL_MS = 33;
 const CHAT_TIMEZONE = 'Australia/Perth'; // UTC+8 year-round, no DST
 const CHAT_RESET_HOUR = 5;
 const CHAT_RESET_POLL_MS = 60_000;
@@ -4267,13 +4267,8 @@ function sideNumCtx(): number {
 // reply still starts talking, short enough that the card is released between
 // conversations. HARU_OLLAMA_KEEP_ALIVE overrides both, as seconds or a
 // duration ("10m", "0" for a machine that shares the card).
-const OLLAMA_KEEP_ALIVE_MAINS = -1;
-const OLLAMA_KEEP_ALIVE_BATTERY = '5m';
-
 function ollamaKeepAlive(): number | string {
-  const override = (process.env.HARU_OLLAMA_KEEP_ALIVE ?? '').trim();
-  if (override) return /^-?\d+$/.test(override) ? Number(override) : override;
-  return powerMonitor.isOnBatteryPower() ? OLLAMA_KEEP_ALIVE_BATTERY : OLLAMA_KEEP_ALIVE_MAINS;
+  return resolveKeepAlive(process.env.HARU_OLLAMA_KEEP_ALIVE, powerMonitor.isOnBatteryPower());
 }
 
 /**
@@ -4286,7 +4281,7 @@ function reportKeepAlive(): void {
   const override = (process.env.HARU_OLLAMA_KEEP_ALIVE ?? '').trim();
   if (override) { console.log(`[ai] the local model is held for ${override} (HARU_OLLAMA_KEEP_ALIVE)`); return; }
   console.log(powerMonitor.isOnBatteryPower()
-    ? `[ai] on battery — the local model is released ${OLLAMA_KEEP_ALIVE_BATTERY} after a request`
+    ? `[ai] on battery — the local model is released ${KEEP_ALIVE_BATTERY} after a request`
     : '[ai] on mains — the local model is held resident');
 }
 
@@ -8071,17 +8066,31 @@ function createCompanionWindow() {
   companionWindow.on('resize', persistBounds);
   companionWindow.on('resized', persistBounds);
 
-  setInterval(() => {
-    // isVisible() throws on a destroyed window rather than returning false,
-    // and nothing ever nulls this variable out on close — so the window
-    // reference outlives the window, and this poll firing every 33ms will
-    // eventually land between a destroy and the next tick. Caught this once
-    // already as an uncaught "Object has been destroyed" from here.
-    if (!companionWindow || companionWindow.isDestroyed() || !companionWindow.isVisible()) return;
-    const point = screen.getCursorScreenPoint();
-    const bounds = companionWindow.getBounds();
-    companionWindow.webContents.send('companion:cursor', { x: point.x - bounds.x, y: point.y - bounds.y });
-  }, CURSOR_POLL_MS);
+  followCursor();
+}
+
+let cursorPollTimer: ReturnType<typeof setTimeout> | undefined;
+
+/**
+ * Following the pointer, at the speed the moment deserves.
+ *
+ * The delay is chosen per tick rather than fixed at setInterval time so the
+ * machine being left alone actually changes it. isVisible() throws on a
+ * destroyed window rather than returning false, and nothing ever nulls the
+ * window reference out on close — so an unconditional poll will eventually land
+ * between a destroy and the next tick, which is a caught crash once already.
+ */
+function followCursor() {
+  if (cursorPollTimer) clearTimeout(cursorPollTimer);
+  cursorPollTimer = setTimeout(() => {
+    if (companionWindow && !companionWindow.isDestroyed() && companionWindow.isVisible()) {
+      const point = screen.getCursorScreenPoint();
+      const bounds = companionWindow.getBounds();
+      companionWindow.webContents.send('companion:cursor', { x: point.x - bounds.x, y: point.y - bounds.y });
+    }
+    followCursor();
+  }, cursorPollDelay(powerMonitor.getSystemIdleTime()));
+  cursorPollTimer.unref?.();
 }
 
 // Handing someone a shortcut for when she has not come up guarantees it gets
@@ -13651,6 +13660,13 @@ app.whenReady().then(() => {
   // out loud — and it is why the next reply may or may not pay a cold load.
   powerMonitor.on('on-battery', reportKeepAlive);
   powerMonitor.on('on-ac', reportKeepAlive);
+  // A resume is where the suspended network calls died and where the model
+  // server may have been evicted while the lid was shut. Say it once, so the
+  // next "classification failed" line has a cause instead of looking like a
+  // model that cannot be reached, and re-ask the power policy because the plug
+  // may have moved while the machine slept.
+  powerMonitor.on('suspend', () => console.log('[system] going to sleep'));
+  powerMonitor.on('resume', () => { console.log('[system] resumed from sleep'); reportKeepAlive(); });
   startHelper();
   watchScreenshots();
   startWatchingScreen();
@@ -13737,6 +13753,7 @@ app.on('before-quit', () => {
   try {
     if (linuxHelperTimer) clearInterval(linuxHelperTimer);
     if (linuxVolumeTimer) clearInterval(linuxVolumeTimer);
+    if (cursorPollTimer) clearTimeout(cursorPollTimer);
   } catch (error) { noteCrash('stopping the Linux desktop watch', error); }
   void stopWebDoor().catch(error => noteCrash('closing the web door', error));
 });
