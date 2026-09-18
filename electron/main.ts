@@ -10590,6 +10590,9 @@ async function pokemonTick(): Promise<void> {
     if (stop) { await endPokemon(stop); return; }
     const brain = store.get('ai.config') as ProviderConfig | undefined;
     if (!brain?.model) return;
+    // The emulator only runs while an action does, so a line that prints letter by letter was
+    // read half-written ("This w", 2026-09-18). A second of frames lets the screen settle first.
+    await link.act(['wait_60']).catch(() => null);
     const state = await link.state();
     const map = await link.map();
     // The words on the screen: /state carries none, and its dialog flag sleeps through Oak's intro.
