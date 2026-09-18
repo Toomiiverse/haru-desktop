@@ -19,6 +19,12 @@ test('the job is one per show, every five minutes, for three days', () => {
   assert.equal(job.createdBy, 'app');
 });
 
+test('a watch outlives a long restart: late by any part of its three days it still runs', () => {
+  const job = fetchJob(fetch, 1_000_000);
+  assert.equal(job.staleAfterMs, FETCH_FOR_MS);
+  assert.ok((job.expiresAt ?? 0) > 1_000_000 + FETCH_FOR_MS);
+});
+
 test('the queue line is found by hash first, then show, then title, whatever the case', () => {
   const byHash = { title: 'other', downloadId: 'ABCDEF01' };
   const byShow = { title: 'x', seriesId: 2 };

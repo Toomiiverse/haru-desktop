@@ -41,7 +41,10 @@ export function fetchJob(fetch: Fetch, nowMs: number): Job {
     kind: ANIME_FETCH_KIND,
     schedule: { at: nowMs + FETCH_EVERY_MS },
     dueAt: nowMs + FETCH_EVERY_MS,
-    staleAfterMs: 3 * FETCH_EVERY_MS,
+    // A check, not a line said at a time: run late it is as good as run on
+    // time. A reboot longer than three misses used to end a three-day watch
+    // (2026-09-18: both fetches dropped at 84% and 44%); expiresAt is the end.
+    staleAfterMs: FETCH_FOR_MS,
     payload: { seriesId: fetch.seriesId, title: fetch.title, infoHash: fetch.infoHash, release: fetch.release, episodes: fetch.episodes, startedAt: nowMs, until, misses: 0 },
     createdBy: 'app',
     createdAt: nowMs,
