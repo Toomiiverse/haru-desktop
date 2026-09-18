@@ -84,7 +84,7 @@ export interface SearchConfig { enabled: boolean; provider: SearchProvider; limi
 export interface DesktopConfig { launch: boolean; power: boolean; }
 export interface WatchingConfig { enabled: boolean; everyMinutes: number; gamesOnly: boolean; }
 export interface ScreenshotConfig { enabled: boolean; folder: string; quietMinutes: number; }
-export interface VisionConfig { enabled: boolean; model: string; folder: string; }
+export interface VisionConfig { enabled: boolean; model: string; folder: string; endpoint?: string; provider?: string; }
 export interface GamingConfig { enabled: boolean; model: string; quiet: boolean; }
 export interface AniListConfig { enabled: boolean; username: string; }
 // Self-reported 0-10 ratings kept beside the day's words. Not a screening tool

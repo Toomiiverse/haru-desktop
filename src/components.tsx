@@ -1505,6 +1505,7 @@ function VisionField() {
   if (!window.haru || !config) return null;
   const save = (changes: Partial<VisionConfig>) => window.haru!.vision.set({ ...config, ...changes }).then(setConfig);
 
+  const hosted = (config.provider ?? '') !== '' && (config.provider ?? '') !== 'ollama';
   return <div className="field"><h2>Showing her pictures</h2>
     <p>Puts a picture button next to the microphone. She looks at what you show her, says what she thinks, and keeps a copy.</p>
     <label className="check-row">
@@ -1513,13 +1514,26 @@ function VisionField() {
     </label>
     {config.enabled && <>
       <div className="form-grid">
-        <select value={config.model} onChange={event => void save({ model: event.target.value })}>
-          {!models.includes(config.model) && <option value={config.model}>{config.model}</option>}
-          {models.map(model => <option key={model} value={model}>{model}</option>)}
+        <input value={config.endpoint ?? ''} placeholder="http://localhost:11434" onChange={event => void save({ endpoint: event.target.value })}/>
+        <select value={config.provider ?? ''} onChange={event => void save({ provider: event.target.value })}>
+          <option value="">Local Ollama</option>
+          <option value="xai">xAI — hosted</option>
+          <option value="openai">OpenAI — hosted</option>
+          <option value="venice">Venice — hosted</option>
         </select>
-        <span className="status-note">Needs a model that can see. <code>gemma4:12b</code> can; qwen and llama cannot.</span>
       </div>
-      <p className="status-note">The seeing model only reports what is in the frame — she reacts to that in her own voice, so her personality does not change with whichever model is doing the looking.</p>
+      <div className="form-grid">
+        {hosted
+          ? <input value={config.model} placeholder="a model that can see" onChange={event => void save({ model: event.target.value })}/>
+          : <select value={config.model} onChange={event => void save({ model: event.target.value })}>
+              {!models.includes(config.model) && <option value={config.model}>{config.model}</option>}
+              {models.map(model => <option key={model} value={model}>{model}</option>)}
+            </select>}
+        <span className="status-note">Needs a model that can see. A hosted one uses the key saved for its provider in the AI settings.</span>
+      </div>
+      <p className="status-note">{hosted
+        ? <>The picture is uploaded to the provider above, the same way an attached one is. The seeing model only reports what is in the frame; she reacts to that in her own voice.</>
+        : <>The seeing model only reports what is in the frame — she reacts to that in her own voice, so her personality does not change with whichever model is doing the looking.</>}</p>
       <div className="row-actions">
         <button className="ghost" onClick={() => void window.haru?.vision.openFolder()}>Open the folder</button>
         <span className="status-note">Copies are kept in {config.folder || 'Pictures\\Haru'}. Anything worth remembering about you goes into her memory; jokes and screenshots do not.</span>

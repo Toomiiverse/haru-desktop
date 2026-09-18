@@ -18,33 +18,39 @@
 // conversation now, image and all — see ./attachments. This file only gets them
 // back when there is no model to send them to.
 
+import { isOpenAIShaped } from './provider';
+
 export type VisionConfig = {
   enabled: boolean;
   /**
    * A model with the `vision` capability. gemma4:12b has it; qwen2.5 does not.
    *
-   * This is her local pair of eyes, and it now has one job: screenshots and the
-   * screen she is watching, which never leave the machine. A picture the user
-   * attaches goes to the answering model inside the conversation instead, and
-   * only comes back here when there is no hosted model to send it to.
+   * This is her pair of eyes for screenshots and the screen she is watching. It
+   * used to be a local model because that screen never left the machine; on this
+   * line it is a hosted one instead, chosen in Setup, and the picture is uploaded
+   * exactly as an attached one already is.
    */
   model: string;
   /** Where copies are kept. Empty means the default under Pictures. */
   folder: string;
   /**
-   * Which Ollama answers, when it should not be the one the chat model uses.
+   * Which server answers. Empty means "wherever the chat model is".
    *
-   * Ollama places a model on whichever card has room, so the only way to keep
-   * the eyes off the card the chat model lives on is a second instance that can
-   * see only the other one. Empty means "wherever the chat model is", which is
-   * what everyone had before. Still refused if it is not this machine — see
-   * visionEndpoint: the screen never leaves the box, and a config field is not
-   * allowed to be the exception.
+   * It may be this machine's Ollama or a hosted API — see {@link provider} for
+   * which dialect that API speaks. A remote address was refused here for as long
+   * as the eyes were local-only; the laptop's are hosted, so a configured
+   * address now wins wherever it points.
    */
   endpoint?: string;
+  /**
+   * Which dialect the endpoint speaks: 'ollama' (the default, and any local
+   * server), or an OpenAI-shaped host — 'openai', 'xai', 'venice'. The picture
+   * travels the same way either way; only the request body differs.
+   */
+  provider?: string;
 };
 
-export const DEFAULT_VISION: VisionConfig = { enabled: false, model: 'gemma4:12b', folder: '', endpoint: '' };
+export const DEFAULT_VISION: VisionConfig = { enabled: false, model: 'gemma4:12b', folder: '', endpoint: '', provider: '' };
 
 export function readVisionConfig(saved: unknown): VisionConfig {
   if (!saved || typeof saved !== 'object') return DEFAULT_VISION;
@@ -54,6 +60,7 @@ export function readVisionConfig(saved: unknown): VisionConfig {
     model: typeof record.model === 'string' && record.model.trim() ? record.model.trim() : DEFAULT_VISION.model,
     folder: typeof record.folder === 'string' ? record.folder.trim() : '',
     endpoint: typeof record.endpoint === 'string' ? record.endpoint.trim() : '',
+    provider: typeof record.provider === 'string' ? record.provider.trim() : '',
   };
 }
 
@@ -97,41 +104,62 @@ export type LookOptions = {
 
 export async function look(imageBase64: string | string[], config: VisionConfig, endpoint: string, headers: Record<string, string>, fetchImpl: Fetcher, options: LookOptions = {}): Promise<Sighting> {
   if (!config.enabled) throw new Error('Looking at pictures is switched off.');
-  const response = await fetchImpl(`${endpoint.replace(/\/+$/, '')}/api/chat`, {
+  const images = Array.isArray(imageBase64) ? imageBase64 : [imageBase64];
+  const hosted = isOpenAIShaped(config.provider);
+  const url = `${endpoint.replace(/\/+$/, '')}${hosted ? '/chat/completions' : '/api/chat'}`;
+  const prompt = options.ask ?? LOOK_PROMPT;
+  const system = options.system ? [{ role: 'system', content: options.system }] : [];
+  // The same picture, in the two shapes a host may want it: Ollama takes base64
+  // in the message; an OpenAI-shaped host wants a data URL in a content part.
+  // The caller only ever has base64.
+  const body = hosted
+    ? {
+        model: config.model,
+        messages: [
+          ...system,
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: prompt },
+              ...images.map(image => ({ type: 'image_url', image_url: { url: `data:image/jpeg;base64,${image}` } })),
+            ],
+          },
+        ],
+        // Low temperature: this is meant to be an accurate account, not an
+        // interesting one.
+        temperature: options.temperature ?? 0.2,
+        ...(options.numPredict ? { max_tokens: options.numPredict } : {}),
+        stream: false,
+      }
+    : {
+        model: config.model,
+        messages: [...system, { role: 'user', content: prompt, images }],
+        ...(options.keepAlive ? { keep_alive: options.keepAlive } : {}),
+        stream: false,
+        // The whole of the wait was here. gemma4 is a reasoning model, and left
+        // to itself it produced three and a half thousand characters of private
+        // deliberation about a photograph before writing two sentences —
+        // measured at 28.3s with it on against 5.2s with it off, and 2.3s once
+        // the prompt was shortened too. The descriptions were no better for it.
+        // Harmless on a model that does not reason: Ollama ignores it.
+        think: false,
+        // The window is set because the default is not enough to hold a
+        // screenshot — a full-screen 1440p capture arrived as 4103 image tokens
+        // against Ollama's 4096, and every shot of that size failed with a 400
+        // until this was raised.
+        options: { temperature: options.temperature ?? 0.2, num_ctx: options.numCtx ?? 8192, ...(options.numPredict ? { num_predict: options.numPredict } : {}) },
+      };
+  const response = await fetchImpl(url, {
     method: 'POST',
     headers,
     signal: AbortSignal.timeout(options.timeoutMs ?? LOOK_TIMEOUT_MS),
-    body: JSON.stringify({
-      model: config.model,
-      messages: [
-        ...(options.system ? [{ role: 'system', content: options.system }] : []),
-        { role: 'user', content: options.ask ?? LOOK_PROMPT, images: Array.isArray(imageBase64) ? imageBase64 : [imageBase64] },
-      ],
-      ...(options.keepAlive ? { keep_alive: options.keepAlive } : {}),
-      stream: false,
-      // The whole of the wait was here. gemma4 is a reasoning model, and left to
-      // itself it produced three and a half thousand characters of private
-      // deliberation about a photograph before writing two sentences — measured
-      // at 28.3s with it on against 5.2s with it off, and 2.3s once the prompt
-      // was shortened too. The descriptions were no better for it; the most
-      // precise of the four came from a run with it off.
-      //
-      // Harmless on a model that does not reason: Ollama ignores it.
-      think: false,
-      // Low temperature: this is meant to be an accurate account, not an
-      // interesting one. The window is set because the default is not enough to
-      // hold a screenshot — a full-screen 1440p capture arrived as 4103 image
-      // tokens against Ollama's 4096, and every shot of that size failed with a
-      // 400 until this was raised. Cheap on a small model, and the alternative
-      // is a size limit on what she is allowed to look at.
-      options: { temperature: options.temperature ?? 0.2, num_ctx: options.numCtx ?? 8192, ...(options.numPredict ? { num_predict: options.numPredict } : {}) },
-    }),
+    body: JSON.stringify(body),
   });
   if (!response.ok) {
     const detail = await response.text().catch(() => '');
     // The commonest failure by far, and the one with an obvious fix.
     if (/does not support|no vision|image/i.test(detail) && response.status === 400) {
-      throw new Error(`${config.model} cannot see images. Pick a model with vision — gemma4:12b has it.`);
+      throw new Error(`${config.model} cannot see images. Pick a model with vision.`);
     }
     // Tagged so a caller can tell "this picture is a problem" from "the model
     // is not there". One oversized screenshot should cost that screenshot, not
@@ -140,8 +168,8 @@ export async function look(imageBase64: string | string[], config: VisionConfig,
     (error as Error & { aboutThisImage?: boolean }).aboutThisImage = response.status >= 400 && response.status < 500;
     throw error;
   }
-  const payload = await response.json() as { message?: { content?: string } };
-  const description = (payload.message?.content ?? '').trim();
+  const payload = await response.json() as { message?: { content?: string }; choices?: { message?: { content?: string } }[] };
+  const description = ((hosted ? payload.choices?.[0]?.message?.content : payload.message?.content) ?? '').trim();
   if (!description) throw new Error('the vision model returned nothing');
   return { description, model: config.model };
 }

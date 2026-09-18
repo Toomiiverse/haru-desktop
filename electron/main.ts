@@ -318,7 +318,7 @@ async function lookAtSyncedShots() {
   // for a caption.
   const keepAlive = moreThanOnePass(held, captions, described) ? '10m' : '0';
   const provider = store.get('ai.config') as ProviderConfig | undefined;
-  const endpoint = visionEndpoint(provider, vision);
+  const endpoint = lookingAt(provider, vision);
   // Written through after every shot rather than banked to the end of the pass.
   // A pass over a long backlog runs for hours, and this app is restarted often;
   // held to the end, an interrupted pass threw away every caption it had earned
@@ -1874,15 +1874,28 @@ function eyesHold(vision: VisionConfig, wanted: string): string | number {
 }
 
 function visionEndpoint(provider: ProviderConfig | undefined, vision?: VisionConfig): string {
-  // Her own address first, when she has been given one — a second Ollama on
-  // another card, say. Held to the same rule as the chat model below it: a
-  // vision endpoint that is not this machine is refused, not obeyed, because
-  // the guarantee is about where the screen goes and not about which field
-  // asked for it.
+  // A configured address wins, local or hosted. It used to refuse a remote one
+  // — "the screen never leaves the box" — and that was right while the eyes were
+  // a local model. On this line they are hosted on purpose: the laptop's brain
+  // is text-only, so the screen goes to the model chosen in Setup, the same way
+  // an attached picture already does. The refusal is gone deliberately, not
+  // relaxed by accident.
   const own = vision?.endpoint?.trim();
-  if (own && !isRemote(own)) return own;
+  if (own) return own;
   const chat = provider?.endpoint?.trim();
   return chat && !isRemote(chat) ? chat : LOCAL_MODELS;
+}
+
+/**
+ * The endpoint her eyes will use, and the key check a hosted one needs before a
+ * picture is sent anywhere. A remote of our own kind wants no key; xAI, OpenAI
+ * and Venice do, and this says so at the call rather than as a 401 after the
+ * upload.
+ */
+function lookingAt(provider: ProviderConfig | undefined, vision: VisionConfig): string {
+  const endpoint = lookingAt(provider, vision);
+  if (isRemote(endpoint)) requireKeyFor(endpoint, (vision.provider as Provider) ?? 'ollama');
+  return endpoint;
 }
 
 let lastLookAt = 0;
@@ -2014,7 +2027,7 @@ async function glanceAtScreen() {
     // The eyes report game state, plainly; she reacts to the report in her own
     // voice with the chat model, and the report stays in her context so a
     // question about the fight is answered from the screen. See sceneAsk.
-    const sighting = await look(encoded, vision, visionEndpoint(provider, vision), modelHeaders(visionEndpoint(provider, vision)), net.fetch, {
+    const sighting = await look(encoded, vision, lookingAt(provider, vision), modelHeaders(lookingAt(provider, vision)), net.fetch, {
       ask: sceneAsk(title),
       keepAlive: eyesHold(vision, '30m'),
       numPredict: 160,
@@ -2116,7 +2129,7 @@ async function remarkOnScreenshot() {
     // asked as a screen rather than as a picture — the same SHOT_LOOK_PROMPT
     // the server pass uses, so a shot described here and one described there
     // come back in the same shape.
-    const sighting = await look(bytes.toString('base64'), vision, visionEndpoint(provider, vision), modelHeaders(visionEndpoint(provider, vision)), net.fetch, { ask: SHOT_LOOK_PROMPT });
+    const sighting = await look(bytes.toString('base64'), vision, lookingAt(provider, vision), modelHeaders(lookingAt(provider, vision)), net.fetch, { ask: SHOT_LOOK_PROMPT });
     const name = path.basename(shot.path);
     console.log(`[shot] ${name} (${(bytes.length / 1024 | 0)}KB) -> ${sighting.description.length} chars${mayRemark ? '' : ', quiet hours — noted not said'}`);
     // Written down whether or not she says anything, and here rather than only
@@ -3411,7 +3424,7 @@ async function eyesForReading(vision: VisionConfig, provider: ProviderConfig): P
     // A look at a picture is a side job on the same model: the shared runner, not the chat's window.
     return { config: { ...vision, model: local.model }, endpoint: trimEndpoint(local.endpoint), numCtx: sideNumCtx() };
   }
-  return { config: vision, endpoint: visionEndpoint(provider, vision) };
+  return { config: vision, endpoint: lookingAt(provider, vision) };
 }
 
 /**
@@ -3469,7 +3482,7 @@ async function openFile(attachment: Attachment, vision: VisionConfig, provider: 
       // frames, which is a fact about the video that no single frame contains.
       const sighting = await look(
         frames.map(frame => readFileSync(frame).toString('base64')),
-        vision, visionEndpoint(provider, vision), modelHeaders(visionEndpoint(provider, vision)), net.fetch,
+        vision, lookingAt(provider, vision), modelHeaders(lookingAt(provider, vision)), net.fetch,
         { ask: `These are ${frames.length} frames taken at even intervals across one video, in order. Say plainly what the video shows and what happens across it, in two or three sentences. Describe it as one video, not as separate pictures.` },
       );
       parts.push(sighting.description);
@@ -11102,7 +11115,7 @@ async function readSomeManga(config: ProviderConfig, options: { force?: boolean;
     const { from, to } = tonightsPages(reading, options.pages);
     if (to <= from) return null;
     if (!files.length) { console.warn(`[manga] no pages came back for ${reading.title} ch ${reading.chapter}`); return null; }
-    const endpoint = visionEndpoint(store.get('ai.config') as ProviderConfig | undefined, vision);
+    const endpoint = lookingAt(store.get('ai.config') as ProviderConfig | undefined, vision);
     const read: string[] = [];
     for (let page = from; page < Math.min(to, files.length); page++) {
       try {
