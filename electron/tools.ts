@@ -282,7 +282,7 @@ export const CHAT_TOOLS: ChatTool[] = [{
   type: 'function',
   function: {
     name: 'change_setting',
-    description: 'Change one of your own settings — a model, an engine, your hours, what reaches their phone. Only the settings describe_myself lists. Call it once without confirm to see what would change, tell them, and only when they have explicitly said to go ahead call it again with confirm: true.',
+    description: 'Change one of your own settings — a model, an engine, your hours, what reaches their phone. Only the settings in the name list, and machine_level is one of them — call this straight away with the name, no describe_myself first. Saying a setting has changed does not change it: nothing changes until this tool answers changed: true. Call it once without confirm to see what would change, tell them, and only when they have explicitly said to go ahead call it again with confirm: true.',
     parameters: {
       type: 'object',
       properties: {

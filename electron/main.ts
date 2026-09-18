@@ -7500,23 +7500,36 @@ const promptState = {
         // the first chunk is the first word and the deadline is waived by it;
         // otherwise the whole reply must land in time.
         const startedAt = Date.now();
-        let firstWordAt = 0;
         const cacheKey = `haru-${localDateKey(zonedNow(CHAT_TIMEZONE))}`;
-        const onChunkSeen = roundOptions.onChunk ? (text: string) => { if (!firstWordAt) firstWordAt = Date.now(); roundOptions.onChunk!(text); } : undefined;
-        try {
-          onSending?.();
-          const request = sendToProvider(sending, config, { ...roundOptions, tools, cacheKey, ...(onChunkSeen ? { onChunk: onChunkSeen } : {}) });
-          const deadline = new Promise<never>((_, reject) => setTimeout(() => { if (!firstWordAt) reject(new Error(`no first word in ${HOSTED_FIRST_WORD_MS / 1000}s`)); }, HOSTED_FIRST_WORD_MS));
-          const answer = await Promise.race([request, deadline]);
-          console.log(`[ai] ${config.model} answered in ${Date.now() - startedAt}ms${firstWordAt ? ` (first word at ${firstWordAt - startedAt}ms)` : ''}`);
-          return answer;
-        } catch (error) {
-          console.warn(`[ai] the conversation route (${config.model}) did not answer (${error instanceof Error ? error.message : String(error)}) — answering at home`);
-          // Refused for money is worth telling the phone about now, not on the hour.
-          if (/insufficient .*balance/i.test(error instanceof Error ? error.message : String(error))) void checkVeniceBalance('a refused turn');
-          if (roundStreamed) { roundStreamed = ''; onChunkReset?.(); }
-          spilledHome = true;
-          return ollamaPost(sending, home, { ...roundOptions, tools });
+        // A network change under a streaming request — the anime stack's
+        // containers recreated mid-turn on 2026-09-18, new interfaces, and
+        // Chromium gave up the Kimi stream 49 s in with ERR_NETWORK_CHANGED —
+        // is asked once more before the local model takes the turn: the
+        // fallback is a different voice, and the reader hears the switch.
+        const transient = (error: unknown) => /ERR_NETWORK_CHANGED|ERR_CONNECTION_RESET|ERR_CONNECTION_CLOSED|ECONNRESET|socket hang up/i.test(error instanceof Error ? error.message : String(error));
+        for (let attempt = 0; ; attempt++) {
+          let firstWordAt = 0;
+          const onChunkSeen = roundOptions.onChunk ? (text: string) => { if (!firstWordAt) firstWordAt = Date.now(); roundOptions.onChunk!(text); } : undefined;
+          try {
+            onSending?.();
+            const request = sendToProvider(sending, config, { ...roundOptions, tools, cacheKey, ...(onChunkSeen ? { onChunk: onChunkSeen } : {}) });
+            const deadline = new Promise<never>((_, reject) => setTimeout(() => { if (!firstWordAt) reject(new Error(`no first word in ${HOSTED_FIRST_WORD_MS / 1000}s`)); }, HOSTED_FIRST_WORD_MS));
+            const answer = await Promise.race([request, deadline]);
+            console.log(`[ai] ${config.model} answered in ${Date.now() - startedAt}ms${firstWordAt ? ` (first word at ${firstWordAt - startedAt}ms)` : ''}${attempt ? ' (second try)' : ''}`);
+            return answer;
+          } catch (error) {
+            if (attempt === 0 && transient(error)) {
+              console.warn(`[ai] the conversation route (${config.model}) broke off (${error instanceof Error ? error.message : String(error)}) — asking once more`);
+              if (roundStreamed) { roundStreamed = ''; onChunkReset?.(); }
+              continue;
+            }
+            console.warn(`[ai] the conversation route (${config.model}) did not answer (${error instanceof Error ? error.message : String(error)}) — answering at home`);
+            // Refused for money is worth telling the phone about now, not on the hour.
+            if (/insufficient .*balance/i.test(error instanceof Error ? error.message : String(error))) void checkVeniceBalance('a refused turn');
+            if (roundStreamed) { roundStreamed = ''; onChunkReset?.(); }
+            spilledHome = true;
+            return ollamaPost(sending, home, { ...roundOptions, tools });
+          }
         }
       }
       try {
