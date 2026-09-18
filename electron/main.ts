@@ -66,6 +66,7 @@ import { convertImage, normaliseFormat, FORMATS } from './convert';
 import { cancelPower, closeApp, findApps, isCancellable, launch, listRunning, matchApp, matchRunning, normalisePower, readDesktopConfig, runPower, supportedDesktop, type DesktopConfig } from './desktop';
 import { activeWindow as linuxActiveWindow, detectLinuxSupport, readVolume as linuxReadVolume, setVolume as linuxSetVolume } from './linuxdesktop';
 import { cursorPollDelay, KEEP_ALIVE_BATTERY, readLinuxPowerSource, resolveKeepAlive } from './power';
+import { createTurnContext, type TurnContext } from './turncontext';
 import { looksLikeScreenshot, maySpeak, readScreenshotConfig, screenshotPrompt, SETTLE_MS, SETTLE_TRIES, type ScreenshotConfig } from './screenshots';
 import { look, photoName, readShotDescription, readVisionConfig, whileLooking, type VisionConfig } from './vision';
 import { CAPTION_MAX_CHARS, describedShots, forgetCaptions, moreThanOnePass, noteCaption, noteFailure, readCaptions, shotsNeedingALook } from './seen';
@@ -94,6 +95,7 @@ import { readBrowserControlConfig } from './browserctl';
 import { listSessions, openSession, readClaudeCodeConfig, readOpenedSessions, resolveSessionDir, sessionName, SESSIONS_KEPT as CLAUDE_SESSIONS_KEPT, stopSession, type SessionHost } from './claudesession';
 import { ShellGate, SERVER_NOTE, denied, ledgerEntry, readShellConfig, runCommand } from './shell';
 import { PokemonLink, PLAY_RULES as POKEMON_PLAY_RULES, afterTurn, describeGame, newSitting, parseMove, readPokemonConfig, runNote, sittingSummary, whyNotStart as whyNotStartPokemon, whyStop as whyStopPokemon, type GameState, type Moment as PokemonMoment, type Sitting } from './pokemon';
+import { HANDS_TURN, HER_HANDS_TOOLS, didNothing, handsInstruction, handsNote, handsToday, keepHands, readHands, readHandsConfig, whyNotAct } from './herhands';
 import { Suwayomi, fetchFits, fetchSummary, hisReading, hisReadingNote, matchManga, onHisShelf, readerLink, readSuwayomiConfig, spiteful, type HisTitle, type ShelfChapter } from './suwayomi';
 import { serverLookNote } from './prompt';
 import { Downloads, downloadsReady, readDownloadsConfig } from './downloads';
@@ -4584,6 +4586,8 @@ const memoryStore = createMemoryStore({
       readingNote(readReading(store.get('her.reading'))),
       // His shelf beside hers: where he is up to, and the spoiler line (suwayomi.ts).
       hisReadingLine(),
+      // What she did with her own hands lately (herhands.ts), so it is hers to bring up.
+      handsNote(readHands(store.get('her.hands')), Date.now(), iso => localDateKey(zonedNow(CHAT_TIMEZONE, new Date(iso))), today),
       // Her own game: where the run stands, read off the game (pokemon.ts).
       runNote((store.get('her.pokemon.lastState') as GameState | undefined) ?? null, String(store.get('her.pokemon.lastSummary') ?? ''), pokemonSitting !== null),
       dayNote(getDays(), today),
@@ -4618,13 +4622,14 @@ const runMemoryConsolidation = memoryStore.consolidate;
 const runMemoryDecay = memoryStore.decay;
 
 // Level 3: a terminal on the box, at his word (shell.ts).
-type SystemConfig = { enabled: boolean; level: 1 | 2 | 3; allowlist: string[] };
+// Level 4: hands of her own, in her own time (herhands.ts).
+type SystemConfig = { enabled: boolean; level: 1 | 2 | 3 | 4; allowlist: string[] };
 const DEFAULT_SYSTEM_CONFIG: SystemConfig = { enabled: true, level: 2, allowlist: ['restart_docker_container', 'start_service', 'stop_service', 'restart_haru'] };
 
 function readSystemConfig(): SystemConfig {
   const saved = store.get('system.config') as Partial<SystemConfig> | undefined;
   if (!saved || typeof saved !== 'object') return DEFAULT_SYSTEM_CONFIG;
-  const level = saved.level === 3 ? 3 : saved.level === 2 ? 2 : saved.level === 1 ? 1 : DEFAULT_SYSTEM_CONFIG.level;
+  const level = saved.level === 4 ? 4 : saved.level === 3 ? 3 : saved.level === 2 ? 2 : saved.level === 1 ? 1 : DEFAULT_SYSTEM_CONFIG.level;
   return {
     enabled: saved.enabled === true,
     level,
@@ -5146,17 +5151,21 @@ let lastResults: SearchResult[] = [];
  *  her tools come off the table for the rest of the reply. */
 let pageWasRead = false;
 
-/** What is switched on right now, for chatTools to draw the table from. */
-function availableTools(): ToolAvailability {
+/** What is switched on right now, for chatTools to draw the table from.
+ *
+ * A turn context, where one is given, is the permissions of that reply rather
+ * than the module's last one: her own background passes run alongside the desk,
+ * and must not read or change what the desk turn was allowed. */
+function availableTools(turn?: TurnContext): ToolAvailability {
   const search = readSearchConfig(store.get('search'));
   const systemConfig = readSystemConfig();
   return {
-    choices: offeringChoices,
+    choices: turn ? turn.offeringChoices() : offeringChoices,
     booking: true,
     chats: true,
     journal: readJournalConfig(store.get('journal.config')).enabled,
     anilist: readAniListConfig(store.get('anilist')).enabled,
-    web: talkingOnWeb,
+    web: turn ? turn.onWeb() : talkingOnWeb,
     search: { enabled: search.enabled, readPages: search.readPages, transcripts: transcriptsAvailable() },
     knowledge: getKnowledgeConfig().enabled,
     browser: readBrowserControlConfig(store.get('browser')).enabled,
@@ -5167,7 +5176,7 @@ function availableTools(): ToolAvailability {
     pokemon: pokemonLink() !== null,
     manga: mangaLink() !== null,
     system: { enabled: systemConfig.enabled, level: systemConfig.level },
-    hands: handsAllowed,
+    hands: turn ? turn.handsAllowed() : handsAllowed,
     desktop: supportedDesktop(readDesktopConfig(store.get('desktop'))),
     knockedAwake: herKnockedAwakeNow(),
   };
@@ -5289,7 +5298,7 @@ function claudeSessions(): ToolDeps['claude'] {
   };
 }
 
-function toolDeps(): ToolDeps {
+function toolDeps(turn?: TurnContext): ToolDeps {
   return {
     CHAT_TIMEZONE,
     net,
@@ -5307,11 +5316,11 @@ function toolDeps(): ToolDeps {
     tryEmbedQuery,
     memoryVectors: memoryStore.vectors,
     touchChunks, getSearchKey,
-    handsAllowed: () => handsAllowed,
-    onWeb: () => talkingOnWeb,
-    markPageRead: () => { pageWasRead = true; },
-    setPendingChoices: (choices) => { pendingChoices = choices as string[]; },
-    requestRestart: () => { pendingHaruRestart = true; },
+    handsAllowed: turn ? turn.handsAllowed : () => handsAllowed,
+    onWeb: turn ? turn.onWeb : () => talkingOnWeb,
+    markPageRead: turn ? turn.markPageRead : () => { pageWasRead = true; },
+    setPendingChoices: turn ? turn.setPendingChoices : (choices) => { pendingChoices = choices as string[]; },
+    requestRestart: turn ? turn.requestRestart : () => { pendingHaruRestart = true; },
     // Her night is hers: back to bed when she decides the wake was nothing (hersleep.ts).
     goBackToSleep: input => goBackToSleep({ pointless: true, block: input.block, why: 'her call' }),
     booking: { book: bookFollowUp },
@@ -5344,9 +5353,9 @@ function toolDeps(): ToolDeps {
       }
     },
     changeMySetting: plan => applyPlanAtTheirWord(plan),
-    lastResults: () => lastResults,
-    lastSearchQuery: () => lastSearchQuery,
-    rememberSearch: (query, results) => { lastSearchQuery = query; lastResults = results; },
+    lastResults: turn ? turn.lastResults : () => lastResults,
+    lastSearchQuery: turn ? turn.lastSearchQuery : () => lastSearchQuery,
+    rememberSearch: turn ? turn.rememberSearch : (query, results) => { lastSearchQuery = query; lastResults = results; },
     runSystemCommand,
     browserPort: () => readBrowserControlConfig(store.get('browser')).port,
     browserShotDir: () => {
@@ -5501,7 +5510,12 @@ function requireKeyFor(endpoint: string, provider: Provider) {
  * purpose: every composer in this file calls ollamaPost, and none of them should
  * have to know or care which provider answered.
  */
-type PostOptions = { tools?: boolean; temperature?: number; format?: unknown; maxTokens?: number; onChunk?: (text: string) => void;
+type PostOptions = { tools?: boolean;
+  /** A table laid by the caller — her own pass — instead of the one the turn would be given. */
+  table?: ChatTool[];
+  /** The reply's own permissions, where the caller keeps one — her own passes do. */
+  turn?: TurnContext;
+  temperature?: number; format?: unknown; maxTokens?: number; onChunk?: (text: string) => void;
   /** A deadline for a hosted answer, after which the local model speaks instead. */
   signal?: AbortSignal;
   /** The endpoint's prompt-cache key for this conversation. */
@@ -5514,10 +5528,10 @@ type PostOptions = { tools?: boolean; temperature?: number; format?: unknown; ma
 const heldTools = { day: '', names: new Set<string>() };
 
 /** The table for a hosted request: laid for this message, then held steady for the day so the prompt cache survives. */
-function hostedTools(conversation: { role?: string; content?: string }[]): ChatTool[] {
+function hostedTools(conversation: { role?: string; content?: string }[], turn?: TurnContext): ChatTool[] {
   const day = localDateKey(zonedNow(CHAT_TIMEZONE));
   if (heldTools.day !== day) { heldTools.day = day; heldTools.names = new Set(); }
-  const available = availableTools();
+  const available = availableTools(turn);
   return steadyTable(chatTools(available, latestUserText(conversation)), chatTools(available), heldTools.names);
 }
 
@@ -5529,12 +5543,12 @@ function latestUserText(conversation: { role?: string; content?: string }[]): st
   return '';
 }
 
-async function openAIPost(conversation: OllamaMessage[], config: ProviderConfig, { tools = true, temperature = config.temperature, format, maxTokens, onChunk, signal, cacheKey }: PostOptions = {}) {
+async function openAIPost(conversation: OllamaMessage[], config: ProviderConfig, { tools = true, turn, temperature = config.temperature, format, maxTokens, onChunk, signal, cacheKey }: PostOptions = {}) {
   requireKeyFor(config.endpoint, (config.provider as Provider) ?? 'openai');
   const body = toOpenAIBody({
     model: config.model,
     conversation,
-    tools: tools && !toolless.has(config.model) ? hostedTools(conversation) : undefined,
+    tools: tools && !toolless.has(config.model) ? hostedTools(conversation, turn) : undefined,
     temperature,
     maxTokens,
     json: Boolean(format),
@@ -5712,10 +5726,10 @@ function capacitySpill(config: ProviderConfig): ProviderConfig | null {
  * silently becoming eight times slower with no explanation, which reads as
  * something being wrong with her rather than with the pod.
  */
-async function ollamaPost(conversation: OllamaMessage[], config: ProviderConfig, { tools = true, temperature = config.temperature, format, maxTokens, onChunk, numCtx }: PostOptions = {}) {
+async function ollamaPost(conversation: OllamaMessage[], config: ProviderConfig, { tools = true, turn, temperature = config.temperature, format, maxTokens, onChunk, numCtx }: PostOptions = {}) {
   // One place, so chat, quips, openings and remarks all follow the same rule.
   config = modelForNow(config);
-  const options = { tools, temperature, format, maxTokens, onChunk, numCtx };
+  const options = { tools, turn, temperature, format, maxTokens, onChunk, numCtx };
   const home = homeTwin(config);
   const address = trimEndpoint(config.endpoint);
 
@@ -5745,12 +5759,12 @@ async function ollamaPost(conversation: OllamaMessage[], config: ProviderConfig,
   }
 }
 
-async function sendToProvider(conversation: OllamaMessage[], config: ProviderConfig, { tools = true, temperature = config.temperature, format, maxTokens, onChunk, signal, cacheKey, numCtx }: PostOptions = {}) {
+async function sendToProvider(conversation: OllamaMessage[], config: ProviderConfig, { tools = true, table, turn, temperature = config.temperature, format, maxTokens, onChunk, signal, cacheKey, numCtx }: PostOptions = {}) {
   // Routed here rather than at every call site: there are a dozen composers in
   // this file and none of them should know which provider is answering.
-  if (isOpenAIShaped(config.provider)) return openAIPost(conversation, config, { tools, temperature, format, maxTokens, onChunk, signal, cacheKey });
+  if (isOpenAIShaped(config.provider)) return openAIPost(conversation, config, { tools, turn, temperature, format, maxTokens, onChunk, signal, cacheKey });
   const send = async (withTools: boolean, streaming: boolean, quiet = true) => {
-    const offered = withTools ? chatTools(availableTools(), latestUserText(conversation)) : [];
+    const offered = table ?? (withTools ? chatTools(availableTools(turn), latestUserText(conversation)) : []);
     if (offered.length) {
       // The estimate is a rough chars/4 token count of the conversation being
       // sent — the tool round's prompt — so the real peak can be measured
@@ -8306,7 +8320,7 @@ async function settingSaid(text: string): Promise<{ reply: string; tier: 2 } | n
   const setting = SETTINGS[command.name];
   const verdict = planChange(command.name, command.value, store.get(setting.path));
   if (!verdict.ok) return { reply: verdict.error, tier: 2 };
-  const meaning = (level: number) => level >= 3 ? 'I run what you hand me, once you have said yes to each one' : level === 2 ? 'I look, and act when you say the word' : 'I look and tell you what I see';
+  const meaning = (level: number) => level >= 4 ? 'my own hands in my own time, and I still run what you hand me once you have said yes to each one' : level === 3 ? 'I run what you hand me, once you have said yes to each one' : level === 2 ? 'I look, and act when you say the word' : 'I look and tell you what I see';
   if (verdict.unchanged) return { reply: `It is already at ${command.value} — ${meaning(command.value)}.`, tier: 2 };
   await applyPlanAtTheirWord(verdict.plan);
   return { reply: `Done. Level ${command.value} now — ${meaning(command.value)}. Do not make it boring.`, tier: 2 };
@@ -10743,6 +10757,97 @@ function mangaShelfLink(): ToolDeps['mangaShelf'] {
 }
 
 /**
+ * Level 4 — her own hands (herhands.ts). Every few minutes: is it her time?
+ * If so, one pass with the local brain and the short table of tools that are
+ * hers; what ran is written to her.hands and shown back to her in her
+ * own-life block, so what she remembers doing is what she did. Nothing here
+ * runs at his word, and nothing of it leaves the box.
+ */
+let herHandsBusy = false;
+let herHandsWhyNot = '';
+async function herHandsTick(): Promise<void> {
+  const system = readSystemConfig();
+  if (system.level < 4) return;
+  const hands = readHandsConfig(store.get('system.config'));
+  const now = zonedNow(CHAT_TIMEZONE);
+  const today = localDateKey(now);
+  const dayOf = (iso: string) => localDateKey(zonedNow(CHAT_TIMEZONE, new Date(iso)));
+  const ledger = readHands(store.get('her.hands'));
+  const last = ledger.at(-1);
+  const why = whyNotAct({
+    level: system.level, config: hands, minutes: now.getHours() * 60 + now.getMinutes(),
+    asleep: herAsleepNow(), speaking: speakingNow, idleMs: Date.now() - hisLastWordMs(),
+    sinceLastMs: last ? Date.now() - Date.parse(last.at) : Number.MAX_SAFE_INTEGER,
+    doneToday: handsToday(ledger, today, dayOf), busy: herHandsBusy || pokemonSitting !== null || readingMangaNow,
+  });
+  if (why) {
+    // Said once per reason, not once per tick.
+    if (why !== herHandsWhyNot) { herHandsWhyNot = why; console.log(`[hands] not now — ${why}`); }
+    return;
+  }
+  herHandsWhyNot = '';
+  const config = store.get('ai.config') as ProviderConfig | undefined;
+  if (!config?.model) return;
+  herHandsBusy = true;
+  const startedAt = Date.now();
+  try {
+    const turn = createTurnContext({ hands: true });
+    const menu = chatTools(availableTools(turn), '').filter(tool => (HER_HANDS_TOOLS as readonly string[]).includes(tool.function.name));
+    if (!menu.length) { console.log('[hands] nothing of hers is switched on to reach for'); return; }
+    const character = getActiveCharacter();
+    const interests = getInterests();
+    const own = [
+      readingNote(readReading(store.get('her.reading'))),
+      runNote((store.get('her.pokemon.lastState') as GameState | undefined) ?? null, String(store.get('her.pokemon.lastSummary') ?? ''), false),
+      tastesInstruction(interests),
+      wantsNote(getWants(), interests),
+      handsNote(ledger, Date.now(), dayOf, today),
+    ].filter(Boolean).join('\n');
+    const conversation = [
+      { role: 'system', content: [character.identity, character.style, FIRST_PERSON_NOTE, NOBODY_HERE, own, handsInstruction(menu.map(tool => tool.function.name))].join('\n\n') },
+      { role: 'user', content: HANDS_TURN },
+    ];
+    // In her own time a read runs to its end, and a game she starts is hers, not his idea.
+    const base = toolDeps(turn);
+    const pokemon = pokemonDeps();
+    const deps: ToolDeps = { ...base, pokemon: pokemon ? { ...pokemon, start: () => startPokemon('her') } : null };
+    const { content, ran } = await runToolLoop(conversation as Parameters<typeof runToolLoop>[0], {
+      ask: (sending, { tools }) => ollamaPost(sending as Parameters<typeof ollamaPost>[0], config, { tools, turn, table: menu }),
+      runTool: async call => {
+        const fn = (call as { function?: { name?: string; arguments?: unknown } }).function ?? {};
+        const tool = fn.name ?? 'tool';
+        let asked = call;
+        if (tool === 'read_manga') {
+          let args: Record<string, unknown> = {};
+          try { args = typeof fn.arguments === 'string' ? JSON.parse(fn.arguments) : (fn.arguments as Record<string, unknown>) ?? {}; } catch { args = {}; }
+          asked = { ...call, function: { ...fn, arguments: JSON.stringify({ ...args, wait: true }) } } as typeof call;
+        }
+        const result = await runChatTool(asked, '', deps);
+        noteDeed(tool, call, result);
+        return result;
+      },
+      pageWasRead: turn.pageWasRead, handsAllowed: turn.handsAllowed, withdrawHands: turn.withdrawHands,
+      hasOpenTask: () => false, canSearch: () => false,
+      log: line => console.log(line), warn: line => console.warn(line), maxRounds: 3,
+    });
+    const acted = [...ran].filter(name => (HER_HANDS_TOOLS as readonly string[]).includes(name));
+    const deed = readDeeds(store.get('her.deeds')).filter(item => Date.parse(item.at) >= startedAt && acted.includes(item.tool)).at(-1);
+    const said = content.trim().slice(0, 400);
+    if (!acted.length || !deed) {
+      store.set('her.hands', keepHands(ledger, { at: new Date().toISOString(), tool: 'nothing', what: '', said }));
+      console.log(`[hands] she let it be — "${said.slice(0, 80)}"`);
+      return;
+    }
+    store.set('her.hands', keepHands(ledger, { at: new Date().toISOString(), tool: deed.tool, what: deed.what, said: didNothing(said) ? '' : said }));
+    console.log(`[hands] she ${deed.what} — "${said.slice(0, 120)}" (${Math.round((Date.now() - startedAt) / 1000)}s)`);
+  } catch (error) {
+    console.warn('[hands] her own time came to nothing:', error instanceof Error ? error.message : error);
+  } finally {
+    herHandsBusy = false;
+  }
+}
+
+/**
  * Her own reading as a tool (tools.ts read_manga): the same pass as the small
  * hours, run now. On a chat turn it starts and answers at once — a stretch is
  * minutes of her eyes on pages — and in her own time (herHandsTick) it runs to
@@ -10774,6 +10879,18 @@ function mangaLink(): ToolDeps['manga'] {
  * he speaks, at bedtime, on time, or on her share of the day, and what came
  * of it goes into her game memory and her own-life block.
  */
+/**
+ * When he last said anything, by any door. The live stamp is only set on the
+ * model path and starts at zero: five minutes after "set your machine level
+ * to 4" — answered in code, right after a restart — her own time opened as
+ * though he had been silent for ever (2026-09-18). The transcript knows.
+ */
+function hisLastWordMs(): number {
+  const messages = (store.get('chat.messages') as { role?: string; at?: string }[] | undefined) ?? [];
+  const last = [...messages].reverse().find(message => message.role === 'user' && message.at);
+  return Math.max(lastUserActivityAt, last?.at ? Date.parse(last.at) || 0 : 0);
+}
+
 let pokemonSitting: Sitting | null = null;
 let pokemonTicking = false;
 function pokemonLink(): PokemonLink | null {
@@ -10785,7 +10902,7 @@ function pokemonPlayedToday(): number {
   return saved?.day === currentChatDayKey() ? Number(saved.ms ?? 0) : 0;
 }
 async function pokemonMoment(link: PokemonLink): Promise<PokemonMoment> {
-  return { now: Date.now(), lastUserActivityAt, asleep: herAsleepNow(), speaking: false, workerUp: await link.up(), playedTodayMs: pokemonPlayedToday() };
+  return { now: Date.now(), lastUserActivityAt: hisLastWordMs(), asleep: herAsleepNow(), speaking: false, workerUp: await link.up(), playedTodayMs: pokemonPlayedToday() };
 }
 async function startPokemon(startedBy: 'her' | 'him'): Promise<Record<string, unknown>> {
   const link = pokemonLink();
@@ -12929,6 +13046,8 @@ app.whenReady().then(() => {
   // Her Game Boy: one move per tick while a sitting is on (pokemon.ts).
   setInterval(() => { void pokemonTick(); }, readPokemonConfig(store.get('games')).tickSeconds * 1000);
   void recoverPokemonSitting();
+  // Level 4: her own hands, looked at every few minutes (herhands.ts).
+  setInterval(() => { void herHandsTick(); }, 5 * 60_000);
   setTimeout(() => scheduler.start(), 30_000);
   // Her thoughts between messages (thoughts.ts): triggers looked at every five
   // minutes, the brain asked only when one has fired.
