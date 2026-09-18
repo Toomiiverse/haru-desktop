@@ -90,7 +90,15 @@ test('standing still is noticed, and the sitting leaves a true line behind', () 
   assert.equal(sitting.stillFor, 0);
   const summary = sittingSummary(sitting, moved, 25 * 60_000, 'he is talking to her');
   assert.match(summary, /Played for 25 min \(3 turns\): PEWTER CITY → PEWTER GYM; 1 badge\(s\); party ZENI L14\. Stopped because he is talking to her\. Last thought: "In\."/);
-  assert.match(runNote(moved, summary, false), /Your Pokémon Red run .* 1 badge\(s\), party ZENI L14, last seen in PEWTER GYM\. Last sitting: Played for 25 min/);
+  const note = runNote(moved, summary, false);
+  assert.match(note, /Your Pokémon Red run .* 1 badge\(s\); party ZENI L14; last seen in PEWTER GYM\. Last sitting: Played for 25 min/);
+  assert.match(note, /Nothing else has happened in that game/);
+  // Twenty minutes into Oak's speech she had "talked to Mom" and "caught a Pidgey" (2026-09-18).
+  const oakStill = runNote({ player: { name: 'NINTEN', rival_name: 'SONY' }, map: { map_id: 38, map_name: "Red's House 2F" }, party: [] }, '', true);
+  assert.match(oakStill, /only just switched it on/);
+  assert.match(oakStill, /not chosen a Pokémon, walked anywhere, met anyone, caught or battled anything/);
+  assert.doesNotMatch(oakStill, /Red's House/);
+  assert.match(runNote({ player: { name: 'HARU' }, map: { map_id: 0, map_name: 'Pallet Town' }, party: [] }, '', false), /no Pokémon yet — you have caught nothing/);
   assert.equal(runNote(null, '', false), '');
 });
 

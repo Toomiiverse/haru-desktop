@@ -239,9 +239,20 @@ export function sittingSummary(sitting: Sitting, state: GameState, now: number, 
   return `Played for ${minutes} min (${sitting.turns} turns): ${sitting.from === to ? `around ${to}` : `${sitting.from} → ${to}`}; ${badgeCount(state)} badge(s); party ${party}. Stopped because ${why}.${sitting.lastThought ? ` Last thought: "${sitting.lastThought}"` : ''}`;
 }
 
-/** One line for her own-life block: where her run stands. */
+/**
+ * One line for her own-life block and her unprompted lines: where her run
+ * stands, and that nothing else has happened in it. Asked how the game was
+ * going twenty minutes into Oak's speech she had "talked to Mom", and a beat
+ * later "caught a Pidgey and named it after you" — from a composer that had
+ * no facts about the run at all (2026-09-18). The facts, then the fence.
+ */
 export function runNote(state: GameState | null, lastSummary: string, playing: boolean): string {
   if (!state) return '';
+  const head = 'Your Pokémon Red run (yours, on your own Game Boy — read off the game itself):';
+  const fence = 'That is the whole of it. Nothing else has happened in that game — no catch, no battle, no badge, no place, no conversation that is not written here — so if they ask for more, say what is here and that you have more playing to do; never make a moment of it up, not even as a joke.';
+  if (notStarted(state) || inIntro(state)) {
+    return `${head} you have only just switched it on. Professor Oak is still giving his introduction; you have not chosen a Pokémon, walked anywhere, met anyone, caught or battled anything.${playing ? ' You are sitting with it right now.' : ''} ${fence}`;
+  }
   const party = (state.party ?? []).map(mon => `${mon.nickname || mon.species} L${mon.level}`).join(', ');
-  return `Your Pokémon Red run (yours, on your own Game Boy — these are facts, read off the game): ${badgeCount(state)} badge(s), ${party ? `party ${party}` : 'no Pokémon yet'}, last seen in ${whereIs(state)}.${playing ? ' You are in the middle of a sitting right now.' : ''}${lastSummary ? ` Last sitting: ${lastSummary}` : ''}`;
+  return `${head} ${badgeCount(state)} badge(s); ${party ? `party ${party}` : 'no Pokémon yet — you have caught nothing and battled nothing'}; last seen in ${whereIs(state)}.${playing ? ' You are in the middle of a sitting right now.' : ''}${lastSummary ? ` Last sitting: ${lastSummary}` : ''} ${fence}`;
 }

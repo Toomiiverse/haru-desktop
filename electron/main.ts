@@ -6830,7 +6830,9 @@ async function secondThought(repliedAt: number, input: { latest: string; reply: 
   if (messages.at(-1)?.role !== 'assistant' || !untagged(messages.at(-1)?.content ?? '').includes(untagged(input.reply).slice(0, 40))) { console.log('[followup] the conversation moved on — nothing to add'); return; }
   const character = getActiveCharacter();
   const route = conversationRoute() ?? input.config;
-  const system = [character.identity, character.style, FIRST_PERSON_NOTE, NATURAL, NO_INVENTED_HISTORY].join('\n\n');
+  // Her game, in facts, with the fence: this composer had none and invented a caught Pidgey a beat after "how's your game going" (pokemon.ts runNote).
+  const herGame = runNote((store.get('her.pokemon.lastState') as GameState | undefined) ?? null, String(store.get('her.pokemon.lastSummary') ?? ''), pokemonSitting !== null);
+  const system = [character.identity, character.style, FIRST_PERSON_NOTE, NATURAL, NO_INVENTED_HISTORY, herGame].filter(Boolean).join('\n\n');
   const conversation: OllamaMessage[] = [
     { role: 'system', content: system },
     ...messages.map(message => ({ role: message.role as OllamaMessage['role'], content: message.content })),
