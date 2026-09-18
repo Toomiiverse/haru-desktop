@@ -20,7 +20,7 @@ test('the bearer token is ES256 over header.claims, with the key id and the team
 
 test('the payload is an alert with a sound, threaded by kind, carrying the page to open', () => {
   const parsed = JSON.parse(apnsPayload('Haru', 'Where are you?', '/', 'haru-random'));
-  assert.deepEqual(parsed, { aps: { alert: { title: 'Haru', body: 'Where are you?' }, sound: 'default', 'thread-id': 'haru-random', category: 'HARU_LINE', 'interruption-level': 'active' }, url: '/', haru: { kind: 'random', url: '/' } });
+  assert.deepEqual(parsed, { aps: { alert: { title: 'Haru', body: 'Where are you?' }, sound: 'default', 'thread-id': 'haru-random', category: 'HARU_LINE', 'interruption-level': 'active', 'mutable-content': 1, 'content-available': 1 }, url: '/', haru: { kind: 'random', url: '/' } });
   assert.equal(JSON.parse(apnsPayload('Haru', 'x'.repeat(2000), '/', 't')).aps.alert.body.length, 1000);
 });
 

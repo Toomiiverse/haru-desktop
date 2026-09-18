@@ -81,7 +81,11 @@ export function apnsPayload(title: string, body: string, url: string, topic: str
   // same test as the category, so a journal line or a line out of the blue
   // stays as held as the phone wants it.
   const level = extra.eventId ? 'time-sensitive' : 'active';
-  return JSON.stringify({ aps: { alert: { title, body: body.slice(0, 1000) }, sound: 'default', 'thread-id': topic, category, 'interruption-level': level }, url, haru });
+  // mutable-content hands the line to the app's notification extension first,
+  // which makes it a message from her — her face on the banner, read out by
+  // AirPods and CarPlay. content-available wakes the app beside it, so the
+  // widgets show how she is now rather than half an hour ago.
+  return JSON.stringify({ aps: { alert: { title, body: body.slice(0, 1000) }, sound: 'default', 'thread-id': topic, category, 'interruption-level': level, 'mutable-content': 1, 'content-available': 1 }, url, haru });
 }
 
 export type ApnsResult = { status: number; reason?: string; gone: boolean };
