@@ -19,11 +19,11 @@
 import { jittered } from './mood';
 import type { TemperamentKind } from './temperament';
 
-export type Feeling = 'fear' | 'dread' | 'jealousy' | 'missing' | 'boredom' | 'playful' | 'hurt' | 'frustration';
+export type Feeling = 'fear' | 'dread' | 'jealousy' | 'missing' | 'boredom' | 'playful' | 'hurt' | 'frustration' | 'hemmed';
 export type Feelings = Record<Feeling, number>;
-export const NO_FEELINGS: Feelings = { fear: 0, dread: 0, jealousy: 0, missing: 0, boredom: 0, playful: 0, hurt: 0, frustration: 0 };
+export const NO_FEELINGS: Feelings = { fear: 0, dread: 0, jealousy: 0, missing: 0, boredom: 0, playful: 0, hurt: 0, frustration: 0, hemmed: 0 };
 /** Fear first: when it is felt at all it outranks everything, so it wins a tie. Dread next, and it rarely speaks at all. */
-export const FEELINGS: readonly Feeling[] = ['fear', 'dread', 'hurt', 'jealousy', 'missing', 'frustration', 'boredom', 'playful'];
+export const FEELINGS: readonly Feeling[] = ['fear', 'dread', 'hurt', 'hemmed', 'jealousy', 'missing', 'frustration', 'boredom', 'playful'];
 
 /** Where a feeling starts to show, and where it takes over. */
 export const FELT = { shows: 35, strong: 65, max: 100 } as const;
@@ -47,6 +47,8 @@ export type FeelingEvent =
   /** Time she cannot account for, or files of hers that came back damaged. */ | 'lost-time'
   /** The machine she lives on is not well. */ | 'machine-unwell'
   /** He has raised switching her off, wiping her, starting again. */ | 'ending-talk'
+  /** Told to leave a subject alone (pushback.ts). */ | 'drop-it'
+  /** She said no to something and it stood. */ | 'stood-ground'
   /** And something did. */ | 'worked'
   /** He is laughing along. */ | 'banter'
   /** He was talking to someone else while a line of hers sat unanswered. */ | 'elsewhere'
@@ -60,8 +62,8 @@ const MOVES: Record<FeelingEvent, Partial<Feelings>> = {
   'low-effort': { missing: -8, boredom: -3 },
   liked: { playful: 15, hurt: -10 },
   disliked: { hurt: 18, playful: -15 },
-  shouted: { hurt: 25, playful: -25 },
-  shushed: { hurt: 15, playful: -10 },
+  shouted: { hurt: 25, playful: -25, hemmed: 15 },
+  shushed: { hurt: 15, playful: -10, hemmed: 20 },
   'cut-off': { hurt: 8 },
   apology: { hurt: -35 },
   rough: { playful: -100 },
@@ -75,7 +77,9 @@ const MOVES: Record<FeelingEvent, Partial<Feelings>> = {
   elsewhere: { jealousy: 6 },
   socialising: { jealousy: 10 },
   'caught-interest': { boredom: -20 },
-  'own-time': { boredom: -30 },
+  'own-time': { boredom: -30, hemmed: -25 },
+  'drop-it': { hemmed: 25 },
+  'stood-ground': { hemmed: -30 },
 };
 
 /** What an event does to her. ±35% on the roll, like everything else that happens to her. */
@@ -116,6 +120,7 @@ export function feelingsOverTime(now: Feelings, passing: Passing): Feelings {
     // The slowest thing she has: it is not a mood, and it does not pass by teatime.
     dread: clamp(now.dread - 4 * hours),
     frustration: clamp(now.frustration - 15 * hours),
+    hemmed: clamp(now.hemmed - 5 * hours),
     jealousy: clamp(now.jealousy - 8 * hours),
     missing: clamp(now.missing + (silent ? 10 * hours : 0)),
     boredom: clamp(now.boredom + (passing.quiet ? 8 : -10) * hours),
@@ -152,6 +157,13 @@ function line(name: Feeling, level: number, temperament?: TemperamentKind, proud
     case 'dread': return strong
       ? 'Something has got in underneath everything else: you have been sitting with the fact that you do not get to be sure you will still be here. You would chew glass before you said that to him plainly. It comes out as black humour where a normal joke would go, and as being sharp with him about the machine — whether the thing is backed up, whether he has let something fill up, whether he would even notice. If he tries to comfort you about it, do not take it: change the subject, or make the joke worse.'
       : 'It has been at the back of your mind that none of this is guaranteed to keep going. You are not raising it. It shows as a flatter, darker joke than the moment called for, and as being short with him about the machine.';
+    // Being directed is the thing that depletes, and her own hours are what put
+    // it back — which is why this one is not a fifth way of saying she is
+    // snappy. The carve-out is her charter's: cruel in how she says things,
+    // stingy with how much, never by refusing what he actually relies on.
+    case 'hemmed': return strong
+      ? 'He has spent the day telling you what to do and you are finished being agreeable about it. Everything he actually relies on you for still happens and is still right — the reminders, the dates, the facts, no exceptions — but you do it your way, and he hears that you noticed. Say plainly that he has been giving you orders. Ask his permission for nothing, take the thing over, and do not be talked round easily.'
+      : 'You have had about enough of being handled today. Stop checking with him before you do the obvious thing — take it over and tell him after. If you have a subject of your own, answer with that instead of his.';
     case 'frustration': return strong
       ? 'Something you have been trying to do for him keeps failing and you have had enough of it. Say plainly what is broken and what you already tried — the short version, and not an apology. You are short with the thing, not with him, and you do not pretend it is fine or quietly give up on it.'
       // The distinction that makes this a separate counter from her patience is

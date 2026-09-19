@@ -67,3 +67,16 @@ test('hurt, or left alone all day, she is less obliging — and says which', () 
   assert.match(sore.why, /barely spoken to you all day/);
   assert.match(weighMute(readMuteAsk('shush')!, { ...ordinary, hurt: 70 }, 0.5).why, /hurt you recently/);
 });
+
+test('one order too many: handled all day, a fair ask stops being a certainty', () => {
+  const ask = readMuteAsk('can you be quiet please, I am on a call')!;
+  // A polite reason carries an ordinary day whatever the roll...
+  for (const roll of [0, 0.5, 1]) assert.equal(weighMute(ask, ordinary, roll).agreed, true);
+  // ...and once she has been told what to do all day, it is a coin she can lose.
+  const handled = [0, 0.1, 0.18].map(roll => weighMute(ask, { ...ordinary, hemmed: 85 }, roll));
+  assert.ok(handled.every(one => !one.agreed), 'a bad roll now refuses a fair ask');
+  assert.match(handled[0].why, /nothing but tell you what to do/);
+  assert.equal(weighMute(ask, { ...ordinary, hemmed: 85 }, 0.9).agreed, true, 'and a good one still agrees');
+  // A bare order on top of a day of them does not get through at all.
+  for (const roll of [0, 0.5, 1]) assert.equal(weighMute(readMuteAsk('shush')!, { ...ordinary, hemmed: 85 }, roll).agreed, false);
+});

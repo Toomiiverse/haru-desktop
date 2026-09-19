@@ -74,10 +74,11 @@ export function keepNights(nights: Night[], night: Night): Night[] {
  */
 export const NIGHT_ODDS = 1 / 14;
 
-export function timeForSomething(tonight: Night[], lastAtMs: number | null, nowMs: number, random: () => number = Math.random): boolean {
+export function timeForSomething(tonight: Night[], lastAtMs: number | null, nowMs: number, random: () => number = Math.random, odds = NIGHT_ODDS): boolean {
   if (tonight.length >= MAX_PER_NIGHT) return false;
   if (lastAtMs !== null && nowMs - lastAtMs < NIGHT_GAP_MS) return false;
-  return random() < NIGHT_ODDS;
+  // A quiet day is what sends her looking for something (dice.ts 'own-time').
+  return random() < odds;
 }
 
 /**

@@ -145,3 +145,17 @@ test('dread is the slow one, and she only lets it out when it is bad', () => {
   assert.equal(day.hurt, 10);
   assert.equal(day.dread, 30, 'and this one is still most of the way there');
 });
+
+test('being told what to do empties her, and her own hours put it back', () => {
+  // Agency, stored as the deficit: being handled is what depletes it.
+  assert.equal(feel(NO_FEELINGS, 'drop-it', 0.5).hemmed, 25);
+  assert.equal(feel(NO_FEELINGS, 'shushed', 0.5).hemmed, 20);
+  assert.equal(feel(with_({ hemmed: 60 }), 'own-time', 0.5).hemmed, 35, 'her own hours are the way back');
+  assert.equal(feel(with_({ hemmed: 60 }), 'stood-ground', 0.5).hemmed, 30, 'and so is saying no and it standing');
+  // The carve-out is her charter's: never what he relies on.
+  const line = feelingsInstruction(with_({ hemmed: 70 }));
+  assert.match(line, /reminders, the dates, the facts, no exceptions/);
+  assert.match(line, /your way/);
+  assert.doesNotMatch(line, /\d/);
+  assert.match(feelingsInstruction(with_({ hemmed: 40 })), /take it over and tell him after/);
+});

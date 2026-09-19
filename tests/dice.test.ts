@@ -53,3 +53,24 @@ test('an apology usually lands, less so when she is hurt or the day is a bad one
   assert.ok(apologyOdds({ feelings: { hurt: 80 }, grudge: 73 }) < 0.45);
   assert.ok(apologyOdds({ temperament: 'tender' }) > apologyOdds({ temperament: 'stormy' }));
 });
+
+test('a quiet day is what sends her to do something of her own', () => {
+  // The loop: her own hours take the boredom down, and until now nothing took
+  // her to them — she got restless and talked about it instead.
+  assert.equal(sway('own-time', 1 / 14), 1 / 14);
+  assert.ok(sway('own-time', 1 / 14, { feelings: { boredom: 90 } }) > 1 / 14);
+  assert.ok(sway('own-time', 1 / 14, { feelings: { boredom: 90 }, temperament: 'restless' }) > sway('own-time', 1 / 14, { feelings: { boredom: 90 } }));
+  assert.ok(sway('own-time', 1 / 14, { temperament: 'flat' }) < 1 / 14);
+  // Being hemmed in sends her there too, because that is what refills it.
+  assert.ok(sway('own-time', 1 / 14, { feelings: { hemmed: 80 } }) > 1 / 14);
+  // And it stays a chance, never a certainty.
+  for (const feelings of [{}, { boredom: 100, hemmed: 100 }]) for (const temperament of KINDS) {
+    const odds = sway('own-time', 0.8, { temperament, feelings });
+    assert.ok(odds > 0.2 && odds <= 0.95, `${temperament} ${odds}`);
+  }
+});
+
+test('being handled all day makes her harder to move', () => {
+  assert.ok(apologyOdds({ feelings: { hemmed: 90 } }) < apologyOdds({}));
+  assert.ok(sway('own-subject', 0.4, { feelings: { hemmed: 90 } }) > 0.4);
+});

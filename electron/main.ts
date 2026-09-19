@@ -121,7 +121,7 @@ import { pickToBringUp, REMEMBERED_PICKS } from './bored';
 import { ANSWER_WINDOW_MS, grudgeAfterApology, grudgeInstruction, irritationAfterTally, nextGrudge, NOT_HELD_AGAINST_THEM, tallyDue, tallyInstruction, unanswered, type Said } from './grudge';
 import { groundedInstruction, placeQuery } from './places';
 import { daySaid, TOLD_ENOUGH, type DaySaid, DEFAULT_BEDTIME_MINUTES, howTheDayWent, nightfallDue, sulkGrudge, sulkInstruction, sulkStillStands, type DayVerdict } from './nightfall';
-import { keepNights, lastNightDay, nightNoteInstruction, nightsInstruction, nightsOn, nightsToDrawOn, pickInstruction, tidyPick, timeForSomething, type Night, nightToRaise } from './nightlife';
+import { keepNights, lastNightDay, nightNoteInstruction, nightsInstruction, nightsOn, nightsToDrawOn, pickInstruction, tidyPick, timeForSomething, type Night, nightToRaise, NIGHT_ODDS } from './nightlife';
 import { gamesPlayedLately, GUIDE_ODDS, guideNoteInstruction, guideQuery, pickGame, withSteam, type Played } from './gamenight';
 import { addressesSomeone, adopt, ADOPT_ODDS, adoptInstruction, deepen, deepenInstruction, isOneOfTheirs, MAX_INTERESTS, nightQuery, NOBODY_HERE, parseAdoption, parseDeepening, pickTonight, tastesInstruction, unaddressed, type Interest } from './tastes';
 import { readSteamWebConfig, recentlyPlayed } from './steamweb';
@@ -144,7 +144,7 @@ import { isHerStanding } from './herstanding';
 import { enoughToStandOn, herStandings, keepSlight, parseStanding, readSlights, recentIncidents, slightsAsIncidents, standingDue, standingPrompt, HER_SUBJECT, type Incident, type Slight } from './herstanding';
 import { blockedLine, asleepLine, backToSleep, dayAfter, decideTimesSystem, dozeOffDue, enoughKnocking, fallbackSchedule, foldAsleepExchanges, goodnightDue, groggyFor, groggyNote, herAsleep, isAsleepLine, knockedAwake, messagesWhileAsleep, parseDecidedTimes, pointlessWake, pointlessWakesLately, readsAsGoodnight, readHerSleep, readHerSleepState, readWakes, sleepNote, sleepWindowOn, wakeIrritation, wakeNote, wokenAt, clockMinutes, BLOCKED_LINE, BLOCK_AFTER_POINTLESS, KNOCK_WINDOW_MS, WAKES_KEPT, type HerSleepSchedule, type Wake } from './hersleep';
 import { parseBalances, balanceWarning } from './venicebalance';
-import { advanceWant, dayNote, dayNoteInstruction, dayPassDue, dayPickInstruction, firstsNote, keepDay, markRecFollowed, noteRecommendation, pickRecommend, pickWantToWork, readDays, readRecs, readWants, readWeek, recDueForFollowUp, reconcileWants, recsAnsweredBy, recsOnDay, wantInstruction, wantOutcome, wantQuery, wantsNote, weekKey, weekNote, weekReflectionInstruction, weekSummaryDue, WANT_ODDS, type HerDay, type HerWeek, type Rec, type Want } from './ownlife';
+import { advanceWant, dayNote, dayNoteInstruction, dayPassDue, dayPickInstruction, firstsNote, keepDay, markRecFollowed, noteRecommendation, pickRecommend, pickWantToWork, readDays, readRecs, readWants, readWeek, recDueForFollowUp, reconcileWants, recsAnsweredBy, recsOnDay, wantInstruction, wantOutcome, wantQuery, wantsNote, weekKey, weekNote, weekReflectionInstruction, weekSummaryDue, WANT_ODDS, type HerDay, type HerWeek, type Rec, type Want, DAY_ODDS } from './ownlife';
 import { inQuietHours, newVapidKeys, pushRequest, readPushDevices, readPushPrefs, type PushDevice, type PushPrefs, nextNudgeDelay, NUDGE_GAP_MS, NUDGE_RETRY_MS, nudgeOverdue, PUSH_BREATHER_MS, tooSoonToPush, heldBack, withoutDevice, isPhoneWebApp, coveredByNativeApp } from './push';
 import { CHECK_EVERY_MS, describeUpdate, progressStep, whyNotCheck, type UpdateState } from './updates';
 import { BREVITY, summonedLine } from './summoned';
@@ -4816,8 +4816,8 @@ function herBehaviour(): Candidate[] {
   const warmDay = temperament ? WARM_DAYS.includes(temperament.kind) : false;
   const coldDay = temperament ? COLD_DAYS.includes(temperament.kind) : false;
   // The loudest feeling is what gives that line its side and its strength.
-  const loudest = Math.max(felt.hurt, felt.jealousy, felt.missing, felt.playful, felt.boredom, felt.frustration, felt.dread);
-  const soreOnTop = Math.max(felt.hurt, felt.jealousy, felt.missing) >= felt.playful;
+  const loudest = Math.max(felt.hurt, felt.jealousy, felt.missing, felt.playful, felt.boredom, felt.frustration, felt.dread, felt.hemmed);
+  const soreOnTop = Math.max(felt.hurt, felt.jealousy, felt.missing, felt.hemmed) >= felt.playful;
   // Fear stands on its own above everything: what she is holding against him
   // stops mattering the moment something has happened to him.
   const afraid = felt.fear >= feelingsShowAt(traits);
@@ -4916,11 +4916,11 @@ function muteTurn(latest: string): string {
   }
   if (ask) {
     const felt = getFeelings();
-    const decision = weighMute(ask, { irritation: mood.irritation, grudge: mood.grudge ?? 0, vitals, hurt: felt.hurt, missing: felt.missing, lean: muteLean(getTemperament()?.kind) });
+    const decision = weighMute(ask, { irritation: mood.irritation, grudge: mood.grudge ?? 0, vitals, hurt: felt.hurt, missing: felt.missing, hemmed: felt.hemmed, lean: muteLean(getTemperament()?.kind) });
     // An order with no reason is rude whichever way she goes on it.
     if (!ask.reason) { setMood({ ...mood, irritation: nextIrritation(mood.irritation, 'disliked', Math.random(), mood.ego) }); nudgeVitals('criticised'); feelNow('shushed'); }
     if (decision.agreed) store.set('mute', { since: now, until: now + decision.minutes * 60_000, reason: ask.reason?.said || 'he asked' } satisfies MuteState);
-    else store.delete('mute' as never);
+    else { store.delete('mute' as never); feelNow('stood-ground'); }
     console.log(`[mute] asked to go quiet (${ask.reason ? ask.reason.what : 'no reason'}${ask.polite ? ', politely' : ''}) — ${decision.agreed ? `yes, for about ${decision.minutes} min` : 'no'}: ${decision.why} (score ${decision.score}, irritation ${mood.irritation}, grudge ${mood.grudge ?? 0})`);
     return muteNote(ask, decision);
   }
@@ -4965,7 +4965,7 @@ function advanceMood(latest: string, history: { role?: string; content?: string 
   // mean it is a beat and never a wall.
   if (shout === 'forgiven' && !mood.apologyRefused) {
     const odds = apologyOdds({ ...swayNow(), grudge: mood.grudge ?? 0 });
-    if (Math.random() >= odds) { shout = 'unmoved'; console.log(`[mood] he apologised and it was not enough yet (odds were ${odds.toFixed(2)})`); }
+    if (Math.random() >= odds) { shout = 'unmoved'; feelNow('stood-ground'); console.log(`[mood] he apologised and it was not enough yet (odds were ${odds.toFixed(2)})`); }
   }
   const awaitingApology = shout === 'shouted' || shout === 'awaiting' || shout === 'unmoved';
 
@@ -7481,6 +7481,7 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // her to drop it and having her comply for one reply is the whole complaint.
   const pushback = nextPushback(store.get('pushback') as Pushback | undefined, readsAsDropIt(latest), Date.now());
   store.set('pushback', pushback);
+  if (readsAsDropIt(latest)) feelNow('drop-it');
   if (readsAsDropIt(latest)) console.log(`[pushback] told to drop it (${pushback.count}/${PUSHBACK_LIMIT})${isSilenced(pushback, Date.now()) ? ' — dropping the subject entirely' : ''}`);
   nudgeVitals('spoken-to');
   const mood = advanceMood(latest, messages.slice(0, -1));
@@ -11384,7 +11385,7 @@ async function haveANight(config: ProviderConfig) {
   const searchConfig = readSearchConfig(store.get('search'));
   if (!searchConfig.enabled) return;
   const tonight = nightsOn(getNights(), nightKey(now));
-  if (!timeForSomething(tonight, lastNightThingAt, Date.now())) return;
+  if (!timeForSomething(tonight, lastNightThingAt, Date.now(), Math.random, sway('own-time', NIGHT_ODDS, swayNow()))) return;
   lastNightThingAt = Date.now();
   try {
     // Whose night it is. Hers first: something she has taken up, or taking
@@ -11545,7 +11546,7 @@ async function haveADay(config: ProviderConfig) {
   if (herAsleepNow()) return;
   const now = zonedNow(CHAT_TIMEZONE);
   const today = localDateKey(now);
-  if (!dayPassDue(now, today, getDays().some(day => day.day === today), Math.random())) return;
+  if (!dayPassDue(now, today, getDays().some(day => day.day === today), Math.random(), sway('own-time', DAY_ODDS, swayNow()))) return;
   const searchConfig = readSearchConfig(store.get('search'));
   if (!searchConfig.enabled) return;
   try {

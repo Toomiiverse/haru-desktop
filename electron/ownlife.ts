@@ -364,10 +364,11 @@ export function keepDay(days: HerDay[], day: HerDay): HerDay[] {
 }
 
 /** Whether the daytime pass is due right now. */
-export function dayPassDue(now: Date, todayKey: string, alreadyToday: boolean, roll: number): boolean {
+export function dayPassDue(now: Date, todayKey: string, alreadyToday: boolean, roll: number, odds = DAY_ODDS): boolean {
   if (now.getHours() < DAY_START_HOUR || now.getHours() >= DAY_END_HOUR) return false;
   if (alreadyToday) return false;
-  return roll < DAY_ODDS;
+  // A quiet day makes her likelier to go and do something (dice.ts 'own-time').
+  return roll < odds;
 }
 
 /** What the block shows of today's reading. */
