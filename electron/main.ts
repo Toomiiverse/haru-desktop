@@ -16,7 +16,7 @@ import { classificationPrompt, EMOTION_SCHEMA, EMOTIONS, NEUTRAL_EMOTION, parseE
 import { withDiscoveredExpressions } from './expressions';
 import { reportCapabilities, seesItsOwnScreen } from './capabilities';
 import { followCalendar, chaseableOverdue, findItem, shiftDays, formatAgenda, itemStatus, missedInstruction, movedSaid, putOffInstruction, putOffUntil, relevantItems, readsAsAnswerToHer, readsAsBareReport, tickOffInstruction, readsAsDone, doneClause, readsAsNotDone, relativeDay, staleItemNamed, inventedTimeFor, raisedRecently, type ItemStatus, underwayClause, isUnderway, FOLLOW_UP_MS } from './agenda';
-import { isRelaunchNotReturn, openingAngles, pickAngle, shouldPipeUp } from './opening';
+import { isRelaunchNotReturn, openingAngles, pickAngle, shouldPipeUp, PIPE_UP_CHANCE } from './opening';
 import { allDayDueMinutes, isEveningCheck, reminderInstruction, reminderTier, reminderVolume, shouldRemind, type ReminderState } from './reminders';
 import { isHeated, readTone, sharpen, toneGesture, tonePose } from './tone';
 import { isSilenced, nextPushback, PUSHBACK_LIMIT, pushbackInstruction, readsAsDropIt, type Pushback } from './pushback';
@@ -27,7 +27,7 @@ import { looksLikeNothing, readListenConfig, transcribe, type ListenConfig } fro
 import { spokenVocabulary } from './vocabulary';
 import { herNameFrom } from './hername';
 import { apnsPayload, apnsSigner, readApnsConfig, readApnsDevices, sendApns, type ApnsDevice } from './apns';
-import { answersHerOwnQuestion, looksLikeAnEcho, parseSecondThought, readsAsTheirAnswer, secondThoughtDelay, secondThoughtNote, wantsSecondThought, SECOND_THOUGHT_GAP_MS } from './secondthought';
+import { answersHerOwnQuestion, looksLikeAnEcho, parseSecondThought, readsAsTheirAnswer, secondThoughtDelay, secondThoughtNote, wantsSecondThought, SECOND_THOUGHT_GAP_MS, SECOND_THOUGHT_ODDS } from './secondthought';
 import { applyRevoices, dueForRevoice, exchangesFrom as revoiceExchanges, grounded, parseRevoices, readRevoiceState, revoicePrompt, withRewrites, REVOICE_EVERY, type Revoice } from './revoice';
 import { decide, readEscalateConfig, type EscalateConfig } from './escalate';
 import { describeFailure, fromOpenAIReply, isOpenAIShaped, promptUsage, toOpenAIBody, DEFAULT_ENDPOINTS, type ChatTool, type Provider } from './provider';
@@ -68,6 +68,7 @@ import { looksLikeScreenshot, maySpeak, readScreenshotConfig, screenshotPrompt, 
 import { look, photoName, readShotDescription, readVisionConfig, whileLooking, type VisionConfig } from './vision';
 import { CAPTION_MAX_CHARS, describedShots, forgetCaptions, moreThanOnePass, noteCaption, noteFailure, readCaptions, shotsNeedingALook } from './seen';
 import { breaksMute, brokeMuteNote, isMuted, muteNote, readMuteAsk, unmuteNote, weighMute, type MuteState } from './mute';
+import { apologyOdds, muteLean, sway, type Sway } from './dice';
 import { feel, feelingsInstruction, feelingsLog, feelingsOverTime, readFeelings, readsAsBanter, type FeelingEvent, type Feelings } from './feelings';
 import { addLeans, bruiseFrom, eventSize, fadeBruise, howHisReturnLands, rollTemperament, stepWander, temperamentLean, temperamentLine, temperamentWord, type Temperament } from './temperament';
 import { EXPRESSIVE, HOSTED_VOICE, LAST_WORD, NATURAL, NO_INVENTED_HISTORY, NO_ABANDON_THREAD, readsAsRough, roomInstruction, HER_EMOJI, emojiRut, roomToRant, askingAboutHer, herSubjectNote, namesIn, justTalking, JUST_TALKING_NOTE } from './room';
@@ -96,7 +97,7 @@ import { listSessions, openSession, readClaudeCodeConfig, readOpenedSessions, re
 import { ShellGate, SERVER_NOTE, denied, ledgerEntry, readShellConfig, runCommand } from './shell';
 import { PokemonLink, PLAY_RULES as POKEMON_PLAY_RULES, afterTurn, describeGame, newSitting, parseMove, readPokemonConfig, runNote, sittingSummary, whyNotStart as whyNotStartPokemon, whyStop as whyStopPokemon, type GameState, type Moment as PokemonMoment, type Sitting } from './pokemon';
 import { HANDS_TURN, HER_HANDS_TOOLS, didNothing, handsInstruction, handsNote, handsToday, keepHands, readHands, readHandsConfig, whyNotAct } from './herhands';
-import { Suwayomi, fetchFits, fetchSummary, hisReading, hisReadingNote, matchManga, onHisShelf, readerLink, readSuwayomiConfig, spiteful, type HisTitle, type ShelfChapter } from './suwayomi';
+import { Suwayomi, fetchFits, fetchSummary, hisReading, hisReadingNote, matchManga, onHisShelf, readerLink, readSuwayomiConfig, spiteful, type HisTitle, type ShelfChapter, SPITE_ODDS } from './suwayomi';
 import { serverLookNote } from './prompt';
 import { Downloads, downloadsReady, readDownloadsConfig } from './downloads';
 import { applyDecay, DEEP_RECALL_LIMIT, findSuperseded, formationPrompt, formationWindows, MEMORIES_PER_DAY, readFormation, type FormedNote, formatMemoryPrompt, isExplicitRecall, closeEvents, isWorthAnEvent, isWorthKeeping, isWorthRemembering, MEMORY_KINDS, migrateMemories, monthFoldPrompt, pruneMemories, readsAsSecondPerson, rememberInto, retrieveMemories, semanticSimilarities, summaryPrompt, supersede, THIRD_PERSON_AGAIN, vectorSimilarity, type ForgettingEntry, type MemoryKind, type MemoryRecord, type MemorySource, type RetrievalFactors, type ScoredMemory, type SessionSummary } from './memory';
@@ -3935,7 +3936,7 @@ async function considerPipingUp(environment: Environment) {
     machineIdleSeconds: environment.idleSeconds,
     curiosity: vitals.curiosity,
     sleepiness: vitals.sleepiness,
-  });
+  }, Math.random, sway('pipe-up', PIPE_UP_CHANCE, swayNow()));
   if (!ready) return;
 
   pipingUp = true;
@@ -4644,7 +4645,8 @@ function getActiveCharacter() {
 // goodnightDay holds the chat day they signed off on, so the state clears itself
 // at the 5am rollover — messaging at 1am is still "after goodnight", messaging
 // at 8am is a new day and she has forgotten about it.
-type Mood = { /** 100 once the counters are on the 0–100 scales (mood.ts rescaleOldMood). */ scale?: number; /** The day an apology last paid some grudge back. */ apologyDay?: string;
+type Mood = { /** His first apology was not enough; the next one is (dice.ts). */ apologyRefused?: boolean;
+  /** 100 once the counters are on the 0–100 scales (mood.ts rescaleOldMood). */ scale?: number; /** The day an apology last paid some grudge back. */ apologyDay?: string;
   irritation: number; ego: number; lastMessageAt?: string; goodnightDay?: string; awaitingApology?: boolean;
   /** Being left on read, kept: see grudge.ts. */
   grudge?: number; ignoredToday?: number; talliedDay?: string;
@@ -4675,7 +4677,7 @@ function getMood(): Mood {
     store.set('mood', rescaled);
     saved = rescaled;
   }
-  return { scale: 100, apologyDay: saved?.apologyDay, irritation: Number(saved?.irritation ?? 0), ego: Number(saved?.ego ?? 0), lastMessageAt: saved?.lastMessageAt, goodnightDay: saved?.goodnightDay, awaitingApology: Boolean(saved?.awaitingApology),
+  return { scale: 100, apologyDay: saved?.apologyDay, apologyRefused: Boolean(saved?.apologyRefused), irritation: Number(saved?.irritation ?? 0), ego: Number(saved?.ego ?? 0), lastMessageAt: saved?.lastMessageAt, goodnightDay: saved?.goodnightDay, awaitingApology: Boolean(saved?.awaitingApology),
     grudge: Number(saved?.grudge ?? 0), ignoredToday: Number(saved?.ignoredToday ?? 0), talliedDay: saved?.talliedDay,
     grudgeBeforeTally: typeof saved?.grudgeBeforeTally === 'number' ? saved.grudgeBeforeTally : undefined,
     toldDay: saved?.toldDay, ignoredSamples: Array.isArray(saved?.ignoredSamples) ? saved.ignoredSamples.map(String) : [],
@@ -4686,6 +4688,11 @@ function getMood(): Mood {
 // her temperament; moved by what happens (feelNow) and by time (passFeelings).
 function getFeelings(): Feelings {
   return readFeelings(store.get('her.feelings'));
+}
+
+/** The day she is having, for the dice (dice.ts). */
+function swayNow(): Sway {
+  return { temperament: getTemperament()?.kind, feelings: getFeelings() };
 }
 
 function feelNow(event: FeelingEvent) {
@@ -4747,7 +4754,7 @@ function muteTurn(latest: string): string {
   }
   if (ask) {
     const felt = getFeelings();
-    const decision = weighMute(ask, { irritation: mood.irritation, grudge: mood.grudge ?? 0, vitals, hurt: felt.hurt, missing: felt.missing });
+    const decision = weighMute(ask, { irritation: mood.irritation, grudge: mood.grudge ?? 0, vitals, hurt: felt.hurt, missing: felt.missing, lean: muteLean(getTemperament()?.kind) });
     // An order with no reason is rude whichever way she goes on it.
     if (!ask.reason) { setMood({ ...mood, irritation: nextIrritation(mood.irritation, 'disliked') }); nudgeVitals('criticised'); feelNow('shushed'); }
     if (decision.agreed) store.set('mute', { since: now, until: now + decision.minutes * 60_000, reason: ask.reason?.said || 'he asked' } satisfies MuteState);
@@ -4790,8 +4797,15 @@ function advanceMood(latest: string, history: { role?: string; content?: string 
 
   // Being shouted at outlasts the message that caused it: she withholds an
   // answer until it is acknowledged, so the flag has to persist across turns.
-  const shout = shoutState(latest, Boolean(mood.awaitingApology));
-  const awaitingApology = shout === 'shouted' || shout === 'awaiting';
+  let shout = shoutState(latest, Boolean(mood.awaitingApology));
+  // An apology usually lands; hurt, a standing grudge or a bad day can make the
+  // first one not enough (dice.ts). Once: the second always does, so making him
+  // mean it is a beat and never a wall.
+  if (shout === 'forgiven' && !mood.apologyRefused) {
+    const odds = apologyOdds({ ...swayNow(), grudge: mood.grudge ?? 0 });
+    if (Math.random() >= odds) { shout = 'unmoved'; console.log(`[mood] he apologised and it was not enough yet (odds were ${odds.toFixed(2)})`); }
+  }
+  const awaitingApology = shout === 'shouted' || shout === 'awaiting' || shout === 'unmoved';
 
   if (isIgnoring(irritation)) {
     // Already stonewalling: this attempt only counts as wearing her down.
@@ -4834,7 +4848,7 @@ function advanceMood(latest: string, history: { role?: string; content?: string 
   // An apology she took pays a little of the grudge back too, once a day.
   const paid = shout === 'forgiven' && mood.apologyDay !== today && (mood.grudge ?? 0) > 0;
   if (paid) console.log(`[grudge] an apology taken — grudge ${mood.grudge ?? 0} -> ${grudgeAfterApology(mood.grudge ?? 0)}`);
-  setMood({ irritation, ego, lastMessageAt: at, goodnightDay, awaitingApology, ...(paid ? { grudge: grudgeAfterApology(mood.grudge ?? 0), apologyDay: today } : {}) });
+  setMood({ irritation, ego, lastMessageAt: at, goodnightDay, awaitingApology, apologyRefused: shout === 'unmoved' ? true : shout === 'forgiven' ? false : mood.apologyRefused, ...(paid ? { grudge: grudgeAfterApology(mood.grudge ?? 0), apologyDay: today } : {}) });
   return { irritation, ego, goodnight, shout };
 }
 
@@ -6972,7 +6986,7 @@ let lastSecondThoughtAt = 0;
 
 function scheduleSecondThought(input: { hers: boolean; ranting: boolean; latest: string; reply: string; config: ProviderConfig }) {
   clearTimeout(secondThoughtTimer);
-  if (!wantsSecondThought({ hers: input.hers, ranting: input.ranting, replyLength: input.reply.length })) return;
+  if (!wantsSecondThought({ hers: input.hers, ranting: input.ranting, replyLength: input.reply.length }, Math.random, sway('second-thought', SECOND_THOUGHT_ODDS, swayNow()))) return;
   if (Date.now() - lastSecondThoughtAt < SECOND_THOUGHT_GAP_MS) return;
   const repliedAt = Date.now();
   const delay = secondThoughtDelay();
@@ -10665,7 +10679,7 @@ async function refreshHisShelf(): Promise<void> {
 function hisReadingLine(): string {
   if (Date.now() - hisShelf.at > 10 * 60_000) void refreshHisShelf();
   const grudge = getMood().grudge ?? 0;
-  const spite = spiteful(grudge, Math.random());
+  const spite = spiteful(grudge, Math.random(), undefined, sway('spite', SPITE_ODDS, swayNow()));
   if (spite && hisShelf.titles.length) console.log(`[manga] spiteful today — grudge ${grudge}, a spoiler is on the table`);
   return hisReadingNote(hisShelf.titles, readReading(store.get('her.reading')), Date.now(), grudge, spite);
 }
@@ -12852,7 +12866,7 @@ function takeThumb(reaction: 'up' | 'down'): { mood: Mood; comeback: boolean } {
       'nod',
     );
   }
-  return { mood: next, comeback: Math.random() < COMEBACK_ODDS };
+  return { mood: next, comeback: Math.random() < sway('comeback', COMEBACK_ODDS, swayNow()) };
 }
 
 /** Where the ratings go: beside config.json, but a file of its own — appended to, never rewritten. */

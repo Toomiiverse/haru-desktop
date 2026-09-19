@@ -200,7 +200,8 @@ export function isApology(text: string) {
   return APOLOGY.test(text);
 }
 
-export type ShoutState = 'none' | 'shouted' | 'awaiting' | 'forgiven';
+/** 'unmoved': he apologised and it was not enough yet (dice.ts apologyOdds) — once; the next apology lands. */
+export type ShoutState = 'none' | 'shouted' | 'awaiting' | 'forgiven' | 'unmoved';
 
 /**
  * Works out where the row stands. Being shouted at stops her answering until it
@@ -221,6 +222,9 @@ export function shoutInstruction(state: ShoutState): string {
     // complained in the same breath — which is not withholding it at all. The
     // prohibition has to rule out answering alongside the complaint.
     return 'They shouted at you and still have not apologised. Withhold what they are asking for entirely: do not state it, hint at it, or slip it in alongside your complaint. Your whole reply is that you are still waiting for an apology. One or two cold sentences and nothing else.';
+  }
+  if (state === 'unmoved') {
+    return 'They have apologised for shouting, and you are not ready to let it go: it came too quickly, or too easily. Say so. Tell them a quick sorry does not cover it and what you actually want to hear, and stay cool with them. Still withhold what they asked for. You are not slamming the door — you are making them mean it.';
   }
   if (state === 'forgiven') {
     return 'They have apologised for shouting. Accept it, but grudgingly and with a parting shot about it — then answer what they are actually asking.';

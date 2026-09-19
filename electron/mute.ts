@@ -64,7 +64,9 @@ export function readMuteAsk(text: string): MuteAsk | null {
 
 export type Feeling = { irritation: number; grudge: number; vitals: Pick<Vitals, 'happiness' | 'affection' | 'stress'>;
   /** feelings.ts, 0–100: being hurt or left alone makes her less obliging. */
-  hurt?: number; missing?: number };
+  hurt?: number; missing?: number;
+  /** Which way the day she is having pushes it (dice.ts muteLean). */
+  lean?: number };
 export type MuteDecision = { agreed: boolean; why: string; minutes: number; score: number };
 
 /**
@@ -83,7 +85,9 @@ export function weighMute(ask: MuteAsk, feeling: Feeling, roll = Math.random()):
   const leftAlone = Math.min(1, (feeling.missing ?? 0) / 100);
   const score = mood - temper * 2 - held * 1.5 - stung * 1.2 - leftAlone * 0.8
     + (ask.reason ? 1.5 : -1) + (ask.polite ? 0.5 : 0)
-    + (roll - 0.5) * 0.8;
+    + (feeling.lean ?? 0)
+    // Twice the weather it had (±0.4): the same day does not always give the same answer.
+    + (roll - 0.5) * 1.6;
   const agreed = score > 0;
   // The strongest thing on the winning side is the reason she gives herself.
   const why = agreed

@@ -22,10 +22,11 @@ export function secondThoughtDelay(random: () => number = Math.random): number {
   return Math.round(SECOND_THOUGHT_MIN_MS + random() * (SECOND_THOUGHT_MAX_MS - SECOND_THOUGHT_MIN_MS));
 }
 
-export function wantsSecondThought(input: { hers: boolean; ranting: boolean; replyLength: number }, random: () => number = Math.random): boolean {
+export function wantsSecondThought(input: { hers: boolean; ranting: boolean; replyLength: number }, random: () => number = Math.random, odds = SECOND_THOUGHT_ODDS): boolean {
   if (input.replyLength < 40) return false;
   if (input.hers || input.ranting) return true;
-  return random() < SECOND_THOUGHT_ODDS;
+  // The odds are hers to lean on by the day she is having (dice.ts); one in six on a day with nothing going on.
+  return random() < odds;
 }
 
 export function secondThoughtNote(secondsAgo: number): string {

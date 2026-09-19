@@ -168,7 +168,7 @@ const BOREDOM_IMPATIENCE = 7;
 // Chance per life tick once she is due. Ticks are roughly twenty seconds, so
 // this spreads her across a couple of minutes instead of firing on the dot —
 // something that happens at exactly fifteen minutes reads as a scheduler.
-const PIPE_UP_CHANCE = 0.14;
+export const PIPE_UP_CHANCE = 0.14;
 
 /**
  * Whether she should say something unprompted right now.
@@ -178,7 +178,7 @@ const PIPE_UP_CHANCE = 0.14;
  * needs someone at the machine and *not* talking to her, which is exactly the
  * case where piping up is the point.
  */
-export function shouldPipeUp(state: IdleState, random: () => number = Math.random): boolean {
+export function shouldPipeUp(state: IdleState, random: () => number = Math.random, chance = PIPE_UP_CHANCE): boolean {
   // Nobody there. Anything she says now is said to nobody.
   if (state.machineIdleSeconds > AWAY_SECONDS) return false;
   // Half asleep, and the hour is doing the talking.
@@ -188,7 +188,7 @@ export function shouldPipeUp(state: IdleState, random: () => number = Math.rando
   // room she has nothing to do in is exactly when she starts prodding.
   const patience = PATIENCE_MINUTES - (1 - state.curiosity) * BOREDOM_IMPATIENCE;
   if (state.minutesSinceUserSpoke < patience) return false;
-  return random() < PIPE_UP_CHANCE;
+  return random() < chance;
 }
 
 /**
