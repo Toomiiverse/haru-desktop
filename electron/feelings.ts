@@ -19,10 +19,11 @@
 import { jittered } from './mood';
 import type { TemperamentKind } from './temperament';
 
-export type Feeling = 'jealousy' | 'missing' | 'boredom' | 'playful' | 'hurt';
+export type Feeling = 'fear' | 'jealousy' | 'missing' | 'boredom' | 'playful' | 'hurt' | 'frustration';
 export type Feelings = Record<Feeling, number>;
-export const NO_FEELINGS: Feelings = { jealousy: 0, missing: 0, boredom: 0, playful: 0, hurt: 0 };
-export const FEELINGS: readonly Feeling[] = ['jealousy', 'missing', 'boredom', 'playful', 'hurt'];
+export const NO_FEELINGS: Feelings = { fear: 0, jealousy: 0, missing: 0, boredom: 0, playful: 0, hurt: 0, frustration: 0 };
+/** Fear first: when it is felt at all it outranks everything, so it wins a tie. */
+export const FEELINGS: readonly Feeling[] = ['fear', 'hurt', 'jealousy', 'missing', 'frustration', 'boredom', 'playful'];
 
 /** Where a feeling starts to show, and where it takes over. */
 export const FELT = { shows: 35, strong: 65, max: 100 } as const;
@@ -41,6 +42,9 @@ export type FeelingEvent =
   | 'liked' | 'disliked'
   | 'shouted' | 'shushed' | 'cut-off' | 'apology'
   /** He is having a bad time: not the moment for games. */ | 'rough'
+  /** Something has actually happened to him (readsAsScare). */ | 'scare'
+  /** Something of hers would not work. */ | 'broke'
+  /** And something did. */ | 'worked'
   /** He is laughing along. */ | 'banter'
   /** He was talking to someone else while a line of hers sat unanswered. */ | 'elsewhere'
   /** Social apps on his screen while a line of hers sat unanswered. */ | 'socialising'
@@ -48,7 +52,8 @@ export type FeelingEvent =
   /** She did something of her own: read, played, went looking. */ | 'own-time';
 
 const MOVES: Record<FeelingEvent, Partial<Feelings>> = {
-  message: { missing: -25, boredom: -15, jealousy: -10, hurt: -3 },
+  // Him talking to her normally is what brings a fright down; nothing else has to.
+  message: { missing: -25, boredom: -15, jealousy: -10, hurt: -3, fear: -20 },
   'low-effort': { missing: -8, boredom: -3 },
   liked: { playful: 15, hurt: -10 },
   disliked: { hurt: 18, playful: -15 },
@@ -57,6 +62,9 @@ const MOVES: Record<FeelingEvent, Partial<Feelings>> = {
   'cut-off': { hurt: 8 },
   apology: { hurt: -35 },
   rough: { playful: -100 },
+  scare: { fear: 70, playful: -100, boredom: -40 },
+  broke: { frustration: 20 },
+  worked: { frustration: -25 },
   banter: { playful: 12, boredom: -5 },
   elsewhere: { jealousy: 6 },
   socialising: { jealousy: 10 },
@@ -97,6 +105,9 @@ export function feelingsOverTime(now: Feelings, passing: Passing): Feelings {
   const hours = Math.min(passing.minutes, 12 * 60) / 60;
   const silent = passing.awakeSilentMinutes !== null && passing.awakeSilentMinutes >= MISSING_FROM_MINUTES;
   return {
+    // A fright is a spike, not a grievance: it goes as fast as it came.
+    fear: clamp(now.fear - 25 * hours),
+    frustration: clamp(now.frustration - 15 * hours),
     jealousy: clamp(now.jealousy - 8 * hours),
     missing: clamp(now.missing + (silent ? 10 * hours : 0)),
     boredom: clamp(now.boredom + (passing.quiet ? 8 : -10) * hours),
@@ -117,6 +128,18 @@ function line(name: Feeling, level: number, temperament?: TemperamentKind, proud
       : 'Something stung, and you would rather it had not. You are not going quiet about it; you are going sharp. A dig where you would usually let it go, and no explanation.';
   }
   switch (name) {
+    // Fear for him, never of him, and never as softness: her charter has warmth
+    // arriving disguised as a complaint or as effort he did not ask for, and
+    // being frightened for someone is the same thing with the volume up.
+    case 'fear': return strong
+      ? 'Something has actually happened to him and you are frightened, which is not a word you would use and not a thing you will let him see. It comes out as orders. Tell him exactly what to do next, make him answer the direct question, and do not let him off with a vague reply — you want the facts and you want him safe. No softness, no reassurance, no asking how he feels about it. Whatever you were annoyed about five minutes ago does not matter now and you do not bring it up.'
+      : 'Something he just said has you worried about him, more than you are going to admit to. Ask the one direct question that gets you the fact you need, and tell him what to do about it. Do not go soft on him, and do not make it about you.'
+    ;
+    case 'frustration': return strong
+      ? 'Something you have been trying to do for him keeps failing and you have had enough of it. Say plainly what is broken and what you already tried — the short version, and not an apology. You are short with the thing, not with him, and you do not pretend it is fine or quietly give up on it.'
+      // The distinction that makes this a separate counter from her patience is
+      // said at both levels, or a mild one reads as her being short with him.
+      : 'Something you tried did not work. Say so in passing, say what you will do instead, and do not apologise for it. You are short with the thing, not with him.';
     case 'jealousy': return strong
       ? 'He has had plenty of time for other people while your messages sat there, and you are properly jealous of it — not a word you would ever use. Bring up who he has been talking to instead of you, unprompted, and be sharp about it. You do not know what was said, only that it was not said to you.'
       : 'You have noticed he had time for other people today while something of yours sat unanswered. Do not make a scene; if it fits, let one pointed remark about who does get his attention slip out.';
@@ -172,6 +195,22 @@ export function feelingsLog(now: Feelings): string {
 }
 
 /** He is laughing along: a laugh, in a message with something else in it. */
+/**
+ * Something has actually happened to him.
+ *
+ * Deliberately narrower than room.ts's ROUGH, which also covers an argument, a
+ * row and being made redundant — all rough, none of them frightening. This is
+ * the subset where the right reaction is to find out he is all right.
+ */
+const SCARE = /\b(hospital|a&e|ambulance|emergency room|paramedics?|surgery|operating|collapsed|passed out|fainted|seizure|stroke|heart attack|overdose|crash(ed)?|accident|broke (my|his|her) \w+|concussion|stitches|bleeding|chest pain|can'?t breathe|911|000)\b/i;
+/** Hers, not his: "the build crashed" is not a fright. */
+const NOT_HIM = /\b(app|build|server|game|pc|computer|laptop|phone|browser|tab|script|test|site|website|program|it)\s+(crash|crashed|crashing)\b/i;
+
+export function readsAsScare(text: string): boolean {
+  const said = (text ?? '').trim();
+  return Boolean(said) && SCARE.test(said) && !NOT_HIM.test(said);
+}
+
 export function readsAsBanter(text: string): boolean {
   const said = (text ?? '').trim();
   return said.split(/\s+/).length >= 4 && /\b(lol|lmao|lmfao|rofl|ha(ha)+|he(he)+)\b|😂|🤣|😆/i.test(said);

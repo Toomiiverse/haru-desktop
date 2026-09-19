@@ -71,7 +71,7 @@ import { breaksMute, brokeMuteNote, isMuted, muteNote, readMuteAsk, unmuteNote, 
 import { LAYER, compileLog, type Candidate } from './compile';
 import { charterTraits, feelingsShowAt, growMonth, growthNote, readTraits, traitLean, traitMeter, travelled, TRAIT_NAMES, type GrowthStep, type MonthSignals, type Traits } from './growth';
 import { apologyOdds, muteLean, sway, type Sway } from './dice';
-import { feel, feelingsInstruction, feelingsLog, feelingsOverTime, readFeelings, readsAsBanter, type FeelingEvent, type Feelings } from './feelings';
+import { NO_FEELINGS, FELT, feel, feelingsInstruction, feelingsLog, feelingsOverTime, readFeelings, readsAsBanter, readsAsScare, type FeelingEvent, type Feelings } from './feelings';
 import { addLeans, bruiseFrom, eventSize, fadeBruise, howHisReturnLands, rollTemperament, stepWander, temperamentLean, temperamentLine, temperamentWord, type Temperament, type TemperamentKind } from './temperament';
 import { EXPRESSIVE, HOSTED_VOICE, LAST_WORD, NATURAL, NO_INVENTED_HISTORY, NO_ABANDON_THREAD, readsAsRough, roomInstruction, HER_EMOJI, emojiRut, roomToRant, askingAboutHer, herSubjectNote, namesIn, justTalking, JUST_TALKING_NOTE } from './room';
 import { journalStance } from './journal';
@@ -4801,12 +4801,16 @@ function herBehaviour(): Candidate[] {
   const warmDay = temperament ? WARM_DAYS.includes(temperament.kind) : false;
   const coldDay = temperament ? COLD_DAYS.includes(temperament.kind) : false;
   // The loudest feeling is what gives that line its side and its strength.
-  const loudest = Math.max(felt.hurt, felt.jealousy, felt.missing, felt.playful, felt.boredom);
+  const loudest = Math.max(felt.hurt, felt.jealousy, felt.missing, felt.playful, felt.boredom, felt.frustration);
   const soreOnTop = Math.max(felt.hurt, felt.jealousy, felt.missing) >= felt.playful;
+  // Fear stands on its own above everything: what she is holding against him
+  // stops mattering the moment something has happened to him.
+  const afraid = felt.fear >= feelingsShowAt(traits);
   return [
+    ...(afraid ? [{ id: 'fear', text: feelingsInstruction({ ...NO_FEELINGS, fear: felt.fear }, mood.irritation, temperament?.kind, feelingsShowAt(traits), mood.ego), stance: 'warm' as const, layer: LAYER.fear, strength: felt.fear / 100, alone: true }] : []),
     { id: 'temperament', text: temperamentLine(temperament), stance: warmDay ? 'warm' : coldDay ? 'cold' : 'neutral', layer: LAYER.temperament, strength: temperament?.intensity ?? 0 },
     { id: 'growth', text: growthNote(traits), stance: travelled(traits, 'warmth') >= 0 ? 'warm' : 'cold', layer: LAYER.growth, strength: Math.abs(travelled(traits, 'warmth')) },
-    { id: 'feelings', text: feelingsInstruction(felt, mood.irritation, temperament?.kind, feelingsShowAt(traits), mood.ego), stance: soreOnTop ? 'cold' : 'warm', layer: LAYER.feelings, strength: loudest / 100 },
+    { id: 'feelings', text: feelingsInstruction({ ...felt, fear: 0 }, mood.irritation, temperament?.kind, feelingsShowAt(traits), mood.ego), stance: soreOnTop ? 'cold' : 'warm', layer: LAYER.feelings, strength: loudest / 100 },
   ];
 }
 
@@ -4959,6 +4963,9 @@ function advanceMood(latest: string, history: { role?: string; content?: string 
   if (shout === 'shouted') { feelNow('shouted'); tallyMonth('hurt'); }
   feelNow(event === 'substantive' ? 'message' : 'low-effort');
   if (readsAsRough(latest).rough) feelNow('rough');
+  // Something has actually happened to him, which outranks anything she was
+  // holding against him five minutes ago (compile.ts LAYER.fear).
+  if (readsAsScare(latest)) { feelNow('scare'); console.log('[feelings] something has happened to him — she is frightened'); }
   else if (readsAsBanter(latest)) feelNow('banter');
   if (goodnight === 'said') nudgeVitals('warmed');
   // Back after a long stretch of his own waking day with nothing said: a relief
@@ -10749,6 +10756,9 @@ function noteDeed(tool: string, call: { function?: { arguments?: unknown } }, re
     const parsed = JSON.parse(result) as Record<string, unknown>;
     failed = typeof parsed.error === 'string' || parsed.confirm === false || parsed.ok === false || parsed.created === false;
   } catch { failed = false; }
+  // Something of hers that would not work. Short with the thing, not with him
+  // — which is what makes it a different counter from her patience.
+  feelNow(failed ? 'broke' : 'worked');
   let args: Record<string, unknown> = {};
   try {
     const raw = call.function?.arguments;

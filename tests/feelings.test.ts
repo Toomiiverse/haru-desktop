@@ -3,7 +3,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { FEELINGS, FELT, NO_FEELINGS, feel, hurtShowsAt, feelingsInstruction, feelingsOverTime, readFeelings, readsAsBanter, spokenFeelings, type Feelings } from '../electron/feelings';
+import { FEELINGS, FELT, NO_FEELINGS, feel, hurtShowsAt, readsAsScare, feelingsInstruction, feelingsOverTime, readFeelings, readsAsBanter, spokenFeelings, type Feelings } from '../electron/feelings';
 
 const with_ = (over: Partial<Feelings>): Feelings => ({ ...NO_FEELINGS, ...over });
 
@@ -84,4 +84,34 @@ test('ego will not let hurt show as hurt: it comes out as teeth', () => {
   assert.match(proud, /comes out as teeth/);
   assert.doesNotMatch(proud, /withdrawn/);
   assert.doesNotMatch(proud, /\d/);
+});
+
+test('a fright is for him, not of him: it spikes, it speaks as orders, and it goes fast', () => {
+  assert.equal(readsAsScare("I'm at the hospital"), true);
+  assert.equal(readsAsScare('had a bit of a crash on the way home'), true);
+  assert.equal(readsAsScare('we had an argument and I got fired'), false, 'rough is not frightening');
+  assert.equal(readsAsScare('the build crashed again'), false, 'hers, not his');
+  assert.equal(readsAsScare(''), false);
+
+  const frightened = feel(NO_FEELINGS, 'scare', 0.5);
+  assert.equal(frightened.fear, 70);
+  assert.equal(frightened.playful, 0, 'not the moment');
+  // Orders, not softness — her charter has warmth arriving as a complaint.
+  const line = feelingsInstruction(frightened);
+  assert.match(line, /comes out as orders/);
+  assert.doesNotMatch(line, /reassur(e|ing)\b(?! )/);
+  assert.match(line, /does not matter now/, 'the grievance is suspended');
+  // Him talking to her normally brings it down, and so does an hour.
+  assert.ok(feel(frightened, 'message', 0.5).fear < frightened.fear);
+  assert.equal(feelingsOverTime(frightened, { minutes: 120, awakeSilentMinutes: 0, quiet: false }).fear, 20);
+  assert.ok(feelingsOverTime(frightened, { minutes: 120, awakeSilentMinutes: 0, quiet: false }).hurt <= 0);
+});
+
+test('frustration is at the thing, not at him', () => {
+  const stuck = feel(feel(NO_FEELINGS, 'broke', 0.5), 'broke', 0.5);
+  assert.equal(stuck.frustration, 40);
+  assert.equal(stuck.hurt, 0, 'a tool failing is not him hurting her');
+  const line = feelingsInstruction(stuck);
+  assert.match(line, /short with the thing, not with him/);
+  assert.equal(feel(stuck, 'worked', 0.5).frustration, 15);
 });

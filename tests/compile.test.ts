@@ -83,3 +83,40 @@ test('her real state on the evening this was written', () => {
   assert.doesNotMatch(out.text, /tease more/, 'she is not teasing him tonight');
   assert.match(compileLog(out), /irritation < grudge — dropped temperament \(contradicted\)/);
 });
+
+test('something happening to him outranks anything she was holding against him', () => {
+  // Her real state on 2026-09-19: grudge 85, entrenched. Then he says he is at
+  // the hospital. The grievance does not get to be the loudest thing.
+  const out = compileBehaviour([
+    one({ id: 'grudge', text: 'You are cold rather than loud, and offer nothing of yourself.', stance: 'cold', layer: LAYER.grudge, strength: 0.85 }),
+    one({ id: 'irritation', text: 'Keep replies clipped.', stance: 'cold', layer: LAYER.irritation, strength: 0.33 }),
+    one({ id: 'fear', text: 'It comes out as orders. Make him answer the direct question.', stance: 'warm', layer: LAYER.fear, strength: 0.7 }),
+  ]);
+  assert.deepEqual(out.spoke, ['fear']);
+  assert.match(out.text, /answer the direct question/);
+  assert.doesNotMatch(out.text, /offer nothing of yourself/);
+  // Even a barely-felt fright beats a maxed-out grudge: that is the point of the rank.
+  const faint = compileBehaviour([
+    one({ id: 'grudge', stance: 'cold', layer: LAYER.grudge, strength: 1 }),
+    one({ id: 'fear', stance: 'warm', layer: LAYER.fear, strength: 0.35 }),
+  ]);
+  assert.deepEqual(faint.spoke, ['fear']);
+});
+
+test('the thing loud enough to own the reply leaves nothing else standing', () => {
+  const out = compileBehaviour([
+    one({ id: 'temperament', text: 'You tease more than usual.', stance: 'warm', layer: LAYER.temperament, strength: 0.7 }),
+    one({ id: 'grudge', stance: 'cold', layer: LAYER.grudge, strength: 0.85 }),
+    one({ id: 'rule', hard: true, layer: 0, strength: 0 }),
+    one({ id: 'fear', stance: 'warm', layer: LAYER.fear, strength: 0.7, alone: true }),
+  ]);
+  assert.deepEqual(out.spoke, ['rule', 'fear'], 'a hard rule is still not a mood');
+  assert.doesNotMatch(out.text, /tease more/, 'not while he is in trouble');
+  assert.deepEqual(out.dropped.filter(d => d.why === 'outranked').map(d => d.id), ['temperament']);
+  // It only owns the reply while it is the loudest thing in it.
+  const faded = compileBehaviour([
+    one({ id: 'grudge', stance: 'cold', layer: LAYER.grudge, strength: 0.85 }),
+    one({ id: 'fear', stance: 'warm', layer: LAYER.fear, strength: 0, alone: true }),
+  ]);
+  assert.deepEqual(faded.spoke, ['grudge']);
+});

@@ -37,6 +37,13 @@ export type Candidate = {
   strength: number;
   /** Never dropped, never counted against the cap: the rules that are not moods. */
   hard?: boolean;
+  /**
+   * When this is the loudest thing, it is the only thing. Sharing a side is not
+   * enough to survive it: a mischievous day is warm and so is being frightened
+   * for him, and 'you tease more than usual' has no business in a reply about a
+   * hospital.
+   */
+  alone?: boolean;
 };
 
 export const LAYER = {
@@ -54,6 +61,12 @@ export const LAYER = {
   irritation: 4,
   /** What she is holding against him. */
   grudge: 5,
+  /**
+   * Something has happened to him. Above everything on purpose: a grudge of 85
+   * would otherwise have her answer a message about a hospital coldly, and the
+   * one thing that should suspend a grievance is him being in trouble.
+   */
+  fear: 8,
 } as const;
 
 /** As many as a model will actually honour. Past this the last ones read as noise. */
@@ -67,7 +80,7 @@ export const SPOKEN_AT_ONCE = 4;
  */
 const score = (candidate: Candidate) => candidate.layer * 0.25 + Math.min(1, Math.max(0, candidate.strength));
 
-export type Compiled = { text: string; spoke: string[]; dropped: { id: string; why: 'contradicted' | 'capped' }[] };
+export type Compiled = { text: string; spoke: string[]; dropped: { id: string; why: 'contradicted' | 'capped' | 'outranked' }[] };
 
 /**
  * Which of them he reads.
@@ -91,6 +104,16 @@ export function compileBehaviour(candidates: Candidate[], cap = SPOKEN_AT_ONCE):
       const contradicts = !candidate.hard && candidate.stance !== 'neutral' && candidate.stance !== loudest.stance;
       if (contradicts) dropped.push({ id: candidate.id, why: 'contradicted' });
       return !contradicts;
+    });
+  }
+
+  // One thing loud enough to own the reply leaves nothing else standing.
+  const owner = kept.filter(candidate => !candidate.hard).reduce<Candidate | null>((best, candidate) => (!best || score(candidate) > score(best) ? candidate : best), null);
+  if (owner?.alone) {
+    kept = kept.filter(candidate => {
+      const outranked = !candidate.hard && candidate !== owner;
+      if (outranked) dropped.push({ id: candidate.id, why: 'outranked' });
+      return !outranked;
     });
   }
 
