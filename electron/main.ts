@@ -3936,6 +3936,8 @@ async function considerPipingUp(environment: Environment) {
     machineIdleSeconds: environment.idleSeconds,
     curiosity: vitals.curiosity,
     sleepiness: vitals.sleepiness,
+    boredom: getFeelings().boredom,
+    missing: getFeelings().missing,
   }, Math.random, sway('pipe-up', PIPE_UP_CHANCE, swayNow()));
   if (!ready) return;
 
@@ -9133,6 +9135,7 @@ function rantRoom(latest: string, mentioned = ''): string {
   const room = roomToRant({
     energy: vitals.energy, curiosity: vitals.curiosity,
     irritation: mood.irritation, ego: mood.ego,
+    boredom: getFeelings().boredom,
     subject: subject.slice(0, 80),
     sinceLastMs: grantedAt ? Date.now() - grantedAt : null,
     roll: Math.random(),
@@ -9633,7 +9636,7 @@ async function boredNudge(): Promise<string | null> {
   const errand = errandToAskAfter((store.get('chat.upTo') as Errand[] | undefined) ?? [], nowMs);
   // Something of her own to say, ahead of asking after him: she had three
   // nights behind her and eighty-eight unprompted lines about his day.
-  const mine = !ignoring && !owed && !task && Math.random() < 0.4
+  const mine = !ignoring && !owed && !task && Math.random() < sway('own-subject', 0.4, swayNow())
     ? nightToRaise(getNights(), getAsides().slice(-12).map(aside => aside.text), todayKey)
     : null;
   // A thing of hers she told him to try: an overdue follow-up — asked once,
@@ -9660,7 +9663,7 @@ async function boredNudge(): Promise<string | null> {
     // Not "how the get the website running tomorrow they said they were off to
     // do went" — the thing goes in quotes and the sentence stays a sentence.
     : errand ? `how "${errand.what}" went — the thing they said they were off to do`
-    : whereNow && Math.random() < 0.6 ? `what they are doing at ${whereNow}` : null;
+    : whereNow && Math.random() < sway('ask-where', 0.6, swayNow()) ? `what they are doing at ${whereNow}` : null;
   const thing = ignoring || owed || askAbout || mine || rec ? null : task ?? pickToBringUp(raisable, getSessions(), broughtUp, todayKey);
   // Counted from when the quiet ended, not from their last word: eight hours
   // of sleep is not eight hours of ignoring her.

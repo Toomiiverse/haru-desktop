@@ -12,6 +12,8 @@ test('with nothing going on the odds are what they always were', () => {
   assert.equal(sway('pipe-up', 0.14, { temperament: 'ordinary' }), 0.14);
   assert.equal(sway('comeback', 0.5), 0.5);
   assert.equal(sway('spite', 0.3), 0.3);
+  assert.equal(sway('own-subject', 0.4), 0.4);
+  assert.equal(sway('ask-where', 0.6), 0.6);
   assert.equal(muteLean('ordinary'), 0);
 });
 
@@ -24,6 +26,12 @@ test('her mood leans on them the way it should', () => {
   assert.ok(sway('comeback', 0.5, { feelings: { hurt: 80 } }) < 0.2);
   assert.ok(sway('spite', 0.3, { feelings: { jealousy: 100 } }) > sway('spite', 0.3, { temperament: 'tender' }));
   assert.ok(muteLean('mischievous') < 0 && muteLean('tender') > 0);
+  // Bored, she would rather raise something of hers than ask after his day;
+  // left alone or jealous, she wants to know where he has been.
+  assert.ok(sway('own-subject', 0.4, { feelings: { boredom: 90 }, temperament: 'restless' }) > 0.5);
+  assert.ok(sway('own-subject', 0.4, { feelings: { hurt: 70 } }) < 0.4);
+  assert.ok(sway('ask-where', 0.6, { feelings: { missing: 90, jealousy: 60 } }) > 0.75);
+  assert.ok(sway('ask-where', 0.6, { feelings: { hurt: 70 } }) < 0.5);
 });
 
 test('a rare thing stays rare and a likely thing never becomes certain, whatever the state', () => {
@@ -34,6 +42,8 @@ test('a rare thing stays rare and a likely thing never becomes certain, whatever
     assert.ok(sway('pipe-up', 0.14, state) <= 0.35 + 1e-9 && sway('pipe-up', 0.14, state) > 0.04);
     assert.ok(sway('comeback', 0.5, state) <= 0.85 && sway('comeback', 0.5, state) >= 0.15);
     assert.ok(sway('spite', 0.3, state) <= 0.6 && sway('spite', 0.3, state) >= 0.1);
+    assert.ok(sway('own-subject', 0.4, state) <= 0.75 && sway('own-subject', 0.4, state) >= 0.2);
+    assert.ok(sway('ask-where', 0.6, state) <= 0.9 && sway('ask-where', 0.6, state) >= 0.3);
     assert.ok(apologyOdds({ ...state, grudge: 100 }) >= 0.35 && apologyOdds({ ...state, grudge: 0 }) <= 0.97);
   }
 });

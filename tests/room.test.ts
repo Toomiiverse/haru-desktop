@@ -203,3 +203,16 @@ test('her voice note for a hosted brain describes the register and quotes none o
   assert.match(HOSTED_VOICE, /fewer words, not softer ones/);
   assert.ok(!HOSTED_VOICE.startsWith('[') && !HOSTED_VOICE.endsWith(']'), 'main.ts wraps it with the label rule');
 });
+
+test('bored, she is likelier to go on about something of her own', () => {
+  const dull = { energy: 0.5, curiosity: 0.4, irritation: 0, ego: 0, sinceLastMs: null, latest: 'what are you up to' };
+  // A middling afternoon with nothing to push her: no room.
+  // Nothing else is pushing her, so boredom alone is the whole score: a fifth
+  // of a chance where there was none.
+  assert.equal(roomToRant({ ...dull, roll: 0.15 }), '');
+  assert.notEqual(roomToRant({ ...dull, boredom: 80, roll: 0.15 }), '');
+  assert.equal(roomToRant({ ...dull, boredom: 80, roll: 0.25 }), '', 'and it is still only a chance');
+  // And the ceiling lifts with it: at full boredom a roll the old cap refused gets through.
+  assert.equal(roomToRant({ energy: 0.9, curiosity: 0.8, irritation: 0, ego: 0, subject: 'Chainsaw Man', sinceLastMs: null, roll: 0.6 }), '');
+  assert.notEqual(roomToRant({ energy: 0.9, curiosity: 0.8, irritation: 0, ego: 0, subject: 'Chainsaw Man', sinceLastMs: null, boredom: 100, roll: 0.6 }), '');
+});

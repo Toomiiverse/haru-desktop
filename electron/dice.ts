@@ -14,7 +14,7 @@ import type { Feelings } from './feelings';
 import type { TemperamentKind } from './temperament';
 
 export type Sway = { temperament?: TemperamentKind | null; feelings?: Partial<Feelings> };
-export type Decision = 'second-thought' | 'pipe-up' | 'comeback' | 'spite';
+export type Decision = 'second-thought' | 'pipe-up' | 'comeback' | 'spite' | 'own-subject' | 'ask-where';
 
 const within = (value: number, low: number, high: number) => Math.max(low, Math.min(high, value));
 const is = (kind: TemperamentKind | null | undefined, ...kinds: TemperamentKind[]) => Boolean(kind && kinds.includes(kind));
@@ -36,6 +36,12 @@ export function sway(decision: Decision, base: number, state: Sway = {}): number
     // Answering a thumb out loud.
     case 'comeback':
       return within(base + playful / 250 - hurt / 200 + (is(kind, 'mischievous', 'prickly') ? 0.15 : is(kind, 'flat') ? -0.2 : 0), 0.15, 0.85);
+    // A nudge that raises something of hers instead of asking after his day.
+    case 'own-subject':
+      return within(base + boredom / 300 + (is(kind, 'mischievous', 'restless') ? 0.1 : is(kind, 'flat') ? -0.1 : 0) - (withdrawn ? 0.15 : 0), 0.2, 0.75);
+    // Asking what he is up to somewhere she already knows he is.
+    case 'ask-where':
+      return within(base + missing / 250 + jealousy / 300 - (withdrawn ? 0.2 : 0), 0.3, 0.9);
     // A spoiler, out of spite, once the grudge allows it at all.
     case 'spite':
       return within(base + jealousy / 250 + (is(kind, 'stormy', 'prickly') ? 0.1 : is(kind, 'tender', 'sunny') ? -0.15 : 0), 0.1, 0.6);

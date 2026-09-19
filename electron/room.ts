@@ -295,6 +295,8 @@ export function roomToRant(input: {
   subject?: string;
   /** Since she was last given the room, or null if never. */
   sinceLastMs: number | null;
+  /** 0..100, feelings.ts: bored, she is the one who starts things. */
+  boredom?: number;
   /** 0..1 */ roll: number;
   /** What they just said, so a greeting does not get a five-line opinion back. */
   latest?: string;
@@ -318,7 +320,12 @@ export function roomToRant(input: {
   if (input.irritation >= IRRITATION.short) score += 0.3;
   if (input.ego >= EGO.coasting) score += 0.2;
   if (input.subject) score += 0.35;
-  const chance = Math.min(score, 0.5);
+  // Bored, she starts things. It counts toward the score and lifts the ceiling
+  // a little, so a dull afternoon is when she is likeliest to go on about
+  // something of her own — which is the whole point of the counter.
+  const bored = Math.min(100, Math.max(0, input.boredom ?? 0)) / 100;
+  if (bored >= 0.35) score += 0.2;
+  const chance = Math.min(score, 0.5 + bored * 0.25);
   if (!input.mentioned && !(input.roll < chance)) return '';
   const about = input.subject
     ? `You have been on ${input.subject}, you have things to say about it that you have not said, and this is the reply where you say them. Open on it — they have not asked, and you are not waiting to be asked.`
