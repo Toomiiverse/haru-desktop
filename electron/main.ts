@@ -68,6 +68,7 @@ import { looksLikeScreenshot, maySpeak, readScreenshotConfig, screenshotPrompt, 
 import { look, photoName, readShotDescription, readVisionConfig, whileLooking, type VisionConfig } from './vision';
 import { CAPTION_MAX_CHARS, describedShots, forgetCaptions, moreThanOnePass, noteCaption, noteFailure, readCaptions, shotsNeedingALook } from './seen';
 import { breaksMute, brokeMuteNote, isMuted, muteNote, readMuteAsk, unmuteNote, weighMute, type MuteState } from './mute';
+import { charterTraits, feelingsShowAt, growMonth, growthNote, readTraits, traitLean, traitMeter, TRAIT_NAMES, type GrowthStep, type MonthSignals, type Traits } from './growth';
 import { apologyOdds, muteLean, sway, type Sway } from './dice';
 import { feel, feelingsInstruction, feelingsLog, feelingsOverTime, readFeelings, readsAsBanter, type FeelingEvent, type Feelings } from './feelings';
 import { addLeans, bruiseFrom, eventSize, fadeBruise, howHisReturnLands, rollTemperament, stepWander, temperamentLean, temperamentLine, temperamentWord, type Temperament } from './temperament';
@@ -116,7 +117,7 @@ import { attachmentsInPlay, describeAttached, READ_IT_ALL_PROMPT, readAttachment
 import { forOllama, withoutOldest } from './ollamaturns';
 import { seedEmoji, seedOffTheOrders } from './seed';
 import { pickToBringUp, REMEMBERED_PICKS } from './bored';
-import { grudgeAfterApology, grudgeInstruction, irritationAfterTally, nextGrudge, NOT_HELD_AGAINST_THEM, tallyDue, tallyInstruction, unanswered, type Said } from './grudge';
+import { ANSWER_WINDOW_MS, grudgeAfterApology, grudgeInstruction, irritationAfterTally, nextGrudge, NOT_HELD_AGAINST_THEM, tallyDue, tallyInstruction, unanswered, type Said } from './grudge';
 import { groundedInstruction, placeQuery } from './places';
 import { daySaid, TOLD_ENOUGH, type DaySaid, DEFAULT_BEDTIME_MINUTES, howTheDayWent, nightfallDue, sulkGrudge, sulkInstruction, sulkStillStands, type DayVerdict } from './nightfall';
 import { keepNights, lastNightDay, nightNoteInstruction, nightsInstruction, nightsOn, nightsToDrawOn, pickInstruction, tidyPick, timeForSomething, type Night, nightToRaise } from './nightlife';
@@ -1071,6 +1072,8 @@ function performChatResetIfDue() {
     if (previousKey.slice(0, 7) !== key.slice(0, 7)) {
       const config = store.get('ai.config') as ProviderConfig | undefined;
       if (config?.model) foldMonth(previousKey.slice(0, 7), config);
+      // And the month leaves its mark on who she is (growth.ts).
+      growAtFold(previousKey.slice(0, 7));
     }
   }
   // The day is counted once more before its lines are trimmed — see settleTally.
@@ -1318,7 +1321,7 @@ function lifeTick() {
   passFeelings(now);
   wander = stepWander(wander, seconds);
   bruise = fadeBruise(bruise, seconds);
-  vitals = driftVitals(vitals, environment, seconds, addLeans(temperamentLean(getTemperament()), wander, bruise));
+  vitals = driftVitals(vitals, environment, seconds, addLeans(traitLean(getTraits()), temperamentLean(getTemperament()), wander, bruise));
   lastTickAt = now;
   persistVitals();
   broadcastLife(chooseIdleAction(vitals, environment), environment);
@@ -1355,6 +1358,7 @@ function startLifeLoop() {
   // hand back a factory-fresh mood.
   if (saved) vitals = { ...DEFAULT_VITALS, ...saved };
   const weather = store.get('her.weather') as { wander?: Lean; bruise?: Lean } | undefined;
+  backfillMonths();
   wander = weather?.wander ?? {};
   bruise = weather?.bruise ?? {};
   lastTickAt = Date.now();
@@ -4692,6 +4696,97 @@ function getFeelings(): Feelings {
   return readFeelings(store.get('her.feelings'));
 }
 
+// ---- growth: who she is at rest, and the months that move it (growth.ts) ----
+
+function getTraits(): Traits {
+  return readTraits(store.get('her.traits'));
+}
+
+function getMonthHistory(): MonthSignals[] {
+  const saved = store.get('her.months') as MonthSignals[] | undefined;
+  return Array.isArray(saved) ? saved : [];
+}
+
+/** Hurt she was left holding, and what he put right: tallied live, because no
+ *  history of either is kept and the month needs both to judge guardedness. */
+type MonthTally = { month: string; hurtEvents: number; apologies: number };
+
+function getMonthTally(): MonthTally {
+  const month = currentChatDayKey().slice(0, 7);
+  const saved = store.get('her.monthTally') as MonthTally | undefined;
+  return saved && saved.month === month ? saved : { month, hurtEvents: 0, apologies: 0 };
+}
+
+function tallyMonth(what: 'hurt' | 'apology') {
+  const tally = getMonthTally();
+  store.set('her.monthTally', { ...tally, ...(what === 'hurt' ? { hurtEvents: tally.hurtEvents + 1 } : { apologies: tally.apologies + 1 }) });
+}
+
+/**
+ * A month of how he was, read off the archive the same way the grudge reads a
+ * day: what he actually said, and how many of her lines nothing came back to.
+ * Nothing she said is in it — see growth.ts on why that matters.
+ */
+function monthSignals(month: string, tally?: MonthTally): MonthSignals | null {
+  const archive = store.getArchive() as Record<string, { role?: string; content?: string; at?: string }[]>;
+  const days = Object.entries(archive).filter(([day]) => day.slice(0, 7) === month);
+  if (!days.length) return null;
+  let said = 0;
+  let hanging = 0;
+  let silent = 0;
+  for (const [, lines] of days) {
+    const heard = daySaid(lines as DaySaid[]);
+    said += heard;
+    if (howTheDayWent(heard, false) === 'silent') silent++;
+    const stamped = lines.filter(line => line.at).map(line => ({ role: line.role, at: Date.parse(String(line.at)) })).sort((a, b) => a.at - b.at);
+    for (const [index, line] of stamped.entries()) {
+      if (line.role !== 'assistant') continue;
+      if (!stamped.slice(index + 1).some(next => next.role === 'user' && next.at - line.at <= ANSWER_WINDOW_MS)) hanging++;
+    }
+  }
+  return {
+    month, days: days.length,
+    saidPerDay: said / days.length,
+    hangingPerDay: hanging / days.length,
+    silentNights: silent,
+    ...(tally && tally.month === month ? { hurtEvents: tally.hurtEvents, apologies: tally.apologies } : {}),
+  };
+}
+
+/**
+ * The month's mark on her, at the fold — the same boundary her day notes fold
+ * into a month at. Automatic, inside the band, and every step is written down
+ * so any of it can be put back (his call, 2026-09-19).
+ */
+function growAtFold(month: string) {
+  const history = getMonthHistory();
+  if (history.some(one => one.month === month)) return;
+  const now = monthSignals(month, getMonthTally());
+  if (!now) return;
+  const { traits, steps } = growMonth(getTraits(), now, history);
+  store.set('her.months', [...history, now].slice(-24));
+  store.delete('her.monthTally' as never);
+  if (!steps.length) {
+    console.log(`[growth] ${month} closed — ${history.length ? 'nothing moved her' : 'her first month with him, so she has no idea yet what usual is'}`);
+    return;
+  }
+  store.set('her.traits', traits);
+  store.set('her.traitLedger', [...((store.get('her.traitLedger') as GrowthStep[] | undefined) ?? []), ...steps].slice(-120));
+  for (const step of steps) console.log(`[growth] ${month}: ${step.trait} ${step.from} -> ${step.to} (${step.score >= 0 ? '+' : ''}${step.score} — ${step.because})`);
+}
+
+/** The months before growth existed, read off the archive once so she has a norm. */
+function backfillMonths() {
+  if (getMonthHistory().length) return;
+  const archive = store.getArchive() as Record<string, unknown>;
+  const months = [...new Set(Object.keys(archive).map(day => day.slice(0, 7)))].sort();
+  const thisMonth = currentChatDayKey().slice(0, 7);
+  const filled = months.filter(month => month < thisMonth).map(month => monthSignals(month)).filter((one): one is MonthSignals => Boolean(one));
+  if (!filled.length) return;
+  store.set('her.months', filled);
+  console.log(`[growth] read ${filled.length} month(s) off the archive so she has some idea of usual: ${filled.map(one => `${one.month} ${one.saidPerDay.toFixed(1)} said/day, ${one.hangingPerDay.toFixed(2)} hanging/day`).join('; ')}`);
+}
+
 /** The day she is having, for the dice (dice.ts). */
 function swayNow(): Sway {
   return { temperament: getTemperament()?.kind, feelings: getFeelings() };
@@ -4834,8 +4929,8 @@ function advanceMood(latest: string, history: { role?: string; content?: string 
   // Shouting stings the way a thumbs-down does; an apology buys some of it back.
   if (shout === 'shouted') irritation = nextIrritation(irritation, 'disliked');
   if (shout === 'forgiven') irritation = nextIrritation(irritation, 'liked');
-  if (shout === 'forgiven') { nudgeVitals('soothed'); feelNow('apology'); }
-  if (shout === 'shouted') feelNow('shouted');
+  if (shout === 'forgiven') { nudgeVitals('soothed'); feelNow('apology'); tallyMonth('apology'); }
+  if (shout === 'shouted') { feelNow('shouted'); tallyMonth('hurt'); }
   feelNow(event === 'substantive' ? 'message' : 'low-effort');
   if (readsAsRough(latest).rough) feelNow('rough');
   else if (readsAsBanter(latest)) feelNow('banter');
@@ -7539,7 +7634,8 @@ const promptState = {
     movedJustNow,
     vitals,
     temperament: temperamentLine(getTemperament()),
-    feelings: feelingsInstruction(getFeelings(), getMood().irritation, getTemperament()?.kind),
+    feelings: feelingsInstruction(getFeelings(), getMood().irritation, getTemperament()?.kind, feelingsShowAt(getTraits())),
+    grown: growthNote(getTraits()),
     pushback: store.get('pushback') as Pushback | undefined,
     grudge: getMood().grudge ?? 0,
     ignoredToday: ignoredTodayNow(),
@@ -9159,6 +9255,7 @@ function currentStanding() {
     vitals,
     woke: temperamentWord(getTemperament()),
     feelings: getFeelings(),
+    traits: TRAIT_NAMES.map(trait => traitMeter(getTraits(), trait)),
     asleep: herAsleepNow(),
     irritation: mood.irritation,
     ego: mood.ego,
@@ -12855,6 +12952,7 @@ function takeThumb(reaction: 'up' | 'down'): { mood: Mood; comeback: boolean } {
   setMood(next);
   nudgeVitals(reaction === 'down' ? 'criticised' : 'praised');
   feelNow(reaction === 'down' ? 'disliked' : 'liked');
+  if (reaction === 'down') tallyMonth('hurt');
   // Sent straight out rather than waiting on a classification: the reaction
   // already says exactly how she should take it, and the face should land with
   // the click rather than a second later.

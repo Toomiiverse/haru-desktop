@@ -135,16 +135,17 @@ function line(name: Feeling, level: number, temperament?: TemperamentKind): stri
  * Playfulness keeps quiet while she is hurt or already annoyed — fond and fed up
  * at once reads as neither (the same call vitals.ts makes for its warm cues).
  */
-export function spokenFeelings(now: Feelings, irritation = 0, annoyedFrom = 33): Feeling[] {
+export function spokenFeelings(now: Feelings, irritation = 0, annoyedFrom = 33, shows: number = FELT.shows): Feeling[] {
   return FEELINGS
-    .filter(name => now[name] >= FELT.shows)
-    .filter(name => name !== 'playful' || (now.hurt < FELT.shows && irritation < annoyedFrom))
+    .filter(name => now[name] >= shows)
+    .filter(name => name !== 'playful' || (now.hurt < shows && irritation < annoyedFrom))
     .sort((a, b) => now[b] - now[a])
     .slice(0, FEELINGS_SPOKEN);
 }
 
-export function feelingsInstruction(now: Feelings, irritation = 0, temperament?: TemperamentKind): string {
-  return spokenFeelings(now, irritation).map(name => line(name, now[name], temperament)).join(' ');
+/** `shows` is her guardedness, which months of how things went can move (growth.ts). */
+export function feelingsInstruction(now: Feelings, irritation = 0, temperament?: TemperamentKind, shows: number = FELT.shows): string {
+  return spokenFeelings(now, irritation, 33, shows).map(name => line(name, now[name], temperament)).join(' ');
 }
 
 export function feelingsLog(now: Feelings): string {

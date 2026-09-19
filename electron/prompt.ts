@@ -213,6 +213,8 @@ export type PromptState = {
   temperament?: string;
   /** Jealousy, missing him, boredom, playfulness, hurt — the two strongest, as what they do to how she talks (feelings.ts). */
   feelings?: string;
+  /** What months of how things have gone have made of her, once it is worth saying (growth.ts). */
+  grown?: string;
   goodnight: 'said' | 'after' | 'none';
   shout: ShoutState;
   latestMessage: string;
@@ -440,6 +442,7 @@ function systemBlocks(state: PromptState, away = false): SystemBlock[] {
     // The day she is having comes before the moment she is in.
     { stable: false, text: state.temperament ?? '' },
     { stable: false, text: vitalsInstruction(state.vitals, state.irritation) },
+    { stable: false, text: state.grown ?? '' },
     { stable: false, text: state.feelings ?? '' },
     { stable: false, text: moodInstruction(state.irritation) },
     { stable: false, text: grudgeInstruction(state.grudge ?? 0, state.ignoredToday ?? 0) },

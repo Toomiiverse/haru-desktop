@@ -113,6 +113,8 @@ export type StandingInput = {
   woke?: string;
   /** feelings.ts, 0–100 each. */
   feelings?: Feelings;
+  /** Where months of living have left her (growth.ts traitMeter). */
+  traits?: { label: string; value: number; note: string }[];
   irritation: number;
   ego: number;
   grudge: number;
@@ -263,6 +265,7 @@ export function standingFrom(input: StandingInput): Standing {
         { key: 'jealousy', label: 'Jealousy', value: Math.round(input.feelings.jealousy), note: 'Time for other people while something of hers sat unanswered.' },
         { key: 'hurt', label: 'Hurt', value: Math.round(input.feelings.hurt), note: 'Thumbs down, shouting, being shushed. Fades slowly; an apology is quicker.' },
       ] : []),
+      ...(input.traits ?? []).map(trait => ({ key: trait.label.toLowerCase(), label: trait.label, value: trait.value, note: trait.note })),
       { key: 'ego', label: 'Ego', value: Math.round(Math.min(EGO_MAX, Math.max(0, input.ego)) / EGO_MAX * 100), note: 'Thumbs up feed this. High means insufferable.' },
     ],
     patience: patienceMeter(input.irritation),
