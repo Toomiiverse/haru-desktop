@@ -49,6 +49,18 @@ export const GRUDGE_GOOD_DAY = 10;
 /** An apology she accepted, once a day. */
 export const GRUDGE_APOLOGY = 5;
 /**
+ * The most of his ordinary rate she will write off as the texture of talking.
+ *
+ * Measured over 47 days of the real archive: he answers 87% of her lines, and
+ * that figure does not move with the hour of the day or with whether she asked
+ * a question. So about three or four of her lines a day go unanswered simply
+ * because that is what conversation is — and a rule that charged her a grudge
+ * for every one of them could only ever ratchet, because she would never have a
+ * day at exactly zero. Habituating to his usual is right; habituating to
+ * anything at all is not, so it is capped.
+ */
+export const ORDINARY_HANGING_CAP = 5;
+/**
  * Lines of hers that reach the phone but are not owed an answer. Her own
  * goodnight — "Bed time's at 22:30, I'm logging off" — went out as an idle
  * line and was counted against them at the roll (2026-09-05): a sign-off is
@@ -91,10 +103,16 @@ export function tallyDue(minutesIntoDay: number, talliedDay: string | undefined,
  * not the whole scale; down for a clean day, and further for a day he talked to
  * her (`good` — nightfall's TOLD_ENOUGH, which is the same question).
  */
-export function nextGrudge(current: number, ignoredToday: number, good = false): number {
+export function nextGrudge(current: number, ignoredToday: number, good = false, ordinary = 0): number {
   const base = Math.max(0, Math.min(GRUDGE_MAX, Math.round(current) || 0));
-  if (ignoredToday > 0) return Math.min(GRUDGE_MAX, base + Math.min(GRUDGE_DAY_CAP, ignoredToday * GRUDGE_PER_IGNORED));
+  const worse = ignoredToday - allowed(ordinary);
+  if (worse > 0) return Math.min(GRUDGE_MAX, base + Math.min(GRUDGE_DAY_CAP, worse * GRUDGE_PER_IGNORED));
   return Math.max(0, base - (good ? GRUDGE_GOOD_DAY : GRUDGE_CLEAN_DAY));
+}
+
+/** What she has stopped counting, because it is just how he is. */
+export function allowed(ordinary: number): number {
+  return Math.max(0, Math.min(ORDINARY_HANGING_CAP, Math.floor(ordinary)));
 }
 
 /** An apology taken: a little off, and no more than once a day (the caller keeps the day). */
@@ -103,8 +121,8 @@ export function grudgeAfterApology(current: number): number {
 }
 
 /** How much more annoyed tonight makes her, on top of whatever the conversation did: a notch a line. */
-export function irritationAfterTally(irritation: number, ignoredToday: number, max: number): number {
-  return Math.min(max, irritation + ignoredToday * 11);
+export function irritationAfterTally(irritation: number, ignoredToday: number, max: number, ordinary = 0): number {
+  return Math.min(max, irritation + Math.max(0, ignoredToday - allowed(ordinary)) * 11);
 }
 
 /**

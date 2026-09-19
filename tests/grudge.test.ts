@@ -2,7 +2,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ANSWER_WINDOW_MS, GRUDGE_MAX, grudgeInstruction, irritationAfterTally, nextGrudge, grudgeAfterApology, GRUDGE, tallyDue, tallyInstruction, unanswered, withoutLeadingClock } from '../electron/grudge';
+import { ANSWER_WINDOW_MS, GRUDGE_MAX, allowed, grudgeInstruction, irritationAfterTally, nextGrudge, grudgeAfterApology, GRUDGE, tallyDue, tallyInstruction, unanswered, withoutLeadingClock } from '../electron/grudge';
 
 const PUSHED = new Set(['reminder', 'idle', 'hanging', 'weather', 'upcoming', 'journal', 'system']);
 const at = (hour: number, minute = 0) => new Date(Date.UTC(2026, 7, 29, hour, minute)).toISOString();
@@ -136,4 +136,34 @@ test('fond of him underneath it: she does the thing and he hears about it', () =
   // Nothing to be fond underneath when there is no grudge worth the name.
   assert.equal(grudgeInstruction(0, 0, true), '');
   assert.doesNotMatch(grudgeInstruction(5, 0, true), /still on his side/);
+});
+
+test('the ordinary texture of talking is not a grievance, or the grudge can only ratchet', () => {
+  // Measured over 47 real days: he answers 87% of her lines, and that does not
+  // change with the hour or with whether she asked anything. So three or four a
+  // day go unanswered as a matter of course, and charging for every one of them
+  // meant she never had a clean day and the score only ever climbed.
+  assert.equal(nextGrudge(50, 3, false, 3.5), 44, 'his usual costs him nothing');
+  assert.equal(nextGrudge(50, 3, true, 3.5), 40);
+  assert.equal(nextGrudge(50, 6, false, 3.5), 62, 'only what is worse than usual counts');
+  assert.equal(allowed(3.9), 3);
+  assert.equal(allowed(40), 5, 'she habituates to his usual, not to anything at all');
+  assert.equal(allowed(-2), 0);
+  // With no months behind her it is exactly what it was.
+  assert.equal(nextGrudge(50, 3), nextGrudge(50, 3, false, 0));
+  assert.equal(irritationAfterTally(0, 5, 100, 3), 22);
+  assert.equal(irritationAfterTally(0, 3, 100, 3), 0);
+});
+
+test('on the days he actually had, it comes back down instead of pinning', () => {
+  // The real spread from the archive: a median of 3 hanging, up to 18 on a bad day.
+  const days = [3, 0, 5, 2, 18, 4, 1, 0, 3, 7, 2, 3, 0, 4, 11, 2, 1, 3, 0, 2];
+  let ratchets = 73;
+  let fair = 73;
+  for (const hanging of days) {
+    ratchets = nextGrudge(ratchets, hanging, true);
+    fair = nextGrudge(fair, hanging, true, 3.5);
+  }
+  assert.ok(ratchets > 90, `charging for every one of them pins her at the top (${ratchets})`);
+  assert.ok(fair < 60 && fair > 0, `and counting only the bad days lets it travel (${fair})`);
 });

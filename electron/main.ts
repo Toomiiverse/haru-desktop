@@ -69,7 +69,7 @@ import { look, photoName, readShotDescription, readVisionConfig, whileLooking, t
 import { CAPTION_MAX_CHARS, describedShots, forgetCaptions, moreThanOnePass, noteCaption, noteFailure, readCaptions, shotsNeedingALook } from './seen';
 import { breaksMute, brokeMuteNote, isMuted, muteNote, readMuteAsk, unmuteNote, weighMute, type MuteState } from './mute';
 import { LAYER, compileLog, type Candidate } from './compile';
-import { charterTraits, feelingsShowAt, fuseOf, growMonth, growthNote, readTraits, traitLean, traitMeter, travelled, TRAIT_NAMES, type GrowthStep, type MonthSignals, type Traits } from './growth';
+import { normFrom, charterTraits, feelingsShowAt, fuseOf, growMonth, growthNote, readTraits, traitLean, traitMeter, travelled, TRAIT_NAMES, type GrowthStep, type MonthSignals, type Traits } from './growth';
 import { apologyOdds, muteLean, sway, type Sway } from './dice';
 import { NO_FEELINGS, FELT, feel, feelingsInstruction, feelingsLog, feelingsOverTime, readFeelings, readsAsBanter, readsAsEnding, readsAsScare, type FeelingEvent, type Feelings } from './feelings';
 import { addLeans, bruiseFrom, eventSize, fadeBruise, howHisReturnLands, rollTemperament, stepWander, temperamentLean, temperamentLine, temperamentWord, type Temperament, type TemperamentKind } from './temperament';
@@ -4794,6 +4794,14 @@ function growAtFold(month: string) {
   store.set('her.traits', traits);
   store.set('her.traitLedger', [...((store.get('her.traitLedger') as GrowthStep[] | undefined) ?? []), ...steps].slice(-120));
   for (const step of steps) console.log(`[growth] ${month}: ${step.trait} ${step.from} -> ${step.to} (${step.score >= 0 ? '+' : ''}${step.score} — ${step.because})`);
+}
+
+/**
+ * How many of her lines he ordinarily leaves hanging, from the months she has.
+ * Only what is worse than this counts against him (grudge.ts).
+ */
+function ordinaryHanging(): number {
+  return normFrom(getMonthHistory())?.hangingPerDay ?? 0;
 }
 
 /** The months before growth existed, read off the archive once so she has a norm. */
@@ -10249,8 +10257,9 @@ async function tallyIgnored(config: ProviderConfig) {
   if (tallyDue(now.getHours() * 60 + now.getMinutes(), mood.talliedDay, todayKey)) {
     const heard = (store.get('chat.messages') as { role: string; at?: string }[] | undefined) ?? [];
     const ignored = countIgnored(todayKey, heard);
-    const grudge = nextGrudge(mood.grudge ?? 0, ignored.length, daySaid(heard as DaySaid[]) >= TOLD_ENOUGH);
-    const irritation = irritationAfterTally(mood.irritation, ignored.length, IRRITATION_MAX);
+    const ordinary = ordinaryHanging();
+    const grudge = nextGrudge(mood.grudge ?? 0, ignored.length, daySaid(heard as DaySaid[]) >= TOLD_ENOUGH, ordinary);
+    const irritation = irritationAfterTally(mood.irritation, ignored.length, IRRITATION_MAX, ordinary);
     // Banked here and nowhere else, so a day is counted exactly once however
     // many times the telling below has to be attempted. What it was before is
     // kept beside it, so the roll can count the whole day from the same start.
@@ -10295,7 +10304,7 @@ function settleTally(day: string, heard: { role: string; at?: string }[]) {
   const ignored = countIgnored(day, heard);
   if (ignored.length <= (counted ? mood.ignoredToday ?? 0 : 0)) return;
   const before = counted ? mood.grudgeBeforeTally ?? mood.grudge ?? 0 : mood.grudge ?? 0;
-  const grudge = nextGrudge(before, ignored.length, daySaid(heard as DaySaid[]) >= TOLD_ENOUGH);
+  const grudge = nextGrudge(before, ignored.length, daySaid(heard as DaySaid[]) >= TOLD_ENOUGH, ordinaryHanging());
   setMood({ ...mood, grudge, grudgeBeforeTally: before, ignoredToday: ignored.length, talliedDay: day,
     ignoredSamples: ignored.slice(0, 2).map(line => (line.text ?? '').slice(0, 80)) });
   console.log(`[grudge] ${day}, counted again at the roll: ${ignored.length} of her lines went unanswered${counted ? ` (${mood.ignoredToday ?? 0} at eight)` : ' (never counted at eight)'} — grudge ${mood.grudge ?? 0} -> ${grudge}`);
