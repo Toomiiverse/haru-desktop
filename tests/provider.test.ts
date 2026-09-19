@@ -92,3 +92,10 @@ test('a stream asks for its usage chunk, and the cached share of the prompt is r
   assert.equal(promptUsage(undefined), null);
   assert.equal(promptUsage({ completion_tokens: 3 }), null);
 });
+
+test('a bare base64 picture goes out as what it is, not always as a PNG', () => {
+  // Claude refuses a JPEG labelled image/png; a phone camera only sends JPEGs.
+  const body = toOpenAIBody({ model: 'm', temperature: 0.7, conversation: [{ role: 'user', content: 'look', images: ['/9j/4AAQ', 'iVBORw0KGgo', 'data:image/webp;base64,UklGR'] }] }) as { messages: { content: { image_url?: { url: string } }[] }[] };
+  const urls = body.messages[0].content.flatMap(part => part.image_url ? [part.image_url.url] : []);
+  assert.deepEqual(urls, ['data:image/jpeg;base64,/9j/4AAQ', 'data:image/png;base64,iVBORw0KGgo', 'data:image/webp;base64,UklGR']);
+});

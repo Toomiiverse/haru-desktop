@@ -22,6 +22,19 @@ export type ChatTool = {
 
 export type Provider = 'ollama' | 'openai' | 'xai' | 'venice';
 
+/**
+ * What a bare base64 picture is, read off its first bytes. Everything used to go
+ * out as image/png, which OpenAI shrugs at and Claude refuses outright ("specified
+ * using the image/png media type, but the image appears to be a image/jpeg") —
+ * and a phone camera only ever sends JPEGs.
+ */
+export function sniffImageType(base64: string): string {
+  if (base64.startsWith('/9j/')) return 'image/jpeg';
+  if (base64.startsWith('R0lGOD')) return 'image/gif';
+  if (base64.startsWith('UklGR')) return 'image/webp';
+  return 'image/png';
+}
+
 /** Everything that is not Ollama speaks OpenAI's dialect, including xAI and Venice. */
 export function isOpenAIShaped(provider: string | undefined): boolean {
   return provider === 'openai' || provider === 'xai' || provider === 'venice';
@@ -108,7 +121,7 @@ export function toOpenAIMessages(conversation: ChatMessage[]): OpenAIMessage[] {
             type: 'image_url' as const,
             // Already a data: URL if the caller had a mime type worth keeping;
             // otherwise base64, which is what every local path produces.
-            image_url: { url: image.startsWith('data:') ? image : `data:image/png;base64,${image}` },
+            image_url: { url: image.startsWith('data:') ? image : `data:${sniffImageType(image)};base64,${image}` },
           })),
         ],
       });
