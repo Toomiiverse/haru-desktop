@@ -209,6 +209,8 @@ export type PromptState = {
   ego: number;
   /** Her slow state — energy, stress, affection and the rest (vitals.ts). Optional so the pure callers need not fake one. */
   vitals?: Vitals;
+  /** The mood she woke up in today, as what it does to how she talks (temperament.ts); empty on an ordinary day. */
+  temperament?: string;
   goodnight: 'said' | 'after' | 'none';
   shout: ShoutState;
   latestMessage: string;
@@ -433,6 +435,8 @@ function systemBlocks(state: PromptState, away = false): SystemBlock[] {
     { stable: true, text: LENGTH_RULE_LOCAL },
     // Her slow state first, so the three lines after it — which carry hard
     // consequences (ignoring, withholding, coasting) — read later and win.
+    // The day she is having comes before the moment she is in.
+    { stable: false, text: state.temperament ?? '' },
     { stable: false, text: vitalsInstruction(state.vitals, state.irritation) },
     { stable: false, text: moodInstruction(state.irritation) },
     { stable: false, text: grudgeInstruction(state.grudge ?? 0, state.ignoredToday ?? 0) },

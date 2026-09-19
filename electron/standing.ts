@@ -108,6 +108,8 @@ export type StandingInput = {
   vitals: Vitals;
   /** She is in her own sleeping hours: whatever the meters say, the face is the sleeping one. */
   asleep?: boolean;
+  /** A few words on the mood she woke up in (temperament.ts), or nothing on an ordinary day. */
+  woke?: string;
   irritation: number;
   ego: number;
   grudge: number;
@@ -240,7 +242,7 @@ export function standingFrom(input: StandingInput): Standing {
     asleep,
     emotion,
     face: MOOD_TO_EMOTION[emotion],
-    mood: asleep ? 'Asleep. She will answer when she wakes.' : moodLine(emotion, input.irritation, input.grudge),
+    mood: asleep ? 'Asleep. She will answer when she wakes.' : [moodLine(emotion, input.irritation, input.grudge), input.woke ?? ''].filter(Boolean).join(' '),
     bond: bondFrom(vitals, input.grudge, input.daysTalked),
     // Ordered by how much each one changes the way she answers, not
     // alphabetically and not by the shape of the Vitals type.

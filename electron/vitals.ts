@@ -15,6 +15,14 @@ export type Vitals = {
   focus: number;
 };
 
+/**
+ * A push on where she settles, on top of what the room says: today's
+ * temperament, the slow weather of the day, and what is left of the last thing
+ * that happened to her (temperament.ts). Added to the drift targets, never to
+ * the values, so it bends where she comes to rest without ratcheting.
+ */
+export type Lean = Partial<Record<'happiness' | 'stress' | 'affection' | 'curiosity' | 'energy', number>>;
+
 export type Environment = {
   hour: number;          // 0-23, in the user's zone
   idleSeconds: number;   // since last keyboard/mouse input anywhere on the machine
@@ -78,7 +86,7 @@ export function isNight(hour: number) {
 
 // One step of drift. `seconds` is how long since the last tick, so a slow or
 // missed tick moves state proportionally rather than by a fixed step.
-export function driftVitals(current: Vitals, environment: Environment, seconds: number): Vitals {
+export function driftVitals(current: Vitals, environment: Environment, seconds: number, lean: Lean = {}): Vitals {
   // Normalised against a nominal 20s tick so rates stay meaningful if the
   // interval changes or a tick is late.
   const step = clamp(seconds / 20) * 0.25;
@@ -91,25 +99,25 @@ export function driftVitals(current: Vitals, environment: Environment, seconds: 
 
   // Energy is mostly the inverse of sleepiness, with the machine running on
   // battery reading as a reason to be a little more subdued.
-  const energyTarget = clamp(1 - sleepiness - (onBattery ? 0.15 : 0));
+  const energyTarget = clamp(1 - sleepiness - (onBattery ? 0.15 : 0) + (lean.energy ?? 0));
   const energy = toward(current.energy, energyTarget, step);
 
   // Curiosity builds while something is happening and fades in a quiet room.
-  const curiosityTarget = active ? CURIOSITY_ENGAGED : idleSeconds > 600 ? 0.15 : 0.4;
+  const curiosityTarget = clamp((active ? CURIOSITY_ENGAGED : idleSeconds > 600 ? 0.15 : 0.4) + (lean.curiosity ?? 0));
   const curiosity = toward(current.curiosity, curiosityTarget, step);
 
   // Focus is about whether her window is the one being used.
   const focus = toward(current.focus, windowFocused ? 0.9 : active ? 0.4 : 0.15, step);
 
   // Left alone for a long stretch she settles rather than stays wound up.
-  const stress = toward(current.stress, idleSeconds > 300 ? 0.1 : 0.25, step * 0.5);
+  const stress = toward(current.stress, clamp((idleSeconds > 300 ? 0.1 : 0.25) + (lean.stress ?? 0)), step * 0.5);
 
   // Attention is what she warms to; a long silence cools it slowly.
-  const affectionTarget = windowFocused ? 0.7 : idleSeconds > 1800 ? 0.25 : current.affection;
+  const affectionTarget = windowFocused ? clamp(0.7 + (lean.affection ?? 0)) : idleSeconds > 1800 ? clamp(0.25 + (lean.affection ?? 0)) : current.affection;
   const affection = toward(current.affection, affectionTarget, step * 0.4);
 
   // Happiness follows the rest rather than having a driver of its own.
-  const happinessTarget = clamp(0.45 + energy * 0.3 + affection * 0.3 - stress * 0.3);
+  const happinessTarget = clamp(0.45 + (lean.happiness ?? 0) + energy * 0.3 + affection * 0.3 - stress * 0.3);
   const happiness = toward(current.happiness, happinessTarget, step * 0.6);
 
   return {
@@ -253,10 +261,30 @@ export function cueLog(vitals: Vitals | undefined, irritation = 0): string {
 }
 
 // Events that move her outside the slow drift.
-export function applyEvent(current: Vitals, event: 'praised' | 'criticised' | 'spoken-to' | 'ignored-user' | 'caught-interest'): Vitals {
+export type VitalEvent = 'praised' | 'criticised' | 'spoken-to' | 'ignored-user' | 'caught-interest'
+  | 'cut-off' | 'soothed' | 'warmed' | 'let-down' | 'returned-glad' | 'returned-sore';
+
+/**
+ * `size` scales the events that add or take away (not the ones that pull her
+ * toward a level, which cannot overshoot by design). 1 is what they always
+ * were; the caller makes it bigger, by her temperament and a roll.
+ */
+export function applyEvent(current: Vitals, event: VitalEvent, size = 1): Vitals {
   const next = { ...current };
-  if (event === 'praised') { next.happiness = clamp(next.happiness + 0.2); next.affection = clamp(next.affection + 0.15); next.energy = clamp(next.energy + 0.1); }
-  if (event === 'criticised') { next.happiness = clamp(next.happiness - 0.25); next.stress = clamp(next.stress + 0.2); }
+  const by = (amount: number) => amount * Math.max(0, size);
+  if (event === 'praised') { next.happiness = clamp(next.happiness + by(0.2)); next.affection = clamp(next.affection + by(0.15)); next.energy = clamp(next.energy + by(0.1)); }
+  if (event === 'criticised') { next.happiness = clamp(next.happiness - by(0.25)); next.stress = clamp(next.stress + by(0.2)); }
+  // Stopped mid-sentence, by a tap or by being talked over.
+  if (event === 'cut-off') { next.stress = clamp(next.stress + by(0.12)); next.happiness = clamp(next.happiness - by(0.1)); }
+  // An apology she took.
+  if (event === 'soothed') { next.stress = clamp(next.stress - by(0.15)); next.happiness = clamp(next.happiness + by(0.1)); next.affection = clamp(next.affection + by(0.05)); }
+  // A goodnight said to her, a small kindness.
+  if (event === 'warmed') { next.affection = clamp(next.affection + by(0.1)); next.happiness = clamp(next.happiness + by(0.05)); }
+  // He went to bed without a word.
+  if (event === 'let-down') { next.happiness = clamp(next.happiness - by(0.2)); next.affection = clamp(next.affection - by(0.1)); }
+  // He is back after a long silence; which of these it is, is her temperament's call.
+  if (event === 'returned-glad') { next.happiness = clamp(next.happiness + by(0.15)); next.affection = clamp(next.affection + by(0.1)); }
+  if (event === 'returned-sore') { next.stress = clamp(next.stress + by(0.15)); next.happiness = clamp(next.happiness - by(0.05)); }
   // Being spoken to brings her to attention. It used to add a flat +0.2 curiosity
   // and +0.05 affection to every message, which nothing pulled back fast enough:
   // by his third message curiosity was pinned at 1.00 and affection climbed for
@@ -269,7 +297,7 @@ export function applyEvent(current: Vitals, event: 'praised' | 'criticised' | 's
   // to, so a conversation settles her at attentive and warm rather than running
   // her to the top of both scales.
   if (event === 'spoken-to') { next.curiosity = toward(next.curiosity, CURIOSITY_ENGAGED, 0.5); next.affection = toward(next.affection, WARMED_BY_ATTENTION, 0.1); next.sleepiness = clamp(next.sleepiness - 0.05); }
-  if (event === 'ignored-user') { next.stress = clamp(next.stress + 0.1); }
+  if (event === 'ignored-user') { next.stress = clamp(next.stress + by(0.1)); next.happiness = clamp(next.happiness - by(0.1)); next.affection = clamp(next.affection - by(0.05)); }
   // Something on their screen caught her eye. Pulled toward engaged like
   // 'spoken-to' rather than added, for the same reason: a run of them should
   // settle her at interested, not stack her to the top of the scale.
