@@ -4,7 +4,8 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { CHARTER, TRAIT_NAMES, charterTraits, feelingsShowAt, growMonth, growthNote, maxStep, normFrom, readTraits, revertTo, scoreWarmth, traitLean, traitMeter, travelled, type MonthSignals, type Traits } from '../electron/growth';
+import { CHARTER, TRAIT_NAMES, charterTraits, feelingsShowAt, growMonth, growthNote, maxStep, normFrom, readTraits, revertTo, scoreFuse, scoreWarmth, traitLean, traitMeter, travelled, type MonthSignals, type Traits } from '../electron/growth';
+import { afterCooldown, nextIrritation } from '../electron/mood';
 
 /** A month shaped like his real ones: ~23 substantive messages a day, ~4.5 of her lines hanging. */
 const month = (over: Partial<MonthSignals> = {}): MonthSignals =>
@@ -78,7 +79,7 @@ test('she can never leave the band, whatever is thrown at her', () => {
     assert.ok(traits[trait] >= CHARTER[trait].charter - CHARTER[trait].band - 1e-9, `${trait} floor`);
     assert.ok(traits[trait] <= CHARTER[trait].charter + CHARTER[trait].band + 1e-9, `${trait} ceiling`);
   }
-  assert.deepEqual(readTraits({ warmth: 99, guardedness: -99 }), { warmth: 0.80, guardedness: 30 });
+  assert.deepEqual(readTraits({ warmth: 99, guardedness: -99 }), { warmth: 0.80, guardedness: 30, fuse: 1 });
   assert.deepEqual(readTraits(undefined), charterTraits());
 });
 
@@ -102,22 +103,49 @@ test('the ledger puts her back', () => {
 
 test('what the rest of the machine reads off her traits', () => {
   assert.deepEqual(traitLean(charterTraits()), {}, 'at the charter she leans on nothing');
-  assert.equal(traitLean({ warmth: 0.75, guardedness: 35 }).affection, 0.05);
-  assert.equal(feelingsShowAt({ warmth: 0.7, guardedness: 38.4 }), 38);
+  assert.equal(traitLean({ warmth: 0.75, guardedness: 35, fuse: 1 }).affection, 0.05);
+  assert.equal(feelingsShowAt({ warmth: 0.7, guardedness: 38.4, fuse: 1 }), 38);
   assert.equal(traitMeter(charterTraits(), 'warmth').value, 50);
   assert.match(traitMeter(charterTraits(), 'warmth').note, /Where she started/);
-  assert.match(traitMeter({ warmth: 0.79, guardedness: 35 }, 'warmth').note, /warmer with him/);
+  assert.match(traitMeter({ warmth: 0.79, guardedness: 35, fuse: 1 }, 'warmth').note, /warmer with him/);
 });
 
 test('she is told only once it is worth telling, and never as a number', () => {
   assert.equal(growthNote(charterTraits()), '');
-  assert.equal(growthNote({ warmth: 0.74, guardedness: 35 }), '', 'a drift she could not feel says nothing');
-  for (const traits of [{ warmth: 0.79, guardedness: 35 }, { warmth: 0.61, guardedness: 35 }, { warmth: 0.7, guardedness: 39 }, { warmth: 0.7, guardedness: 31 }]) {
+  assert.equal(growthNote({ warmth: 0.74, guardedness: 35, fuse: 1 }), '', 'a drift she could not feel says nothing');
+  for (const traits of [{ warmth: 0.79, guardedness: 35, fuse: 1 }, { warmth: 0.61, guardedness: 35, fuse: 1 }, { warmth: 0.7, guardedness: 39, fuse: 1 }, { warmth: 0.7, guardedness: 31, fuse: 1 }]) {
     const note = growthNote(traits);
     assert.ok(note.length > 80);
     assert.doesNotMatch(note, /\d/, 'a number in the prompt comes back as a number in the reply');
   }
-  assert.match(growthNote({ warmth: 0.8, guardedness: 35 }), /fonder of him now/);
-  assert.match(growthNote({ warmth: 0.6, guardedness: 35 }), /stopped reaching for him/);
-  assert.ok(Math.abs(travelled({ warmth: 0.8, guardedness: 35 }, 'warmth') - 1) < 1e-9);
+  assert.match(growthNote({ warmth: 0.8, guardedness: 35, fuse: 1 }), /fonder of him now/);
+  assert.match(growthNote({ warmth: 0.6, guardedness: 35, fuse: 1 }), /stopped reaching for him/);
+  assert.ok(Math.abs(travelled({ warmth: 0.8, guardedness: 35, fuse: 1 }, 'warmth') - 1) < 1e-9);
+});
+
+test('a month of being wound up leaves her shorter-fused, and a calm one lets it grow back', () => {
+  const calm = month({ month: '2026-08', woundUp: 10 });
+  const rough = growMonth(charterTraits(), month({ month: '2026-09', woundUp: 30 }), [calm]);
+  const quiet = growMonth(charterTraits(), month({ month: '2026-09', woundUp: 2 }), [calm]);
+  const shorter = rough.steps.find(step => step.trait === 'fuse')!;
+  const longer = quiet.steps.find(step => step.trait === 'fuse')!;
+  assert.ok(shorter.to < 1 && longer.to > 1);
+  assert.match(shorter.because, /wound her up more often than usual/);
+  // A bad month saturates the score and still only moves her a fortieth of the
+  // way, because hardening runs at sixty percent (tested on warmth above).
+  assert.ok(1 - shorter.to <= maxStep('fuse') * 0.6 + 1e-9);
+  assert.ok(longer.to - 1 <= maxStep('fuse') + 1e-9);
+  // And it does not move at all until there is a month of tallies on both sides.
+  assert.equal(growMonth(charterTraits(), month({ month: '2026-09', woundUp: 30 }), [month()]).steps.find(s => s.trait === 'fuse'), undefined);
+  assert.equal(scoreFuse(month({ woundUp: 5 }), null), null);
+});
+
+test('the fuse is what the same thing costs her', () => {
+  // Her charter, then a year of being wound up, then a year of not.
+  assert.equal(nextIrritation(0, 'low-effort', 0.5, 0, 1), 22);
+  assert.ok(nextIrritation(0, 'low-effort', 0.5, 0, 0.75) > 22, 'a shorter fuse costs more');
+  assert.ok(nextIrritation(0, 'low-effort', 0.5, 0, 1.25) < 22, 'a longer one costs less');
+  // And it cools the other way round.
+  assert.ok(afterCooldown(60, 16, 1.25) < afterCooldown(60, 16, 1) && afterCooldown(60, 16, 1) < afterCooldown(60, 16, 0.75));
+  assert.equal(nextIrritation(0, 'low-effort', 0.5, 0, 0), nextIrritation(0, 'low-effort', 0.5, 0, 0.5), 'a nonsense fuse is floored');
 });

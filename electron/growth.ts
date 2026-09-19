@@ -32,7 +32,7 @@
 // Pure: no store, no clock, no I/O. The caller gathers the months and keeps the
 // ledger.
 
-export type TraitName = 'warmth' | 'guardedness';
+export type TraitName = 'warmth' | 'guardedness' | 'fuse';
 export type Traits = Record<TraitName, number>;
 
 type Charter = {
@@ -56,6 +56,12 @@ export const CHARTER: Record<TraitName, Charter> = {
   // How high a feeling must climb before it reaches her prompt at all
   // (feelings.ts FELT.shows, 35). Up is more hidden.
   guardedness: { charter: 35, band: 5, harder: 1, label: 'Guardedness', rising: 'keeping more to herself than she did', falling: 'letting more show than she used to' },
+  // Patience, as how much it takes to wind her up rather than as a level she
+  // rests at: a resting irritation above zero would put a permanent trace of
+  // temper under everything, which is a different character. This scales how
+  // hard a thing lands and how fast it cools (mood.ts), so a month of being
+  // wound up leaves her brittle and a calm one lets her settle.
+  fuse: { charter: 1, band: 0.25, harder: -1, label: 'Fuse', rising: 'slower to wind up than she was', falling: 'quicker to snap than she used to be' },
 };
 
 export const TRAIT_NAMES = Object.keys(CHARTER) as TraitName[];
@@ -104,9 +110,11 @@ export type MonthSignals = {
   /** Tallied live from here on; absent for months that ended before the tally existed. */
   hurtEvents?: number;
   apologies?: number;
+  /** Times he wound her past the level where it reaches her voice. */
+  woundUp?: number;
 };
 
-export type Norm = { saidPerDay: number; hangingPerDay: number; hurtEvents?: number; apologies?: number; months: number };
+export type Norm = { saidPerDay: number; hangingPerDay: number; hurtEvents?: number; apologies?: number; woundUp?: number; months: number };
 
 /** How he usually is: up to six months behind the one being scored. */
 export const NORM_MONTHS = 6;
@@ -123,6 +131,7 @@ export function normFrom(history: MonthSignals[]): Norm | null {
     hangingPerDay: mean(month => month.hangingPerDay) ?? 0,
     hurtEvents: mean(month => month.hurtEvents),
     apologies: mean(month => month.apologies),
+    woundUp: mean(month => month.woundUp),
     months: recent.length,
   };
 }
@@ -170,9 +179,25 @@ export function scoreGuardedness(now: MonthSignals, norm: Norm | null): Scored {
   return { score, because: reasons.join(', ') || 'much as usual' };
 }
 
+/**
+ * A month of being wound up leaves her shorter-fused; a quiet one lets it grow
+ * back. Against his norm like everything else, so a steady month changes
+ * nothing — only his getting worse or better at it does.
+ */
+export function scoreFuse(now: MonthSignals, norm: Norm | null): Scored {
+  if (!norm || now.woundUp === undefined || norm.woundUp === undefined) return null;
+  const wound = against(now.woundUp, norm.woundUp, 1);
+  const score = clamp1(-wound * 0.8);
+  return {
+    score,
+    because: wound > 0.08 ? 'he wound her up more often than usual' : wound < -0.08 ? 'less wound her up than usual' : 'much as usual',
+  };
+}
+
 const SCORERS: Record<TraitName, (now: MonthSignals, norm: Norm | null) => Scored> = {
   warmth: scoreWarmth,
   guardedness: scoreGuardedness,
+  fuse: scoreFuse,
 };
 
 export type GrowthStep = { month: string; trait: TraitName; from: number; to: number; score: number; because: string };
@@ -217,6 +242,11 @@ export function revertTo(traits: Traits, ledger: GrowthStep[], month: string): T
 export function traitLean(traits: Traits): { affection: number } | Record<string, never> {
   const push = Math.round((traits.warmth - CHARTER.warmth.charter) * 1000) / 1000;
   return push ? { affection: push } : {};
+}
+
+/** How hard a thing lands on her and how fast it cools (mood.ts). */
+export function fuseOf(traits: Traits): number {
+  return traits.fuse;
 }
 
 /** Guardedness is the bar a feeling has to clear before it reaches her prompt. */

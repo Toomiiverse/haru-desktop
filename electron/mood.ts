@@ -106,9 +106,9 @@ export function isLowEffort(text: string): boolean {
 // Time away counts for more than anything said: walking off and coming back
 // should find her calmer, which is what stops the state feeling like a punishment
 // that has to be argued out of.
-export function afterCooldown(level: number, minutesSinceLastMessage: number) {
+export function afterCooldown(level: number, minutesSinceLastMessage: number, fuse = 1) {
   if (minutesSinceLastMessage <= 0) return level;
-  return Math.max(0, level - Math.floor(minutesSinceLastMessage / COOLDOWN_MINUTES * IRRITATION_NOTCH));
+  return Math.max(0, level - Math.floor(minutesSinceLastMessage / COOLDOWN_MINUTES * IRRITATION_NOTCH * Math.max(0.5, fuse)));
 }
 
 // 'redo' is deliberately worth nothing rather than counting as a real message.
@@ -123,10 +123,17 @@ export function afterCooldown(level: number, minutesSinceLastMessage: number) {
  * right. Lazy or repeated questions are about him rather than about her, so
  * they land the same however pleased with herself she is.
  */
-export function nextIrritation(level: number, event: 'low-effort' | 'substantive' | 'repeat' | 'redo' | 'disliked' | 'liked', roll = Math.random(), ego = 0) {
+/**
+ * `fuse` is her patience as a trait (growth.ts): months of being wound up leave
+ * her quicker to get there and slower to come down, a calm stretch the reverse.
+ * 1 is where her charter sits.
+ */
+export function nextIrritation(level: number, event: 'low-effort' | 'substantive' | 'repeat' | 'redo' | 'disliked' | 'liked', roll = Math.random(), ego = 0, fuse = 1) {
   const delta = { 'low-effort': 22, repeat: 33, disliked: 22, redo: 0, substantive: -11, liked: -22 }[event];
   const stings = event === 'disliked' ? delta * (1 + Math.min(1, Math.max(0, ego) / EGO_MAX) * 0.6) : delta;
-  return Math.min(IRRITATION_MAX, Math.max(0, level + jittered(stings, roll)));
+  const held = Math.max(0.5, fuse);
+  const felt = stings > 0 ? stings / held : stings * held;
+  return Math.min(IRRITATION_MAX, Math.max(0, level + jittered(felt, roll)));
 }
 
 /** 0–100 since 2026-09-19 (was 0–8); the old levels are the bands, × 100/8. */

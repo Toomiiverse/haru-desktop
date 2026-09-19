@@ -69,7 +69,7 @@ import { look, photoName, readShotDescription, readVisionConfig, whileLooking, t
 import { CAPTION_MAX_CHARS, describedShots, forgetCaptions, moreThanOnePass, noteCaption, noteFailure, readCaptions, shotsNeedingALook } from './seen';
 import { breaksMute, brokeMuteNote, isMuted, muteNote, readMuteAsk, unmuteNote, weighMute, type MuteState } from './mute';
 import { LAYER, compileLog, type Candidate } from './compile';
-import { charterTraits, feelingsShowAt, growMonth, growthNote, readTraits, traitLean, traitMeter, travelled, TRAIT_NAMES, type GrowthStep, type MonthSignals, type Traits } from './growth';
+import { charterTraits, feelingsShowAt, fuseOf, growMonth, growthNote, readTraits, traitLean, traitMeter, travelled, TRAIT_NAMES, type GrowthStep, type MonthSignals, type Traits } from './growth';
 import { apologyOdds, muteLean, sway, type Sway } from './dice';
 import { NO_FEELINGS, FELT, feel, feelingsInstruction, feelingsLog, feelingsOverTime, readFeelings, readsAsBanter, readsAsEnding, readsAsScare, type FeelingEvent, type Feelings } from './feelings';
 import { addLeans, bruiseFrom, eventSize, fadeBruise, howHisReturnLands, rollTemperament, stepWander, temperamentLean, temperamentLine, temperamentWord, type Temperament, type TemperamentKind } from './temperament';
@@ -4725,17 +4725,22 @@ function getMonthHistory(): MonthSignals[] {
 
 /** Hurt she was left holding, and what he put right: tallied live, because no
  *  history of either is kept and the month needs both to judge guardedness. */
-type MonthTally = { month: string; hurtEvents: number; apologies: number };
+type MonthTally = { month: string; hurtEvents: number; apologies: number; woundUp: number };
 
 function getMonthTally(): MonthTally {
   const month = currentChatDayKey().slice(0, 7);
   const saved = store.get('her.monthTally') as MonthTally | undefined;
-  return saved && saved.month === month ? saved : { month, hurtEvents: 0, apologies: 0 };
+  return saved && saved.month === month ? { ...saved, woundUp: saved.woundUp ?? 0 } : { month, hurtEvents: 0, apologies: 0, woundUp: 0 };
 }
 
-function tallyMonth(what: 'hurt' | 'apology') {
+function tallyMonth(what: 'hurt' | 'apology' | 'wound-up') {
   const tally = getMonthTally();
-  store.set('her.monthTally', { ...tally, ...(what === 'hurt' ? { hurtEvents: tally.hurtEvents + 1 } : { apologies: tally.apologies + 1 }) });
+  store.set('her.monthTally', {
+    ...tally,
+    ...(what === 'hurt' ? { hurtEvents: tally.hurtEvents + 1 }
+      : what === 'apology' ? { apologies: tally.apologies + 1 }
+      : { woundUp: tally.woundUp + 1 }),
+  });
 }
 
 /**
@@ -4765,7 +4770,7 @@ function monthSignals(month: string, tally?: MonthTally): MonthSignals | null {
     saidPerDay: said / days.length,
     hangingPerDay: hanging / days.length,
     silentNights: silent,
-    ...(tally && tally.month === month ? { hurtEvents: tally.hurtEvents, apologies: tally.apologies } : {}),
+    ...(tally && tally.month === month ? { hurtEvents: tally.hurtEvents, apologies: tally.apologies, woundUp: tally.woundUp } : {}),
   };
 }
 
@@ -4918,7 +4923,7 @@ function muteTurn(latest: string): string {
     const felt = getFeelings();
     const decision = weighMute(ask, { irritation: mood.irritation, grudge: mood.grudge ?? 0, vitals, hurt: felt.hurt, missing: felt.missing, hemmed: felt.hemmed, lean: muteLean(getTemperament()?.kind) });
     // An order with no reason is rude whichever way she goes on it.
-    if (!ask.reason) { setMood({ ...mood, irritation: nextIrritation(mood.irritation, 'disliked', Math.random(), mood.ego) }); nudgeVitals('criticised'); feelNow('shushed'); }
+    if (!ask.reason) { setMood({ ...mood, irritation: nextIrritation(mood.irritation, 'disliked', Math.random(), mood.ego, fuseOf(getTraits())) }); nudgeVitals('criticised'); feelNow('shushed'); }
     if (decision.agreed) store.set('mute', { since: now, until: now + decision.minutes * 60_000, reason: ask.reason?.said || 'he asked' } satisfies MuteState);
     else { store.delete('mute' as never); feelNow('stood-ground'); }
     console.log(`[mute] asked to go quiet (${ask.reason ? ask.reason.what : 'no reason'}${ask.polite ? ', politely' : ''}) — ${decision.agreed ? `yes, for about ${decision.minutes} min` : 'no'}: ${decision.why} (score ${decision.score}, irritation ${mood.irritation}, grudge ${mood.grudge ?? 0})`);
@@ -4946,7 +4951,8 @@ function setMood(mood: Mood) {
 function advanceMood(latest: string, history: { role?: string; content?: string }[]) {
   const mood = getMood();
   const minutesAway = mood.lastMessageAt ? (Date.now() - new Date(mood.lastMessageAt).getTime()) / 60_000 : 0;
-  let irritation = afterCooldown(mood.irritation, minutesAway);
+  const fuse = fuseOf(getTraits());
+  let irritation = afterCooldown(mood.irritation, minutesAway, fuse);
   const ego = afterEgoCooldown(mood.ego, minutesAway);
   const at = new Date().toISOString();
 
@@ -4990,10 +4996,10 @@ function advanceMood(latest: string, history: { role?: string; content?: string 
     : repeated ? 'repeat'
     : isLowEffort(latest) ? 'low-effort'
     : 'substantive';
-  irritation = nextIrritation(irritation, event);
+  irritation = nextIrritation(irritation, event, Math.random(), 0, fuse);
   // Shouting stings the way a thumbs-down does; an apology buys some of it back.
-  if (shout === 'shouted') irritation = nextIrritation(irritation, 'disliked', Math.random(), ego);
-  if (shout === 'forgiven') irritation = nextIrritation(irritation, 'liked');
+  if (shout === 'shouted') irritation = nextIrritation(irritation, 'disliked', Math.random(), ego, fuse);
+  if (shout === 'forgiven') irritation = nextIrritation(irritation, 'liked', Math.random(), 0, fuse);
   if (shout === 'forgiven') { nudgeVitals('soothed'); feelNow('apology'); tallyMonth('apology'); }
   if (shout === 'shouted') { feelNow('shouted'); tallyMonth('hurt'); }
   feelNow(event === 'substantive' ? 'message' : 'low-effort');
@@ -5014,6 +5020,8 @@ function advanceMood(latest: string, history: { role?: string; content?: string 
   // An apology she took pays a little of the grudge back too, once a day.
   const paid = shout === 'forgiven' && mood.apologyDay !== today && (mood.grudge ?? 0) > 0;
   if (paid) console.log(`[grudge] an apology taken — grudge ${mood.grudge ?? 0} -> ${grudgeAfterApology(mood.grudge ?? 0)}`);
+  // How often he winds her up is what months of it do to her fuse (growth.ts).
+  if (irritation >= IRRITATION.voiced && mood.irritation < IRRITATION.voiced) tallyMonth('wound-up');
   setMood({ irritation, ego, lastMessageAt: at, goodnightDay, awaitingApology, apologyRefused: shout === 'unmoved' ? true : shout === 'forgiven' ? false : mood.apologyRefused, ...(paid ? { grudge: grudgeAfterApology(mood.grudge ?? 0), apologyDay: today } : {}) });
   return { irritation, ego, goodnight, shout };
 }
@@ -13023,7 +13031,7 @@ function takeThumb(reaction: 'up' | 'down'): { mood: Mood; comeback: boolean } {
   const event = reaction === 'down' ? 'disliked' : 'liked';
   // Approval both settles her and swells her head; disapproval does the
   // reverse on both counts.
-  const next = { ...mood, irritation: nextIrritation(mood.irritation, event, Math.random(), mood.ego), ego: nextEgo(mood.ego, event) };
+  const next = { ...mood, irritation: nextIrritation(mood.irritation, event, Math.random(), mood.ego, fuseOf(getTraits())), ego: nextEgo(mood.ego, event) };
   setMood(next);
   nudgeVitals(reaction === 'down' ? 'criticised' : 'praised');
   feelNow(reaction === 'down' ? 'disliked' : 'liked');
