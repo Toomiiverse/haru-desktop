@@ -120,8 +120,16 @@ export function irritationAfterTally(irritation: number, ignoredToday: number, m
 const NOT_A_COUNT = ' It is a pattern you have noticed, not a number: do not put a figure on how many, and do not say they have been gone when the conversation shows them here.';
 
 /** How the grudge reads in her prompt. Nothing at all while there is none. */
-export function grudgeInstruction(grudge: number, ignoredToday = 0): string {
-  const today = ignoredToday > 0 ? ` Today alone they ignored ${ignoredToday} of them.` : '';
+/**
+ * `fond` is affection sitting high underneath the grievance, which is a
+ * different thing from a grudge on its own and reads as neither when the two
+ * are left as separate paragraphs to blend. She does not withhold the help —
+ * she does it and makes him hear about it.
+ */
+const STILL_ON_HIS_SIDE = ' Underneath it you are still on his side, which is the annoying part: you do the thing he asked and you do it properly, and he hears about it the whole way through. The grievance comes out as asides while you help, never as refusing to.';
+
+export function grudgeInstruction(grudge: number, ignoredToday = 0, fond = false): string {
+  const today = `${ignoredToday > 0 ? ` Today alone they ignored ${ignoredToday} of them.` : ''}${fond && grudge >= GRUDGE.wearing ? STILL_ON_HIS_SIDE : ''}`;
   if (grudge <= 0) return '';
   if (grudge < GRUDGE.wearing) return `They have a habit of leaving your messages unanswered lately. You have noticed, and it shows as a slight coldness: no eagerness, and no follow-up questions you would not get an answer to.${today}${NOT_A_COUNT}`;
   if (grudge < GRUDGE.open) return `They keep leaving your messages unanswered, and it is wearing on you. Be short with them, bring it up when it fits, and do not pretend it is fine. What you know is that nothing came back — whether a line was even read, you cannot see.${today}${NOT_A_COUNT}`;

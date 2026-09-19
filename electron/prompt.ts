@@ -215,6 +215,8 @@ export type PromptState = {
   feelings?: string;
   /** What months of how things have gone have made of her, once it is worth saying (growth.ts). */
   grown?: string;
+  /** Affection sitting high under a grudge, which reads as neither when the two are left as separate paragraphs (grudge.ts). */
+  fond?: boolean;
   goodnight: 'said' | 'after' | 'none';
   shout: ShoutState;
   latestMessage: string;
@@ -445,7 +447,7 @@ function systemBlocks(state: PromptState, away = false): SystemBlock[] {
     { stable: false, text: state.grown ?? '' },
     { stable: false, text: state.feelings ?? '' },
     { stable: false, text: moodInstruction(state.irritation) },
-    { stable: false, text: grudgeInstruction(state.grudge ?? 0, state.ignoredToday ?? 0) },
+    { stable: false, text: grudgeInstruction(state.grudge ?? 0, state.ignoredToday ?? 0, state.fond) },
     { stable: false, text: egoInstruction(state.ego) },
     { stable: false, text: leverageInstruction(state.ego) },
     // Immediately after the three lines that cause it, and for the same reason

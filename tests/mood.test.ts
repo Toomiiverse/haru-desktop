@@ -214,3 +214,14 @@ test('a phrase she has used in three of her last four replies is named, whatever
   assert.equal(repeatedPhrase(['I do not want to.', 'You are not going to.', 'Do not do that.', 'I am not on it.']), '', 'filler runs are not phrases');
 });
 
+
+test('being told she is wrong lands harder when she is pleased with herself', () => {
+  // EGO + CRITICISM. An ego that has been fed does not take correction well.
+  const plain = nextIrritation(0, 'disliked', 0.5, 0);
+  const proud = nextIrritation(0, 'disliked', 0.5, EGO.insufferable);
+  assert.ok(proud > plain * 1.3, `a thumbs-down stings more at a fed ego (${plain} -> ${proud})`);
+  assert.equal(nextIrritation(0, 'disliked', 0.5, 100), 35);
+  // And only being told she is wrong: a lazy question is about him, not her.
+  assert.equal(nextIrritation(0, 'low-effort', 0.5, 0), nextIrritation(0, 'low-effort', 0.5, 100));
+  assert.equal(nextIrritation(50, 'liked', 0.5, 100), nextIrritation(50, 'liked', 0.5, 0));
+});

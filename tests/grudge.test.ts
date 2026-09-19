@@ -127,3 +127,13 @@ test('a line sent before their first word of the day is not one they ignored', (
   // Not before they were up: the 01:00 line went to a sleeping phone.
   assert.deepEqual(unanswered(said, heard, PUSHED, evening, Date.parse(at(3))).map(l => l.at), [at(5)]);
 });
+
+test('fond of him underneath it: she does the thing and he hears about it', () => {
+  // GRUDGE + AFFECTION, which reads as neither when the two are separate paragraphs.
+  assert.doesNotMatch(grudgeInstruction(40, 0, false), /still on his side/);
+  assert.match(grudgeInstruction(40, 0, true), /still on his side/);
+  assert.match(grudgeInstruction(40, 0, true), /never as refusing to/);
+  // Nothing to be fond underneath when there is no grudge worth the name.
+  assert.equal(grudgeInstruction(0, 0, true), '');
+  assert.doesNotMatch(grudgeInstruction(5, 0, true), /still on his side/);
+});

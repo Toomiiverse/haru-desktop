@@ -115,9 +115,18 @@ export function afterCooldown(level: number, minutesSinceLastMessage: number) {
 // Being told to have another go should not wind her up — she earned it — but it
 // should not calm her down either, because that would hand the user a point of
 // patience every time she got something wrong.
-export function nextIrritation(level: number, event: 'low-effort' | 'substantive' | 'repeat' | 'redo' | 'disliked' | 'liked', roll = Math.random()) {
+/**
+ * `ego` amplifies being told she is wrong, and nothing else.
+ *
+ * An ego that has been fed does not take correction well: the same thumbs-down
+ * costs more patience when she has spent the afternoon being told she was
+ * right. Lazy or repeated questions are about him rather than about her, so
+ * they land the same however pleased with herself she is.
+ */
+export function nextIrritation(level: number, event: 'low-effort' | 'substantive' | 'repeat' | 'redo' | 'disliked' | 'liked', roll = Math.random(), ego = 0) {
   const delta = { 'low-effort': 22, repeat: 33, disliked: 22, redo: 0, substantive: -11, liked: -22 }[event];
-  return Math.min(IRRITATION_MAX, Math.max(0, level + jittered(delta, roll)));
+  const stings = event === 'disliked' ? delta * (1 + Math.min(1, Math.max(0, ego) / EGO_MAX) * 0.6) : delta;
+  return Math.min(IRRITATION_MAX, Math.max(0, level + jittered(stings, roll)));
 }
 
 /** 0–100 since 2026-09-19 (was 0–8); the old levels are the bands, × 100/8. */

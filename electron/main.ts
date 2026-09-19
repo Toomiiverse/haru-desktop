@@ -4853,7 +4853,7 @@ function muteTurn(latest: string): string {
     const felt = getFeelings();
     const decision = weighMute(ask, { irritation: mood.irritation, grudge: mood.grudge ?? 0, vitals, hurt: felt.hurt, missing: felt.missing, lean: muteLean(getTemperament()?.kind) });
     // An order with no reason is rude whichever way she goes on it.
-    if (!ask.reason) { setMood({ ...mood, irritation: nextIrritation(mood.irritation, 'disliked') }); nudgeVitals('criticised'); feelNow('shushed'); }
+    if (!ask.reason) { setMood({ ...mood, irritation: nextIrritation(mood.irritation, 'disliked', Math.random(), mood.ego) }); nudgeVitals('criticised'); feelNow('shushed'); }
     if (decision.agreed) store.set('mute', { since: now, until: now + decision.minutes * 60_000, reason: ask.reason?.said || 'he asked' } satisfies MuteState);
     else store.delete('mute' as never);
     console.log(`[mute] asked to go quiet (${ask.reason ? ask.reason.what : 'no reason'}${ask.polite ? ', politely' : ''}) — ${decision.agreed ? `yes, for about ${decision.minutes} min` : 'no'}: ${decision.why} (score ${decision.score}, irritation ${mood.irritation}, grudge ${mood.grudge ?? 0})`);
@@ -4927,7 +4927,7 @@ function advanceMood(latest: string, history: { role?: string; content?: string 
     : 'substantive';
   irritation = nextIrritation(irritation, event);
   // Shouting stings the way a thumbs-down does; an apology buys some of it back.
-  if (shout === 'shouted') irritation = nextIrritation(irritation, 'disliked');
+  if (shout === 'shouted') irritation = nextIrritation(irritation, 'disliked', Math.random(), ego);
   if (shout === 'forgiven') irritation = nextIrritation(irritation, 'liked');
   if (shout === 'forgiven') { nudgeVitals('soothed'); feelNow('apology'); tallyMonth('apology'); }
   if (shout === 'shouted') { feelNow('shouted'); tallyMonth('hurt'); }
@@ -7634,8 +7634,9 @@ const promptState = {
     movedJustNow,
     vitals,
     temperament: temperamentLine(getTemperament()),
-    feelings: feelingsInstruction(getFeelings(), getMood().irritation, getTemperament()?.kind, feelingsShowAt(getTraits())),
+    feelings: feelingsInstruction(getFeelings(), getMood().irritation, getTemperament()?.kind, feelingsShowAt(getTraits()), getMood().ego),
     grown: growthNote(getTraits()),
+    fond: vitals.affection >= 0.72,
     pushback: store.get('pushback') as Pushback | undefined,
     grudge: getMood().grudge ?? 0,
     ignoredToday: ignoredTodayNow(),
@@ -12948,7 +12949,7 @@ function takeThumb(reaction: 'up' | 'down'): { mood: Mood; comeback: boolean } {
   const event = reaction === 'down' ? 'disliked' : 'liked';
   // Approval both settles her and swells her head; disapproval does the
   // reverse on both counts.
-  const next = { ...mood, irritation: nextIrritation(mood.irritation, event), ego: nextEgo(mood.ego, event) };
+  const next = { ...mood, irritation: nextIrritation(mood.irritation, event, Math.random(), mood.ego), ego: nextEgo(mood.ego, event) };
   setMood(next);
   nudgeVitals(reaction === 'down' ? 'criticised' : 'praised');
   feelNow(reaction === 'down' ? 'disliked' : 'liked');

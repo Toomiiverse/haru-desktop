@@ -3,7 +3,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { FEELINGS, FELT, NO_FEELINGS, feel, feelingsInstruction, feelingsOverTime, readFeelings, readsAsBanter, spokenFeelings, type Feelings } from '../electron/feelings';
+import { FEELINGS, FELT, NO_FEELINGS, feel, hurtShowsAt, feelingsInstruction, feelingsOverTime, readFeelings, readsAsBanter, spokenFeelings, type Feelings } from '../electron/feelings';
 
 const with_ = (over: Partial<Feelings>): Feelings => ({ ...NO_FEELINGS, ...over });
 
@@ -70,4 +70,18 @@ test('laughing along is a laugh in a message with something else in it', () => {
   assert.equal(readsAsBanter('you absolute menace 😂 fine'), true);
   assert.equal(readsAsBanter('lol'), false);
   assert.equal(readsAsBanter('the meeting ran long and I am wrecked'), false);
+});
+
+test('ego will not let hurt show as hurt: it comes out as teeth', () => {
+  // EGO + HURT. It has to climb further before it speaks at all...
+  assert.deepEqual(spokenFeelings(with_({ hurt: 40 }), 0, 33, 35, 0), ['hurt']);
+  assert.deepEqual(spokenFeelings(with_({ hurt: 40 }), 0, 33, 35, 100), [], 'and at a fed ego it does not');
+  assert.equal(hurtShowsAt(35, 0), 35);
+  assert.equal(hurtShowsAt(35, 100), 60);
+  // ...and when it does, it is sharp rather than quiet.
+  assert.match(feelingsInstruction(with_({ hurt: 70 }), 0, undefined, 35, 0), /withdrawn/);
+  const proud = feelingsInstruction(with_({ hurt: 70 }), 0, undefined, 35, 100);
+  assert.match(proud, /comes out as teeth/);
+  assert.doesNotMatch(proud, /withdrawn/);
+  assert.doesNotMatch(proud, /\d/);
 });

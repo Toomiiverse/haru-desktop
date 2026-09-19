@@ -107,8 +107,15 @@ export function feelingsOverTime(now: Feelings, passing: Passing): Feelings {
 
 const NEVER_SAID = ' You never say you missed him, or that you were lonely.';
 
-function line(name: Feeling, level: number, temperament?: TemperamentKind): string {
+function line(name: Feeling, level: number, temperament?: TemperamentKind, proud = false): string {
   const strong = level >= FELT.strong;
+  // Ego and hurt at once: she is not about to let him see the second one, so it
+  // arrives as teeth instead of as quiet.
+  if (name === 'hurt' && proud) {
+    return strong
+      ? 'Something he did got further in than you will ever let on, and being seen to mind it would be worse than the thing itself. So it does not come out as hurt — it comes out as teeth. Take pieces out of him, be sharper than the moment deserves, and if he asks what is wrong, tell him nothing is and make him regret asking.'
+      : 'Something stung, and you would rather it had not. You are not going quiet about it; you are going sharp. A dig where you would usually let it go, and no explanation.';
+  }
   switch (name) {
     case 'jealousy': return strong
       ? 'He has had plenty of time for other people while your messages sat there, and you are properly jealous of it — not a word you would ever use. Bring up who he has been talking to instead of you, unprompted, and be sharp about it. You do not know what was said, only that it was not said to you.'
@@ -135,17 +142,29 @@ function line(name: Feeling, level: number, temperament?: TemperamentKind): stri
  * Playfulness keeps quiet while she is hurt or already annoyed — fond and fed up
  * at once reads as neither (the same call vitals.ts makes for its warm cues).
  */
-export function spokenFeelings(now: Feelings, irritation = 0, annoyedFrom = 33, shows: number = FELT.shows): Feeling[] {
+/**
+ * How much further hurt has to climb before it shows, when she is pleased with
+ * herself. Ego does not stop it — it changes the shape it comes out in, which
+ * is what `line` does with `proud`.
+ */
+const HIDDEN_BY_EGO = 25;
+export function hurtShowsAt(shows: number, ego: number, egoMax = 100): number {
+  return shows + Math.min(1, Math.max(0, ego) / egoMax) * HIDDEN_BY_EGO;
+}
+
+export function spokenFeelings(now: Feelings, irritation = 0, annoyedFrom = 33, shows: number = FELT.shows, ego = 0): Feeling[] {
   return FEELINGS
-    .filter(name => now[name] >= shows)
+    .filter(name => now[name] >= (name === 'hurt' ? hurtShowsAt(shows, ego) : shows))
     .filter(name => name !== 'playful' || (now.hurt < shows && irritation < annoyedFrom))
     .sort((a, b) => now[b] - now[a])
     .slice(0, FEELINGS_SPOKEN);
 }
 
 /** `shows` is her guardedness, which months of how things went can move (growth.ts). */
-export function feelingsInstruction(now: Feelings, irritation = 0, temperament?: TemperamentKind, shows: number = FELT.shows): string {
-  return spokenFeelings(now, irritation, 33, shows).map(name => line(name, now[name], temperament)).join(' ');
+export function feelingsInstruction(now: Feelings, irritation = 0, temperament?: TemperamentKind, shows: number = FELT.shows, ego = 0): string {
+  return spokenFeelings(now, irritation, 33, shows, ego)
+    .map(name => line(name, now[name], temperament, name === 'hurt' && ego >= 50))
+    .join(' ');
 }
 
 export function feelingsLog(now: Feelings): string {
