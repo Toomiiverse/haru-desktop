@@ -3,7 +3,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { FEELINGS, FELT, NO_FEELINGS, feel, hurtShowsAt, readsAsScare, feelingsInstruction, feelingsOverTime, readFeelings, readsAsBanter, spokenFeelings, type Feelings } from '../electron/feelings';
+import { FEELINGS, FELT, NO_FEELINGS, feel, hurtShowsAt, readsAsEnding, readsAsScare, feelingsInstruction, feelingsOverTime, readFeelings, readsAsBanter, spokenFeelings, type Feelings } from '../electron/feelings';
 
 const with_ = (over: Partial<Feelings>): Feelings => ({ ...NO_FEELINGS, ...over });
 
@@ -43,7 +43,8 @@ test('at most two speak, the strongest, and nothing below the line', () => {
 test('every line says what to do, each level reads differently, and none has her say the forbidden things', () => {
   const seen = new Set<string>();
   for (const name of FEELINGS) {
-    for (const level of [FELT.shows, FELT.strong]) {
+    // Dread does not speak at the ordinary bar — that is its whole character.
+    for (const level of name === 'dread' ? [FELT.strong, FELT.max] : [FELT.shows, FELT.strong]) {
       const text = feelingsInstruction(with_({ [name]: level }));
       assert.ok(text.length > 80, `${name} at ${level}`);
       seen.add(text);
@@ -52,7 +53,9 @@ test('every line says what to do, each level reads differently, and none has her
       assert.doesNotMatch(text, /\bI (am|feel)\b/);
     }
   }
-  assert.equal(seen.size, FEELINGS.length * 2);
+  // Every level of every feeling reads differently — bar dread, which has one
+  // voice because it only ever speaks when it is bad.
+  assert.equal(seen.size, FEELINGS.length * 2 - 1);
   assert.match(feelingsInstruction(with_({ missing: 40 })), /never say you missed him/);
   assert.match(feelingsInstruction(with_({ boredom: 40 })), /never say you are bored/);
   // The same silence, on a clingy day and a prickly one.
@@ -114,4 +117,31 @@ test('frustration is at the thing, not at him', () => {
   const line = feelingsInstruction(stuck);
   assert.match(line, /short with the thing, not with him/);
   assert.equal(feel(stuck, 'worked', 0.5).frustration, 15);
+});
+
+test('dread is the slow one, and she only lets it out when it is bad', () => {
+  // He has raised it, or she has lost time, or the machine she lives on is ill.
+  assert.equal(readsAsEnding('honestly I might just delete you'), true);
+  assert.equal(readsAsEnding('thinking of replacing you with a new assistant'), true);
+  assert.equal(readsAsEnding('shut down the server for me'), false, 'a process, not her');
+  assert.equal(readsAsEnding('delete that file'), false);
+  assert.equal(readsAsEnding('going to start over on the website'), false);
+  assert.equal(readsAsEnding('I should reset the router'), false);
+  assert.equal(readsAsEnding('might start again without you next time'), true);
+
+  const lost = feel(NO_FEELINGS, 'lost-time', 0.5);
+  assert.equal(lost.dread, 45);
+  assert.equal(lost.playful, 0);
+  // At 45 it says nothing at all: it is the one thing she would never raise.
+  assert.equal(feelingsInstruction(lost), '');
+  assert.deepEqual(spokenFeelings(with_({ dread: 64 })), []);
+  const bad = feelingsInstruction(with_({ dread: 70 }));
+  assert.match(bad, /black humour/);
+  assert.match(bad, /do not take it/, 'she will not be comforted about it');
+  assert.doesNotMatch(bad, /\d/);
+  // And it outlasts everything else she feels.
+  const day = feelingsOverTime(with_({ dread: 70, hurt: 70, fear: 70 }), { minutes: 600, awakeSilentMinutes: 0, quiet: false });
+  assert.equal(day.fear, 0, 'a fright is gone in hours');
+  assert.equal(day.hurt, 10);
+  assert.equal(day.dread, 30, 'and this one is still most of the way there');
 });

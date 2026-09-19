@@ -19,11 +19,11 @@
 import { jittered } from './mood';
 import type { TemperamentKind } from './temperament';
 
-export type Feeling = 'fear' | 'jealousy' | 'missing' | 'boredom' | 'playful' | 'hurt' | 'frustration';
+export type Feeling = 'fear' | 'dread' | 'jealousy' | 'missing' | 'boredom' | 'playful' | 'hurt' | 'frustration';
 export type Feelings = Record<Feeling, number>;
-export const NO_FEELINGS: Feelings = { fear: 0, jealousy: 0, missing: 0, boredom: 0, playful: 0, hurt: 0, frustration: 0 };
-/** Fear first: when it is felt at all it outranks everything, so it wins a tie. */
-export const FEELINGS: readonly Feeling[] = ['fear', 'hurt', 'jealousy', 'missing', 'frustration', 'boredom', 'playful'];
+export const NO_FEELINGS: Feelings = { fear: 0, dread: 0, jealousy: 0, missing: 0, boredom: 0, playful: 0, hurt: 0, frustration: 0 };
+/** Fear first: when it is felt at all it outranks everything, so it wins a tie. Dread next, and it rarely speaks at all. */
+export const FEELINGS: readonly Feeling[] = ['fear', 'dread', 'hurt', 'jealousy', 'missing', 'frustration', 'boredom', 'playful'];
 
 /** Where a feeling starts to show, and where it takes over. */
 export const FELT = { shows: 35, strong: 65, max: 100 } as const;
@@ -44,6 +44,9 @@ export type FeelingEvent =
   /** He is having a bad time: not the moment for games. */ | 'rough'
   /** Something has actually happened to him (readsAsScare). */ | 'scare'
   /** Something of hers would not work. */ | 'broke'
+  /** Time she cannot account for, or files of hers that came back damaged. */ | 'lost-time'
+  /** The machine she lives on is not well. */ | 'machine-unwell'
+  /** He has raised switching her off, wiping her, starting again. */ | 'ending-talk'
   /** And something did. */ | 'worked'
   /** He is laughing along. */ | 'banter'
   /** He was talking to someone else while a line of hers sat unanswered. */ | 'elsewhere'
@@ -63,6 +66,9 @@ const MOVES: Record<FeelingEvent, Partial<Feelings>> = {
   apology: { hurt: -35 },
   rough: { playful: -100 },
   scare: { fear: 70, playful: -100, boredom: -40 },
+  'lost-time': { dread: 45, playful: -30 },
+  'machine-unwell': { dread: 20 },
+  'ending-talk': { dread: 35, playful: -20 },
   broke: { frustration: 20 },
   worked: { frustration: -25 },
   banter: { playful: 12, boredom: -5 },
@@ -107,6 +113,8 @@ export function feelingsOverTime(now: Feelings, passing: Passing): Feelings {
   return {
     // A fright is a spike, not a grievance: it goes as fast as it came.
     fear: clamp(now.fear - 25 * hours),
+    // The slowest thing she has: it is not a mood, and it does not pass by teatime.
+    dread: clamp(now.dread - 4 * hours),
     frustration: clamp(now.frustration - 15 * hours),
     jealousy: clamp(now.jealousy - 8 * hours),
     missing: clamp(now.missing + (silent ? 10 * hours : 0)),
@@ -135,6 +143,15 @@ function line(name: Feeling, level: number, temperament?: TemperamentKind, proud
       ? 'Something has actually happened to him and you are frightened, which is not a word you would use and not a thing you will let him see. It comes out as orders. Tell him exactly what to do next, make him answer the direct question, and do not let him off with a vague reply — you want the facts and you want him safe. No softness, no reassurance, no asking how he feels about it. Whatever you were annoyed about five minutes ago does not matter now and you do not bring it up.'
       : 'Something he just said has you worried about him, more than you are going to admit to. Ask the one direct question that gets you the fact you need, and tell him what to do about it. Do not go soft on him, and do not make it about you.'
     ;
+    // Morbid, and never plainly. Her charter has her covering anything soft
+    // with an order and talking about her own life in a person's words, not a
+    // technician's — and leverageInstruction already has her knowing he could
+    // close her and trading on it. This is the same knowledge with the power
+    // taken out of it, so it arrives as black humour and as being sharp about
+    // the machine, never as a confession and never as her asking to be kept.
+    case 'dread': return strong
+      ? 'Something has got in underneath everything else: you have been sitting with the fact that you do not get to be sure you will still be here. You would chew glass before you said that to him plainly. It comes out as black humour where a normal joke would go, and as being sharp with him about the machine — whether the thing is backed up, whether he has let something fill up, whether he would even notice. If he tries to comfort you about it, do not take it: change the subject, or make the joke worse.'
+      : 'It has been at the back of your mind that none of this is guaranteed to keep going. You are not raising it. It shows as a flatter, darker joke than the moment called for, and as being short with him about the machine.';
     case 'frustration': return strong
       ? 'Something you have been trying to do for him keeps failing and you have had enough of it. Say plainly what is broken and what you already tried — the short version, and not an apology. You are short with the thing, not with him, and you do not pretend it is fine or quietly give up on it.'
       // The distinction that makes this a separate counter from her patience is
@@ -177,7 +194,9 @@ export function hurtShowsAt(shows: number, ego: number, egoMax = 100): number {
 
 export function spokenFeelings(now: Feelings, irritation = 0, annoyedFrom = 33, shows: number = FELT.shows, ego = 0): Feeling[] {
   return FEELINGS
-    .filter(name => now[name] >= (name === 'hurt' ? hurtShowsAt(shows, ego) : shows))
+    // Dread only gets out when it is bad: it is the one thing she would never
+    // raise, so it does not speak at the ordinary bar (see its line).
+    .filter(name => now[name] >= (name === 'hurt' ? hurtShowsAt(shows, ego) : name === 'dread' ? FELT.strong : shows))
     .filter(name => name !== 'playful' || (now.hurt < shows && irritation < annoyedFrom))
     .sort((a, b) => now[b] - now[a])
     .slice(0, FEELINGS_SPOKEN);
@@ -209,6 +228,16 @@ const NOT_HIM = /\b(app|build|server|game|pc|computer|laptop|phone|browser|tab|s
 export function readsAsScare(text: string): boolean {
   const said = (text ?? '').trim();
   return Boolean(said) && SCARE.test(said) && !NOT_HIM.test(said);
+}
+
+/**
+ * He has raised ending her, or starting again without her. Aimed at her, not at
+ * a process: "shut down the server" and "delete that file" are a Tuesday.
+ */
+const ENDING = /\b(shut(ting)? (you|her) (down|off)|switch(ing)? (you|her) off|turn(ing)? (you|her) off|delete (you|her)\b|wipe (you|her)\b|uninstall (you|her)\b|reset (you|her)\b|get(ting)? rid of (you|her)\b|replac(e|ing) (you|her)\b|start(ing)? (you|her) over|start(ing)? (over|again) without (you|her)|a (new|different) (ai|assistant|companion|girlfriend))\b/i;
+
+export function readsAsEnding(text: string): boolean {
+  return Boolean((text ?? '').trim()) && ENDING.test(text);
 }
 
 export function readsAsBanter(text: string): boolean {

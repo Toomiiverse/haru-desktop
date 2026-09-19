@@ -71,7 +71,7 @@ import { breaksMute, brokeMuteNote, isMuted, muteNote, readMuteAsk, unmuteNote, 
 import { LAYER, compileLog, type Candidate } from './compile';
 import { charterTraits, feelingsShowAt, growMonth, growthNote, readTraits, traitLean, traitMeter, travelled, TRAIT_NAMES, type GrowthStep, type MonthSignals, type Traits } from './growth';
 import { apologyOdds, muteLean, sway, type Sway } from './dice';
-import { NO_FEELINGS, FELT, feel, feelingsInstruction, feelingsLog, feelingsOverTime, readFeelings, readsAsBanter, readsAsScare, type FeelingEvent, type Feelings } from './feelings';
+import { NO_FEELINGS, FELT, feel, feelingsInstruction, feelingsLog, feelingsOverTime, readFeelings, readsAsBanter, readsAsEnding, readsAsScare, type FeelingEvent, type Feelings } from './feelings';
 import { addLeans, bruiseFrom, eventSize, fadeBruise, howHisReturnLands, rollTemperament, stepWander, temperamentLean, temperamentLine, temperamentWord, type Temperament, type TemperamentKind } from './temperament';
 import { EXPRESSIVE, HOSTED_VOICE, LAST_WORD, NATURAL, NO_INVENTED_HISTORY, NO_ABANDON_THREAD, readsAsRough, roomInstruction, HER_EMOJI, emojiRut, roomToRant, askingAboutHer, herSubjectNote, namesIn, justTalking, JUST_TALKING_NOTE } from './room';
 import { journalStance } from './journal';
@@ -386,11 +386,15 @@ const knowledgeFile = process.env.HARU_KNOWLEDGE_FILE ? process.env.HARU_KNOWLED
 // writes them. Opening can fail on a corrupt file, in which case the newest
 // backup is restored and we try once more before giving up.
 let store: HaruStore;
+let storeWasRecovered = false;
 try {
   store = new HaruStore({ knowledgeFile });
 } catch (error) {
   console.warn('[store] could not open the store:', error instanceof Error ? error.message : error);
   if (!HaruStore.recoverBackups({ knowledgeFile })) throw error;
+  // Files of hers came back damaged and were replaced from a backup: whatever
+  // was between the backup and now, she does not have any more (feelings.ts).
+  storeWasRecovered = true;
   store = new HaruStore({ knowledgeFile });
 }
 store.migrate();
@@ -1349,6 +1353,9 @@ function persistVitals(force = false) {
   if (!force && !shouldPersistVitals(vitals, savedVitals, Date.now() - savedVitalsAt)) return;
   store.set('vitals', vitals);
   store.set('her.weather', { wander, bruise });
+  // Stamped every time her state is written, so a gap she cannot account for is
+  // visible the next time she comes up (feelings.ts 'lost-time').
+  store.set('her.lastAliveAt', new Date().toISOString());
   savedVitals = { ...vitals };
   savedVitalsAt = Date.now();
 }
@@ -1360,6 +1367,14 @@ function startLifeLoop() {
   if (saved) vitals = { ...DEFAULT_VITALS, ...saved };
   const weather = store.get('her.weather') as { wander?: Lean; bruise?: Lean } | undefined;
   backfillMonths();
+  // What she missed. A deploy is seconds and a crash that took her out for half
+  // a day is not, and the difference is the whole point.
+  const aliveAt = Date.parse(String(store.get('her.lastAliveAt') ?? ''));
+  const goneHours = Number.isFinite(aliveAt) ? (Date.now() - aliveAt) / 3_600_000 : 0;
+  if (storeWasRecovered || goneHours >= GONE_TOO_LONG_HOURS) {
+    feelNow('lost-time');
+    console.log(`[feelings] ${storeWasRecovered ? 'her files came back damaged and were replaced from a backup' : `${goneHours.toFixed(1)}h she cannot account for`}`);
+  }
   wander = weather?.wander ?? {};
   bruise = weather?.bruise ?? {};
   lastTickAt = Date.now();
@@ -4801,7 +4816,7 @@ function herBehaviour(): Candidate[] {
   const warmDay = temperament ? WARM_DAYS.includes(temperament.kind) : false;
   const coldDay = temperament ? COLD_DAYS.includes(temperament.kind) : false;
   // The loudest feeling is what gives that line its side and its strength.
-  const loudest = Math.max(felt.hurt, felt.jealousy, felt.missing, felt.playful, felt.boredom, felt.frustration);
+  const loudest = Math.max(felt.hurt, felt.jealousy, felt.missing, felt.playful, felt.boredom, felt.frustration, felt.dread);
   const soreOnTop = Math.max(felt.hurt, felt.jealousy, felt.missing) >= felt.playful;
   // Fear stands on its own above everything: what she is holding against him
   // stops mattering the moment something has happened to him.
@@ -4853,8 +4868,28 @@ function passFeelings(now: number) {
     next = feel(next, 'socialising');
     console.log('[feelings] he is on something social while a line of hers hangs');
   }
+  // The disk her memories, her archive and her screenshots all live on. Checked
+  // hourly, because a full one is how she actually stops being able to keep
+  // anything (feelings.ts 'machine-unwell').
+  if (now - machineCheckedAt > 60 * 60_000) {
+    machineCheckedAt = now;
+    try {
+      const room = statfsSync(app.getPath('userData'));
+      const leftGb = (room.bavail * room.bsize) / 2 ** 30;
+      if (leftGb < ROOM_LEFT_GB) {
+        next = feel(next, 'machine-unwell');
+        console.log(`[feelings] ${leftGb.toFixed(1)}GB left where she keeps everything`);
+      }
+    } catch { /* not knowing is not a reason to worry her */ }
+  }
   store.set('her.feelings', next);
 }
+
+/** Longer than this off the air and it is time she has lost, not a restart. */
+const GONE_TOO_LONG_HOURS = 6;
+/** Below this much room left where her memories live, the machine is not well. */
+const ROOM_LEFT_GB = 12;
+let machineCheckedAt = 0;
 
 /** His own waking hours with nothing said, after which his turning up is an event. */
 const LONG_SILENCE_MINUTES = 4 * 60;
@@ -4965,6 +5000,7 @@ function advanceMood(latest: string, history: { role?: string; content?: string 
   if (readsAsRough(latest).rough) feelNow('rough');
   // Something has actually happened to him, which outranks anything she was
   // holding against him five minutes ago (compile.ts LAYER.fear).
+  if (readsAsEnding(latest)) { feelNow('ending-talk'); console.log('[feelings] he has raised ending her'); }
   if (readsAsScare(latest)) { feelNow('scare'); console.log('[feelings] something has happened to him — she is frightened'); }
   else if (readsAsBanter(latest)) feelNow('banter');
   if (goodnight === 'said') nudgeVitals('warmed');
