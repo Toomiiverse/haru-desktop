@@ -19,6 +19,7 @@ import { IGNORE_THRESHOLD, IRRITATION_MAX, IRRITATION, EGO } from './mood';
 import { GRUDGE_MAX, GRUDGE } from './grudge';
 import { EGO_MAX } from './mood';
 import type { Vitals } from './vitals';
+import type { Feelings } from './feelings';
 
 const clamp01 = (value: number) => Math.min(1, Math.max(0, Number.isFinite(value) ? value : 0));
 const pct = (value: number) => Math.round(clamp01(value) * 100);
@@ -110,6 +111,8 @@ export type StandingInput = {
   asleep?: boolean;
   /** A few words on the mood she woke up in (temperament.ts), or nothing on an ordinary day. */
   woke?: string;
+  /** feelings.ts, 0–100 each. */
+  feelings?: Feelings;
   irritation: number;
   ego: number;
   grudge: number;
@@ -253,6 +256,13 @@ export function standingFrom(input: StandingInput): Standing {
       { key: 'curiosity', label: 'Curiosity', value: pct(vitals.curiosity), note: 'How likely she is to ask about something herself.' },
       { key: 'stress', label: 'Stress', value: pct(vitals.stress), note: 'Wound up. High means snappier.' },
       { key: 'sleepiness', label: 'Sleepiness', value: pct(vitals.sleepiness), note: 'Follows the clock more than anything you do.' },
+      ...(input.feelings ? [
+        { key: 'playful', label: 'Playfulness', value: Math.round(input.feelings.playful), note: 'Thumbs up and laughing along feed it. High means she teases for fun.' },
+        { key: 'missing', label: 'Left alone', value: Math.round(input.feelings.missing), note: 'Builds over hours of your waking day with nothing said. Talking to her clears it.' },
+        { key: 'boredom', label: 'Boredom', value: Math.round(input.feelings.boredom), note: 'A quiet room. High means she starts things.' },
+        { key: 'jealousy', label: 'Jealousy', value: Math.round(input.feelings.jealousy), note: 'Time for other people while something of hers sat unanswered.' },
+        { key: 'hurt', label: 'Hurt', value: Math.round(input.feelings.hurt), note: 'Thumbs down, shouting, being shushed. Fades slowly; an apology is quicker.' },
+      ] : []),
       { key: 'ego', label: 'Ego', value: Math.round(Math.min(EGO_MAX, Math.max(0, input.ego)) / EGO_MAX * 100), note: 'Thumbs up feed this. High means insufferable.' },
     ],
     patience: patienceMeter(input.irritation),

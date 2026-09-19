@@ -68,6 +68,7 @@ import { looksLikeScreenshot, maySpeak, readScreenshotConfig, screenshotPrompt, 
 import { look, photoName, readShotDescription, readVisionConfig, whileLooking, type VisionConfig } from './vision';
 import { CAPTION_MAX_CHARS, describedShots, forgetCaptions, moreThanOnePass, noteCaption, noteFailure, readCaptions, shotsNeedingALook } from './seen';
 import { breaksMute, brokeMuteNote, isMuted, muteNote, readMuteAsk, unmuteNote, weighMute, type MuteState } from './mute';
+import { feel, feelingsInstruction, feelingsLog, feelingsOverTime, readFeelings, readsAsBanter, type FeelingEvent, type Feelings } from './feelings';
 import { addLeans, bruiseFrom, eventSize, fadeBruise, howHisReturnLands, rollTemperament, stepWander, temperamentLean, temperamentLine, temperamentWord, type Temperament } from './temperament';
 import { EXPRESSIVE, HOSTED_VOICE, LAST_WORD, NATURAL, NO_INVENTED_HISTORY, NO_ABANDON_THREAD, readsAsRough, roomInstruction, HER_EMOJI, emojiRut, roomToRant, askingAboutHer, herSubjectNote, namesIn, justTalking, JUST_TALKING_NOTE } from './room';
 import { journalStance } from './journal';
@@ -1313,6 +1314,7 @@ function lifeTick() {
   const environment = readEnvironment();
   const seconds = (now - lastTickAt) / 1000;
   ensureTemperament();
+  passFeelings(now);
   wander = stepWander(wander, seconds);
   bruise = fadeBruise(bruise, seconds);
   vitals = driftVitals(vitals, environment, seconds, addLeans(temperamentLean(getTemperament()), wander, bruise));
@@ -3728,6 +3730,7 @@ async function reactToFullscreen(title: string) {
     // Something happened on their screen, which is a real event and the one
     // beat whose vitals movement used to ride on broadcastBeat.
     nudgeVitals('caught-interest');
+    feelNow('caught-interest');
     sendToWindows('companion:pose', 'lean-in');
     // Spoken only if it was also written down — see interject.
     if (interject(line, { source: 'fullscreen' })) void speak(line);
@@ -4679,6 +4682,46 @@ function getMood(): Mood {
     nightfallDay: saved?.nightfallDay, owedMorning: saved?.owedMorning, diaryDay: saved?.diaryDay };
 }
 
+// Jealousy, missing him, boredom, playfulness, hurt (feelings.ts). Kept beside
+// her temperament; moved by what happens (feelNow) and by time (passFeelings).
+function getFeelings(): Feelings {
+  return readFeelings(store.get('her.feelings'));
+}
+
+function feelNow(event: FeelingEvent) {
+  store.set('her.feelings', feel(getFeelings(), event));
+}
+
+let feelingsPassedAt = Date.now();
+let herOwnTimeAt = 0;
+let jealousOfScreenAt = 0;
+const FEELINGS_EVERY_MS = 5 * 60_000;
+const QUIET_ROOM_MS = 30 * 60_000;
+
+/** What time does to them, every few minutes of her waking day. A night is not a silence. */
+function passFeelings(now: number) {
+  if (herAsleepNow()) { feelingsPassedAt = now; return; }
+  if (now - feelingsPassedAt < FEELINGS_EVERY_MS) return;
+  const minutes = (now - feelingsPassedAt) / 60_000;
+  feelingsPassedAt = now;
+  const mood = getMood();
+  const quiet = now - lastUserActivityAt > QUIET_ROOM_MS && now - herOwnTimeAt > QUIET_ROOM_MS;
+  let next = feelingsOverTime(getFeelings(), {
+    minutes,
+    awakeSilentMinutes: mood.lastMessageAt ? awakeMinutesSince(mood.lastMessageAt, getPush().prefs, zonedNow(CHAT_TIMEZONE)) : null,
+    quiet,
+  });
+  // Social apps on his screen while something of hers hangs unanswered: at most
+  // once per half hour, or an afternoon on Discord would be the whole scale.
+  if (currentActivity?.kind === 'social' && now - jealousOfScreenAt > QUIET_ROOM_MS
+    && leftHanging((store.get('chat.messages') as { role: string; content: string; at?: string }[] | undefined) ?? [], now)) {
+    jealousOfScreenAt = now;
+    next = feel(next, 'socialising');
+    console.log('[feelings] he is on something social while a line of hers hangs');
+  }
+  store.set('her.feelings', next);
+}
+
 /** His own waking hours with nothing said, after which his turning up is an event. */
 const LONG_SILENCE_MINUTES = 4 * 60;
 
@@ -4703,9 +4746,10 @@ function muteTurn(latest: string): string {
     return unmuteNote(isMuted(state, now));
   }
   if (ask) {
-    const decision = weighMute(ask, { irritation: mood.irritation, grudge: mood.grudge ?? 0, vitals });
+    const felt = getFeelings();
+    const decision = weighMute(ask, { irritation: mood.irritation, grudge: mood.grudge ?? 0, vitals, hurt: felt.hurt, missing: felt.missing });
     // An order with no reason is rude whichever way she goes on it.
-    if (!ask.reason) { setMood({ ...mood, irritation: nextIrritation(mood.irritation, 'disliked') }); nudgeVitals('criticised'); }
+    if (!ask.reason) { setMood({ ...mood, irritation: nextIrritation(mood.irritation, 'disliked') }); nudgeVitals('criticised'); feelNow('shushed'); }
     if (decision.agreed) store.set('mute', { since: now, until: now + decision.minutes * 60_000, reason: ask.reason?.said || 'he asked' } satisfies MuteState);
     else store.delete('mute' as never);
     console.log(`[mute] asked to go quiet (${ask.reason ? ask.reason.what : 'no reason'}${ask.polite ? ', politely' : ''}) — ${decision.agreed ? `yes, for about ${decision.minutes} min` : 'no'}: ${decision.why} (score ${decision.score}, irritation ${mood.irritation}, grudge ${mood.grudge ?? 0})`);
@@ -4774,7 +4818,11 @@ function advanceMood(latest: string, history: { role?: string; content?: string 
   // Shouting stings the way a thumbs-down does; an apology buys some of it back.
   if (shout === 'shouted') irritation = nextIrritation(irritation, 'disliked');
   if (shout === 'forgiven') irritation = nextIrritation(irritation, 'liked');
-  if (shout === 'forgiven') nudgeVitals('soothed');
+  if (shout === 'forgiven') { nudgeVitals('soothed'); feelNow('apology'); }
+  if (shout === 'shouted') feelNow('shouted');
+  feelNow(event === 'substantive' ? 'message' : 'low-effort');
+  if (readsAsRough(latest).rough) feelNow('rough');
+  else if (readsAsBanter(latest)) feelNow('banter');
   if (goodnight === 'said') nudgeVitals('warmed');
   // Back after a long stretch of his own waking day with nothing said: a relief
   // or a grievance, by the day she is having (temperament.ts).
@@ -7336,6 +7384,7 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // tuned from what actually fired rather than from what they were guessed to
   // fire at. `grep '\[vitals\]' ~/haru.log | …` is the whole measurement.
   console.log(`[vitals] ${cueLog(vitals, getMood().irritation)}`);
+  { const mood = getMood(); const woke = getTemperament(); console.log(`[mood] ${woke ? `${woke.kind} ${woke.intensity}` : 'no temperament yet'} · irritation ${mood.irritation} ego ${mood.ego} grudge ${mood.grudge ?? 0} · ${feelingsLog(getFeelings())}`); }
   // What she can still see. Not only this message: a picture has to ride along
   // again on the next turn or "what is in week three" cannot be answered, and
   // attachmentsInPlay is where the bound on doing that lives.
@@ -7474,6 +7523,7 @@ const promptState = {
     movedJustNow,
     vitals,
     temperament: temperamentLine(getTemperament()),
+    feelings: feelingsInstruction(getFeelings(), getMood().irritation, getTemperament()?.kind),
     pushback: store.get('pushback') as Pushback | undefined,
     grudge: getMood().grudge ?? 0,
     ignoredToday: ignoredTodayNow(),
@@ -9091,6 +9141,7 @@ function currentStanding() {
   return standingFrom({
     vitals,
     woke: temperamentWord(getTemperament()),
+    feelings: getFeelings(),
     asleep: herAsleepNow(),
     irritation: mood.irritation,
     ego: mood.ego,
@@ -10548,6 +10599,9 @@ let readingMangaNow = false;
  */
 function noteDeed(tool: string, call: { function?: { arguments?: unknown } }, result: string): void {
   if (!isADeed(tool)) return;
+  // Something of her own to do is the cure for a quiet room (feelings.ts).
+  herOwnTimeAt = Date.now();
+  feelNow('own-time');
   let failed = false;
   try {
     const parsed = JSON.parse(result) as Record<string, unknown>;
@@ -12045,7 +12099,7 @@ function webDeps(): WebDeps {
       const messages = [...history, { role: 'user', content: text, at: new Date().toISOString(), ...(files.length ? { attachments: files } : {}) }];
       const started = Date.now();
       // Stopped mid-sentence, by a tap on her or by being talked over.
-      if (options?.interrupted) nudgeVitals('cut-off');
+      if (options?.interrupted) { nudgeVitals('cut-off'); feelNow('cut-off'); }
       const answer = await ollamaChat(messages, config, {
         hands: false,
         web: true,
@@ -12783,6 +12837,7 @@ function takeThumb(reaction: 'up' | 'down'): { mood: Mood; comeback: boolean } {
   const next = { ...mood, irritation: nextIrritation(mood.irritation, event), ego: nextEgo(mood.ego, event) };
   setMood(next);
   nudgeVitals(reaction === 'down' ? 'criticised' : 'praised');
+  feelNow(reaction === 'down' ? 'disliked' : 'liked');
   // Sent straight out rather than waiting on a classification: the reaction
   // already says exactly how she should take it, and the face should land with
   // the click rather than a second later.

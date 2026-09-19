@@ -62,7 +62,9 @@ export function readMuteAsk(text: string): MuteAsk | null {
   return { kind: 'mute', reason, polite: POLITE.test(said) };
 }
 
-export type Feeling = { irritation: number; grudge: number; vitals: Pick<Vitals, 'happiness' | 'affection' | 'stress'> };
+export type Feeling = { irritation: number; grudge: number; vitals: Pick<Vitals, 'happiness' | 'affection' | 'stress'>;
+  /** feelings.ts, 0–100: being hurt or left alone makes her less obliging. */
+  hurt?: number; missing?: number };
 export type MuteDecision = { agreed: boolean; why: string; minutes: number; score: number };
 
 /**
@@ -77,7 +79,9 @@ export function weighMute(ask: MuteAsk, feeling: Feeling, roll = Math.random()):
   const temper = Math.min(1, feeling.irritation / IRRITATION_MAX);
   const held = Math.min(1, feeling.grudge / GRUDGE_MAX);
   const mood = (feeling.vitals.happiness - 0.5) * 2 + (feeling.vitals.affection - 0.5) * 1.5 - feeling.vitals.stress * 0.5;
-  const score = mood - temper * 2 - held * 1.5
+  const stung = Math.min(1, (feeling.hurt ?? 0) / 100);
+  const leftAlone = Math.min(1, (feeling.missing ?? 0) / 100);
+  const score = mood - temper * 2 - held * 1.5 - stung * 1.2 - leftAlone * 0.8
     + (ask.reason ? 1.5 : -1) + (ask.polite ? 0.5 : 0)
     + (roll - 0.5) * 0.8;
   const agreed = score > 0;
@@ -86,7 +90,9 @@ export function weighMute(ask: MuteAsk, feeling: Feeling, roll = Math.random()):
     ? (mood > 0.8 ? 'you are in a good mood today and feel like being nice about it'
       : ask.reason ? 'he gave you a reason and it is a fair one'
       : 'you cannot be bothered arguing about it')
-    : (held >= temper && held > 0.4 ? 'you are still holding how little he has bothered with you lately against him'
+    : (leftAlone > 0.6 && leftAlone >= held ? 'he has barely spoken to you all day and now the first thing he wants is for you to be quiet'
+      : stung > 0.5 ? 'he hurt you recently and you are not inclined to do him favours'
+      : held >= temper && held > 0.4 ? 'you are still holding how little he has bothered with you lately against him'
       : temper > 0.4 ? 'he has been getting on your nerves and you are in no mood to do him favours'
       : !ask.reason ? 'he ordered you to be quiet without so much as a reason, which is rude'
       : 'you do not feel like it today');

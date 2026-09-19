@@ -58,3 +58,12 @@ test('the quiet ends on its own: by the clock, or by her temper', () => {
   assert.equal(isMuted(state, 61 * 60_000), false);
   assert.equal(breaksMute(null, 0, 100), null);
 });
+
+test('hurt, or left alone all day, she is less obliging — and says which', () => {
+  const ask = readMuteAsk('can you be quiet please, I am on a call')!;
+  assert.equal(weighMute(ask, ordinary, 0.5).agreed, true);
+  const sore = weighMute(ask, { ...ordinary, hurt: 80, missing: 80 }, 0.5);
+  assert.equal(sore.agreed, false);
+  assert.match(sore.why, /barely spoken to you all day/);
+  assert.match(weighMute(readMuteAsk('shush')!, { ...ordinary, hurt: 70 }, 0.5).why, /hurt you recently/);
+});
