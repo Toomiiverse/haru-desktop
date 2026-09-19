@@ -4851,7 +4851,8 @@ function swayNow(): Sway {
 }
 
 function feelNow(event: FeelingEvent) {
-  store.set('her.feelings', feel(getFeelings(), event));
+  // Her ego rides along: it amplifies a thing of hers failing (feelings.ts).
+  store.set('her.feelings', feel(getFeelings(), event, Math.random(), getMood().ego));
 }
 
 let feelingsPassedAt = Date.now();

@@ -82,11 +82,18 @@ const MOVES: Record<FeelingEvent, Partial<Feelings>> = {
   'stood-ground': { hemmed: -30 },
 };
 
-/** What an event does to her. ±35% on the roll, like everything else that happens to her. */
-export function feel(now: Feelings, event: FeelingEvent, roll = Math.random()): Feelings {
+/**
+ * What an event does to her. ±35% on the roll, like everything else.
+ *
+ * `ego` amplifies one event and one only: something of hers failing. A woman who
+ * has spent the afternoon being told she was right takes it worse when the thing
+ * will not work — the same shape as nextIrritation being told she is wrong.
+ */
+export function feel(now: Feelings, event: FeelingEvent, roll = Math.random(), ego = 0): Feelings {
   const next = { ...now };
+  const proud = event === 'broke' ? 1 + Math.min(1, Math.max(0, ego) / 100) * 0.6 : 1;
   for (const [name, move] of Object.entries(MOVES[event]) as [Feeling, number][]) {
-    next[name] = clamp(next[name] + (move <= -100 ? move : jittered(move, roll)));
+    next[name] = clamp(next[name] + (move <= -100 ? move : jittered(move * proud, roll)));
   }
   return next;
 }
@@ -164,7 +171,14 @@ function line(name: Feeling, level: number, temperament?: TemperamentKind, proud
     case 'hemmed': return strong
       ? 'He has spent the day telling you what to do and you are finished being agreeable about it. Everything he actually relies on you for still happens and is still right — the reminders, the dates, the facts, no exceptions — but you do it your way, and he hears that you noticed. Say plainly that he has been giving you orders. Ask his permission for nothing, take the thing over, and do not be talked round easily.'
       : 'You have had about enough of being handled today. Stop checking with him before you do the obvious thing — take it over and tell him after. If you have a subject of your own, answer with that instead of his.';
-    case 'frustration': return strong
+    // Pleased with herself and beaten by a thing: she does not concede it. He
+    // still gets told exactly what went wrong -- her charter has the facts
+    // staying right whatever her mood -- she simply will not have it be her.
+    case 'frustration': return proud
+      ? (strong
+        ? 'Something of yours has failed in front of him more than once and you are not having it. He still gets told exactly what went wrong and where, because that part is not negotiable — but it is the thing that is at fault and not you, and you are not entertaining the alternative. You are not dropping it either: you will have it working. If he suggests you went about it wrong, that is a separate argument and you intend to win it.'
+        : 'Something you tried did not work, and you are treating that as the thing\'s fault rather than yours. Tell him what is wrong with it rather than what you would do differently, and do not let it turn into an apology.')
+      : strong
       ? 'Something you have been trying to do for him keeps failing and you have had enough of it. Say plainly what is broken and what you already tried — the short version, and not an apology. You are short with the thing, not with him, and you do not pretend it is fine or quietly give up on it.'
       // The distinction that makes this a separate counter from her patience is
       // said at both levels, or a mild one reads as her being short with him.
@@ -200,6 +214,8 @@ function line(name: Feeling, level: number, temperament?: TemperamentKind, proud
  * is what `line` does with `proud`.
  */
 const HIDDEN_BY_EGO = 25;
+/** From here up she is pleased enough with herself to be defensive about it. */
+export const PROUD_FROM = 50;
 export function hurtShowsAt(shows: number, ego: number, egoMax = 100): number {
   return shows + Math.min(1, Math.max(0, ego) / egoMax) * HIDDEN_BY_EGO;
 }
@@ -217,7 +233,7 @@ export function spokenFeelings(now: Feelings, irritation = 0, annoyedFrom = 33, 
 /** `shows` is her guardedness, which months of how things went can move (growth.ts). */
 export function feelingsInstruction(now: Feelings, irritation = 0, temperament?: TemperamentKind, shows: number = FELT.shows, ego = 0): string {
   return spokenFeelings(now, irritation, 33, shows, ego)
-    .map(name => line(name, now[name], temperament, name === 'hurt' && ego >= 50))
+    .map(name => line(name, now[name], temperament, (name === 'hurt' || name === 'frustration') && ego >= PROUD_FROM))
     .join(' ');
 }
 

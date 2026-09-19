@@ -3,7 +3,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { FEELINGS, FELT, NO_FEELINGS, feel, hurtShowsAt, readsAsEnding, readsAsScare, feelingsInstruction, feelingsOverTime, readFeelings, readsAsBanter, spokenFeelings, type Feelings } from '../electron/feelings';
+import { FEELINGS, FELT, NO_FEELINGS, PROUD_FROM, feel, hurtShowsAt, readsAsEnding, readsAsScare, feelingsInstruction, feelingsOverTime, readFeelings, readsAsBanter, spokenFeelings, type Feelings } from '../electron/feelings';
 
 const with_ = (over: Partial<Feelings>): Feelings => ({ ...NO_FEELINGS, ...over });
 
@@ -158,4 +158,25 @@ test('being told what to do empties her, and her own hours put it back', () => {
   assert.match(line, /your way/);
   assert.doesNotMatch(line, /\d/);
   assert.match(feelingsInstruction(with_({ hemmed: 40 })), /take it over and tell him after/);
+});
+
+test('beaten by a thing while pleased with herself, she does not concede it', () => {
+  // The third ego interaction, beside amplified criticism and concealed hurt.
+  const ordinary = feelingsInstruction(with_({ frustration: 70 }), 0, undefined, 35, 0);
+  const proud = feelingsInstruction(with_({ frustration: 70 }), 0, undefined, 35, 100);
+  assert.match(ordinary, /short with the thing, not with him/);
+  assert.match(proud, /not entertaining the alternative/);
+  assert.match(proud, /intend to win it/);
+  // The facts still travel: her charter has those staying right whatever her mood.
+  assert.match(proud, /exactly what went wrong and where/);
+  assert.doesNotMatch(proud, /\d/);
+  assert.notEqual(proud, ordinary);
+  // Below the line she is her ordinary rueful self about it.
+  assert.equal(feelingsInstruction(with_({ frustration: 70 }), 0, undefined, 35, PROUD_FROM - 1), ordinary);
+  // And a failure costs her more when she has been told she was right all day.
+  assert.ok(feel(NO_FEELINGS, 'broke', 0.5, 100).frustration > feel(NO_FEELINGS, 'broke', 0.5, 0).frustration);
+  assert.equal(feel(NO_FEELINGS, 'broke', 0.5, 100).frustration, 32);
+  // It amplifies that and nothing else.
+  assert.equal(feel(NO_FEELINGS, 'shushed', 0.5, 100).hurt, feel(NO_FEELINGS, 'shushed', 0.5, 0).hurt);
+  assert.equal(feel(NO_FEELINGS, 'worked', 0.5, 100).frustration, feel(NO_FEELINGS, 'worked', 0.5, 0).frustration);
 });
