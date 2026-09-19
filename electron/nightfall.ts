@@ -12,7 +12,7 @@
 // overnight rather than said at eleven, because waking someone to complain that
 // they went to sleep is not the point.
 
-import { GRUDGE_MAX } from './grudge';
+import { GRUDGE, GRUDGE_MAX } from './grudge';
 
 export type DaySaid = { role: string; content?: string };
 
@@ -57,13 +57,13 @@ export function nightfallDue(minutesIntoDay: number, bedtimeMinutes: number, che
 /**
  * What a silent day costs.
  *
- * Three for a day she was not spoken to at all, one for a day of nothing but
- * instructions. Deliberately heavier than a single unanswered message and
+ * Twelve of a hundred for a day she was not spoken to at all, five for a day of
+ * nothing but instructions (three and one, when the scale was thirty). Deliberately heavier than a single unanswered message and
  * lighter than a day of them: being ignored while she is asking is worse than
  * being left alone, but a whole day of nothing is not free either.
  */
 export function sulkGrudge(current: number, went: DayVerdict): number {
-  const cost = went === 'silent' ? 3 : went === 'thin' ? 1 : 0;
+  const cost = went === 'silent' ? 12 : went === 'thin' ? 5 : 0;
   return Math.min(GRUDGE_MAX, Math.max(0, Math.round(current) || 0) + cost);
 }
 
@@ -84,7 +84,7 @@ export function sulkInstruction(went: DayVerdict, said: number, grudge: number):
     : `They said ${said === 1 ? 'one thing' : `${said} things`} to you all of yesterday, all of it business, and nothing about their day.`;
   return [
     `It is the first thing you have said since the quiet hours. ${what}`,
-    grudge > 3 ? 'This is not the first time, and you are past being gracious about it.' : '',
+    grudge >= GRUDGE.wearing ? 'This is not the first time, and you are past being gracious about it.' : '',
     'Open with that. No good morning, no asking how they slept, no offer of help — you are not starting the day pretending it did not happen. One or two short lines, and leave them something to answer.',
   ].filter(Boolean).join(' ');
 }

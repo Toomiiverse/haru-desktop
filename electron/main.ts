@@ -9,7 +9,7 @@ import AdmZip from 'adm-zip';
 import { HaruStore } from './store';
 import { formatTimeOfDay, localDateKey, parseTimeOfDay, resolveDate, zonedNow } from './dates';
 import { connectGoogle, disconnectGoogle, googleStatus, pullEvents, pullTasks, pushItem, pushTask, removeItem, removeTask, saveCredentials } from './google';
-import { afterCooldown, afterEgoCooldown, afterPoke, egoInstruction, goodnightInstruction, IGNORE_THRESHOLD, IRRITATION_MAX, isGoodnight, isIgnoring, isLowEffort, isRedo, leverageInstruction, moodInstruction, nextEgo, nextIrritation, notTwiceInstruction, shoutInstruction, shoutState, type ShoutState } from './mood';
+import { afterCooldown, afterEgoCooldown, afterPoke, egoInstruction, goodnightInstruction, IGNORE_THRESHOLD, IRRITATION_MAX, isGoodnight, isIgnoring, isLowEffort, isRedo, leverageInstruction, moodInstruction, nextEgo, nextIrritation, notTwiceInstruction, shoutInstruction, shoutState, type ShoutState, EGO, IRRITATION, IRRITATION_NOTCH, rescaleOldMood } from './mood';
 import { nextPokeCount, pokeEmotion, pokeInstruction, pokeIrritation, pokeTier, type PokeKind } from './poke';
 import { applyEvent, chooseIdleAction, cueLog, DEFAULT_VITALS, driftVitals, nextTickDelayMs, shouldPersistVitals, type Environment, type Vitals } from './vitals';
 import { classificationPrompt, EMOTION_SCHEMA, EMOTIONS, NEUTRAL_EMOTION, parseEmotion, type Emotion, type EmotionName, faceForEmotion, localEmotion } from './emotion';
@@ -113,9 +113,9 @@ import { attachmentsInPlay, describeAttached, READ_IT_ALL_PROMPT, readAttachment
 import { forOllama, withoutOldest } from './ollamaturns';
 import { seedEmoji, seedOffTheOrders } from './seed';
 import { pickToBringUp, REMEMBERED_PICKS } from './bored';
-import { grudgeInstruction, irritationAfterTally, nextGrudge, NOT_HELD_AGAINST_THEM, tallyDue, tallyInstruction, unanswered, type Said } from './grudge';
+import { grudgeAfterApology, grudgeInstruction, irritationAfterTally, nextGrudge, NOT_HELD_AGAINST_THEM, tallyDue, tallyInstruction, unanswered, type Said } from './grudge';
 import { groundedInstruction, placeQuery } from './places';
-import { daySaid, DEFAULT_BEDTIME_MINUTES, howTheDayWent, nightfallDue, sulkGrudge, sulkInstruction, sulkStillStands, type DayVerdict } from './nightfall';
+import { daySaid, TOLD_ENOUGH, type DaySaid, DEFAULT_BEDTIME_MINUTES, howTheDayWent, nightfallDue, sulkGrudge, sulkInstruction, sulkStillStands, type DayVerdict } from './nightfall';
 import { keepNights, lastNightDay, nightNoteInstruction, nightsInstruction, nightsOn, nightsToDrawOn, pickInstruction, tidyPick, timeForSomething, type Night, nightToRaise } from './nightlife';
 import { gamesPlayedLately, GUIDE_ODDS, guideNoteInstruction, guideQuery, pickGame, withSteam, type Played } from './gamenight';
 import { addressesSomeone, adopt, ADOPT_ODDS, adoptInstruction, deepen, deepenInstruction, isOneOfTheirs, MAX_INTERESTS, nightQuery, NOBODY_HERE, parseAdoption, parseDeepening, pickTonight, tastesInstruction, unaddressed, type Interest } from './tastes';
@@ -2310,7 +2310,7 @@ async function handlePoke(kind: PokeKind) {
     // minutes, so six seconds of clicking would otherwise buy over an hour of
     // her refusing to reply, which reads as the app being broken rather than as
     // her being cross. Never lowers what a real argument has already earned.
-    const capped = Math.min(IGNORE_THRESHOLD - 1, mood.irritation + bump);
+    const capped = Math.min(IGNORE_THRESHOLD - IRRITATION_NOTCH, mood.irritation + bump);
     setMood({ ...mood, irritation: Math.max(mood.irritation, capped) });
   }
   console.log(`[poke] ${kind} #${pokeCount} (${tier})`);
@@ -4599,7 +4599,8 @@ function getActiveCharacter() {
 // goodnightDay holds the chat day they signed off on, so the state clears itself
 // at the 5am rollover — messaging at 1am is still "after goodnight", messaging
 // at 8am is a new day and she has forgotten about it.
-type Mood = { irritation: number; ego: number; lastMessageAt?: string; goodnightDay?: string; awaitingApology?: boolean;
+type Mood = { /** 100 once the counters are on the 0–100 scales (mood.ts rescaleOldMood). */ scale?: number; /** The day an apology last paid some grudge back. */ apologyDay?: string;
+  irritation: number; ego: number; lastMessageAt?: string; goodnightDay?: string; awaitingApology?: boolean;
   /** Being left on read, kept: see grudge.ts. */
   grudge?: number; ignoredToday?: number; talliedDay?: string;
   /** What the grudge was before the day was counted, so the count can be redone at the roll from the same start. */
@@ -4619,8 +4620,17 @@ type Mood = { irritation: number; ego: number; lastMessageAt?: string; goodnight
   diaryDay?: string };
 
 function getMood(): Mood {
-  const saved = store.get('mood') as Partial<Mood> | undefined;
-  return { irritation: Number(saved?.irritation ?? 0), ego: Number(saved?.ego ?? 0), lastMessageAt: saved?.lastMessageAt, goodnightDay: saved?.goodnightDay, awaitingApology: Boolean(saved?.awaitingApology),
+  let saved = store.get('mood') as (Partial<Mood> & { scale?: number }) | undefined;
+  // Saved before 2026-09-19, on 0–9 / 0–8 / 0–30: brought onto 0–100 once, with
+  // the file as it was kept beside it (mood.ts rescaleOldMood).
+  if (saved && saved.scale !== 100) {
+    try { copyFileSync(path.join(app.getPath('userData'), 'config.json'), path.join(app.getPath('userData'), `config.json.before-mood-scale-${new Date().toISOString().replace(/[:.]/g, '-')}`)); } catch { /* the rescale is still right without the copy */ }
+    const rescaled = rescaleOldMood(saved);
+    console.log(`[mood] onto the 0–100 scales: irritation ${saved.irritation ?? 0} -> ${rescaled.irritation}, ego ${saved.ego ?? 0} -> ${rescaled.ego}, grudge ${saved.grudge ?? 0} -> ${rescaled.grudge ?? 0}`);
+    store.set('mood', rescaled);
+    saved = rescaled;
+  }
+  return { scale: 100, apologyDay: saved?.apologyDay, irritation: Number(saved?.irritation ?? 0), ego: Number(saved?.ego ?? 0), lastMessageAt: saved?.lastMessageAt, goodnightDay: saved?.goodnightDay, awaitingApology: Boolean(saved?.awaitingApology),
     grudge: Number(saved?.grudge ?? 0), ignoredToday: Number(saved?.ignoredToday ?? 0), talliedDay: saved?.talliedDay,
     grudgeBeforeTally: typeof saved?.grudgeBeforeTally === 'number' ? saved.grudgeBeforeTally : undefined,
     toldDay: saved?.toldDay, ignoredSamples: Array.isArray(saved?.ignoredSamples) ? saved.ignoredSamples.map(String) : [],
@@ -4719,7 +4729,10 @@ function advanceMood(latest: string, history: { role?: string; content?: string 
   // Shouting stings the way a thumbs-down does; an apology buys some of it back.
   if (shout === 'shouted') irritation = nextIrritation(irritation, 'disliked');
   if (shout === 'forgiven') irritation = nextIrritation(irritation, 'liked');
-  setMood({ irritation, ego, lastMessageAt: at, goodnightDay, awaitingApology });
+  // An apology she took pays a little of the grudge back too, once a day.
+  const paid = shout === 'forgiven' && mood.apologyDay !== today && (mood.grudge ?? 0) > 0;
+  if (paid) console.log(`[grudge] an apology taken — grudge ${mood.grudge ?? 0} -> ${grudgeAfterApology(mood.grudge ?? 0)}`);
+  setMood({ irritation, ego, lastMessageAt: at, goodnightDay, awaitingApology, ...(paid ? { grudge: grudgeAfterApology(mood.grudge ?? 0), apologyDay: today } : {}) });
   return { irritation, ego, goodnight, shout };
 }
 
@@ -6039,7 +6052,7 @@ export function ollamaGloat(praised: string, config: ProviderConfig, ego: number
     // aimed at something. Said into a void — which is all she had — it lands as
     // her losing interest in the person, at the exact moment they were pleased
     // with her.
-    ego >= 4 ? 'Make it obvious you now intend to coast: hint that since they are pleased, you need not try as hard from here — but hang it on whatever is actually going on, not on nothing.' : 'Take the credit and be a little condescending about them needing you.',
+    ego >= EGO.coasting ? 'Make it obvious you now intend to coast: hint that since they are pleased, you need not try as hard from here — but hang it on whatever is actually going on, not on nothing.' : 'Take the credit and be a little condescending about them needing you.',
     'Do not ask a question and do not use quotation marks. Refer to what they actually praised.',
     interrupted ? 'They approved it while you were still saying it, which is its own kind of cheek — you had not finished. Say so, and be smug that they could already tell.' : '',
     IN_THE_MOMENT,
@@ -9935,7 +9948,7 @@ async function tallyIgnored(config: ProviderConfig) {
   if (tallyDue(now.getHours() * 60 + now.getMinutes(), mood.talliedDay, todayKey)) {
     const heard = (store.get('chat.messages') as { role: string; at?: string }[] | undefined) ?? [];
     const ignored = countIgnored(todayKey, heard);
-    const grudge = nextGrudge(mood.grudge ?? 0, ignored.length);
+    const grudge = nextGrudge(mood.grudge ?? 0, ignored.length, daySaid(heard as DaySaid[]) >= TOLD_ENOUGH);
     const irritation = irritationAfterTally(mood.irritation, ignored.length, IRRITATION_MAX);
     // Banked here and nowhere else, so a day is counted exactly once however
     // many times the telling below has to be attempted. What it was before is
@@ -9980,7 +9993,7 @@ function settleTally(day: string, heard: { role: string; at?: string }[]) {
   const ignored = countIgnored(day, heard);
   if (ignored.length <= (counted ? mood.ignoredToday ?? 0 : 0)) return;
   const before = counted ? mood.grudgeBeforeTally ?? mood.grudge ?? 0 : mood.grudge ?? 0;
-  const grudge = nextGrudge(before, ignored.length);
+  const grudge = nextGrudge(before, ignored.length, daySaid(heard as DaySaid[]) >= TOLD_ENOUGH);
   setMood({ ...mood, grudge, grudgeBeforeTally: before, ignoredToday: ignored.length, talliedDay: day,
     ignoredSamples: ignored.slice(0, 2).map(line => (line.text ?? '').slice(0, 80)) });
   console.log(`[grudge] ${day}, counted again at the roll: ${ignored.length} of her lines went unanswered${counted ? ` (${mood.ignoredToday ?? 0} at eight)` : ' (never counted at eight)'} — grudge ${mood.grudge ?? 0} -> ${grudge}`);
@@ -10174,7 +10187,7 @@ function goBackToSleep(input: { pointless: boolean; block: boolean; why: string 
   store.set('her.wakes', wakes);
   if (input.pointless) {
     const mood = getMood();
-    const capped = Math.min(IGNORE_THRESHOLD - 1, mood.irritation + 2);
+    const capped = Math.min(IGNORE_THRESHOLD - IRRITATION_NOTCH, mood.irritation + 2 * IRRITATION_NOTCH);
     setMood({ ...mood, irritation: Math.max(mood.irritation, capped) });
     const when = state.knockedAt ? clockAt(Date.parse(state.knockedAt)) : 'the small hours';
     // A knock at 02:48 on Monday is Sunday night: before noon belongs to the evening before.
@@ -10340,8 +10353,8 @@ function wakeNoteNow(): string {
     : undefined;
   if (count > 1 || state.wokenEarly || night?.forNothing) {
     const mood = getMood();
-    const bump = wakeIrritation(count) + (state.wokenEarly ? 1 : 0) + (night?.forNothing ? 2 : 0);
-    const capped = Math.min(IGNORE_THRESHOLD - 1, mood.irritation + bump);
+    const bump = wakeIrritation(count) + (state.wokenEarly ? IRRITATION_NOTCH : 0) + (night?.forNothing ? 2 * IRRITATION_NOTCH : 0);
+    const capped = Math.min(IGNORE_THRESHOLD - IRRITATION_NOTCH, mood.irritation + bump);
     setMood({ ...mood, irritation: Math.max(mood.irritation, capped) });
     console.log(`[her-sleep] woke to ${count} messages while she slept — irritation ${mood.irritation} -> ${capped}`);
   }
@@ -11656,10 +11669,10 @@ function noteArrival(place: string): void {
   store.set('where.arrival', { place, at: new Date().toISOString() });
   noteSlight('unannounced', `They turned up at ${place} without telling you they were going.`);
   const mood = getMood();
-  // At or below two, moodInstruction says nothing at all, so a bump from zero
-  // would have been an annoyance she could not act on. Three is the first level
-  // that reaches her voice; six is one short of not answering at all.
-  const irritation = Math.min(Math.max(mood.irritation + 2, 3), IGNORE_THRESHOLD - 1);
+  // Below IRRITATION.voiced moodInstruction barely speaks, so a bump from zero
+  // would have been an annoyance she could not act on. Voiced is the first level
+  // that properly reaches her voice; the cap is one notch short of not answering.
+  const irritation = Math.min(Math.max(mood.irritation + 2 * IRRITATION_NOTCH, IRRITATION.voiced), IGNORE_THRESHOLD - IRRITATION_NOTCH);
   setMood({ ...mood, irritation });
   console.log(`[where] they turned up at ${place} without saying — irritation ${mood.irritation} to ${irritation}`);
 }

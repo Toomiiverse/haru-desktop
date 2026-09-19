@@ -131,9 +131,9 @@ test('the wake note and its cost follow the agreed thresholds', () => {
   assert.match(wakeNote(4, '08:00'), /properly annoyed/);
   assert.equal(wakeIrritation(0), 0);
   assert.equal(wakeIrritation(1), 0);
-  assert.equal(wakeIrritation(2), 1);
-  assert.equal(wakeIrritation(3), 1);
-  assert.equal(wakeIrritation(4), 2);
+  assert.equal(wakeIrritation(2), 11);
+  assert.equal(wakeIrritation(3), 11);
+  assert.equal(wakeIrritation(4), 22);
 });
 
 test('goodnightDue is only in the run-up to her bedtime, and never once she is asleep', () => {

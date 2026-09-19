@@ -1,3 +1,4 @@
+import { IRRITATION, EGO } from './mood';
 // Reading the room.
 //
 // Not to be confused with tone.ts, which reads how hard *she* said something so
@@ -288,8 +289,8 @@ export function nothingInIt(text: string): boolean {
 
 export function roomToRant(input: {
   /** 0..1 */ energy: number; curiosity: number;
-  /** 0..9 */ irritation: number;
-  /** 0..N */ ego: number;
+  /** 0..100 */ irritation: number;
+  /** 0..100 */ ego: number;
   /** What she was up to last night or is deep in, if anything: "Chainsaw Man", "the Steam sale". */
   subject?: string;
   /** Since she was last given the room, or null if never. */
@@ -314,8 +315,8 @@ export function roomToRant(input: {
   let score = 0;
   if (input.energy >= 0.7) score += 0.25;
   if (input.curiosity >= 0.6) score += 0.25;
-  if (input.irritation >= 4) score += 0.3;
-  if (input.ego >= 4) score += 0.2;
+  if (input.irritation >= IRRITATION.short) score += 0.3;
+  if (input.ego >= EGO.coasting) score += 0.2;
   if (input.subject) score += 0.35;
   const chance = Math.min(score, 0.5);
   if (!input.mentioned && !(input.roll < chance)) return '';

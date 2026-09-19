@@ -58,7 +58,7 @@ const at = (prompt: string, needle: string) => prompt.indexOf(needle);
 test('the documented order holds, from the tools down to the last word', () => {
   const prompt = chatSystemPrompt(state({
     search: readSearchConfig({ enabled: true, readPages: true }),
-    irritation: 5,
+    irritation: 56,
     fresh: { at: NOW.toISOString(), hadMessages: true, reason: 'manual' },
     pushback: { count: 1, at: NOW.toISOString() },
     goodnight: 'said',
@@ -104,7 +104,7 @@ test('corrections are read after the mood that causes them, not before', () => {
   // Being told she is fed up is what produces the thing the correction fixes,
   // so a correction read first is simply overridden.
   const prompt = chatSystemPrompt(state({
-    irritation: 5,
+    irritation: 56,
     latestMessage: "it's been a rough day and I'm exhausted",
     fresh: { at: NOW.toISOString(), hadMessages: false, reason: 'daily' },
   }));
@@ -227,7 +227,7 @@ test('a short follow-up is read as continuing the thread, and never echoed back 
 });
 
 test('her emoji are named, as hers, beside the persona', () => {
-  const prompt = chatSystemPrompt(state({ irritation: 5 }));
+  const prompt = chatSystemPrompt(state({ irritation: 56 }));
   const expressive = prompt.indexOf('Emoji are part of how you talk');
   assert.notEqual(expressive, -1, 'the emoji rule never made it into the prompt');
   assert.ok(expressive > prompt.indexOf(STYLE), 'it is part of her voice, so it follows her style');
@@ -273,7 +273,7 @@ test('the weather where they are sits with their whereabouts, when she has a rea
 test('chatSystemPrompt carries her vitals as a tone line before the irritation line, and only when they have drifted', () => {
   const calm = chatSystemPrompt(state({ vitals: { energy: 0.6, happiness: 0.6, curiosity: 0.5, affection: 0.4, sleepiness: 0.2, stress: 0.2, focus: 0.5 } }));
   assert.doesNotMatch(calm, /on edge|drowsy|fonder of them/);
-  const tense = chatSystemPrompt(state({ irritation: 5, vitals: { energy: 0.6, happiness: 0.6, curiosity: 0.5, affection: 0.4, sleepiness: 0.2, stress: 0.9, focus: 0.5 } }));
+  const tense = chatSystemPrompt(state({ irritation: 56, vitals: { energy: 0.6, happiness: 0.6, curiosity: 0.5, affection: 0.4, sleepiness: 0.2, stress: 0.9, focus: 0.5 } }));
   assert.ok(tense.indexOf('on edge') < tense.indexOf('thoroughly fed up'));
 });
 
@@ -284,7 +284,7 @@ test('the local length rule is in the brief verbatim, so a hosted brain can swap
 });
 
 test('the way she writes is read after the persona and after the emoji rule', () => {
-  const prompt = chatSystemPrompt(state({ irritation: 5 }));
+  const prompt = chatSystemPrompt(state({ irritation: 56 }));
   const natural = prompt.indexOf('Write the way a person texts');
   assert.notEqual(natural, -1, 'it never made it into the prompt');
   assert.ok(natural > prompt.indexOf(STYLE), 'after her style, which tells her to be bitchy in every reply');
@@ -292,10 +292,10 @@ test('the way she writes is read after the persona and after the emoji rule', ()
 });
 
 test('asked about her own things, her list is not in front of her', () => {
-  const withList = chatSystemPrompt(state({ irritation: 1 }));
+  const withList = chatSystemPrompt(state({ irritation: 11 }));
   const kept = withList.indexOf('Answer questions about what is coming up');
   assert.notEqual(kept, -1, 'the list is normally there');
-  const hers = chatSystemPrompt({ ...state({ irritation: 1 }), aboutHer: true });
+  const hers = chatSystemPrompt({ ...state({ irritation: 11 }), aboutHer: true });
   assert.equal(hers.indexOf('Answer questions about what is coming up'), -1, 'and gone when the subject is her');
   assert.match(hers, /Emoji are part of how you talk/, 'the rest of the brief is untouched');
 });
@@ -306,7 +306,7 @@ test('asked about her own things, her list is not in front of her', () => {
 const CLOCK = "in the user's timezone";
 
 test('cachedHead keeps only the invariant blocks, persona and rules', () => {
-  const prompt = chatSystemPrompt(state({ irritation: 5, latestMessage: 'what is the weather in leeds' }), true);
+  const prompt = chatSystemPrompt(state({ irritation: 56, latestMessage: 'what is the weather in leeds' }), true);
   assert.ok(at(prompt, IDENTITY) !== -1);
   assert.ok(at(prompt, STYLE) !== -1);
   assert.ok(at(prompt, LENGTH_RULE_LOCAL) !== -1);
@@ -318,13 +318,13 @@ test('cachedHead keeps only the invariant blocks, persona and rules', () => {
 
 test('the cachedHead head is byte-identical however the turn changes', () => {
   const a = chatSystemPrompt(state({ now: new Date('2026-08-20T09:00:00.000Z'), latestMessage: 'hello', irritation: 0, machineNote: '' }), true);
-  const b = chatSystemPrompt(state({ now: new Date('2026-08-20T23:59:00.000Z'), latestMessage: 'why are you ignoring me', irritation: 7, machineNote: MACHINE, goodnight: 'said' }), true);
+  const b = chatSystemPrompt(state({ now: new Date('2026-08-20T23:59:00.000Z'), latestMessage: 'why are you ignoring me', irritation: 78, machineNote: MACHINE, goodnight: 'said' }), true);
   assert.ok(a.length > 500, 'the stable head should still be the bulk of her rules');
   assert.equal(a, b);
 });
 
 test('the changing context lives in chatDynamicContext, in the original order', () => {
-  const extra = chatDynamicContext(state({ irritation: 5, latestMessage: 'what is the weather in leeds' }));
+  const extra = chatDynamicContext(state({ irritation: 56, latestMessage: 'what is the weather in leeds' }));
   assert.ok(extra.includes(CLOCK));
   assert.ok(extra.includes(PROFILE));
   assert.ok(extra.includes('thoroughly fed up'));
@@ -335,7 +335,7 @@ test('the changing context lives in chatDynamicContext, in the original order', 
 });
 
 test('chatSystemPrompt default still opens with the clock and holds the mood', () => {
-  const prompt = chatSystemPrompt(state({ irritation: 5 }));
+  const prompt = chatSystemPrompt(state({ irritation: 56 }));
   assert.ok(at(prompt, CLOCK) < at(prompt, IDENTITY), 'the local-brain order is unchanged');
   assert.ok(prompt.includes('thoroughly fed up'));
 });

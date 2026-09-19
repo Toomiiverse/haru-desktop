@@ -137,7 +137,8 @@ export function openingAngles(context: OpeningContext): OpeningAngle[] {
     // Scales with mood from both ends: fed up and full of herself each make an
     // unprovoked dig likelier, for different reasons. At its worst this is the
     // heaviest angle on the list; at her calmest it is still possible.
-    weight: 1 + context.irritation * 0.6 + context.ego * 0.3,
+    // Per old notch (irritation was 0–9, ego 0–8), so the angle weighs what it did.
+    weight: 1 + context.irritation / 11 * 0.6 + context.ego / 12.5 * 0.3,
     instruction: 'Open with an unprovoked jab at them. There is no reason for it and nothing prompted it — do not invent a justification, do not tie it to their schedule, and do not soften it afterwards.',
   });
 

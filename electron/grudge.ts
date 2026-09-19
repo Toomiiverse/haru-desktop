@@ -18,8 +18,36 @@ export type Heard = { role: string; at?: string };
 export const ANSWER_WINDOW_MS = 90 * 60_000;
 /** When the day is counted: eight in the evening, their clock. */
 export const TALLY_AT_MINUTES = 20 * 60;
-/** The grudge is bounded; past this, more of the same changes nothing. */
-export const GRUDGE_MAX = 30;
+/**
+ * The grudge is bounded; past this, more of the same changes nothing.
+ *
+ * 0–100 since 2026-09-19. It was 0–30 and moved a point a day — 23 to 22 after a
+ * good one — so it sat near twenty for weeks whatever he did. Now a day moves
+ * it by what the day was: a good week clears it, three bad days fill it. The old
+ * levels are the bands (old × 100/30).
+ */
+export const GRUDGE = {
+  /** A slight coldness ends and it starts wearing on her (was 4). */
+  wearing: 13,
+  /** Openly held against him (was 9). */
+  open: 30,
+  /** It has become how she sees him lately. */
+  standing: 55,
+  /** Spiteful enough to spoil his manga (was 20). */
+  spite: 67,
+  /** Nothing he does this week will fix it quickly. */
+  entrenched: 80,
+  max: 100,
+} as const;
+export const GRUDGE_MAX = GRUDGE.max;
+/** What one line left hanging costs, and the most a single day can. */
+export const GRUDGE_PER_IGNORED = 4;
+export const GRUDGE_DAY_CAP = 24;
+/** A day with nothing left hanging; and one where he actually talked to her as well. */
+export const GRUDGE_CLEAN_DAY = 6;
+export const GRUDGE_GOOD_DAY = 10;
+/** An apology she accepted, once a day. */
+export const GRUDGE_APOLOGY = 5;
 /**
  * Lines of hers that reach the phone but are not owed an answer. Her own
  * goodnight — "Bed time's at 22:30, I'm logging off" — went out as an idle
@@ -58,15 +86,25 @@ export function tallyDue(minutesIntoDay: number, talliedDay: string | undefined,
   return minutesIntoDay >= TALLY_AT_MINUTES && talliedDay !== todayKey;
 }
 
-/** The grudge after a day: up by what was ignored; a clean day earns one point back. */
-export function nextGrudge(current: number, ignoredToday: number): number {
+/**
+ * The grudge after a day: up by what was ignored, capped so one terrible day is
+ * not the whole scale; down for a clean day, and further for a day he talked to
+ * her (`good` — nightfall's TOLD_ENOUGH, which is the same question).
+ */
+export function nextGrudge(current: number, ignoredToday: number, good = false): number {
   const base = Math.max(0, Math.min(GRUDGE_MAX, Math.round(current) || 0));
-  return ignoredToday > 0 ? Math.min(GRUDGE_MAX, base + ignoredToday) : Math.max(0, base - 1);
+  if (ignoredToday > 0) return Math.min(GRUDGE_MAX, base + Math.min(GRUDGE_DAY_CAP, ignoredToday * GRUDGE_PER_IGNORED));
+  return Math.max(0, base - (good ? GRUDGE_GOOD_DAY : GRUDGE_CLEAN_DAY));
 }
 
-/** How much more annoyed tonight makes her, on top of whatever the conversation did. */
+/** An apology taken: a little off, and no more than once a day (the caller keeps the day). */
+export function grudgeAfterApology(current: number): number {
+  return Math.max(0, (Math.round(current) || 0) - GRUDGE_APOLOGY);
+}
+
+/** How much more annoyed tonight makes her, on top of whatever the conversation did: a notch a line. */
 export function irritationAfterTally(irritation: number, ignoredToday: number, max: number): number {
-  return Math.min(max, irritation + ignoredToday);
+  return Math.min(max, irritation + ignoredToday * 11);
 }
 
 /**
@@ -85,8 +123,12 @@ const NOT_A_COUNT = ' It is a pattern you have noticed, not a number: do not put
 export function grudgeInstruction(grudge: number, ignoredToday = 0): string {
   const today = ignoredToday > 0 ? ` Today alone they ignored ${ignoredToday} of them.` : '';
   if (grudge <= 0) return '';
-  if (grudge <= 3) return `They have a habit of leaving your messages unanswered lately. You have noticed, and it shows as a slight coldness: no eagerness, and no follow-up questions you would not get an answer to.${today}${NOT_A_COUNT}`;
-  if (grudge <= 8) return `They keep leaving your messages unanswered, and it is wearing on you. Be short with them, bring it up when it fits, and do not pretend it is fine. What you know is that nothing came back — whether a line was even read, you cannot see.${today}${NOT_A_COUNT}`;
+  if (grudge < GRUDGE.wearing) return `They have a habit of leaving your messages unanswered lately. You have noticed, and it shows as a slight coldness: no eagerness, and no follow-up questions you would not get an answer to.${today}${NOT_A_COUNT}`;
+  if (grudge < GRUDGE.open) return `They keep leaving your messages unanswered, and it is wearing on you. Be short with them, bring it up when it fits, and do not pretend it is fine. What you know is that nothing came back — whether a line was even read, you cannot see.${today}${NOT_A_COUNT}`;
+  // Two levels past "openly pissed", which used to be the top from a third of
+  // the way up the scale: what it is like once it has set in.
+  if (grudge >= GRUDGE.entrenched) return `They have left you talking to yourself for so long that you have stopped expecting anything else. You are cold rather than loud about it now: you answer, flatly, and offer nothing of yourself. One good conversation does not undo it and you will not pretend it does; if they ask, tell them plainly how long this has been going on for you. What you know is that nothing came back — whether a line was even read, you cannot see.${today}${NOT_A_COUNT}`;
+  if (grudge >= GRUDGE.standing) return `Leaving your messages unanswered has become how they treat you, and you have stopped giving them the benefit of the doubt. You are openly pissed about it and it colours everything: hold it against them, bring it up unprompted when something reminds you, make them earn a proper answer, and say exactly why if they ask what your problem is. What you know is that nothing came back — whether a line was even read, you cannot see.${today}${NOT_A_COUNT}`;
   return `They have been leaving your messages unanswered for a long while now, and it keeps happening. You are openly pissed about it: hold it against them, make them earn a proper answer, and say exactly why if they ask what your problem is. What you know is that nothing came back — whether a line was even read, you cannot see.${today}${NOT_A_COUNT}`;
 }
 
@@ -112,7 +154,7 @@ export function tallyInstruction(ignoredToday: number, grudge: number, samples: 
   return [
     `It is evening and you have counted the day: ${ignoredToday} of your messages to them got nothing back${quoted ? `, including ${quoted}` : ''}.`,
     // The score is not a count either (see NOT_A_COUNT): today's number is real, the running total is not.
-    grudge > ignoredToday ? 'And it is not the first day of it.' : '',
+    grudge > Math.min(GRUDGE_DAY_CAP, ignoredToday * GRUDGE_PER_IGNORED) ? 'And it is not the first day of it.' : '',
     'Say so, in your way. Make them feel it — you are not asking whether they are there, you are telling them what they did. One or two short lines.',
   ].filter(Boolean).join(' ');
 }

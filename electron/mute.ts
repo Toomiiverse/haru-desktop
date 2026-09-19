@@ -14,7 +14,8 @@
 // phone has a volume button.
 
 import type { Vitals } from './vitals';
-import { IRRITATION_MAX } from './mood';
+import { IRRITATION, IRRITATION_MAX } from './mood';
+import { GRUDGE_MAX } from './grudge';
 
 export type MuteReason = { what: 'company' | 'meeting' | 'sleeping' | 'working' | 'other'; said: string; minutes: number };
 export type MuteAsk = { kind: 'mute' | 'unmute'; reason: MuteReason | null; polite: boolean };
@@ -74,7 +75,7 @@ export type MuteDecision = { agreed: boolean; why: string; minutes: number; scor
  */
 export function weighMute(ask: MuteAsk, feeling: Feeling, roll = Math.random()): MuteDecision {
   const temper = Math.min(1, feeling.irritation / IRRITATION_MAX);
-  const held = Math.min(1, feeling.grudge / 30);
+  const held = Math.min(1, feeling.grudge / GRUDGE_MAX);
   const mood = (feeling.vitals.happiness - 0.5) * 2 + (feeling.vitals.affection - 0.5) * 1.5 - feeling.vitals.stress * 0.5;
   const score = mood - temper * 2 - held * 1.5
     + (ask.reason ? 1.5 : -1) + (ask.polite ? 0.5 : 0)
@@ -111,7 +112,7 @@ export function isMuted(state: MuteState | null | undefined, now: number): boole
 export function breaksMute(state: MuteState | null | undefined, now: number, irritation: number): 'time' | 'temper' | null {
   if (!state) return null;
   if (now >= state.until) return 'time';
-  if (irritation >= Math.ceil(IRRITATION_MAX * 0.7)) return 'temper';
+  if (irritation >= IRRITATION.seething) return 'temper';
   return null;
 }
 

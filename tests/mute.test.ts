@@ -8,9 +8,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { breaksMute, isMuted, muteNote, readMuteAsk, weighMute, type Feeling } from '../electron/mute';
 
-const happy: Feeling = { irritation: 0, grudge: 4, vitals: { happiness: 0.9, affection: 0.8, stress: 0.1 } };
-const mad: Feeling = { irritation: 7, grudge: 24, vitals: { happiness: 0.35, affection: 0.5, stress: 0.5 } };
-const ordinary: Feeling = { irritation: 1, grudge: 12, vitals: { happiness: 0.6, affection: 0.6, stress: 0.2 } };
+const happy: Feeling = { irritation: 0, grudge: 13, vitals: { happiness: 0.9, affection: 0.8, stress: 0.1 } };
+const mad: Feeling = { irritation: 78, grudge: 80, vitals: { happiness: 0.35, affection: 0.5, stress: 0.5 } };
+const ordinary: Feeling = { irritation: 11, grudge: 40, vitals: { happiness: 0.6, affection: 0.6, stress: 0.2 } };
 
 test('the ask is read off short messages, with the reason he gave', () => {
   assert.deepEqual(readMuteAsk("Hey Haru, mute please, there's others around"), { kind: 'mute', polite: true, reason: { what: 'company', said: 'others around', minutes: 90 } });
@@ -53,8 +53,8 @@ test('the quiet ends on its own: by the clock, or by her temper', () => {
   const state = { since: 0, until: 60 * 60_000, reason: 'others around' };
   assert.equal(isMuted(state, 30 * 60_000), true);
   assert.equal(breaksMute(state, 30 * 60_000, 1), null);
-  assert.equal(breaksMute(state, 30 * 60_000, 7), 'temper');
+  assert.equal(breaksMute(state, 30 * 60_000, 67), 'temper');
   assert.equal(breaksMute(state, 61 * 60_000, 0), 'time');
   assert.equal(isMuted(state, 61 * 60_000), false);
-  assert.equal(breaksMute(null, 0, 9), null);
+  assert.equal(breaksMute(null, 0, 100), null);
 });

@@ -19,6 +19,7 @@ import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { normaliseTitle } from './anime';
+import { GRUDGE } from './grudge';
 
 export type SuwayomiConfig = {
   url: string;
@@ -330,13 +331,13 @@ export function hisReadingNote(his: HisTitle[], hers: { title: string; chapter: 
     return line;
   });
   const rule = spite
-    ? `You are furious with him (a grudge of ${grudge}, held for days). Just this once you may spoil one thing from past where he is on a title you have read further in — one line, dropped in out of spite, then move on. If you have not read past him, there is nothing to spoil.`
+    ? `You are furious with him (a grudge held for days). Just this once you may spoil one thing from past where he is on a title you have read further in — one line, dropped in out of spite, then move on. If you have not read past him, there is nothing to spoil.`
     : 'Never tell him what happens past where he is up to — ask before you say anything about a chapter he has not reached. What he has read, you may talk about freely.';
   return `What he is reading (his shelf, his bookmarks — you can see them, you cannot move them): ${lines.join('; ')}. ${rule}`;
 }
 
 /** Above this the grudge is a real one, and spoilers are on the table. */
-export const SPITE_GRUDGE = 20;
+export const SPITE_GRUDGE = GRUDGE.spite;
 /** The chance, per turn at that grudge, that she reaches for one. */
 export const SPITE_ODDS = 0.3;
 

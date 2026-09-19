@@ -15,8 +15,8 @@
 import { CHASE_WINDOW_DAYS, relativeDay, shiftDays } from './agenda';
 import type { EmotionName } from './emotion';
 import { MOOD_TO_EMOTION, type HaruEmotion } from './emotions';
-import { IGNORE_THRESHOLD, IRRITATION_MAX } from './mood';
-import { GRUDGE_MAX } from './grudge';
+import { IGNORE_THRESHOLD, IRRITATION_MAX, IRRITATION, EGO } from './mood';
+import { GRUDGE_MAX, GRUDGE } from './grudge';
 import { EGO_MAX } from './mood';
 import type { Vitals } from './vitals';
 
@@ -137,9 +137,9 @@ export type StandingInput = {
 export function restingEmotion(vitals: Vitals, irritation: number, ego: number): EmotionName {
   if (irritation >= IGNORE_THRESHOLD) return 'annoyed';
   if (vitals.sleepiness >= 0.75) return 'sleepy';
-  if (irritation >= 4) return 'annoyed';
+  if (irritation >= IRRITATION.short) return 'annoyed';
   if (vitals.stress >= 0.6) return 'worried';
-  if (ego >= 5) return 'smug';
+  if (ego >= EGO.showing) return 'smug';
   if (vitals.affection >= 0.72 && vitals.happiness >= 0.45) return 'affectionate';
   if (vitals.curiosity >= 0.7) return 'curious';
   if (vitals.happiness >= 0.7) return 'happy';
@@ -150,7 +150,7 @@ export function restingEmotion(vitals: Vitals, irritation: number, ego: number):
 /** One line for the top of the screen: what that face is about. */
 export function moodLine(emotion: EmotionName, irritation: number, grudge: number): string {
   if (irritation >= IGNORE_THRESHOLD) return 'Not speaking to you properly right now.';
-  if (grudge > 8 && emotion !== 'affectionate') return 'Civil, and keeping score.';
+  if (grudge >= GRUDGE.open && emotion !== 'affectionate') return 'Civil, and keeping score.';
   const lines: Record<EmotionName, string> = {
     neutral: 'Around, and unbothered.',
     happy: 'In a good mood, which you may take some credit for.',
@@ -194,7 +194,7 @@ export function bondFrom(vitals: Vitals, grudge: number, daysTalked: number): Bo
   const earned = clamp01(vitals.affection) * 70
     + Math.min(daysTalked, 30) / 30 * 20
     + clamp01(vitals.happiness) * 10;
-  const value = Math.round(Math.min(100, Math.max(0, earned - Math.min(grudge, GRUDGE_MAX) * 2)));
+  const value = Math.round(Math.min(100, Math.max(0, earned - Math.min(grudge, GRUDGE_MAX) * 0.6)));
   let level = 0;
   for (const [index, band] of BOND_LEVELS.entries()) if (value >= band.from) level = index;
   const band = BOND_LEVELS[level];
@@ -206,8 +206,8 @@ export function bondFrom(vitals: Vitals, grudge: number, daysTalked: number): Bo
 export function patienceMeter(irritation: number): Meter {
   const left = Math.max(0, IRRITATION_MAX - Math.max(0, irritation));
   const note = irritation >= IGNORE_THRESHOLD ? 'Gone. She is ignoring you.'
-    : irritation >= 4 ? 'Wearing thin — she is being short with you.'
-    : irritation >= 1 ? 'Slightly frayed. It cools off on its own.'
+    : irritation >= IRRITATION.short ? 'Wearing thin — she is being short with you.'
+    : irritation >= IRRITATION.stirred ? 'Slightly frayed. It cools off on its own.'
     : 'Intact.';
   return { key: 'patience', label: 'Patience', value: Math.round(left / IRRITATION_MAX * 100), note };
 }
@@ -215,9 +215,12 @@ export function patienceMeter(irritation: number): Meter {
 function grudgeNote(grudge: number, ignoredToday: number): string {
   const today = ignoredToday > 0 ? ` ${ignoredToday} of them today.` : '';
   if (grudge <= 0) return 'Nothing held against you.';
-  if (grudge <= 3) return `${grudge} of her messages left unanswered. She has noticed.${today}`;
-  if (grudge <= 8) return `${grudge} unanswered, and it is wearing on her.${today}`;
-  return `${grudge} unanswered. She is openly annoyed about it.${today}`;
+  // The score is not a count of messages, and was printed as one ("22 unanswered").
+  if (grudge < GRUDGE.wearing) return `She has noticed you leaving her unanswered.${today}`;
+  if (grudge < GRUDGE.open) return `Being left unanswered is wearing on her.${today}`;
+  if (grudge < GRUDGE.standing) return `She is openly annoyed about being left unanswered.${today}`;
+  if (grudge < GRUDGE.entrenched) return `It has become how she sees you lately. Good days bring it down.${today}`;
+  return `Set in. It will take more than one good day.${today}`;
 }
 
 /** Whole days between two YYYY-MM-DD keys, which is all this screen needs. */

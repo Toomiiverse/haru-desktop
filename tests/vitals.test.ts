@@ -58,9 +58,9 @@ test('only the two strongest cues speak', () => {
 test('the warm cues are withheld once she is annoyed', () => {
   const fond: Vitals = { ...DEFAULT_VITALS, affection: 1, curiosity: 1, happiness: 1 };
   assert.match(vitalsInstruction(fond, 0), /fonder of them/);
-  assert.equal(vitalsInstruction(fond, 3), '');
+  assert.equal(vitalsInstruction(fond, 33), '');
   // A cold or stressed reading still speaks through the annoyance.
-  assert.match(vitalsInstruction({ ...DEFAULT_VITALS, stress: 0.9 }, 5), /on edge/);
+  assert.match(vitalsInstruction({ ...DEFAULT_VITALS, stress: 0.9 }, 56), /on edge/);
 });
 
 // ---- sleepinessForHour: the day curve ----
@@ -269,7 +269,7 @@ test('the log names which cues spoke, how strongly, and the state behind them', 
 test('the log says when the warm cues were held back, and when nothing spoke', () => {
   const fond = { ...DEFAULT_VITALS, affection: 0.95 };
   assert.match(cueLog(fond, 0), /^fond /);
-  const annoyed = cueLog(fond, 5);
+  const annoyed = cueLog(fond, 56);
   assert.match(annoyed, /^none, warm cues withheld/);
   assert.equal(cueLog(undefined), 'none — no vitals');
 });

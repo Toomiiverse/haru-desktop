@@ -464,8 +464,8 @@ export function wakeNote(count: number, wakeAt: string, wokenBy = 0, night?: Nig
 /** The irritation a wake costs, on the thresholds wakeNote uses. */
 export function wakeIrritation(count: number): number {
   if (count <= 1) return 0;
-  if (count <= 3) return 1;
-  return 2;
+  if (count <= 3) return 11;
+  return 22;
 }
 
 /**

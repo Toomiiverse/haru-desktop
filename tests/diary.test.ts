@@ -38,7 +38,7 @@ test('the entry is due just before the quiet ends, and as a catch-up through the
 test('what she writes from is facts, laid out, with the rule that it is only those', () => {
   const m: DayMaterial = {
     day: '2026-08-29', theySaid: ['nothing important, ignore me', 'Set me a reminder to eat @12'], theirMessages: 37, herUnprompted: 5,
-    irritation: 5, grudge: 1, ignoredToday: 1, went: 'fine', ticked: ['Rental Inspection'],
+    irritation: 56, grudge: 4, ignoredToday: 1, went: 'fine', ticked: ['Rental Inspection'],
     nights: [{ about: 'Elden Ring review', note: 'brilliant and cruel', interest: 'Elden Ring' }],
     tastes: [{ name: 'Elden Ring', stance: 'A masterpiece that hates you.' }], weather: '15°C and clear',
     did: [],

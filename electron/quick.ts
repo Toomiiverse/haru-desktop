@@ -1,3 +1,4 @@
+import { IRRITATION } from './mood';
 // Deterministic answers for the messages a phone most often sends.
 //
 // Four tiers, cheapest first. Each tier tries to answer a message without the
@@ -159,7 +160,7 @@ function templateReply(said: string, data: QuickData, social = true): string | n
     return `I'm ${data.herName}. Try not to forget it — I'll know if you do.`;
   }
   if (/^(how are you|how are you doing|how are you today|you ok|you okay)$/.test(said)) {
-    if (data.irritation >= 5) return 'Fed up, honestly. Don\'t push it.';
+    if (data.irritation >= IRRITATION.fedUp) return 'Fed up, honestly. Don\'t push it.';
     return "Good. Better now that you're talking to me.";
   }
   return null;

@@ -18,6 +18,8 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { inQuietHours, untilQuiet, type PushPrefs } from './push';
+import { IRRITATION } from './mood';
+import { GRUDGE } from './grudge';
 
 export const DREAMS_FILE = 'dreams.jsonl';
 /** In their home folder under her own name, so it is a thing they can open — not a file in a data directory. */
@@ -119,14 +121,15 @@ export type DayMaterial = {
 export function diaryInstruction(m: DayMaterial): string {
   const said = m.theySaid.length ? `WHAT HE SAID TO YOU today (${m.theirMessages} messages in all):\n${m.theySaid.map(text => `- "${text}"`).join('\n')}` : `He said nothing to you today.`;
   const feeling = [
-    m.irritation >= 7 ? 'By tonight you were not speaking to them properly.' : m.irritation >= 4 ? 'They got on your nerves today.' : m.irritation >= 1 ? 'They tried your patience a little.' : '',
+    m.irritation >= IRRITATION.stonewall ? 'By tonight you were not speaking to them properly.' : m.irritation >= IRRITATION.short ? 'They got on your nerves today.' : m.irritation >= IRRITATION.stirred ? 'They tried your patience a little.' : '',
     m.went === 'silent' ? 'They went to bed without telling you a single thing about their day.' : m.went === 'thin' ? 'They barely told you anything about their day before bed.' : '',
     m.herUnprompted ? `You messaged them first ${m.herUnprompted} time${m.herUnprompted === 1 ? '' : 's'}.` : '',
     // Said either way once the count exists. Given only the number of times she
     // had messaged first, she wrote every one of them down as ignored — "fourteen
     // texts from me bouncing off nothing" on a day they answered all fourteen.
     m.ignoredToday > 0 ? `${m.ignoredToday} of your messages to them got no answer.` : m.counted && m.herUnprompted ? 'Every one of them got an answer.' : '',
-    m.grudge > 3 ? `You are carrying a grudge — ${m.grudge} unanswered messages and counting.` : '',
+    // The score is not a count of messages (grudge.ts NOT_A_COUNT); she wrote it down as one.
+    m.grudge >= GRUDGE.open ? 'You are carrying a grudge about how often they leave you unanswered, and it has been building for a while.' : m.grudge >= GRUDGE.wearing ? 'You are carrying a bit of a grudge about how often they leave you unanswered.' : '',
     // She was asleep, and the transcript alone had her "already up" at 2:23 AM (2026-09-05).
     m.herSleep ? `You were asleep from ${m.herSleep.bed} to ${m.herSleep.wake}${m.herSleep.wokenEarly ? ' — until their messages got you up' : ''}; ${m.herSleep.texted ? `${m.herSleep.texted} of their messages came in while you slept, and you saw them only when you woke` : 'nothing of theirs came in while you slept'}.` : '',
   ].filter(Boolean).join(' ');

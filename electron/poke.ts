@@ -32,7 +32,7 @@ export function pokeTier(count: number): PokeTier {
 
 /** How far each poke at this tier pushes her irritation. */
 export function pokeIrritation(tier: PokeTier): number {
-  return tier === 'first' ? 0 : tier === 'irritated' ? 1 : tier === 'angry' ? 2 : 3;
+  return tier === 'first' ? 0 : tier === 'irritated' ? 11 : tier === 'angry' ? 22 : 33;
 }
 
 const POKE_LINES: Record<PokeTier, string> = {

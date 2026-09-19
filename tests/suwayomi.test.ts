@@ -102,7 +102,7 @@ test('the note says where he is, how she sits against him, and holds the spoiler
   const behind = hisReadingNote(his, { title: 'Berserk', chapter: '1', finished: 0 }, Date.now(), 4, false);
   assert.match(behind, /he is ahead of you/);
   const spite = hisReadingNote(his, { title: 'Berserk', chapter: '10', finished: 9 }, Date.now(), 22, true);
-  assert.match(spite, /furious with him \(a grudge of 22/);
+  assert.match(spite, /furious with him \(a grudge held for days/);
   assert.match(spite, /spoil one thing from past where he is/);
   assert.equal(hisReadingNote([], null, Date.now(), 0, false), '');
   assert.equal(spiteful(SPITE_GRUDGE, 0.1), true);

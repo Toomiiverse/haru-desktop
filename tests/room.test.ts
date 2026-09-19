@@ -76,7 +76,7 @@ test('one emoji at most, whichever came first', () => {
 });
 
 test('room to go on about something comes from her evening and her mood, not from the size of his message', () => {
-  const wound = { energy: 0.9, curiosity: 0.8, irritation: 5, ego: 5, subject: 'Chainsaw Man', sinceLastMs: null, roll: 0.01 };
+  const wound = { energy: 0.9, curiosity: 0.8, irritation: 56, ego: 63, subject: 'Chainsaw Man', sinceLastMs: null, roll: 0.01 };
   const room = roomToRant(wound);
   assert.match(room, /You have been on Chainsaw Man, you have things to say about it/);
   assert.match(room, /the rule about matching the length of their message does not apply/);
@@ -88,7 +88,7 @@ test('room to go on about something comes from her evening and her mood, not fro
   assert.equal(roomToRant({ ...wound, sinceLastMs: RANT_COOLDOWN_MS + 1, roll: 0.01 }), room, 'and free again after');
   const flat = { energy: 0.2, curiosity: 0.2, irritation: 0, ego: 0, sinceLastMs: null, roll: 0.2 };
   assert.equal(roomToRant(flat), '', 'nothing in her, nothing to say');
-  assert.match(roomToRant({ ...flat, irritation: 6, roll: 0.01 }), /something you actually want to get off your chest/, 'fed up is its own reason, with no subject');
+  assert.match(roomToRant({ ...flat, irritation: 67, roll: 0.01 }), /something you actually want to get off your chest/, 'fed up is its own reason, with no subject');
 });
 
 test('a plain greeting gets no five-line opinion about last night', () => {
@@ -98,7 +98,7 @@ test('a plain greeting gets no five-line opinion about last night', () => {
   for (const line of ['morning, what did you watch last night', 'ok so what do you reckon', 'hey can you remind me at 6', 'right, im off to work']) {
     assert.equal(nothingInIt(line), false, line);
   }
-  const wound = { energy: 0.9, curiosity: 0.8, irritation: 5, ego: 5, subject: 'Chainsaw Man', sinceLastMs: null, roll: 0.01 };
+  const wound = { energy: 0.9, curiosity: 0.8, irritation: 56, ego: 63, subject: 'Chainsaw Man', sinceLastMs: null, roll: 0.01 };
   assert.equal(roomToRant({ ...wound, latest: 'Morning Haru' }), '', 'nothing in the message, nothing to launch at');
   assert.match(roomToRant({ ...wound, latest: 'morning, what did you get up to last night' }), /You have been on Chainsaw Man/);
   assert.match(roomToRant(wound), /You have been on Chainsaw Man/, 'no message given, unchanged');
