@@ -11,7 +11,7 @@ import { formatTimeOfDay, localDateKey, parseTimeOfDay, resolveDate, zonedNow } 
 import { connectGoogle, disconnectGoogle, googleStatus, pullEvents, pullTasks, pushItem, pushTask, removeItem, removeTask, saveCredentials } from './google';
 import { afterCooldown, afterEgoCooldown, afterPoke, egoInstruction, goodnightInstruction, IGNORE_THRESHOLD, IRRITATION_MAX, isGoodnight, isIgnoring, isLowEffort, isRedo, leverageInstruction, moodInstruction, nextEgo, nextIrritation, notTwiceInstruction, shoutInstruction, shoutState, type ShoutState, EGO, IRRITATION, IRRITATION_NOTCH, rescaleOldMood } from './mood';
 import { nextPokeCount, pokeEmotion, pokeInstruction, pokeIrritation, pokeTier, type PokeKind } from './poke';
-import { applyEvent, chooseIdleAction, cueLog, DEFAULT_VITALS, driftVitals, nextTickDelayMs, shouldPersistVitals, type Environment, type Vitals } from './vitals';
+import { applyEvent, chooseIdleAction, cueLog, DEFAULT_VITALS, driftVitals, nextTickDelayMs, shouldPersistVitals, type Environment, type Lean, type Vitals } from './vitals';
 import { classificationPrompt, EMOTION_SCHEMA, EMOTIONS, NEUTRAL_EMOTION, parseEmotion, type Emotion, type EmotionName, faceForEmotion, localEmotion } from './emotion';
 import { withDiscoveredExpressions } from './expressions';
 import { reportCapabilities, seesItsOwnScreen } from './capabilities';
@@ -68,6 +68,7 @@ import { looksLikeScreenshot, maySpeak, readScreenshotConfig, screenshotPrompt, 
 import { look, photoName, readShotDescription, readVisionConfig, whileLooking, type VisionConfig } from './vision';
 import { CAPTION_MAX_CHARS, describedShots, forgetCaptions, moreThanOnePass, noteCaption, noteFailure, readCaptions, shotsNeedingALook } from './seen';
 import { breaksMute, brokeMuteNote, isMuted, muteNote, readMuteAsk, unmuteNote, weighMute, type MuteState } from './mute';
+import { addLeans, bruiseFrom, eventSize, fadeBruise, howHisReturnLands, rollTemperament, stepWander, temperamentLean, temperamentLine, temperamentWord, type Temperament } from './temperament';
 import { EXPRESSIVE, HOSTED_VOICE, LAST_WORD, NATURAL, NO_INVENTED_HISTORY, NO_ABANDON_THREAD, readsAsRough, roomInstruction, HER_EMOJI, emojiRut, roomToRant, askingAboutHer, herSubjectNote, namesIn, justTalking, JUST_TALKING_NOTE } from './room';
 import { journalStance } from './journal';
 import { haruNote, rangeStats, type HaruNote, type RangeName, type RangeStats } from './journal';
@@ -1278,10 +1279,43 @@ function broadcastLife(action: string | null, environment: Environment) {
   for (const win of BrowserWindow.getAllWindows()) win.webContents.send('life:tick', payload);
 }
 
+// The weather of her day and what is left of the last thing that happened
+// (temperament.ts). Kept with her vitals, so a restart is not a fresh start.
+let wander: Lean = {};
+let bruise: Lean = {};
+
+function getTemperament(): Temperament | null {
+  const saved = store.get('her.temperament') as Temperament | undefined;
+  return saved && saved.day === currentChatDayKey() ? saved : null;
+}
+
+/**
+ * The mood she woke up in, rolled the first time she is awake on a new day —
+ * so it is decided at her wake, not at the 05:00 roll she sleeps through.
+ */
+function ensureTemperament() {
+  if (getTemperament() || herAsleepNow()) return;
+  const before = store.get('her.temperament') as Temperament | undefined;
+  const mood = getMood();
+  const night = getHerSleepSchedule();
+  const rolled = rollTemperament(currentChatDayKey(), {
+    history: before?.history ?? (before ? [before.kind] : []),
+    went: mood.owedMorning?.went,
+    grudge: mood.grudge ?? 0,
+    wokenInNight: Boolean(night?.wokenEarly || night?.knockedAt),
+  });
+  store.set('her.temperament', rolled);
+  console.log(`[temperament] ${rolled.day}: ${rolled.kind} ${rolled.intensity}${rolled.because ? ` — ${rolled.because}` : ''}`);
+}
+
 function lifeTick() {
   const now = Date.now();
   const environment = readEnvironment();
-  vitals = driftVitals(vitals, environment, (now - lastTickAt) / 1000);
+  const seconds = (now - lastTickAt) / 1000;
+  ensureTemperament();
+  wander = stepWander(wander, seconds);
+  bruise = fadeBruise(bruise, seconds);
+  vitals = driftVitals(vitals, environment, seconds, addLeans(temperamentLean(getTemperament()), wander, bruise));
   lastTickAt = now;
   persistVitals();
   broadcastLife(chooseIdleAction(vitals, environment), environment);
@@ -1307,6 +1341,7 @@ let savedVitalsAt = 0;
 function persistVitals(force = false) {
   if (!force && !shouldPersistVitals(vitals, savedVitals, Date.now() - savedVitalsAt)) return;
   store.set('vitals', vitals);
+  store.set('her.weather', { wander, bruise });
   savedVitals = { ...vitals };
   savedVitalsAt = Date.now();
 }
@@ -1316,6 +1351,9 @@ function startLifeLoop() {
   // Resuming where she left off means closing and reopening the app does not
   // hand back a factory-fresh mood.
   if (saved) vitals = { ...DEFAULT_VITALS, ...saved };
+  const weather = store.get('her.weather') as { wander?: Lean; bruise?: Lean } | undefined;
+  wander = weather?.wander ?? {};
+  bruise = weather?.bruise ?? {};
   lastTickAt = Date.now();
   // What is on disk right now, so the first tick is measured against it rather
   // than against nothing and written out immediately. Null when there was
@@ -1327,7 +1365,11 @@ function startLifeLoop() {
 }
 
 function nudgeVitals(event: Parameters<typeof applyEvent>[1]) {
-  vitals = applyEvent(vitals, event);
+  // Bigger than it was, by the day she is having and a roll; and half of it
+  // stays as a push on where she settles, so the next few ticks do not erase it.
+  const before = vitals;
+  vitals = applyEvent(vitals, event, eventSize(getTemperament(), event));
+  bruise = bruiseFrom(bruise, before, vitals);
   broadcastLife(null, readEnvironment());
 }
 
@@ -4637,6 +4679,9 @@ function getMood(): Mood {
     nightfallDay: saved?.nightfallDay, owedMorning: saved?.owedMorning, diaryDay: saved?.diaryDay };
 }
 
+/** His own waking hours with nothing said, after which his turning up is an event. */
+const LONG_SILENCE_MINUTES = 4 * 60;
+
 function getMute(): MuteState | null {
   const saved = store.get('mute') as MuteState | undefined;
   return saved && typeof saved.until === 'number' ? saved : null;
@@ -4660,7 +4705,7 @@ function muteTurn(latest: string): string {
   if (ask) {
     const decision = weighMute(ask, { irritation: mood.irritation, grudge: mood.grudge ?? 0, vitals });
     // An order with no reason is rude whichever way she goes on it.
-    if (!ask.reason) setMood({ ...mood, irritation: nextIrritation(mood.irritation, 'disliked') });
+    if (!ask.reason) { setMood({ ...mood, irritation: nextIrritation(mood.irritation, 'disliked') }); nudgeVitals('criticised'); }
     if (decision.agreed) store.set('mute', { since: now, until: now + decision.minutes * 60_000, reason: ask.reason?.said || 'he asked' } satisfies MuteState);
     else store.delete('mute' as never);
     console.log(`[mute] asked to go quiet (${ask.reason ? ask.reason.what : 'no reason'}${ask.polite ? ', politely' : ''}) — ${decision.agreed ? `yes, for about ${decision.minutes} min` : 'no'}: ${decision.why} (score ${decision.score}, irritation ${mood.irritation}, grudge ${mood.grudge ?? 0})`);
@@ -4729,6 +4774,15 @@ function advanceMood(latest: string, history: { role?: string; content?: string 
   // Shouting stings the way a thumbs-down does; an apology buys some of it back.
   if (shout === 'shouted') irritation = nextIrritation(irritation, 'disliked');
   if (shout === 'forgiven') irritation = nextIrritation(irritation, 'liked');
+  if (shout === 'forgiven') nudgeVitals('soothed');
+  if (goodnight === 'said') nudgeVitals('warmed');
+  // Back after a long stretch of his own waking day with nothing said: a relief
+  // or a grievance, by the day she is having (temperament.ts).
+  if (mood.lastMessageAt && (awakeMinutesSince(mood.lastMessageAt, getPush().prefs, zonedNow(CHAT_TIMEZONE)) ?? 0) >= LONG_SILENCE_MINUTES) {
+    const lands = howHisReturnLands(getTemperament(), mood.grudge ?? 0);
+    console.log(`[vitals] he is back after a long silence — ${lands === 'returned-glad' ? 'a relief' : 'a grievance'}`);
+    nudgeVitals(lands);
+  }
   // An apology she took pays a little of the grudge back too, once a day.
   const paid = shout === 'forgiven' && mood.apologyDay !== today && (mood.grudge ?? 0) > 0;
   if (paid) console.log(`[grudge] an apology taken — grudge ${mood.grudge ?? 0} -> ${grudgeAfterApology(mood.grudge ?? 0)}`);
@@ -7419,6 +7473,7 @@ const promptState = {
     aboutHer: Boolean(hers),
     movedJustNow,
     vitals,
+    temperament: temperamentLine(getTemperament()),
     pushback: store.get('pushback') as Pushback | undefined,
     grudge: getMood().grudge ?? 0,
     ignoredToday: ignoredTodayNow(),
@@ -9035,6 +9090,7 @@ function currentStanding() {
   const days = getSessions().map(session => session.day).filter(Boolean).sort();
   return standingFrom({
     vitals,
+    woke: temperamentWord(getTemperament()),
     asleep: herAsleepNow(),
     irritation: mood.irritation,
     ego: mood.ego,
@@ -9958,6 +10014,7 @@ async function tallyIgnored(config: ProviderConfig) {
     console.log(`[grudge] ${todayKey}: ${ignored.length} of her lines went unanswered — grudge ${mood.grudge ?? 0} -> ${grudge}, irritation ${mood.irritation} -> ${irritation}`);
     // Kept as well as counted: the count is today's and gone tomorrow, and a
     // rule of hers needs the day it happened on, weeks later.
+    if (ignored.length) nudgeVitals('ignored-user');
     if (ignored.length) noteSlight('ignored', `${ignored.length} of the things you said went unanswered all day.`);
   }
   await tellThemTheTally(config, todayKey);
@@ -11475,6 +11532,7 @@ function sulkAtNightfall() {
     || checkInsOn(getCheckIns(), todayKey).length > 0;
   const went = howTheDayWent(said, toldElsewhere);
   const grudge = sulkGrudge(mood.grudge ?? 0, went);
+  if (went === 'silent') nudgeVitals('let-down');
   setMood({ ...mood, grudge, nightfallDay: todayKey, owedMorning: went === 'fine' ? undefined : { day: todayKey, went, said } });
   console.log(`[nightfall] ${todayKey}: ${said} real message(s)${toldElsewhere ? ' plus a journal or check-in' : ''} — ${went}, grudge ${mood.grudge ?? 0} -> ${grudge}${went === 'fine' ? '' : ', owed a word in the morning'}`);
 }
@@ -11986,6 +12044,8 @@ function webDeps(): WebDeps {
       }
       const messages = [...history, { role: 'user', content: text, at: new Date().toISOString(), ...(files.length ? { attachments: files } : {}) }];
       const started = Date.now();
+      // Stopped mid-sentence, by a tap on her or by being talked over.
+      if (options?.interrupted) nudgeVitals('cut-off');
       const answer = await ollamaChat(messages, config, {
         hands: false,
         web: true,
