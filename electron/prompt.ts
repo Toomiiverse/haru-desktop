@@ -32,6 +32,7 @@ import { CONTINUITY, EXPRESSIVE, NO_INVENTED_HISTORY, NO_ABANDON_THREAD, readsAs
 import { journalPrompt, journalStance, type JournalConfig, type JournalEntry } from './journal';
 import { familiarity, type Haunt } from './familiar';
 import { formatTimeOfDay, localDateKey } from './dates';
+import { LAYER, compileBehaviour, type Candidate, type Compiled } from './compile';
 
 /** Why this conversation is empty, when it is. */
 export type FreshStart = { at: string; hadMessages: boolean; reason: 'manual' | 'daily' };
@@ -215,6 +216,8 @@ export type PromptState = {
   feelings?: string;
   /** What months of how things have gone have made of her, once it is worth saying (growth.ts). */
   grown?: string;
+  /** The lines main.ts already rendered — her day, what months made of her, what she is feeling — with the stance and strength the compiler arbitrates on. */
+  behaviour?: Candidate[];
   /** Affection sitting high under a grudge, which reads as neither when the two are left as separate paragraphs (grudge.ts). */
   fond?: boolean;
   goodnight: 'said' | 'after' | 'none';
@@ -442,14 +445,11 @@ function systemBlocks(state: PromptState, away = false): SystemBlock[] {
     // Her slow state first, so the three lines after it — which carry hard
     // consequences (ignoring, withholding, coasting) — read later and win.
     // The day she is having comes before the moment she is in.
-    { stable: false, text: state.temperament ?? '' },
-    { stable: false, text: vitalsInstruction(state.vitals, state.irritation) },
-    { stable: false, text: state.grown ?? '' },
-    { stable: false, text: state.feelings ?? '' },
-    { stable: false, text: moodInstruction(state.irritation) },
-    { stable: false, text: grudgeInstruction(state.grudge ?? 0, state.ignoredToday ?? 0, state.fond) },
-    { stable: false, text: egoInstruction(state.ego) },
-    { stable: false, text: leverageInstruction(state.ego) },
+    // Which of them actually speaks is compile.ts's call: they used to be eight
+    // independent paragraphs that could tell her to tease him, say less and go
+    // cold in the same breath. The order out is weakest first, so the one that
+    // should win is still the last thing she reads.
+    { stable: false, text: behaviourOf(state).text },
     // Immediately after the three lines that cause it, and for the same reason
     // freshStartInstruction sits where it does: being told she is fed up is what
     // produces the stock sentence, so the correction has to be read second or it
@@ -502,6 +502,29 @@ function systemBlocks(state: PromptState, away = false): SystemBlock[] {
     // an exit from having a view she has.
     { stable: true, text: 'You are allowed to be genuinely unsure — "I think", "was it?", a beat of hesitation — and to catch yourself being wrong: "wait, no, that was Tuesday". When you realise you misremembered, correct yourself plainly and move on; never defend a wrong memory with a new invention, and never hedge to dodge a view you actually have.' },
   ];
+}
+
+/**
+ * Her state as things that want to be said, each with a side and a strength, for
+ * compile.ts to arbitrate between. The lines themselves are unchanged — this
+ * only says how loud each one is and whether it is a warm thing or a cold one.
+ */
+export function behaviourCandidates(state: PromptState): Candidate[] {
+  const irritation = state.irritation ?? 0;
+  const grudge = state.grudge ?? 0;
+  const ego = state.ego ?? 0;
+  return [
+    ...(state.behaviour ?? []),
+    { id: 'vitals', text: vitalsInstruction(state.vitals, irritation), stance: 'neutral', layer: LAYER.vitals, strength: 0.5 },
+    { id: 'irritation', text: moodInstruction(irritation), stance: 'cold', layer: LAYER.irritation, strength: irritation / 100 },
+    { id: 'grudge', text: grudgeInstruction(grudge, state.ignoredToday ?? 0, state.fond), stance: 'cold', layer: LAYER.grudge, strength: grudge / 100 },
+    { id: 'ego', text: egoInstruction(ego), stance: 'neutral', layer: LAYER.ego, strength: ego / 100 },
+    { id: 'leverage', text: leverageInstruction(ego), stance: 'neutral', layer: LAYER.ego, strength: ego / 100 },
+  ];
+}
+
+export function behaviourOf(state: PromptState): Compiled {
+  return compileBehaviour(behaviourCandidates(state));
 }
 
 /**

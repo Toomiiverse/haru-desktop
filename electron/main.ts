@@ -68,10 +68,11 @@ import { looksLikeScreenshot, maySpeak, readScreenshotConfig, screenshotPrompt, 
 import { look, photoName, readShotDescription, readVisionConfig, whileLooking, type VisionConfig } from './vision';
 import { CAPTION_MAX_CHARS, describedShots, forgetCaptions, moreThanOnePass, noteCaption, noteFailure, readCaptions, shotsNeedingALook } from './seen';
 import { breaksMute, brokeMuteNote, isMuted, muteNote, readMuteAsk, unmuteNote, weighMute, type MuteState } from './mute';
-import { charterTraits, feelingsShowAt, growMonth, growthNote, readTraits, traitLean, traitMeter, TRAIT_NAMES, type GrowthStep, type MonthSignals, type Traits } from './growth';
+import { LAYER, compileLog, type Candidate } from './compile';
+import { charterTraits, feelingsShowAt, growMonth, growthNote, readTraits, traitLean, traitMeter, travelled, TRAIT_NAMES, type GrowthStep, type MonthSignals, type Traits } from './growth';
 import { apologyOdds, muteLean, sway, type Sway } from './dice';
 import { feel, feelingsInstruction, feelingsLog, feelingsOverTime, readFeelings, readsAsBanter, type FeelingEvent, type Feelings } from './feelings';
-import { addLeans, bruiseFrom, eventSize, fadeBruise, howHisReturnLands, rollTemperament, stepWander, temperamentLean, temperamentLine, temperamentWord, type Temperament } from './temperament';
+import { addLeans, bruiseFrom, eventSize, fadeBruise, howHisReturnLands, rollTemperament, stepWander, temperamentLean, temperamentLine, temperamentWord, type Temperament, type TemperamentKind } from './temperament';
 import { EXPRESSIVE, HOSTED_VOICE, LAST_WORD, NATURAL, NO_INVENTED_HISTORY, NO_ABANDON_THREAD, readsAsRough, roomInstruction, HER_EMOJI, emojiRut, roomToRant, askingAboutHer, herSubjectNote, namesIn, justTalking, JUST_TALKING_NOTE } from './room';
 import { journalStance } from './journal';
 import { haruNote, rangeStats, type HaruNote, type RangeName, type RangeStats } from './journal';
@@ -85,7 +86,7 @@ import { describeMyself, describeSettings, planChange, readSelfSnapshot, SETTING
 import { pickBreath } from './breaths';
 import { createMemoryStore } from './memorystore';
 import { createKnowledgeStore } from './knowledgestore';
-import { chatSystemPrompt, chatDynamicContext, FIRST_PERSON_NOTE, freshStartInstruction, type FreshStart, type RatedReply, LENGTH_RULE_LOCAL, LENGTH_RULE_HOSTED } from './prompt';
+import { behaviourOf, chatSystemPrompt, chatDynamicContext, FIRST_PERSON_NOTE, freshStartInstruction, type FreshStart, type RatedReply, LENGTH_RULE_LOCAL, LENGTH_RULE_HOSTED } from './prompt';
 import { hasShout, readVoiceConfig, referenceFor, shoutReference, spokenCase, speakableText, splitForSpeech, streamedSentences, synthesise, synthesiseBreezeStream, type SpeechClip, type VoiceConfig, looksClipped, HUME_DESCRIPTIONS, HUME_STREAM_URL } from './voice';
 import { hearVoice, readHumeConfig, readingFrom } from './hume';
 import { readEviConfig, newSessionId, secondsUsedToday, noteUsage, underCap, callAside } from './evi';
@@ -4787,6 +4788,31 @@ function backfillMonths() {
   console.log(`[growth] read ${filled.length} month(s) off the archive so she has some idea of usual: ${filled.map(one => `${one.month} ${one.saidPerDay.toFixed(1)} said/day, ${one.hangingPerDay.toFixed(2)} hanging/day`).join('; ')}`);
 }
 
+/**
+ * The three lines main.ts owns, with the side each one is on and how strongly
+ * it is felt. A warm temperament under a cold grudge is exactly the argument
+ * compile.ts exists to settle.
+ */
+function herBehaviour(): Candidate[] {
+  const mood = getMood();
+  const temperament = getTemperament();
+  const traits = getTraits();
+  const felt = getFeelings();
+  const warmDay = temperament ? WARM_DAYS.includes(temperament.kind) : false;
+  const coldDay = temperament ? COLD_DAYS.includes(temperament.kind) : false;
+  // The loudest feeling is what gives that line its side and its strength.
+  const loudest = Math.max(felt.hurt, felt.jealousy, felt.missing, felt.playful, felt.boredom);
+  const soreOnTop = Math.max(felt.hurt, felt.jealousy, felt.missing) >= felt.playful;
+  return [
+    { id: 'temperament', text: temperamentLine(temperament), stance: warmDay ? 'warm' : coldDay ? 'cold' : 'neutral', layer: LAYER.temperament, strength: temperament?.intensity ?? 0 },
+    { id: 'growth', text: growthNote(traits), stance: travelled(traits, 'warmth') >= 0 ? 'warm' : 'cold', layer: LAYER.growth, strength: Math.abs(travelled(traits, 'warmth')) },
+    { id: 'feelings', text: feelingsInstruction(felt, mood.irritation, temperament?.kind, feelingsShowAt(traits), mood.ego), stance: soreOnTop ? 'cold' : 'warm', layer: LAYER.feelings, strength: loudest / 100 },
+  ];
+}
+
+const WARM_DAYS: TemperamentKind[] = ['sunny', 'tender', 'clingy', 'mischievous'];
+const COLD_DAYS: TemperamentKind[] = ['prickly', 'stormy', 'flat'];
+
 /** The day she is having, for the dice (dice.ts). */
 function swayNow(): Sway {
   return { temperament: getTemperament()?.kind, feelings: getFeelings() };
@@ -7633,9 +7659,9 @@ const promptState = {
     aboutHer: Boolean(hers),
     movedJustNow,
     vitals,
-    temperament: temperamentLine(getTemperament()),
-    feelings: feelingsInstruction(getFeelings(), getMood().irritation, getTemperament()?.kind, feelingsShowAt(getTraits()), getMood().ego),
-    grown: growthNote(getTraits()),
+    // Her day, what months made of her, and what she is feeling — as things
+    // that want to be said, for compile.ts to arbitrate between (prompt.ts).
+    behaviour: herBehaviour(),
     fond: vitals.affection >= 0.72,
     pushback: store.get('pushback') as Pushback | undefined,
     grudge: getMood().grudge ?? 0,
@@ -7655,6 +7681,7 @@ const promptState = {
     directionsNote: directions?.note,
     serverNote: shellTurn ? SERVER_NOTE : machineTurn ? serverLookNote(readSystemConfig().level) : '',
   };
+  console.log(`[prompt] ${compileLog(behaviourOf(promptState))}`);
   // A hosted brain reads the whole prompt before its first word, so its system
   // message holds only the invariant blocks — her rules and her persona — and
   // the changing context (the clock, her mood, the memory profile, what is on
