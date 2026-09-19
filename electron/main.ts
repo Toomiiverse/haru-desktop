@@ -67,6 +67,7 @@ import { cancelPower, closeApp, findApps, isCancellable, launch, listRunning, ma
 import { looksLikeScreenshot, maySpeak, readScreenshotConfig, screenshotPrompt, SETTLE_MS, SETTLE_TRIES, type ScreenshotConfig } from './screenshots';
 import { look, photoName, readShotDescription, readVisionConfig, whileLooking, type VisionConfig } from './vision';
 import { CAPTION_MAX_CHARS, describedShots, forgetCaptions, moreThanOnePass, noteCaption, noteFailure, readCaptions, shotsNeedingALook } from './seen';
+import { breaksMute, brokeMuteNote, isMuted, muteNote, readMuteAsk, unmuteNote, weighMute, type MuteState } from './mute';
 import { EXPRESSIVE, HOSTED_VOICE, LAST_WORD, NATURAL, NO_INVENTED_HISTORY, NO_ABANDON_THREAD, readsAsRough, roomInstruction, HER_EMOJI, emojiRut, roomToRant, askingAboutHer, herSubjectNote, namesIn, justTalking, JUST_TALKING_NOTE } from './room';
 import { journalStance } from './journal';
 import { haruNote, rangeStats, type HaruNote, type RangeName, type RangeStats } from './journal';
@@ -132,7 +133,7 @@ import { openingInstruction, openingsDueNow, type DueOpening } from './standingt
 import { parseVaultMemoryPage, VAULT_MEMORY_PAGES, type VaultMemoryPage } from './vaultmemories';
 import { planRetirement, readAdmitted, recordsToRetire, type Admitted } from './vaultretire';
 import { afterReading, feedUrl, pagesUrl, parseReadingTake, PAGE_PROMPT, readableChapters, readingInstruction, readingNote, readReading, REQUEST_GAP_MS, searchUrl, tonightsPages, USER_AGENT, type ChapterRef, type Reading } from './manga';
-import { cleaningChunks, deliveryReminder, deliveryRule, hasDeliveryLabel, splitDelivery, stripDelivery } from './delivery';
+import { cleaningChunks, deliveryReminder, deliveryRule, hasDeliveryLabel, splitDelivery, stripDelivery, MOOD_ALIASES } from './delivery';
 import { deedFrom, isADeed, keepDeed, readDeeds } from './deeds';
 import { isHerStanding } from './herstanding';
 import { enoughToStandOn, herStandings, keepSlight, parseStanding, readSlights, recentIncidents, slightsAsIncidents, standingDue, standingPrompt, HER_SUBJECT, type Incident, type Slight } from './herstanding';
@@ -4626,6 +4627,44 @@ function getMood(): Mood {
     nightfallDay: saved?.nightfallDay, owedMorning: saved?.owedMorning, diaryDay: saved?.diaryDay };
 }
 
+function getMute(): MuteState | null {
+  const saved = store.get('mute') as MuteState | undefined;
+  return saved && typeof saved.until === 'number' ? saved : null;
+}
+
+/**
+ * Asked to go quiet, told she may talk again, or done with being quiet — and
+ * the note that tells her which. Her voice on the phone is hers to switch off
+ * (mute.ts); this is where the decision meets her actual state and is kept.
+ */
+function muteTurn(latest: string): string {
+  const now = Date.now();
+  const mood = getMood();
+  const state = getMute();
+  const ask = readMuteAsk(latest);
+  if (ask?.kind === 'unmute') {
+    store.delete('mute' as never);
+    console.log(`[mute] he says she can talk again${isMuted(state, now) ? '' : ' — she was not muted'}`);
+    return unmuteNote(isMuted(state, now));
+  }
+  if (ask) {
+    const decision = weighMute(ask, { irritation: mood.irritation, grudge: mood.grudge ?? 0, vitals });
+    // An order with no reason is rude whichever way she goes on it.
+    if (!ask.reason) setMood({ ...mood, irritation: nextIrritation(mood.irritation, 'disliked') });
+    if (decision.agreed) store.set('mute', { since: now, until: now + decision.minutes * 60_000, reason: ask.reason?.said || 'he asked' } satisfies MuteState);
+    else store.delete('mute' as never);
+    console.log(`[mute] asked to go quiet (${ask.reason ? ask.reason.what : 'no reason'}${ask.polite ? ', politely' : ''}) — ${decision.agreed ? `yes, for about ${decision.minutes} min` : 'no'}: ${decision.why} (score ${decision.score}, irritation ${mood.irritation}, grudge ${mood.grudge ?? 0})`);
+    return muteNote(ask, decision);
+  }
+  const broke = breaksMute(state, now, mood.irritation);
+  if (broke && state) {
+    store.delete('mute' as never);
+    console.log(`[mute] she is done being quiet — ${broke === 'time' ? 'long enough' : 'he wound her up'}`);
+    return brokeMuteNote(state, now, broke);
+  }
+  return '';
+}
+
 function setMood(mood: Mood) {
   // Merged over what is kept: the patience callers rewrite is the moment's,
   // the grudge underneath it is not theirs to drop.
@@ -7104,6 +7143,9 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   if (hers) console.log(`[ai] they are asking about ${herSubject} — hers to talk about`);
   const talking = messages.at(-1)?.role === 'user' && justTalking(latest) ? JUST_TALKING_NOTE : '';
   if (talking) console.log('[ai] they just want to talk — taken at face value');
+  // Asked to be quiet, or finished being quiet: her call, see muteTurn. Not on a
+  // call — he rang her to hear her.
+  const quiet = messages.at(-1)?.role === 'user' && !call && !brief && !choices ? muteTurn(latest) : '';
   let turnedUp = messages.at(-1)?.role === 'user' ? arrivalNote() : '';
   const arrival = getArrival();
   if (turnedUp && arrival && saidTheyWereGoing(arrival.place, [latest])) {
@@ -7446,7 +7488,7 @@ const promptState = {
   // after it (HOSTED_VOICE), since that is where a hosted model reads hardest.
   const preTurnSystem = [
     ...(brain.hosted ? [chatDynamicContext(promptState, Boolean(away)), answering] : []),
-    aside, turnedUp, directions?.note ?? '', hers, talking, rantRoomNow, wakeNow, voiceRoomNow, emojiRut(herRecentReplies),
+    aside, turnedUp, directions?.note ?? '', hers, talking, quiet, rantRoomNow, wakeNow, voiceRoomNow, emojiRut(herRecentReplies),
     LAST_WORD,
     // After LAST_WORD, for a hosted brain only: her register and the labelling
     // rule, nearest his turn, where a model that reads the end of the prompt
@@ -12253,6 +12295,15 @@ function webDeps(): WebDeps {
       store.set('wake.lastAckAt', Date.now());
       return wakeAck();
     },
+    quiet: () => isMuted(getMute(), Date.now()),
+    attachedFile(saved) {
+      const folder = path.resolve(photoFolder());
+      const target = path.resolve(folder, path.basename(String(saved ?? '')));
+      if (!target.startsWith(folder + path.sep) || classify(target) !== 'image') return null;
+      const mime = ({ '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.gif': 'image/gif', '.webp': 'image/webp', '.heic': 'image/heic' } as Record<string, string>)[path.extname(target).toLowerCase()];
+      if (!mime) return null;
+      try { return { bytes: new Uint8Array(readFileSync(target)), mime }; } catch { return null; }
+    },
     async sigh(emotion) {
       const voice = readVoiceConfig(store.get('voice'));
       if (voice.engine === 'off' || !voice.webEnabled) return null;
@@ -13393,6 +13444,29 @@ app.whenReady().then(() => {
     if (door) return { content: door, ignored: false, irritation: 0, ego: 0 };
     return ollamaChat(messages, config);
   });
+  // Streaming, for a client that draws the line as it is written rather than
+  // waiting for the whole of it. Same generation as ai:send; each stretch is
+  // announced as it arrives, and delivery labels are taken out at the source so
+  // they are not printed. The last label is handed over as `mood`: it is how she
+  // said the line she ended on, which is the face a terminal should leave her
+  // wearing.
+  ipcMain.handle('ai:stream', (_e, turn: string, messages: { role: string; content: string }[], config: ProviderConfig) => {
+    const tell = (channel: string, payload: unknown) => { for (const win of BrowserWindow.getAllWindows()) win.webContents.send(channel, payload); };
+    const door = herAsleepNow() ? knockWhileAsleep() : null;
+    if (door) return { content: door, ignored: false, irritation: 0, ego: 0, mood: null };
+    let clean = cleaningChunks(text => tell('ai:chunk', { turn, text }));
+    return ollamaChat(messages, config, {
+      onChunk: text => clean(text),
+      onChunkReset: () => { clean = cleaningChunks(text => tell('ai:chunk', { turn, text })); tell('ai:chunkReset', { turn }); },
+      onToolCall: name => tell('ai:tool', { turn, name }),
+    }).then(reply => {
+      const moods = splitDelivery(reply.content ?? '').map(part => part.mood).filter(Boolean);
+      return { ...reply, content: stripDelivery(reply.content ?? ''), mood: moods.at(-1) ?? null };
+    });
+  });
+  // The words she can wrap a line in so her voice knows how to say it; the
+  // terminal takes them out of what she is shown.
+  ipcMain.handle('delivery:labels', () => [...EMOTIONS, ...Object.keys(MOOD_ALIASES)]);
   ipcMain.handle('ai:test', (_e, endpoint: string, provider?: string) => (isOpenAIShaped(provider)
     ? openAIModels(endpoint, (provider as Provider) ?? 'openai')
     : ollamaTags(endpoint)));

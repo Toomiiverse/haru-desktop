@@ -193,6 +193,11 @@ export type WebDeps = {
   /** The same line as a stream the page can play as it arrives — the Hume path,
    *  which generates audio progressively. Null when the engine does not stream. */
   speakStream?(text: string, emotion?: string | null, options?: { seed?: number }): Promise<{ mime: string; body: ReadableStream<Uint8Array> } | null>;
+  /** Whether she has agreed to go quiet on the phone (mute.ts). Calls are not
+   *  asked: they reach speak() without coming through these routes. */
+  quiet?(): boolean;
+  /** A picture or file she was sent, back out of her keeping for the chat to show. */
+  attachedFile?(saved: string): { bytes: Uint8Array; mime: string } | null;
   /** One of her recorded sighs, for the gap between paragraphs; null when she has none. */
   sigh(emotion?: string | null): Promise<{ audio: Uint8Array; mime: string } | null>;
   /** Her word when they only said her name. */
@@ -911,6 +916,28 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
   // A recorded sigh or grunt of hers, in a mood, for the gap between two
   // paragraphs — the desktop breathes there and the phone can too. Bytes, so
   // the phone plays it like a line.
+  // She has gone quiet for him: no voice leaves by any of the three routes.
+  // 204 rather than an error — nothing is wrong, she is simply not speaking.
+  if ((path === '/api/sigh' || path === '/api/speak') && deps.quiet?.()) {
+    res.writeHead(204, { 'Cache-Control': 'no-store', 'X-Haru-Quiet': '1' });
+    return res.end();
+  }
+
+  // What he sent her, for the chat to show again. The name is one stage() gave
+  // out; the deps side refuses anything outside her pictures folder.
+  if (req.method === 'GET' && path === '/api/attach/file') {
+    const file = deps.attachedFile?.(url.searchParams.get('saved') ?? '');
+    if (!file) return json(res, 404, { error: 'She does not have that.' });
+    res.writeHead(200, {
+      'Content-Type': file.mime,
+      'Content-Length': file.bytes.length,
+      'Content-Security-Policy': "default-src 'none'",
+      'X-Content-Type-Options': 'nosniff',
+      'Cache-Control': 'private, max-age=86400',
+    });
+    return res.end(Buffer.from(file.bytes));
+  }
+
   if (req.method === 'GET' && path === '/api/sigh') {
     const emotion = (url.searchParams.get('emotion') ?? '').slice(0, 30) || null;
     const clip = await deps.sigh(emotion);
