@@ -101,9 +101,31 @@ test('a snapshot of their screen is not a fact that keeps', () => {
   assert.ok(drawn('2026-09-16').has('s1'), `a snapshot is still hers to raise for ${SNAPSHOT_FRESH_DAYS} day(s)`);
 });
 
+test('who he is does not get dated; what he was partway through does', () => {
+  // Dating everything was worse than the fault it fixed: 25 of 36 topics in the
+  // live draw came out stamped, his girlfriend and his company among them
+  // (2026-09-20).
+  const draw = (m: object) => pickToBringUp([{ id: 'x', importance: 0.8, lastSeenAt: '2026-08-21T00:00:00.000Z', ...m } as never], [], [], '2026-09-20', () => 0);
+  assert.equal(ageNote(draw({ text: 'Is in a relationship with Emma Wilson since 18th of June, 2024.', kind: 'fact', category: 'identity' })), '', 'a month on, he is still with her');
+  assert.equal(ageNote(draw({ text: 'Is the founder of a company called The PC Project.', kind: 'fact', category: 'identity' })), '');
+  assert.equal(ageNote(draw({ text: 'Johnny — Tommy’s stepfather.', kind: 'relationship', category: 'person' })), '');
+  assert.equal(ageNote(draw({ text: 'Omarchy is a setup on Arch Linux, not a made-up word.', kind: 'fact', category: 'knowledge' })), '');
+  // What perishes still gets its date.
+  assert.match(ageNote(draw({ text: 'Developing a gaming cafe manager tool to replace Gizmo.', kind: 'fact', category: 'ongoing' })), /you last saw this 30 days ago/);
+  assert.match(ageNote(draw({ text: 'Wants 6 mailboxes total for The PC Project.', kind: 'fact', category: 'plan' })), /you last saw this 30 days ago/);
+  // An event is dated while it is still fresh enough to raise at all; past
+  // EVENT_FRESH_DAYS it leaves the draw rather than being dated.
+  assert.match(ageNote(draw({ text: 'Went to The PC Project because a staff member was sick.', kind: 'event', category: 'event', lastSeenAt: '2026-09-18T00:00:00.000Z' })), /you last saw this 2 days ago/);
+  assert.equal(draw({ text: 'Went to The PC Project because a staff member was sick.', kind: 'event', category: 'event' }), null, 'a month-old event is gone, not dated');
+  // A snapshot is never dated either — it is removed a day after she saw it.
+  assert.equal(draw({ text: 'They are currently rebuilding the website in a text editor.', kind: 'fact' }), null);
+  // Unsorted and not perishable by kind or wording: no date.
+  assert.equal(ageNote(draw({ text: 'Runs a store called The PC Project with Sudin.', kind: 'fact' })), '', 'a plain standing fact, unsorted');
+});
+
 test('what she raises is dated, so she cannot speak it as live', () => {
-  const old = { id: 'o1', text: 'Wants 6 mailboxes total for The PC Project.', kind: 'fact', importance: 0.8, lastSeenAt: '2026-09-14T00:00:00.000Z' };
-  const today = { id: 'o2', text: 'Wants 6 mailboxes total for The PC Project.', kind: 'fact', importance: 0.8, lastSeenAt: '2026-09-20T00:00:00.000Z' };
+  const old = { id: 'o1', text: 'Wants 6 mailboxes total for The PC Project.', kind: 'fact', category: 'plan', importance: 0.8, lastSeenAt: '2026-09-14T00:00:00.000Z' };
+  const today = { id: 'o2', text: 'Wants 6 mailboxes total for The PC Project.', kind: 'fact', category: 'plan', importance: 0.8, lastSeenAt: '2026-09-20T00:00:00.000Z' };
   assert.match(ageNote(pickToBringUp([old], [], [], '2026-09-20', () => 0)), /you last saw this 6 days ago/);
   assert.match(ageNote(pickToBringUp([old], [], [], '2026-09-20', () => 0)), /nothing in it is owed to you/);
   assert.equal(ageNote(pickToBringUp([today], [], [], '2026-09-20', () => 0)), '', 'today needs no dating');

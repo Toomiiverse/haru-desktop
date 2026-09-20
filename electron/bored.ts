@@ -7,7 +7,7 @@
 // she used kept out of the draw so a long silence does not get the same jab
 // four times.
 
-export type Remembered = { id: string; text: string; kind?: string; status?: string; importance?: number; lastSeenAt?: string; createdAt?: string };
+export type Remembered = { id: string; text: string; kind?: string; category?: string; status?: string; importance?: number; lastSeenAt?: string; createdAt?: string };
 
 /** An event is on her mind for this long; after that it is a thing that happened, not a thing to raise. */
 export const EVENT_FRESH_DAYS = 3;
@@ -24,7 +24,7 @@ export const EVENT_FRESH_DAYS = 3;
  */
 export const SNAPSHOT_FRESH_DAYS = 1;
 export type Day = { day: string; summary: string };
-export type Something = { id: string; text: string; from: 'memory' | 'day' | 'task'; daysOld?: number };
+export type Something = { id: string; text: string; from: 'memory' | 'day' | 'task'; daysOld?: number; perishable?: boolean };
 
 /** Days this far back are still worth a remark; older than that is memories' job. */
 export const DAYS_WORTH_RAISING = 10;
@@ -53,6 +53,25 @@ const SNAPSHOT = /\b(currently|right now|at the moment|just now|today|this (?:mo
 const DEFAULT_IMPORTANCE = 0.5, DAY_IMPORTANCE = 0.6;
 
 /**
+ * Whether this is the kind of thing that stops being true.
+ *
+ * What they are partway through, what happened on a day, what they were doing
+ * when she last looked. Not who they live with, what company they founded or
+ * what they have been diagnosed with — dating those was worse than the fault
+ * it was meant to fix: "Is in a relationship with Emma Wilson since 18th of
+ * June, 2024 (you last saw this 30 days ago — it is what was true then)" invites
+ * her to hedge about his girlfriend, and 25 of the 36 topics in the draw were
+ * being stamped that way.
+ */
+const PERISHABLE = new Set(['ongoing', 'event', 'plan']);
+
+function perishes(memory: Remembered): boolean {
+  if (memory.category) return PERISHABLE.has(memory.category);
+  // Before the sorter has placed it, the kind and the wording are all there is.
+  return memory.kind === 'event' || SNAPSHOT.test(memory.text ?? '');
+}
+
+/**
  * How old the thing she is about to raise actually is.
  *
  * The draw hands her the text and nothing else, so a fact from Tuesday reads
@@ -62,7 +81,7 @@ const DEFAULT_IMPORTANCE = 0.5, DAY_IMPORTANCE = 0.6;
  * a memory does not, so only a memory gets dated.
  */
 export function ageNote(thing: Something | null | undefined): string {
-  if (!thing || thing.from !== 'memory') return '';
+  if (!thing || thing.from !== 'memory' || !thing.perishable) return '';
   const days = thing.daysOld ?? 0;
   if (days <= 1) return '';
   return ` (you last saw this ${days} days ago — it is what was true then, not what they are doing now, and nothing in it is owed to you)`;
@@ -78,7 +97,7 @@ export function pickToBringUp(memories: Remembered[], days: Day[], recent: strin
     // does anything phrased as what they are doing this minute.
     .filter(m => m.kind !== 'event' || ageOf(m) <= EVENT_FRESH_DAYS)
     .filter(m => !SNAPSHOT.test(m.text) || ageOf(m) <= SNAPSHOT_FRESH_DAYS)
-    .map(m => ({ thing: { id: m.id, text: m.text.trim(), from: 'memory' as const, daysOld: Math.max(0, ageOf(m)) }, weight: m.importance ?? DEFAULT_IMPORTANCE }));
+    .map(m => ({ thing: { id: m.id, text: m.text.trim(), from: 'memory' as const, daysOld: Math.max(0, ageOf(m)), perishable: perishes(m) }, weight: m.importance ?? DEFAULT_IMPORTANCE }));
   const recentDays = days
     .filter(d => d.summary && d.day && d.day < todayKey && dayDistance(d.day, todayKey) <= DAYS_WORTH_RAISING && worth(d.summary))
     .map(d => ({ thing: { id: `day:${d.day}`, text: d.summary.trim(), from: 'day' as const, daysOld: Math.max(0, dayDistance(d.day, todayKey)) }, weight: DAY_IMPORTANCE }));
