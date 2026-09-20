@@ -2,7 +2,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { absorb, describeWhereabouts, distanceM, forgetPlace, namePlace, placeAt, readSpot, readWhereabouts, SPOT_STALE_MS, whereForPage, type Whereabouts, saidTheyWereGoing, unannouncedArrivalNote, withoutWhereDenials, ARRIVAL_FRESH_MS } from '../electron/whereabouts';
+import { absorb, describeWhereabouts, distanceM, forgetPlace, namePlace, placeAt, readSpot, readWhereabouts, SPOT_STALE_MS, whereForPage, type Whereabouts, knownHaunt, saidTheyWereGoing, unannouncedArrivalNote, withoutWhereDenials, ARRIVAL_FRESH_MS } from '../electron/whereabouts';
 
 const NOW = new Date('2026-08-28T10:00:00Z');
 const HOME = { lat: -31.9505, lon: 115.8605 };
@@ -137,4 +137,46 @@ test('ordinary replies that merely mention seeing are left alone', () => {
     { role: 'assistant', content: "I don't know what you want me to say." },
   ];
   assert.equal(withoutWhereDenials(said, true).length, 3);
+});
+
+test('turning up where she knows they always are is not turning up unannounced', () => {
+  // The three she actually has written down (2026-09-20).
+  const known = [
+    'Tommy works at Happytel Rockingham every Sunday from 12-4:30pm only',
+    'They worked at Happytel Rockingham every Sunday from 12-4:30',
+    'Works at The PC Project shop during the week, not just Sundays at Happytel',
+    'Live with girlfriend Emma in student lodgings at Murdoch.',
+  ];
+  // The arrival that cost him a third of her irritation on a Sunday at noon.
+  assert.equal(knownHaunt('Happytel, Rockingham', known, 'sunday'), true);
+  // A memory that names Sundays is no licence for a Tuesday.
+  assert.equal(knownHaunt('Happytel, Rockingham', known, 'tuesday'), false);
+  // "during the week" covers a weekday and not the weekend — and the Sunday in
+  // that same sentence belongs to Happytel, not to the shop.
+  assert.equal(knownHaunt('The PC Project', known, 'wednesday'), true);
+  assert.equal(knownHaunt('The PC Project', known, 'saturday'), false);
+  assert.equal(knownHaunt('The PC Project', known, 'sunday'), false);
+  assert.equal(knownHaunt('The PC Project', ['Tommy is usually working at The PC Project shop during the week'], 'saturday'), false);
+  // A weekend job is the other way round.
+  assert.equal(knownHaunt('Jewel Cafe', ['Works at Jewel Cafe on weekends'], 'saturday'), true);
+  assert.equal(knownHaunt('Jewel Cafe', ['Works at Jewel Cafe on weekends'], 'monday'), false);
+  // Somewhere she knows nothing about is still a slight.
+  assert.equal(knownHaunt('Dome', known, 'sunday'), false);
+  assert.equal(knownHaunt('Scarlett’s house', known, 'sunday'), false);
+});
+
+test('a place she merely remembers them going once is no licence', () => {
+  const once = ['They visited their mother’s house after work', 'Went to the S&R Orchard Blossom Festival in Walliston with Emma', 'Picked up a new CPU at 40 Boddington Circuit'];
+  assert.equal(knownHaunt('Walliston', once, 'sunday'), false, 'went once is not a routine');
+  assert.equal(knownHaunt('Boddington Circuit', once, 'monday'), false);
+  // "on Thursday" is a day something happened; "on Thursdays" is a routine.
+  // The singular excused going home every Thursday, on the strength of one
+  // memory about starting admin work (2026-09-20).
+  assert.equal(knownHaunt('Murdoch', ['They started admin work from Murdoch on Thursday'], 'thursday'), false);
+  assert.equal(knownHaunt('Murdoch', ['They do admin work from Murdoch on Thursdays'], 'thursday'), true);
+  // Nothing to go on at all.
+  assert.equal(knownHaunt('Happytel', [], 'sunday'), false);
+  assert.equal(knownHaunt('', ['works at Happytel every Sunday'], 'sunday'), false);
+  // A place whose only words are vague ones cannot match on them.
+  assert.equal(knownHaunt('the shop', ['works at the shop every day'], 'sunday'), false, '"shop" names half the places anyone has');
 });

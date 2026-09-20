@@ -223,10 +223,45 @@ export function errandsToldFrom(text: string, nowIso: string): Errand[] {
 }
 
 /** The one worth asking after: the most recent that is still fresh. */
+/**
+ * The hour an errand names for itself, if it names one.
+ *
+ * "text you when I finish work around 4:30" is not a thing to ask after an hour
+ * later. She did exactly that at 1:51 PM — "You told me you'd text when you
+ * finished your shift around 4:30. It's 1:50 PM on a Sunday, you're still at
+ * Happytel" — asking how it went and saying in the same breath that it had not
+ * happened (2026-09-20). The clock is read off the errand's own words, against
+ * the day it was said; a time already past when they said it belongs to
+ * tomorrow, because "text you at 8" said at nine at night is the morning.
+ */
+export function errandDueAt(errand: Errand): number | null {
+  const said = Date.parse(errand.at);
+  if (!Number.isFinite(said)) return null;
+  const match = /\b(?:at|around|about|by|after)\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\b/i.exec(errand.what ?? '');
+  if (!match || !TIME.test(match[1])) return null;
+  const when = clock(match[1]);
+  if (!when) return null;
+  const parts = /^(\d{1,2}):(\d{2})\s*(AM|PM)$/.exec(when);
+  if (!parts) return null;
+  let hour = Number(parts[1]) % 12;
+  if (parts[3] === 'PM') hour += 12;
+  const due = new Date(said);
+  due.setHours(hour, Number(parts[2]), 0, 0);
+  if (due.getTime() < said) due.setDate(due.getDate() + 1);
+  return due.getTime();
+}
+
 export function errandToAskAfter(errands: Errand[], nowMs: number): Errand | null {
   for (let i = errands.length - 1; i >= 0; i--) {
     const at = Date.parse(errands[i].at);
-    if (Number.isFinite(at) && nowMs - at >= 0 && nowMs - at <= ERRAND_FRESH_MS) return errands[i];
+    if (!Number.isFinite(at)) continue;
+    // An errand with an hour on it is asked after from that hour, not from when
+    // they said it — measured from the saying, "text you around 4:30" said at
+    // 12:54 would have gone stale at 3:54 and she could never have asked at all.
+    const due = errandDueAt(errands[i]);
+    const from = due ?? at;
+    if (nowMs < from || nowMs - from > ERRAND_FRESH_MS) continue;
+    return errands[i];
   }
   return null;
 }

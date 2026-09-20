@@ -2,7 +2,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { describeTold, placeToldFrom, toldStillStands, toldTheyAreBusy, TOLD_STALE_MS, errandsToldFrom, errandToAskAfter, ERRAND_FRESH_MS } from '../electron/told';
+import { describeTold, errandDueAt, placeToldFrom, toldStillStands, toldTheyAreBusy, TOLD_STALE_MS, errandsToldFrom, errandToAskAfter, ERRAND_FRESH_MS } from '../electron/told';
 
 const now = '2026-08-30T04:46:00.000Z';
 const tell = (text: string) => placeToldFrom(text, now);
@@ -118,3 +118,45 @@ test('a question with the mark left off is still a question, and a bare name is 
   assert.deepEqual(errandsToldFrom("I'll let ya know 🤣 I'm still in bed", '2026-09-07T01:34:50.632Z'), [], '"let ya know" is not an errand');
 });
 
+
+test('an errand that names an hour is not asked after before the hour', () => {
+  // 12:54 PM: "I'll text you when I finish work around 4:30". At 1:51 PM she
+  // asked how it went, and said in the same line that it was 1:50 (2026-09-20).
+  const saidAt = new Date(2026, 8, 20, 12, 54, 54);
+  const errands = errandsToldFrom('Sorry Haru, yes I’m at the shop, I’ll text you when I finish work around 4:30', saidAt.toISOString());
+  assert.equal(errands.length, 1, JSON.stringify(errands));
+  const due = errandDueAt(errands[0]);
+  assert.ok(due !== null);
+  assert.equal(new Date(due!).getHours(), 16);
+  assert.equal(new Date(due!).getMinutes(), 30);
+  const at = (h: number, m: number) => new Date(2026, 8, 20, h, m).getTime();
+  assert.equal(errandToAskAfter(errands, at(13, 51)), null, 'not two and a half hours early');
+  assert.equal(errandToAskAfter(errands, at(16, 29)), null, 'not a minute early');
+  assert.equal(errandToAskAfter(errands, at(16, 31))?.what, errands[0].what, 'once the hour has come, it is fair game');
+  // Its three hours run from the hour it named, not from when he said it —
+  // measured from the saying it would have gone stale at 3:54, before the
+  // shift it was about had even ended.
+  assert.equal(errandToAskAfter(errands, at(19, 29))?.what, errands[0].what, 'still askable within three hours of 4:30');
+  assert.equal(errandToAskAfter(errands, at(19, 31)), null, 'three hours after the hour it named');
+});
+
+test('an hour already gone when they said it belongs to tomorrow, and an errand with no hour is unchanged', () => {
+  const late = new Date(2026, 8, 20, 21, 0, 0);
+  // "I'll call you at 8pm" said at nine at night is tomorrow evening, not an
+  // hour that went by before he spoke.
+  const evening = errandsToldFrom("I'll call you at 8pm", late.toISOString());
+  const due = errandDueAt(evening[0]);
+  assert.ok(due !== null && due! > late.getTime(), 'tomorrow, not an hour ago');
+  assert.equal(new Date(due!).getDate(), 21);
+  assert.equal(new Date(due!).getHours(), 20);
+  // A bare "at 8" is not a clock — TIME wants am/pm or a colon, the same rule
+  // that governs `until`. It falls back to the three hours from the saying,
+  // which is the behaviour it always had.
+  const bare = errandsToldFrom("I'll call you at 8", late.toISOString());
+  assert.equal(errandDueAt(bare[0]), null);
+  assert.equal(errandToAskAfter(bare, late.getTime() + 40 * 60_000)?.what, 'call you at 8');
+  // No clock at all: unchanged.
+  const shower = errandsToldFrom("I'm about to have a shower", late.toISOString());
+  assert.equal(errandDueAt(shower[0]), null);
+  assert.equal(errandToAskAfter(shower, late.getTime() + 40 * 60_000)?.what, 'have a shower');
+});

@@ -60,7 +60,7 @@ import { awakeHoursSince, theyAreUp, awakeMinutesSince, quietEndedAt } from './a
 import { describeTold, placeToldFrom, toldTheyAreBusy, toldStillStands, type Told, errandsToldFrom, errandToAskAfter, type Errand } from './told';
 import { markMentioned, upcomingToMention } from './upcoming';
 import { directionsAskFrom, directionsNote, dropRouteTalk, matchNamedPlace, startingPoint, withDirections, withoutMapsLinks, type DirectionsAsk, claimsTraffic, withoutTrafficDenials } from './directions';
-import { absorb, describeWhereabouts, distanceM, forgetPlace, homeOf, namePlace, placeAt, readSpot, readWhereabouts, whereForPage, type Whereabouts, SPOT_STALE_MS, saidTheyWereGoing, unannouncedArrivalNote, withoutWhereDenials, type Arrival } from './whereabouts';
+import { absorb, describeWhereabouts, distanceM, forgetPlace, homeOf, knownHaunt, namePlace, placeAt, readSpot, readWhereabouts, whereForPage, type Whereabouts, SPOT_STALE_MS, saidTheyWereGoing, unannouncedArrivalNote, withoutWhereDenials, type Arrival } from './whereabouts';
 import { bodyForPage, describeBody, readBody as readBodyState, readBodyReport, type Body } from './body';
 import { convertImage, normaliseFormat, FORMATS } from './convert';
 import { cancelPower, closeApp, findApps, isCancellable, launch, listRunning, matchApp, matchRunning, normalisePower, POWER_DELAY_S, readDesktopConfig, runPower, supportedDesktop, type DesktopConfig } from './desktop';
@@ -13201,6 +13201,13 @@ function watchForUpdates() {
   const refusal = whyNotCheck(app.isPackaged, process.platform);
   if (refusal) {
     console.log(`[update] not checking — ${refusal}`);
+    return;
+  }
+  // Nobody announces their own shift every week. What she already knows counts
+  // as having been told — see knownHaunt.
+  const weekday = new Intl.DateTimeFormat('en-US', { weekday: 'long' }).format(zonedNow(CHAT_TIMEZONE)).toLowerCase();
+  if (knownHaunt(place, getMemories().filter(memory => memory.status !== 'archived').map(memory => memory.text), weekday)) {
+    console.log(`[where] they turned up at ${place}, which is where they are on a ${weekday}`);
     return;
   }
   // eslint-disable-next-line @typescript-eslint/no-var-requires

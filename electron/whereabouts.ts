@@ -227,3 +227,59 @@ export function withoutWhereDenials<T extends { role: string; content: string }>
   if (!knowsWhere) return messages;
   return messages.filter(message => !(message.role === 'assistant' && CANT_SEE_WHERE.test(message.content.replace(/[\u2018\u2019]/g, "'"))));
 }
+
+// Somewhere she already knows they regularly are.
+//
+// saidTheyWereGoing asks whether they announced the trip. It is the wrong
+// question for a routine: nobody announces their own shift every week, and she
+// has it written down three times over — "Tommy works at Happytel Rockingham
+// every Sunday from 12-4:30pm only". On Sunday 2026-09-20 his phone reached
+// Happytel at 12:21, theirWordsLately reached back only three hours and his
+// last word on it was three hours and thirty-eight minutes old, so she filed it
+// as a slight and put her irritation from nothing to a third of the way up —
+// which is what made the 12:21 notification read "you didn't have the decency
+// to tell me". Left alone it fires again every Sunday at noon.
+//
+// Only a memory that says the place AND says it is regular counts, and when it
+// names the days, today has to be one of them. A memory that merely mentions a
+// place they went once is no licence.
+
+// "on Thursdays" is a routine; "on Thursday" is a day something happened, and
+// read as a routine it excused an arrival home every Thursday on the strength
+// of "They started admin work from home on Thursday". The plural is the tell.
+const REGULAR = /\b(every|each|usually|always|regularly|weekly|on\s+\w+days\b|works?\s+(?:at|in)|working\s+(?:at|in)|during the week|weekends?|weekdays?)\b/i;
+const DAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+const WEEKEND = new Set(['saturday', 'sunday']);
+
+/**
+ * Whether what she knows about them puts them at this place today.
+ *
+ * `weekday` is the local day name, lower case — "sunday". `known` is the text
+ * of what she remembers; anything that is not about a routine is ignored.
+ */
+export function knownHaunt(place: string, known: string[], weekday: string): boolean {
+  const key = place.trim().toLowerCase().replace(/^(at|the)\s+/, '');
+  if (!key) return false;
+  const words = key.replace(/[^a-z0-9\s']/g, ' ').split(/\s+/).filter(word => word.length > 2 && !VAGUE.has(word));
+  if (!words.length) return false;
+  const today = weekday.trim().toLowerCase();
+  for (const memory of known) {
+    const text = (memory ?? '').toLowerCase();
+    if (!text.trim() || !REGULAR.test(text)) continue;
+    if (!words.every(word => text.includes(word))) continue;
+    // "during the week" means the week: it excused the shop on a Saturday until
+    // it was read as the restriction it is. It also settles "works at the shop
+    // during the week, not just Sundays at Happytel", where the Sunday belongs
+    // to the other place — a weekday clause is not a Sunday licence.
+    const weekdayOnly = /\b(during the week|weekdays?)\b/.test(text);
+    const weekendOnly = !weekdayOnly && /\bweekends?\b/.test(text);
+    if (weekdayOnly && WEEKEND.has(today)) continue;
+    if (weekendOnly && !WEEKEND.has(today)) continue;
+    // A memory that names days is a licence for those days only: "every Sunday
+    // at Happytel" says nothing about a Tuesday.
+    const named = DAYS.filter(day => text.includes(day));
+    if (named.length && !named.includes(today) && !weekdayOnly && !weekendOnly) continue;
+    return true;
+  }
+  return false;
+}
