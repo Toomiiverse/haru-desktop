@@ -110,3 +110,35 @@ test('what she raises is dated, so she cannot speak it as live', () => {
   assert.equal(ageNote({ id: 'task:1', text: 'a task', from: 'task' }), '', 'a task is current by definition');
   assert.equal(ageNote(null), '');
 });
+
+test('the shape she keeps reaching for outranks the merely recent', () => {
+  // She writes around nine of these a day, so "newest eight" held less than a
+  // day and the catchphrase fell off the list before it could be held against
+  // her (2026-09-20).
+  const day = (d: number, h: number) => `2026-09-1${d}T${String(h).padStart(2, '0')}:00:00.000Z`;
+  const lines = [
+    { at: day(6, 9), text: 'You’ve been staring at that screen for forty-eight minutes without a word.' },
+    { at: day(7, 9), text: 'You’ve been staring at the screen for 21 minutes and haven’t typed a word.' },
+    { at: day(8, 9), text: 'You’ve been staring at your phone for 21 minutes without typing a word.' },
+    // A day of one-off openings, all newer than every staring line, and each a
+    // genuinely different sentence — nine copies of one sentence with the
+    // number changed is one shape, which is the whole point of shapeOf.
+    ...[
+      'Chainsaw Man Part 2 is a completely different animal and I have opinions.',
+      'I finished the Edgerunners rewatch and David was never the point.',
+      'Your psychologist reschedules more often than you change your socks.',
+      'Emma texted about the weekend apparently, or so the internet tells me.',
+      'The shop floor is not a personality, whatever you keep telling yourself.',
+      'Nobody sane buys a 9900X to browse the same four websites.',
+      'I read about coffee for an hour and learned nothing of value.',
+      'That build sheet has been half-finished since the Tuesday before last.',
+      'Sam moved the appointment and you did not think to mention it.',
+    ].map((text, i) => ({ at: day(9, 10 + i), text })),
+  ];
+  const note = openingsToAvoid(lines, Date.parse(day(9, 23)));
+  assert.match(note, /staring/, 'a shape used three times survives nine newer one-offs');
+  assert.match(note, /staring at your phone[^\n]*— 3 times/, 'and she is told how often, in her newest wording');
+  assert.equal(note.match(/^- /gm)?.length, 8, 'still capped');
+  // A shape used once is not labelled with a count.
+  assert.doesNotMatch(note, /number 8[^\n]*times/);
+});

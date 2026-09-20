@@ -153,16 +153,34 @@ export function shapeOf(text: string): string {
 export function openingsToAvoid(lines: { at: string; text: string }[], nowMs: number, days = OPENINGS_DAYS, limit = OPENINGS_LIMIT): string {
   const since = nowMs - days * 86_400_000;
   const recent = lines.filter(line => { const at = Date.parse(line.at); return Number.isFinite(at) && at <= nowMs && at >= since; });
-  const byShape = new Map<string, string>();
-  // Newest wins the slot, so the list reads as what she is doing lately.
   // A one-word clause ("Happytel, Rockingham.") is not a shape anyone repeats;
   // listing it only crowds out the ones she does.
-  for (const line of recent) { const shape = shapeOf(line.text); if (shape.split(' ').length >= 4) byShape.set(shape, opening(line.text)); }
-  const openings = [...byShape.values()].slice(-limit);
+  const byShape = new Map<string, { text: string; used: number; at: number }>();
+  for (const line of recent) {
+    const shape = shapeOf(line.text);
+    if (shape.split(' ').length < 4) continue;
+    // Newest wording wins the slot, so the list reads as what she is doing
+    // lately, but the count of the shape carries over.
+    byShape.set(shape, { text: opening(line.text), used: (byShape.get(shape)?.used ?? 0) + 1, at: Date.parse(line.at) });
+  }
+  // The ones she has actually repeated come first, not merely the latest.
+  //
+  // Taking the newest N was nearly useless here: she writes around nine of
+  // these a day, so eight slots held less than a day of shapes and a template
+  // that fires once a day fell off the list before it could be held against
+  // her. Checked against the live log on 2026-09-20 the "staring at X for N
+  // minutes" shape — the whole reason for this — had already dropped out.
+  // A shape used twice is a habit forming and a shape used six times is the
+  // catchphrase; recency only breaks ties.
+  const openings = [...byShape.values()]
+    .sort((a, b) => b.used - a.used || b.at - a.at)
+    .slice(0, limit)
+    .sort((a, b) => a.at - b.at)
+    .map(entry => entry.used > 1 ? `${entry.text}" — ${entry.used} times` : `${entry.text}"`);
   if (!openings.length) return '';
   return [
     'Openings you have already used in the last few days:',
-    openings.map(text => `- "${text}"`).join('\n'),
+    openings.map(text => `- "${text}`).join('\n'),
     'Do not open on the shape of any of them. Swapping the noun or the number does not make it a new sentence — "you have been staring at that screen for forty minutes" and "you have been staring at that shop floor for two hours" are one line said twice, and saying it daily is the catchphrase you are not supposed to have. Start somewhere else entirely.',
   ].join('\n');
 }
