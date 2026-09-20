@@ -55,7 +55,7 @@ import { lookUpPlace, readWindowsLocation, searchPlaces, type FoundPlace } from 
 import { INTERRUPTED_ASIDE, wakeAck } from './wake';
 import { acceptedOffer, promisedTitle, reminderAsk, reminderPromised, reminderSavedAside } from './remindme';
 import { describeWeather, readForecast, weatherEvents, weatherToDrawOn, weatherUrl, WEATHER_A_DAY, WEATHER_POLL_MS, type WeatherSample, disputesRain } from './weather';
-import { HANGING_COOLDOWN_MS, isClosing, leftHanging, saidTheyWereLeaving } from './hanging';
+import { HANGING_COOLDOWN_MS, isClosing, judgeInput, judgePrompt, leftHanging, readJudgement, saidTheyWereLeaving, type Hanging } from './hanging';
 import { awakeHoursSince, theyAreUp, awakeMinutesSince, quietEndedAt } from './awake';
 import { describeTold, placeToldFrom, toldTheyAreBusy, toldStillStands, type Told, errandsToldFrom, errandToAskAfter, type Errand } from './told';
 import { markMentioned, upcomingToMention } from './upcoming';
@@ -10135,6 +10135,45 @@ function proactivePrompt(facts: string[], mustSurvive: boolean, subjectNow?: str
   ].filter(Boolean).join('\n\n');
 }
 
+/**
+ * Whether the question she is about to chase him over is one he owes her.
+ *
+ * Her own nudge brain, at temperature nothing, one word back: on the eight
+ * chases it was measured against it agreed with the reading every time, and
+ * gave the same answer on four runs of each. When it cannot be reached or will
+ * not answer plainly, the fallback is ridesOnHisAsk, which is much blunter —
+ * it reads a question mark in what he last said, so his questions typed
+ * without one come back as debts. Over 2026-09-06..20 it still held five
+ * chases that should never have gone, at the cost of one that should have.
+ */
+async function heOwesHerAnAnswer(hanging: Hanging): Promise<boolean> {
+  const judge = nudgeBrain() ?? (store.get('ai.config') as ProviderConfig | undefined);
+  if (judge?.model) {
+    try {
+      const message = await ollamaPost(
+        [{ role: 'system', content: judgePrompt() }, { role: 'user', content: judgeInput(hanging) }],
+        judge,
+        // One word back, but the budget is for a reasoning model: both brains
+        // she might use here spend their allowance thinking first and return
+        // an empty string if they run out mid-thought. At 200 the local 27B
+        // answered nothing at all, every time.
+        { tools: false, temperature: 0, maxTokens: 700 },
+      );
+      const verdict = readJudgement(message.content ?? '');
+      if (verdict) {
+        console.log(`[push] the question she asked is ${verdict === 'blocking' ? 'holding up something he asked for — chasing' : 'a rider on an answer he already got — not chasing'}`);
+        return verdict === 'blocking';
+      }
+      console.warn(`[push] the judge would not say ("${(message.content ?? '').trim().slice(0, 60)}") — falling back`);
+    } catch (error) {
+      console.warn('[push] could not judge her question:', error instanceof Error ? error.message : error);
+    }
+  }
+  const owed = !hanging.ridesOnHisAsk;
+  console.log(`[push] no judgement on her question — ${owed ? 'chasing' : 'not chasing, it came off the back of his own question'}`);
+  return owed;
+}
+
 async function checkHanging(config: ProviderConfig) {
   const history = (store.get('chat.messages') as { id?: string; role: string; content: string; at?: string }[] | undefined) ?? [];
   const hanging = leftHanging(history);
@@ -10158,6 +10197,13 @@ async function checkHanging(config: ProviderConfig) {
   }
   const lastChase = Number(store.get('hanging.lastAt') ?? 0) || 0;
   if (Date.now() - lastChase < HANGING_COOLDOWN_MS) return;
+  // A question mark is not a debt. Asked after the cheap gates and the
+  // cooldown, so the call is only paid for on a chase that would otherwise go
+  // out — see judgePrompt for what it decides and why no pattern can.
+  if (hanging.sheAsked && !(await heOwesHerAnAnswer(hanging))) {
+    store.set('hanging.nudgedFor', hanging.key);
+    return;
+  }
   store.set('hanging.nudgedFor', hanging.key);
   store.set('hanging.lastAt', Date.now());
   const system = proactiveSystem(
