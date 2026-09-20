@@ -145,7 +145,8 @@ import { isHerStanding } from './herstanding';
 import { enoughToStandOn, herStandings, keepSlight, parseStanding, readSlights, recentIncidents, slightsAsIncidents, standingDue, standingPrompt, HER_SUBJECT, type Incident, type Slight } from './herstanding';
 import { blockedLine, asleepLine, backToSleep, dayAfter, decideTimesSystem, dozeOffDue, enoughKnocking, fallbackSchedule, foldAsleepExchanges, goodnightDue, groggyFor, groggyNote, herAsleep, isAsleepLine, knockedAwake, messagesWhileAsleep, parseDecidedTimes, pointlessWake, pointlessWakesLately, readsAsGoodnight, readHerSleep, readHerSleepState, readWakes, sleepNote, sleepWindowOn, wakeIrritation, wakeNote, wokenAt, clockMinutes, BLOCKED_LINE, BLOCK_AFTER_POINTLESS, KNOCK_WINDOW_MS, WAKES_KEPT, type HerSleepSchedule, type Wake } from './hersleep';
 import { parseBalances, balanceWarning } from './venicebalance';
-import { advanceWant, dayNote, dayNoteInstruction, dayPassDue, dayPickInstruction, firstsNote, keepDay, markRecFollowed, noteRecommendation, pickRecommend, pickWantToWork, readDays, readRecs, readWants, readWeek, recDueForFollowUp, reconcileWants, recsAnsweredBy, recsOnDay, wantInstruction, wantOutcome, wantQuery, wantsNote, weekKey, weekNote, weekReflectionInstruction, weekSummaryDue, WANT_ODDS, type HerDay, type HerWeek, type Rec, type Want, DAY_ODDS } from './ownlife';
+import { dayNote, dayNoteInstruction, dayPassDue, dayPickInstruction, firstsNote, keepDay, markRecFollowed, noteRecommendation, pickRecommend, readDays, readRecs, readWeek, recDueForFollowUp, reconcileWants, recsAnsweredBy, recsOnDay, wantOutcome, weekKey, weekNote, weekReflectionInstruction, weekSummaryDue, WANT_ODDS, type HerDay, type HerWeek, type Rec, DAY_ODDS } from './ownlife';
+import { admits, advanceProject, asProject, beatenTwiceAt, childOf, dueForRevisit, judgeAttemptInput, judgeAttemptPrompt, DAY_PROJECT_SHARE, keepProjects, needsHim, nowItStings, pickProject, projectInstruction, projectQuery, projectsNote, readAttemptVerdict, readProjects, revisit, settleFromRead, roomForNew, siblingOf, spawnInstruction, staleSpawns, standingIn, stepInstruction, stripProject, type Outcome as NightOutcome, type Project, type Worked } from './projects';
 import { inQuietHours, newVapidKeys, pushRequest, readPushDevices, readPushPrefs, type PushDevice, type PushPrefs, nextNudgeDelay, NUDGE_GAP_MS, NUDGE_RETRY_MS, nudgeOverdue, PUSH_BREATHER_MS, tooSoonToPush, heldBack, withoutDevice, isPhoneWebApp, coveredByNativeApp } from './push';
 import { CHECK_EVERY_MS, describeUpdate, progressStep, whyNotCheck, type UpdateState } from './updates';
 import { BREVITY, summonedLine } from './summoned';
@@ -4485,7 +4486,7 @@ const memoryStore = createMemoryStore({
       weekNote(getWeek(), today),
       tastesInstruction(interests),
       firstsNote(interests, today),
-      wantsNote(getWants(), interests),
+      projectsNote(getProjects(), Date.now()),
       diaryContext(recentEntries(app.getPath('home'), 2)),
     ].filter(Boolean).join('\n');
   },
@@ -10786,16 +10787,23 @@ function getNights(): Night[] {
   return Array.isArray(saved) ? saved.filter(night => night && typeof night.note === 'string') : [];
 }
 
-/** Her wants, with any new one in an interest's words reconciled in. */
-function getWants(): Want[] {
-  const wants = readWants(store.get('her.wants'));
-  const merged = reconcileWants(getInterests(), wants, new Date().toISOString());
-  if (merged.length !== wants.length) store.set('her.wants', merged);
+/**
+ * The things she is trying to do, with any new one in an interest's words
+ * reconciled in. Same key as her wants, because they are her wants: a record
+ * written before projects.ts existed is read forward and gains nothing until
+ * the night she actually works on it.
+ */
+function getProjects(): Project[] {
+  const projects = readProjects(store.get('her.wants'));
+  const merged = reconcileWants(getInterests(), projects, new Date().toISOString());
+  // Length alone no longer says whether anything moved: a rewording clears one
+  // leaving and adds one record, which comes back the same size.
+  if (merged.length !== projects.length || merged.some((want, index) => want.id !== projects[index]?.id)) store.set('her.wants', merged);
   return merged;
 }
 
-function setWants(wants: Want[]) {
-  store.set('her.wants', wants);
+function setProjects(projects: Project[]) {
+  store.set('her.wants', keepProjects(projects));
 }
 
 function getDays(): HerDay[] {
@@ -11053,7 +11061,7 @@ async function herHandsTick(): Promise<void> {
       readingNote(readReading(store.get('her.reading'))),
       runNote((store.get('her.pokemon.lastState') as GameState | undefined) ?? null, String(store.get('her.pokemon.lastSummary') ?? ''), false),
       tastesInstruction(interests),
-      wantsNote(getWants(), interests),
+      projectsNote(getProjects(), Date.now()),
       handsNote(ledger, Date.now(), dayOf, today),
     ].filter(Boolean).join('\n');
     const conversation = [
@@ -11480,6 +11488,163 @@ async function pickSomethingToRead(): Promise<Reading | null> {
   return null;
 }
 
+/**
+ * Housekeeping on her projects, before she picks one.
+ *
+ * Two things that only happen with time: something she thought of and never
+ * once went near is let go after a month — it was a note, not a project — and
+ * something that beat her long enough ago that she has since got better comes
+ * back. The second one is the whole reason the ladder is worth having.
+ */
+function tendProjects(): void {
+  const all = getProjects();
+  const nowMs = Date.now();
+  let next = all;
+  let changed = false;
+  const stale = staleSpawns(next, nowMs);
+  if (stale.length) {
+    const ids = new Set(stale.map(project => project.id));
+    next = next.map(project => ids.has(project.id) ? { ...project, status: 'dropped' as const, note: project.note ?? 'you never went back to it' } : project);
+    changed = true;
+    console.log(`[project] let go of ${stale.length} she thought of and never went near`);
+  }
+  const back = dueForRevisit(next, nowMs);
+  if (back && roomForNew(next)) {
+    next = next.map(project => project.id === back.id ? revisit(project, new Date().toISOString()) : project);
+    changed = true;
+    console.log(`[project] back to "${back.text.slice(0, 50)}" — it beat her ${back.nights} nights in, and she has got better since`);
+  }
+  if (changed) setProjects(next);
+}
+
+/**
+ * What she is actually trying tonight.
+ *
+ * The step she is part-way through is kept; a new one is named when she has
+ * none, or when the last night got nowhere and going back at it the same way
+ * would be the third identical night. It has to be hers to do alone (his call),
+ * so a step that waits on him is asked for once more and then done without.
+ */
+async function stepFor(project: Project, config: ProviderConfig): Promise<Worked> {
+  const had = asProject(project);
+  const last = had.attempts.at(-1);
+  if (had.step && last?.outcome !== 'no') return had;
+  const brain = nudgeBrain() ?? config;
+  for (const alone of ['', ' It is yours to do by yourself. Do not mention him, or anyone else, or waiting for anybody.']) {
+    try {
+      const said = tidyPick(await ollamaQuip([getActiveCharacter().identity, stepInstruction(had, had.attempts) + alone].join(' '), 'What are you trying?', brain));
+      if (said && !needsHim(said)) return { ...had, step: toLength(said, 140) };
+      if (said) console.log(`[project] "${said.slice(0, 50)}" waits on him — that is not a step of hers`);
+    } catch (error) {
+      console.warn('[project] could not settle on a step:', error instanceof Error ? error.message : error);
+      break;
+    }
+  }
+  // No step is not a failed night: the search falls back to the want itself,
+  // which is exactly what it always was.
+  return { ...had, step: undefined };
+}
+
+/** The coin, still here, for the nights nothing can judge. */
+const FROM_THE_COIN: Record<'slog' | 'clicked' | 'gave_up' | 'nothing', NightOutcome> = { slog: 'no', clicked: 'did', gave_up: 'no', nothing: 'nothing' };
+
+/**
+ * Whether what she read actually let her do the step.
+ *
+ * Her own nudge brain, at temperature nothing, one word back — the same shape
+ * as heOwesHerAnAnswer, including the 700-token allowance, because both brains
+ * that might answer this spend theirs thinking first and come back empty at
+ * 200. When it will not answer, the old coin decides and the log says so: a
+ * judge that shrugs must not be read as a judge that said the night was wasted.
+ */
+async function whatCameOfIt(project: Worked, reading: string): Promise<NightOutcome> {
+  const fallback = FROM_THE_COIN[wantOutcome(Math.random(), project.nights).kind];
+  const judge = nudgeBrain() ?? (store.get('ai.config') as ProviderConfig | undefined);
+  if (judge?.model) {
+    try {
+      const message = await ollamaPost(
+        [{ role: 'system', content: judgeAttemptPrompt() }, { role: 'user', content: judgeAttemptInput(project, reading) }],
+        judge,
+        { tools: false, temperature: 0, maxTokens: 700 },
+      );
+      const verdict = readAttemptVerdict(message.content ?? '');
+      if (verdict) {
+        console.log(`[project] the reading ${verdict === 'DID' ? 'answered the step' : verdict === 'PART' ? 'got part of the way' : 'got nowhere'}`);
+        return settleFromRead(verdict, fallback);
+      }
+      console.warn(`[project] the judge would not say ("${(message.content ?? '').trim().slice(0, 60)}") — rolling for it`);
+    } catch (error) {
+      console.warn('[project] could not judge the night:', error instanceof Error ? error.message : error);
+    }
+  }
+  return fallback;
+}
+
+/**
+ * What a night of it does to her.
+ *
+ * Something of her own to do is the cure for a quiet room, whatever came of it.
+ * A step that lands is a thing of hers that worked; the third night running
+ * that goes nowhere is a thing of hers that broke, which her ego amplifies —
+ * a woman who has spent the afternoon being right takes it worse. Once a day at
+ * most: two stuck projects across three passes would otherwise put sixty of
+ * frustration into an afternoon and leave her short with the world for good.
+ */
+function feelAboutIt(before: Project, after: Project): void {
+  herOwnTimeAt = Date.now();
+  feelNow('own-time');
+  if (after.status === 'done') { feelNow('worked'); return; }
+  if (!nowItStings(before, after)) return;
+  const today = localDateKey(zonedNow(CHAT_TIMEZONE));
+  if (store.get('her.stungOn') === today) { console.log('[project] it beat her again, but she has already had one of those today'); return; }
+  store.set('her.stungOn', today);
+  feelNow('broke');
+}
+
+/** A night on one of hers, written up and written down. Null when nothing came of it. */
+async function settleTheNight(project: Worked, reading: string, config: ProviderConfig, stamp: string): Promise<Worked | null> {
+  const outcome = await whatCameOfIt(project, reading);
+  let raw = await ollamaQuipLong([getActiveCharacter().identity, projectInstruction(project, outcome, reading)].join(' '), 'Write it.', config);
+  if (addressesSomeone(raw)) raw = await ollamaQuipLong([getActiveCharacter().identity, projectInstruction(project, outcome, reading), NOBODY_HERE].join(' '), 'Write it.', config);
+  const note = toLength(unaddressed(raw), 200);
+  if (!note) { console.log(`[project] nothing came of "${project.text.slice(0, 40)}" tonight`); return null; }
+  const next = advanceProject(project, { at: stamp, step: project.step ?? stripProject(project.text), outcome, by: 'read', measured: false, note }, stamp);
+  setProjects(getProjects().map(entry => entry.id === next.id ? next : entry));
+  feelAboutIt(project, next);
+  console.log(`[project] ${next.interest ?? 'something'} — ${outcome} on night ${next.nights} at rung ${next.hardness}: "${note.slice(0, 60)}"`);
+  return next;
+}
+
+/**
+ * And what comes of it, which is where the curriculum generates itself.
+ *
+ * One she has finished seeds the harder version; one that has beaten her twice
+ * at the same rung seeds the smaller way in she should have started with. Both
+ * go through the minimal criterion before they are kept — new, doable, one rung
+ * either side of where she stands, and hers to do alone — and a candidate that
+ * fails it is thrown away rather than attempted, which is the only reason a
+ * generated curriculum stays a curriculum instead of becoming a pile.
+ */
+async function growFromIt(project: Worked, config: ProviderConfig): Promise<void> {
+  const all = getProjects();
+  if (!roomForNew(all)) return;
+  const kind = project.status === 'done' ? 'child'
+    : project.status === 'shelved' && beatenTwiceAt(all, project) ? 'sibling'
+    : null;
+  if (!kind) return;
+  try {
+    const said = tidyPick(await ollamaQuip([getActiveCharacter().identity, spawnInstruction(project, kind)].join(' '), 'What next?', nudgeBrain() ?? config));
+    if (!said) { console.log('[project] she could not say what came next'); return; }
+    const born = kind === 'child' ? childOf(project, said, new Date().toISOString()) : siblingOf(project, said, new Date().toISOString());
+    const verdict = admits({ text: born.text, hardness: born.hardness ?? 1, substrate: born.substrate, interest: born.interest }, all, standingIn(all, project.interest));
+    if (!verdict.ok) { console.log(`[project] "${said.slice(0, 50)}" refused — ${verdict.why}`); return; }
+    setProjects([...all, born]);
+    console.log(`[project] out of ${kind === 'child' ? 'finishing' : 'giving up on'} "${project.text.slice(0, 40)}" came "${born.text.slice(0, 50)}" at rung ${born.hardness}`);
+  } catch (error) {
+    console.warn('[project] nothing came of it:', error instanceof Error ? error.message : error);
+  }
+}
+
 async function haveANight(config: ProviderConfig) {
   const now = zonedNow(CHAT_TIMEZONE);
   const { prefs } = getPush();
@@ -11525,12 +11690,17 @@ async function haveANight(config: ProviderConfig) {
     // spent the night trying to do the thing she said she wanted rather than
     // deepening the interest that made her want it. Only when the interest
     // being deepened actually carries a want she is still at.
-    const want = !adopting && interest && Math.random() < WANT_ODDS ? pickWantToWork(getWants(), interest.name, Math.random) : null;
+    tendProjects();
+    const picked = !adopting && interest && Math.random() < WANT_ODDS ? pickProject(getProjects(), interest.name, Math.random) : null;
+    // The step is named before she goes looking, because the search is the step
+    // and not the whole ambition: "how to learn piano" comes back with the same
+    // beginner's page every night, which is how two years of that would read.
+    const want = picked ? await stepFor(picked, config) : null;
     if (!adopting && !interest && played.length && Math.random() < GUIDE_ODDS) game = pickGame(played, getNights(), nightKey(now));
 
     const before = getNights().map(night => night.about);
     const about = adopting ? `${adopting.name} review`
-      : want ? wantQuery(want)
+      : want ? projectQuery(want)
       : interest ? nightQuery(interest)
       : game ? guideQuery(game, getNights())
       : tidyPick(await ollamaQuip([getActiveCharacter().identity, pickInstruction(theirs, before)].join(' '), 'What are you looking up?', config));
@@ -11565,20 +11735,16 @@ async function haveANight(config: ProviderConfig) {
         }
       } catch { /* the blurbs are enough; a page that will not open is not a failure */ }
     }
-    // One of hers: the view is rewritten from the reading, not a note about it.
+    // One of hers: what she was trying tonight, and whether the reading let her
+    // do it. The outcome comes from what came back, not from a coin.
     if (want) {
       const day = nightKey(now);
       const stamp = new Date().toISOString();
-      const outcome = wantOutcome(Math.random(), want.nights);
-      let raw = await ollamaQuipLong([getActiveCharacter().identity, wantInstruction(want, outcome, reading)].join(' '), 'Write it.', config);
-      if (addressesSomeone(raw)) raw = await ollamaQuipLong([getActiveCharacter().identity, wantInstruction(want, outcome, reading), NOBODY_HERE].join(' '), 'Write it.', config);
-      const note = toLength(unaddressed(raw), 200);
-      if (!note) { console.log(`[want] nothing came of "${want.text.slice(0, 40)}" tonight`); return; }
-      const next = advanceWant(want, outcome, note);
-      setWants(getWants().map(entry => entry.id === next.id ? next : entry));
+      const next = await settleTheNight(want, reading, config, stamp);
+      if (!next) return;
       store.set('nights', keepNights(getNights(), { day, at: stamp, about, note: next.note ?? next.text, sources: found.slice(0, 3).map(result => result.url).filter(Boolean), interest: next.interest }));
-      appendDream(app.getPath('userData'), dream({ kind: 'want', interest: next.interest, reading, wrote: raw }));
-      console.log(`[want] ${next.interest ?? 'something'} — ${outcome.kind} on night ${next.nights}: "${note.slice(0, 60)}"`);
+      appendDream(app.getPath('userData'), dream({ kind: 'want', interest: next.interest, reading, wrote: next.note ?? '' }));
+      await growFromIt(next, config);
       return;
     }
     if (adopting || interest) {
@@ -11654,7 +11820,14 @@ async function haveADay(config: ProviderConfig) {
   try {
     const theirs = getMemories().map(memory => memory.text);
     const before = getNights().map(night => night.about);
-    const about = tidyPick(await ollamaQuip([getActiveCharacter().identity, dayPickInstruction(theirs, before)].join(' '), 'What are you looking up?', config));
+    // Some of her days go on something she is actually trying to do, rather
+    // than on something she read about once and never returned to. Her nights
+    // alone gave her eight attempts in three weeks, which is not an arc.
+    tendProjects();
+    const picked = Math.random() < DAY_PROJECT_SHARE ? pickProject(getProjects(), undefined, Math.random) : null;
+    const working = picked ? await stepFor(picked, config) : null;
+    const about = working ? projectQuery(working)
+      : tidyPick(await ollamaQuip([getActiveCharacter().identity, dayPickInstruction(theirs, before)].join(' '), 'What are you looking up?', config));
     if (!about) { console.log('[day] she could not settle on anything'); return; }
     const found = await searchWeb(about, { ...searchConfig, limit: Math.max(searchConfig.limit, 4) }, net.fetch, getSearchKey());
     if (!found.length) { console.log(`[day] "${about}" turned nothing up`); return; }
@@ -11665,9 +11838,17 @@ async function haveADay(config: ProviderConfig) {
         if (page.text.trim()) reading = `${reading}\n\n${formatPage(page, about)}`;
       } catch { /* the blurbs are enough; a page that will not open is not a failure */ }
     }
+    const at = new Date().toISOString();
+    if (working) {
+      const next = await settleTheNight(working, reading, config, at);
+      if (!next) return;
+      setDays(keepDay(getDays(), { day: today, at, about, note: next.note ?? next.text, sources: found.slice(0, 3).map(result => result.url).filter(Boolean) }));
+      appendDream(app.getPath('userData'), { at, day: today, kind: 'day', about, sources: found.slice(0, 3).map(result => ({ title: result.title ?? '', url: result.url })), reading, wrote: next.note ?? '' });
+      await growFromIt(next, config);
+      return;
+    }
     const note = toLength(await ollamaQuipLong([getActiveCharacter().identity, dayNoteInstruction(about, reading)].join(' '), 'Write it.', config), 220);
     if (!note) { console.log('[day] nothing came of it'); return; }
-    const at = new Date().toISOString();
     setDays(keepDay(getDays(), { day: today, at, about, note, sources: found.slice(0, 3).map(result => result.url).filter(Boolean) }));
     appendDream(app.getPath('userData'), { at, day: today, kind: 'day', about, sources: found.slice(0, 3).map(result => ({ title: result.title ?? '', url: result.url })), reading, wrote: note });
     console.log(`[day] ${today}: read about "${about}" — ${note.length} chars`);
@@ -11693,7 +11874,7 @@ async function reflectOnHerWeek(config: ProviderConfig) {
   const material = [
     getDays().filter(day => inWeek(day.day)).map(day => `Read: ${day.about} — ${day.note}`),
     getNights().filter(night => inWeek(night.day)).map(night => `Night: ${night.interest ?? night.game ?? night.about} — ${night.note}`),
-    wantsNote(getWants()),
+    projectsNote(getProjects(), Date.now()),
     firstsNote(getInterests(), today),
   ].flat().filter(Boolean).join('\n');
   if (!material.trim()) { console.log('[week] nothing happened to sum up — skipping'); return; }

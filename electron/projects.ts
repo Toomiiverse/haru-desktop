@@ -19,9 +19,9 @@
 //
 // Pure, all of it. The model writes the words; this decides the shape.
 
-import type { Want } from './ownlife';
+import type { Want, WantStatus } from './ownlife';
 
-export type ProjectStatus = 'declared' | 'working' | 'done' | 'dropped' | 'shelved';
+export type ProjectStatus = WantStatus;
 /** Where it came from: her tastes, her own head, or the last one she finished or gave up on. */
 export type BornOf = 'taste' | 'her' | 'child' | 'sibling' | 'revisit';
 /** Something real enough to say what happened. Reading is the one she always has. */
@@ -44,7 +44,7 @@ export type Attempt = {
  * it is handed and the sixteen already in the store predate all of this — they
  * carry their nights and her notes and must go on working untouched.
  */
-export type Project = Omit<Want, 'status'> & {
+export type Project = Want & {
   status: ProjectStatus;
   hardness?: number;
   /** The thing she is actually trying next. Always something she can do alone. */
@@ -71,6 +71,15 @@ export const PROJECTS_SHOWN = 4;
 export const ATTEMPTS_KEPT = 8;
 /** And the ledger itself. */
 export const PROJECTS_KEPT = 40;
+/**
+ * The share of her days spent on something she is trying to do, rather than on
+ * something she read about once.
+ *
+ * Eight attempts in three weeks is not an arc: a want would take a year to
+ * resolve and nothing would ever be seen to happen. A third of her days roughly
+ * doubles the rate. This is the charter value for the dial that will own it.
+ */
+export const DAY_PROJECT_SHARE = 0.35;
 /** Nights in a row at the same step before she gives up on it. */
 export const STUCK_SHELVES = 3;
 /** How often she returns to the one she has put the most into, rather than rolling. */
