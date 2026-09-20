@@ -519,6 +519,27 @@ test('her deliberation is recognised and the reply behind it kept', () => {
   assert.ok(dropped > 700 && !text.includes('The user') && !text.includes('save_journal'));
 });
 
+test('"Let me respond" is a plan; the rest of what she says after "let me" is not', () => {
+  // Went to his phone whole on 2026-09-20: the planning ran into the reply with
+  // no space, which is the seam dropThinkingAloud looks for.
+  const leak = "Let me respond with some edge - he's being a bit condescending by checking up on me like thatMaking sure? Like I'm a dog you left in the yard? 🙄\n\nWhat, you think I just power down when you walk away?\n\nI have things. I do them. You don't need to supervise.";
+  assert.equal(thinksAloud(leak), true);
+  const { text } = dropThinkingAloud(leak);
+  assert.ok(text.startsWith('Making sure?'), `the reply begins at the seam, not: ${text.slice(0, 40)}`);
+  assert.ok(text.endsWith("You don't need to supervise."), 'and all three of her paragraphs survive');
+  assert.ok(!text.includes('condescending'), 'the working-out is gone');
+  assert.equal(thinksAloud('Let me reply to that properly for once.'), true);
+  // Everything else after "let me" is how she talks, and none of it is a plan.
+  for (const hers of [
+    'Let me guess — you forgot again.',
+    "Let me ask you something, since you're being so forthcoming.",
+    'Let me give you the short version: it won’t fit.',
+    'Let me save you the trouble — Sudin already did it.',
+    'Let me be clear about this, because you keep forgetting.',
+    'Let me make one thing obvious before you start.',
+  ]) assert.equal(thinksAloud(hers), false, hers);
+});
+
 test('a plan with nothing behind it is nothing to say', () => {
   const planOnly = 'The user seems upset about being ignored. I should acknowledge that without apologising.\n\nI need to keep her voice: sharp, not warm.';
   assert.equal(thinksAloud(planOnly), true);

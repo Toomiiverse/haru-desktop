@@ -214,7 +214,13 @@ export function readsLikeAssistant(reply: string): boolean {
 // "I should" alone is hers ("I should have said this earlier"); the planning
 // forms are "I should:" and "I should acknowledge / not / keep / be…".
 const PLANNING_VERBS = '(?:acknowledge|not|keep|stay|be|avoid|respond|answer|reply|call|check|save|address|focus|make|hold|match|lean|drop|push|ask|point|give|offer|remind|steer|use)';
-const THINKING_OPENER = new RegExp(`^(?:The user\\b|I should(?:n'?t)?(?::|\\s+${PLANNING_VERBS}\\b)|I need to\\s+${PLANNING_VERBS}\\b|Let me (?:think|check|see|consider|figure)\\b|Okay, so (?:the user|they)\\b|Alright, (?:so )?(?:the user|they)\\b|First, (?:I|let me)\\b)`);
+// "Let me think" was deliberation and "Let me respond with some edge - he's
+// being a bit condescending by checking up on me like thatMaking sure?" was not,
+// so that one went to his phone whole (2026-09-20). Only the two verbs that name
+// the act of replying are added: the rest of PLANNING_VERBS is ordinary speech
+// after "Let me" — "let me ask you something", "let me give you the short
+// version", "let me save you the trouble" are all things she says.
+const THINKING_OPENER = new RegExp(`^(?:The user\\b|I should(?:n'?t)?(?::|\\s+${PLANNING_VERBS}\\b)|I need to\\s+${PLANNING_VERBS}\\b|Let me (?:think|check|see|consider|figure|respond|reply)\\b|Okay, so (?:the user|they)\\b|Alright, (?:so )?(?:the user|they)\\b|First, (?:I|let me)\\b)`);
 const THINKING_CONTINUES = new RegExp(`^(?:They (?:mentioned|said|are|have|'re|'ve|seem|want|opened|need|asked|just)\\b|This is (?:a |just |the |about )|This isn'?t\\b|\\d+[.)]\\s|So I\\b|I can\\b|I'?ll\\b|I won'?t\\b|I should(?:n'?t)?(?::|\\s+${PLANNING_VERBS}\\b)|The \\w+ (?:drops|stays|goes|comes) here|Since (?:they|the user)\\b|Given (?:that|the|what)\\b|No (?:therapy|advice|solutions)\\b|Keep it\\b|Stay (?:in|with)\\b)`);
 
 export function thinksAloud(reply: string): boolean {
