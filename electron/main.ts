@@ -17,7 +17,7 @@ import { withDiscoveredExpressions } from './expressions';
 import { reportCapabilities, seesItsOwnScreen } from './capabilities';
 import { followCalendar, chaseableOverdue, findItem, shiftDays, formatAgenda, itemStatus, missedInstruction, movedSaid, putOffInstruction, putOffUntil, relevantItems, readsAsAnswerToHer, readsAsBareReport, tickOffInstruction, readsAsDone, doneClause, readsAsNotDone, relativeDay, staleItemNamed, inventedTimeFor, raisedRecently, type ItemStatus, underwayClause, isUnderway, FOLLOW_UP_MS } from './agenda';
 import { isRelaunchNotReturn, openingAngles, pickAngle, shouldPipeUp, PIPE_UP_CHANCE } from './opening';
-import { blankSlateOpening, BODY_KEYS, readSlate, RESET_KEYS, slateIsNewer, withoutPreSlate, type BlankSlate } from './blankslate';
+import { blankSlateOpening, BODY_KEYS, readSlate, RESET_KEYS, slateIsNewer, SLATE_DISARM_MINUTES, withoutPreSlate, type BlankSlate } from './blankslate';
 import { allDayDueMinutes, isEveningCheck, reminderInstruction, reminderTier, reminderVolume, shouldRemind, type ReminderState } from './reminders';
 import { isHeated, readTone, sharpen, toneGesture, tonePose } from './tone';
 import { isSilenced, nextPushback, PUSHBACK_LIMIT, pushbackInstruction, readsAsDropIt, type Pushback } from './pushback';
@@ -126,7 +126,7 @@ import { keepNights, lastNightDay, nightNoteInstruction, nightsInstruction, nigh
 import { gamesPlayedLately, GUIDE_ODDS, guideNoteInstruction, guideQuery, pickGame, withSteam, type Played } from './gamenight';
 import { addressesSomeone, adopt, ADOPT_ODDS, adoptInstruction, deepen, deepenInstruction, isOneOfTheirs, MAX_INTERESTS, nightQuery, NOBODY_HERE, parseAdoption, parseDeepening, pickTonight, tastesInstruction, unaddressed, type Interest } from './tastes';
 import { readSteamWebConfig, recentlyPlayed } from './steamweb';
-import { appendDream, appendEntry, diaryContext, diaryDueFor, diaryInstruction, DIARY_FILE, recentEntries, type Dream, type Entry } from './diary';
+import { appendDream, appendEntry, diaryContext, diaryDueFor, diaryInstruction, DIARY_FILE, DREAMS_FILE, recentEntries, type Dream, type Entry } from './diary';
 import { DIARY_VOICE, fragmentsInstruction, liftedFrom, NOT_THOSE_LINES, NOT_THOSE_NAMES, unknownNames } from './diaryvoice';
 import { fetchTranscript, formatTranscript, titleFrom, transcriptInstruction, transcriptsAvailable, videoIdFrom, watchUrl } from './transcripts';
 import { feedbackEntry, modelThatSpoke, readSpoke, recordFeedback, rememberSpoke, repliedTo } from './feedback';
@@ -158,7 +158,7 @@ import { emptyKnowledge, KNOWLEDGE_CATEGORIES, knowledgeStats, type KnowledgeCat
 import type { IngestResult } from './ingestion';
 import type { Embedder } from './embeddings';
 import { retrieveContext } from './retrieveContext';
-import type { VaultSyncReport } from './obsidian';
+import { HARU_FOLDER, type VaultSyncReport } from './obsidian';
 import { diaryNotes, herNote, indexNote, memoriesNote, nightNotes, placesNote, standingNote, writeNotes } from './vault';
 import { categoryOf, LEGACY_KIND, namesSomeoneElse, readSorting, sortInput, sortPrompt, type SortNote, type Sorted } from './categories';
 import { collectAll, collectDocker, collectDockerLight, collectGpu, collectGpuApps, collectProcesses, collectServices, collectSystem, diagnose, KNOWN_SERVICES, USER_SERVICES, type Diagnosis } from './system';
@@ -411,8 +411,18 @@ store.hardenPermissions();
 // Here rather than in whenReady, because the first memory sync runs on startup
 // and a reset after it has already merged back the very memories it is clearing.
 if (process.env.HARU_RESET === '1') {
-  console.log('[reset] HARU_RESET is set — she is waking up with nothing');
-  resetHer();
+  // Self-disarming, because the variable outlives the intention: the drop-in is
+  // removed by hand and Restart=on-failure is three seconds away, so a crash on
+  // the way up would wipe her again — with a new timestamp, which every body
+  // would then follow a second time (SLATE_DISARM_MINUTES).
+  const stood = Date.parse((store.get('her.slate') as { at?: string } | undefined)?.at ?? '');
+  const sinceMinutes = Number.isFinite(stood) ? (Date.now() - stood) / 60_000 : Infinity;
+  if (sinceMinutes < SLATE_DISARM_MINUTES) {
+    console.log(`[reset] HARU_RESET is set, but she was reset ${Math.round(sinceMinutes)} minute(s) ago — refusing to fire again. Take the drop-in out.`);
+  } else {
+    console.log('[reset] HARU_RESET is set — she is waking up with nothing');
+    resetHer();
+  }
 } else if (process.env.HARU_BODY_CLEAR === '1') {
   // The limb's own version: drop the life this machine led while it was a
   // second her, keep what he typed, leave no slate. Her memories come back down
@@ -4725,14 +4735,52 @@ function resetHer({ body = false, at = new Date().toISOString() }: { body?: bool
   store.setKnowledge(emptyKnowledge());
   store.setThoughts(emptyThoughtState());
   store.setActivityLog({});
+  // What she booked herself: a follow-up is in her prompt as something she said
+  // she would come back to, and the scheduler would fire it in her own voice
+  // about a life she no longer has. The app's own jobs are housekeeping and his
+  // watches are his — only the ones she created go.
+  const schedule = store.getSchedule();
+  store.setSchedule({ ...schedule, jobs: schedule.jobs.filter(job => job.createdBy === 'app'), runs: [], booked: [] });
   for (const key of (body ? BODY_KEYS : RESET_KEYS)) store.delete(key as never);
-  try {
-    const diary = path.join(app.getPath('home'), DIARY_FILE);
-    if (existsSync(diary)) renameSync(diary, path.join(app.getPath('home'), `${DIARY_FILE.replace(/\.md$/, '')} (before reset ${at.slice(0, 10)}).md`));
-  } catch (error) {
-    // The diary staying put is a worse reset, not a failed one: she reads the
-    // last two entries only, and the slate note outranks them for a fortnight.
-    console.warn('[reset] could not move the diary aside:', error instanceof Error ? error.message : error);
+  // The rest of her record is files rather than keys, and a file left where it
+  // is outlives the wipe. Each one is moved aside under a dated name rather than
+  // deleted — still his to open, no longer hers to read back as a life she
+  // remembers having. Any one of them staying put is a worse reset, not a failed
+  // one, so each failure warns and the wipe stands.
+  const stamp = at.slice(0, 10);
+  const userData = app.getPath('userData');
+  const home = app.getPath('home');
+  const aside = (from: string, to: string) => {
+    try {
+      if (existsSync(from)) renameSync(from, to);
+    } catch (error) {
+      console.warn(`[reset] could not move ${from} aside:`, error instanceof Error ? error.message : error);
+    }
+  };
+  aside(path.join(home, DIARY_FILE), path.join(home, `${DIARY_FILE.replace(/\.md$/, '')} (before reset ${stamp}).md`));
+  // The other half of the diary: every search, page and thing she wrote at night.
+  aside(path.join(userData, DREAMS_FILE), path.join(userData, `dreams (before reset ${stamp}).jsonl`));
+  // What she remembers of her own games, handed to her as simply what she
+  // remembers — five dated sittings of a game she has never played.
+  aside(path.join(userData, 'games'), path.join(userData, `games (before reset ${stamp})`));
+  // Her pages in his vault, and only on a reset: a body clear is housekeeping on
+  // a limb and has no business rearranging his Obsidian. The knowledge sync skips
+  // her own folder, so these never taught her anything back — but vault.ts only
+  // ever writes notes, so a year of her diary and her nights would sit there as
+  // current pages of a life the reset had just taken.
+  const vaultRoot = (store.get('knowledge.vault') as { path?: unknown } | undefined)?.path;
+  if (!body && typeof vaultRoot === 'string' && vaultRoot.trim()) {
+    const vault = vaultRoot.trim();
+    aside(path.join(vault, HARU_FOLDER, 'Diary'), path.join(vault, HARU_FOLDER, `Diary (before reset ${stamp})`));
+    aside(path.join(vault, HARU_FOLDER, 'Nights'), path.join(vault, HARU_FOLDER, `Nights (before reset ${stamp})`));
+    // Who is who is the fact graph rendered as a page, and that page is read back
+    // into the graph. Emptying the graph and leaving the page puts his whole
+    // social graph back the next time it is read — his people, by name.
+    try {
+      writeFileSync(path.join(vault, GRAPH_PAGE), renderGraphPage(emptyGraph(), new Date()).text, 'utf8');
+    } catch (error) {
+      console.warn('[reset] could not blank the who-is-who page:', error instanceof Error ? error.message : error);
+    }
   }
   // Only a reset leaves one. A body clearing itself is housekeeping on a limb:
   // stamping a slate here would tell every machine she had been reset, which

@@ -48,7 +48,11 @@ export const SLATE_STRANGER = 8;
  */
 export const RESET_KEYS: string[] = [
   // What she knew about him.
-  'profile', 'told', 'haunts', 'following', 'whereabouts', 'where.arrival', 'memory.formed',
+  // whereabouts by its leaves, not whole: the key also holds `enabled`, which is
+  // his decision to share his location at all. Taking that with the rest would
+  // switch his own setting off, which is the one thing above this list says it
+  // must not do — the same targeted style as `where.arrival` and `hume.reading`.
+  'profile', 'told', 'haunts', 'following', 'whereabouts.last', 'whereabouts.places', 'where.arrival', 'memory.formed',
   // The blocks: derived from the memory above, except where one was edited by
   // hand — and an edited block would survive the wipe holding the old picture.
   'memory.blocks',
@@ -63,9 +67,29 @@ export const RESET_KEYS: string[] = [
   'tastes', 'nights',
   'her.days', 'her.deeds', 'her.feelings', 'her.hands', 'her.monthTally', 'her.months',
   'her.openedOn', 'her.reading', 'her.readingOn', 'her.recs', 'her.slights', 'her.standingAt',
-  'her.temperament', 'her.traitLedger', 'her.traits', 'her.wakes', 'her.wants', 'her.week',
+  'her.temperament', 'her.weather', 'her.traitLedger', 'her.traits', 'her.wakes', 'her.wants', 'her.week',
   'her.pokemon.lastState', 'her.pokemon.lastSummary', 'her.pokemon.played', 'her.pokemon.sitting',
+  // What she wrote about the pictures of his screen. The pictures themselves are
+  // his and stay; the captions are hers, and the ledger is also what stops her
+  // describing a shot twice — left behind, it silently forbids her ever looking
+  // at any of the 461 she has already seen.
+  'shots.captions',
+  // The copies the store's own migrations left in config.json when the records
+  // moved to files of their own. Nothing reads them, which is exactly why they
+  // were missed: on this machine `memories` is still 37 records of him. A delete
+  // of an absent key is a no-op, so the others cost nothing and make the list true.
+  'memories', 'chat.archive', 'memory.sessions', 'memory.forgettingLog',
 ];
+
+/**
+ * How recent a slate has to be for HARU_RESET to refuse to fire again.
+ *
+ * The drop-in that sets the variable is taken out by hand, and Restart=on-failure
+ * is three seconds: a crash on the way up would otherwise wipe her a second time
+ * with a fresh timestamp, and the second wipe's backup rotates the first one out.
+ * Longer than any restart loop, shorter than any second reset he would mean.
+ */
+export const SLATE_DISARM_MINUTES = 10;
 
 /**
  * The two things in the list above a person typed rather than she learned.
