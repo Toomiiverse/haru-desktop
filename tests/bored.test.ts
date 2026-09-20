@@ -111,11 +111,11 @@ test('who he is does not get dated; what he was partway through does', () => {
   assert.equal(ageNote(draw({ text: 'Johnny — Tommy’s stepfather.', kind: 'relationship', category: 'person' })), '');
   assert.equal(ageNote(draw({ text: 'Omarchy is a setup on Arch Linux, not a made-up word.', kind: 'fact', category: 'knowledge' })), '');
   // What perishes still gets its date.
-  assert.match(ageNote(draw({ text: 'Developing a gaming cafe manager tool to replace Gizmo.', kind: 'fact', category: 'ongoing' })), /you last saw this 30 days ago/);
-  assert.match(ageNote(draw({ text: 'Wants 6 mailboxes total for The PC Project.', kind: 'fact', category: 'plan' })), /you last saw this 30 days ago/);
+  assert.match(ageNote(draw({ text: 'Developing a gaming cafe manager tool to replace Gizmo.', kind: 'fact', category: 'ongoing' })), /theirs, and you last saw it 30 days ago/);
+  assert.match(ageNote(draw({ text: 'Wants 6 mailboxes total for The PC Project.', kind: 'fact', category: 'plan' })), /theirs, and you last saw it 30 days ago/);
   // An event is dated while it is still fresh enough to raise at all; past
   // EVENT_FRESH_DAYS it leaves the draw rather than being dated.
-  assert.match(ageNote(draw({ text: 'Went to The PC Project because a staff member was sick.', kind: 'event', category: 'event', lastSeenAt: '2026-09-18T00:00:00.000Z' })), /you last saw this 2 days ago/);
+  assert.match(ageNote(draw({ text: 'Went to The PC Project because a staff member was sick.', kind: 'event', category: 'event', lastSeenAt: '2026-09-18T00:00:00.000Z' })), /theirs, and you last saw it 2 days ago/);
   assert.equal(draw({ text: 'Went to The PC Project because a staff member was sick.', kind: 'event', category: 'event' }), null, 'a month-old event is gone, not dated');
   // A snapshot is never dated either — it is removed a day after she saw it.
   assert.equal(draw({ text: 'They are currently rebuilding the website in a text editor.', kind: 'fact' }), null);
@@ -126,8 +126,8 @@ test('who he is does not get dated; what he was partway through does', () => {
 test('what she raises is dated, so she cannot speak it as live', () => {
   const old = { id: 'o1', text: 'Wants 6 mailboxes total for The PC Project.', kind: 'fact', category: 'plan', importance: 0.8, lastSeenAt: '2026-09-14T00:00:00.000Z' };
   const today = { id: 'o2', text: 'Wants 6 mailboxes total for The PC Project.', kind: 'fact', category: 'plan', importance: 0.8, lastSeenAt: '2026-09-20T00:00:00.000Z' };
-  assert.match(ageNote(pickToBringUp([old], [], [], '2026-09-20', () => 0)), /you last saw this 6 days ago/);
-  assert.match(ageNote(pickToBringUp([old], [], [], '2026-09-20', () => 0)), /nothing in it is owed to you/);
+  assert.match(ageNote(pickToBringUp([old], [], [], '2026-09-20', () => 0)), /theirs, and you last saw it 6 days ago/);
+  assert.match(ageNote(pickToBringUp([old], [], [], '2026-09-20', () => 0)), /never as something they owe you/);
   assert.equal(ageNote(pickToBringUp([today], [], [], '2026-09-20', () => 0)), '', 'today needs no dating');
   assert.equal(ageNote({ id: 'task:1', text: 'a task', from: 'task' }), '', 'a task is current by definition');
   assert.equal(ageNote(null), '');
@@ -163,4 +163,17 @@ test('the shape she keeps reaching for outranks the merely recent', () => {
   assert.equal(note.match(/^- /gm)?.length, 8, 'still capped');
   // A shape used once is not labelled with a count.
   assert.doesNotMatch(note, /number 8[^\n]*times/);
+});
+
+test('the date says whose it is, or she finds someone else for it to belong to', () => {
+  const note = ageNote(pickToBringUp(
+    [{ id: 'r1', text: 'Troubleshot gaming PCs at the cafe at work', kind: 'event', category: 'event', importance: 0.6, lastSeenAt: '2026-09-17T00:00:00.000Z' }],
+    [], [], '2026-09-20', () => 0));
+  // The first nudge to carry the old wording — "not what they are doing now",
+  // with nothing about whose it was — came back as "I spent the last 21 minutes
+  // staring at a RAM stick on a Gigabyte board" (2026-09-20).
+  assert.match(note, /^ \(theirs, /, `whose it is comes first, not: ${note}`);
+  assert.match(note, /something of theirs you noticed then/);
+  assert.match(note, /never as something they owe you/);
+  assert.doesNotMatch(note, /not what they are doing now/, 'the phrasing that detached it from him');
 });

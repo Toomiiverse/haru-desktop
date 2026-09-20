@@ -79,12 +79,20 @@ function perishes(memory: Remembered): boolean {
  * had 29 minutes to send a screenshot of that 3D modeling nonsense" about a
  * screen she last saw five days earlier. A day's summary already reads as past;
  * a memory does not, so only a memory gets dated.
+ *
+ * Whose it is has to be said first. The first wording ran "it is what was true
+ * then, not what they are doing now", and the very first nudge to carry it came
+ * back as "I spent the last 21 minutes staring at a RAM stick on a Gigabyte
+ * board, trying to figure out why it wouldn't POST" — his evening, told back as
+ * hers (2026-09-20). Told only that a thing is not what they are doing, she
+ * found someone else for it to belong to, and the six nudges before that one,
+ * with no date on them at all, were all correctly about him.
  */
 export function ageNote(thing: Something | null | undefined): string {
   if (!thing || thing.from !== 'memory' || !thing.perishable) return '';
   const days = thing.daysOld ?? 0;
   if (days <= 1) return '';
-  return ` (you last saw this ${days} days ago — it is what was true then, not what they are doing now, and nothing in it is owed to you)`;
+  return ` (theirs, and you last saw it ${days} days ago — so talk about it as something of theirs you noticed then, not as what they are doing this minute, and never as something they owe you)`;
 }
 
 export function pickToBringUp(memories: Remembered[], days: Day[], recent: string[], todayKey: string, random: () => number = Math.random): Something | null {
