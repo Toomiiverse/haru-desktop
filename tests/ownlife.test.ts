@@ -9,6 +9,7 @@ import {
   firstsNote, keepDay, markRecFollowed, noteRecommendation, pickRecommend,
   pickWantToWork, readDays, readRecs, readWants, reconcileWants,
   recDueForFollowUp, wantInstruction, wantOutcome, wantQuery, wantsNote,
+  WANTS_SHOWN, WANT_NOTE_CHARS, WANT_TEXT_CHARS,
   weekKey, weekNote, weekReflectionInstruction, weekSummaryDue, recsAnsweredBy, recsOnDay, REC_MAX_PER_DAY } from '../electron/ownlife';
 
 const at = (day: string, hour: number, minute = 0) => {
@@ -91,18 +92,24 @@ test('advanceWant moves status and counts the night', () => {
   assert.equal(advanceWant(want, { kind: 'nothing' }, '').nights, 1);
 });
 
-test('wantsNote shows only the declared and working ones, with progress', () => {
+test('wantsNote shows only the ones she has actually put a night into', () => {
   const note = wantsNote([
     { id: '1', interest: 'Bebop', text: 'to learn piano', since: 'd', nights: 2, status: 'working' as const, note: 'the piano is the problem' },
     { id: '2', interest: 'Lain', text: 'to argue about Lain', since: 'd', nights: 1, status: 'dropped' as const },
   ]);
   assert.match(note, /Things you are trying to do/);
-  assert.match(note, /Bebop: learn piano/);
+  assert.match(note, /Bebop: learn piano \(night 2\)/);
   assert.match(note, /the piano is the problem/);
   assert.doesNotMatch(note, /argue about Lain/);
+  assert.equal(wantsNote([]), '', 'nothing worked on, nothing said');
 });
 
-test('wantsNote leaves out a declared want her tastes already say, and keeps one she has worked on', () => {
+// Changed 2026-09-20, deliberately: this used to keep a declared want that no
+// interest stated any more. On the real store that rule kept ten ghosts — old
+// phrasings left behind every time `deepen` rewrote `interest.wants` and
+// `reconcileWants` minted a fresh record off the new wording. Eight lines,
+// 1,986 characters, and her diary cut off the end of the block every turn.
+test('wantsNote leaves out the declared ones — the live wording is already in her tastes', () => {
   const interests = [{ name: 'Hades', wants: 'read what Zagreus says back to Charon' }, { name: 'Bebop', wants: 'to learn piano' }];
   const note = wantsNote([
     { id: '1', interest: 'Hades', text: 'read what Zagreus says back to Charon', since: 'd', nights: 0, status: 'declared' as const },
@@ -110,8 +117,22 @@ test('wantsNote leaves out a declared want her tastes already say, and keeps one
     { id: '3', interest: 'Lain', text: 'to find someone who has seen it', since: 'd', nights: 0, status: 'declared' as const },
   ], interests);
   assert.doesNotMatch(note, /Zagreus/, 'already in the tastes block');
+  assert.doesNotMatch(note, /find someone who has seen it/, 'declared and never worked: a ghost of an old wording');
   assert.match(note, /Bebop: learn piano \(night 2\) — the piano is the problem/);
-  assert.match(note, /Lain: find someone who has seen it \(declared\)/, 'no interest states it, so it stays');
+});
+
+test('wantsNote is capped, busiest first, and clips her own long lines', () => {
+  const long = 'x'.repeat(400);
+  const wants = [3, 9, 1, 7, 5].map((nights, index) => ({
+    id: String(index), interest: `I${index}`, text: `to do thing ${index}`, since: 'd', nights, status: 'working' as const, note: long,
+  }));
+  const note = wantsNote(wants);
+  const lines = note.split('\n').slice(1);
+  assert.equal(lines.length, WANTS_SHOWN, 'four lines, however many she is at');
+  assert.match(lines[0], /I1:/, 'nine nights in comes first');
+  assert.ok(lines.every(line => line.length < WANT_TEXT_CHARS + WANT_NOTE_CHARS + 40), 'each line is clipped, not a paragraph');
+  assert.ok(note.length < 800, `the whole thing fits the block budget (was ${note.length})`);
+  assert.ok(note.includes('…'), 'and says it was clipped');
 });
 
 test('wantQuery turns the want into a search and the instruction names the attempt', () => {

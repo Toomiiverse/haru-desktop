@@ -161,22 +161,46 @@ export function advanceWant(want: Want, outcome: WantOutcome, note: string): Wan
   return { ...want, status, nights: want.nights + 1, note: note || undefined };
 }
 
-/** What the block shows of the wants she is still at. */
-export function wantsNote(wants: Want[], interests: { name: string; wants?: string }[] = []): string {
-  // A want she has only declared is already in her tastes, word for word, as
-  // the end of that interest's view ("I want to…"). Listed here as well it was
-  // said twice — seven of fifteen lines on 2026-09-17, about a thousand chars —
-  // and the block ran over its budget, which cuts from the tail: her diary.
-  // One she has worked on stays, for the nights and the note.
-  const stated = new Set(interests.filter(interest => interest.name && interest.wants).map(interest => wantKey(interest.name, interest.wants!)));
-  const active = wants.filter(want => want.status === 'working'
-    || (want.status === 'declared' && !stated.has(wantKey(want.interest ?? '', want.text))));
-  if (!active.length) return '';
-  const lines = active.map(want => {
-    const bit = want.interest ? `${want.interest}: ${stripWant(want.text)}` : stripWant(want.text);
-    const progress = want.status === 'working' ? `night ${want.nights}` : 'declared';
-    const note = want.note ? ` — ${want.note}` : '';
-    return `- ${bit} (${progress})${note}`;
+/** Lines this can afford. The pile reached sixteen and the block cut her diary instead. */
+export const WANTS_SHOWN = 4;
+/** How much of her own note survives: enough to say which part is still beating her. */
+export const WANT_NOTE_CHARS = 90;
+/** And of the want itself — one of hers ran to 160 characters, which is a paragraph, not a line. */
+export const WANT_TEXT_CHARS = 110;
+
+function clipped(text: string, max: number): string {
+  const flat = String(text ?? '').replace(/\s+/g, ' ').trim();
+  return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
+}
+
+/**
+ * What the block shows of the wants she is still at: the ones she has actually
+ * put a night into, the busiest first, and no more than a handful.
+ *
+ * It used to list the declared ones too. Two things made that wrong. A want she
+ * has only declared is already in her tastes, word for word, as the end of that
+ * interest's view ("I want to…") — so it was said twice. And `deepen` rewrites
+ * `interest.wants` every night it produces a new WANT: line, while
+ * `reconcileWants` keys on the wording, so each new phrasing mints another
+ * record and leaves the old one behind: on 2026-09-20 that was eleven declared
+ * wants with no nights in them, ghosts of phrasings she had moved on from, and
+ * the suppression here could not see them because no interest stated them any
+ * more. Eight lines, 1,980 characters, and the her_own block spent every turn
+ * over its budget — `[blocks] her_own cut from 12711 to 11689` — which cuts from
+ * the tail, which is her diary. Nothing is lost by leaving them out: the live
+ * wording of every interest's want is in the tastes block already.
+ */
+export function wantsNote(wants: Want[], _interests: { name: string; wants?: string }[] = []): string {
+  const working = wants
+    .filter(want => want.status === 'working')
+    .sort((a, b) => b.nights - a.nights)
+    .slice(0, WANTS_SHOWN);
+  if (!working.length) return '';
+  const lines = working.map(want => {
+    const said = clipped(stripWant(want.text), WANT_TEXT_CHARS);
+    const bit = want.interest ? `${want.interest}: ${said}` : said;
+    const note = want.note ? ` — ${clipped(want.note, WANT_NOTE_CHARS)}` : '';
+    return `- ${bit} (night ${want.nights})${note}`;
   });
   return `Things you are trying to do, on your own time:\n${lines.join('\n')}`;
 }
