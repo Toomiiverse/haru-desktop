@@ -128,7 +128,7 @@ import { readSteamWebConfig, recentlyPlayed } from './steamweb';
 import { appendDream, appendEntry, diaryContext, diaryDueFor, diaryInstruction, recentEntries, type Dream, type Entry } from './diary';
 import { DIARY_VOICE, fragmentsInstruction, liftedFrom, NOT_THOSE_LINES, NOT_THOSE_NAMES, unknownNames } from './diaryvoice';
 import { fetchTranscript, formatTranscript, titleFrom, transcriptInstruction, transcriptsAvailable, videoIdFrom, watchUrl } from './transcripts';
-import { feedbackEntry, recordFeedback } from './feedback';
+import { feedbackEntry, modelThatSpoke, readSpoke, recordFeedback, rememberSpoke, repliedTo } from './feedback';
 import { appendTuningPage, recordTuning, tuningNote } from './tuning';
 import { describePull, isTailnetAddress, mergeCheckIns, readCheckInSource } from './checkinsource';
 import { describeMerge } from './memorysync';
@@ -8118,7 +8118,30 @@ const promptState = {
     pendingHaruRestart = false;
     setTimeout(() => { void runSystemCommand('systemctl', ['--user', 'restart', 'haru']); }, 5000);
   }
+  // Which brain this one was, written down before it is handed back: the
+  // renderer owns the stored message and gives it no model, so a thumb on it
+  // days later has nothing to go on but this (feedback.ts, Spoke).
+  noteWhoSpoke(config.model, brainName);
   return { content, ignored: false, irritation, ego };
+}
+
+/** The route that just spoke, kept so a rating can be read by model. */
+function noteWhoSpoke(model: string, brain: string): void {
+  if (!model) return;
+  store.set('ai.spoke', rememberSpoke(readSpoke(store.get('ai.spoke')), { at: new Date().toISOString(), model, brain }));
+}
+
+/**
+ * Which model wrote the reply they are rating.
+ *
+ * Both logs used to stamp `ai.config.model` — the local brain, whoever actually
+ * answered. The route now writes itself down as it finishes (noteWhoSpoke), so
+ * this reads back the one that was speaking when that reply was stamped, and
+ * falls back to the old answer for anything older than the record.
+ */
+function modelBehind(history: { id?: string; role: string; content?: string; reaction?: string; at?: string }[], id: string): string {
+  const fallback = (store.get('ai.config') as ProviderConfig | undefined)?.model ?? '';
+  return modelThatSpoke(readSpoke(store.get('ai.spoke')), repliedTo(history, id)?.at, fallback);
 }
 
 /**
@@ -13145,7 +13168,7 @@ function feedbackFile(): string {
  */
 function appendFeedback(about: { id: string; reaction?: 'up' | 'down' | null; note?: unknown; source: 'phone' | 'desktop' }): void {
   const history = (store.get('chat.messages') as { id?: string; role: string; content?: string; reaction?: string }[] | undefined) ?? [];
-  const entry = feedbackEntry(history, { ...about, model: (store.get('ai.config') as ProviderConfig | undefined)?.model ?? '', at: new Date().toISOString() });
+  const entry = feedbackEntry(history, { ...about, model: modelBehind(history, about.id), at: new Date().toISOString() });
   if (!entry) return;
   try { recordFeedback(feedbackFile(), entry); } catch (error) { console.warn('[feedback] could not write it down:', error instanceof Error ? error.message : error); }
 }
@@ -13172,7 +13195,7 @@ function appendTuning(about: { id: string; wrong?: unknown; rather?: unknown; so
   const now = new Date();
   const note = tuningNote(history, {
     ...about,
-    model: (store.get('ai.config') as ProviderConfig | undefined)?.model ?? '',
+    model: modelBehind(history, about.id),
     at: now.toISOString(),
     day: localDateKey(zonedNow(CHAT_TIMEZONE, now)),
   });
