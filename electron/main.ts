@@ -12046,6 +12046,13 @@ function noteArrival(place: string): void {
     console.log(`[where] they turned up at ${place}, and they had said so`);
     return;
   }
+  // Nobody announces their own shift every week. What she already knows counts
+  // as having been told — see knownHaunt.
+  const weekday = new Intl.DateTimeFormat('en-US', { weekday: 'long' }).format(zonedNow(CHAT_TIMEZONE)).toLowerCase();
+  if (knownHaunt(place, getMemories().filter(memory => memory.status !== 'archived').map(memory => memory.text), weekday)) {
+    console.log(`[where] they turned up at ${place}, which is where they are on a ${weekday}`);
+    return;
+  }
   store.set('where.arrival', { place, at: new Date().toISOString() });
   noteSlight('unannounced', `They turned up at ${place} without telling you they were going.`);
   const mood = getMood();
@@ -13242,13 +13249,6 @@ function watchForUpdates() {
   const refusal = whyNotCheck(app.isPackaged, process.platform);
   if (refusal) {
     console.log(`[update] not checking — ${refusal}`);
-    return;
-  }
-  // Nobody announces their own shift every week. What she already knows counts
-  // as having been told — see knownHaunt.
-  const weekday = new Intl.DateTimeFormat('en-US', { weekday: 'long' }).format(zonedNow(CHAT_TIMEZONE)).toLowerCase();
-  if (knownHaunt(place, getMemories().filter(memory => memory.status !== 'archived').map(memory => memory.text), weekday)) {
-    console.log(`[where] they turned up at ${place}, which is where they are on a ${weekday}`);
     return;
   }
   // eslint-disable-next-line @typescript-eslint/no-var-requires
