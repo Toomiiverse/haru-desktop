@@ -4,7 +4,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { DEFAULT_VITALS, applyEvent, driftVitals, type Environment, type Vitals } from '../electron/vitals';
+import { DEFAULT_VITALS, applyEvent, driftVitals, type Environment, type Lean, type Vitals } from '../electron/vitals';
 import { TEMPERAMENTS, WANDER_LIMIT, addLeans, bruiseFrom, eventSize, fadeBruise, howHisReturnLands, rollTemperament, stepWander, temperamentLean, temperamentLine, type TemperamentKind } from '../electron/temperament';
 
 /** A small seeded generator, so a month of days is the same month every run. */
@@ -14,6 +14,25 @@ function seeded(seed: number): () => number {
 }
 
 const afternoon: Environment = { hour: 14, idleSeconds: 20, onBattery: false, windowFocused: true };
+
+/** The tick the life loop actually runs on. */
+const TICK = 20;
+
+/**
+ * The drift over a real stretch of time, tick by tick.
+ *
+ * driftVitals normalises its step against a nominal twenty-second tick and
+ * clamps it there, however many seconds it is handed — a laptop resumed after
+ * eight hours must not slam her onto target. So one call with 3600 moves no
+ * further than one call with 20, and a lean handed to it barely shows: settling
+ * is something the loop does, not something a big number does. Asserting on a
+ * single long call measured the clamp instead of the temperament.
+ */
+function over(seconds: number, vitals: Vitals, lean: Lean = {}): Vitals {
+  let out: Vitals = { ...vitals };
+  for (let tick = 0; tick < Math.round(seconds / TICK); tick++) out = driftVitals(out, afternoon, TICK, lean);
+  return out;
+}
 
 test('a temperament is rolled from what she carries, and never three days the same', () => {
   const random = seeded(7);
@@ -59,7 +78,7 @@ test('an ordinary day says nothing; the others say what to do, not how she feels
 });
 
 test('the same afternoon settles somewhere different on a sunny day and a stormy one', () => {
-  const settle = (kind: TemperamentKind) => driftVitals(DEFAULT_VITALS, afternoon, 3600, temperamentLean({ day: 'd', kind, intensity: 1 }));
+  const settle = (kind: TemperamentKind) => over(3600, DEFAULT_VITALS, temperamentLean({ day: 'd', kind, intensity: 1 }));
   const sunny = settle('sunny'), stormy = settle('stormy'), plain = settle('ordinary');
   assert.ok(sunny.happiness > plain.happiness + 0.08, `sunny ${sunny.happiness} vs ${plain.happiness}`);
   assert.ok(stormy.happiness < plain.happiness - 0.15, `stormy ${stormy.happiness} vs ${plain.happiness}`);
@@ -113,14 +132,20 @@ test('things land harder than they did, by her temperament and the roll, and are
   assert.ok(eventSize({ day: 'd', kind: 'tender', intensity: 1 }, 'praised', 0.5) > eventSize({ day: 'd', kind: 'stormy', intensity: 1 }, 'praised', 0.5));
   assert.ok(eventSize(null, 'praised', 0) < eventSize(null, 'praised', 1));
 
-  const settled = driftVitals(DEFAULT_VITALS, afternoon, 3600);
+  const settled = over(3600, DEFAULT_VITALS);
   const hit = applyEvent(settled, 'criticised', eventSize(null, 'criticised', 0.5));
   assert.ok(settled.happiness - hit.happiness > 0.3);
   const bruise = bruiseFrom({}, settled, hit);
   assert.ok((bruise.happiness ?? 0) < -0.1 && (bruise.stress ?? 0) > 0.1);
-  // Forty-five minutes later: without the bruise the drift has erased it; with it, it still shows.
-  const erased = driftVitals(hit, afternoon, 45 * 60);
-  const marked = driftVitals(hit, afternoon, 45 * 60, bruise);
+  // Forty-five minutes later, tick by tick, and with the bruise fading as it
+  // does in the life loop rather than held at full strength the whole time:
+  // without it the drift has erased the hit, with it she is still coloured.
+  let erased = hit, marked = hit, fading = bruise;
+  for (let tick = 0; tick < (45 * 60) / TICK; tick++) {
+    erased = driftVitals(erased, afternoon, TICK);
+    fading = fadeBruise(fading, TICK);
+    marked = driftVitals(marked, afternoon, TICK, fading);
+  }
   assert.ok(settled.happiness - erased.happiness < 0.02, 'the old behaviour: gone');
   assert.ok(settled.happiness - marked.happiness > 0.08, `still colouring her (${(settled.happiness - marked.happiness).toFixed(3)})`);
   // And it does fade.
