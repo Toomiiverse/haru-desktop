@@ -8,6 +8,7 @@ import { pathToFileURL } from 'node:url';
 import AdmZip from 'adm-zip';
 import { HaruStore } from './store';
 import { apiUsage, trackedFetch } from './apiusage';
+import { collectSpend, keepSnapshots, type BalanceSnapshot, type ServiceSpend } from './spend';
 import { ActivityReporter } from './activity-reporter';
 import { SERVER_PARTITION, serverOrigin, sendServerChat, serverJson, jsonPost, type ServerRequest } from './server-chat';
 import { formatTimeOfDay, localDateKey, parseTimeOfDay, resolveDate, zonedNow } from './dates';
@@ -433,6 +434,28 @@ store.hardenPermissions();
 // See apiusage.ts for why it is flushed on a timer rather than on each call.
 apiUsage.load(store.get('apiusage'));
 function saveApiUsage() { if (apiUsage.dirty) store.set('apiusage', apiUsage.snapshot()); }
+
+// What each service costs and what is left in it (spend.ts). The Claude Code
+// pass reads a month of transcripts — a second of work the first time — so the
+// answer is held for ten minutes rather than gathered again per repaint.
+let spendHeld: { at: number; report: ServiceSpend[] } | null = null;
+const SPEND_FRESH_MS = 10 * 60_000;
+
+function spendReport(force = false): ServiceSpend[] {
+  if (!force && spendHeld && Date.now() - spendHeld.at < SPEND_FRESH_MS) return spendHeld.report;
+  const balance = store.get('venice.balance') as { usd?: number; diem?: number } | undefined;
+  const calls: Record<string, number> = {};
+  for (const row of apiUsage.report()) calls[row.service] = row.month;
+  const report = collectSpend({
+    home: os.homedir(),
+    venice: balance && Number.isFinite(Number(balance.usd)) ? { usd: Number(balance.usd), diem: Number(balance.diem ?? 0) } : null,
+    veniceHistory: (store.get('venice.balanceHistory') as BalanceSnapshot[] | undefined) ?? [],
+    veniceLowUsd: typeof store.get('venice.lowBalanceUsd') === 'number' ? store.get('venice.lowBalanceUsd') as number : 2,
+    calls,
+  });
+  spendHeld = { at: Date.now(), report };
+  return report;
+}
 setInterval(saveApiUsage, 5 * 60_000).unref();
 
 protocol.registerSchemesAsPrivileged([
@@ -10831,16 +10854,25 @@ function setHerSleepSchedule(schedule: HerSleepSchedule | null) {
  * per level (venicebalance.ts). Not her voice — she would not know.
  */
 async function checkVeniceBalance(reason: string): Promise<void> {
+  // Either place a Venice model can be set. Gated on the conversation route
+  // alone, a desk whose chat model is Venice — this one — never read its own
+  // balance at all, and the panel that shows it had nothing to show.
   const route = store.get('ai.conversation') as { provider?: string } | undefined;
-  if (route?.provider !== 'venice') return;
+  const chat = store.get('ai.config') as { provider?: string } | undefined;
+  if (route?.provider !== 'venice' && chat?.provider !== 'venice') return;
   const key = getVeniceKey();
   if (!key) return;
   try {
-    const response = await net.fetch('https://api.venice.ai/api/v1/api_keys/rate_limits', { headers: { Authorization: `Bearer ${key}` } });
+    const response = await trackedFetch('https://api.venice.ai/api/v1/api_keys/rate_limits', { headers: { Authorization: `Bearer ${key}` } });
     if (!response.ok) { console.warn(`[venice] could not read the balance (${response.status})`); return; }
     const balances = parseBalances(await response.json());
     if (!balances) { console.warn('[venice] the balance came back in a shape I do not know'); return; }
     store.set('venice.balance', { ...balances, at: new Date().toISOString() });
+    // A month of them behind it. The balance is the only record Venice keeps,
+    // so the drop from one day to the next is the only way to see a day's spend.
+    store.set('venice.balanceHistory', keepSnapshots(
+      (store.get('venice.balanceHistory') as BalanceSnapshot[] | undefined) ?? [],
+      { at: new Date().toISOString(), total: balances.usd + balances.diem }));
     console.log(`[venice] balance $${balances.usd.toFixed(2)}${balances.diem ? ` + ${balances.diem.toFixed(2)} diem` : ''} — checked on ${reason}`);
     const lowUsd = typeof store.get('venice.lowBalanceUsd') === 'number' ? store.get('venice.lowBalanceUsd') as number : 2;
     const warning = balanceWarning(balances, lowUsd, (store.get('venice.warned') as { level?: 'fine' | 'low' | 'empty'; at?: string } | undefined) ?? {}, new Date());
@@ -13852,6 +13884,7 @@ app.whenReady().then(() => {
   // request — ipcMain.handle refuses a duplicate channel.
   nativeTheme.themeSource = 'dark';
   ipcMain.handle('usage:get', () => apiUsage.report());
+  ipcMain.handle('usage:spend', (_e, force?: boolean) => spendReport(force === true));
   ipcMain.handle('settings:get', (_e, key) => store.get(key));
   ipcMain.handle('settings:set', (_e, key, value) => store.set(key, value));
   // Read back from Windows rather than from the store, so the panel shows what

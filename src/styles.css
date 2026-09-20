@@ -883,3 +883,28 @@ body { min-width: 360px; }
 .haru-app .compose .mic-recording { color: var(--accent); background: var(--accent-wash); }
 
 .haru-app textarea::placeholder,.haru-app input::placeholder { color: var(--muted); opacity: 1; }
+
+/* The services infographic: one card per service, one bar per day. A single
+   series per chart, so one hue does the whole job and no legend is needed. */
+.spend-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(19rem,1fr));gap:var(--space-4);margin:0 0 var(--space-6)}
+.spend-card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:var(--space-4)}
+.spend-card header{display:flex;align-items:baseline;justify-content:space-between;gap:var(--space-2)}
+.spend-card h3{margin:0;font:600 .9375rem var(--font-ui);color:var(--text)}
+.spend-card .basis{font:10px var(--font-mono);letter-spacing:.06em;text-transform:uppercase;color:var(--muted-3);border:1px solid var(--line);border-radius:999px;padding:2px 7px;white-space:nowrap}
+.spend-card .basis.billed{color:var(--good);border-color:var(--good)}
+.spend-hero{display:flex;align-items:baseline;gap:var(--space-2);margin:var(--space-3) 0 var(--space-2);font:600 1.75rem var(--font-ui);color:var(--text);letter-spacing:-.02em}
+.spend-hero small{font:400 .75rem var(--font-ui);color:var(--text-3)}
+.spend-hero.fine{color:var(--good)}
+.spend-hero.low,.spend-hero.empty{color:var(--accent)}
+.spend-chart{display:block;max-width:100%;margin:var(--space-2) 0 0}
+.spend-bar{fill:var(--accent)}
+.spend-bar.none{fill:var(--line-2)}
+.spend-peak{fill:var(--muted-3);font:10px var(--font-mono)}
+.spend-figures{display:flex;flex-wrap:wrap;gap:var(--space-4);margin:var(--space-3) 0 0}
+.spend-figures div{display:flex;flex-direction:column;gap:2px}
+.spend-figures dt{font:10px var(--font-mono);letter-spacing:.06em;text-transform:uppercase;color:var(--muted-3)}
+.spend-figures dd{margin:0;font:500 .875rem var(--font-ui);color:var(--text)}
+.spend-quiet{color:var(--muted-3);font-size:.8125rem;margin:var(--space-3) 0 0}
+.spend-days{margin-top:var(--space-3)}
+.spend-days summary{font:11px var(--font-mono);color:var(--muted-3);cursor:pointer}
+.page.services .spend-days .memory-list{max-height:14rem;overflow-y:auto}

@@ -141,3 +141,20 @@ export type WebStatus = {
 
 /** One service she has called, and how much of it. See electron/apiusage.ts. */
 export type UsageRow = { service: string; host: string; today: number; week: number; month: number; failed: number; last: string };
+
+/** A day's worth of one service, from electron/spend.ts. */
+export type DaySpend = { day: string; cost: number; tokens: number };
+
+/** What one service costs and what is left in it. `basis` is where the numbers came from. */
+export type ServiceSpend = {
+  service: string;
+  balance: { amount: number; unit: string; level: 'fine' | 'low' | 'empty' } | null;
+  calls: number;
+  days: DaySpend[];
+  today: number;
+  week: number;
+  month: number;
+  tokens: number;
+  basis: 'billed' | 'estimated' | 'balance' | 'calls';
+  note: string;
+};

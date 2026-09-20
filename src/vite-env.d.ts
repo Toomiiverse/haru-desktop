@@ -62,6 +62,7 @@ interface Window {
     };
     usage: {
       get(): Promise<import('./types').UsageRow[]>;
+      spend(force?: boolean): Promise<import('./types').ServiceSpend[]>;
     };
     jellyfin: {
       status(): Promise<{ url: string; userId: string; hasKey: boolean }>;

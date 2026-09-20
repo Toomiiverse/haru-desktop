@@ -83,6 +83,7 @@ contextBridge.exposeInMainWorld('haru', {
   },
   usage: {
     get: () => ipcRenderer.invoke('usage:get'),
+    spend: (force?: boolean) => ipcRenderer.invoke('usage:spend', force),
   },
   jellyfin: {
     status: () => ipcRenderer.invoke('jellyfin:get'),

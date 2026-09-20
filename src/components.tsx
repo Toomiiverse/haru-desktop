@@ -1,6 +1,6 @@
 import { Component, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Activity, ArrowUp, Settings2, UserRound, BookOpen, Paperclip, MicOff, CalendarDays, Check, ChevronDown, CornerDownRight, FileAudio, FileText, FileVideo, Mic, Quote, Reply, SquareCheck, ChevronLeft, ChevronRight, CircleDot, Import, Plus, NotebookPen, MessageSquare, Square, ImagePlus, Sparkles, ThumbsDown, ThumbsUp, Trash2, X } from 'lucide-react';
-import type { Aside, AsideSource, Attachment, HeldBack, UpdateReport, AniListConfig, Character, DesktopConfig, GamingConfig, ScreenshotConfig, WatchingConfig, VisionConfig, HaruNote, ForgettingEntry, JournalConfig, JournalEntry, JournalField, JournalRange, JournalStats, JournalFieldStats, LastRetrieval, MemoryBlock, RoamConfig, EmotionName, GoogleStatus, KeptItem, ListenConfig, Memory, MemoryKind, Message, Profile, ProviderConfig, Reaction, SearchConfig, SessionSummary, UsageRow, VoiceConfig, VoiceEngine, VoiceReference, WardrobeControl, WebStatus } from './types';
+import type { Aside, AsideSource, Attachment, HeldBack, UpdateReport, AniListConfig, Character, DesktopConfig, GamingConfig, ScreenshotConfig, WatchingConfig, VisionConfig, HaruNote, ForgettingEntry, JournalConfig, JournalEntry, JournalField, JournalRange, JournalStats, JournalFieldStats, LastRetrieval, MemoryBlock, RoamConfig, EmotionName, GoogleStatus, KeptItem, ListenConfig, Memory, MemoryKind, Message, Profile, ProviderConfig, Reaction, SearchConfig, SessionSummary, ServiceSpend, UsageRow, VoiceConfig, VoiceEngine, VoiceReference, WardrobeControl, WebStatus } from './types';
 import { buildMonthGrid, clockInZone, datesInView, dayLabel, rangeLabel, shiftISODate, todayInZone, toISODate, weekOf, type CalendarView } from './date';
 import { startListening, startRecording, type Listener, type Recorder } from './companion/microphone';
 import { isUsableFollowUp, matchWake, readsAsFarewell } from './companion/wake';
@@ -1638,25 +1638,115 @@ function AniListField() {
  */
 
 /**
- * Every service she calls on, and how much of each.
+ * Every service she calls on, what it has cost, and what is left in it.
  *
- * The count is kept by host rather than by feature, because a host is what a
- * key and a quota belong to: three different things in here reach Google, and
- * the number that matters when Google starts answering 429 is their sum. His
- * own machines are in the list too — named by host, since that is what
- * separates the voice server from the model.
+ * Four questions with four different answers, and the panel says which is
+ * which rather than setting them all in the same typeface. OpenCode's figures
+ * are billed ones out of its own database; Claude's are its own token counts
+ * priced at the published rates, which is an estimate and is called one; Venice
+ * reports the balance, and the spending is read out of its fall; OpenAI and
+ * Google will tell an ordinary key nothing at all, so what is shown for them is
+ * the only thing that is true — how often she called.
  *
- * Read-only on purpose. There is nothing here to configure — the services
- * themselves are set up in Settings — and a button that reset the tally would
- * only ever be pressed by accident.
+ * Read-only on purpose. The services themselves are set up in Settings, and a
+ * button that reset the tally would only ever be pressed by accident.
  */
+const BASIS_WORDS: Record<ServiceSpend['basis'], string> = {
+  billed: 'billed',
+  estimated: 'estimated',
+  balance: 'from the balance',
+  calls: 'calls only',
+};
+
+const money = (amount: number) => amount >= 1000 ? '$' + Math.round(amount).toLocaleString()
+  : amount >= 1 ? '$' + amount.toFixed(2)
+  : amount > 0 ? '$' + amount.toFixed(3)
+  : '$0';
+
+const compact = (count: number) => count >= 1e9 ? (count / 1e9).toFixed(1) + 'B'
+  : count >= 1e6 ? (count / 1e6).toFixed(1) + 'M'
+  : count >= 1e3 ? (count / 1e3).toFixed(1) + 'k'
+  : String(count);
+
+/** The last thirty days as keys, so a day with nothing in it still holds its place. */
+function spendSlots(days = 30): string[] {
+  const today = todayInZone();
+  return Array.from({ length: days }, (_, index) => shiftISODate(today, index - (days - 1)));
+}
+
+/**
+ * A month of daily spend, one bar a day.
+ *
+ * One series, so one colour and no legend. The tallest day is labelled and the
+ * rest are not — a number over every bar is a table that nobody can read as a
+ * shape. A day with nothing keeps its slot as a baseline tick: gaps that close
+ * up would make a quiet fortnight look like a busy one.
+ */
+function SpendChart({ spend }: { spend: ServiceSpend }) {
+  const slots = spendSlots();
+  const byDay = new Map(spend.days.map(day => [day.day, day]));
+  const peak = spend.days.reduce((most, day) => (day.cost > most.cost ? day : most), { day: '', cost: 0, tokens: 0 });
+  if (!peak.cost) return <p className="spend-quiet">Nothing in the last thirty days.</p>;
+  const width = 6;
+  const gap = 3;
+  const height = 46;
+  return <svg className="spend-chart" width={slots.length * (width + gap) - gap} height={height + 15} role="img"
+    aria-label={'Daily spend over thirty days. Highest ' + money(peak.cost) + ' on ' + dayLabel(peak.day) + ', ' + money(spend.month) + ' in all.'}>
+    {slots.map((day, index) => {
+      const cost = byDay.get(day)?.cost ?? 0;
+      const tall = cost > 0 ? Math.max(3, Math.round((cost / peak.cost) * height)) : 1;
+      return <rect key={day} x={index * (width + gap)} y={height - tall} width={width} height={tall} rx={2}
+        className={cost > 0 ? 'spend-bar' : 'spend-bar none'}>
+        <title>{dayLabel(day) + ' — ' + (cost > 0 ? money(cost) : 'nothing')}</title>
+      </rect>;
+    })}
+    <text className="spend-peak" x={0} y={height + 13}>{money(peak.cost)} on {dayLabel(peak.day)}</text>
+  </svg>;
+}
+
+function SpendCard({ spend }: { spend: ServiceSpend }) {
+  const balance = spend.balance;
+  return <article className="spend-card">
+    <header>
+      <h3>{spend.service}</h3>
+      <span className={'basis ' + spend.basis}>{BASIS_WORDS[spend.basis]}</span>
+    </header>
+    {balance
+      ? <p className={'spend-hero ' + balance.level}>{money(balance.amount)}<small>left{balance.unit === 'USD' ? '' : ' · ' + balance.unit}</small></p>
+      : spend.basis === 'calls'
+        ? <p className="spend-hero">{spend.calls.toLocaleString()}<small>calls in 30 days</small></p>
+        : <p className="spend-hero">{money(spend.month)}<small>in 30 days</small></p>}
+    {spend.basis !== 'calls' && <>
+      <SpendChart spend={spend}/>
+      <dl className="spend-figures">
+        <div><dt>Today</dt><dd>{money(spend.today)}</dd></div>
+        <div><dt>7 days</dt><dd>{money(spend.week)}</dd></div>
+        <div><dt>30 days</dt><dd>{money(spend.month)}</dd></div>
+        {spend.tokens > 0 && <div><dt>Tokens</dt><dd>{compact(spend.tokens)}</dd></div>}
+      </dl>
+    </>}
+    <p className="status-note">{spend.note}</p>
+    {spend.days.length > 0 && <details className="spend-days">
+      <summary>Day by day</summary>
+      <ul className="memory-list">{[...spend.days].reverse().map(day => <li key={day.day}>
+        <span>{dayLabel(day.day)}</span>
+        <span className="memory-meta-inline">{money(day.cost)}{day.tokens ? ' · ' + compact(day.tokens) + ' tokens' : ''}</span>
+      </li>)}</ul>
+    </details>}
+  </article>;
+}
+
 export function ServicesPage() {
   const [rows, setRows] = useState<UsageRow[] | null>(null);
+  const [spend, setSpend] = useState<ServiceSpend[] | null>(null);
   const load = useCallback(() => {
     void window.haru?.usage?.get?.().then(setRows).catch(() => setRows([]));
+    void window.haru?.usage?.spend?.().then(setSpend).catch(() => setSpend([]));
   }, []);
-  // The tally moves while the page is open — she calls out on her own — so it
-  // is re-read on a timer rather than only on the way in.
+  // The tally moves while the page is open — she calls out on her own — so it is
+  // re-read on a timer rather than only on the way in. What the spend costs to
+  // gather is paid in the main process and held there for ten minutes, so this
+  // is a message and not a second of reading.
   useEffect(() => { load(); const timer = setInterval(load, 30_000); return () => clearInterval(timer); }, [load]);
 
   if (!window.haru?.usage) return <section className="page services"><div className="field">
@@ -1666,14 +1756,19 @@ export function ServicesPage() {
 
   return <section className="page services">
     <div className="field">
-      <h2>What she calls on</h2>
-      <p>Every service she has reached out to in the last thirty days, and how often. Only the host and the count are kept — never what was asked for, or what came back.</p>
+      <h2>What it costs</h2>
+      <p>The services she is pointed at, what each has cost over thirty days, and what is left in the ones that will say. Every figure carries where it came from — billed, estimated, or simply counted.</p>
+    </div>
+    <div className="spend-grid">{(spend ?? []).map(service => <SpendCard key={service.service} spend={service}/>)}</div>
+    <div className="field">
+      <h2>Everything she reached</h2>
+      <p>Her own calls, counted by host. Nothing about what was asked for, or what came back.</p>
     </div>
     {rows && !rows.length
       ? <div className="quiet-empty"><Activity size={28} aria-hidden="true"/><h3>Nothing called yet.</h3><p>The first time she looks something up, it will show up here.</p></div>
       : <ul className="memory-list">{(rows ?? []).map(row => <li key={row.service}>
           <span>{row.service}{row.service !== row.host && <em> · {row.host}</em>}</span>
-          <span className="memory-meta-inline">{row.today} today · {row.week} this week · {row.month} in 30 days{row.failed ? ` · ${row.failed} failed` : ''} · last {row.last}</span>
+          <span className="memory-meta-inline">{row.today} today · {row.week} this week · {row.month} in 30 days{row.failed ? ' · ' + row.failed + ' failed' : ''} · last {row.last}</span>
         </li>)}</ul>}
   </section>;
 }
