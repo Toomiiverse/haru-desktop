@@ -9,8 +9,24 @@
 // idea holds before any of src/companion is touched.
 
 const { app, BrowserWindow, ipcMain, screen } = require('electron');
-const { writeFileSync } = require('node:fs');
+const { writeFileSync, readdirSync, statSync } = require('node:fs');
 const path = require('node:path');
+
+// SPIKE_CLIP is one .vrma, several joined with |, or a folder of them. The
+// page gets a | list either way and names each clip after its file, since a
+// .vrma carries no name of its own.
+function clipList(spec) {
+  if (!spec) return '';
+  const files = spec.split('|').flatMap((entry) => {
+    try {
+      if (statSync(entry).isDirectory()) {
+        return readdirSync(entry).filter((f) => f.toLowerCase().endsWith('.vrma')).sort().map((f) => path.join(entry, f));
+      }
+    } catch { /* not a path we can stat; hand it over as written */ }
+    return [entry];
+  });
+  return files.join('|');
+}
 
 const MODEL = process.env.SPIKE_VRM
   || path.join(app.getPath('appData'), 'haru-desktop', 'vrm-models', '586a41f2a5392895', 'Haruhi.vrm');
@@ -18,15 +34,17 @@ const MODEL = process.env.SPIKE_VRM
 function createWindow() {
   const width = 420;
   const height = 700;
+  // A fixed, known corner by default. The companion lives bottom-right in real
+  // life, but a spike has to be screenshotted, and working out where the window
+  // landed under a 1.5x scale factor was two wrong captures before this.
+  // SPIKE_DOCK=1 puts her where she actually lives.
+  const work = screen.getPrimaryDisplay().workArea;
+  const docked = process.env.SPIKE_DOCK === '1';
   const window_ = new BrowserWindow({
     width,
     height,
-    // A fixed, known corner rather than the bottom right. The companion lives
-    // bottom-right in real life, but a spike has to be screenshotted, and
-    // working out where the window landed under a 1.5x scale factor was two
-    // wrong captures before this.
-    x: 100,
-    y: 100,
+    x: docked ? work.x + work.width - width - 16 : 100,
+    y: docked ? work.y + work.height - height : 100,
     frame: false,
     transparent: true,
     resizable: false,
@@ -43,7 +61,7 @@ function createWindow() {
       premul: process.env.SPIKE_PREMUL ?? '',
       fps: process.env.SPIKE_FPS ?? '',
       action: process.env.SPIKE_ACTION ?? '',
-      clip: process.env.SPIKE_CLIP ?? '',
+      clip: clipList(process.env.SPIKE_CLIP),
       bake: process.env.SPIKE_BAKE ?? '',
     },
   });

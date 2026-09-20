@@ -31,9 +31,12 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { VRMLoaderPlugin, VRMUtils, MToonMaterial } from '@pixiv/three-vrm';
 import { VRMAnimationLoaderPlugin, VRMLookAtQuaternionProxy, createVRMAnimationClip } from '@pixiv/three-vrm-animation';
+import { FaceDriver, HEAD_FOR_MOOD } from './gen/face.js';
 import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
 
 const hud = document.getElementById('hud');
+// Frameless and off the taskbar, so this is the way out.
+addEventListener('keydown', (e) => { if (e.key === 'Escape') window.spike?.done(); });
 const say = (line) => { hud.textContent = line; };
 const report = (line) => window.spike?.report(line);
 
@@ -79,6 +82,7 @@ let mixer = null;
 let clips = null;
 let playing = '';
 let current = null;
+let nextClipAt = 0;
 
 /**
  * Switch to a named action, blending out of whatever was running.
@@ -194,9 +198,14 @@ loader.load(modelPath, (gltf) => {
 
   const external = params.get('clip');
   if (external) {
-    clipsFromFile(external, vrm)
-      .then((loaded) => {
-        clips = Object.fromEntries(loaded.map((c, i) => [c.name || `clip${i}`, c]));
+    // One file or a | list. A .vrma has no name inside, so each clip is named
+    // after its file, which is how clips/settle.vrma becomes 'settle'.
+    const files = external.split('|').filter(Boolean);
+    const stem = (file) => file.split('/').pop().split(String.fromCharCode(92)).pop().replace(/[.][^.]*$/, '');
+    Promise.all(files.map((file) => clipsFromFile(file, vrm).then((loaded) => loaded.map((c, i) => [loaded.length > 1 ? `${stem(file)}${i}` : stem(file), c]))))
+      .then((groups) => {
+        const loaded = groups.flat().map(([, c]) => c);
+        clips = Object.fromEntries(groups.flat());
         const bound = loaded.reduce((n, c) => n + c.tracks.length, 0);
         report(`[spike] loaded from file: ${Object.keys(clips).join(', ')} (${bound} tracks)`);
         started = performance.now();
@@ -346,10 +355,57 @@ async function clipsFromFile(url, vrm) {
  * the two never touch, which is the whole reason emotions can stay as
  * expressions while actions become clips.
  */
+let faceDriver = null;
+const forcedFace = params.get('face') || '';
+// What the life loop would send, cycled so a change can be watched: an
+// expression and the mood whose head angle goes with it. null is a bare face.
+const FACES = [['happy', 'happy'], ['fond', 'happy'], ['smug', 'neutral'], ['determined', 'curious'], ['sleepy', 'sleepy'], [null, 'neutral']];
+let faceIndex = -1;
+let probe = null;
+let probes = 0;
+
 function face(t) {
   if (!vrm) return;
-  vrm.expressionManager?.setValue('blink', Math.sin(t * 0.9) > 0.985 ? 1 : 0);
+  if (!faceDriver) {
+    faceDriver = new FaceDriver({ has: (name) => Boolean(vrm.expressionManager?.getExpression(name)) });
+    const parts = Object.keys(vrm.expressionManager?.expressionMap ?? {}).filter((n) => /\.(eyes|brows|mouth)$/.test(n));
+    report(`[spike] face parts shipped: ${parts.length}`);
+  }
+  const now = performance.now();
+  const wanted = forcedFace ? 0 : started ? Math.floor((now - started) / 1800) % FACES.length : -1;
+  if (wanted !== faceIndex) {
+    faceIndex = wanted;
+    const [name, mood] = forcedFace ? [forcedFace, 'neutral'] : FACES[Math.max(0, wanted)];
+    faceDriver.show(name, HEAD_FOR_MOOD[mood], now);
+    report(`[spike] face -> ${name ?? 'none'} through ${Object.keys(faceDriver.update(now).weights).join(', ') || 'nothing'}`);
+    // The first two changes get traced: what the expression manager actually
+    // holds, frame by frame, for a third of a second. A screenshot can't show
+    // a stagger; this can.
+    if (name && probes < 2) { probe = { name, from: now, rows: [] }; probes++; }
+  }
+  const out = faceDriver.update(now);
+  for (const [name, weight] of Object.entries(out.weights)) vrm.expressionManager?.setValue(name, weight);
+  if (probe) {
+    const em = vrm.expressionManager;
+    const at = Math.round(now - probe.from);
+    if (at <= 360) {
+      probe.rows.push(`${at}ms e${em.getValue(`${probe.name}.eyes`)?.toFixed(1)} b${em.getValue(`${probe.name}.brows`)?.toFixed(1)} m${em.getValue(`${probe.name}.mouth`)?.toFixed(1)} blink${Math.max(out.blink, 0).toFixed(1)} yaw${out.head.yaw.toFixed(1)}`);
+    } else {
+      report(`[spike] trace ${probe.name}: ${probe.rows.join(' | ')}`);
+      probe = null;
+    }
+  }
+  // The cut's blink sits over the idle one; taking the max means neither can half-open the other's lids.
+  const idleBlink = Math.sin(t * 0.9) > 0.985 ? 1 : 0;
+  vrm.expressionManager?.setValue('blink', Math.max(idleBlink, out.blink));
   vrm.expressionManager?.setValue('aa', Math.max(0, Math.sin(t * 3.1)) * 0.6);
+  // The head turn rides on top of whatever the clip put there: applied after
+  // the mixer, before vrm.update carries it onto the real bones.
+  const head = vrm.humanoid?.getNormalizedBoneNode('head');
+  if (head) {
+    head.quaternion.multiply(new THREE.Quaternion().setFromEuler(
+      new THREE.Euler(THREE.MathUtils.degToRad(out.head.pitch), THREE.MathUtils.degToRad(out.head.yaw), 0)));
+  }
 }
 
 /**
@@ -392,11 +448,15 @@ renderer.setAnimationLoop(() => {
   renderer.render(scene, camera);
   const cost = performance.now() - before;
 
-  // Cycles through the vocabulary so a crossfade can actually be watched.
-  // ?action=walk pins one instead, which is how each was screenshotted.
-  if (!forcedAction && started) {
-    const order = ['settle', 'lean-in', 'settle', 'walk'];
-    play(order[Math.floor((performance.now() - started) / 4000) % order.length]);
+  // Cycles through the vocabulary so a crossfade can actually be watched:
+  // each clip runs once through at its own length, then the next comes in
+  // under a crossfade, which is the shape the life loop will drive. ?action=
+  // pins one instead, which is how each was screenshotted.
+  if (!forcedAction && started && clips && performance.now() >= nextClipAt) {
+    const names = Object.keys(clips);
+    const name = names[(names.indexOf(playing) + 1) % names.length];
+    play(name);
+    nextClipAt = performance.now() + Math.max(1200, clips[name].duration * 1000);
   }
 
   if (!started) return;
