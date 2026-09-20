@@ -2508,6 +2508,11 @@ async function remarkOnScreenshot() {
       const described = describeShot(store.getActivityLog(), currentChatDayKey(), name, sighting.description);
       if (described !== store.getActivityLog()) store.setActivityLog(described);
     }
+    // Written down here, said somewhere else. The line below is composed on
+    // this machine's model, and when her brain is on the server that is a
+    // second Haru talking over the first — so the desk looks, writes it
+    // down, and leaves the talking to her.
+    if (desktopServer()) return;
     if (!mayRemark) return;
     screenshotSpokeAt = Date.now();
     const character = getActiveCharacter();
@@ -7026,6 +7031,26 @@ let pullingCheckIns = false;
 
 async function pullCheckIns(): Promise<void> {
   if (pullingCheckIns) return;
+  // Her server's notes, over the session that is already signed in to it. The
+  // password below cannot be opened on this machine (see feedHerServer), and a
+  // 401 every quarter of an hour is not a pull.
+  if (desktopServer()) {
+    pullingCheckIns = true;
+    try {
+      const body = await serverJson<{ entries?: unknown }>(serverRequest, '/api/checkins');
+      const theirs = Array.isArray(body.entries) ? body.entries : [];
+      if (!theirs.length) return;
+      const before = getCheckIns();
+      const merged = mergeCheckIns(before, theirs as never);
+      const what = describePull(before, merged);
+      if (!what) return;
+      setCheckIns(merged);
+      console.log('[checkins] ' + what);
+    } catch (error) {
+      console.warn('[checkins] could not read hers:', error instanceof Error ? error.message : error);
+    } finally { pullingCheckIns = false; }
+    return;
+  }
   const source = readCheckInSource(store.get('checkinSource'));
   if (!source) return;
   // readCheckInSource already refuses anything off-tailnet, and this asks again
@@ -7091,6 +7116,12 @@ let syncingMemories = false;
 
 async function syncMemories(): Promise<void> {
   if (syncingMemories) return;
+  // Pointed at her server: no password, no second login. See feedHerServer.
+  if (desktopServer()) {
+    syncingMemories = true;
+    try { await feedHerServer(); } finally { syncingMemories = false; }
+    return;
+  }
   const source = readCheckInSource(store.get('checkinSource'));
   if (!source) return;
   // Asked again rather than trusted, the same as the check-in pull: her memory
@@ -7115,6 +7146,9 @@ async function syncMemories(): Promise<void> {
     const headers: Record<string, string> = cookie ? { cookie } : {};
 
     activityReporter.connected(source, cookie);
+    // The same shape the signed-in session has, so everything below is written
+    // once and works through either door.
+    const send: ServerRequest = (route, init = {}) => trackedFetch(source.url + route, { ...init, headers: { ...headers, ...(init.headers as Record<string, string> | undefined) } } as never) as never;
 
     const got = await trackedFetch(source.url + '/api/memory/records', { headers });
     // An older server has the route this replaced and not this one. Say so once
@@ -7145,27 +7179,85 @@ async function syncMemories(): Promise<void> {
     // same login and the same tailnet check — and a second sign-in would only
     // be a second thing to fail.
     if (store.get('activityLog', true) === true) {
-      const log = store.getActivityLog();
-      if (Object.keys(log).length) {
-        const pushed = await trackedFetch(source.url + '/api/activity', {
-          method: 'POST',
-          headers: { ...headers, 'content-type': 'application/json' },
-          body: JSON.stringify({ activity: log }),
-        });
-        if (pushed.status === 404) console.warn('[activity] that server is too old to take the log');
-        else if (!pushed.ok) console.warn('[activity] the server would not take the log (' + pushed.status + ')');
-        else {
-          const held = await pushed.json() as { days?: number; entries?: number };
-          console.log('[activity] the server holds ' + (held.days ?? 0) + ' day(s), ' + (held.entries ?? 0) + ' entr(ies)');
-        }
-      }
-      await pushScreenshots(source.url, headers);
+      await pushActivityLog(send);
+      await pushScreenshots(send);
     }
   } catch (error) {
     console.warn('[memory] could not reach the server:', error instanceof Error ? error.message : error);
   } finally {
     syncingMemories = false;
   }
+}
+
+/**
+ * The day at the desk, sent to whichever machine is keeping it.
+ *
+ * One direction only: the server has no foreground window, so there is nothing
+ * there to pull back.
+ */
+async function pushActivityLog(send: ServerRequest): Promise<void> {
+  const log = store.getActivityLog();
+  if (!Object.keys(log).length) return;
+  const pushed = await send('/api/activity', jsonPost({ activity: log }));
+  if (pushed.status === 404) console.warn('[activity] that server is too old to take the log');
+  else if (!pushed.ok) console.warn('[activity] the server would not take the log (' + pushed.status + ')');
+  else {
+    const held = await pushed.json() as { days?: number; entries?: number };
+    console.log('[activity] the server holds ' + (held.days ?? 0) + ' day(s), ' + (held.entries ?? 0) + ' entr(ies)');
+  }
+}
+
+/**
+ * What this desk gives her back when her brain is on the server.
+ *
+ * The same payloads the sync below sends, through a door that is already open:
+ * the chat session in the server partition, which every message she is sent
+ * goes through. The sync's own login cannot be used here — its password is
+ * sealed per machine by safeStorage, and the copy in this config was sealed on
+ * the server, so decrypting it returns an empty string and both halves of the
+ * sync returned without a word. The desk had been sending her nothing at all.
+ *
+ * Memory comes down and does not go back up. The server forms and forgets; the
+ * desk takes a copy so the panel here is not a year out of date, and sending
+ * its own stale set back would re-add everything she has since let go of.
+ */
+async function feedHerServer(): Promise<void> {
+  try {
+    const body = await serverJson<{ memories?: unknown }>(serverRequest, '/api/memory/records');
+    const what = describeMerge(mergeIn(body.memories));
+    if (what) console.log('[memory] ' + what + ' from her server');
+    if (store.get('activityLog', true) !== true) return;
+    await pushActivityLog(serverRequest);
+    await pushScreenshots(serverRequest);
+    await armAttentionReports();
+  } catch (error) {
+    console.warn('[sync] could not reach her server:', error instanceof Error ? error.message : error);
+  }
+}
+
+/**
+ * The attention samples, pointed at the session's own cookie.
+ *
+ * The reporter opens its own connection rather than borrowing this one — it
+ * fires every thirty seconds from the life loop, long after any sync has
+ * finished — so it needs the cookie as a string. The partition has one, and
+ * reading it out once a sync is cheaper than teaching the reporter what an
+ * Electron session is.
+ */
+let attentionArmed = false;
+
+async function armAttentionReports(): Promise<void> {
+  const origin = desktopServer();
+  const source = readCheckInSource(store.get('checkinSource'));
+  if (!origin || !source) return;
+  const jar = await session.fromPartition(SERVER_PARTITION).cookies.get({ url: origin });
+  const cookie = jar.map(entry => `${entry.name}=${entry.value}`).join('; ');
+  if (!cookie) return;
+  activityReporter.connected(source, cookie);
+  // Once, on the first sync that arms it. The reporter is silent by design —
+  // a diagnostic that talks is a diagnostic in the way — and silent is also
+  // what it looks like when it was never connected at all.
+  if (!attentionArmed) { attentionArmed = true; console.log('[attention] idle, focus and battery are going to her server'); }
 }
 
 /** At most this many per sync. A first run against a full folder would
@@ -7185,7 +7277,7 @@ const SHOTS_PER_SYNC = 20;
  * image on the server for a day whose log has already been pruned out from
  * under it.
  */
-async function pushScreenshots(serverUrl: string, headers: Record<string, string>): Promise<void> {
+async function pushScreenshots(send: ServerRequest): Promise<void> {
   const config = readScreenshotConfig(store.get('screenshots'));
   if (!config.enabled) return;
   const folder = screenshotFolder();
@@ -7194,12 +7286,14 @@ async function pushScreenshots(serverUrl: string, headers: Record<string, string
   const mine = localShots(folder, at => localDateKey(at), looksLikeScreenshot, new Date(), ACTIVITY_RETENTION_DAYS);
   if (!mine.length) return;
 
-  const asked = await trackedFetch(serverUrl + '/api/activity/shots', { headers });
+  const asked = await send('/api/activity/shots');
   if (asked.status === 404) { console.warn('[activity] that server is too old to take screenshots'); return; }
   if (!asked.ok) { console.warn('[activity] could not ask what it already has (' + asked.status + ')'); return; }
   const held = (await asked.json() as { shots?: unknown }).shots;
   const missing = missingFrom(held && typeof held === 'object' ? held as Record<string, string[]> : {}, mine);
-  if (!missing.length) return;
+  // Said rather than passed over: a desk that is sending nothing because
+  // there is nothing to send looks exactly like one that is not sending.
+  if (!missing.length) { console.log(`[activity] the server already has all ${mine.length} screenshot(s)`); return; }
 
   let sent = 0;
   for (const shot of missing.slice(0, SHOTS_PER_SYNC)) {
@@ -7211,9 +7305,9 @@ async function pushScreenshots(serverUrl: string, headers: Record<string, string
       if (!bytes.length || bytes.length > MAX_SHOT_BYTES) continue;
     } catch { continue; }
     const query = `?day=${encodeURIComponent(shot.day)}&name=${encodeURIComponent(shot.name)}`;
-    const put = await trackedFetch(serverUrl + '/api/activity/shots' + query, {
+    const put = await send('/api/activity/shots' + query, {
       method: 'POST',
-      headers: { ...headers, 'content-type': 'application/octet-stream' },
+      headers: { 'content-type': 'application/octet-stream' },
       body: bytes as never,
     });
     if (put.ok) sent += 1;
@@ -8619,11 +8713,20 @@ function appIcon(): string | undefined {
 
 function desktopServer() { return serverOrigin(store.get('desktop.serverUrl')); }
 
+// Twenty seconds is the ceiling for something a person is waiting on. The sync
+// is not that: the day at the desk and its screenshots arrive while she is
+// answering somebody, and the box that merges them is the same one running the
+// model. Every push timed out at twenty seconds on a busy evening and the desk
+// sent nothing for the hour, which is the failure this whole path exists to
+// avoid — so the background routes get the patience the foreground cannot.
+const SLOW_ROUTES = /^\/api\/(chat|activity|memory)/;
+
 const serverRequest: ServerRequest = (route, init = {}) => {
   const origin = desktopServer();
   if (!origin || !route.startsWith('/api/')) throw new Error('No Haru server is configured.');
   return session.fromPartition(SERVER_PARTITION).fetch(origin + route, {
-    ...init, credentials: 'include', redirect: 'error', signal: AbortSignal.timeout(route === '/api/chat' ? 180_000 : 20_000),
+    ...init, credentials: 'include', redirect: 'error',
+    signal: init.signal ?? AbortSignal.timeout(SLOW_ROUTES.test(route) ? 180_000 : 20_000),
   });
 };
 
@@ -13605,12 +13708,22 @@ app.whenReady().then(() => {
   // The money behind her hosted voice, on the hour; the day it ran out, nobody knew.
   setTimeout(() => void checkVeniceBalance('startup'), 2 * 60_000);
   setInterval(() => void checkVeniceBalance('the hour'), 60 * 60_000);
-  if (!desktopServer()) {
-  // Whatever was said to her elsewhere today. Once at startup, then quietly on
-  // the hour — often enough that the evening review has it, rare enough that a
-  // sleeping server is not being knocked on constantly.
+  // Whatever was said to her elsewhere today, and everything this desk has to
+  // give her back: the day at the desk, its screenshots, and the attention
+  // samples the life loop sends once this login has been made.
+  //
+  // Outside the gate below, and that is the whole point. Inside it, the desk
+  // stopped feeding her the moment it was pointed at a server — which is
+  // exactly when it has nothing else to offer. A desk that answers through her
+  // server is not a quieter Haru; it is her eyes on a machine she does not have.
   void pullCheckIns().then(syncMemories);
   setInterval(() => void pullCheckIns().then(syncMemories), 15 * 60_000);
+
+  // Her brain, and only where it runs. Everything from here to the closing
+  // brace is her thinking — forming memories, reading the graph, sitting at a
+  // game, looking at the backlog of shots — and when a server does that, doing
+  // it here as well is two of her, disagreeing.
+  if (!desktopServer()) {
 
   if (!isPrimaryInstance) return;
   // After the single-instance gate: two copies racing to download the same
@@ -14521,8 +14634,14 @@ app.whenReady().then(() => {
   reportCapabilities();
   reportSetup();
   startWindowsHelper();
-  if (!desktopServer()) {
+  // Her eye on this machine, whichever machine is thinking. A screenshot is
+  // described here because the server has no vision model to describe it
+  // with, and the description is what travels: it goes onto the day at the
+  // desk and reaches her with it (activitylog.ts). Gated with the brain, a
+  // desk pointed at her server logged that a screenshot had been taken and
+  // nothing whatever about what was in it.
   watchScreenshots();
+  if (!desktopServer()) {
   startWatchingScreen();
   // Opened at boot when it was left on, for the same reason the screen watcher
   // is: doing it inside the settings handler means it only ever starts for
