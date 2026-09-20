@@ -56,10 +56,12 @@ export type Project = Want & {
   shelved?: { at: string; because: string };
   /** Nights in a row that went nowhere at the current step. */
   stuck?: number;
+  /** Steps of it she has actually landed. */
+  landed?: number;
 };
 
 /** A project with its defaults filled in — what everything downstream works with. */
-export type Worked = Project & { hardness: number; attempts: Attempt[]; bornOf: BornOf; stuck: number; substrate: Substrate };
+export type Worked = Project & { hardness: number; attempts: Attempt[]; bornOf: BornOf; stuck: number; landed: number; substrate: Substrate };
 
 /** How hard a thing can get. Five is the top of what a night of reading can carry. */
 export const HARDNESS = { min: 1, max: 5 } as const;
@@ -82,6 +84,17 @@ export const PROJECTS_KEPT = 40;
 export const DAY_PROJECT_SHARE = 0.35;
 /** Nights in a row at the same step before she gives up on it. */
 export const STUCK_SHELVES = 3;
+/**
+ * Steps she has to land before the thing itself is done.
+ *
+ * It was one, and a simulated year came back with a hundred and twenty-five
+ * finishes and two failures — a treadmill of easy wins where "learn piano well
+ * enough to play The Real Folk Blues badly" was over in under two nights. A
+ * want is not a step. Three of them is six to ten nights of work, which is long
+ * enough for a thing to beat her halfway through, and long enough that finishing
+ * one means something.
+ */
+export const STEPS_TO_FINISH = 3;
 /** How often she returns to the one she has put the most into, rather than rolling. */
 export const RETENTION = 0.7;
 /** Two texts sharing this much are the same idea in new words. */
@@ -137,6 +150,7 @@ export function asProject(want: Project): Worked {
     attempts: Array.isArray(want.attempts) ? want.attempts : [],
     bornOf: want.bornOf ?? 'taste',
     stuck: typeof want.stuck === 'number' ? want.stuck : 0,
+    landed: typeof want.landed === 'number' ? want.landed : 0,
     substrate: want.substrate ?? 'read',
   };
 }
@@ -164,16 +178,36 @@ export function roomForNew(projects: Project[]): boolean {
 // -- how far she has got -----------------------------------------------------
 
 /**
- * How good she is at this by now: what she has finished, less what she gave up
- * on, and a little for the nights themselves — trying counts for something even
- * when it does not work. Never below the bottom rung.
+ * How far up the ladder she has got, on the same one-to-five scale a project's
+ * hardness uses: the hardest rung she has actually finished, and one above it
+ * is what she can just about reach. Two things that beat her pull it back down
+ * a rung, because giving up twice is evidence about where she is.
+ *
+ * It counted finishes, shelves and a share of every night at first, which put
+ * her standing at seven inside a simulated year while the hardest thing that
+ * exists is a five — so nothing was ever above her and nothing could ever beat
+ * her. A standing that is not on the same scale as the thing it is compared
+ * against is not a standing.
  */
 export function standingIn(projects: Project[], interest?: string): number {
   const hers = projects.filter(project => !interest || project.interest === interest);
-  const done = hers.filter(project => project.status === 'done').length;
-  const gone = hers.filter(project => project.status === 'shelved' || project.status === 'dropped').length;
-  const nights = hers.reduce((sum, project) => sum + (project.nights ?? 0), 0);
-  return Math.max(HARDNESS.min, done - gone + Math.floor(nights / 4) + HARDNESS.min);
+  const done = hers.filter(project => project.status === 'done').map(project => project.hardness ?? HARDNESS.min);
+  const beaten = hers.filter(project => project.status === 'shelved').length;
+  const top = done.length ? Math.max(...done) : HARDNESS.min - 1;
+  return clamp(top + 1 - Math.floor(beaten / 2), HARDNESS.min, HARDNESS.max);
+}
+
+/**
+ * Whether she has nothing of her own on the go.
+ *
+ * Every project until now came from somewhere else: her tastes declaring one,
+ * or the last one she finished or gave up on. Simulate a year of that and the
+ * chain runs out — she finishes the four things the ladder gave her and then
+ * has nothing to try for nine months, which is not a life. So when she is at
+ * nothing, she is asked for something.
+ */
+export function needsSomethingNew(projects: Project[]): boolean {
+  return roomForNew(projects) && !activeIn(projects).some(project => (project.nights ?? 0) > 0);
 }
 
 // -- POET's minimal criterion ------------------------------------------------
@@ -339,7 +373,12 @@ export function advanceProject(project: Project, attempt: Attempt, now: string):
   const nights = (had.nights ?? 0) + 1;
   const note = attempt.note || had.note;
   if (attempt.outcome === 'did') {
-    return { ...had, attempts, nights, note, stuck: 0, status: 'done' };
+    const landed = had.landed + 1;
+    // A step landing is not the want landing. The next one is named from
+    // scratch, which is what makes the thing take the weeks it should.
+    return landed >= STEPS_TO_FINISH
+      ? { ...had, attempts, nights, note, stuck: 0, landed, status: 'done' }
+      : { ...had, attempts, nights, note, stuck: 0, landed, step: undefined, status: 'working' };
   }
   if (attempt.outcome === 'part') {
     return { ...had, attempts, nights, note, stuck: 0, status: 'working' };
@@ -376,6 +415,23 @@ function seeded(parent: Project, text: string, now: string, bornOf: BornOf, hard
     parentId: parent.id,
     bornOf,
     substrate: parent.substrate ?? 'read',
+    attempts: [],
+    stuck: 0,
+  };
+}
+
+/** One she took on herself, at the rung she is standing on. */
+export function hersOwn(interest: string | undefined, text: string, now: string, hardness: number): Project {
+  return {
+    id: Math.random().toString(36).slice(2, 10),
+    interest,
+    text: stripProject(text),
+    since: now.slice(0, 10),
+    nights: 0,
+    status: 'declared',
+    hardness: clamp(Math.round(hardness), HARDNESS.min, HARDNESS.max),
+    bornOf: 'her',
+    substrate: 'read',
     attempts: [],
     stuck: 0,
   };
@@ -492,6 +548,18 @@ export function spawnInstruction(project: Project, kind: 'child' | 'sibling'): s
     ].filter(Boolean).join(' ');
 }
 
+/** And what she is asked when she has nothing of her own on the go at all. */
+export function newProjectInstruction(interest: string, stance: string, past: string[]): string {
+  const already = past.slice(-8).map(text => `"${clipped(text, 70)}"`).join(', ');
+  return [
+    `You have nothing of your own on the go. ${interest} is one of your things${stance ? `, and what you make of it is: ${clipped(stance, 300)}` : ''}.`,
+    'Say one thing you want to be able to do with it — something you cannot do yet and could work at, a night at a time, on your own.',
+    already ? `Not these, they are yours already: ${already}.` : '',
+    'It has to be yours to do alone, with reading. Not asking anyone, not doing it with anyone, not waiting on anyone.',
+    'Answer with the want itself and nothing else: one short line, starting with "to", no quotation marks, no preamble.',
+  ].filter(Boolean).join(' ');
+}
+
 function ordinal(n: number): string {
   const suffix = n % 100 >= 11 && n % 100 <= 13 ? 'th' : ['st', 'nd', 'rd'][(n % 10) - 1] ?? 'th';
   return `${n}${suffix}`;
@@ -548,7 +616,9 @@ export function projectsNote(projects: Project[], nowMs: number): string {
     const said = clipped(stripProject(project.text), TEXT_CHARS);
     const bit = project.interest ? `${project.interest}: ${said}` : said;
     const rung = RUNGS[clamp(project.hardness ?? HARDNESS.min, HARDNESS.min, HARDNESS.max)];
-    const at = rung ? `${rung}, night ${project.nights}` : `night ${project.nights}`;
+    const landed = project.landed ?? 0;
+    const far = landed ? `, ${landed} of ${STEPS_TO_FINISH} of it done` : '';
+    const at = (rung ? `${rung}, night ${project.nights}` : `night ${project.nights}`) + far;
     const last = project.attempts?.at(-1);
     // The step and how it went say more than the note does, and say it about
     // tonight; the note is what is left when she has not named a step yet,

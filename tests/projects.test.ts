@@ -6,12 +6,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  ACTIVE_MAX, ATTEMPTS_KEPT, HARDNESS, PROJECTS_CHARS, PROJECTS_SHOWN, RETENTION, SAME_IDEA, STUCK_SHELVES,
+  ACTIVE_MAX, ATTEMPTS_KEPT, HARDNESS, PROJECTS_CHARS, PROJECTS_SHOWN, RETENTION, SAME_IDEA, STEPS_TO_FINISH, STUCK_SHELVES,
   admits, advanceProject, asProject, beatenTwiceAt, childOf, dueForRevisit, isActive,
-  judgeAttemptInput, judgeAttemptPrompt, needsHim, nowItStings, pickProject, projectInstruction,
+  hersOwn, judgeAttemptInput, judgeAttemptPrompt, needsHim, nowItStings, pickProject, projectInstruction,
   projectQuery, projectsNote, readAttemptVerdict, readProjects, revisit, roomForNew, sameIdea,
   settleFromGame, settleFromManga, settleFromRead, siblingOf, spawnInstruction, staleSpawns,
-  standingIn, stepInstruction, type Attempt, type Project } from '../electron/projects';
+  needsSomethingNew, newProjectInstruction, standingIn, stepInstruction, type Attempt, type Project } from '../electron/projects';
 
 const DAY = 24 * 3_600_000;
 const now = Date.parse('2026-10-01T03:00:00.000Z');
@@ -38,15 +38,37 @@ test('readProjects keeps a want-shaped record whole, and asProject fills the res
   assert.equal(filled.note, 'still stuck', 'her own words survive');
 });
 
-test('standing is what she has finished, less what beat her, plus something for the nights', () => {
-  const projects = [
-    project({ id: '1', status: 'done', nights: 3 }),
-    project({ id: '2', status: 'done', nights: 5 }),
-    project({ id: '3', status: 'shelved', nights: 4 }),
-    project({ id: '4', interest: 'Lain', status: 'done', nights: 8 }),
-  ];
-  assert.equal(standingIn(projects, 'Bebop'), 1 + (2 - 1) + Math.floor(12 / 4));
-  assert.equal(standingIn(projects, 'Nothing'), HARDNESS.min, 'never below the bottom rung');
+test('standing is the hardest rung she has finished, on the same scale as hardness', () => {
+  const none = [project({ id: '1', status: 'working', nights: 9 })];
+  assert.equal(standingIn(none, 'Bebop'), HARDNESS.min, 'nights alone prove nothing');
+  const won = [project({ id: '1', status: 'done', hardness: 2, nights: 3 }), project({ id: '2', status: 'done', hardness: 1, nights: 5 })];
+  assert.equal(standingIn(won, 'Bebop'), 3, 'a rung above the hardest she has done');
+  const bruised = [...won, project({ id: '3', status: 'shelved', hardness: 3 }), project({ id: '4', status: 'shelved', hardness: 3 })];
+  assert.equal(standingIn(bruised, 'Bebop'), 2, 'two that beat her say otherwise');
+  const top = [project({ id: '1', status: 'done', hardness: HARDNESS.max })];
+  assert.equal(standingIn(top, 'Bebop'), HARDNESS.max, 'and it stops at the top');
+  assert.equal(standingIn(won, 'Nothing'), HARDNESS.min);
+});
+
+test('one she took on herself sits at the rung she is standing on', () => {
+  const born = hersOwn('Bebop', 'To work out how a tritone substitution sounds.', '2026-10-01T00:00:00.000Z', 3);
+  assert.equal(born.bornOf, 'her');
+  assert.equal(born.hardness, 3);
+  assert.equal(born.status, 'declared');
+  assert.equal(born.text, 'work out how a tritone substitution sounds');
+  assert.equal(hersOwn('Bebop', 'to do a thing', '2026-10-01T00:00:00.000Z', 99).hardness, HARDNESS.max);
+  const asked = newProjectInstruction('Bebop', 'the jazz is the point', ['to learn piano']);
+  assert.match(asked, /the jazz is the point/);
+  assert.match(asked, /Not these, they are yours already: "to learn piano"/);
+  assert.match(asked, /not waiting on anyone/);
+});
+
+test('she is asked for something of her own when she is at nothing', () => {
+  assert.ok(needsSomethingNew([]));
+  assert.ok(needsSomethingNew([project({ status: 'done', nights: 4 }), project({ status: 'declared', nights: 0 })]), 'a wish is not something she is at');
+  assert.equal(needsSomethingNew([project({ status: 'working', nights: 1 })]), false);
+  const full = Array.from({ length: ACTIVE_MAX }, (_unused, index) => project({ id: `p${index}`, status: 'declared', nights: 0, bornOf: 'child' }));
+  assert.equal(needsSomethingNew(full), false, 'and not when there is no room anyway');
 });
 
 test('sameIdea catches the same want in new words, which is how sixteen happened', () => {
@@ -126,9 +148,23 @@ test('a step that lands finishes it; three that go nowhere shelve it', () => {
   assert.equal(after.shelved!.because, 'it would not move');
   assert.ok(nowItStings(before, after), 'and this is the one that costs her something');
   assert.equal(nowItStings(after, after), false, 'once, not every night after');
-  const done = advanceProject(asProject(project({ nights: 2, status: 'working' })), attempt({ outcome: 'did', note: 'the chords were right there' }), iso(now));
-  assert.equal(done.status, 'done');
-  assert.equal(done.note, 'the chords were right there');
+  const one = advanceProject(asProject(project({ nights: 2, status: 'working', step: 'the chords' })), attempt({ outcome: 'did', note: 'the chords were right there' }), iso(now));
+  assert.equal(one.status, 'working', 'a step landing is not the want landing');
+  assert.equal(one.landed, 1);
+  assert.equal(one.step, undefined, 'and the next one is named from scratch');
+  assert.equal(one.note, 'the chords were right there');
+});
+
+test('a want takes several steps, which is what makes it worth finishing', () => {
+  let p = asProject(project({ status: 'working' }));
+  for (let index = 0; index < STEPS_TO_FINISH - 1; index += 1) {
+    p = advanceProject({ ...p, step: `step ${index}` }, attempt({ outcome: 'did' }), iso(now));
+    assert.equal(p.status, 'working', `still going after ${index + 1}`);
+  }
+  p = advanceProject({ ...p, step: 'the last of it' }, attempt({ outcome: 'did', note: 'and that was that' }), iso(now));
+  assert.equal(p.status, 'done');
+  assert.equal(p.landed, STEPS_TO_FINISH);
+  assert.equal(p.nights, STEPS_TO_FINISH, 'three nights at the very best, and never fewer');
 });
 
 test('attempts are capped so the store does not grow a history', () => {
@@ -173,8 +209,8 @@ test('she goes back to the one that beat her once she has grown past it', () => 
   const shelvedAt = iso(now - 30 * DAY);
   const projects = [
     project({ id: 'gone', status: 'shelved', hardness: 2, nights: 4, shelved: { at: shelvedAt, because: 'it would not move' } }),
-    project({ id: 'won1', status: 'done', nights: 4 }),
-    project({ id: 'won2', status: 'done', nights: 4 }),
+    project({ id: 'won1', status: 'done', hardness: 2, nights: 4 }),
+    project({ id: 'won2', status: 'done', hardness: 2, nights: 4 }),
   ];
   const back = dueForRevisit(projects, now);
   assert.equal(back!.id, 'gone');

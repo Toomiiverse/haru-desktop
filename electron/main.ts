@@ -146,7 +146,7 @@ import { enoughToStandOn, herStandings, keepSlight, parseStanding, readSlights, 
 import { blockedLine, asleepLine, backToSleep, dayAfter, decideTimesSystem, dozeOffDue, enoughKnocking, fallbackSchedule, foldAsleepExchanges, goodnightDue, groggyFor, groggyNote, herAsleep, isAsleepLine, knockedAwake, messagesWhileAsleep, parseDecidedTimes, pointlessWake, pointlessWakesLately, readsAsGoodnight, readHerSleep, readHerSleepState, readWakes, sleepNote, sleepWindowOn, wakeIrritation, wakeNote, wokenAt, clockMinutes, BLOCKED_LINE, BLOCK_AFTER_POINTLESS, KNOCK_WINDOW_MS, WAKES_KEPT, type HerSleepSchedule, type Wake } from './hersleep';
 import { parseBalances, balanceWarning } from './venicebalance';
 import { dayNote, dayNoteInstruction, dayPassDue, dayPickInstruction, firstsNote, keepDay, markRecFollowed, noteRecommendation, pickRecommend, readDays, readRecs, readWeek, recDueForFollowUp, reconcileWants, recsAnsweredBy, recsOnDay, wantOutcome, weekKey, weekNote, weekReflectionInstruction, weekSummaryDue, WANT_ODDS, type HerDay, type HerWeek, type Rec, DAY_ODDS } from './ownlife';
-import { admits, advanceProject, asProject, beatenTwiceAt, childOf, dueForRevisit, judgeAttemptInput, judgeAttemptPrompt, DAY_PROJECT_SHARE, keepProjects, needsHim, nowItStings, pickProject, projectInstruction, projectQuery, projectsNote, readAttemptVerdict, readProjects, revisit, settleFromRead, roomForNew, siblingOf, spawnInstruction, staleSpawns, standingIn, stepInstruction, stripProject, type Outcome as NightOutcome, type Project, type Worked } from './projects';
+import { admits, advanceProject, asProject, beatenTwiceAt, childOf, dueForRevisit, judgeAttemptInput, judgeAttemptPrompt, DAY_PROJECT_SHARE, hersOwn, keepProjects, needsHim, needsSomethingNew, newProjectInstruction, nowItStings, pickProject, projectInstruction, projectQuery, projectsNote, readAttemptVerdict, readProjects, revisit, settleFromRead, roomForNew, siblingOf, spawnInstruction, staleSpawns, standingIn, stepInstruction, stripProject, type Outcome as NightOutcome, type Project, type Worked } from './projects';
 import { inQuietHours, newVapidKeys, pushRequest, readPushDevices, readPushPrefs, type PushDevice, type PushPrefs, nextNudgeDelay, NUDGE_GAP_MS, NUDGE_RETRY_MS, nudgeOverdue, PUSH_BREATHER_MS, tooSoonToPush, heldBack, withoutDevice, isPhoneWebApp, coveredByNativeApp } from './push';
 import { CHECK_EVERY_MS, describeUpdate, progressStep, whyNotCheck, type UpdateState } from './updates';
 import { BREVITY, summonedLine } from './summoned';
@@ -11518,6 +11518,32 @@ function tendProjects(): void {
 }
 
 /**
+ * When she is at nothing, she is asked for something of her own to try.
+ *
+ * Every project used to come from somewhere else — her tastes declaring one, or
+ * the last one she finished or gave up on. A simulated year of that runs out:
+ * the chain ends the first time a candidate is refused, and she spends the rest
+ * of it with nothing to work at. So the one case the ladder cannot cover is
+ * covered here, and the thing she names is hers.
+ */
+async function askForSomethingToTry(interest: { name: string; stance: string } | null, config: ProviderConfig): Promise<void> {
+  const all = getProjects();
+  if (!interest || !needsSomethingNew(all)) return;
+  const standing = standingIn(all, interest.name);
+  try {
+    const said = tidyPick(await ollamaQuip([getActiveCharacter().identity, newProjectInstruction(interest.name, interest.stance, all.map(project => project.text))].join(' '), 'What are you going to try?', nudgeBrain() ?? config));
+    if (!said) { console.log('[project] she could not think of anything she wanted to do'); return; }
+    const born = hersOwn(interest.name, said, new Date().toISOString(), standing);
+    const verdict = admits({ text: born.text, hardness: born.hardness ?? 1, substrate: born.substrate, interest: born.interest }, all, standing);
+    if (!verdict.ok) { console.log(`[project] "${said.slice(0, 50)}" refused — ${verdict.why}`); return; }
+    setProjects([...all, born]);
+    console.log(`[project] she has taken something on herself: "${born.text.slice(0, 50)}" at rung ${born.hardness}`);
+  } catch (error) {
+    console.warn('[project] could not ask her what she wanted to try:', error instanceof Error ? error.message : error);
+  }
+}
+
+/**
  * What she is actually trying tonight.
  *
  * The step she is part-way through is kept; a new one is named when she has
@@ -11691,6 +11717,7 @@ async function haveANight(config: ProviderConfig) {
     // deepening the interest that made her want it. Only when the interest
     // being deepened actually carries a want she is still at.
     tendProjects();
+    if (!adopting && interest) await askForSomethingToTry(interest, config);
     const picked = !adopting && interest && Math.random() < WANT_ODDS ? pickProject(getProjects(), interest.name, Math.random) : null;
     // The step is named before she goes looking, because the search is the step
     // and not the whole ambition: "how to learn piano" comes back with the same
