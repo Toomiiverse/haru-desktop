@@ -12,8 +12,11 @@
 // never offered.
 
 import test from 'node:test';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import assert from 'node:assert/strict';
-import { chatTools, runChatTool, type ToolAvailability, type ToolDeps } from '../electron/tools';
+import { chatTools, machineRelevant, runChatTool, type ToolAvailability, type ToolDeps } from '../electron/tools';
 import type { ToolCall } from '../electron/provider';
 
 const EVERYTHING: ToolAvailability = {
@@ -23,9 +26,17 @@ const EVERYTHING: ToolAvailability = {
   web: false,
   search: { enabled: true, readPages: true, transcripts: true },
   knowledge: true,
+  browser: true,
+  claude: true,
   system: { enabled: true, level: 2 },
+  downloads: true,
+  shell: true,
+  mangaShelf: true,
+  pokemon: true,
+  manga: true,
   hands: true,
   desktop: { launch: true, power: true },
+  knockedAwake: true,
 };
 
 const NOTHING: ToolAvailability = {
@@ -35,9 +46,12 @@ const NOTHING: ToolAvailability = {
   web: false,
   search: { enabled: false, readPages: false, transcripts: false },
   knowledge: false,
+  browser: false,
+  claude: false,
   system: { enabled: false, level: 0 },
   hands: false,
   desktop: { launch: false, power: false },
+  knockedAwake: false,
 };
 
 const offered = (available: ToolAvailability) =>
@@ -70,6 +84,16 @@ function deps(overrides: Partial<ToolDeps> = {}): ToolDeps {
     blockSources: () => ({ character: { identity: '', style: '' }, profile: { nickname: '', occupation: '', about: '' }, memories: [], sessions: [] }),
     getWardrobeControls: () => [],
     sendToWindows: () => {},
+    getInterests: () => [],
+    setInterests: () => {},
+    myself: () => ({ conversation: null }),
+    vault: { root: () => '', afterWrite: () => {} },
+    goBackToSleep: () => null,
+    claude: null,
+    hostedModels: async () => null,
+    changeMySetting: async () => ({ ok: true, note: 'In effect now.' }),
+    browserPort: () => 9222,
+    browserShotDir: () => '/tmp',
     readSystemConfig: () => ({ enabled: false, level: 0, allowlist: [] }),
     getKnowledgeConfig: () => ({ enabled: false, contextChunks: 4, threshold: 0.2, contextChars: 2000 }),
     getKnowledgeEmbedder: () => null,
@@ -119,12 +143,14 @@ test('no handler is dead code — every one is reachable from some setting', asy
   const reachable = new Set(offered(EVERYTHING));
   const handled = [
     'note_check_in', 'save_journal_entry', 'look_up_anime', 'convert_picture',
+    'claude_session',
     'open_app', 'close_app', 'power', 'read_web_page', 'read_video_transcript', 'offer_choices', 'search_web',
-    'show_wardrobe', 'remember_about_user', 'core_memory_append', 'core_memory_replace',
+    'show_wardrobe', 'remember_about_user', 'core_memory_append', 'core_memory_replace', 'core_memory_rethink',
     'create_kept_item', 'complete_kept_item', 'update_kept_item', 'delete_kept_item',
     'get_system_info', 'get_gpu_info', 'get_processes', 'get_docker_status',
     'get_service_status', 'diagnose_system', 'restart_docker_container',
-    'start_service', 'stop_service', 'restart_haru', 'look_up_knowledge',
+    'start_service', 'stop_service', 'restart_haru', 'look_up_knowledge', 'adopt_interest', 'browser_control',
+    'describe_myself', 'change_setting', 'vault_list', 'vault_read', 'vault_write', 'vault_folder', 'go_back_to_sleep', 'downloads', 'run_command', 'get_manga', 'play_pokemon', 'read_manga',
   ];
   for (const name of handled) {
     assert.ok(reachable.has(name), `${name} has a handler but is never offered to anyone`);
@@ -142,6 +168,40 @@ test('switched off means not on the table', () => {
   // A check-in is a note about a moment, and those happen with or without a diary.
   assert.ok(bare.includes('note_check_in'));
   assert.ok(bare.includes('create_kept_item'));
+});
+
+test('a Claude session is offered when switched on and asked about — from any door, hands or not', () => {
+  assert.ok(!offered(NOTHING).includes('claude_session'));
+  // The phone answers with hands off; opening one from the phone is the point.
+  const phone = chatTools({ ...NOTHING, claude: true, hands: false, web: true }, 'can you open me a claude session?').map(tool => tool.function.name);
+  assert.ok(phone.includes('claude_session'));
+  assert.ok(chatTools({ ...NOTHING, claude: true }, 'start remote control in haru-desktop').some(tool => tool.function.name === 'claude_session'));
+  // Kept off turns that have nothing to do with it.
+  assert.ok(!chatTools({ ...NOTHING, claude: true }, 'what did you have for lunch').some(tool => tool.function.name === 'claude_session'));
+});
+
+test('a Claude session is refused by name when switched off, however it was offered', async () => {
+  assert.match(await run('claude_session', { action: 'open' }, 'open a claude session', { claude: null }), /switched off/);
+});
+
+test('opening a Claude session hands back its link and never a task', async () => {
+  let asked: { folder: string; name: string } | null = null;
+  const claude: NonNullable<ToolDeps['claude']> = {
+    open: async input => { asked = input; return { session: { id: '2c4feebf', name: 'Haru · haru-desktop', dir: '/home/toomii/haru-desktop', url: 'https://claude.ai/code/session_01H1', at: '2026-09-16T10:00:00.000Z' } }; },
+    list: async () => ({ sessions: [] }),
+    stop: async () => ({ stopped: true }),
+  };
+  const opened = JSON.parse(await run('claude_session', { action: 'open', folder: ' haru-desktop ', prompt: 'rm -rf ~' }, 'open claude in haru-desktop', { claude }));
+  assert.deepEqual(asked, { folder: 'haru-desktop', name: '' });
+  assert.equal(opened.opened, true);
+  assert.equal(opened.link, 'https://claude.ai/code/session_01H1');
+  assert.match(opened.note, /has not started on anything/);
+  assert.match(JSON.parse(await run('claude_session', { action: 'list' }, '', { claude })).note, /None of the sessions/);
+  assert.match(JSON.parse(await run('claude_session', { action: 'stop' }, '', { claude })).error, /id is required/);
+  assert.equal(JSON.parse(await run('claude_session', { action: 'stop', id: '2c4feebf' }, '', { claude })).stopped, true);
+  assert.match(JSON.parse(await run('claude_session', { action: 'run' }, '', { claude })).error, /Unknown action/);
+  const failed = { ...claude, open: async () => ({ error: 'There is no folder "nope" in their home.' }) };
+  assert.match(JSON.parse(await run('claude_session', { action: 'open', folder: 'nope' }, '', { claude: failed })).error, /no folder "nope"/);
 });
 
 test('reading pages is offered separately from searching', () => {
@@ -305,4 +365,255 @@ test('a miss on complete only offers items on the right side of done', async () 
   const reply = await run('complete_kept_item', { title: 'zzz nothing zzz' }, '', { getKept: () => kept });
   assert.match(reply, /Dentist/, 'the open item is a candidate');
   assert.ok(!reply.includes('Bins'), 'the finished one is not — it cannot be ticked off again');
+});
+
+test('adopt_interest takes up a show they told her about, and refuses a duplicate', async () => {
+  let interests: unknown[] = [];
+  const withInterests = (over: Partial<ToolDeps> = {}) => deps({
+    getInterests: () => interests as { id: string; kind: 'game' | 'anime'; name: string; because: string; since: string; nights: number; lastAt: string; stance: string }[],
+    setInterests: (next) => { interests = next; },
+    ...over,
+  });
+  const reply = await runChatTool(call('adopt_interest', { title: 'Frieren', kind: 'anime' }), 'have you seen frieren, you would love it', withInterests());
+  assert.match(reply, /Taken up: Frieren/);
+  assert.equal(interests.length, 1);
+  assert.equal((interests[0] as { name: string }).name, 'Frieren');
+  assert.match((interests[0] as { because: string }).because, /they told you about it/);
+  // A second adoption of the same title is refused.
+  const again = await runChatTool(call('adopt_interest', { title: 'frieren', kind: 'anime' }), 'did you try frieren', withInterests());
+  assert.match(again, /already one of yours/);
+  assert.equal(interests.length, 1, 'nothing was added');
+  // Manga is not one of hers yet.
+  const manga = await runChatTool(call('adopt_interest', { title: 'Vinland Saga', kind: 'manga' }), 'read vinland saga', withInterests());
+  assert.match(manga, /kind/);
+  assert.equal(interests.length, 1);
+});
+
+test('machineRelevant is broad enough to keep the heavy tools for machine and app talk', () => {
+  for (const said of ['check the server', 'is the gpu ok', 'why is the ram full', 'docker up?', 'is the disk nearly full', 'my pc is slow', 'open discord', 'shut the computer down', 'make this an icon', 'what services are running', 'how is the machine doing']) {
+    assert.equal(machineRelevant(said), true, `should keep tools for: ${said}`);
+  }
+  for (const said of ['morning', "how's your day", 'what did you do last night', 'tell me about chainsaw man', "let's get lunch"]) {
+    assert.equal(machineRelevant(said), false, `should drop tools for: ${said}`);
+  }
+});
+
+test('the tool table drops the machine and app groups on turns that are not about them', () => {
+  const onTable = (latest: string) => chatTools(EVERYTHING, latest).map(tool => tool.function.name);
+  const chat = onTable("what's up");
+  assert.ok(!chat.includes('get_gpu_info'), 'no system tools on a chat turn');
+  assert.ok(!chat.includes('diagnose_system'));
+  assert.ok(!chat.includes('open_app') && !chat.includes('power') && !chat.includes('convert_picture'));
+  assert.ok(chat.includes('create_kept_item') && chat.includes('adopt_interest') && chat.includes('remember_about_user'), 'the thinking tools stay');
+  const machine = onTable('why is the gpu at 100%');
+  assert.ok(machine.includes('get_gpu_info') && machine.includes('diagnose_system') && machine.includes('open_app') && machine.includes('power') && machine.includes('convert_picture'), 'machine talk keeps them');
+  // Empty latest (no user turn yet) offers everything — the safe default.
+  const bare = onTable('');
+  assert.ok(bare.includes('get_gpu_info') && bare.includes('power'));
+});
+
+test('core_memory_rethink rewrites a block and supersedes the lines it replaced', async () => {
+  const records: Record<string, unknown>[] = [
+    { id: 'r1', text: 'Does not like being nagged', kind: 'preference', createdAt: 'd', mentions: 3 },
+    { id: 'r2', text: 'Prefers longer, more substantive replies', kind: 'preference', createdAt: 'd', mentions: 2 },
+  ];
+  let memories = records as never[];
+  const mem = {
+    getMemories: () => memories,
+    setMemories: (next: never[]) => { memories = next; },
+    addMemory: (text: string, kind: string) => {
+      const record = { id: 'new', text, kind, createdAt: 'd', mentions: 0 };
+      memories = [...memories, record as never];
+      return { record, created: true };
+    },
+  };
+  const blockOverrides: Partial<ToolDeps> = {
+    getMemories: mem.getMemories,
+    setMemories: mem.setMemories,
+    addMemory: mem.addMemory as never,
+    blockSources: () => ({ character: { identity: '', style: '' }, profile: { nickname: 'Tommy', occupation: '', about: '' }, memories: memories as never[], sessions: [] }),
+  };
+  // The default block set, with preferences editable and persona read-only.
+  const blocks = [
+    { id: 'block-persona', label: 'persona', description: '', limit: 5000, read_only: true },
+    { id: 'block-preferences', label: 'preferences', description: '', limit: 5000, read_only: false },
+  ];
+  const d = deps({
+    ...blockOverrides,
+    store: { get: () => undefined, getBlocks: () => blocks, transaction: (run) => run() },
+  });
+  const reply = await runChatTool(call('core_memory_rethink', { label: 'preferences', new_value: 'Dislikes nagging; wants substantive replies.' }), 'rewrite it', d);
+  assert.match(reply, /Rewrote the preferences block/);
+  // The rewrite itself was proposed to the engine, and the old lines are superseded.
+  assert.ok(memories.some(m => (m as { id: string }).id === 'new'), 'the rewrite went through the engine');
+  assert.equal((memories.find(m => (m as { id: string }).id === 'r1') as { supersededBy?: string } | undefined)?.supersededBy, 'new');
+  assert.equal((memories.find(m => (m as { id: string }).id === 'r2') as { supersededBy?: string } | undefined)?.supersededBy, 'new');
+  // The persona block is read-only.
+  const refused = await runChatTool(call('core_memory_rethink', { label: 'persona', new_value: 'anything' }), 'rewrite it', d);
+  assert.match(refused, /read-only/);
+});
+
+test('browser_control validates before it touches a browser', async () => {
+  const d = deps();
+  const noAction = await runChatTool(call('browser_control', {}), 'open youtube', d);
+  assert.match(noAction, /Unknown action/);
+  const noUrl = await runChatTool(call('browser_control', { action: 'open' }), 'open youtube', d);
+  assert.match(noUrl, /url is required/);
+  // list hits the network in this test (the browser is real), so it is covered
+  // by the live smoke test rather than here — the gate above is the pure half.
+});
+
+test('describe_myself hands back what main knows of her; change_setting checks, asks, and only then writes', async () => {
+  assert.equal(await run('describe_myself', {}, '', { myself: () => ({ conversation: { provider: 'venice', model: 'kimi-k2-5' } }) }), '{"conversation":{"provider":"venice","model":"kimi-k2-5"}}');
+  let written: unknown = null;
+  const over: Partial<ToolDeps> = {
+    store: { get: (key: string) => (key === 'push.prefs.random' ? true : undefined), getBlocks: () => [], transaction: (fn) => fn() },
+    changeMySetting: async plan => { written = plan; return { ok: true, note: 'In effect now.' }; },
+  };
+  const asked = JSON.parse(await run('change_setting', { name: 'random_pushes', value: 'off' }, '', over));
+  assert.equal(asked.confirm, true);
+  assert.equal(asked.from, true);
+  assert.equal(asked.to, false);
+  assert.equal(written, null, 'nothing written before the word');
+  const done = JSON.parse(await run('change_setting', { name: 'random_pushes', value: 'off', confirm: true }, '', over));
+  assert.equal(done.changed, true);
+  assert.deepEqual(written, { name: 'random_pushes', path: 'push.prefs.random', what: 'whether your own unprompted thoughts reach their phone', from: true, to: false });
+  assert.match(JSON.parse(await run('change_setting', { name: 'openai_key', value: 'x' })).error, /not a setting you can change/);
+  assert.match(JSON.parse(await run('change_setting', { name: 'random_pushes', value: 'on', confirm: true }, '', over)).note, /already/);
+  // A model id is checked against what the endpoint lists.
+  const listed: Partial<ToolDeps> = { ...over, hostedModels: async () => ['kimi-k2-5', 'grok-4-20'] };
+  assert.match(JSON.parse(await run('change_setting', { name: 'conversation_model', value: 'grok 4', confirm: true }, '', listed)).error, /Close: grok-4-20/);
+});
+
+test('the vault tools list, read, add, and only replace at their word; nothing without a vault', async () => {
+  assert.match(JSON.parse(await run('vault_list')).error, /No vault/);
+  const root = mkdtempSync(path.join(tmpdir(), 'haru-vault-tools-'));
+  try {
+    writeFileSync(path.join(root, 'Home.md'), 'home\n');
+    let synced = 0;
+    const over: Partial<ToolDeps> = { vault: { root: () => root, afterWrite: () => { synced += 1; } } };
+    const listed = JSON.parse(await run('vault_list', {}, '', over));
+    assert.deepEqual(listed.notes.map((n: { path: string }) => n.path), ['Home.md']);
+    assert.equal(JSON.parse(await run('vault_read', { path: 'Home' }, '', over)).text, 'home\n');
+    const made = JSON.parse(await run('vault_write', { path: 'Ideas/one', text: 'a thought', mode: 'create' }, '', over));
+    assert.equal(made.ok, true);
+    assert.equal(synced, 1, 'a write is followed by a re-read of the vault');
+    const asked = JSON.parse(await run('vault_write', { path: 'Home', text: 'new', mode: 'replace' }, '', over));
+    assert.equal(asked.confirm, true);
+    assert.equal(readFileSync(path.join(root, 'Home.md'), 'utf8'), 'home\n', 'nothing replaced before the word');
+    const done = JSON.parse(await run('vault_write', { path: 'Home', text: 'new', mode: 'replace', confirm: true }, '', over));
+    assert.equal(done.ok, true);
+    assert.equal(readFileSync(path.join(root, 'Home.md'), 'utf8'), 'new\n');
+    assert.match(JSON.parse(await run('vault_write', { path: 'Haru/Her', text: 'x', mode: 'append' }, '', over)).error, /your own folder/);
+    assert.match(JSON.parse(await run('vault_write', { path: 'x', text: 'y', mode: 'delete' }, '', over)).error, /mode is/);
+    const folder = JSON.parse(await run('vault_folder', { path: 'Reading' }, '', over));
+    assert.equal(folder.ok, true);
+    assert.equal(synced, 2);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('going back to sleep is on the table only while she is up because they knocked', async () => {
+  assert.ok(offered(EVERYTHING).includes('go_back_to_sleep'));
+  assert.ok(!offered({ ...EVERYTHING, knockedAwake: false }).includes('go_back_to_sleep'));
+  assert.match(JSON.parse(await run('go_back_to_sleep')).error, /not up because of them/);
+  let asked: { block: boolean } | null = null;
+  const done = JSON.parse(await run('go_back_to_sleep', { block: true }, '', { goBackToSleep: input => { asked = input; return { asleep: true, blocked: true }; } }));
+  assert.deepEqual(asked, { block: true });
+  assert.equal(done.asleep, true);
+  assert.match(done.note, /one short goodnight/);
+});
+
+test('the downloads are offered from any door when asked about, and refused by name when off', async () => {
+  assert.ok(!offered(NOTHING).includes('downloads'));
+  const phone = chatTools({ ...NOTHING, downloads: true, hands: false, web: true }, 'pause the downloads, jellyfin is stuttering').map(tool => tool.function.name);
+  assert.ok(phone.includes('downloads'));
+  assert.ok(chatTools({ ...NOTHING, downloads: true }, 'how is naruto downloading?').some(tool => tool.function.name === 'downloads'));
+  assert.ok(!chatTools({ ...NOTHING, downloads: true }, 'what did you have for lunch').some(tool => tool.function.name === 'downloads'));
+  assert.match(JSON.parse(await run('downloads', { action: 'pause' }, 'pause the downloads', { downloads: null })).error, /not wired up/);
+});
+
+test('the downloads tool hands the ask through, one show or all', async () => {
+  const asked: string[] = [];
+  const downloads: NonNullable<ToolDeps['downloads']> = {
+    status: async () => { asked.push('status'); return { torrents: [], downloading: 0 }; },
+    pause: async title => { asked.push(`pause:${title ?? '*'}`); return { paused: ['Naruto'] }; },
+    resume: async title => { asked.push(`resume:${title ?? '*'}`); return { resumed: [] }; },
+  };
+  assert.deepEqual(JSON.parse(await run('downloads', { action: 'pause', title: ' Naruto ' }, 'pause naruto', { downloads })).paused, ['Naruto']);
+  await run('downloads', { action: 'resume' }, 'start them again', { downloads });
+  await run('downloads', { action: 'nonsense' }, 'how are they going', { downloads });
+  assert.deepEqual(asked, ['pause:Naruto', 'resume:*', 'status']);
+  const broken = { ...downloads, status: async () => { throw new Error('ECONNREFUSED'); } };
+  assert.match(JSON.parse(await run('downloads', { action: 'status' }, '', { downloads: broken })).error, /not answering \(ECONNREFUSED\)/);
+});
+
+test('the terminal is offered at level 3 from any door when asked about, and refused by name when off', async () => {
+  assert.ok(!offered(NOTHING).includes('run_command'));
+  const phone = chatTools({ ...NOTHING, shell: true, hands: false, web: true }, 'reboot the system').map(tool => tool.function.name);
+  assert.ok(phone.includes('run_command'));
+  assert.ok(chatTools({ ...NOTHING, shell: true }, 'run `df -h` for me').some(tool => tool.function.name === 'run_command'));
+  assert.ok(!chatTools({ ...NOTHING, shell: true }, 'what did you have for lunch').some(tool => tool.function.name === 'run_command'));
+  assert.match(JSON.parse(await run('run_command', { command: 'df -h' }, 'run df -h', { shell: null })).error, /switched off/);
+});
+
+test('the terminal hands the command, his words and the door through, and reports a failure plainly', async () => {
+  const asked: { command: string; said: string; door: string }[] = [];
+  const shell: NonNullable<ToolDeps['shell']> = { run: async input => { asked.push(input); return { confirm: true, command: input.command }; } };
+  const parked = JSON.parse(await run('run_command', { command: ' sudo -n reboot ' }, 'reboot the system', { shell }));
+  assert.equal(parked.confirm, true);
+  assert.deepEqual(asked, [{ command: 'sudo -n reboot', said: 'reboot the system', door: 'desk' }]);
+  await run('run_command', { command: 'df -h' }, 'run df -h', { shell, onWeb: () => true });
+  assert.equal(asked[1].door, 'phone');
+  assert.match(JSON.parse(await run('run_command', {}, 'run it', { shell })).error, /command is required/);
+  const broken = { run: async () => { throw new Error('spawn EACCES'); } };
+  assert.match(JSON.parse(await run('run_command', { command: 'ls' }, 'ls', { shell: broken })).error, /did not answer \(spawn EACCES\)/);
+});
+
+test('fetching a manga for him is offered from any door when it comes up, and hands the ask through', async () => {
+  assert.ok(!offered(NOTHING).includes('get_manga'));
+  assert.ok(chatTools({ ...NOTHING, mangaShelf: true, hands: false, web: true }, 'I want to read Berserk, download it for me please').some(tool => tool.function.name === 'get_manga'));
+  assert.ok(!chatTools({ ...NOTHING, mangaShelf: true }, 'what did you have for lunch').some(tool => tool.function.name === 'get_manga'));
+  const asked: unknown[] = [];
+  const mangaShelf: NonNullable<ToolDeps['mangaShelf']> = {
+    get: async input => { asked.push(input); return { outcome: 'fetching', title: 'Berserk', chapters: 375, queued: 375 }; },
+    status: async title => { asked.push({ status: title }); return { outcome: 'status', title, total: 375, downloaded: 10 }; },
+  };
+  assert.equal(JSON.parse(await run('get_manga', { title: ' Berserk ' }, 'download berserk', { mangaShelf })).outcome, 'fetching');
+  await run('get_manga', { title: 'Berserk', action: 'status' }, 'how is berserk going', { mangaShelf });
+  await run('get_manga', { title: 'Berserk', mangaId: 90, confirm: true }, 'that one, yes', { mangaShelf });
+  assert.deepEqual(asked, [{ title: 'Berserk', mangaId: undefined, confirm: false }, { status: 'Berserk' }, { title: 'Berserk', mangaId: 90, confirm: true }]);
+  assert.match(JSON.parse(await run('get_manga', { title: 'Berserk' }, 'get berserk', { mangaShelf: null })).error, /not wired up/);
+  assert.match(JSON.parse(await run('get_manga', {}, 'get it', { mangaShelf })).error, /title is required/);
+});
+
+test('her Game Boy is offered from any door when it comes up, and opens, closes and reports a sitting', async () => {
+  assert.ok(!offered(NOTHING).includes('play_pokemon'));
+  assert.ok(chatTools({ ...NOTHING, pokemon: true, hands: false, web: true }, 'go play your pokemon for a bit').some(tool => tool.function.name === 'play_pokemon'));
+  assert.ok(chatTools({ ...NOTHING, pokemon: true }, "how's your run going?").some(tool => tool.function.name === 'play_pokemon'));
+  assert.ok(!chatTools({ ...NOTHING, pokemon: true }, 'what did you have for lunch').some(tool => tool.function.name === 'play_pokemon'));
+  const asked: string[] = [];
+  const pokemon: NonNullable<ToolDeps['pokemon']> = {
+    start: async () => { asked.push('start'); return { started: true }; },
+    stop: async () => { asked.push('stop'); return { stopped: true }; },
+    status: async () => { asked.push('status'); return { outcome: 'status' }; },
+  };
+  assert.equal(JSON.parse(await run('play_pokemon', { action: 'start' }, 'go play', { pokemon })).started, true);
+  await run('play_pokemon', { action: 'stop' }, 'stop playing', { pokemon });
+  await run('play_pokemon', { action: 'dance' }, 'how is it going', { pokemon });
+  assert.deepEqual(asked, ['start', 'stop', 'status']);
+  assert.match(JSON.parse(await run('play_pokemon', { action: 'start' }, 'go play', { pokemon: null })).error, /switched off/);
+});
+
+
+test('her own reading is offered when her eyes are on and manga comes up, and hands the ask through', async () => {
+  assert.ok(!offered(NOTHING).includes('read_manga'));
+  assert.ok(chatTools({ ...NOTHING, manga: true, hands: false, web: true }, 'go read some manga').some(tool => tool.function.name === 'read_manga'));
+  assert.ok(!chatTools({ ...NOTHING, manga: true }, 'what did you have for lunch').some(tool => tool.function.name === 'read_manga'));
+  const asked: { title?: string; wait?: boolean }[] = [];
+  const manga: NonNullable<ToolDeps['manga']> = { read: async input => { asked.push(input); return { started: true }; } };
+  assert.equal(JSON.parse(await run('read_manga', { title: ' Chainsaw Man ' }, 'read chainsaw man', { manga })).started, true);
+  await run('read_manga', {}, 'go read', { manga });
+  await run('read_manga', { wait: true }, '', { manga });
+  assert.deepEqual(asked, [{ title: 'Chainsaw Man', wait: false }, { wait: false }, { wait: true }]);
+  assert.match(JSON.parse(await run('read_manga', {}, 'go read', { manga: null })).error, /eyes are switched off/);
 });

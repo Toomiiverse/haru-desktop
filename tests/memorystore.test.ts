@@ -9,8 +9,8 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createMemoryStore, QUERY_CACHE_MAX, type MemoryStoreDeps } from '../electron/memorystore';
-import type { MemoryRecord, SessionSummary, ForgettingEntry } from '../electron/memory';
+import { createMemoryStore, MAX_MEMORIES, QUERY_CACHE_MAX, type MemoryStoreDeps } from '../electron/memorystore';
+import type { MemoryRecord, SessionSummary, ForgettingEntry, MonthNote } from '../electron/memory';
 import type { MemoryBlock } from '../electron/blocks';
 import type { Embedder } from '../electron/embeddings';
 
@@ -33,8 +33,10 @@ function record(overrides: Partial<MemoryRecord> & { id: string; text: string })
 function harness(options: Partial<{
   memories: MemoryRecord[];
   sessions: SessionSummary[];
+  monthNotes: MonthNote[];
   blocks: MemoryBlock[];
   embedder: Embedder | null;
+  sort: MemoryStoreDeps['sort'];
 }> = {}) {
   let saved = options.memories ? [...options.memories] : [];
   const forgotten: ForgettingEntry[] = [];
@@ -48,6 +50,8 @@ function harness(options: Partial<{
       getMemories: () => saved,
       setMemories: (records) => { saved = records; },
       getSessions: () => options.sessions ?? [],
+      getMonthNotes: () => options.monthNotes ?? [],
+      setMonthNotes: (items) => { options.monthNotes = items; },
       getBlocks: () => blocks,
       setBlocks: (next) => { blocks = next; },
       getForgettingLog: () => forgotten,
@@ -66,6 +70,8 @@ function harness(options: Partial<{
     profile: () => ({ nickname: 'Tom', occupation: '', about: '' }),
     following: () => [],
     agenda: () => [],
+    herOwnLife: () => '',
+    ...(options.sort ? { sort: options.sort } : {}),
   };
   const store = createMemoryStore(deps);
   return {
@@ -111,8 +117,8 @@ test('an empty fact is not a fact', () => {
 });
 
 test('at the cap something leaves, and it leaves a record of why', () => {
-  // Sixty low-importance memories, all long stale, so the cap has to choose.
-  const full = Array.from({ length: 60 }, (_, index) => record({
+  // A full store of low-importance memories, all long stale, so the cap has to choose.
+  const full = Array.from({ length: MAX_MEMORIES }, (_, index) => record({
     id: `m${index}`,
     text: `Owns a thing numbered ${index}`,
     importance: 0.2,
@@ -120,10 +126,10 @@ test('at the cap something leaves, and it leaves a record of why', () => {
   }));
   const h = harness({ memories: full });
   h.store.addMemory('Allergic to shellfish', 'fact');
-  assert.ok(h.saved.length <= 60, 'the cap must hold');
+  assert.ok(h.saved.length <= MAX_MEMORIES, 'the cap must hold');
   assert.ok(h.forgotten.length > 0, 'something left and nobody was told');
   assert.equal(h.forgotten[0].reason, 'prune');
-  assert.match(h.forgotten[0].detail ?? '', /60-memory cap/);
+  assert.match(h.forgotten[0].detail ?? '', new RegExp(`${MAX_MEMORIES}-memory cap`));
 });
 
 test('a query is embedded once however often it is asked', async () => {
@@ -258,4 +264,93 @@ test('blocks are written and every window is told', () => {
   const h = harness();
   h.store.setBlocks([{ id: 'block-human', label: 'human', description: 'them', limit: 500, read_only: false }]);
   assert.ok(h.broadcasts.some(entry => entry.channel === 'blocks:changed'));
+});
+
+// ---- sorting ------------------------------------------------------------------
+
+test('unsorted records are sent to be sorted and come back with a category and a day', async () => {
+  const asked: string[][] = [];
+  const h = harness({
+    memories: [
+      record({ id: 'psych', text: 'Rescheduled the psychologist to next Friday', kind: 'event', createdAt: '2026-09-14T02:00:00.000Z' }),
+      record({ id: 'done', text: 'Likes lo-fi music while working', kind: 'preference', category: 'preference' }),
+      record({ id: 'hers', text: "I don't get up for this any more", kind: 'preference', subject: 'haru' }),
+      record({ id: 'gone', text: 'Uses Ubuntu', supersededBy: 'x' }),
+    ],
+    sort: async notes => {
+      asked.push(notes.map(note => note.id));
+      return new Map([['psych', { category: 'plan' as const, when: '2026-09-18' }]]);
+    },
+  });
+  assert.equal(await h.store.sortPending(), 1);
+  assert.deepEqual(asked, [['psych']], 'not what is sorted, hers, or replaced');
+  const psych = h.saved.find(memory => memory.id === 'psych');
+  assert.equal(psych?.category, 'plan');
+  assert.equal(psych?.when, '2026-09-18');
+  assert.equal(psych?.kind, 'event', 'the kind the older code reads is left as it was');
+  assert.ok(h.broadcasts.some(entry => entry.channel === 'memory:changed'));
+  assert.equal(h.embedded.length, 0, 'the text did not change, so nothing is re-embedded');
+});
+
+test('something raised on three separate days is not filed as passing on one read of it', async () => {
+  const days = ['2026-09-01', '2026-09-02', '2026-09-03'].map(day => ({ at: `${day}T08:00:00.000Z`, kind: 'repeat' as const, source: 'explicit' as const }));
+  const h = harness({
+    memories: [
+      record({ id: 'page', text: 'Check up on Tommy in the mornings', kind: 'preference', source: 'explicit', evidence: days }),
+      record({ id: 'once', text: 'You asked about the new voice I use', kind: 'fact', source: 'explicit' }),
+    ],
+    sort: async () => new Map([['page', { category: 'passing' as const }], ['once', { category: 'passing' as const }]]),
+  });
+  await h.store.sortPending();
+  assert.equal(h.saved.find(memory => memory.id === 'page')?.category, 'instruction');
+  assert.equal(h.saved.find(memory => memory.id === 'once')?.category, 'passing');
+});
+
+test('a record the model did not answer for is skipped next time, and one rewritten meanwhile is left for later', async () => {
+  let calls = 0;
+  const h = harness({
+    memories: [record({ id: 'a', text: 'Works at the cinema' }), record({ id: 'b', text: 'Saving for a house' })],
+    sort: async notes => {
+      calls += 1;
+      if (calls === 1) {
+        // Rewritten while the model was thinking.
+        h.store.setMemories(h.saved.map(memory => memory.id === 'b' ? { ...memory, text: 'Saving for a house deposit' } : memory));
+        return new Map([['b', { category: 'ongoing' as const }]]);
+      }
+      return new Map(notes.map(note => [note.id, { category: 'identity' as const }]));
+    },
+  });
+  assert.equal(await h.store.sortPending(), 0);
+  assert.equal(h.saved.find(memory => memory.id === 'b')?.category, undefined, 'its text changed, so the answer was for something else');
+  await h.store.sortPending();
+  assert.equal(h.saved.find(memory => memory.id === 'a')?.category, undefined, 'a was not answered the first time, so it is not asked again this run');
+  assert.equal(h.saved.find(memory => memory.id === 'b')?.category, 'identity');
+});
+
+test('a model that cannot be reached costs nothing but the batch', async () => {
+  const h = harness({ memories: [record({ id: 'a', text: 'Works at the cinema' })], sort: async () => { throw new Error('connection refused'); } });
+  assert.equal(await h.store.sortPending(), 0);
+  assert.equal(h.saved[0].category, undefined);
+});
+
+test('a page line synced again is a resighting, not another mention', () => {
+  const h = harness();
+  h.store.addMemory('Allergic to shellfish', 'fact', undefined, { source: 'explicit' });
+  const again = h.store.addMemory('Allergic to shellfish', 'fact', undefined, { source: 'explicit', resighting: true });
+  assert.equal(again?.created, false);
+  assert.equal(h.saved[0].mentions, 1);
+  assert.equal(h.saved[0].evidence?.length, 1);
+});
+
+test('a note sorted as a person that names nobody but him is kept about him instead', async () => {
+  const h = harness({
+    memories: [
+      record({ id: 'him', text: 'Tom complained about the build failing again', kind: 'event' }),
+      record({ id: 'mum', text: "Tom's mum lives in Perth", kind: 'relationship' }),
+    ],
+    sort: async () => new Map([['him', { category: 'person' as const }], ['mum', { category: 'person' as const }]]),
+  });
+  await h.store.sortPending();
+  assert.equal(h.saved.find(memory => memory.id === 'him')?.category, 'event');
+  assert.equal(h.saved.find(memory => memory.id === 'mum')?.category, 'person');
 });

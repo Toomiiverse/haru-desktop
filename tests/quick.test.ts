@@ -2,7 +2,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { quickAnswer, type QuickData } from '../electron/quick';
+import { quickAnswer, settingCommand, type QuickData } from '../electron/quick';
 
 const data = (over: Partial<QuickData> = {}): QuickData => ({
   now: new Date('2026-08-28T05:00:00Z'), todayKey: '2026-08-28', nickname: 'Tommy', herName: 'Haru',
@@ -48,3 +48,12 @@ test('with the small talk switched off, greetings and stray words go to the mode
   assert.equal(quickAnswer('Hey Haru', data)?.tier, 1, 'unchanged when small talk is allowed');
 });
 
+test('an explicit machine-level command is read outright, and nothing else is', () => {
+  for (const line of ['Set your machine level to 3', 'haru set your access to level 3', 'set your machine to level 2', 'Set level 1', 'put your level to 3', 'machine level 3']) {
+    assert.deepEqual(settingCommand(line), { name: 'machine_level', value: Number(line.match(/[123]/)![0]) }, line);
+  }
+  assert.deepEqual(settingCommand('set your machine level to 4'), { name: 'machine_level', value: 4 });
+  for (const line of ['what level are you on?', 'set your bedtime to 23:00', 'level 4 please', 'set your machine level to 5', 'I set the shelf to level 3', 'set your machine level to 3 tomorrow maybe?']) {
+    assert.equal(settingCommand(line), null, line);
+  }
+});

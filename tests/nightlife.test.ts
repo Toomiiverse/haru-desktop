@@ -2,7 +2,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { keepNights, MAX_PER_NIGHT, mentionsNight, NIGHT_GAP_MS, NIGHTS_KEPT, nightNoteInstruction, nightsInstruction, nightsOn, nightsToDrawOn, pickInstruction, tidyPick, timeForSomething, type Night, unlabel, nightToRaise } from '../electron/nightlife';
+import { keepNights, lastNightDay, MAX_PER_NIGHT, mentionsNight, NIGHT_GAP_MS, NIGHTS_KEPT, nightNoteInstruction, nightsInstruction, nightsOn, nightsToDrawOn, pickInstruction, tidyPick, timeForSomething, type Night, unlabel, nightToRaise } from '../electron/nightlife';
 
 const night = (day: string, about: string): Night => ({ day, at: `${day}T18:40:00.000Z`, about, note: 'It was all right.', sources: ['https://example.com'] });
 
@@ -72,6 +72,10 @@ test('her night reaches the prompt as something that happened, with a limit on w
   assert.match(said, /deep sea gigantism: It was all right\./);
   assert.match(said, /neon signs/);
   assert.match(said, /say you only read a bit about it rather than filling the gap/);
+  // Last night is last night: the diary holds the earlier ones, and they are not folded in.
+  assert.match(said, /^Last night/);
+  assert.match(said, /Nothing else belongs to last night/);
+  assert.match(said, /diary/);
 });
 
 test('her night is offered to an unprompted line once, not as the opener of every one', () => {
@@ -105,3 +109,22 @@ test('she has a night of her own to raise, unless she has raised it already or i
   assert.equal(nightToRaise([], [], '2026-09-01'), null);
 });
 
+test('a manga night is pages she read, not a subject she read about', () => {
+  const manga: Night = { day: '2026-09-11', at: '2026-09-11T15:20:10.351Z', about: 'Chainsaw Man, chapter 1', note: 'Denji whines.', sources: ['https://mangadex.org/chapter/73af4d8d'], interest: 'Chainsaw Man' };
+  const said = nightsInstruction([manga, night('2026-09-11', 'piano for The Real Folk Blues')]);
+  assert.match(said, /- Chainsaw Man, chapter 1 — pages you read yourself, one of your own things: Denji whines\./);
+  assert.match(said, /piano for The Real Folk Blues: It was all right\./);
+  assert.match(said, /read the pages themselves/);
+});
+
+
+test('last night stays last night all day, until the next one has begun', () => {
+  // 2:30 PM on the 13th asked about the night of the 12th, and got nothing (2026-09-13).
+  const nights = [night('2026-09-12', 'Chainsaw Man, chapter 1')];
+  assert.equal(lastNightDay(nights, 9, '2026-09-13', '2026-09-12'), '2026-09-12', 'the morning after');
+  assert.equal(lastNightDay(nights, 14, '2026-09-13', '2026-09-12'), '2026-09-12', 'the afternoon after — this was the bug');
+  assert.equal(lastNightDay(nights, 22, '2026-09-13', '2026-09-12'), '2026-09-12', 'the evening, before she has started');
+  const started = [...nights, night('2026-09-13', 'Control: Ultimate Edition story explained')];
+  assert.equal(lastNightDay(started, 23, '2026-09-13', '2026-09-12'), '2026-09-13', 'once tonight has begun, it is the one');
+  assert.equal(lastNightDay(started, 1, '2026-09-14', '2026-09-13'), '2026-09-13', 'the small hours belong to the evening before');
+});

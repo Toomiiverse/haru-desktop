@@ -108,3 +108,26 @@ test('"remind me what happened" is a question, not an errand', () => {
   assert.notEqual(reminderAsk('remind me about the parcel tomorrow', now), null, 'and a thing, without "to"');
 });
 
+test('a calendar date is a date, and a greeting in front of the ask is still the ask', () => {
+  // Friday 11 September 2026, 10:02 — "Hey Haru remind me to my car
+  // registration on the 6th of October" matched nothing and was never saved.
+  const friday = new Date(2026, 8, 11, 10, 2);
+  assert.deepEqual(reminderAsk('Hey Haru remind me to my car registration on the 6th of October', friday), { title: 'My car registration', date: '2026-10-06' });
+  assert.deepEqual(reminderAsk('remind me to renew my car registration on October 6', friday), { title: 'Renew my car registration', date: '2026-10-06' });
+  assert.deepEqual(reminderAsk('remind me on 6/10 to pay the rego', friday), { title: 'Pay the rego', date: '2026-10-06' });
+  assert.deepEqual(reminderAsk('Haru, remind me to call the dentist on the 3rd of March', friday), { title: 'Call the dentist', date: '2027-03-03' }, 'a date already past this year is next year\'s');
+  assert.deepEqual(reminderAsk('remind me to check the mail on Jan 2, 2028 at 9am', friday), { title: 'Check the mail', date: '2028-01-02', time: '9:00 AM' });
+  assert.equal(reminderAsk('remind me to message Jan on monday', friday)?.title, 'Message Jan', 'a person called Jan is not January');
+  // Her promise with a day and no clock is still a promise.
+  assert.deepEqual(reminderPromised("Got it. I'll remind you to do your car registration on the 6th of October.", friday), { date: '2026-10-06' });
+  assert.equal(reminderPromised('Sure, whatever you need.', friday), null);
+  // Her account of an old request is not a new promise: read as one, it filed
+  // "You forgot to remind me" for the day it was said (Monday 2026-09-14).
+  const monday = new Date(2026, 8, 14, 21, 38);
+  assert.equal(reminderPromised("No, I didn’t forget. 👀 You asked me on the 24th of August to remind you *one week in advance* for the 14th of September. I did that.", monday), null);
+  assert.equal(reminderPromised('I reminded you on Friday, genius.', monday), null);
+  assert.equal(reminderPromised('Want me to remind you on Friday?', monday), null);
+  assert.deepEqual(reminderPromised("Fine. I'll make sure to remind you on the 6th of October.", monday), { date: '2026-10-06' });
+  assert.deepEqual(reminderPromised('I will remind you on Friday, then.', monday), { date: '2026-09-18' });
+});
+

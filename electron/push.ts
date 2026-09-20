@@ -28,6 +28,8 @@ export type PushDevice = {
   auth: string;
   /** What the person called the device when they signed in on it. */
   name: string;
+  /** The sign-in this came from (webAccess.devices id), so a second subscription from the same phone replaces the first. */
+  deviceId?: string;
   added: string;
 };
 
@@ -50,6 +52,12 @@ export type PushPrefs = {
    * means she waits for a sign of life however long it takes.
    */
   upBy: string;
+  /**
+   * Her nudges held for now: a Focus on the phone has said so, through the
+   * app's Focus filter. Nothing timed about it — it lifts when the Focus does,
+   * because the phone calls again with the default (false) then.
+   */
+  held: boolean;
 };
 
 export function readPushDevices(saved: unknown): PushDevice[] {
@@ -65,7 +73,34 @@ export function readPushDevices(saved: unknown): PushDevice[] {
       auth: String(entry.auth),
       name: typeof entry.name === 'string' ? entry.name : 'a phone',
       added: typeof entry.added === 'string' ? entry.added : '',
+      ...(typeof entry.deviceId === 'string' && entry.deviceId ? { deviceId: entry.deviceId } : {}),
     }));
+}
+
+/** The rest of a list once one sign-in's entries are gone; nothing goes when the sign-in is unknown. */
+export function withoutDevice<T extends { deviceId?: string }>(list: T[], deviceId: string | undefined): T[] {
+  if (!deviceId) return list;
+  return list.filter(entry => entry.deviceId !== deviceId);
+}
+
+/** A web-app subscription made from a phone's browser, by the name the page signs in under (its user agent). */
+export function isPhoneWebApp(name: string): boolean {
+  return /\b(?:iPhone|iPad|Android)\b/.test(name ?? '');
+}
+
+/**
+ * The web app's subscriptions the native app makes redundant.
+ *
+ * Three Safari subscriptions from 4 September and the app's Apple token were
+ * each taking every push (2026-09-06): one phone, four copies. A phone with
+ * the app registered through Apple does not need its browser buzzing too, so
+ * once an Apple token is on file the phone-browser subscriptions go, and a
+ * fresh one from the page is not kept. A subscription from a desktop browser
+ * is another device and stays.
+ */
+export function coveredByNativeApp(devices: PushDevice[], appleRegistered: boolean): PushDevice[] {
+  if (!appleRegistered) return [];
+  return devices.filter(device => isPhoneWebApp(device.name));
 }
 
 const TIME = /^([01]?\d|2[0-3]):[0-5]\d$/;
@@ -84,7 +119,13 @@ export function readPushPrefs(saved: unknown): PushPrefs {
     quietFrom: time(record.quietFrom, '23:00'),
     quietTo: time(record.quietTo, '08:00'),
     upBy: typeof record.upBy === 'string' && (record.upBy === '' || TIME.test(record.upBy)) ? record.upBy : '09:00',
+    held: flag(record.held, false),
   };
+}
+
+/** Whether the phone is being left alone right now: quiet hours, or a Focus holding her. */
+export function heldBack(prefs: Pick<PushPrefs, 'quietFrom' | 'quietTo' | 'held'>, now: Date): boolean {
+  return prefs.held || inQuietHours(prefs, now);
 }
 
 /** Whether the phone is being left alone right now. Uses the clock it is given. */

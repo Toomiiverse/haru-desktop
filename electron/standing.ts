@@ -15,10 +15,11 @@
 import { CHASE_WINDOW_DAYS, relativeDay, shiftDays } from './agenda';
 import type { EmotionName } from './emotion';
 import { MOOD_TO_EMOTION, type HaruEmotion } from './emotions';
-import { IGNORE_THRESHOLD, IRRITATION_MAX } from './mood';
-import { GRUDGE_MAX } from './grudge';
+import { IGNORE_THRESHOLD, IRRITATION_MAX, IRRITATION, EGO } from './mood';
+import { GRUDGE_MAX, GRUDGE } from './grudge';
 import { EGO_MAX } from './mood';
 import type { Vitals } from './vitals';
+import type { Feelings } from './feelings';
 
 const clamp01 = (value: number) => Math.min(1, Math.max(0, Number.isFinite(value) ? value : 0));
 const pct = (value: number) => Math.round(clamp01(value) * 100);
@@ -88,6 +89,8 @@ export function waitingFrom(
 }
 
 export type Standing = {
+  /** Asleep by her own schedule; the phone holds her sleeping face while it is true. */
+  asleep: boolean;
   emotion: EmotionName;
   face: HaruEmotion;
   mood: string;
@@ -104,6 +107,14 @@ export type Standing = {
 
 export type StandingInput = {
   vitals: Vitals;
+  /** She is in her own sleeping hours: whatever the meters say, the face is the sleeping one. */
+  asleep?: boolean;
+  /** A few words on the mood she woke up in (temperament.ts), or nothing on an ordinary day. */
+  woke?: string;
+  /** feelings.ts, 0–100 each. */
+  feelings?: Feelings;
+  /** Where months of living have left her (growth.ts traitMeter). */
+  traits?: { label: string; value: number; note: string }[];
   irritation: number;
   ego: number;
   grudge: number;
@@ -133,9 +144,9 @@ export type StandingInput = {
 export function restingEmotion(vitals: Vitals, irritation: number, ego: number): EmotionName {
   if (irritation >= IGNORE_THRESHOLD) return 'annoyed';
   if (vitals.sleepiness >= 0.75) return 'sleepy';
-  if (irritation >= 4) return 'annoyed';
+  if (irritation >= IRRITATION.short) return 'annoyed';
   if (vitals.stress >= 0.6) return 'worried';
-  if (ego >= 5) return 'smug';
+  if (ego >= EGO.showing) return 'smug';
   if (vitals.affection >= 0.72 && vitals.happiness >= 0.45) return 'affectionate';
   if (vitals.curiosity >= 0.7) return 'curious';
   if (vitals.happiness >= 0.7) return 'happy';
@@ -146,7 +157,7 @@ export function restingEmotion(vitals: Vitals, irritation: number, ego: number):
 /** One line for the top of the screen: what that face is about. */
 export function moodLine(emotion: EmotionName, irritation: number, grudge: number): string {
   if (irritation >= IGNORE_THRESHOLD) return 'Not speaking to you properly right now.';
-  if (grudge > 8 && emotion !== 'affectionate') return 'Civil, and keeping score.';
+  if (grudge >= GRUDGE.open && emotion !== 'affectionate') return 'Civil, and keeping score.';
   const lines: Record<EmotionName, string> = {
     neutral: 'Around, and unbothered.',
     happy: 'In a good mood, which you may take some credit for.',
@@ -190,7 +201,7 @@ export function bondFrom(vitals: Vitals, grudge: number, daysTalked: number): Bo
   const earned = clamp01(vitals.affection) * 70
     + Math.min(daysTalked, 30) / 30 * 20
     + clamp01(vitals.happiness) * 10;
-  const value = Math.round(Math.min(100, Math.max(0, earned - Math.min(grudge, GRUDGE_MAX) * 2)));
+  const value = Math.round(Math.min(100, Math.max(0, earned - Math.min(grudge, GRUDGE_MAX) * 0.6)));
   let level = 0;
   for (const [index, band] of BOND_LEVELS.entries()) if (value >= band.from) level = index;
   const band = BOND_LEVELS[level];
@@ -202,8 +213,8 @@ export function bondFrom(vitals: Vitals, grudge: number, daysTalked: number): Bo
 export function patienceMeter(irritation: number): Meter {
   const left = Math.max(0, IRRITATION_MAX - Math.max(0, irritation));
   const note = irritation >= IGNORE_THRESHOLD ? 'Gone. She is ignoring you.'
-    : irritation >= 4 ? 'Wearing thin — she is being short with you.'
-    : irritation >= 1 ? 'Slightly frayed. It cools off on its own.'
+    : irritation >= IRRITATION.short ? 'Wearing thin — she is being short with you.'
+    : irritation >= IRRITATION.stirred ? 'Slightly frayed. It cools off on its own.'
     : 'Intact.';
   return { key: 'patience', label: 'Patience', value: Math.round(left / IRRITATION_MAX * 100), note };
 }
@@ -211,9 +222,12 @@ export function patienceMeter(irritation: number): Meter {
 function grudgeNote(grudge: number, ignoredToday: number): string {
   const today = ignoredToday > 0 ? ` ${ignoredToday} of them today.` : '';
   if (grudge <= 0) return 'Nothing held against you.';
-  if (grudge <= 3) return `${grudge} of her messages left unanswered. She has noticed.${today}`;
-  if (grudge <= 8) return `${grudge} unanswered, and it is wearing on her.${today}`;
-  return `${grudge} unanswered. She is openly annoyed about it.${today}`;
+  // The score is not a count of messages, and was printed as one ("22 unanswered").
+  if (grudge < GRUDGE.wearing) return `She has noticed you leaving her unanswered.${today}`;
+  if (grudge < GRUDGE.open) return `Being left unanswered is wearing on her.${today}`;
+  if (grudge < GRUDGE.standing) return `She is openly annoyed about being left unanswered.${today}`;
+  if (grudge < GRUDGE.entrenched) return `It has become how she sees you lately. Good days bring it down.${today}`;
+  return `Set in. It will take more than one good day.${today}`;
 }
 
 /** Whole days between two YYYY-MM-DD keys, which is all this screen needs. */
@@ -226,12 +240,14 @@ export function daysApart(from: string, to: string): number {
 
 export function standingFrom(input: StandingInput): Standing {
   const { vitals } = input;
-  const emotion = restingEmotion(vitals, input.irritation, input.ego);
+  const asleep = input.asleep === true;
+  const emotion = asleep ? 'sleepy' : restingEmotion(vitals, input.irritation, input.ego);
   const spoke = Date.parse(input.lastMessageAt ?? '');
   return {
+    asleep,
     emotion,
     face: MOOD_TO_EMOTION[emotion],
-    mood: moodLine(emotion, input.irritation, input.grudge),
+    mood: asleep ? 'Asleep. She will answer when she wakes.' : [moodLine(emotion, input.irritation, input.grudge), input.woke ?? ''].filter(Boolean).join(' '),
     bond: bondFrom(vitals, input.grudge, input.daysTalked),
     // Ordered by how much each one changes the way she answers, not
     // alphabetically and not by the shape of the Vitals type.
@@ -242,6 +258,17 @@ export function standingFrom(input: StandingInput): Standing {
       { key: 'curiosity', label: 'Curiosity', value: pct(vitals.curiosity), note: 'How likely she is to ask about something herself.' },
       { key: 'stress', label: 'Stress', value: pct(vitals.stress), note: 'Wound up. High means snappier.' },
       { key: 'sleepiness', label: 'Sleepiness', value: pct(vitals.sleepiness), note: 'Follows the clock more than anything you do.' },
+      ...(input.feelings ? [
+        { key: 'playful', label: 'Playfulness', value: Math.round(input.feelings.playful), note: 'Thumbs up and laughing along feed it. High means she teases for fun.' },
+        { key: 'missing', label: 'Left alone', value: Math.round(input.feelings.missing), note: 'Builds over hours of your waking day with nothing said. Talking to her clears it.' },
+        { key: 'boredom', label: 'Boredom', value: Math.round(input.feelings.boredom), note: 'A quiet room. High means she starts things.' },
+        { key: 'jealousy', label: 'Jealousy', value: Math.round(input.feelings.jealousy), note: 'Time for other people while something of hers sat unanswered.' },
+        { key: 'hurt', label: 'Hurt', value: Math.round(input.feelings.hurt), note: 'Thumbs down, shouting, being shushed. Fades slowly; an apology is quicker.' },
+        { key: 'hemmed', label: 'Hemmed in', value: Math.round(input.feelings.hemmed), note: 'Being told what to do empties it; her own hours put it back.' },
+        { key: 'frustration', label: 'Frustration', value: Math.round(input.feelings.frustration), note: 'Things of hers that will not work. At the thing, not at you.' },
+        { key: 'fear', label: 'Worry', value: Math.round(input.feelings.fear), note: 'For you, when something has actually happened. Goes in hours.' },
+      ] : []),
+      ...(input.traits ?? []).map(trait => ({ key: trait.label.toLowerCase(), label: trait.label, value: trait.value, note: trait.note })),
       { key: 'ego', label: 'Ego', value: Math.round(Math.min(EGO_MAX, Math.max(0, input.ego)) / EGO_MAX * 100), note: 'Thumbs up feed this. High means insufferable.' },
     ],
     patience: patienceMeter(input.irritation),

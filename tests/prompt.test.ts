@@ -7,7 +7,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { chatSystemPrompt, feedbackSummary, freshStartInstruction, knowledgeInstruction, screenContext, searchInstruction, systemInstruction, NO_GUESSING, type PromptState, LENGTH_RULE_LOCAL, LENGTH_RULE_HOSTED } from '../electron/prompt';
+import { chatSystemPrompt, chatDynamicContext, feedbackSummary, freshStartInstruction, knowledgeInstruction, screenContext, searchInstruction, systemInstruction, NO_GUESSING, FIRST_PERSON_NOTE, type PromptState, LENGTH_RULE_LOCAL, LENGTH_RULE_HOSTED } from '../electron/prompt';
 import { readSearchConfig } from '../electron/search';
 
 const NOW = new Date('2026-08-20T19:30:00.000Z');
@@ -58,7 +58,7 @@ const at = (prompt: string, needle: string) => prompt.indexOf(needle);
 test('the documented order holds, from the tools down to the last word', () => {
   const prompt = chatSystemPrompt(state({
     search: readSearchConfig({ enabled: true, readPages: true }),
-    irritation: 5,
+    irritation: 56,
     fresh: { at: NOW.toISOString(), hadMessages: true, reason: 'manual' },
     pushback: { count: 1, at: NOW.toISOString() },
     goodnight: 'said',
@@ -104,7 +104,7 @@ test('corrections are read after the mood that causes them, not before', () => {
   // Being told she is fed up is what produces the thing the correction fixes,
   // so a correction read first is simply overridden.
   const prompt = chatSystemPrompt(state({
-    irritation: 5,
+    irritation: 56,
     latestMessage: "it's been a rough day and I'm exhausted",
     fresh: { at: NOW.toISOString(), hadMessages: false, reason: 'daily' },
   }));
@@ -227,8 +227,8 @@ test('a short follow-up is read as continuing the thread, and never echoed back 
 });
 
 test('her emoji are named, as hers, beside the persona', () => {
-  const prompt = chatSystemPrompt(state({ irritation: 5 }));
-  const expressive = prompt.indexOf('the smirk, the side-eye, the huff');
+  const prompt = chatSystemPrompt(state({ irritation: 56 }));
+  const expressive = prompt.indexOf('Emoji are part of how you talk');
   assert.notEqual(expressive, -1, 'the emoji rule never made it into the prompt');
   assert.ok(expressive > prompt.indexOf(STYLE), 'it is part of her voice, so it follows her style');
   assert.ok(expressive > prompt.indexOf('thoroughly fed up'), 'and after the mood and ego, which read as "no cheer" — before them the emoji were dropped as cheer');
@@ -250,6 +250,20 @@ test('the way somewhere sits beside the machine facts, when they asked for it', 
   assert.match(asked, /Found: Coles, Wembley/);
 });
 
+test('her replies are always her first person — the note sits with the persona', () => {
+  const prompt = chatSystemPrompt(state());
+  const note = at(prompt, FIRST_PERSON_NOTE.slice(0, 30));
+  assert.notEqual(note, -1, 'the first-person note never made it into the prompt');
+  assert.ok(note > at(prompt, STYLE), 'read after her identity and style, so it binds with who she is');
+});
+
+test('she is allowed to hedge and to catch herself being wrong', () => {
+  const prompt = chatSystemPrompt(state());
+  assert.match(prompt, /genuinely unsure/);
+  assert.match(prompt, /wait, no, that was Tuesday/);
+  assert.match(prompt, /never defend a wrong memory with a new invention/);
+});
+
 test('the weather where they are sits with their whereabouts, when she has a reading', () => {
   assert.doesNotMatch(chatSystemPrompt(state()), /actual weather/);
   const read = chatSystemPrompt(state({ weather: "Where they are it is 17°C and clear; today's range 10°C to 19°C. That is the actual weather, from a forecast service, as of a few minutes ago — use it rather than guessing, and do not say you cannot check." }));
@@ -259,7 +273,7 @@ test('the weather where they are sits with their whereabouts, when she has a rea
 test('chatSystemPrompt carries her vitals as a tone line before the irritation line, and only when they have drifted', () => {
   const calm = chatSystemPrompt(state({ vitals: { energy: 0.6, happiness: 0.6, curiosity: 0.5, affection: 0.4, sleepiness: 0.2, stress: 0.2, focus: 0.5 } }));
   assert.doesNotMatch(calm, /on edge|drowsy|fonder of them/);
-  const tense = chatSystemPrompt(state({ irritation: 5, vitals: { energy: 0.6, happiness: 0.6, curiosity: 0.5, affection: 0.4, sleepiness: 0.2, stress: 0.9, focus: 0.5 } }));
+  const tense = chatSystemPrompt(state({ irritation: 56, vitals: { energy: 0.6, happiness: 0.6, curiosity: 0.5, affection: 0.4, sleepiness: 0.2, stress: 0.9, focus: 0.5 } }));
   assert.ok(tense.indexOf('on edge') < tense.indexOf('thoroughly fed up'));
 });
 
@@ -270,19 +284,111 @@ test('the local length rule is in the brief verbatim, so a hosted brain can swap
 });
 
 test('the way she writes is read after the persona and after the emoji rule', () => {
-  const prompt = chatSystemPrompt(state({ irritation: 5 }));
+  const prompt = chatSystemPrompt(state({ irritation: 56 }));
   const natural = prompt.indexOf('Write the way a person texts');
   assert.notEqual(natural, -1, 'it never made it into the prompt');
   assert.ok(natural > prompt.indexOf(STYLE), 'after her style, which tells her to be bitchy in every reply');
-  assert.ok(natural > prompt.indexOf('the smirk, the side-eye, the huff'), 'and after the emoji rule');
+  assert.ok(natural > prompt.indexOf('Emoji are part of how you talk'), 'and after the emoji rule');
 });
 
 test('asked about her own things, her list is not in front of her', () => {
-  const withList = chatSystemPrompt(state({ irritation: 1 }));
+  const withList = chatSystemPrompt(state({ irritation: 11 }));
   const kept = withList.indexOf('Answer questions about what is coming up');
   assert.notEqual(kept, -1, 'the list is normally there');
-  const hers = chatSystemPrompt({ ...state({ irritation: 1 }), aboutHer: true });
+  const hers = chatSystemPrompt({ ...state({ irritation: 11 }), aboutHer: true });
   assert.equal(hers.indexOf('Answer questions about what is coming up'), -1, 'and gone when the subject is her');
   assert.match(hers, /Emoji are part of how you talk/, 'the rest of the brief is untouched');
 });
 
+
+// ---- cachedHead: the hosted-brain split, where the cacheable head comes first ----
+
+const CLOCK = "in the user's timezone";
+
+test('cachedHead keeps only the invariant blocks, persona and rules', () => {
+  const prompt = chatSystemPrompt(state({ irritation: 56, latestMessage: 'what is the weather in leeds' }), true);
+  assert.ok(at(prompt, IDENTITY) !== -1);
+  assert.ok(at(prompt, STYLE) !== -1);
+  assert.ok(at(prompt, LENGTH_RULE_LOCAL) !== -1);
+  // The changing context has left the system message entirely.
+  assert.equal(at(prompt, CLOCK), -1, 'the clock must not be in the cached head');
+  assert.equal(at(prompt, PROFILE), -1, 'the query-selected memory must not be in the cached head');
+  assert.equal(at(prompt, 'thoroughly fed up'), -1, 'her mood must not be in the cached head');
+});
+
+test('the cachedHead head is byte-identical however the turn changes', () => {
+  const a = chatSystemPrompt(state({ now: new Date('2026-08-20T09:00:00.000Z'), latestMessage: 'hello', irritation: 0, machineNote: '' }), true);
+  const b = chatSystemPrompt(state({ now: new Date('2026-08-20T23:59:00.000Z'), latestMessage: 'why are you ignoring me', irritation: 78, machineNote: MACHINE, goodnight: 'said' }), true);
+  assert.ok(a.length > 500, 'the stable head should still be the bulk of her rules');
+  assert.equal(a, b);
+});
+
+test('the changing context lives in chatDynamicContext, in the original order', () => {
+  const extra = chatDynamicContext(state({ irritation: 56, latestMessage: 'what is the weather in leeds' }));
+  assert.ok(extra.includes(CLOCK));
+  assert.ok(extra.includes(PROFILE));
+  assert.ok(extra.includes('thoroughly fed up'));
+  // The clock opens it, the memory profile follows, her mood is read last —
+  // the order she was always told them in.
+  assert.ok(at(extra, CLOCK) < at(extra, PROFILE));
+  assert.ok(at(extra, PROFILE) < at(extra, 'thoroughly fed up'));
+});
+
+test('chatSystemPrompt default still opens with the clock and holds the mood', () => {
+  const prompt = chatSystemPrompt(state({ irritation: 56 }));
+  assert.ok(at(prompt, CLOCK) < at(prompt, IDENTITY), 'the local-brain order is unchanged');
+  assert.ok(prompt.includes('thoroughly fed up'));
+});
+
+test('the default order still opens with the clock', () => {
+  const prompt = chatSystemPrompt(state());
+  assert.ok(at(prompt, CLOCK) < at(prompt, IDENTITY), 'the local-brain order is unchanged');
+});
+
+// ---- away: the phone trims its own system prompt ----
+
+test('away drops the machine-tools description but keeps the lookup tools', () => {
+  const desk = chatSystemPrompt(state({ search: readSearchConfig({ enabled: true }), knowledgeEnabled: true, systemEnabled: true }), true, false);
+  assert.ok(desk.includes('get_gpu_info'), 'the desk is told about the machine tools');
+  const phone = chatSystemPrompt(state({ search: readSearchConfig({ enabled: true }), knowledgeEnabled: true, systemEnabled: true }), true, true);
+  assert.ok(!phone.includes('get_gpu_info'), 'a phone is never offered the machine tools');
+  assert.ok(phone.includes('search_web'), 'a phone still gets the lookup tools');
+  assert.ok(phone.includes('look_up_knowledge'));
+  assert.ok(phone.includes(IDENTITY), 'her persona stays on the phone');
+});
+
+// ---- she must not deny a sense she has ----
+//
+// 2026-09-07: asked "how come you can't see my screen or where I am" she said
+// "I just can't. That's how I'm built… No location tracking, no screen peeking,
+// no secret camera in your pocket." Her whereabouts store held a 14-metre fix
+// on him from seven minutes earlier, tracking was switched on, and three of her
+// own replies further up the same transcript read "You're at The PC Project, as
+// your phone says". Two lines in this file taught her that: an exhaustive
+// capability list that left location off, and a guard that opened by denying
+// the screen outright.
+
+test('the capability list does not leave out where their phone puts them', () => {
+  const prompt = chatSystemPrompt(state());
+  const claim = /What you have access to is exactly this:[^.]*\./.exec(prompt);
+  assert.ok(claim, 'the capability list should still be in the prompt');
+  // It says "exactly this… that is all of it", so anything missing from it is
+  // something she will deny having when asked outright.
+  assert.match(claim[0], /where their phone puts them/i);
+  assert.match(claim[0], /on their screen/i);
+});
+
+test('the no-guessing guard constrains guessing without denying the sense', () => {
+  assert.doesNotMatch(NO_GUESSING, /you cannot see their screen/i);
+  // The guard itself must survive: not guessing is the whole point of it.
+  assert.match(NO_GUESSING, /never guess/i);
+  assert.match(NO_GUESSING, /you do not know/i);
+});
+
+test('a question about what she can see routes to describe_myself', () => {
+  const prompt = chatSystemPrompt(state());
+  // describeMyself already answered this correctly ("see where their phone
+  // is"); she never called it, because the trigger named her models and voice
+  // and not her senses.
+  assert.match(prompt, /what you can see, know, reach or have access to/i);
+});

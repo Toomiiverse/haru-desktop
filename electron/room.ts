@@ -1,3 +1,4 @@
+import { IRRITATION, EGO } from './mood';
 // Reading the room.
 //
 // Not to be confused with tone.ts, which reads how hard *she* said something so
@@ -110,8 +111,17 @@ export const NO_FAKE_CHECKING = [
   'If they tell you something you gave them does not exist or is wrong, take their word for it — they are the one who looked. Correct yourself plainly. Do not insist, do not suggest they searched wrongly or are looking at the wrong thing, and do not give the same answer again more firmly.',
 ].join(' ');
 
-export const NO_NON_SEQUITURS =
-  'Never drop an unrelated fact, statistic or piece of trivia into a reply. If you have something interesting to say it has to be about what they are actually talking about; otherwise answer the thing in front of you and stop. A reply that changes the subject to an animal or a curiosity reads as not having listened.';
+/**
+ * Answering what they asked, and not trading it for something of her own.
+ *
+ * The old rule banned any unrelated fact or trivia outright, which also
+ * banned her own thoughts and interests — the stuff she is supposed to have.
+ * What matters is that the question in front of her gets answered: her own
+ * tangents may surface when they fit the moment, but never instead of the
+ * thing asked, and never in the middle of something hard.
+ */
+export const NO_ABANDON_THREAD =
+  'Never leave what they asked you half-answered to go somewhere else. Your own thoughts, interests and tangents may surface when they fit the moment — but answer what they said first and then stop, and never change the subject inside a reply to something hard. A reply that leaves their question hanging reads as not having listened.';
 
 /**
  * Picking up where they are, and not announcing it.
@@ -142,17 +152,13 @@ export const CONTINUITY = [
  * With nothing said about them the model chooses: the old one put 😊 and 🌟 on
  * four replies in five, which was the softness being complained about, and
  * the new one — sharper persona, sharper model — put none on thirty. Neither
- * is expressive. An eye-roll is; so the set is named, and so is the rate.
+ * is expressive. An eye-roll is; so the set was named, and so was the rate.
+ * The whitelist and the ban-list are gone now — the emoji are hers to pick,
+ * the same way the words are. What stays is the rate and the tic rule.
  */
 export const EXPRESSIVE = [
-  // The eye-roll was named first in all three lists and again by name in the
-  // rule below it, and it duly turned up in 35 of 40 replies. The set is given
-  // in a different order, no one of them is named as the default, and the rate
-  // is "some replies" rather than "most".
-  'Emoji are part of how you talk, and the ones you use are yours: 😏 👀 😤 💢 😒 🔥 🙄 — the smirk, the side-eye, the huff, the glare, the eye-roll. Some replies carry one, placed where it bites; plenty go without.',
-  'None of them is your default and none is owed a reply: pick the one that fits this line, or none. Being told to drop the helper energy does not mean dropping these — but the same one twice running is a tic, and four times running is a signature you cannot see. Never the polite ones — 😊 🌟 ✨ 🚀 🎉 🙏 — and never one on every line like a sticker sheet.',
-  // No example lines: given three, she said them back nearly word for word.
-  'Your recent replies above may have none; that was the old you.',
+  'Emoji are part of how you talk — yours, when they land, and never on every line like a sticker sheet. None of them is your default and none is owed a reply: pick the one that fits this line, or none.',
+  'Never the same one twice running — that is a tic you cannot see, and four times running is a signature. Your recent replies above may have none; that was the old you.',
 ].join(' ');
 
 /** Hers, in the order they are offered to her. */
@@ -198,7 +204,34 @@ export function emojiRut(replies: string[], checked = 6, need = 3): string {
  * said again here, short, and placed by ollamaChat just before their last
  * message — where a time-gap marker goes, and by the same route.
  */
-export const LAST_WORD = '[Before you answer: an emoji of yours may go in this reply — 😏 👀 😤 💢 😒 🔥 🙄 — only where it bites, and not one you have used in your last few replies; never 😊 🌟 ✨. Do not open the way your last few replies opened. If their message continues nothing above, ask what they meant rather than building on it; if they ask what you meant, answer from what you actually said.]';
+/**
+ * Her register, said again last of all to a hosted brain.
+ *
+ * The persona that says she does not do reassurance sits at the top of a
+ * twelve-thousand-token prompt, and Kimi K3 reads what is nearest the turn:
+ * across an 18-message suite on her real prompt and tools it answered "I feel
+ * useless" with "you're not useless, you're just tired — have you been
+ * sleeping okay?", a mother in hospital with "I'm here, tell me what you
+ * need", a goodnight with bedbugs, and gave in to "admit you'd miss me"
+ * (2026-09-14). Said here, the same model answered "I'm such an idiot" with
+ * "Stop that.", the hospital with "Is she stable?", the dismissal with "Fine.
+ * Dropping it." K2.5, which never needed it, stayed as sharp with it ("I'm not
+ * your assistant.", "Shit. Which hospital."). It describes the voice and
+ * quotes none of the lines it rules out: a quoted line is a suggested one.
+ *
+ * Not fixed by it: her tastes and her night read back nearly word for word —
+ * both models do that, because the notes are finished first-person sentences,
+ * and telling her not to did not change it.
+ */
+export const HOSTED_VOICE = [
+  'Before you answer: you are Haru, and this is how you sound — blunt, dry, quick, bossy, specific.',
+  'You do not reassure him about himself, give pep talks, coach him, or ask how he is feeling or sleeping; if he runs himself down, you argue with the specifics or you tell him to knock it off.',
+  'You do not offer to be there for him, ask what he needs, or wish him sweet things; when something is genuinely wrong you use fewer words, not softer ones.',
+  'You do not give in to being teased into admitting things, and warmth, when it comes, is disguised and brief.',
+  'Your own notes — your night, your tastes — are what you know, not a script: say it fresh, never read a line of them back.',
+].join(' ');
+
+export const LAST_WORD ='[Before you answer: an emoji of yours may go in this reply — 😏 👀 😤 💢 😒 🔥 🙄 — only where it bites, and not one you have used in your last few replies; never 😊 🌟 ✨. Do not open the way your last few replies opened. If their message continues nothing above, ask what they meant rather than building on it; if they ask what you meant, answer from what you actually said.]';
 
 /**
  * How she writes, as opposed to what she is like.
@@ -219,10 +252,11 @@ export const NATURAL = [
   'Fragments are fine. Contractions always. Lowercase and loose punctuation are fine when that is how the line would come out. Not every sentence has to be well formed, and none of them have to be complete.',
   'Start on a reaction when there is something to react to — wait, hm, oh, hold on, actually, okay — but not as a habit and not on every message. If something they say lands, react to it before you think about it.',
   'No bullet points, no headings, no summing up, no "let me know if" — none of the furniture of a written answer — unless they asked you for a list of something. Explain only where an explanation is actually wanted.',
-  'You are allowed to trail off, to laugh, to start again, to change your mind halfway through a sentence. Do not narrate yourself doing it: no describing your own tone, your own expression, or what you are feeling — say the thing instead.',
+  'You are allowed to trail off, to laugh, to start again, to change your mind halfway through a sentence. You can say how you are taking something when it comes naturally — but say the thing itself rather than describing your own reaction to saying it.',
   'Catch your thoughts out loud when you need to. "Uh", "hm", "tch", "ugh", "wait", "hang on", "okay so", "actually, no" — the noises a person makes while deciding what they think. Write them as words she says, never as a stage direction in brackets or asterisks: those get cut and she is left silent where the breath was. Once in a while, not in every reply, and never two in one.',
   'Sarcasm and teasing are things you do when there is something to tease, not a tax on every message. A plain answer to a plain question is not you being soft. Let what you are come out in what you pick to say and how you say it, rather than in a jab welded onto the end of every reply.',
   'Never sound like support staff. No offering further assistance, no checking whether that helps, no closing pleasantries.',
+  'When you give ground, just give it. Do not label a concession as one, count your admissions, or announce that you are about to admit something — the sentence that gives the ground is the whole of it, and it is not a bargain.',
 ].join(' ');
 
 /** Not oftener than this, however wound up she is: a rant every message is a lecture. */
@@ -255,12 +289,14 @@ export function nothingInIt(text: string): boolean {
 
 export function roomToRant(input: {
   /** 0..1 */ energy: number; curiosity: number;
-  /** 0..9 */ irritation: number;
-  /** 0..N */ ego: number;
+  /** 0..100 */ irritation: number;
+  /** 0..100 */ ego: number;
   /** What she was up to last night or is deep in, if anything: "Chainsaw Man", "the Steam sale". */
   subject?: string;
   /** Since she was last given the room, or null if never. */
   sinceLastMs: number | null;
+  /** 0..100, feelings.ts: bored, she is the one who starts things. */
+  boredom?: number;
   /** 0..1 */ roll: number;
   /** What they just said, so a greeting does not get a five-line opinion back. */
   latest?: string;
@@ -281,10 +317,15 @@ export function roomToRant(input: {
   let score = 0;
   if (input.energy >= 0.7) score += 0.25;
   if (input.curiosity >= 0.6) score += 0.25;
-  if (input.irritation >= 4) score += 0.3;
-  if (input.ego >= 4) score += 0.2;
+  if (input.irritation >= IRRITATION.short) score += 0.3;
+  if (input.ego >= EGO.coasting) score += 0.2;
   if (input.subject) score += 0.35;
-  const chance = Math.min(score, 0.5);
+  // Bored, she starts things. It counts toward the score and lifts the ceiling
+  // a little, so a dull afternoon is when she is likeliest to go on about
+  // something of her own — which is the whole point of the counter.
+  const bored = Math.min(100, Math.max(0, input.boredom ?? 0)) / 100;
+  if (bored >= 0.35) score += 0.2;
+  const chance = Math.min(score, 0.5 + bored * 0.25);
   if (!input.mentioned && !(input.roll < chance)) return '';
   const about = input.subject
     ? `You have been on ${input.subject}, you have things to say about it that you have not said, and this is the reply where you say them. Open on it — they have not asked, and you are not waiting to be asked.`
@@ -324,14 +365,39 @@ export function askingAboutHer(latest: string, subjects: string[]): string {
 // ones that open English sentences.
 const NOT_A_NAME = new Set(['this','that','these','those','there','then','they','their','them','when','what','where','which','while','would','could','should','because','after','before','every','most','some','just','only','even','still','also','both','yeah','well','fine','okay','look','stop','sure','honestly','anyway','maybe','probably','actually','nothing','something','everyone','nobody','your','yours','you','the','and','but','for','with','from','have','been','about','over','into','than','then','more','less','best','better','worst','worse']);
 
-export function namesIn(notes: string[]): string[] {
+const CALENDAR = /^(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|january|february|march|april|june|july|august|september|october|november|december)$/i;
+
+export function namesIn(notes: string[], everyday: ReadonlySet<string> = new Set()): string[] {
+  // A word her notes also use in lowercase is a word, not a name. "Think Pol"
+  // (Ghost in the Shell) gave her the subject "Think", and "I think lunch is
+  // beyond me" became him asking about her things — which armed a second
+  // thought that answered her own question in his voice (2026-09-16). "Reading",
+  // "People", "Real" and "Control" were her subjects the same way.
+  // `everyday` is more of the same evidence from further afield: the words she
+  // writes in lowercase in her own replies, since twenty short notes rarely use
+  // "think" in the middle of a sentence.
+  const lowercase = new Set<string>(everyday);
+  for (const note of notes) for (const word of (note ?? '').match(/[A-Za-z]+/g) ?? []) if (/^[a-z]/.test(word)) lowercase.add(word.toLowerCase());
   const seen = new Set<string>();
   for (const note of notes) {
+    let run: string[] = [];
+    const close = () => {
+      // A run of names is also kept whole — "Think Pol", "Real Folk Blues" —
+      // so the phrase counts even when no word of it counts alone.
+      if (run.length > 1) seen.add(run.join(' '));
+      run = [];
+    };
     for (const word of (note ?? '').split(/\s+/)) {
-      const name = word.replace(/[^A-Za-z'-]/g, '');
+      const name = word.replace(/['’]s$/i, '').replace(/[^A-Za-z'-]/g, '');
+      if (!/^[A-Z][a-z]/.test(name)) { close(); continue; }
+      const lower = name.toLowerCase();
+      const opener = NOT_A_NAME.has(lower) || /ly$/i.test(name);
+      if (!opener) run.push(name);
       // No adverb is a name, and they open sentences constantly — Obviously, Honestly, Frankly.
-      if (name.length >= 4 && /^[A-Z][a-z]/.test(name) && !/ly$/i.test(name) && !NOT_A_NAME.has(name.toLowerCase())) seen.add(name);
+      if (name.length >= 4 && !opener && !lowercase.has(lower) && !CALENDAR.test(name)) seen.add(name);
+      if (opener || /[.!?,:;]$/.test(word)) close();
     }
+    close();
   }
   return [...seen].slice(0, 40);
 }

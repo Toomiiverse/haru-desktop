@@ -65,8 +65,15 @@ export type Decision = { escalate: boolean; because: string };
  * questions and pasted code go out regardless of length, because a short "why
  * does this fail" is exactly the case the local model is worst at.
  */
-export function decide(message: string, config: EscalateConfig): Decision {
+export function decide(message: string, config: EscalateConfig, { routed = false } = {}): Decision {
   if (!config.enabled) return { escalate: false, because: 'switching is off' };
+  // A conversation route (ai.conversation) is a hosted model that answers as
+  // her, with her tools. With one set, nothing text-shaped goes out: the route
+  // researches and answers in one pass, in her voice, in a few seconds — where
+  // sending it out and having the local model say it again took 20–40 s and
+  // came back as a numbered list or in lower case (2026-09-06). A picture or
+  // a file never reaches this function; they are forced out above it.
+  if (routed) return { escalate: false, because: 'the conversation route answers it' };
   const text = message.trim();
   if (!text) return { escalate: false, because: 'nothing said' };
 

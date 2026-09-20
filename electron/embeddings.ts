@@ -22,7 +22,11 @@ export function ollamaEmbedder(endpoint: string, model: string, fetchImpl: Fetch
     const response = await fetchImpl(`${endpoint.replace(/\/+$/, '')}/api/embed`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model, input: texts }),
+      // On the CPU, and kept there: the embedder is 350 MB and a text takes it
+      // 50 ms, while on the GPU it did not fit beside the 9B at its Q6 size —
+      // Ollama evicted one to load the other, eight seconds a swap, several
+      // swaps a conversation. Nothing she says waits on this.
+      body: JSON.stringify({ model, input: texts, keep_alive: -1, options: { num_gpu: 0 } }),
     });
     const body = await response.text().catch(() => '');
     if (!response.ok) {

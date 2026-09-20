@@ -11,11 +11,13 @@
 
 import { net } from 'electron';
 import { trackedFetch } from './apiusage';
+import { readFile } from 'node:fs/promises';
+import { basename } from 'node:path';
 import { EMOTIONS, type EmotionName } from './emotion';
 
 // 'windows' has no adapter here — it is spoken by the renderer through the
 // built-in SAPI voices, which are reachable from a window and nowhere else.
-export type VoiceEngine = 'off' | 'windows' | 'openai' | 'gpt-sovits';
+export type VoiceEngine = 'off' | 'windows' | 'openai' | 'gpt-sovits' | 'hume' | 'breeze';
 
 /** A clip to clone from, and what it says. The two travel together because a
  *  transcript that does not match its clip drags the cloned timbre off target —
@@ -60,6 +62,63 @@ export type VoiceConfig = {
   desktopEnabled: boolean;
   /** GPT-SoVITS only; anything unset is DEFAULT_SAMPLING. */
   sampling?: Partial<VoiceSampling>;
+  /** Breeze only: a voice already encoded on the server (see its /v1/voices).
+   *  Sending voice_id skips the per-request reference encode — measured
+   *  ~650 ms shaved off, and time to first audio drops from ~1.2 s to ~0.4 s. */
+  voiceId?: string;
+};
+
+/** Hume's TTS endpoint: one utterance in, a WAV file out. */
+export const HUME_TTS_URL = 'https://api.hume.ai/v0/tts/file';
+/** The streaming half — audio arrives as it is generated, so a phone can start
+ *  speaking on the first bytes instead of waiting for the whole clip. */
+export const HUME_STREAM_URL = 'https://api.hume.ai/v0/tts/stream/file';
+
+/** Breeze TTS 2's streaming endpoint: multipart form in, 24 kHz s16le PCM out. */
+export const BREEZE_SPEECH_URL = '/v1/audio/speech';
+
+/**
+ * Haru's emotions, as short acting directions for Octave. With a voice already
+ * chosen, the `description` field steers delivery — the docs recommend keeping
+ * it to a few words. This is what replaces the twelve per-emotion reference
+ * clips: one cloned voice, the mood carried by how it says the line.
+ */
+export const HUME_DESCRIPTIONS: Record<EmotionName, string> = {
+  neutral: 'dry, flat, matter-of-fact',
+  happy: 'bright, pleased',
+  curious: 'interested, light, wondering',
+  smug: 'smug, self-satisfied, teasing',
+  annoyed: 'annoyed, clipped, testy',
+  bored: 'bored, flat, unimpressed',
+  sleepy: 'sleepy, slow, soft, low energy, a little annoyed',
+  surprised: 'surprised, sharp',
+  affectionate: 'warm, fond, soft',
+  embarrassed: 'embarrassed, sheepish, deflecting',
+  determined: 'determined, firm, pushing',
+  worried: 'worried, soft, uncertain',
+};
+
+/** Breeze TTS 2 steers delivery with a natural-language `instruction`, so the
+ *  acting directions do the same job they do for Hume. Breeze has no speed
+ *  parameter — its own docs demonstrate tempo with "Speak slowly with a
+ *  restrained, serious tone" — so the tempo cue lives in the instruction
+ *  too, folded into each mood's direction. Kept as Breeze's own object rather
+ *  than a shared one: the two engines get different phrasing ("description"
+ *  there, a spoken sentence here), and a tempo that works in one voice does
+ *  not necessarily suit the other. */
+export const BREEZE_DESCRIPTIONS: Record<EmotionName, string> = {
+  neutral: 'dry, flat, matter-of-fact',
+  happy: 'bright, pleased, slightly quicker',
+  curious: 'interested, light, wondering',
+  smug: 'smug, self-satisfied, teasing, unhurried',
+  annoyed: 'annoyed, clipped, testy, sharp',
+  bored: 'bored, flat, unimpressed, drawn out',
+  sleepy: 'sleepy, slow, soft and low, drowsy, a little annoyed',
+  surprised: 'surprised, sharp, quick',
+  affectionate: 'warm, fond, soft, gentle',
+  embarrassed: 'embarrassed, sheepish, deflecting, hesitant',
+  determined: 'determined, firm, pushing, deliberate',
+  worried: 'worried, soft, uncertain, strained',
 };
 
 export const DEFAULT_VOICE: VoiceConfig = {
@@ -100,6 +159,10 @@ export type SpeechClip = {
 // Long enough for a slow first synthesis on CPU — GPT-SoVITS takes a few seconds
 // to warm up — without hanging the queue forever if the server has gone away.
 const REQUEST_TIMEOUT_MS = 30_000;
+// Breeze is eager and local: ~3x slower than realtime on a 3060, so a long
+// chunk can need a minute. The desk retries timeouts once, so a too-short
+// ceiling doubles the wait instead of saving it.
+const BREEZE_TIMEOUT_MS = 90_000;
 
 // Chunks are kept short so the first one comes back fast and she starts talking
 // while the rest is still being synthesised. Too short and the engine loses the
@@ -125,6 +188,7 @@ const SAID_AS_LETTERS = new Set([
   'CPU', 'GPU', 'PC', 'AM', 'PM', 'ADHD', 'AI', 'TTS', 'TV', 'GPT', 'RTX', 'DDR', 'IQ', 'UV', 'VI',
   'CBD', 'STD', 'TMI', 'SS', 'USB', 'RAM', 'SSD', 'API', 'URL', 'HTTP', 'FPS', 'DM', 'UK', 'US',
   'HD', 'ID', 'OS', 'IT', 'HR', 'ETA', 'FAQ', 'PDF', 'USD', 'AUD', 'NSFW', 'IRL', 'AFK',
+  'HDMI', 'MIA', 'XAI', 'GB', 'TB', 'MB', 'LLM',
 ]);
 
 /** Words she shouts rather than abbreviates, whatever their length. */
@@ -251,6 +315,33 @@ export function splitForSpeech(text: string, maxChars = MAX_CHUNK_CHARS): string
   return chunks.filter(chunk => /[\p{Letter}\p{Number}]/u.test(chunk));
 }
 
+/**
+ * Sentences cut out of a reply as it streams in, so her voice can start on the
+ * first one while the model is still writing the rest.
+ *
+ * A sentence is a run ending in a terminator that is followed by whitespace —
+ * and nothing else. A terminator at the very end of the buffer is left in
+ * `rest` because it may be gaining more ("it's 2." is a decimal until "50"
+ * arrives), and the caller flushes what is left when the stream ends: the
+ * reply's final sentence arrives without the space the splitter waits for.
+ * Emoji between sentences keep the splitter honest: the engine is given the
+ * sentence raw, and speakableText strips them at /api/speak.
+ */
+export function streamedSentences(buffer: string): { sentences: string[]; rest: string } {
+  const sentences: string[] = [];
+  let rest = buffer ?? '';
+  // /s: a paragraph break must not freeze the cut — a sentence ending in the
+  // paragraph before it is still a sentence, and her replies change paragraphs.
+  const re = /^.*?[.!?…]+\s/s;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(rest))) {
+    const sentence = match[0].trim();
+    rest = rest.slice(match[0].length);
+    if (/[\p{Letter}\p{Number}]/u.test(sentence)) sentences.push(sentence);
+  }
+  return { sentences, rest };
+}
+
 async function post(url: string, body: unknown, auth: Record<string, string> = {}) {
   const response = await trackedFetch(url, {
     method: 'POST',
@@ -310,9 +401,11 @@ export function isSilent(bytes: Uint8Array): boolean {
 
 /**
  * One chunk of speech as audio bytes. Returns null for engines the renderer
- * speaks itself, so callers can treat every engine the same way.
+ * speaks itself, so callers can treat every engine the same way. `emotion` is
+ * what the clip-based engines select on and what Hume steers delivery with;
+ * the other engines ignore it.
  */
-export async function synthesise(text: string, config: VoiceConfig, reference: VoiceReference = referenceFor(config), auth: Record<string, string> = {}): Promise<{ audio: Uint8Array; mime: string } | null> {
+export async function synthesise(text: string, config: VoiceConfig, reference: VoiceReference = referenceFor(config), auth: Record<string, string> = {}, emotion?: EmotionName | null): Promise<{ audio: Uint8Array; mime: string } | null> {
   const endpoint = trimEndpoint(config.endpoint);
   switch (config.engine) {
     case 'off':
@@ -334,7 +427,239 @@ export async function synthesise(text: string, config: VoiceConfig, reference: V
     // and its transcript has to match or the output drifts badly off-target.
     case 'gpt-sovits':
       return post(`${endpoint}/tts`, sovitsRequest(config, reference, text), auth);
+    // Hume Octave, with a cloned voice. The reference clips mean nothing here —
+    // the voice is one clone and the mood is acting directions in the request.
+    case 'hume': {
+      const key = auth['X-Hume-Api-Key'];
+      if (!key) throw new Error('Hume is selected but no Hume API key is saved.');
+      if (!config.voice) throw new Error('Hume is selected but no Hume voice is saved.');
+      const directions = [emotion ? HUME_DESCRIPTIONS[emotion] : '', hasShout(text) ? 'loud, shouting' : ''].filter(Boolean).join(', ');
+      const response = await net.fetch(HUME_TTS_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Hume-Api-Key': key },
+        body: JSON.stringify({
+          utterances: [{
+            text,
+            voice: { id: config.voice },
+            ...(directions ? { description: directions } : {}),
+            ...(config.speed !== 1 ? { speed: config.speed } : {}),
+          }],
+          format: { type: 'wav' },
+        }),
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      });
+      if (!response.ok) {
+        const detail = await response.text().catch(() => '');
+        throw new Error(`${response.status}${detail ? `: ${detail.slice(0, 300)}` : ''}`);
+      }
+      const audio = new Uint8Array(await response.arrayBuffer());
+      if (isSilent(audio)) throw new Error('the server returned silence — inference probably failed part-way.');
+      return { audio, mime: 'audio/wav' };
+    }
+    // Breeze TTS 2, self-hosted. One reference clip + its exact transcript
+    // clones the voice, and the instruction steers delivery the way Hume's
+    // description does — the same acting directions, a different engine.
+    case 'breeze': {
+      if (!reference.clip) throw new Error('Breeze is selected but no reference clip is set.');
+      const release = await breezeSlot();
+      let pcm: Uint8Array;
+      try {
+        const response = await postBreeze(config, reference, text, emotion);
+        // Breeze streams 24 kHz mono s16le PCM; wrap it in a WAV so the rest of
+        // the voice path — silence check, clipping check, playback — can treat it
+        // like every other engine's clip.
+        pcm = new Uint8Array(await response.arrayBuffer());
+      } finally {
+        release();
+      }
+      const audio = pcmToWav(pcm);
+      if (isSilent(audio)) throw new Error('the server returned silence — inference probably failed part-way.');
+      return { audio, mime: 'audio/wav' };
+    }
   }
+}
+
+/** The instruction Breeze gets for a line: the mood's acting direction, plus a
+ *  shout where the text is one. Shared by the buffered and streaming paths so
+ *  the phone and the desk ask for the same delivery. */
+function breezeInstruction(text: string, emotion?: EmotionName | null): string {
+  return [emotion ? BREEZE_DESCRIPTIONS[emotion] : '', hasShout(text) ? 'loud, shouting' : ''].filter(Boolean).join(', ') || 'Speak clearly and naturally.';
+}
+
+/** Builds and sends the multipart clone-and-direction request Breeze's API
+ *  takes. Returns the raw response so a caller can buffer or stream it. When a
+ *  voice has already been encoded on the server (config.voiceId), that id is
+ *  sent instead of the clip — the server keeps the encoded voice, so nothing
+ *  is re-run and the first audio arrives sooner. */
+/**
+ * breeze-server holds one model slot and answers a second concurrent request
+ * with 409 busy. The desk's loop is serial for it, but the phone's sentence
+ * pieces arrive together, and every refused piece was a line she never said.
+ * One synthesis at a time, then: a caller takes the slot, and gives it back
+ * only once its audio has all come back, since the server is busy for as long
+ * as the stream runs. Resolves to the release.
+ */
+let breezeTurn: Promise<void> = Promise.resolve();
+export function breezeSlot(): Promise<() => void> {
+  let release: () => void = () => {};
+  let released = false;
+  const mine = new Promise<void>(resolve => { release = () => { if (!released) { released = true; resolve(); } }; });
+  const before = breezeTurn;
+  breezeTurn = before.then(() => mine);
+  return before.then(() => release);
+}
+
+/** The stream as it is, and the slot given back when it ends, is cancelled,
+ *  or has run past any reasonable synthesis — nobody reading it counts. */
+function releasingWhenDone(source: ReadableStream<Uint8Array>, release: () => void): ReadableStream<Uint8Array> {
+  const reader = source.getReader();
+  const timer = setTimeout(release, BREEZE_TIMEOUT_MS + 5_000);
+  const done = () => { clearTimeout(timer); release(); };
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        const { value, done: end } = await reader.read();
+        if (end) { controller.close(); done(); return; }
+        controller.enqueue(value);
+      } catch (error) {
+        controller.error(error);
+        done();
+      }
+    },
+    cancel(reason) {
+      done();
+      return reader.cancel(reason);
+    },
+  });
+}
+
+async function postBreeze(config: VoiceConfig, reference: VoiceReference, text: string, emotion?: EmotionName | null, seed?: number): Promise<Response> {
+  const form = new FormData();
+  form.append('text', text);
+  form.append('instruction', breezeInstruction(text, emotion));
+  form.append('cfg_scale', '4');
+  form.append('ref_text', reference.text || '');
+  // Random per line, not the server's fixed 42: a fixed seed gives the same
+  // delivery for the same text every time, which is how a voice starts to
+  // sound like a recording of itself. Prosody varies run to run instead.
+  // A caller that voices a reply in several pieces passes one seed for all
+  // of them, so the pieces are takes of the same performance.
+  form.append('seed', String(seed ?? Math.floor(Math.random() * 2 ** 31)));
+  if (config.voiceId) {
+    form.append('voice_id', config.voiceId);
+  } else {
+    const clip = await readFile(reference.clip);
+    form.append('ref_audio', new Blob([clip as unknown as BlobPart], { type: 'audio/wav' }), basename(reference.clip));
+  }
+  // Breeze takes one request at a time and answers a second with 409. The
+  // slot above keeps ours in line, but a line the phone abandoned mid-stream
+  // gives the slot back while Breeze is still finishing it — so the next line
+  // was refused and, on the phone, silently skipped (55 times on 2026-09-05).
+  // A busy Breeze is a Breeze about to be free: wait a little and ask again.
+  const started = Date.now();
+  for (let attempt = 0; ; attempt++) {
+    const response = await net.fetch(`${trimEndpoint(config.endpoint)}${BREEZE_SPEECH_URL}`, {
+      method: 'POST',
+      body: form,
+      signal: AbortSignal.timeout(BREEZE_TIMEOUT_MS),
+    });
+    if (response.ok) {
+      if (attempt) console.log(`[voice] breeze was busy — waited ${Date.now() - started}ms`);
+      return response;
+    }
+    const detail = await response.text().catch(() => '');
+    if (response.status === 409 && attempt < BREEZE_BUSY_TRIES) {
+      await new Promise(resolve => setTimeout(resolve, BREEZE_BUSY_WAIT_MS));
+      continue;
+    }
+    throw new Error(`${response.status}${detail ? `: ${detail.slice(0, 300)}` : ''}`);
+  }
+}
+
+/** How often, and how long apart, a busy Breeze is asked again: about two seconds in all. */
+const BREEZE_BUSY_TRIES = 6;
+const BREEZE_BUSY_WAIT_MS = 350;
+
+/** Wraps Breeze's 24 kHz s16le PCM stream in a WAV the phone's <audio> element
+ *  can play progressively. The data length is unknown while it streams, so the
+ *  header declares the WAV-extended "open" length (0xFFFFFFFF) and the stream
+ *  simply ends when the connection does. */
+export function wrapPcmAsWav(body: ReadableStream<Uint8Array>): ReadableStream<Uint8Array> {
+  const reader = body.getReader();
+  let headerSent = false;
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      if (!headerSent) {
+        headerSent = true;
+        const header = new Uint8Array(44);
+        const view = new DataView(header.buffer);
+        const ascii = (offset: number, text: string) => { for (let i = 0; i < text.length; i += 1) header[offset + i] = text.charCodeAt(i); };
+        ascii(0, 'RIFF');
+        view.setUint32(4, 0xFFFFFFFF, true);
+        ascii(8, 'WAVE');
+        ascii(12, 'fmt ');
+        view.setUint32(16, 16, true);
+        view.setUint16(20, 1, true);
+        view.setUint16(22, 1, true);
+        view.setUint32(24, 24000, true);
+        view.setUint32(28, 48000, true);
+        view.setUint16(32, 2, true);
+        view.setUint16(34, 16, true);
+        ascii(36, 'data');
+        view.setUint32(40, 0xFFFFFFFF, true);
+        controller.enqueue(header);
+      }
+      const { done, value } = await reader.read();
+      if (done) {
+        controller.close();
+        return;
+      }
+      controller.enqueue(value);
+    },
+    cancel() {
+      void reader.cancel();
+    },
+  });
+}
+
+/** The streaming half of the Breeze door, for the phone's GET /api/speak: the
+ *  PCM arrives progressively, and the WAV wrapper keeps the first byte fast. */
+export async function synthesiseBreezeStream(config: VoiceConfig, reference: VoiceReference, text: string, emotion?: EmotionName | null, seed?: number): Promise<{ mime: string; body: ReadableStream<Uint8Array> } | null> {
+  const release = await breezeSlot();
+  try {
+    const response = await postBreeze(config, reference, text, emotion, seed);
+    if (!response.body) { release(); return null; }
+    return { mime: 'audio/wav', body: wrapPcmAsWav(releasingWhenDone(response.body, release)) };
+  } catch {
+    release();
+    return null;
+  }
+}
+
+/** Wraps 24 kHz mono s16le PCM in a standard 44-byte WAV header. */
+export function pcmToWav(pcm: Uint8Array, sampleRate = 24000, channels = 1, bitsPerSample = 16): Uint8Array {
+  const header = new Uint8Array(44);
+  const view = new DataView(header.buffer);
+  const bytesPerSample = bitsPerSample / 8;
+  const blockAlign = channels * bytesPerSample;
+  const ascii = (offset: number, text: string) => { for (let i = 0; i < text.length; i += 1) header[offset + i] = text.charCodeAt(i); };
+  ascii(0, 'RIFF');
+  view.setUint32(4, 36 + pcm.length, true);
+  ascii(8, 'WAVE');
+  ascii(12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, channels, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * blockAlign, true);
+  view.setUint16(32, blockAlign, true);
+  view.setUint16(34, bitsPerSample, true);
+  ascii(36, 'data');
+  view.setUint32(40, pcm.length, true);
+  const out = new Uint8Array(44 + pcm.length);
+  out.set(header);
+  out.set(pcm, 44);
+  return out;
 }
 
 /** The api_v2 /tts body: reference, its fellows, and the sampling that shapes the take. */
@@ -375,7 +700,7 @@ export function sovitsRequest(config: VoiceConfig, reference: VoiceReference, te
 export function readVoiceConfig(saved: unknown): VoiceConfig {
   if (!saved || typeof saved !== 'object') return DEFAULT_VOICE;
   const record = saved as Partial<VoiceConfig>;
-  const engines: VoiceEngine[] = ['off', 'windows', 'openai', 'gpt-sovits'];
+  const engines: VoiceEngine[] = ['off', 'windows', 'openai', 'gpt-sovits', 'hume', 'breeze'];
   return {
     engine: engines.includes(record.engine as VoiceEngine) ? record.engine as VoiceEngine : DEFAULT_VOICE.engine,
     endpoint: typeof record.endpoint === 'string' ? record.endpoint : DEFAULT_VOICE.endpoint,
@@ -390,6 +715,7 @@ export function readVoiceConfig(saved: unknown): VoiceConfig {
     shoutVoice: readReference(record.shoutVoice),
     webEnabled: record.webEnabled !== false,
     desktopEnabled: record.desktopEnabled !== false,
+    ...(typeof record.voiceId === 'string' && record.voiceId.trim() ? { voiceId: record.voiceId.trim() } : {}),
   };
 }
 
@@ -438,14 +764,27 @@ function readEmotionVoices(saved: unknown): Partial<Record<EmotionName, VoiceRef
  * what the text needs was cut off rather than said.
  *
  * PCM only, which is what the wav these servers return always is: bytes after
- * the 44-byte header, over the rate times the width.
+ * the 44-byte header, over the rate times the width. The rate is read from the
+ * header rather than assumed — GPT-SoVITS is 32 kHz and Breeze 24 kHz, and a
+ * wrongly assumed rate makes a full clip look cut short.
  */
 export const SPOKEN_CHARS_PER_SECOND = 15;
 export function looksClipped(audio: Uint8Array, text: string, rate = 32000, bytesPerSample = 2): boolean {
   const said = (text ?? '').replace(/\s+/g, ' ').trim();
   // Too short to judge: a two-word answer has no reliable length.
   if (said.length < 40 || audio.length <= 44) return false;
-  const seconds = (audio.length - 44) / (rate * bytesPerSample);
+  const headerRate = wavSampleRate(audio);
+  const actualRate = headerRate || rate;
+  const seconds = (audio.length - 44) / (actualRate * bytesPerSample);
   return seconds < (said.length / SPOKEN_CHARS_PER_SECOND) * 0.5;
+}
+
+/** The sample rate in a WAV's fmt chunk, or 0 when this is not a WAV it knows. */
+function wavSampleRate(audio: Uint8Array): number {
+  if (audio.length < 44) return 0;
+  const view = new DataView(audio.buffer, audio.byteOffset, audio.byteLength);
+  const riff = view.getUint32(0, false);
+  if (riff !== 0x52494646) return 0; // 'RIFF'
+  return view.getUint32(24, true);
 }
 

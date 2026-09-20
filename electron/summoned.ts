@@ -1,3 +1,4 @@
+import { IRRITATION } from './mood';
 // What she says when you click her and the box opens.
 //
 // Canned on purpose, and that is the whole point. A generated line would take
@@ -49,9 +50,9 @@ const LINES: Record<Welcome, string[]> = {
  * point at a time — waiting until she is furious would mean the annoyed lines
  * almost never appear, which is the same as not writing them.
  */
-export const ANNOYED_AT = 3;
+export const ANNOYED_AT = IRRITATION.voiced;
 /** Below this she is in an actively good mood rather than merely not cross. */
-export const WARM_BELOW = 1;
+export const WARM_BELOW = IRRITATION.stirred;
 
 export function welcomeFor(irritation: number): Welcome {
   if (irritation >= ANNOYED_AT) return 'annoyed';

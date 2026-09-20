@@ -32,6 +32,10 @@ import {
   eventsPrompt,
   isWorthAnEvent,
   type MemoryRecord,
+  entityTerms,
+  entityScore,
+  monthFoldPrompt,
+  readsAsHerNagging,
 } from '../electron/memory';
 
 const fixture = (overrides: Partial<MemoryRecord> & { id: string; text: string; kind: MemoryRecord['kind'] }): MemoryRecord => ({
@@ -541,4 +545,107 @@ test('un-ticking opens it again, and nothing else is ever touched', () => {
   const none = closeEvents(memories, 'Something else entirely', now);
   assert.equal(none.memories, memories);
   assert.deepEqual(none.changed, []);
+});
+
+// ---- emotion tags: what a memory was written in, and how retrieval reads it ----
+
+function emoRecord(overrides: Partial<MemoryRecord> = {}): MemoryRecord {
+  return {
+    id: overrides.id ?? 'e1',
+    text: overrides.text ?? 'They run the shop together',
+    kind: 'fact',
+    createdAt: '2026-09-01T00:00:00.000Z',
+    lastSeenAt: '2026-09-01T00:00:00.000Z',
+    mentions: 1,
+    source: 'explicit',
+    ...overrides,
+  };
+}
+
+test('rememberInto stamps the mood and keeps the first sighting on a repeat', () => {
+  const base = emoRecord({ id: 'a', text: 'She is scared of thunder' });
+  const first = rememberInto([], { text: 'She is scared of thunder', kind: 'fact', id: 'a', now: '2026-09-01T00:00:00.000Z', emotion: 'worried', emotionIntensity: 0.7 });
+  assert.equal(first.record.emotion, 'worried');
+  assert.equal(first.record.emotionIntensity, 0.7);
+  const repeat = rememberInto([first.record], { text: 'she is scared of thunder', kind: 'fact', id: 'a', now: '2026-09-02T00:00:00.000Z', emotion: 'annoyed', emotionIntensity: 0.9 });
+  assert.equal(repeat.record.emotion, 'worried', 'the first sighting mood stands');
+  assert.equal(repeat.record.emotionIntensity, 0.9, 'intensity keeps the strongest');
+});
+
+test('migrateMemories keeps a valid emotion, clamps intensity, drops junk', () => {
+  const good = migrateMemories([{ id: 'a', text: 'x', kind: 'fact', createdAt: '2026-09-01T00:00:00.000Z', lastSeenAt: '2026-09-01T00:00:00.000Z', mentions: 1, emotion: 'annoyed', emotionIntensity: 5 }], '2026-09-03T00:00:00.000Z');
+  assert.equal(good[0].emotion, 'annoyed');
+  assert.equal(good[0].emotionIntensity, 1, 'clamped to the valid range');
+  const junk = migrateMemories([{ id: 'b', text: 'y', kind: 'fact', createdAt: '2026-09-01T00:00:00.000Z', lastSeenAt: '2026-09-01T00:00:00.000Z', mentions: 1, emotion: 'furious' }], '2026-09-03T00:00:00.000Z');
+  assert.equal(junk[0].emotion, undefined, 'not a real emotion, not kept');
+});
+
+test('retrieval favours a memory written in the same mood as the message', () => {
+  const now = new Date('2026-09-02T00:00:00.000Z');
+  const sting = emoRecord({ id: 'a', text: 'The last time the store thing came up he went quiet', emotion: 'annoyed', emotionIntensity: 0.8 });
+  const calm = emoRecord({ id: 'b', text: 'The store keeps Sunday hours', emotion: 'neutral', emotionIntensity: 0.2 });
+  const picked = retrieveMemories([calm, sting], 'forget the store thing, are you kidding me, never mind', { limit: 2, now });
+  const rank = picked.map(entry => entry.memory.id);
+  const stingIndex = rank.indexOf('a');
+  const calmIndex = rank.indexOf('b');
+  // Same lexical reach, different moods — the stung memory surfaces first.
+  assert.ok(stingIndex !== -1 && calmIndex !== -1);
+  assert.ok(stingIndex < calmIndex, 'the same-mood memory outranks the neutral one');
+});
+
+// ---- entity signal: the triples finally read at retrieval time ----
+
+test('entityTerms only counts words that are capitalised every time', () => {
+  const terms = entityTerms('The bins go out. The shop is Emma\'s. Emma runs it.');
+  assert.ok(terms.has('emma'));
+  assert.ok(!terms.has('the'), 'sentence-start capitals are not names');
+  assert.ok(!terms.has('bins') && !terms.has('shop'), 'lowercase words are not names');
+});
+
+test('entityScore matches the query against the memory triple', () => {
+  const memory = emoRecord({ id: 'a', text: 'They run the shop together', subject: 'PC Project', predicate: 'runs', object: 'PC Project' });
+  // The query shares no content words with the memory text, only the subject.
+  const score = entityScore('how is the PC Project doing', memory);
+  assert.ok(score > 0, 'the subject of the triple answers the query');
+  assert.equal(entityScore('what is for dinner', memory), 0, 'no shared entity, no signal');
+});
+
+// ---- the month fold: her L1 prompt ----
+
+test('monthFoldPrompt names the month and forbids the second person', () => {
+  const prompt = monthFoldPrompt('2026-08');
+  assert.ok(prompt.includes('2026-08'));
+  assert.ok(prompt.includes('third person'));
+  assert.ok(prompt.includes('nothing invented'));
+});
+
+// ---- their words are not her nagging ----
+//
+// Preferences.md asks for exactly one form — "one bullet per preference: what
+// Haru should do or avoid" — and that is the same form her own nagging takes.
+// Three of the user's five bullets were refused on every hourly sync, 93 times
+// each in one log, and the tally reported them as already known.
+
+test('an instruction she wrote for herself is still refused', () => {
+  assert.equal(isWorthRemembering('Don\u2019t be late for the motherboard pickup'), false);
+  assert.equal(isWorthRemembering('Remember to call the shop'), false);
+  assert.equal(readsAsHerNagging('Never let it go to voicemail'), true);
+});
+
+test('the same sentence in their own words is kept', () => {
+  for (const bullet of [
+    "Don't interrupt with unprompted lines while Tommy is working at the shop or mid-task.",
+    "Don't nag about the same thing twice in a day — say it once, in her own way.",
+    "Don't let Tommy leave the house without coffee.",
+    'Remind Tommy about bin night on Thursdays.',
+  ]) {
+    assert.equal(isWorthRemembering(bullet, { meantAsARule: true }), true, `refused: ${bullet}`);
+  }
+});
+
+test('their words are exempt from the nagging rule and nothing else', () => {
+  // The other gates still apply to a page the user wrote: an empty bullet, or
+  // one that is only about her, is no better for having been typed by him.
+  assert.equal(isWorthRemembering('   ', { meantAsARule: true }), false);
+  assert.equal(isWorthRemembering('Thanks you for the help', { meantAsARule: true }), false);
 });

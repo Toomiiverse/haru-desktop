@@ -14,7 +14,13 @@
 
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from 'node:http';
 import { createReadStream, existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { timingSafeEqual } from 'node:crypto';
+import type { Duplex } from 'node:stream';
 import filePath from 'node:path';
+import { WebSocketServer, type WebSocket as CallSocket } from 'ws';
+import { clmTurnFrom, spokenReply, sseChunk, sseStop, SSE_DONE } from './evi';
+import { pcmToWav } from './voice';
+import type { Correction } from './hearing';
 import type { Standing } from './standing';
 import type { Her } from './her';
 import {
@@ -23,6 +29,7 @@ import {
 } from './web';
 import { loginPage, appPage, serviceWorker } from './webpage';
 import { readPushPrefs, type PushPrefs } from './push';
+import { isDeviceToken } from './apns';
 import { emotionFile } from './emotions';
 import type { CheckIn } from './checkins';
 import { MAX_SHOT_BYTES, type HeldShots } from './shotstore';
@@ -43,15 +50,23 @@ export type WebDeps = {
    * taken back. One exception: a round that is thrown away at the last moment
    * (a tool call was coming, a retry was pressed) signals itself by handing a
    * single U+FFFD — the reader clears what it has and waits for the next chunk.
+   *
+   * `onSentence` is called as each complete sentence of the reply arrives,
+   * with the mood read from the line so far (no model call). The phone speaks
+   * these while the rest is still being written, so her voice follows the
+   * words instead of waiting for them; the last sentence is always delivered
+   * before the stream ends. The same U+FFFD that clears the text clears the
+   * voice: nothing of a thrown-away round may be spoken.
    */
-  sayStream(text: string, onChunk: (chunk: string) => void, attachments?: unknown[], options?: { interrupted?: boolean }): Promise<{ reply: string; ignored?: boolean }>;
+  sayStream(text: string, onChunk: (chunk: string) => void, attachments?: unknown[], options?: { interrupted?: boolean; call?: boolean; onToolCall?: (name: string) => void }, onSentence?: (sentence: string, emotion: string) => void): Promise<{ reply: string; ignored?: boolean }>;
   /**
    * Her last reply, done again. The message that prompted it is asked once
    * more with that reply left out of the history, and the new one takes its
    * place — on the phone and on the desktop, which owns the conversation.
-   * Same stream contract as sayStream. Null when she has nothing to redo.
+   * Same stream contract as sayStream, sentences included.
+   * Null when she has nothing to redo.
    */
-  retryStream(onChunk: (chunk: string) => void): Promise<{ reply: string; ignored?: boolean } | null>;
+  retryStream(onChunk: (chunk: string) => void, onSentence?: (sentence: string, emotion: string) => void): Promise<{ reply: string; ignored?: boolean } | null>;
   /** Files that ride the next message, staged the way a desktop paste is. */
   attach: {
     /** Copies the bytes into her keeping; returns the staged record the page
@@ -68,7 +83,8 @@ export type WebDeps = {
    */
   expression(text: string): Promise<{ emotion: string | null; expression: string | null }>;
   /** The day so far, with ids so a reply can be rated, and any rating it already has. */
-  history(): { id?: string; role: string; content: string; at?: string; reaction?: string; note?: string; aside?: string }[];
+  /** The day as heard; `poll` marks a page refreshing itself, which is not the page being opened. */
+  history(poll?: boolean): { id?: string; role: string; content: string; at?: string; reaction?: string; note?: string; aside?: string }[];
   /**
    * What they thought of a reply of hers. A thumb lands on the message the
    * same way the desktop's does — into her prompt, onto her mood — and she
@@ -80,6 +96,8 @@ export type WebDeps = {
   /** date is a bare YYYY-MM-DD; daysAway is its offset from today so the page can bucket into daily/weekly/monthly without redoing timezone-aware date math client-side. */
   agenda(): { id: string; title: string; date: string; time: string | null; kind: string; done?: boolean; daysAway: number }[];
   tickOff(id: string): Promise<void> | void;
+  /** A task the phone wrote down — a reminder added to the Haru list in Apple Reminders. Null when the time does not read as one. */
+  addAgenda(title: string, date: string, time?: string): { id: string; title: string; date: string; time?: string } | null;
   memories(): string[];
   /** Where they stand with her, for the status tab. See standing.ts. */
   standing(): Standing;
@@ -112,13 +130,18 @@ export type WebDeps = {
   /** Jot one down. Returns today's, including the new one. */
   addCheckIn(note: string, anxiety: number | undefined): CheckIn[];
   /** Anything she would say first, unprompted, or nothing. */
-  nudge(): Promise<{ line: string; about: string } | null>;
+  nudge(): Promise<{ line: string; about: string; eventId?: string } | null>;
   /** Being told about her when nothing of hers is open. The keys stored are the
    *  phone's own; the one secret — the signing key — never appears here. */
   push: {
+    /** The native app's device token, from Apple. `sandbox` for a build run from Xcode; TestFlight and the store are production. */
+    subscribeApns(token: string, name: string, sandbox: boolean, deviceId?: string): void;
+    unsubscribeApns(token: string): void;
+    /** Whether the Apple sender has a key to sign with. */
+    apnsReady(): boolean;
     /** The public half of the VAPID pair, for the page to subscribe with. */
     key(): string;
-    subscribe(device: { endpoint: string; p256dh: string; auth: string }, name: string): void;
+    subscribe(device: { endpoint: string; p256dh: string; auth: string }, name: string, deviceId?: string): void;
     unsubscribe(endpoint: string): void;
     prefs(): PushPrefs;
     savePrefs(prefs: PushPrefs): void;
@@ -148,6 +171,13 @@ export type WebDeps = {
     /** What the last fix's surroundings are called, asked once of the map service. Throws when there is nothing to ask about or no answer. */
     lookUp(): Promise<string>;
   };
+  /** How they slept and how far they walked, from the phone's Health app — see body.ts. */
+  body: {
+    get(): { enabled: boolean; at: string | null; fresh: boolean; day: string | null; sleepMinutes: number | null; steps: number | null };
+    enable(on: boolean): void;
+    /** The phone's latest figures. Refused (false) while the switch is off or the report is not one. */
+    report(report: unknown): boolean;
+  };
   /** Her picture, or nothing if this build has none. */
   portrait(): Buffer | null;
   /** The Live2D model to stand on the stage: the folder it lives in and its entry file. */
@@ -160,12 +190,49 @@ export type WebDeps = {
   emotionsFolder(): string | null;
   /** Her voice for a line — in the mood it was said in, when told — or nothing if she has none set up. */
   speak(text: string, emotion?: string | null): Promise<{ audio: Uint8Array; mime: string } | null>;
+  /** The same line as a stream the page can play as it arrives — the Hume path,
+   *  which generates audio progressively. Null when the engine does not stream. */
+  speakStream?(text: string, emotion?: string | null, options?: { seed?: number }): Promise<{ mime: string; body: ReadableStream<Uint8Array> } | null>;
+  /** Whether she has agreed to go quiet on the phone (mute.ts). Calls are not
+   *  asked: they reach speak() without coming through these routes. */
+  quiet?(): boolean;
+  /** A picture or file she was sent, back out of her keeping for the chat to show. */
+  attachedFile?(saved: string): { bytes: Uint8Array; mime: string } | null;
   /** One of her recorded sighs, for the gap between paragraphs; null when she has none. */
   sigh(emotion?: string | null): Promise<{ audio: Uint8Array; mime: string } | null>;
   /** Her word when they only said her name. */
   wake(): { line: string; emotion: string };
   /** What they just said, through the same ears and the same corrections as the desktop. */
   hear(audio: Uint8Array, mime: string): Promise<string>;
+  /** A take of his voice saying her name, from the phone's enrolment: kept for the wake-word model of his voice. Returns the file name. */
+  keepVoiceTake?(wav: Uint8Array): Promise<string>;
+  /** What she has been taught she mishears — see hearing.ts. */
+  corrections(): Correction[];
+  /** Teaching her ears from the phone: what came back against what was said. The pair she kept, if there was one. */
+  teach(heard: string, meant: string): { learned: { heard: string; meant: string } | null; count: number };
+  forgetCorrection(heard: string): Correction[];
+  /**
+   * Speech to speech through Hume's EVI — see evi.ts. A call: the phone streams
+   * its microphone up one socket and her voice comes back down it, while her
+   * words are asked of the brain hook below. Absent when this build has none.
+   */
+  evi?: {
+    status(): { enabled: boolean; engine: string; minutesToday: number; cap: number; reason?: string; asleep?: boolean; wakesAt?: string | null };
+    /** The bearer Hume must present at the brain hook; '' when none is set. */
+    secret(): string;
+    /**
+     * Opens a call for this device, on whichever engine is configured (call.ts).
+     * Throws with a reason worth showing when refused. `onAudio` carries her
+     * voice as raw PCM between an audio_start and its audio_end (the local
+     * engine); the Hume engine sends whole sentences as audio_output events.
+     */
+    open(deviceId: string, handlers: { onEvent(event: Record<string, unknown>): void; onAudio(pcm: Uint8Array): void; onClose(reason: string): void }): Promise<{ sendAudio(pcm: Uint8Array): void; close(reason?: string): void; herSpeaking?(on: boolean): void }>;
+    /**
+     * One turn of a call: what Hume heard and how it sounded, answered in her
+     * words, streamed. Null when the session is not a call of ours.
+     */
+    turn(sessionId: string, text: string, prosody: Record<string, number> | null, onChunk: (chunk: string) => void): Promise<{ reply: string; ignored?: boolean } | null>;
+  };
   knowledge: {
     search(query: string, category?: string): Promise<{ results: { content: string; source: string; category: string; heading: string | null; version: number; confidence: number; updatedAt: string; score: number }[] }>;
     stats(): Record<string, unknown>;
@@ -253,6 +320,14 @@ const SESSION_COOKIE = 'haru_session';
 const DEVICE_COOKIE = 'haru_device';
 /** Big enough for a long message, small enough that nobody posts a film. */
 const MAX_BODY = 256 * 1024;
+/**
+ * The two routes another machine of hers syncs through — every memory it
+ * holds, and its day at the desk — carry the whole thing each time, and a
+ * laptop that has pulled the server's records posts them all back. At the
+ * message-sized cap that was refused as "too much" forty-six times a day
+ * (2026-09-06), and the laptop's memories and activity never arrived.
+ */
+const MAX_SYNC_BODY = 8 * 1024 * 1024;
 /** A recording is not a message. Roughly a minute of opus, and a hard stop. */
 const MAX_AUDIO = 8 * 1024 * 1024;
 /** A file attached to a message. Videos are the biggest honest case. */
@@ -353,12 +428,12 @@ function sendFile(res: ServerResponse, file: string, type: string) {
   stream.pipe(res);
 }
 
-async function readBody(req: IncomingMessage): Promise<unknown> {
+async function readBody(req: IncomingMessage, cap = MAX_BODY): Promise<unknown> {
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of req) {
     size += (chunk as Buffer).length;
-    if (size > MAX_BODY) throw new Error('too much');
+    if (size > cap) throw new Error('too much');
     chunks.push(chunk as Buffer);
   }
   if (!chunks.length) return {};
@@ -392,9 +467,25 @@ function whoIsThis(req: IncomingMessage, access: WebAccess, now: Date) {
 
 export function startWebServer(port: number, deps: WebDeps): Promise<{ port: number; stop(): Promise<void> }> {
   const server: Server = createServer((req, res) => { void handle(req, res, deps).catch(error => {
-    console.error('[web] ' + (error instanceof Error ? error.message : String(error)));
+    // Named by route, size and caller: "too much" forty-six times in a day
+    // said nothing about who was sending what (2026-09-06).
+    const from = String(req.headers['x-forwarded-for'] ?? req.headers['cf-connecting-ip'] ?? req.socket.remoteAddress ?? 'unknown').split(',')[0].trim();
+    const declared = req.headers['content-length'] ? ` (${req.headers['content-length']} bytes declared)` : '';
+    console.error(`[web] ${error instanceof Error ? error.message : String(error)} — ${req.method ?? '?'} ${(req.url ?? '/').split('?')[0]} from ${from}${declared}`);
     if (!res.headersSent) json(res, 500, { error: 'Something went wrong.' });
   }); });
+
+  // The one socket: a call. Everything else on this server is a request and an
+  // answer; a call is the phone's microphone going up and her voice coming
+  // down for as long as the mic is on, and that is a different shape of
+  // connection. It is gated the same way as every route past the sign-in.
+  const calls = new WebSocketServer({ noServer: true, maxPayload: MAX_CALL_FRAME });
+  server.on('upgrade', (req, socket, head) => {
+    void answerUpgrade(req, socket as Duplex, head, deps, calls).catch(error => {
+      console.error('[web] ' + (error instanceof Error ? error.message : String(error)));
+      socket.destroy();
+    });
+  });
 
   return new Promise((resolve, reject) => {
     server.once('error', reject);
@@ -404,10 +495,181 @@ export function startWebServer(port: number, deps: WebDeps): Promise<{ port: num
       console.log(`[web] listening on 127.0.0.1:${actual} — reachable only through a tunnel`);
       resolve({
         port: actual,
-        stop: () => new Promise<void>(done => server.close(() => { sessions.clear(); done(); })),
+        stop: () => new Promise<void>(done => {
+          for (const client of calls.clients) client.terminate();
+          calls.close();
+          server.close(() => { sessions.clear(); done(); });
+        }),
       });
     });
   });
+}
+
+/** A frame of the phone's audio. 40 ms of 16 kHz PCM16 is 1.3 KB; a megabyte is somebody else. */
+const MAX_CALL_FRAME = 1024 * 1024;
+/** What Hume posts to the brain hook: the whole call as it holds it, prosody and all. */
+const MAX_HOOK_BODY = 4 * 1024 * 1024;
+
+function refuseUpgrade(socket: Duplex, status: number, reason: string) {
+  socket.write(`HTTP/1.1 ${status} ${reason}\r\nConnection: close\r\n\r\n`);
+  socket.destroy();
+}
+
+/**
+ * The call's door. Same checks as `handle`, in the same order — the door is
+ * closed, the caller is a stranger, the feature is not built — and only then
+ * the socket is taken over. Anything but the one path is refused outright: a
+ * WebSocket handshake that lands anywhere else is not the phone.
+ */
+async function answerUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer, deps: WebDeps, calls: WebSocketServer) {
+  const url = new URL(req.url ?? '/', 'http://127.0.0.1');
+  if (url.pathname !== '/api/call/session' && url.pathname !== '/api/evi/session') return refuseUpgrade(socket, 404, 'Not Found');
+  const access = deps.readAccess();
+  if (!access.enabled || !access.hash) return refuseUpgrade(socket, 503, 'Service Unavailable');
+  const me = whoIsThis(req, access, new Date());
+  if (!me.allowed) return refuseUpgrade(socket, 401, 'Unauthorized');
+  if (!deps.evi) return refuseUpgrade(socket, 404, 'Not Found');
+  const evi = deps.evi;
+  const deviceId = me.device?.id ?? 'session';
+  calls.handleUpgrade(req, socket, head, ws => { void runCall(ws, deviceId, evi); });
+}
+
+/**
+ * The call itself. Binary frames up are the microphone and go to the engine;
+ * text frames up are requests: `stop`, `hello` (what the phone can play), and
+ * `her` (whether she is audible through its speaker, so the engine knows an
+ * echo from an interruption). Down, one JSON event per text frame — what was
+ * heard, what she said, a filler while a tool runs, she was talked over, she
+ * has finished — and her voice either as base64 WAV `audio_output` events
+ * (the Hume engine, and any phone that did not say it plays PCM) or as raw
+ * PCM binary frames between `audio_start` and `audio_end` (the local engine,
+ * to a phone that said `{type:'hello', pcm:true}`). `ready` first, `ended`
+ * last, `refused` instead of either when the call could not be placed.
+ */
+async function runCall(ws: CallSocket, deviceId: string, evi: NonNullable<WebDeps['evi']>) {
+  const tell = (event: Record<string, unknown>) => { if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(event)); };
+  let call: Awaited<ReturnType<typeof evi.open>> | null = null;
+  let ended = false;
+  // A phone that plays PCM gets her voice as it is made; one that does not
+  // gets each line whole, as a WAV, once it has all arrived.
+  let pcmPhone = false;
+  let sampleRate = 24000;
+  let held: Uint8Array[] = [];
+  const asWholeWav = (event: Record<string, unknown>): boolean => {
+    if (pcmPhone) return false;
+    if (event.type === 'audio_start') { held = []; sampleRate = typeof event.sampleRate === 'number' ? event.sampleRate : 24000; return true; }
+    if (event.type === 'audio_end') {
+      const pcm = Buffer.concat(held.map(part => Buffer.from(part.buffer, part.byteOffset, part.byteLength)));
+      held = [];
+      if (pcm.byteLength) tell({ type: 'audio_output', data: Buffer.from(pcmToWav(pcm, sampleRate)).toString('base64'), id: String(event.id ?? ''), index: 0 });
+      return true;
+    }
+    return false;
+  };
+  try {
+    call = await evi.open(deviceId, {
+      onEvent: event => { if (!asWholeWav(event)) tell(event); },
+      onAudio: pcm => {
+        if (pcmPhone) { if (ws.readyState === ws.OPEN) ws.send(pcm, { binary: true }); }
+        else held.push(pcm);
+      },
+      onClose: reason => {
+        if (ended) return;
+        ended = true;
+        tell({ type: 'ended', reason });
+        if (ws.readyState === ws.OPEN) ws.close(1000, reason.slice(0, 120));
+      },
+    });
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    console.log(`[evi] refused a call: ${reason}`);
+    tell({ type: 'refused', reason });
+    ws.close(1008, reason.slice(0, 120));
+    return;
+  }
+  const placed = call;
+  tell({ type: 'ready' });
+  ws.on('message', (data, isBinary) => {
+    if (isBinary) {
+      const frame = Array.isArray(data) ? Buffer.concat(data) : Buffer.isBuffer(data) ? data : Buffer.from(data as ArrayBuffer);
+      placed.sendAudio(frame);
+      return;
+    }
+    let request: { type?: unknown; pcm?: unknown; speaking?: unknown } = {};
+    try { request = JSON.parse(String(data)) as typeof request; } catch { return; }
+    if (request.type === 'stop') placed.close('the phone hung up');
+    else if (request.type === 'hello') pcmPhone = request.pcm === true;
+    else if (request.type === 'her') placed.herSpeaking?.(request.speaking === true);
+  });
+  ws.on('close', () => { ended = true; placed.close('the phone went away'); });
+  ws.on('error', () => { ended = true; placed.close('the phone\'s socket failed'); });
+}
+
+/**
+ * The brain hook: where Hume asks what she says.
+ *
+ * This is the one route that has to be reachable from the internet — Hume's
+ * servers call it, not the phone — so it stands before the sign-in gate and
+ * has a gate of its own: a bearer only Hume was handed, compared in constant
+ * time, with the sign-in's own lockout behind it. A right bearer with a
+ * session that is not a live call of ours is refused too; the secret opens
+ * the door to the calls, not to her.
+ */
+async function brainHook(req: IncomingMessage, res: ServerResponse, deps: WebDeps, url: URL, now: Date) {
+  if (!deps.evi) return json(res, 404, { error: 'Nothing here.' });
+  // The bearer is checked before the lockout, not after: through the tunnel
+  // every caller shares one address, so a stranger guessing at the door must
+  // slow only strangers down. A right bearer cannot be guessed, and Hume's
+  // calls go through however many wrong ones came before.
+  const given = /^Bearer\s+(\S+)$/i.exec(req.headers.authorization ?? '')?.[1] ?? '';
+  if (!sameSecret(given, deps.evi.secret())) {
+    const from = String(req.headers['x-forwarded-for'] ?? req.headers['cf-connecting-ip'] ?? req.socket.remoteAddress ?? 'unknown').split(',')[0].trim();
+    const attempts = attemptsBy.get(from) ?? clearFailures();
+    const wait = lockedFor(attempts, now.getTime());
+    if (wait > 0) return json(res, 429, { error: `Too many tries. Wait ${Math.ceil(wait / 1000)}s.` });
+    attemptsBy.set(from, noteFailure(attempts, now.getTime()));
+    console.warn(`[evi] refused a brain-hook call from ${from}`);
+    return json(res, 401, { error: 'That is not right.' });
+  }
+  const sessionId = (url.searchParams.get('custom_session_id') ?? '').trim();
+  if (!sessionId) return json(res, 400, { error: 'No session.' });
+  let body: unknown;
+  try { body = await readBody(req, MAX_HOOK_BODY); } catch { return json(res, 400, { error: 'Bad request.' }); }
+  const turn = clmTurnFrom(body);
+  if (!turn) return json(res, 400, { error: 'Nothing was said.' });
+
+  // The reply goes out whole, once it is the reply that counts. Measured on
+  // the wire (2026-09-05): EVI says nothing until the stream has ended,
+  // whatever arrives first, so streaming her words as they come bought
+  // nothing and cost two things — a round thrown away at the last moment had
+  // already been spoken, and the reply the filters settled on differed from
+  // the one she said. Waiting for the end fixes both, and lets the text be
+  // made speakable as one piece: no markdown, no emoji, no shouting.
+  const id = `haru-${now.getTime().toString(36)}`;
+  const created = Math.floor(now.getTime() / 1000);
+  let answer: { reply: string; ignored?: boolean } | null;
+  try {
+    answer = await deps.evi.turn(sessionId, turn.text, turn.prosody, () => {});
+  } catch (error) {
+    console.error('[evi] the brain hook failed: ' + (error instanceof Error ? error.message : String(error)));
+    return json(res, 500, { error: 'Something went wrong.' });
+  }
+  if (!answer) return json(res, 403, { error: 'Not a call of ours.' });
+  const said = answer.ignored ? '' : spokenReply(answer.reply);
+  if (answer.ignored) console.log(`[evi] ${sessionId} — she is not answering that`);
+  res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-store', 'Connection': 'keep-alive' });
+  if (said) res.write(sseChunk(said, id, created));
+  res.write(sseStop(id, created));
+  res.write(SSE_DONE);
+  return res.end();
+}
+
+/** Equal, in time that does not depend on where they differ. */
+function sameSecret(given: string, expected: string): boolean {
+  if (!given || !expected) return false;
+  const a = Buffer.from(given);
+  const b = Buffer.from(expected);
+  return a.length === b.length && timingSafeEqual(a, b);
 }
 
 async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) {
@@ -469,6 +731,10 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
   }
 
   if (req.method === 'POST' && path === '/api/login') return login(req, res, deps, access, now);
+
+  // Hume's servers, asking what she says. Its own gate, above — the phone's
+  // cookie never travels this way.
+  if (req.method === 'POST' && path === '/api/evi/chat/completions') return brainHook(req, res, deps, url, now);
 
   if (!me.allowed) {
     // Her model is not served to strangers. It is 28MB of somebody's paid asset
@@ -542,12 +808,17 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
   // request from her own page rather than a form somebody else submitted.
   // A recording and an attached file are the two things posted here that are
   // not JSON; each checks its own body below rather than being waved through.
-  if (req.method === 'POST' && path !== '/api/listen' && path !== '/api/attach' && path !== '/api/activity/shots' && !/^application\/json/.test(req.headers['content-type'] ?? '')) {
+  if (req.method === 'POST' && path !== '/api/listen' && path !== '/api/attach' && path !== '/api/activity/shots' && path !== '/api/voice/enrol' && !/^application\/json/.test(req.headers['content-type'] ?? '')) {
     return json(res, 415, { error: 'Send JSON.' });
   }
 
   if (req.method === 'GET' && path === '/api/chat') {
-    return json(res, 200, { messages: deps.history().slice(-60) });
+    return json(res, 200, { messages: deps.history(url.searchParams.get('poll') === '1').slice(-60) });
+  }
+
+  // Whether a call can be placed, on which engine, and how much of today's allowance is left.
+  if (req.method === 'GET' && (path === '/api/call/status' || path === '/api/evi/status')) {
+    return json(res, 200, deps.evi ? deps.evi.status() : { enabled: false, engine: 'none', minutesToday: 0, cap: 0, reason: 'not built' });
   }
 
   if (req.method === 'POST' && path === '/api/chat') {
@@ -579,7 +850,7 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
     });
     const emit = (value: unknown) => { if (!res.destroyed) res.write(`data: ${JSON.stringify(value)}\n\n`); };
     try {
-      const answer = await deps.sayStream(text, chunk => emit({ text: chunk }), files, { interrupted });
+      const answer = await deps.sayStream(text, chunk => emit({ text: chunk }), files, { interrupted }, (sentence, emotion) => emit({ sentence, emotion }));
       emit({ done: true, reply: answer.reply, ignored: Boolean(answer.ignored) });
     } catch (error) {
       console.error('[web] ' + (error instanceof Error ? error.message : String(error)));
@@ -612,7 +883,7 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
     });
     const emit = (value: unknown) => { if (!res.destroyed) res.write(`data: ${JSON.stringify(value)}\n\n`); };
     try {
-      const answer = await deps.retryStream(chunk => emit({ text: chunk }));
+      const answer = await deps.retryStream(chunk => emit({ text: chunk }), (sentence, emotion) => emit({ sentence, emotion }));
       if (!answer) emit({ error: 'There is nothing of hers to do again.' });
       else emit({ done: true, reply: answer.reply, ignored: Boolean(answer.ignored) });
     } catch (error) {
@@ -642,6 +913,45 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
     return json(res, 200, deps.wake());
   }
 
+  // A recorded sigh or grunt of hers, in a mood, for the gap between two
+  // paragraphs — the desktop breathes there and the phone can too. Bytes, so
+  // the phone plays it like a line.
+  // She has gone quiet for him: no voice leaves by any of the three routes.
+  // 204 rather than an error — nothing is wrong, she is simply not speaking.
+  if ((path === '/api/sigh' || path === '/api/speak') && deps.quiet?.()) {
+    res.writeHead(204, { 'Cache-Control': 'no-store', 'X-Haru-Quiet': '1' });
+    return res.end();
+  }
+
+  // What he sent her, for the chat to show again. The name is one stage() gave
+  // out; the deps side refuses anything outside her pictures folder.
+  if (req.method === 'GET' && path === '/api/attach/file') {
+    const file = deps.attachedFile?.(url.searchParams.get('saved') ?? '');
+    if (!file) return json(res, 404, { error: 'She does not have that.' });
+    res.writeHead(200, {
+      'Content-Type': file.mime,
+      'Content-Length': file.bytes.length,
+      'Content-Security-Policy': "default-src 'none'",
+      'X-Content-Type-Options': 'nosniff',
+      'Cache-Control': 'private, max-age=86400',
+    });
+    return res.end(Buffer.from(file.bytes));
+  }
+
+  if (req.method === 'GET' && path === '/api/sigh') {
+    const emotion = (url.searchParams.get('emotion') ?? '').slice(0, 30) || null;
+    const clip = await deps.sigh(emotion);
+    if (!clip) return json(res, 404, { error: 'No sigh for that.' });
+    res.writeHead(200, {
+      'Content-Type': clip.mime || 'audio/wav',
+      'Content-Length': clip.audio.length,
+      'Content-Security-Policy': "default-src 'none'",
+      'X-Content-Type-Options': 'nosniff',
+      'Cache-Control': 'no-store',
+    });
+    return res.end(Buffer.from(clip.audio));
+  }
+
   if (req.method === 'POST' && path === '/api/speak') {
     const body = await readBody(req) as { text?: unknown; emotion?: unknown; sigh?: unknown };
     const text = typeof body.text === 'string' ? body.text.trim() : '';
@@ -668,9 +978,79 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
     return res.end(Buffer.from(clip.audio));
   }
 
+  // The streaming half of the same door. A GET the page's <audio> element can
+  // play directly, so the first sound is the first bytes instead of the whole
+  // clip. Hume streams MP3 as it generates; any other engine falls back to the
+  // buffered clip and sends it whole — identical sound, just not progressive.
+  if (req.method === 'GET' && path === '/api/speak') {
+    const url = new URL(req.url ?? '/', 'http://localhost');
+    const text = (url.searchParams.get('text') ?? '').trim().slice(0, 2000);
+    const emotion = (url.searchParams.get('emotion') ?? '').slice(0, 30) || null;
+    if (!text) return json(res, 400, { error: 'Nothing to say.' });
+    const streamed = deps.speakStream ? await deps.speakStream(text, emotion) : null;
+    if (streamed?.body) {
+      res.writeHead(200, {
+        'Content-Type': streamed.mime || 'audio/mpeg',
+        'Content-Security-Policy': "default-src 'none'",
+        'X-Content-Type-Options': 'nosniff',
+        'Cache-Control': 'no-store',
+      });
+      try {
+        for await (const chunk of streamed.body) res.write(Buffer.from(chunk));
+      } catch { /* a stalled stream ends the reply, not the connection */ }
+      return res.end();
+    }
+    const clip = await deps.speak(text, emotion);
+    if (!clip) return json(res, 503, { error: 'Her voice is not set up.' });
+    res.writeHead(200, {
+      'Content-Type': clip.mime || 'audio/wav',
+      'Content-Length': clip.audio.length,
+      'Content-Security-Policy': "default-src 'none'",
+      'X-Content-Type-Options': 'nosniff',
+      'Cache-Control': 'no-store',
+    });
+    return res.end(Buffer.from(clip.audio));
+  }
+
+  // Her ears, taught. The phone had no way to tell her she keeps getting a
+  // name wrong; this is it — what came back, against what was actually said.
+  // The pair is narrowed to the word that differs (hearing.ts) and rewrites
+  // every take after this one, calls included.
+  if (req.method === 'GET' && path === '/api/hearing') {
+    return json(res, 200, { corrections: deps.corrections() });
+  }
+  if (req.method === 'POST' && path === '/api/hearing') {
+    const body = await readBody(req) as { heard?: unknown; meant?: unknown };
+    const heard = typeof body.heard === 'string' ? body.heard.trim().slice(0, 500) : '';
+    const meant = typeof body.meant === 'string' ? body.meant.trim().slice(0, 500) : '';
+    if (!heard || !meant) return json(res, 400, { error: 'Both what she heard and what you said.' });
+    return json(res, 200, deps.teach(heard, meant));
+  }
+  if (req.method === 'POST' && path === '/api/hearing/forget') {
+    const body = await readBody(req) as { heard?: unknown };
+    const heard = typeof body.heard === 'string' ? body.heard.trim() : '';
+    if (!heard) return json(res, 400, { error: 'Which one.' });
+    return json(res, 200, { corrections: deps.forgetCorrection(heard) });
+  }
+
   // Her ears. The body is a recording rather than JSON, so it is read raw and
   // capped far higher — the JSON limit is sized for a message, not for a minute
   // of audio.
+  // The phone teaching her his voice (VoiceGate.swift): each "Hey Haru" he
+  // says lands here as a WAV, the seeds of a wake-word model of his own voice.
+  if (req.method === 'POST' && path === '/api/voice/enrol') {
+    const mime = String(req.headers['content-type'] ?? '').split(';')[0];
+    if (!/^audio\//.test(mime)) return json(res, 415, { error: 'Send audio.' });
+    let wav: Buffer;
+    try { wav = await readRaw(req, MAX_AUDIO); } catch {
+      res.setHeader('Connection', 'close');
+      return json(res, 413, { error: 'That take is too long.' });
+    }
+    if (wav.length < 1000) return json(res, 400, { error: 'The take was empty.' });
+    if (!deps.keepVoiceTake) return json(res, 501, { error: 'This server keeps no voice takes.' });
+    return json(res, 200, { kept: await deps.keepVoiceTake(wav) });
+  }
+
   if (req.method === 'POST' && path === '/api/listen') {
     const mime = String(req.headers['content-type'] ?? 'audio/webm').split(';')[0];
     if (!/^audio\//.test(mime)) return json(res, 415, { error: 'Send audio.' });
@@ -742,6 +1122,22 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
   // Where they are. The page holds the coordinates; this side holds names and
   // a yes or no. Nothing is taken while sharing is off, so a phone that kept
   // watching after the switch was thrown here changes nothing.
+  // Their body, from the phone: last night's sleep and today's steps, while
+  // the switch says so. Two numbers a day, for one background sentence.
+  if (req.method === 'GET' && path === '/api/body') return json(res, 200, deps.body.get());
+
+  if (req.method === 'POST' && path === '/api/body/prefs') {
+    const body = await readBody(req) as { enabled?: unknown };
+    deps.body.enable(body.enabled === true);
+    return json(res, 200, deps.body.get());
+  }
+
+  if (req.method === 'POST' && path === '/api/body') {
+    if (!deps.body.get().enabled) return json(res, 409, { error: 'That is switched off.' });
+    if (!deps.body.report(await readBody(req))) return json(res, 400, { error: 'That is not a report.' });
+    return json(res, 200, deps.body.get());
+  }
+
   if (req.method === 'GET' && path === '/api/where') {
     return json(res, 200, deps.where.get());
   }
@@ -802,7 +1198,21 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
     if (Buffer.from(p256dh, 'base64url').length !== 65 || Buffer.from(auth, 'base64url').length !== 16) {
       return json(res, 400, { error: 'Those are not subscription keys.' });
     }
-    deps.push.subscribe({ endpoint, p256dh, auth }, me.device?.name ?? 'a phone');
+    deps.push.subscribe({ endpoint, p256dh, auth }, me.device?.name ?? 'a phone', me.device?.id);
+    return json(res, 200, { ok: true });
+  }
+
+  if (req.method === 'POST' && path === '/api/push/apns') {
+    const body = await readBody(req) as { token?: unknown; sandbox?: unknown };
+    if (!isDeviceToken(body.token)) return json(res, 400, { error: 'That is not a device token.' });
+    deps.push.subscribeApns(body.token.toLowerCase(), me.device?.name ?? 'an iPhone', body.sandbox === true, me.device?.id);
+    return json(res, 200, { ok: true, ready: deps.push.apnsReady() });
+  }
+
+  if (req.method === 'POST' && path === '/api/push/apns/unsubscribe') {
+    const body = await readBody(req) as { token?: unknown };
+    if (!isDeviceToken(body.token)) return json(res, 400, { error: 'Which one?' });
+    deps.push.unsubscribeApns(body.token.toLowerCase());
     return json(res, 200, { ok: true });
   }
 
@@ -814,8 +1224,12 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
   }
 
   if (req.method === 'POST' && path === '/api/push/prefs') {
-    // The reader, not the body, decides what a preference is allowed to be.
-    deps.push.savePrefs(readPushPrefs(await readBody(req)));
+    // The reader, not the body, decides what a preference is allowed to be;
+    // a body that names only some of them leaves the rest as they were, so
+    // the Focus filter's one flag does not reset the sheet's switches.
+    const current = deps.push.prefs() as unknown as Record<string, unknown>;
+    const wanted = await readBody(req) as Record<string, unknown>;
+    deps.push.savePrefs(readPushPrefs({ ...current, ...wanted }));
     return json(res, 200, { prefs: deps.push.prefs() });
   }
 
@@ -824,6 +1238,21 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
   }
 
   if (req.method === 'GET' && path === '/api/agenda') return json(res, 200, { items: deps.agenda() });
+
+  // The phone's own list writes back: a reminder added to the Haru list in
+  // Apple Reminders arrives here and becomes a task of hers, so the two lists
+  // stay one list (Reminders.swift in haru-ios). A title and a bare date; a
+  // clock is optional and read as either "9:00 AM" or "09:00".
+  if (req.method === 'POST' && path === '/api/agenda') {
+    const body = await readBody(req) as { title?: unknown; date?: unknown; time?: unknown };
+    const title = typeof body.title === 'string' ? body.title.trim().slice(0, 140) : '';
+    const date = typeof body.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(body.date) ? body.date : '';
+    const time = typeof body.time === 'string' && body.time.trim() ? body.time.trim() : undefined;
+    if (!title || !date) return json(res, 400, { error: 'A title and a date, please.' });
+    const item = deps.addAgenda(title, date, time);
+    if (!item) return json(res, 400, { error: 'That time does not read as one.' });
+    return json(res, 200, { item, items: deps.agenda() });
+  }
 
   if (req.method === 'POST' && path === '/api/agenda/done') {
     const body = await readBody(req) as { id?: unknown };
@@ -883,7 +1312,7 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
   }
 
   if (req.method === 'POST' && path === '/api/activity') {
-    const body = await readBody(req) as { activity?: unknown };
+    const body = await readBody(req, MAX_SYNC_BODY) as { activity?: unknown };
     if (!body.activity || typeof body.activity !== 'object' || Array.isArray(body.activity)) {
       return json(res, 400, { error: 'Send a log keyed by day.' });
     }
@@ -891,7 +1320,7 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
   }
 
   if (req.method === 'POST' && path === '/api/memory/records') {
-    const body = await readBody(req) as { memories?: unknown };
+    const body = await readBody(req, MAX_SYNC_BODY) as { memories?: unknown };
     if (!Array.isArray(body.memories)) return json(res, 400, { error: 'Send a list of memories.' });
     const merged = deps.mergeMemories(body.memories);
     return json(res, 200, { ...merged, memories: deps.memoryRecords() });
@@ -996,7 +1425,7 @@ async function login(req: IncomingMessage, res: ServerResponse, deps: WebDeps, a
   } else {
     sessions.set(token, now.getTime() + SESSION_MS);
     setCookie(res, SESSION_COOKIE, token, Math.floor(SESSION_MS / 1000));
-    console.log('[web] signed in for this session only');
+    console.log(`[web] signed in for this session only — from ${from}, ${String(req.headers['user-agent'] ?? 'no user agent').slice(0, 60)}`);
   }
   return json(res, 200, { ok: true });
 }

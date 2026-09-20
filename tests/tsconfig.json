@@ -12,5 +12,10 @@
   // Only the tests. Whatever they import comes along on its own, which is what
   // the list that used to sit here was doing by hand — and it had already
   // fallen ten modules behind, while reading like a register of what is tested.
-  "include": ["*.test.ts", "helpers.ts"]
+  "include": ["*.test.ts", "helpers.ts"],
+  // anime.test.ts imports watchRelevant and an anime/minecraft ToolAvailability
+  // from electron/tools.ts. Neither is in the tools.ts that was pushed — the
+  // server's copy has changes that never left it — so the file cannot compile
+  // here. Out until that side is pushed, then delete this.
+  "exclude": ["anime.test.ts"]
 }

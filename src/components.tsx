@@ -635,12 +635,12 @@ export function SettingsDrawer({ config, onSave, onTest, onClose }: { config: Pr
       <input type="password" value={modelKey} placeholder={hasModelKey ? `A key is saved for ${KEY_SLOT_NAME[slot]} — type a new one to replace it` : `Bearer token for ${KEY_SLOT_NAME[slot]}`} onChange={event => setModelKey(event.target.value)}/>
       <button className="ghost" disabled={!modelKey.trim()} onClick={saveModelKey}>Save key</button>
     </div>
-  </>}{status.state !== 'idle' && <p className={status.state === 'error' ? 'status-error' : 'status-ok'}>{status.state === 'testing' ? 'Testing…' : status.message}</p>}</div><SecondBrainField/></details>
+  </>}{status.state !== 'idle' && <p className={status.state === 'error' ? 'status-error' : 'status-ok'}>{status.state === 'testing' ? 'Testing…' : status.message}</p>}</div><SecondBrainField/><NudgeField/></details>
     <details className="settings-group"><summary><span><strong>Voice & listening</strong><small>How she sounds, and how she hears you.</small></span><ChevronDown size={18}/></summary><VoiceField registerSave={registerVoiceSave}/><ListenField/></details>
     <details className="settings-group"><summary><span><strong>Your desktop</strong><small>Appearance, movement and startup.</small></span><ChevronDown size={18}/></summary><ThemeField/><RoamField/><StartupField/></details>
     <details className="settings-group"><summary><span><strong>Awareness & files</strong><small>Manage what Haru can see and read.</small></span><ChevronDown size={18}/></summary><VisionField/><AttachmentsField/><ScreenshotField/><WatchingField/><DesktopField/><GamingField/></details>
-    <details className="settings-group"><summary><span><strong>Connected services</strong><small>Calendar, search, media and your other devices.</small></span><ChevronDown size={18}/></summary><SearchField/><AniListField/><GoogleCalendarField/><DiscordField/><WebField/><CheckInSourceField/><JellyfinField/></details>
-    <div className="drawer-foot"><button className="ghost" onClick={test} disabled={status.state === 'testing'}>{status.state === 'testing' ? 'Testing…' : 'Test connection'}</button>{saved && <span className="saved"><Check size={13}/> Saved</span>}<button className="solid" onClick={() => void save()}>Save settings</button></div></section>;
+    <details className="settings-group"><summary><span><strong>Connected services</strong><small>Calendar, search, media and your other devices.</small></span><ChevronDown size={18}/></summary><SearchField/><AniListField/><GoogleCalendarField/><WebField/><CheckInSourceField/><JellyfinField/></details>
+    <div className="drawer-foot"><button className="ghost" onClick={test} disabled={status.state === 'testing'}>{status.state === 'testing' ? 'Testing…' : 'Test connection'}</button><button className="ghost">Enable alerts</button>{saved && <span className="saved"><Check size={13}/> Saved</span>}<button className="solid" onClick={() => void save()}>Save setup</button></div></section>;
 }
 
 // What each engine calls the thing it clones or selects a voice with. The label
@@ -651,6 +651,7 @@ const VOICE_ENGINES: { value: VoiceEngine; label: string; hint: string; voiceLab
   { value: 'windows', label: 'Windows built-in', hint: 'No setup, but the voice is the stock Microsoft one and her mouth can only be approximated — there is no audio to measure, so it is an animated flap rather than real lip sync.' },
   { value: 'openai', label: 'Local server (OpenAI API)', hint: 'Anything speaking the /v1/audio/speech shape — openedai-speech wrapping an XTTS clone, Kokoro-FastAPI, LocalAI. Point it at the base URL including /v1.', voiceLabel: 'Voice name' },
   { value: 'gpt-sovits', label: 'GPT-SoVITS', hint: 'Clones a voice from one short reference clip, and can be fine-tuned further on your own recordings. Run api_v2.py and point this at it.', voiceLabel: 'Reference clip (full path to a .wav)' },
+  { value: 'breeze', label: 'Breeze TTS 2', hint: 'Self-hosted voice clone + natural-language acting directions, streaming. Run python -m breeze_infer.api ~/breeze-tts-2 and point this at it (default http://127.0.0.1:7860).', voiceLabel: 'Reference clip (full path to a .wav)' },
 ];
 
 /**
@@ -817,7 +818,7 @@ function VoiceField({ registerSave }: { registerSave?(save: () => Promise<void>)
 
   if (!window.haru || !config) return null;
   const engine = VOICE_ENGINES.find(entry => entry.value === config.engine) ?? VOICE_ENGINES[0];
-  const remote = config.engine === 'openai' || config.engine === 'gpt-sovits';
+  const remote = config.engine === 'openai' || config.engine === 'gpt-sovits' || config.engine === 'breeze';
   const update = (changes: Partial<VoiceConfig>) => setConfig({ ...config, ...changes });
 
   async function run(kind: 'saving' | 'testing', action: () => Promise<unknown>, done?: string) {
@@ -841,7 +842,7 @@ function VoiceField({ registerSave }: { registerSave?(save: () => Promise<void>)
       <select value={config.engine} onChange={event => update({ engine: event.target.value as VoiceEngine })}>
         {VOICE_ENGINES.map(entry => <option key={entry.value} value={entry.value}>{entry.label}</option>)}
       </select>
-      {remote && <input value={config.endpoint} onChange={event => update({ endpoint: event.target.value })} placeholder={config.engine === 'gpt-sovits' ? 'http://127.0.0.1:9880' : 'http://127.0.0.1:8000/v1'}/>}
+      {remote && <input value={config.endpoint} onChange={event => update({ endpoint: event.target.value })} placeholder={config.engine === 'gpt-sovits' ? 'http://127.0.0.1:9880' : config.engine === 'breeze' ? 'http://127.0.0.1:7860' : 'http://127.0.0.1:8000/v1'}/>}
     </div>
     {/* A name the server already knows, so this one stays a plain text field. */}
     {config.engine === 'openai' && <div className="row-actions"><input value={config.voice} onChange={event => update({ voice: event.target.value })} placeholder={engine.voiceLabel}/></div>}
@@ -857,12 +858,15 @@ function VoiceField({ registerSave }: { registerSave?(save: () => Promise<void>)
         typo shows up as a failed synthesis rather than as an obviously wrong path.
         The transcript has to match its clip or the cloned voice drifts off target,
         which is the single most common way a GPT-SoVITS setup sounds wrong. */}
-    {config.engine === 'gpt-sovits' && <>
+    {(config.engine === 'gpt-sovits' || config.engine === 'breeze') && <>
       <div className="row-actions">
         <button className="ghost" onClick={async () => { const picked = await window.haru!.voice.pickClip(); if (picked) update({ voice: picked }); }}>{config.voice ? clipName(config.voice) : 'Choose reference clip…'}</button>
         <input value={config.referenceText} onChange={event => update({ referenceText: event.target.value })} placeholder="Exactly what that clip says"/>
       </div>
-      <EmotionVoices config={config} onChange={update}/>
+      {config.engine === 'gpt-sovits' && <EmotionVoices config={config} onChange={update}/>}
+      {config.engine === 'breeze' && <div className="row-actions">
+        <input value={config.voiceId ?? ''} onChange={event => update({ voiceId: event.target.value.trim() })} placeholder="Saved voice id (optional — skips the per-line reference encode)"/>
+      </div>}
     </>}
     {config.engine !== 'off' && <div className="row-actions">
       {remote && <input value={config.language} onChange={event => update({ language: event.target.value })} placeholder="Language (en, ja, zh)"/>}
@@ -1244,6 +1248,71 @@ function SecondBrainField() {
 }
 
 /**
+ * Who composes her one-liners — nudges, spontaneous pings, check-in quips.
+ *
+ * These are short and frequent, and a parked main model (the 9B evicted to
+ * make room for the voice server) otherwise silences them entirely: every call
+ * throws at a dead endpoint and is caught into nothing. The nudge provider is
+ * a tiny always-resident local model (the nudge ollama on :11437) or a hosted
+ * one like Venice, which answers in about a second.
+ */
+function NudgeField() {
+  const [config, setConfig] = useState<ProviderConfig | null>(null);
+  const [models, setModels] = useState<string[]>([]);
+  const [checking, setChecking] = useState(false);
+  const [message, setMessage] = useState<{ text: string; error?: boolean } | null>(null);
+  useEffect(() => {
+    window.haru?.settings.get('ai.nudge').then((saved: unknown) => {
+      const p = saved as ProviderConfig | null | undefined;
+      setConfig(p ?? null);
+    });
+  }, []);
+  if (!window.haru) return null;
+
+  const nudge = config ?? { provider: 'venice' as const, model: 'qwen3-6-35b-a3b', endpoint: 'https://api.venice.ai/api/v1', temperature: 0.9 };
+  const save = (next: ProviderConfig) => {
+    setConfig(next);
+    void window.haru!.settings.set('ai.nudge', next);
+  };
+  const clear = () => {
+    setConfig(null);
+    void window.haru!.settings.set('ai.nudge', null);
+  };
+
+  async function list() {
+    setChecking(true); setMessage(null);
+    try {
+      const result = await window.haru!.ai.verify(nudge.endpoint, nudge.provider, nudge.model);
+      setModels(result.models);
+      setMessage({ text: result.models.length ? `The key works — ${result.models.length} models available.` : (result.note || 'The key works.') });
+    } catch (error) {
+      setMessage({ text: error instanceof Error ? error.message.replace(/^Error invoking remote method '[^']+':\s*(Error:\s*)?/, '') : 'Could not reach it.', error: true });
+    } finally { setChecking(false); }
+  }
+
+  return <div className="field"><h2>Nudges</h2>
+    <p>Who writes her unprompted lines — nudges, spontaneous pings and check-in quips. A tiny local model on the 1660 Ti (127.0.0.1:11437) or a hosted one like Venice keeps them working while the main model is parked for the voice.</p>
+    {config ? <>
+      <div className="form-grid">
+        <select value={nudge.provider} onChange={event => save({ ...nudge, provider: event.target.value as ProviderConfig['provider'], endpoint: event.target.value === 'openai' ? 'https://api.openai.com/v1' : event.target.value === 'venice' ? 'https://api.venice.ai/api/v1' : event.target.value === 'ollama' ? 'http://127.0.0.1:11437' : 'https://api.x.ai/v1' })}>
+          <option value="venice">Venice AI</option>
+          <option value="ollama">Local (1660 Ti nudge instance)</option>
+          <option value="openai">OpenAI</option>
+          <option value="xai">xAI — Grok</option>
+        </select>
+        <input value={nudge.model} placeholder="qwen3-6-35b-a3b" onChange={event => save({ ...nudge, model: event.target.value })}/>
+      </div>
+      <div className="row-actions">
+        <button className="ghost" onClick={() => void list()} disabled={checking}>{checking ? 'Checking…' : 'Check the key and list models'}</button>
+        <button className="ghost" onClick={clear}>Use the main model instead</button>
+      </div>
+      {models.length > 0 && <p className="status-note">Available: {models.slice(0, 8).join(', ')}{models.length > 8 ? '…' : ''}</p>}
+    </> : <button className="ghost" onClick={() => save(nudge)}>Nudge with Venice by default</button>}
+    {message && <p className={message.error ? 'status-error' : 'status-ok'}>{message.text}</p>}
+  </div>;
+}
+
+/**
  * Light or dark. Written to the document element rather than held in React, so
  * the choice applies to the companion window too and survives a reload without a
  * flash of the wrong palette.
@@ -1567,75 +1636,6 @@ function AniListField() {
  * wrong, and it is no use knowing that unless the phone can be turned off from
  * the machine at home.
  */
-/**
- * Reaching her from Discord.
- *
- * The one field that is not optional is the user ID. A bot is reachable by
- * anyone who finds it, so without knowing whose messages to answer she would
- * answer everyone's — and everything she knows is in those answers.
- */
-function DiscordField() {
-  const [status, setStatus] = useState<{ enabled: boolean; ownerId: string; pesterHours: number; hasToken: boolean; connected: boolean; botName: string; trouble: string; checkInChannel: string } | null>(null);
-  const [token, setToken] = useState('');
-  const [ownerId, setOwnerId] = useState('');
-  const [hours, setHours] = useState(3);
-  const [checkInChannel, setCheckInChannel] = useState('');
-  const [message, setMessage] = useState<{ text: string; error?: boolean } | null>(null);
-  const [busy, setBusy] = useState(false);
-  useEffect(() => {
-    const read = () => window.haru?.discord.status().then(s => { setStatus(s); setOwnerId(s.ownerId); setHours(s.pesterHours); setCheckInChannel(s.checkInChannel); });
-    read();
-    // Polled while the panel is open: the interesting failures happen when a
-    // message arrives, which is after anyone has stopped looking at a status.
-    const timer = setInterval(read, 3000);
-    return () => clearInterval(timer);
-  }, []);
-
-  if (!window.haru || !status) return null;
-
-  async function run(action: () => Promise<unknown>, done: string) {
-    setBusy(true); setMessage(null);
-    try {
-      await action();
-      setStatus(await window.haru!.discord.status());
-      setMessage({ text: done });
-    } catch (error) {
-      setMessage({ text: error instanceof Error ? error.message.replace(/^Error invoking remote method '[^']*':s*(Error:s*)?/, '') : String(error), error: true });
-    } finally { setBusy(false); }
-  }
-
-  return <div className="field"><h2>Reaching her from Discord</h2>
-    <p>She answers you in a direct message, and brings things up herself — which the web version cannot do, because a browser tab cannot make your phone buzz.</p>
-    <p className="status-note">Make a bot at discord.com/developers, turn on the Message Content intent, and invite it to any server you are both in — Discord will not let it message you otherwise. Then paste its token here. Turn on Developer Mode in Discord to copy your own user ID.</p>
-    <div className="form-grid">
-      <input type="password" value={token} disabled={busy} placeholder={status.hasToken ? 'A token is saved — type a new one to replace it' : 'Bot token'} onChange={event => setToken(event.target.value)}/>
-      <button className="ghost" disabled={busy || !token.trim()} onClick={() => void run(async () => { await window.haru!.discord.setToken(token); setToken(''); }, 'Token saved, encrypted by the system.')}>Save token</button>
-    </div>
-    <div className="form-grid">
-      <input value={ownerId} disabled={busy} placeholder="Your Discord user ID — 18 digits, not your username" onChange={event => setOwnerId(event.target.value)}/>
-      <label className="check">
-        Pester every
-        <input type="number" min={1} max={12} value={hours} disabled={busy} style={{ width: '4rem' }} onChange={event => setHours(Number(event.target.value))}/>
-        hours
-      </label>
-    </div>
-    <div className="form-grid">
-      <input value={checkInChannel} disabled={busy} placeholder="Check-in channel id — optional" onChange={event => setCheckInChannel(event.target.value)}/>
-      <span className="status-note">Anything you post there is written down as a check-in, without her having to work out that it was one. Leave it empty and she decides from what you say.</span>
-    </div>
-    <div className="row">
-      <button className="ghost" disabled={busy} onClick={() => void run(() => window.haru!.discord.set({ ownerId: ownerId.trim(), pesterHours: hours, enabled: status.enabled, checkInChannel }), 'Saved.')}>Save</button>
-      <label className="check">
-        <input type="checkbox" checked={status.enabled} disabled={busy || !status.hasToken}
-          onChange={event => void run(() => window.haru!.discord.set({ ownerId: ownerId.trim(), pesterHours: hours, enabled: event.target.checked, checkInChannel }), event.target.checked ? 'Connecting…' : 'Disconnected.')}/>
-        Let her use Discord
-      </label>
-    </div>
-    {status.enabled && <p className="status-note">{status.botName ? `Connected as ${status.botName}. Message her.` : status.connected ? 'Connecting…' : 'Switched on but not connected.'}</p>}
-    {status.trouble && <p className="status-error">{status.trouble}</p>}
-    {message && <p className={message.error ? 'status-error' : 'status-ok'}>{message.text}</p>}
-  </div>;
-}
 
 /**
  * Every service she calls on, and how much of each.
@@ -1681,7 +1681,7 @@ export function ServicesPage() {
 /**
  * Where her other self is, and how to sign in to it.
  *
- * Discord moved to the server, so a note sent from a phone is written there and
+ * The phone talks to the server, so a note sent from it is written there and
  * this machine would never see it — the day arriving in two halves that never
  * meet. This is how the desk is told where to go and ask.
  */
@@ -1776,7 +1776,7 @@ function CheckInSourceField() {
   }
 
   return <div className="field"><h2>Check-ins made elsewhere</h2>
-    <p>If she also runs on another machine — a server answering Discord, say — the notes you send it are written there. This lets her read them back here, so the end-of-day check-in knows about the whole day and not just the part spent at this desk.</p>
+    <p>If she also runs on another machine — a server your phone talks to, say — the notes you send it are written there. This lets her read them back here, so the end-of-day check-in knows about the whole day and not just the part spent at this desk.</p>
     <p className="status-note">The address has to be on your tailnet: a name ending .ts.net, or a 100.x address. Anything else is refused rather than sent. These are the most private things she keeps, and they should never leave it.</p>
     <div className="form-grid">
       <input value={url} disabled={busy} placeholder="https://haruserver.tail1234.ts.net" onChange={event => setUrl(event.target.value)}/>

@@ -11,16 +11,21 @@
 // about the thing we discussed", a reminder with no task named, a question)
 // still goes to the model and its tool, which can ask.
 
-import { formatTimeOfDay, localDateKey, parseTimeOfDay, resolveDate } from './dates';
+import { formatTimeOfDay, localDateKey, MONTH_PATTERN, parseTimeOfDay, resolveDate } from './dates';
 
 export type ReminderAsk = { title: string; date: string; time?: string };
 
-/** The ask itself, at the start of the message; what follows is the task and when. */
-const TRIGGER = /^(?:please |can you |could you |haru,? )?(?:set (?:me )?(?:up )?(?:a |an )?(?:reminder|alarm|timer)|remind me|reminder)\b(.*)$/i;
+/**
+ * The ask itself, at the start of the message; what follows is the task and when.
+ * A greeting in front of it is still the start: "Hey Haru remind me to my car
+ * registration on the 6th of October" matched nothing, the model called no
+ * tool, and she said "Got it" about a reminder that did not exist (2026-09-11).
+ */
+const TRIGGER = /^(?:(?:hey|hi|yo|oi|ok|okay)[,!]?\s+)?(?:haru[,!]?\s+)?(?:please |can you |could you )?(?:haru,? )?(?:set (?:me )?(?:up )?(?:a |an )?(?:reminder|alarm|timer)|remind me|reminder)\b(.*)$/i;
 /** "in 20 minutes", "in 2 hours" — a clock time from now. */
 const IN = /(?:^|\s)(?:in|for)\s+(\d{1,3})\s*(minutes?|mins?|hours?|hrs?)\b/i;
-/** "today", "tomorrow", "on monday", "next friday" — anywhere in the clause. */
-const DAY = /(?:^|\s)((?:the )?day after tomorrow|today|tonight|tomorrow|(?:this |next |on )?(?:sunday|monday|tuesday|wednesday|thursday|friday|saturday))\b/i;
+/** "today", "tomorrow", "on monday", "next friday", "on the 6th of October", "Oct 6", "6/10" — anywhere in the clause. */
+const DAY = new RegExp(`(?:^|\\s)((?:the )?day after tomorrow|today|tonight|tomorrow|(?:this |next |on )?(?:sunday|monday|tuesday|wednesday|thursday|friday|saturday)|(?:on )?(?:the )?\\d{1,2}(?:st|nd|rd|th)?(?: of)? ${MONTH_PATTERN}(?:,? \\d{4})?|(?:on )?${MONTH_PATTERN} (?:the )?\\d{1,2}(?:st|nd|rd|th)?(?:,? \\d{4})?|(?:on )?\\d{1,2}/\\d{1,2}(?:/\\d{2,4})?|on the \\d{1,2}(?:st|nd|rd|th))\\b`, 'i');
 /** "@12", "at 12:30", "by 5pm"; "for" only with an unmistakable clock ("for 12pm", "for 9:30"). */
 const AT = /(?:^|\s)(?:@\s*|at\s+|by\s+)(\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)?)(?![\d:])(?!\s*(?:minutes?|mins?|hours?|hrs?)\b)|(?:^|\s)for\s+(\d{1,2}(?::\d{2}\s*(?:am|pm)?|\s*(?:am|pm)))\b/i;
 const CONNECTOR = /^(?:to|that i need to|that i have to|that i should|that i|for|about|:|,|-)\s+/i;
@@ -128,9 +133,29 @@ export function reminderSavedAside(ask: ReminderAsk, todayKey: string): string {
  */
 const PROMISED = /\b(?:i(?:'|’)?ll|i will|i(?:'|’)?ve|i have|consider it|reminder(?:'s| is)?)\s+(?:go(?:ing)? (?:to|and) )?(?:(?:set|put|add|write|note|log)(?:ting)?\s+(?:you\s+)?(?:up\s+)?(?:a |the |that |your )?(?:reminder|alarm|note)s?\s*(?:down\s+)?(?:for|at|@)|remind(?:ing)?\s+you\s+(?:about\s+\S+\s+)?(?:at|@|for)|set(?:ting)?\s+(?:for|at|@))\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)?)\b/i;
 
-export function reminderPromised(herReply: string, now: Date): { time: string; date: string } | null {
-  const m = PROMISED.exec((herReply ?? '').replace(/[‘’]/g, "'"));
-  if (!m) return null;
+/**
+ * "I'll remind you to do your car registration on the 6th of October" — a day
+ * and no clock. PROMISED wants a time, so this went unmatched, the tool was
+ * never called, and the reminder existed only in her reply (2026-09-11).
+ */
+// Her promise, not her account of one. "You asked me on the 24th of August to
+// remind you one week in advance for the 14th of September. I did that." has
+// "remind you … for the 14th of September" in it and is the opposite of a
+// promise; read as one, it put "You forgot to remind me" on his list for the day
+// it was said and pushed it to Google Tasks (2026-09-14). So the reminding has
+// to be something she says she will do — I'll, I will, I'm going to — with a
+// few words allowed between ("I'll make sure to remind you").
+const PROMISE_LEAD = "\\b(?:i'll|i will|i'm going to|i am going to|i'm gonna)\\s+(?:[a-z]+\\s+){0,3}?";
+const PROMISED_DAY = new RegExp(`${PROMISE_LEAD}remind(?:ing)? you\\b[^.!?\\n]*?\\b(?:on|by|for)\\s+((?:the )?\\d{1,2}(?:st|nd|rd|th)?(?: of)? ${MONTH_PATTERN}(?:,? \\d{4})?|${MONTH_PATTERN} (?:the )?\\d{1,2}(?:st|nd|rd|th)?(?:,? \\d{4})?|tomorrow|(?:next |this )?(?:sunday|monday|tuesday|wednesday|thursday|friday|saturday))\\b`, 'i');
+
+export function reminderPromised(herReply: string, now: Date): { time?: string; date: string } | null {
+  const said = (herReply ?? '').replace(/[‘’]/g, "'");
+  const m = PROMISED.exec(said);
+  if (!m) {
+    const day = PROMISED_DAY.exec(said);
+    const date = day ? resolveDate(day[1].toLowerCase(), now) : null;
+    return date ? { date } : null;
+  }
   const raw = m[1].toLowerCase().replace(/\./g, '').replace(/\s+/g, '');
   const parts = /^(\d{1,2})(?::(\d{2}))?(am|pm)?$/.exec(raw);
   if (!parts) return null;
@@ -184,7 +209,7 @@ export function promisedTitle(theirRecent: string[]): string {
  */
 const OFFERED = /\b(?:(?:want|like|need) me to|shall i|should i|do you want (?:me to |a )?|i(?:'|’)?ll|i can|i could)\s+(?:set (?:you )?(?:up )?(?:a |the )?(?:reminder|alarm)(?: for you)?\s*(?:for|at|@)|remind you(?: about \S+(?: \S+){0,4})?\s+(?:at|@|for)|(?:set|wake you|nudge you|ping you)\s+(?:up\s+)?(?:for|at|@))\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)?)\b/i;
 
-export function reminderOffered(herLine: string, now: Date): { time: string; date: string } | null {
+export function reminderOffered(herLine: string, now: Date): { time?: string; date: string } | null {
   const line = (herLine ?? '').replace(/[‘’]/g, "'");
   if (!OFFERED.test(line)) return null;
   // Same clock reading as a promise, once the offer's shape has been recognised.

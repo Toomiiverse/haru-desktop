@@ -17,6 +17,8 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import WebSocket from 'ws';
+import { narrow, readHearing, remember } from '../electron/hearing';
 import { startWebServer, type WebDeps } from '../electron/webserver';
 import { standingFrom } from '../electron/standing';
 import { DEFAULT_VITALS } from '../electron/vitals';
@@ -44,6 +46,7 @@ let shotRoot = '';
 function deps(overrides: Partial<WebDeps> = {}): WebDeps {
   let stored = access();
   let whereOn = false, whereAt: string | null = null; const reported: unknown[] = [];
+  let bodyOn = false;
   return {
     readAccess: () => stored,
     saveAccess: (next) => { stored = next; },
@@ -55,6 +58,7 @@ function deps(overrides: Partial<WebDeps> = {}): WebDeps {
     history: () => [],
     agenda: () => [],
     tickOff: () => {},
+    addAgenda: () => null,
     memories: () => [],
     diary: () => [{ day: '2026-08-29', title: 'Tommy was a pain.', text: 'Tommy was a pain. I read about Elden Ring instead.' }],
     her: () => ({ things: [], adventures: [], likes: [], wants: [], diary: { entries: 0 }, nightsOut: { count: 0 } }),
@@ -101,7 +105,13 @@ function deps(overrides: Partial<WebDeps> = {}): WebDeps {
       forget() { whereAt = null; },
       lookUp: async () => 'Wembley, Perth, Western Australia',
     },
-    push: {
+    body: {
+      get: () => ({ enabled: bodyOn, at: null, fresh: false, day: null, sleepMinutes: null, steps: null }),
+      enable(on) { bodyOn = on; },
+      report(report) { const r = report as { day?: unknown }; return typeof r.day === 'string'; },
+    },
+push: {
+      subscribeApns: () => {}, unsubscribeApns: () => {}, apnsReady: () => false,
       key: () => 'B'.repeat(87),
       subscribe: () => {},
       unsubscribe: () => {},
@@ -115,6 +125,9 @@ function deps(overrides: Partial<WebDeps> = {}): WebDeps {
     libFolder: () => null,
     speak: async () => null,
     hear: async () => '',
+    corrections: () => [],
+    teach: () => ({ learned: null, count: 0 }),
+    forgetCorrection: () => [],
     knowledge: {
       search: async () => ({ results: [] }),
       stats: () => ({}),
@@ -158,7 +171,7 @@ async function door(overrides: Partial<WebDeps> = {}) {
   };
   const signIn = (remember = false) =>
     call('/api/login', { method: 'POST', body: JSON.stringify({ username: USERNAME, password: PASSWORD, remember }) });
-  return { call, signIn, from, stop: running.stop };
+  return { call, signIn, from, stop: running.stop, port: running.port, cookie: () => jar };
 }
 
 // -- who gets an answer at all ---------------------------------------------------
@@ -170,7 +183,7 @@ test('a stranger gets the sign-in page and nothing else', async () => {
     assert.equal(front.status, 200);
     assert.ok((await front.text()).includes('Sign in to reach her'));
 
-    for (const path of ['/api/chat', '/api/agenda', '/api/status', '/api/diary', '/api/her', '/api/memory', '/api/memory/records', '/api/activity', '/api/activity/shots', '/api/journal', '/api/checkins', '/api/knowledge/stats', '/api/model', '/api/push', '/api/attach', '/api/where']) {
+    for (const path of ['/api/chat', '/api/agenda', '/api/status', '/api/diary', '/api/her', '/api/memory', '/api/memory/records', '/api/activity', '/api/activity/shots', '/api/journal', '/api/checkins', '/api/knowledge/stats', '/api/model', '/api/push', '/api/attach', '/api/where', '/api/evi/status']) {
       const refused = await web.call(path);
       assert.equal(refused.status, 401, `${path} answered a stranger`);
     }
@@ -413,7 +426,8 @@ test('a subscription is held to the shape a push service actually hands out', as
   // place a signed-in phone could point her at somewhere arbitrary.
   const taken: { endpoint: string; name: string }[] = [];
   const web = await door({
-    push: {
+push: {
+      subscribeApns: () => {}, unsubscribeApns: () => {}, apnsReady: () => false,
       key: () => 'k', unsubscribe: () => {}, prefs: () => readPushPrefs({}), savePrefs: () => {}, test: async () => true,
       subscribe: (device, name) => { taken.push({ endpoint: device.endpoint, name }); },
     },
@@ -437,7 +451,8 @@ test('a subscription is held to the shape a push service actually hands out', as
 test('the worker and the public key are served to a signed-in phone, and preferences read back sane', async () => {
   let prefs = readPushPrefs({});
   const web = await door({
-    push: {
+push: {
+      subscribeApns: () => {}, unsubscribeApns: () => {}, apnsReady: () => false,
       key: () => 'k', subscribe: () => {}, unsubscribe: () => {},
       prefs: () => prefs, savePrefs: (next) => { prefs = next; },
       test: async () => true,
@@ -651,6 +666,28 @@ test('the where routes, like the rest, are for the signed-in only', async () => 
 
 // -- her ears kept open --------------------------------------------------------
 
+test('she can be taught what she mishears from the phone, shown the list, and made to forget', async () => {
+  let hearing = readHearing(undefined);
+  const web = await door({
+    corrections: () => hearing.corrections,
+    teach: (heard, meant) => { hearing = remember(hearing, heard, meant, '2026-09-06T00:00:00Z'); return { learned: narrow(heard, meant), count: hearing.corrections.length }; },
+    forgetCorrection: heard => { hearing = { corrections: hearing.corrections.filter(c => c.heard !== heard) }; return hearing.corrections; },
+  });
+  try {
+    await web.signIn();
+    const taught = await web.call('/api/hearing', { method: 'POST', body: JSON.stringify({ heard: 'remind me to call harrow at six', meant: 'remind me to call Haru at six' }) });
+    assert.equal(taught.status, 200);
+    assert.deepEqual(await taught.json(), { learned: { heard: 'harrow', meant: 'Haru' }, count: 1 });
+    const list = await web.call('/api/hearing');
+    const page = await list.json() as { corrections: { heard: string; meant: string }[] };
+    assert.deepEqual(page.corrections.map(c => [c.heard, c.meant]), [['harrow', 'Haru']]);
+    const half = await web.call('/api/hearing', { method: 'POST', body: JSON.stringify({ heard: 'only this' }) });
+    assert.equal(half.status, 400);
+    const gone = await web.call('/api/hearing/forget', { method: 'POST', body: JSON.stringify({ heard: 'harrow' }) });
+    assert.deepEqual(await gone.json(), { corrections: [] });
+  } finally { await web.stop(); }
+});
+
 test('her name alone gets a word back; a line is spoken in its mood; a message said over her says so', async () => {
   const spoken: { text: string; emotion?: string | null }[] = [];
   const asides: unknown[] = [];
@@ -704,6 +741,17 @@ test('the desk trades memories with the server, and is not trusted while it does
     });
     assert.equal(sent.status, 200);
     assert.equal((await sent.json()).added, 1);
+
+    // The whole of a laptop's memory comes back every time, and a laptop that
+    // has pulled the server's records posts them all back: well past the
+    // message-sized cap, which refused it as "too much" forty-six times a day.
+    const whole = { memories: Array.from({ length: 3000 }, (_, i) => ({ id: `m${i}`, text: `something worth keeping about them, the ${i}th of a great many `.repeat(2), kind: 'fact', mentions: 1 })) };
+    assert.ok(JSON.stringify(whole).length > 300 * 1024, 'the body is over the message cap');
+    const bulk = await web.call('/api/memory/records', { method: 'POST', body: JSON.stringify(whole) });
+    assert.equal(bulk.status, 200, 'a sync body is not a message');
+    assert.equal((await bulk.json()).added, 3000);
+    syncedMemories = [];
+    await web.call('/api/memory/records', { method: 'POST', body: JSON.stringify({ memories: [{ id: 'a', text: 'likes tea', kind: 'fact', mentions: 2 }] }) });
 
     const back = await web.call('/api/memory/records');
     assert.equal(back.status, 200);
@@ -822,5 +870,207 @@ test('her diary is served to the phone, newest first, behind the door', async ()
     const { entries } = await got.json() as { entries: { day: string; text: string }[] };
     assert.equal(entries[0].day, '2026-08-29');
     assert.match(entries[0].text, /Tommy was a pain/);
+  } finally { await web.stop(); }
+});
+
+// -- speech to speech: the hook, the status, the call ----------------------------------
+
+type Evi = NonNullable<WebDeps['evi']>;
+
+/** A call that can be placed, a hook that answers one live session. */
+function eviDeps(overrides: Partial<Evi> = {}): Evi {
+  return {
+    status: () => ({ enabled: true, engine: 'hume', minutesToday: 3, cap: 60 }),
+    secret: () => 'hook-secret',
+    open: async (_device, handlers) => ({ sendAudio: () => {}, close: reason => handlers.onClose(reason ?? 'hung up') }),
+    turn: async (sessionId, text, _prosody, onChunk) => {
+      if (sessionId !== 'dev.live') return null;
+      // The stream is what the phone would read; Hume gets the reply that
+      // counts, once, made speakable — so the marker and the markdown stay here.
+      onChunk('Fine, ');
+      onChunk('�');
+      onChunk(text.toUpperCase());
+      return { reply: '**Fine,** ' + text.toUpperCase() + ' 😒' };
+    },
+    ...overrides,
+  };
+}
+
+const HOOK = '/api/evi/chat/completions?custom_session_id=dev.live';
+const hookBody = (text: string) => JSON.stringify({ messages: [{ role: 'user', content: text, models: { prosody: { scores: { Anger: 0.5 } } } }] });
+const dataLines = (body: string) => body.split('\n').filter(line => line.startsWith('data: ')).map(line => line.slice(6));
+
+test('the call status is behind the sign-in and says when nothing is built', async () => {
+  const bare = await door();
+  try {
+    await bare.signIn();
+    const status = await bare.call('/api/evi/status');
+    assert.equal(status.status, 200);
+    assert.deepEqual(await status.json(), { enabled: false, engine: 'none', minutesToday: 0, cap: 0, reason: 'not built' });
+  } finally { await bare.stop(); }
+  const built = await door({ evi: eviDeps() });
+  try {
+    await built.signIn();
+    assert.deepEqual(await (await built.call('/api/evi/status')).json(), { enabled: true, engine: 'hume', minutesToday: 3, cap: 60 });
+    assert.deepEqual(await (await built.call('/api/call/status')).json(), { enabled: true, engine: 'hume', minutesToday: 3, cap: 60 }, 'the same door under its own name');
+  } finally { await built.stop(); }
+});
+
+test('the brain hook answers Hume by bearer, never by cookie, and locks out guessing', async () => {
+  const web = await door({ evi: eviDeps() });
+  try {
+    // No cookie is ever involved: Hume's servers call this, not the phone.
+    const bare = await web.call(HOOK, { method: 'POST', body: hookBody('hello'), anonymous: true });
+    assert.equal(bare.status, 401);
+    for (let i = 0; i < 3; i++) {
+      const wrong = await web.call(HOOK, { method: 'POST', body: hookBody('hello'), anonymous: true, headers: { authorization: 'Bearer nope' } });
+      assert.equal(wrong.status, 401);
+    }
+    const locked = await web.call(HOOK, { method: 'POST', body: hookBody('hello'), anonymous: true, headers: { authorization: 'Bearer nope' } });
+    assert.equal(locked.status, 429, 'the fifth wrong bearer waits, like the fifth wrong password');
+    // Through the tunnel every caller shares an address, so the lockout a
+    // stranger earned must not stand between Hume and her words.
+    const hume = await web.call(HOOK, { method: 'POST', body: hookBody('hello'), anonymous: true, headers: { authorization: 'Bearer hook-secret' } });
+    assert.equal(hume.status, 200, 'a right bearer is never locked out');
+  } finally { await web.stop(); }
+});
+
+test('the brain hook answers with her whole reply as one OpenAI chunk, then DONE', async () => {
+  const web = await door({ evi: eviDeps() });
+  try {
+    const right = { authorization: 'Bearer hook-secret' };
+    const noSession = await web.call('/api/evi/chat/completions', { method: 'POST', body: hookBody('hello'), anonymous: true, headers: right });
+    assert.equal(noSession.status, 400);
+    const strange = await web.call('/api/evi/chat/completions?custom_session_id=dev.stale', { method: 'POST', body: hookBody('hello'), anonymous: true, headers: right });
+    assert.equal(strange.status, 403, 'a right bearer with a session that is not a call of ours is refused');
+    const nothing = await web.call(HOOK, { method: 'POST', body: JSON.stringify({ messages: [{ role: 'assistant', content: 'x' }] }), anonymous: true, headers: right });
+    assert.equal(nothing.status, 400);
+
+    const answered = await web.call(HOOK, { method: 'POST', body: hookBody('hello'), anonymous: true, headers: right });
+    assert.equal(answered.status, 200);
+    assert.match(answered.headers.get('content-type') ?? '', /^text\/event-stream/);
+    const lines = dataLines(await answered.text());
+    assert.equal(lines.at(-1), '[DONE]');
+    const chunks = lines.slice(0, -1).map(line => JSON.parse(line) as { object: string; choices: { delta: { content?: string }; finish_reason: string | null }[] });
+    assert.ok(chunks.every(chunk => chunk.object === 'chat.completion.chunk'));
+    assert.deepEqual(chunks.map(chunk => chunk.choices[0].delta.content ?? ''), ['Fine, Hello', ''], 'the reply that counts, speakable, in one piece');
+    assert.deepEqual(chunks.map(chunk => chunk.choices[0].finish_reason), [null, 'stop']);
+  } finally { await web.stop(); }
+});
+
+test('a reply she is not giving is a stop and DONE with no words in it', async () => {
+  const web = await door({ evi: eviDeps({ turn: async () => ({ reply: '', ignored: true }) }) });
+  try {
+    const answered = await web.call(HOOK, { method: 'POST', body: hookBody('hello'), anonymous: true, headers: { authorization: 'Bearer hook-secret' } });
+    assert.equal(answered.status, 200);
+    const lines = dataLines(await answered.text());
+    assert.equal(lines.length, 2);
+    assert.equal((JSON.parse(lines[0]) as { choices: { finish_reason: string }[] }).choices[0].finish_reason, 'stop');
+    assert.equal(lines[1], '[DONE]');
+  } finally { await web.stop(); }
+});
+
+/** The phone's end of a call: the socket, and its messages in the order they came. */
+type Call = { ws: WebSocket; next(): Promise<Record<string, unknown>>; closed: Promise<{ code: number; reason: string }> };
+
+/**
+ * Opens the call socket and resolves with the call, or with the status the
+ * server refused it with. Messages are queued from the first byte: the
+ * server's `ready` can share a packet with the handshake and be emitted
+ * before any listener a test attaches afterwards would hear it.
+ */
+function dial(port: number, path: string, cookie: string): Promise<Call | { refused: number }> {
+  return new Promise((resolve, reject) => {
+    const ws = new WebSocket(`ws://127.0.0.1:${port}${path}`, { headers: cookie ? { cookie } : {} });
+    const queue: Record<string, unknown>[] = [];
+    const waiting: ((message: Record<string, unknown>) => void)[] = [];
+    ws.on('message', data => {
+      const message = JSON.parse(String(data)) as Record<string, unknown>;
+      const taker = waiting.shift();
+      if (taker) taker(message); else queue.push(message);
+    });
+    const closed = new Promise<{ code: number; reason: string }>(done => ws.once('close', (code, reason) => done({ code, reason: String(reason) })));
+    const next = () => new Promise<Record<string, unknown>>(take => { const queued = queue.shift(); if (queued) take(queued); else waiting.push(take); });
+    ws.once('unexpected-response', (_req, res) => { resolve({ refused: res.statusCode ?? 0 }); ws.terminate(); });
+    ws.once('open', () => resolve({ ws, next, closed }));
+    ws.once('error', reject);
+  });
+}
+
+test('the call socket is refused to strangers and off every other path', async () => {
+  const web = await door({ evi: eviDeps() });
+  try {
+    assert.deepEqual(await dial(web.port, '/api/evi/session', ''), { refused: 401 });
+    await web.signIn(true);
+    assert.deepEqual(await dial(web.port, '/api/chat', web.cookie()), { refused: 404 });
+  } finally { await web.stop(); }
+  const bare = await door();
+  try {
+    await bare.signIn(true);
+    assert.deepEqual(await dial(bare.port, '/api/evi/session', bare.cookie()), { refused: 404 }, 'nothing built, nothing to connect to');
+  } finally { await bare.stop(); }
+});
+
+test('a call carries audio up and events down, and stop hangs it up', async () => {
+  const frames: number[] = [];
+  const web = await door({
+    evi: eviDeps({
+      open: async (_device, handlers) => {
+        setTimeout(() => handlers.onEvent({ type: 'user_message', text: 'hello', interim: false }), 5);
+        return { sendAudio: pcm => frames.push(pcm.length), close: reason => handlers.onClose(reason ?? 'hung up') };
+      },
+    }),
+  });
+  try {
+    await web.signIn(true);
+    const dialled = await dial(web.port, '/api/evi/session', web.cookie());
+    assert.ok('ws' in dialled, 'the phone gets its call');
+    const call = dialled;
+    assert.deepEqual(await call.next(), { type: 'ready' });
+    assert.deepEqual(await call.next(), { type: 'user_message', text: 'hello', interim: false });
+    call.ws.send(Buffer.alloc(1280));
+    call.ws.send(Buffer.alloc(640));
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assert.deepEqual(frames, [1280, 640]);
+    call.ws.send(JSON.stringify({ type: 'stop' }));
+    assert.deepEqual(await call.next(), { type: 'ended', reason: 'the phone hung up' });
+    assert.equal((await call.closed).code, 1000);
+  } finally { await web.stop(); }
+});
+
+test('a call that cannot be placed says why and closes', async () => {
+  const web = await door({ evi: eviDeps({ open: async () => { throw new Error('She is asleep.'); } }) });
+  try {
+    await web.signIn(true);
+    const dialled = await dial(web.port, '/api/evi/session', web.cookie());
+    assert.ok('ws' in dialled);
+    assert.deepEqual(await dialled.next(), { type: 'refused', reason: 'She is asleep.' });
+    const end = await dialled.closed;
+    assert.equal(end.code, 1008);
+    assert.equal(end.reason, 'She is asleep.');
+  } finally { await web.stop(); }
+});
+
+test('the phone can write a task onto her list, and a bad one is refused', async () => {
+  // A reminder added to the Haru list in Apple Reminders (Reminders.swift).
+  const written: { title: string; date: string; time?: string }[] = [];
+  const web = await door({
+    addAgenda: (title, date, time) => {
+      if (time && !/^\d{1,2}:\d{2}( [AP]M)?$/i.test(time)) return null;
+      written.push({ title, date, ...(time ? { time } : {}) });
+      return { id: `k${written.length}`, title, date, ...(time ? { time } : {}) };
+    },
+    agenda: () => written.map((item, index) => ({ id: `k${index + 1}`, title: item.title, date: item.date, time: item.time ?? null, kind: 'task', done: false, daysAway: 1 })),
+  });
+  try {
+    assert.equal((await web.call('/api/agenda', { method: 'POST', body: JSON.stringify({ title: 'Pay the rego', date: '2026-10-06' }) })).status, 401, 'signed out');
+    await web.signIn();
+    const saved = await (await web.call('/api/agenda', { method: 'POST', body: JSON.stringify({ title: '  Pay the rego ', date: '2026-10-06', time: '09:00' }) })).json();
+    assert.deepEqual(saved.item, { id: 'k1', title: 'Pay the rego', date: '2026-10-06', time: '09:00' });
+    assert.equal(saved.items.length, 1);
+    assert.equal((await web.call('/api/agenda', { method: 'POST', body: JSON.stringify({ title: 'No date' }) })).status, 400);
+    assert.equal((await web.call('/api/agenda', { method: 'POST', body: JSON.stringify({ title: 'Bad date', date: '6/10' }) })).status, 400);
+    assert.equal((await web.call('/api/agenda', { method: 'POST', body: JSON.stringify({ title: 'Bad time', date: '2026-10-06', time: 'nine-ish' }) })).status, 400);
+    assert.equal(written.length, 1);
   } finally { await web.stop(); }
 });

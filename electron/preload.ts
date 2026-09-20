@@ -149,11 +149,6 @@ contextBridge.exposeInMainWorld('haru', {
     set: (config: GamingConfig) => ipcRenderer.invoke('gaming:set', config) as Promise<GamingConfig>,
   },
   ui: { page: (page: string) => ipcRenderer.invoke('ui:page', page) as Promise<void> },
-  discord: {
-    status: () => ipcRenderer.invoke('discord:status') as Promise<{ enabled: boolean; ownerId: string; pesterHours: number; hasToken: boolean; connected: boolean; botName: string; trouble: string; checkInChannel: string }>,
-    setToken: (token: string) => ipcRenderer.invoke('discord:setToken', token) as Promise<boolean>,
-    set: (next: { ownerId: string; pesterHours: number; enabled: boolean; checkInChannel?: string }) => ipcRenderer.invoke('discord:set', next) as Promise<{ enabled: boolean; connected: boolean }>,
-  },
   // The door a phone comes in by. The password goes one way only — there is no
   // getter here, and there is not meant to be.
   web: {
@@ -237,6 +232,13 @@ contextBridge.exposeInMainWorld('haru', {
       const listener = (_event: Electron.IpcRendererEvent, turn: { text: string; reply: string; ignored: boolean; retry?: boolean; attachments?: Attachment[] }) => callback(turn);
       ipcRenderer.on('chat:fromPhone', listener);
       return () => ipcRenderer.removeListener('chat:fromPhone', listener);
+    },
+    // Said on a call, and cut off: what she actually got out replaces the
+    // reply her brain wrote, or the reply goes when none of it was said.
+    onSaidFromPhone: (callback: (turn: { reply: string; said: string }) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, turn: { reply: string; said: string }) => callback(turn);
+      ipcRenderer.on('chat:saidFromPhone', listener);
+      return () => ipcRenderer.removeListener('chat:saidFromPhone', listener);
     },
     // Rated from a phone. The thumb and the note land on the message here,
     // where the conversation lives; her comeback arrives as an interjection.

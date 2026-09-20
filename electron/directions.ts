@@ -15,13 +15,16 @@ export type Found = { name: string; lat: number; lon: number };
 
 // Everything a question can trail off with that is not part of the place: "from
 // here right now?", "this morning?", "please". Repeated, because they stack.
-const TAIL = String.raw`(?:\s+(?:from here|from where i am|from home|right now|at the moment|this (?:morning|afternoon|evening|arvo)|today|tonight|currently|please|pls|now|thanks|(?:going|heading|driving|on (?:my|the) way)?\s*(?:back(?: home)?|home)))*\s*[?.!]*\s*$`;
+const TAIL = String.raw`(?:\s+(?:from here|from where i am|from home|right now|at the moment|this (?:morning|afternoon|evening|arvo)|today|tonight|currently|please|pls|now|thanks|(?:going|heading|driving|on (?:my|the) way)?\s*(?:back(?: to)? home|back|(?:to )?home)))*\s*[?.!]*\s*$`;
 const ASKS: { pattern: RegExp; nearest?: boolean }[] = [
   { pattern: new RegExp(String.raw`\b(?:directions?|the way|a route|route|navigat(?:e|ion))\s+(?:to|for|towards?)\s+(.+?)` + TAIL, 'i') },
   { pattern: new RegExp(String.raw`\bhow (?:do|can|would|should|did) (?:i|we) get (?:back )?(?:to|home to)\s+(.+?)` + TAIL, 'i') },
   { pattern: new RegExp(String.raw`\b(?:take|guide|walk|drive|navigate|get) (?:me|us) (?:back )?to\s+(.+?)` + TAIL, 'i') },
   { pattern: new RegExp(String.raw`\b(?:take|guide|walk|drive|get) (?:me|us) (home)` + TAIL, 'i') },
   { pattern: new RegExp(String.raw`\bhow far (?:is|to|away is)\s+(.+?)` + TAIL, 'i') },
+  // "How long to get home" read as a place called "get", and "how long will it
+  // take to drive back home" as one called "drive back": home comes first.
+  { pattern: new RegExp(String.raw`\bhow long (?:to|till|until|before|(?:will|would|does) it take(?: (?:me|us))? to) (?:get|go|drive|walk|head|ride|i'?m|i am|we'?re|we are|i get|we get) (?:back )?(?:to )?(home)` + TAIL, 'i') },
   // Travel time is a route question too. Without these she guessed — "roughly
   // 45 minutes to an hour" for a half-hour drive — and a guess about a journey
   // is exactly the confident wrong number the map exists to replace.
@@ -31,10 +34,12 @@ const ASKS: { pattern: RegExp; nearest?: boolean }[] = [
   { pattern: new RegExp(String.raw`\beta (?:to|for)\s+(.+?)` + TAIL, 'i') },
   // "How's the traffic into Perth?" was answered "Traffic's fine" — she cannot
   // see traffic. The map can; so it is a route question, and the button shows it.
+  // "check traffic to get back home" had "get back home" as the place.
+  { pattern: new RegExp(String.raw`\btraffic\s+(?:like\s+)?(?:to|for) (?:get|go|drive|head|ride|walk)(?: back)?(?: to)?\s+(.+?)` + TAIL, 'i') },
   { pattern: new RegExp(String.raw`\b(?:how(?:'s| is| are|'re) the )?traffic\s+(?:like\s+)?(?:from [^?]+? )?(?:into|to|towards?|on the way to|heading to|going to)\s+(.+?)` + TAIL, 'i') },
   { pattern: new RegExp(String.raw`\b(?:where(?:'s| is)|find(?: me)?|nearest|closest)\s+(?:the |a )?(?:nearest|closest)\s+(.+?)` + TAIL, 'i'), nearest: true },
 ];
-const NOT_A_PLACE = /^(?:there|here|it|that|this|you|her|him|them|me|us|the point|sleep|bed|work on it|the top|the bottom)$/i;
+const NOT_A_PLACE = /^(?:there|here|it|that|this|you|her|him|them|me|us|the point|sleep|bed|work on it|the top|the bottom|get|go|drive|walk|head|ride)$/i;
 /** "How long does it take to boil an egg" has the shape of a journey and none of the substance. */
 const NOT_A_JOURNEY = /^(?:you|i|we|they|he|she|it|this|that|boil|cook|make|bake|do|finish|learn|read|write|build|fix|charge|download|install|render|compile|get ready|fall asleep|heal|recover|grow|dry|load|update|stop|start|be)\b/i;
 
@@ -55,7 +60,9 @@ export function directionsAsk(text: string): DirectionsAsk | null {
     const cleaned = cleanDestination(m[1]);
     const near = /^(?:the )?(?:nearest|closest|nearby|near(?:by)? )\s*/i.exec(cleaned);
     const destination = near ? cleanDestination(cleaned.slice(near[0].length)) : cleaned;
-    if (destination.length < 2 || NOT_A_PLACE.test(destination) || NOT_A_JOURNEY.test(destination)) return null;
+    // Not this pattern's place; a later one may still read the sentence right
+    // ("take me to get home" is not a place called "get home", but it is home).
+    if (destination.length < 2 || NOT_A_PLACE.test(destination) || NOT_A_JOURNEY.test(destination)) continue;
     return { destination, nearest: nearest === true || near !== null };
   }
   return null;
@@ -119,7 +126,10 @@ export function claimsTraffic(reply: string): boolean {
 // "how long will that take?", "is traffic bad?" — a journey question with the
 // place left in the sentence before it, or in the same breath: "I'm going to
 // Starbucks in Murdoch then work, so how long will that take?"
-const BARE_JOURNEY = new RegExp(String.raw`^(?:.*\b)?(?:so\s+)?(?:how long (?:will|would|does|is) (?:that|it|this)(?: take| be)?|is (?:the )?traffic (?:bad|heavy|ok|okay|alright|any good)|how(?:'s|’s|s| is) (?:the )?traffic|what(?:'s|’s|s| is) (?:the )?traffic like)` + TAIL, 'i');
+// Told rather than asked counts too: "Haru check the traffic going back to
+// home" got "I don't have access to live traffic data. You'd need to check
+// Google Maps" (2026-09-17), with her holding both and the ask in plain words.
+const BARE_JOURNEY = new RegExp(String.raw`^(?:.*\b)?(?:so\s+)?(?:how long (?:will|would|does|is) (?:that|it|this)(?: take| be)?|is (?:the )?traffic (?:bad|heavy|ok|okay|alright|any good)|how(?:'s|’s|s| is) (?:the )?traffic|what(?:'s|’s|s| is) (?:the )?traffic like|how bad is (?:the )?traffic|(?:is there )?(?:any|much) traffic|(?:(?:can|could|would|will) you\s+)?(?:please\s+)?(?:check|look up|look at|pull up|get)(?: me)?\s+(?:the |on (?:the )?)?(?:traffic|travel time|drive time|eta)(?: (?:report|update))?)` + TAIL, 'i');
 /** Where they said they were off to, in their own words: "going to X", "stopping by X", "off to X". */
 export function destinationNamed(text: string): string | null {
   const m = new RegExp(String.raw`\b(?:going|heading|off|driving|walking|nipping|popping|stopping(?: by| in| at)?|on my way)\s+(?:to|by|at|into|over to|down to|round to)?\s*([A-Z][\w'&-]*(?:\s+(?:in|at|on)\s+[A-Z][\w'&-]*|\s+[A-Z][\w'&-]*){0,3})`, '').exec(text ?? '');
@@ -130,7 +140,21 @@ export function destinationNamed(text: string): string | null {
 /** "pick up the cpu", "the Dianella address" — a thing to do, not a place; the place is an address they gave. */
 const ERRAND = /^(?:(?:to )?(?:pick|pick up|grab|collect|fetch|drop off|drop off at|drop)\b|.*\baddress\b)/i;
 /** Going home, however they put it: "going back", "heading home", "the way back", "back home". */
-const HOMEWARD = /\b(?:(?:going|heading|driving|getting|get|head|go|come|coming|on (?:my|the) way|(?:the |my )?(?:way|drive|trip|run))\s+(?:back(?: home)?|home)|back home)\b/i;
+// Any wording, as long as it asks about the roads and not something else
+// called traffic: after "check the traffic going back to home" came "Haru check
+// traffic to get back home", which the anchored BARE_JOURNEY missed again. A
+// request (a verb or question word up front, or a question mark) naming
+// traffic, the drive time or an eta; statements about the day are not asks.
+const ROAD_WORD = /\b(?:traffic|drive time|travel time|eta)\b(?!\s*(?:lights?|cams?|cameras?|signals?|cones?))|\b(?:drive|roads?|commute|trip|ride|journey)\s+(?:back(?: home)?|home)\b/i;
+const NOT_ROADS = /\b(?:web ?site|site|web|page|server|network|api|seo|search|organic|google analytics|analytics)\s+traffic\b|\btraffic\s+(?:to|on|for) (?:the |my |our )?(?:web ?site|site|page|server|store page|shop page)\b/i;
+const REQUEST = /^(?:(?:hey |ok |oi )?haru[,!.]?\s+)?(?:(?:can|could|would|will) you\s+|please\s+|pls\s+)?(?:check|look|see|find|get|pull|tell|what|what's|whats|how|how's|hows|is|are|any|much)\b|\?\s*$/i;
+function asksAboutRoads(line: string): boolean {
+  return ROAD_WORD.test(line) && !NOT_ROADS.test(line) && REQUEST.test(line.trim());
+}
+// "Check again" after a route question is that question, asked again.
+const AGAIN = /^(?:(?:hey |ok )?haru[,!.]?\s+)?(?:(?:can you |could you |please )?(?:check|try|look|do(?: it| that)?|ask)(?: it| that| the traffic)? (?:again|now)|again|once more|re-?check(?: it)?|refresh(?: it)?|and now|what about now|how about now)(?: please| pls)?[?.!\s]*$/i;
+
+const HOMEWARD = /\b(?:(?:going|heading|driving|getting|get|head|go|come|coming|on (?:my|the) way|(?:the |my )?(?:way|drive|trip|run))\s+(?:back(?: to)?(?: home)?|(?:to )?home)|back home|(?:traffic|eta|travel time|drive time)\s+(?:back\s+)?(?:to\s+)?home)\b/i;
 
 /** The ask with no place in it: "give me the directions", "directions please", "how do I get there". */
 const BARE_ASK = /^(?:(?:can|could|would|will) you )?(?:(?:give|send|show|get|shoot) me )?(?:the |some |those |a )?(?:directions?|route|way there)(?: there| to (?:it|that|there|the place))?(?: please| pls| again| now| thanks)*[?.!\s]*$|^how (?:do|can|would) (?:i|we) get there(?: from here)?[?.!\s]*$/i;
@@ -168,6 +192,19 @@ export function directionsAskFrom(latest: string, recentUser: string[]): Directi
     // traffic and their position, she said she could not check and told him
     // to open Waze. "Back" and "home" are the place she knows as home.
     if (HOMEWARD.test(line) || recentUser.slice(-3).some(earlier => HOMEWARD.test(earlier))) return { destination: 'home', nearest: false };
+  }
+  if (asksAboutRoads(line)) {
+    const named = destinationNamed(line);
+    if (named) return { destination: named, nearest: false };
+    if (HOMEWARD.test(line) || /\bhome\b/i.test(line)) return { destination: 'home', nearest: false };
+  }
+  if (AGAIN.test(line)) {
+    // The latest earlier message that was a route question, read with what came before it.
+    for (let at = recentUser.length - 1; at >= Math.max(0, recentUser.length - 3); at--) {
+      const again = directionsAskFrom(recentUser[at], recentUser.slice(0, at));
+      if (again) return again;
+    }
+    return null;
   }
   if (BARE_ASK.test(line)) {
     const address = remembered();

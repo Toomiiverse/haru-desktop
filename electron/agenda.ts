@@ -2,7 +2,7 @@
 // that a time which has already been and gone is not just another line on a
 // list — she should notice, and want to know how it went.
 
-import { localDateKey, parseTimeOfDay, resolveDate } from './dates';
+import { localDateKey, MONTH_PATTERN, parseTimeOfDay, resolveDate } from './dates';
 
 // heardAbout is when she asked how something went and was actually told. It is
 // separate from completedAt because they answer different questions: one is
@@ -187,8 +187,27 @@ function sharesRoot(word: string, asked: Set<string>) {
  */
 const WHERE_IT_HAPPENS = /\s+\b(?:from|at|in)\b\s+/i;
 
+/**
+ * Words that name nothing. Three letters is the length filter below, and "the"
+ * and "for" are three letters: they counted as words of a title, so "RAM has
+ * been above 90% for the last 60 seconds" named "Be at the shop by 7 for the
+ * electricians" — two words of it, whole, which is the bar staleItemNamed
+ * asks for — and every system warning she had to give was thrown away for
+ * mentioning a done errand, twice an hour, for weeks (2026-09-14). Function
+ * words only: a verb like "get" or "pick" still says what the errand is.
+ */
+const FUNCTION_WORDS = new Set([
+  'the', 'and', 'for', 'but', 'nor', 'not', 'you', 'your', 'yours', 'are', 'was', 'were', 'has', 'had', 'have', 'been',
+  'being', 'with', 'that', 'this', 'these', 'those', 'from', 'they', 'them', 'their', 'theirs', 'what', 'when', 'where',
+  'which', 'who', 'whom', 'whose', 'will', 'would', 'could', 'should', 'can', 'may', 'might', 'shall', 'its', 'into',
+  'onto', 'than', 'then', 'also', 'just', 'very', 'some', 'any', 'all', 'out', 'off', 'over', 'about', 'after', 'before',
+  'she', 'her', 'hers', 'him', 'his', 'our', 'ours', 'did', 'does', 'there', 'here', 'how', 'why', 'too', 'yet', 'only',
+  'still', 'ever', 'never', 'again', 'while', 'until', 'till', 'because', 'though', 'although', 'whether', 'either',
+  'neither',
+]);
+
 function significant(text: string) {
-  return new Set(text.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(word => word.length > 2));
+  return new Set(text.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(word => word.length > 2 && !FUNCTION_WORDS.has(word)));
 }
 
 function headOf(title: string): string | null {
@@ -621,6 +640,81 @@ export function putOffInstruction(latestMessage: string): string {
 }
 
 /**
+ * A day and a clock time, read out of one sentence.
+ *
+ * "rescheduled to next Friday @8:45am" carries both; "moved it to the 6th of
+ * October" a day; "make it 3pm" a time. Either may be missing. The time is in
+ * the list's own format ("8:45 AM"), the day resolved from now the way
+ * resolveDate does — "next friday" said on a Sunday is that week's Friday.
+ */
+const DAY_NAMED = new RegExp(`\\b((?:next |this coming |this )?(?:sunday|monday|tuesday|wednesday|thursday|friday|saturday)|tomorrow|tonight|today|(?:the )?\\d{1,2}(?:st|nd|rd|th)?(?: of)? ${MONTH_PATTERN}(?:,? \\d{4})?|${MONTH_PATTERN} (?:the )?\\d{1,2}(?:st|nd|rd|th)?(?:,? \\d{4})?)\\b`, 'i');
+const CLOCK_NAMED = /(?:@\s*|\bat\s+)?\b(\d{1,2})(?::(\d{2}))?\s*([ap])\.?m\b/i;
+
+export function saidWhen(text: string, now: Date): { date?: string; time?: string } {
+  const day = DAY_NAMED.exec(text)?.[1];
+  const date = day ? resolveDate(day.toLowerCase(), now) ?? undefined : undefined;
+  const clock = CLOCK_NAMED.exec(text);
+  let time: string | undefined;
+  if (clock) {
+    const hour = Number(clock[1]); const minute = Number(clock[2] ?? '0');
+    if (hour >= 1 && hour <= 12 && minute <= 59) time = `${hour}:${String(minute).padStart(2, '0')} ${clock[3].toLowerCase() === 'p' ? 'PM' : 'AM'}`;
+  }
+  return { date, time };
+}
+
+/**
+ * Her reply saying she has moved something — as opposed to them having moved
+ * it, or her asking whether to. "I've moved it to next Friday", "Rescheduled.",
+ * "It's been pushed to the 6th"; not "so you moved it and didn't tell me".
+ */
+const CLAIMS_MOVED = /\b(?:i(?:'ve| have|'ll| will)?|it'?s|it is|that'?s|that is|(?:it|that) has|consider it)\s+(?:been\s+)?(?:moved|rescheduled|shifted|bumped|pushed)\b|^\s*(?:moved|rescheduled|shifted|bumped)\b/i;
+
+export type MoveSaid<T> = { item: T; date: string; time?: string };
+
+/**
+ * Her claim of a move, made good on the list.
+ *
+ * "She had to cancel because she was sick so we rescheduled to next Friday
+ * @8:45am" — "Right, so you knew and didn't tell me. I've moved it to next
+ * Friday at 8:45 AM." Nothing moved: the hosted brain wrote the sentence and
+ * called no tool, the appointment stayed on the old day, and that evening she
+ * was still asking about an 11:30 that had been rescheduled in her hearing
+ * (2026-09-13). The same shape as reminderPromised: what she says she has done
+ * to the list is done to the list, read from the day and time they gave, with
+ * her own words filling in only what they left out.
+ *
+ * Which item: one named in their message, in her reply, or in her previous
+ * line — "That was Friday. Your psychologist, Sam." is what "it" means a turn
+ * later — else what she was chasing, which the caller supplies. Named loosely,
+ * as whenMismatchInstruction does, because the alternative is not caution: it
+ * is a list that says one thing while she says another. Nothing moves that
+ * neither of them named and she was not chasing, and nothing moves to where
+ * it already is.
+ */
+export function movedSaid<T extends AgendaItem>(
+  theirMessage: string,
+  herReply: string,
+  herPrevious: string,
+  open: T[],
+  chased: T | null,
+  now: Date,
+): MoveSaid<T> | null {
+  if (!CLAIMS_MOVED.test(herReply)) return null;
+  const theirs = saidWhen(theirMessage, now);
+  const hers = saidWhen(herReply, now);
+  const date = theirs.date ?? hers.date;
+  const time = theirs.time ?? hers.time;
+  if (!date && !time) return null;
+  const live = open.filter(item => !item.done);
+  const item = namedItem(live, theirMessage) ?? namedItem(live, herReply) ?? namedItem(live, herPrevious) ?? (chased && !chased.done ? chased : null);
+  if (!item) return null;
+  const toDate = date ?? item.date;
+  const toTime = time ?? item.time;
+  if (toDate === item.date && toTime === item.time) return null;
+  return { item, date: toDate, time: toTime };
+}
+
+/**
  * How many days between two date keys, counted on the calendar rather than the
  * clock, so daylight saving cannot make a day 23 hours long and lose one.
  */
@@ -680,7 +774,12 @@ export function relativeDay(dateKey: string, todayKey: string, weekday: Intl.Dat
   const away = daysBetween(todayKey, dateKey);
   if (away > 1 && away <= 14) return `${name}, ${away} days from now`;
   if (away < -1 && away >= -14) return `last ${name}, ${-away} days ago`;
-  return dateKey < todayKey ? `last ${name}` : name;
+  // Past the fortnight a weekday alone is the nearest one: the car registration
+  // due on 6 October stood on his Standing page as "My car registration —
+  // Tuesday" nineteen days out (2026-09-17). So the date comes with it.
+  const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  const dated = `${name} ${day} ${MONTHS[month - 1]}${String(year) === todayKey.slice(0, 4) ? '' : ` ${year}`}`;
+  return dateKey < todayKey ? `last ${dated}` : dated;
 }
 
 
@@ -828,3 +927,23 @@ export function staleItemNamed(line: string, items: AgendaItem[], todayKey: stri
   if (!stale.length) return null;
   return findItem(stale, line, { whole: true }) ?? null;
 }
+
+/**
+ * A calendar event she already tracks, as Google has it now.
+ *
+ * He saw Sam on 2026-09-18 and then moved the same calendar event to 15
+ * October for the next session. The sync copied the new date onto her entry
+ * and nothing else, so the tick from that afternoon rode along: the next
+ * session arrived already done, and she argued with him that evening about
+ * whether he had been at all. A new date is a new occasion — the tick, the
+ * "heard about it" and the "underway" belonged to the old one. Moved into the
+ * past it is left as it was: reopening that would only have her chase a day
+ * that has gone.
+ */
+export function followCalendar<T extends { title: string; date: string; time?: string; done: boolean; completedAt?: string; heardAbout?: string; underway?: string }>(
+  item: T, event: { title: string; date: string; time?: string }, today: string,
+): T {
+  const reopened = event.date !== item.date && event.date >= today;
+  return { ...item, title: event.title, date: event.date, time: event.time, ...(reopened ? { done: false, completedAt: undefined, heardAbout: undefined, underway: undefined } : {}) };
+}
+

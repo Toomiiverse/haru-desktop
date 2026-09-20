@@ -91,7 +91,9 @@ export function markTimeGaps<T extends Dated>(messages: T[], timeZone: string, g
     if (usable && previous && usable.getTime() - previous.getTime() >= gapMinutes * MINUTE) {
       out.push({
         role: 'system',
-        content: `[Time passed here — what follows was said ${describeGap(previous, usable, timeZone)}. Everything above this line is from before that gap: it is background, not something still going on. Do not carry a plan, a mood or a time of day across this line, and do not refer to anything above it as though it were still happening unless they bring it up.]`,
+        // Short: five of these sat in one prompt at eighty tokens each, read by
+        // the hosted model before every first word. The rule is the same.
+        content: `[Time passed — what follows was said ${describeGap(previous, usable, timeZone)}. What is above is background, not still going on: carry no plan, mood or time of day across this line.]`,
       });
     }
     if (usable) previous = usable;
@@ -144,7 +146,90 @@ export function earlierTurns<T extends Dated>(archive: Record<string, T[]>, toda
   const byDay = wanted.map(day => (archive[day] ?? []).filter(message => message.role === 'user' || message.role === 'assistant'));
   const size = (turns: T[]) => turns.reduce((sum, turn) => sum + String(turn.content ?? '').length, 0);
   // Oldest first out, so what survives is what was said most recently.
-  while (byDay.length && byDay.reduce((sum, turns) => sum + size(turns), 0) > budget) byDay.shift();
+  while (byDay.length > 1 && byDay.reduce((sum, turns) => sum + size(turns), 0) > budget) byDay.shift();
+  // One day left and still too much: its evening, from a message of theirs,
+  // rather than nothing. A small budget — a phone that wants her first word
+  // in a second — should still see how yesterday ended.
+  if (byDay.length === 1 && size(byDay[0]) > budget) {
+    let day = byDay[0];
+    while (day.length && size(day) > budget) day = day.slice(1);
+    while (day.length && day[0].role !== 'user') day = day.slice(1);
+    byDay[0] = day;
+  }
   return byDay.flat();
+}
+
+/** The one-line note a finished day was distilled into (summariseSession). */
+export type DayNote = { day: string; summary: string };
+
+/** A finished month, folded from its day notes (foldMonth). */
+export type MonthNote = { month: string; summary: string; createdAt?: string };
+
+/**
+ * The finished days before today, from her own one-line notes — newest last.
+ *
+ * Each day is distilled once at the five o'clock roll, so a note exists for
+ * every day that was actually over while she was running. They are compact,
+ * byte-stable per day (which keeps the cached head stable), and written in
+ * her voice, so the prompt can hold a week of them for a tenth of what three
+ * days of raw turns cost.
+ */
+export function earlierDayNotes(sessions: DayNote[], todayKey: string, days = 7): DayNote[] {
+  return sessions
+    .filter(session => session.day < todayKey)
+    .sort((a, b) => a.day.localeCompare(b.day))
+    .slice(-days);
+}
+
+/**
+ * The finished months before the current one, from her own folds — newest
+ * last. Each is the whole of a month in one line, so the prompt can hold six
+ * of them for the price of a single day's raw turns.
+ */
+export function earlierMonthNotes(monthNotes: MonthNote[], todayKey: string, count = 6): MonthNote[] {
+  const current = todayKey.slice(0, 7);
+  return monthNotes
+    .filter(note => note.month < current)
+    .sort((a, b) => a.month.localeCompare(b.month))
+    .slice(-count);
+}
+
+/**
+ * The earlier-days context for the chat prompt: her one-line notes for the
+ * days that have them, her folded notes for the months before them, and raw
+ * turns (via earlierTurns) for the days that have neither — a day is only
+ * distilled once it is actually over, so yesterday can still be raw before the
+ * roll, or raw for ever if the model was down that night. Notes become a
+ * single system message in the prompt; raw turns flow through the same seams
+ * as today's.
+ */
+export function earlierDaysContext(
+  sessions: DayNote[],
+  monthNotes: MonthNote[],
+  archive: Record<string, unknown[]>,
+  todayKey: string,
+  opts: { days?: number; months?: number; budget?: number; turnsDays?: number } = {},
+): { notes: string[]; turns: Dated[] } {
+  const days = opts.days ?? DAYS_OF_HISTORY;
+  const months = opts.months ?? 6;
+  const budget = opts.budget ?? HISTORY_BUDGET_CHARS;
+  const turnsDays = opts.turnsDays ?? DAYS_OF_HISTORY;
+  // Distilled means it has a note at all — or its whole month is folded —
+  // not that its note is inside the window shown. Before this, a day just
+  // past the window (its note dropped, its month folded) read as never
+  // distilled and its raw turns came back into the prompt: 42 turns of a
+  // day three weeks gone, in front of today's, on every turn.
+  const folded = new Set(monthNotes.map(note => note.month));
+  const noted = new Set(sessions.map(note => note.day));
+  // The months come first, the recent days after — oldest to newest.
+  const notes = [
+    ...earlierMonthNotes(monthNotes, todayKey, months).map(note => `[Month ${note.month}] ${note.summary}`),
+    ...earlierDayNotes(sessions, todayKey, days).map(note => `[Day ${note.day}] ${note.summary}`),
+  ];
+  const wanted = Object.keys(archive).filter(day => day < todayKey && !noted.has(day) && !folded.has(day.slice(0, 7))).sort().slice(-turnsDays);
+  const subset: Record<string, unknown[]> = {};
+  for (const day of wanted) subset[day] = archive[day] ?? [];
+  const turns = earlierTurns(subset as Record<string, Dated[]>, todayKey, turnsDays, budget);
+  return { notes, turns };
 }
 

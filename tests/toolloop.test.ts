@@ -7,7 +7,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { MAX_TOOL_ROUNDS, runToolLoop, type ToolLoopDeps } from '../electron/toolloop';
+import { MAX_TOOL_ROUNDS, runToolLoop, type ToolLoopDeps, textToolCall } from '../electron/toolloop';
 import type { ChatMessage, ToolCall } from '../electron/provider';
 
 const says = (content: string): ChatMessage => ({ role: 'assistant', content });
@@ -87,6 +87,75 @@ test('a reply with no tool calls settles in one round', async () => {
   assert.equal(result.rounds, 1);
   assert.equal(result.ran.size, 0);
   assert.equal(h.resets, 0, 'nothing was discarded, so nothing should be taken back');
+});
+
+// -- a call written out as words ---------------------------------------------------
+
+test('a call written out as words is read as the call it is, and a sentence naming a tool is not', () => {
+  assert.deepEqual(textToolCall('look_up_knowledge:0{"query": "Haru notes", "category": "personal"}'), { function: { name: 'look_up_knowledge', arguments: '{"query": "Haru notes", "category": "personal"}' } });
+  assert.deepEqual(textToolCall('functions.get_system_info:0{}'), { function: { name: 'get_system_info', arguments: '{}' } });
+  assert.deepEqual(textToolCall('adopt_interest(kind="game", title="Zenless Zone Zero")'), { function: { name: 'adopt_interest', arguments: '{"kind":"game","title":"Zenless Zone Zero"}' } });
+  assert.deepEqual(textToolCall("search_web(query='RX 9060 XT FSR 4', fresh=true, limit=3)"), { function: { name: 'search_web', arguments: '{"query":"RX 9060 XT FSR 4","fresh":true,"limit":3}' } });
+  assert.equal(textToolCall('I could call search_web(query="x") but I would rather not.'), null);
+  assert.equal(textToolCall('Tch. Fine. Sit with that.'), null);
+  assert.equal(textToolCall('look_up_knowledge:0{not json'), null);
+  assert.equal(textToolCall('adopt_interest(kind=game)'), null, 'a bare word is not a value she could have meant');
+  // Kimi K3's shapes, 2026-09-14: wrapped in brackets, with or without a label.
+  assert.deepEqual(textToolCall('[search_web(query="RX 9060 XT FSR 4 support")]'), { function: { name: 'search_web', arguments: '{"query":"RX 9060 XT FSR 4 support"}' } });
+  assert.deepEqual(textToolCall('[neutral] [search_web(query="RX 9060 XT FSR 4 support")]'), { function: { name: 'search_web', arguments: '{"query":"RX 9060 XT FSR 4 support"}' } });
+  assert.equal(textToolCall('[annoyed] Fine. Checking.'), null, 'a label in front of words is still words');
+});
+
+test('asked to look it up and answered from memory, she is sent to look once', async () => {
+  const asked = 'can you look up whether the RX 9060 XT supports FSR 4 yet';
+  const memory = 'The RX 9060 XT is RDNA 4, so it supports FSR 4 natively.';
+  const h = harness([says(memory), calls('search_web'), says('It does — AMD lists it, and the driver has it on.')]);
+  h.conversation[0].content = asked;
+  const result = await runToolLoop(h.conversation, h.deps);
+  assert.match(h.conversation.map(turn => String(turn.content ?? '')).join(' '), /They asked you to look that up/);
+  assert.deepEqual(h.toolsRun, ['search_web']);
+  assert.ok(h.resets >= 1, 'the answer from memory streamed and is taken back');
+  assert.match(result.content, /AMD lists it/);
+
+  const searched = harness([calls('search_web'), says(memory)]);
+  searched.conversation[0].content = asked;
+  assert.equal((await runToolLoop(searched.conversation, searched.deps)).content, memory, 'she looked, so the answer stands');
+  const notAsked = harness([says(memory)]);
+  notAsked.conversation[0].content = 'does the RX 9060 XT support FSR 4?';
+  assert.equal((await runToolLoop(notAsked.conversation, notAsked.deps)).content, memory, 'a question is not an ask to search');
+  const twice = harness([says(memory), says(memory)]);
+  twice.conversation[0].content = asked;
+  assert.equal((await runToolLoop(twice.conversation, twice.deps)).content, memory, 'asked once, then taken at her word');
+  const cannot = harness([says(memory)], { canSearch: false });
+  cannot.conversation[0].content = asked;
+  assert.equal((await runToolLoop(cannot.conversation, cannot.deps)).content, memory);
+  assert.equal(cannot.resets, 0);
+});
+
+test('a call written out as words runs like any other, and its words are taken back', async () => {
+  const seen: unknown[] = [];
+  const h = harness([
+    { role: 'assistant', content: 'adopt_interest(kind="game", title="Zenless Zone Zero")' },
+    says('Fine. Zenless Zone Zero it is.'),
+  ], { runTool: async call => { seen.push(call.function?.arguments); return 'adopted'; } });
+  const result = await runToolLoop(h.conversation, h.deps);
+  assert.equal(result.content, 'Fine. Zenless Zone Zero it is.');
+  assert.deepEqual([...result.ran], ['adopt_interest']);
+  assert.deepEqual(seen, ['{"kind":"game","title":"Zenless Zone Zero"}']);
+  assert.equal(h.conversation[1].content, '', 'the words that were the call do not stay as her line');
+  assert.ok(h.resets >= 1, 'the reader saw the call streamed; it is taken back');
+});
+
+test('a call written out as words when no tools were on the table is asked again for words', async () => {
+  const h = harness([
+    { role: 'assistant', content: 'get_system_info:0{}' },
+    says('Ask your machine, not me.'),
+  ], { pageReadAfter: 'never' });
+  h.deps.pageWasRead = () => true; // tools withdrawn for the turn
+  const result = await runToolLoop(h.conversation, h.deps);
+  assert.equal(result.content, 'Ask your machine, not me.');
+  assert.equal(result.ran.size, 0);
+  assert.ok(h.say.some(line => /asking for words/.test(line)), h.say.join('\n'));
 });
 
 test('a tool call runs, its result goes back, and the next round settles', async () => {
@@ -199,6 +268,29 @@ test('each retry fires at most once, so a stubborn model is reported not looped'
   assert.equal(result.ran.size, 0);
 });
 
+test('her deliberation in front of the reply is cut, and the reply behind it stands', async () => {
+  const h = harness([
+    says('The user is expressing a low mood. This deserves a real response.\n\nI should:\n1. Acknowledge it\n2. Not offer therapy\n\nLet me check if I need to save this — yes, so I should call save_journalThat sucks. 😤 And "lately" is doing a lot of work there.\n\nWhat set it off today?'),
+  ]);
+  const result = await runToolLoop(h.conversation, h.deps);
+  assert.equal(result.content, 'That sucks. 😤 And "lately" is doing a lot of work there.\n\nWhat set it off today?');
+  assert.equal(result.rounds, 1, 'no second round: the words were there');
+  assert.equal(h.resets, 1, 'the reader saw the plan; it is taken back');
+  assert.ok(h.say.some(line => line.includes('deliberation')));
+});
+
+test('a plan with no words behind it is asked for again, once', async () => {
+  const h = harness([
+    says('The user seems upset about being ignored. I should acknowledge that without apologising.'),
+    says('You were ignored? Funny. I counted fourteen of mine.'),
+  ]);
+  const result = await runToolLoop(h.conversation, h.deps);
+  assert.equal(result.content, 'You were ignored? Funny. I counted fourteen of mine.');
+  assert.equal(result.rounds, 2);
+  assert.equal(h.resets, 1);
+  assert.ok(h.conversation.some(m => m.role === 'user' && /reasoning about what to say/.test(String(m.content))));
+});
+
 test('a reply in a help-desk register is pressed once to be herself', async () => {
   const h = harness([
     says("I'm sorry to hear that. Could you please clarify what specifically is not true?"),
@@ -246,3 +338,18 @@ test('she is only sent to check once, and never when she cannot look or already 
   assert.equal((await runToolLoop(twice.conversation, twice.deps)).content, denial, 'asked once, then taken at her word');
 });
 
+
+test('a claim to have checked, with nothing called, is sent to look once', async () => {
+  const claim = "I checked — nothing with \"Haru notes\" in it. Could be there under something else.";
+  const h = harness([says(claim), calls('look_up_knowledge'), says('There is one: your note about me, the character sheet.')]);
+  const result = await runToolLoop(h.conversation, h.deps);
+  assert.match(h.conversation.map(turn => String(turn.content ?? '')).join(' '), /Call look_up_knowledge or search_web now/);
+  assert.ok(h.resets >= 1, 'the claim streamed and is taken back');
+  assert.match(result.content, /character sheet/);
+  const looked = harness([calls('look_up_knowledge'), says(claim)]);
+  assert.equal((await runToolLoop(looked.conversation, looked.deps)).content, claim, 'she looked, so the claim stands');
+  const twice = harness([says(claim), says(claim)]);
+  assert.equal((await runToolLoop(twice.conversation, twice.deps)).content, claim, 'asked once, then taken at her word');
+  const cannot = harness([says(claim)], { canSearch: false });
+  assert.equal(cannot.resets, 0);
+});

@@ -37,6 +37,9 @@ export type AsideSource =
   | 'weather'     // the weather turning where they are
   | 'upcoming'    // something on the calendar, an hour or a quarter of an hour out
   | 'followup'    // a beat after her own reply, the thing she left out
+  | 'booked'      // something she set herself to come back to (scheduler.ts)
+  | 'thought'     // something on her mind she decided to say (thoughts.ts)
+  | 'goodnight'   // turning in for the night, at her own hour (hersleep.ts)
   | 'other';
 
 export type Aside = {
@@ -121,7 +124,7 @@ export const ASIDE_DAYS = 7;
 // and 'upcoming' were missing, which is three of the seven sources that reach
 // the phone — the evening tally counted none of them, so being left on read
 // after "you left me hanging" cost them nothing.
-const SOURCES: AsideSource[] = ['screen', 'screenshot', 'activity', 'fullscreen', 'reminder', 'idle', 'journal', 'page', 'poke', 'kept', 'system', 'hanging', 'weather', 'upcoming', 'other', 'followup'];
+const SOURCES: AsideSource[] = ['screen', 'screenshot', 'activity', 'fullscreen', 'reminder', 'idle', 'journal', 'page', 'poke', 'kept', 'system', 'hanging', 'weather', 'upcoming', 'other', 'followup', 'goodnight', 'booked', 'thought'];
 
 export function readAsides(saved: unknown): Aside[] {
   if (!Array.isArray(saved)) return [];
@@ -245,19 +248,11 @@ const ALREADY_SAID_LIMIT = 6;
  */
 export const ALREADY_SAID_MS = 12 * 60 * 60_000;
 
-/**
- * What she has already come out with lately, for the next time she speaks first.
- *
- * Moving these out of the transcript took something with it. "What has already
- * been said today" was the one thing stopping her making the same observation
- * about the same game three times in an afternoon, and with her half of it gone
- * she had no way to know she had said anything at all.
- *
- * So they come back, but only here — on the paths where she is composing another
- * unprompted line, which is the only place the answer to "have I already said
- * this" changes what she writes. A reply to something they typed does not need
- * it, and is measurably worse for having it.
- */
+/** A clock stamp where a line should start: the shape of the list above, not of anything she says. */
+const CLOCK_STAMP_OPENING = /^\s*\d{1,2}(?::\d{2})?\s*(?:am|pm)?\s*[—–-]/i;
+
+const bare = (text: string) => text.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ').replace(/\s+/g, ' ').trim();
+
 export function alreadySaidRecently(asides: Aside[], timeZone: string, now: number, theirLastAt?: number, limit = ALREADY_SAID_LIMIT): string {
   const said = asides
     .filter(aside => {
@@ -336,4 +331,54 @@ export const HELD_BACK_KEPT = 20;
 
 export function keepHeldBack(held: HeldBack[], entry: HeldBack): HeldBack[] {
   return [...held, entry].slice(-HELD_BACK_KEPT);
+}
+
+// -- a notification he answers is the conversation ------------------------------
+
+/**
+ * The lines she sent him unprompted, put into the conversation the model sees
+ * — for this turn only — as the things she said, right before his message.
+ *
+ * They used to ride beside his message as a quoted note ("You said this a
+ * moment ago… it is not written in the conversation below"). She pushed "I
+ * caught a Pidgey and named it after you", he tapped the notification and
+ * wrote "Hahah did you actually??" — and with her own line handed back to her
+ * in quotes, outside the conversation, she answered by saying it again, word
+ * for word (2026-09-18). A notification he answers IS the conversation: his
+ * reply follows her line, and she follows the thread.
+ *
+ * Only for the turn: the transcript is not touched, and an aside older than
+ * the context window is not spliced, so a remark from an hour ago still does
+ * not come back as though it were hanging in the air.
+ */
+export function spliceRecentAsides<T extends { role: string; content: string; at?: string }>(messages: T[], asides: Aside[], now: number): { messages: T[]; spliced: Aside[] } {
+  const last = messages.at(-1);
+  if (!last || last.role !== 'user') return { messages, spliced: [] };
+  const before = Date.parse(messages.at(-2)?.at ?? '');
+  const theirs = Date.parse(last.at ?? '');
+  const flat = (text: string) => text.toLowerCase().replace(/\s+/g, ' ').trim();
+  const said = new Set(messages.slice(-8).filter(message => message.role === 'assistant').map(message => flat(message.content)));
+  const spliced = asides
+    .filter(aside => {
+      const at = Date.parse(aside.at);
+      if (!Number.isFinite(at) || now - at < 0 || now - at >= ASIDE_CONTEXT_MS) return false;
+      if (Number.isFinite(before) && at <= before) return false;
+      if (Number.isFinite(theirs) && at > theirs) return false;
+      return !said.has(flat(aside.text));
+    })
+    .slice(-ASIDE_CONTEXT_LIMIT);
+  if (!spliced.length) return { messages, spliced: [] };
+  const hers = spliced.map(aside => ({ role: 'assistant', content: aside.text, at: aside.at }) as unknown as T);
+  return { messages: [...messages.slice(0, -1), ...hers, last], spliced };
+}
+
+/** What she is told about the lines that were spliced in: follow the thread. */
+export function splicedAsidesNote(spliced: Aside[]): string {
+  if (!spliced.length) return '';
+  const about = spliced.filter(aside => aside.about).map(aside => `"${aside.text.replace(/\s+/g, ' ').slice(0, 80)}" was you chasing "${aside.about}" off their list`);
+  return [
+    `The last ${spliced.length === 1 ? 'thing' : `${spliced.length} things`} you said in the conversation below ${spliced.length === 1 ? 'was a line' : 'were lines'} you sent them unprompted — a notification on their phone — and what they have just written is most likely their answer to it.`,
+    'Follow that thread: answer what they said about it. Do not say the line again, do not start on something else, and if they ask whether it was true, say honestly whether it was.',
+    about.length ? `(${about.join('; ')}.)` : '',
+  ].filter(Boolean).join(' ');
 }

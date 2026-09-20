@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { KNOWLEDGE_CATEGORIES, type KnowledgeCategory, type KnowledgeStore } from './knowledge';
 
@@ -15,6 +15,13 @@ export type VaultSyncReport = {
 
 /** Her own folder in the vault (vault.ts) — written by the app, and not read back as knowledge about his world. */
 export const HARU_FOLDER = 'Haru';
+/**
+ * The one page of her folder she may read: how she is put together
+ * (Configuration.md, kept by scripts/update-haru-config.sh). The rest of the
+ * folder is regenerated from her own store and would only feed her back to
+ * herself; this one is about her and written by nobody else.
+ */
+export const HER_OWN_READABLE = ['Configuration.md'];
 
 /** Folders that are Obsidian housekeeping or should never be read as knowledge. */
 export const DEFAULT_VAULT_SKIP = ['.obsidian', '.trash', '.git', 'templates', '_templates', 'attachments', '_attachments', 'node_modules', HARU_FOLDER];
@@ -29,7 +36,15 @@ export function walkVault(root: string, skip: string[] = DEFAULT_VAULT_SKIP): Va
       const full = path.join(dir, entry.name);
       const rel = relative ? path.join(relative, entry.name) : entry.name;
       if (entry.isDirectory()) {
-        if (skip.includes(entry.name)) continue;
+        if (skip.includes(entry.name)) {
+          if (entry.name === HARU_FOLDER) {
+            for (const page of HER_OWN_READABLE) {
+              const file = path.join(full, page);
+              if (existsSync(file)) out.push({ file, relative: path.join(rel, page) });
+            }
+          }
+          continue;
+        }
         visit(full, rel);
       } else if (entry.isFile() && /\.md$/i.test(entry.name)) {
         out.push({ file: full, relative: rel });

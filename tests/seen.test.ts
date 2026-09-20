@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { CAPTIONS_KEPT, MAX_LOOK_TRIES, noteFailure, captionsFor, describedShots, forgetCaptions, moreThanOnePass, noteCaption, readCaptions, shotsNeedingALook, unseenShots, type Caption } from '../electron/seen';
+import { CAPTIONS_KEPT, MAX_LOOK_TRIES, fallenOff, noteFailure, captionsFor, describedShots, forgetCaptions, moreThanOnePass, noteCaption, readCaptions, shotsNeedingALook, unseenShots, type Caption } from '../electron/seen';
 
 const caption = (day: string, name: string, text = 'a window'): Caption => ({ day, name, at: `${day}T09:00:00.000Z`, text });
 
@@ -111,4 +111,25 @@ test('a failed look is not a caption', () => {
   const after = noteCaption(captions, caption('2026-08-28', 'big.png', 'A spreadsheet.'));
   assert.equal(after.length, 1);
   assert.equal(captionsFor(after, '2026-08-28')[0].text, 'A spreadsheet.');
+});
+
+test('a shot older than the oldest caption she still holds is not looked at again once the list is full', () => {
+  // 451 pictures held, 400 captions kept: the 51 oldest were always unseen,
+  // so every pass described them again and pushed 51 newer captions off the
+  // end — a backlog that never shrank (2026-09-14).
+  const full: Caption[] = Array.from({ length: CAPTIONS_KEPT }, (_, i) => caption('2026-08-20', `${String(i).padStart(4, '0')}.png`));
+  const held = { '2026-08-01': ['old.png'], '2026-08-20': ['0000.png', 'zz-new.png'], '2026-08-21': ['later.png'] };
+  assert.equal(fallenOff(full), '2026-08-20/0000.png');
+  assert.deepEqual(shotsNeedingALook(held, full, {}), [
+    { day: '2026-08-20', name: 'zz-new.png' },
+    { day: '2026-08-21', name: 'later.png' },
+  ]);
+  // Below the cap nothing has fallen off, so the old one is still owed a look.
+  assert.equal(fallenOff(full.slice(1)), null);
+  assert.deepEqual(shotsNeedingALook(held, full.slice(1), {})[0], { day: '2026-08-01', name: 'old.png' });
+  // The desk's descriptions are stand-ins, never stored: they draw no floor.
+  const described = { '2026-08-20': full.map(entry => entry.name) };
+  assert.deepEqual(shotsNeedingALook(held, [], described)[0], { day: '2026-08-01', name: 'old.png' });
+  // And once the folder is only what the list covers, there is no backlog to hold the model for.
+  assert.equal(moreThanOnePass({ '2026-08-01': ['old.png'], '2026-08-20': ['0000.png'] }, full, {}), false);
 });

@@ -24,7 +24,7 @@ function record(overrides: Partial<MemoryRecord> & { id: string; text: string; k
 
 test('defaultMemoryBlocks has the standard set with unique lowercase labels', () => {
   const blocks = defaultMemoryBlocks();
-  assert.deepEqual(blocks.map(b => b.label), ['persona', 'human', 'preferences', 'relationship', 'current_project', 'working_state']);
+  assert.deepEqual(blocks.map(b => b.label), ['persona', 'human', 'preferences', 'her_standing', 'relationship', 'shared_history', 'current_project', 'working_state', 'her_own']);
   assert.equal(new Set(blocks.map(b => b.label)).size, blocks.length);
   for (const block of blocks) {
     assert.equal(blockLabelValid(block.label), true);
@@ -34,12 +34,16 @@ test('defaultMemoryBlocks has the standard set with unique lowercase labels', ()
   }
 });
 
-test('persona is the only read-only default', () => {
+test('persona and her own standings are the read-only defaults', () => {
   const blocks = defaultMemoryBlocks();
   const persona = findBlock(blocks, 'persona')!;
   assert.equal(persona.read_only, true);
   assert.equal(persona.description.toLowerCase().includes('read-only'), true);
-  for (const block of blocks.filter(b => b.label !== 'persona')) {
+  // Hers are read-only for a different reason than persona's: a rule the memory
+  // tools can quietly rewrite or delete is not a rule she holds. She forms them
+  // and supersedes them by forming a newer one, and nothing else edits them.
+  assert.equal(findBlock(blocks, 'her_standing')!.read_only, true);
+  for (const block of blocks.filter(b => b.label !== 'persona' && b.label !== 'her_standing')) {
     assert.equal(block.read_only, false);
   }
 });
@@ -56,7 +60,7 @@ test('mergeBlockDefaults keeps custom blocks and adds missing defaults', () => {
   const merged = mergeBlockDefaults(saved);
   assert.ok(findBlock(merged, 'custom'));
   assert.equal(findBlock(merged, 'custom')!.limit, 1234);
-  for (const label of ['persona', 'human', 'preferences', 'relationship', 'current_project', 'working_state']) {
+  for (const label of ['persona', 'human', 'preferences', 'her_standing', 'relationship', 'shared_history', 'current_project', 'working_state', 'her_own']) {
     assert.ok(findBlock(merged, label), `missing default ${label}`);
   }
 });
@@ -120,7 +124,7 @@ test('resolveBlockValue splits preferences and relationships into their blocks',
 test('resolveBlockValue surfaces projects and recent working state', () => {
   const blocks = defaultMemoryBlocks();
   const memories: MemoryRecord[] = [
-    record({ id: 'p', text: 'Works on the PC Project', kind: 'fact', importance: 0.8 }),
+    record({ id: 'p', text: 'Is building the PC Project website', kind: 'fact', importance: 0.6, lastSeenAt: new Date().toISOString() }),
     record({ id: 'e', text: 'Finished the edit on Thursday', kind: 'event', importance: 0.45 }),
   ];
   const sessions: SessionSummary[] = [
@@ -140,6 +144,27 @@ test('resolveBlockValue surfaces projects and recent working state', () => {
   const working = resolveBlockValue(findBlock(blocks, 'working_state')!, sources);
   assert.ok(working.includes('TV power connector'));
   assert.ok(working.includes('Rental inspection'));
+});
+
+test('a past item nobody ticked is named as past, not as today\'s agenda', () => {
+  // Sunday 13 September 2026: a psychologist appointment from Friday, still
+  // open, was "Today's agenda: Sam Psychologist (event, 11:30 AM)" — and she
+  // opened with "11:30 AM is over, Tommy. Don't ignore the calendar."
+  const working = resolveBlockValue(findBlock(defaultMemoryBlocks(), 'working_state')!, {
+    character: { identity: '', style: '' },
+    profile: { nickname: '', occupation: '', about: '' },
+    memories: [],
+    sessions: [],
+    agenda: [
+      { title: 'Sam Psychologist', kind: 'event', done: false, date: '2026-09-11', time: '11:30 AM', daysAway: -2 },
+      { title: 'Joint Therapy', kind: 'event', done: false, date: '2026-09-18', time: '6:30 PM', daysAway: 5 },
+      { title: 'Verge collection', kind: 'event', done: false, date: '2026-09-13', daysAway: 0 },
+    ],
+  });
+  assert.match(working, /Today's agenda: Verge collection \(event\)/);
+  assert.doesNotMatch(working, /Today's agenda:[^\n]*Sam Psychologist/);
+  assert.match(working, /Not ticked off, from before today: Sam Psychologist \(event, was 2 days ago \(Fri,? 11 Sept?\) 11:30 AM\)/);
+  assert.match(working, /Coming up: Joint Therapy \(Fri,? 18 Sept? 6:30 PM\)/);
 });
 
 test('an explicit governed value wins over derivation', () => {
@@ -266,7 +291,7 @@ test('each record renders once, in its most specific block, and never when the p
       record({ id: 'pref', text: 'Dislikes being nagged', kind: 'preference', importance: 0.85 }),
       record({ id: 'rel', text: 'Emma is their girlfriend', kind: 'relationship', importance: 0.8 }),
       record({ id: 'founder', text: 'Is the founder of a company called The PC Project in Northbridge', kind: 'fact', importance: 0.8 }),
-      record({ id: 'mail', text: 'Wants 6 mailboxes for the company project', kind: 'fact', importance: 0.8 }),
+      record({ id: 'mail', text: 'Wants 6 mailboxes for the company project', kind: 'fact', importance: 0.8, category: 'plan', lastSeenAt: new Date().toISOString() }),
     ],
     sessions: [] as SessionSummary[],
     query: 'how many mailboxes for the project',
@@ -282,6 +307,40 @@ test('each record renders once, in its most specific block, and never when the p
   assert.ok(!text.includes('Is the founder of a company'));
   // Resolved on its own, the block is whole — the tools and inspector see everything.
   assert.ok(resolveBlockValue(findBlock(blocks, 'current_project')!, sources).includes('Wants 6 mailboxes'));
+});
+
+test('what the two of them share renders as their shared history, not among his facts', () => {
+  // 2026-09-17: her own name's spelling sat in the human block under his bio,
+  // and she told him six times that he had named her.
+  const blocks = defaultMemoryBlocks();
+  const sources = {
+    character: { identity: '', style: '' },
+    profile: { nickname: 'Tommy', occupation: '', about: 'Was born in Thailand.' },
+    memories: [
+      record({ id: 'who', text: 'Starts a new job as a mobile phone technician', kind: 'fact', importance: 0.7, category: 'identity' }),
+      record({ id: 'gag', text: 'Haru, with one r — he once spelled her name "Harru". It is one r. Like the season.', kind: 'fact', importance: 0.6, category: 'shared', mentions: 354 }),
+    ],
+    sessions: [] as SessionSummary[],
+  };
+  const { text } = formatMemoryBlocks(blocks, sources, { omit: ['persona'], compact: true });
+  const section = (label: string) => text.match(new RegExp(`<${label}>[\\s\\S]*?</${label}>`))?.[0] ?? '';
+  assert.ok(section('human').includes('mobile phone technician'));
+  assert.ok(!section('human').includes('one r'));
+  assert.ok(section('shared_history').includes('Haru, with one r'));
+  assert.ok(text.indexOf('<shared_history>') > text.indexOf('<human>'));
+});
+
+test('a saved set gains a missing default beside its neighbour, not at the end', () => {
+  // The live config saved six blocks before her_standing, shared_history and
+  // her_own existed; each lands where a fresh install has it.
+  const saved = ['persona', 'human', 'preferences', 'relationship', 'current_project', 'working_state']
+    .map(label => ({ label, description: label, limit: 1000, read_only: false }));
+  assert.deepEqual(mergeBlockDefaults(saved).map(block => block.label), defaultMemoryBlocks().map(block => block.label));
+  // A custom block keeps its place; with no default to stand beside, a default goes last.
+  const custom = mergeBlockDefaults([{ label: 'custom', description: 'mine', limit: 100, read_only: false }, ...saved]);
+  assert.equal(custom[0].label, 'custom');
+  assert.deepEqual(mergeBlockDefaults([{ label: 'custom', description: 'mine', limit: 100, read_only: false }]).map(block => block.label),
+    ['custom', ...defaultMemoryBlocks().map(block => block.label)]);
 });
 
 test('the human block uses the semantic map when one is supplied', () => {
@@ -362,4 +421,32 @@ test('withEditedValue marks the block edited; resetBlockToDerived clears it', ()
   assert.equal(reset.edited, undefined);
   assert.equal(reset.value, undefined);
   assert.deepEqual(reset, human);
+});
+test('an away reply scales what she keeps about them, never what she has been up to herself', () => {
+  const herOwn = defaultMemoryBlocks().find(block => block.label === 'her_own')!;
+  // Under her own limit whole, over half of it: scaled it would be cut.
+  const long = Array.from({ length: 90 }, (_, i) => `- Line ${i} of her own: something she read in the small hours and what she made of it, at length.`).join('\n');
+  assert.ok(long.length > herOwn.limit / 2 && long.length < herOwn.limit);
+  const notes = { ...herOwn, id: 'notes', label: 'notes', value: long };
+  const sources = {
+    character: { identity: '', style: '' },
+    profile: { nickname: '', occupation: '', about: '' },
+    memories: [] as MemoryRecord[],
+    sessions: [] as SessionSummary[],
+    herOwn: long,
+  };
+  const { text, cut } = formatMemoryBlocks([herOwn, notes], sources, { scale: 0.5 });
+  assert.deepEqual(cut.map(entry => entry.label), ['notes'], 'the same text under another label is cut to half its budget');
+  assert.ok(text.includes('Line 89 of her own'), 'her own block goes in whole');
+});
+
+test('fitToLimit scale shrinks the effective budget', () => {
+  const long = Array.from({ length: 40 }, (_, i) => `line number ${i} with some padding words`).join('\n');
+  const block = { ...defaultMemoryBlocks()[0], limit: 400 };
+  const full = fitToLimit(long, block);
+  const scaled = fitToLimit(long, block, 0.5);
+  assert.equal(full.cut, true);
+  assert.equal(scaled.cut, true);
+  assert.ok(scaled.value.length < full.value.length, 'half the budget means fewer lines survive');
+  assert.ok(scaled.value.length <= 200 + 2);
 });

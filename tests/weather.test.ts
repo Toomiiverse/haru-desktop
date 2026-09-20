@@ -43,13 +43,15 @@ test('what buzzes the phone: rain soon, rain started and stopped, a sky turned, 
   const clear = readForecast(payload(), NOW)!;
   const soon: WeatherSample = { ...clear, rainSoonMin: 15, rainSoonProb: 80 };
   const first = weatherEvents(clear, soon, {}, NOW);
-  assert.equal(first.length, 1); assert.equal(first[0].kind, 'rain-soon'); assert.match(first[0].text, /in about 15 minutes \(80% likely\)/);
+  assert.equal(first.length, 1); assert.equal(first[0].kind, 'rain-soon');
+  // An occasion, not a forecast read out: no percentage for her to recite.
+  assert.match(first[0].text, /Rain is due in about 15 minutes where you both are/);
+  assert.doesNotMatch(first[0].text, /80%/);
   assert.deepEqual(weatherEvents(clear, soon, { 'rain-soon': NOW - 60_000 }, NOW), [], 'already said for this shower');
-  assert.equal(weatherEvents(clear, soon, { 'rain-soon': NOW - COOLDOWN_MS['rain-soon'] }, NOW).length, 1, 'said again two hours on');
 
   const wet: WeatherSample = { ...clear, raining: true, sky: 'rain', tempC: 14 };
   assert.deepEqual(weatherEvents(clear, wet, {}, NOW).map(e => e.kind), ['rain-started']);
-  assert.match(weatherEvents(clear, wet, {}, NOW)[0].text, /^The forecast says it has started raining where they are \(rain\)\..*do not tell them they are wet/);
+  assert.match(weatherEvents(clear, wet, {}, NOW)[0].text, /^It has started raining where you both are — rain,.*do not tell them they are wet/);
   const drizzleCode: WeatherSample = { ...clear, raining: true, sky: 'drizzle', mm: 0 };
   assert.deepEqual(weatherEvents(clear, drizzleCode, {}, NOW), [], 'a drizzle code with nothing measured is not a shower');
   const drizzleWet: WeatherSample = { ...clear, raining: true, sky: 'drizzle', mm: 0.4 };
@@ -119,3 +121,38 @@ test('"it is not raining here" is their word against the forecast, and the promp
   assert.match(describeWeatherAgain(wet, 'Where they are', NOW), /and raining/);
 });
 
+
+
+// ---- rain is remarked on once per front, not once per cooldown ----
+//
+// 2026-09-03: a band sitting offshore forecast "rain in five minutes" all
+// afternoon, and because the cooldown re-arms while the condition still holds
+// she warned him three times about rain that never came. rain-started did not
+// fire that day or for eight days either side of it.
+
+test('a front that is still coming is not news a second time, however long it sits there', () => {
+  const clear = readForecast(payload(), NOW)!;
+  const soon: WeatherSample = { ...clear, rainSoonMin: 15, rainSoonProb: 80 };
+  const closer: WeatherSample = { ...clear, rainSoonMin: 5, rainSoonProb: 85 };
+  // The rising edge is the event.
+  assert.equal(weatherEvents(clear, soon, {}, NOW).length, 1, 'the front appearing is worth saying');
+  // Still coming, hours later, cooldown long expired: still not news.
+  assert.deepEqual(weatherEvents(soon, closer, { 'rain-soon': NOW - COOLDOWN_MS['rain-soon'] }, NOW), [],
+    'the same front creeping closer is the same front');
+  assert.deepEqual(weatherEvents(closer, closer, { 'rain-soon': NOW - 5 * COOLDOWN_MS['rain-soon'] }, NOW), [],
+    'and it is still the same front an afternoon later');
+});
+
+test('a new front after the sky cleared is worth saying again', () => {
+  const clear = readForecast(payload(), NOW)!;
+  const soon: WeatherSample = { ...clear, rainSoonMin: 15, rainSoonProb: 80 };
+  // Gone away, then a fresh one arrives: a rising edge again.
+  assert.equal(weatherEvents(clear, soon, { 'rain-soon': NOW - COOLDOWN_MS['rain-soon'] }, NOW).length, 1);
+});
+
+test('rain that actually arrives is still its own occasion', () => {
+  const clear = readForecast(payload(), NOW)!;
+  const soon: WeatherSample = { ...clear, rainSoonMin: 5, rainSoonProb: 85 };
+  const wet: WeatherSample = { ...clear, raining: true, sky: 'rain', tempC: 14 };
+  assert.deepEqual(weatherEvents(soon, wet, { 'rain-soon': NOW - 60_000 }, NOW).map(e => e.kind), ['rain-started']);
+});

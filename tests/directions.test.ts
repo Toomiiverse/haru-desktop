@@ -152,6 +152,34 @@ test('an errand takes the address they gave a message earlier; an address alone,
   assert.deepEqual(directionsAskFrom('how long will it take', ['alright, on my way back']), { destination: 'home', nearest: false }, 'said just before');
   assert.deepEqual(directionsAskFrom("what's the traffic like", ['heading to Umart then']), { destination: 'Umart', nearest: false }, 'a named place still wins');
   assert.equal(directionsAskFrom("what's the traffic like", []), null, 'nowhere named and nowhere implied is still nowhere');
+  // Told, not asked (2026-09-17: "I don't have access to live traffic data").
+  assert.deepEqual(directionsAskFrom('Haru check the traffic going back to home', []), { destination: 'home', nearest: false });
+  assert.deepEqual(directionsAskFrom('can you check the traffic on the way home?', []), { destination: 'home', nearest: false });
+  assert.deepEqual(directionsAskFrom('look up the drive time home', []), { destination: 'home', nearest: false });
+  assert.deepEqual(directionsAskFrom("how's traffic home", []), { destination: 'home', nearest: false });
+  assert.deepEqual(directionsAskFrom('is there much traffic going back?', []), { destination: 'home', nearest: false });
+  assert.deepEqual(directionsAskFrom('check the traffic', ['heading to Umart then']), { destination: 'Umart', nearest: false }, 'a named place still wins');
+  assert.equal(directionsAskFrom('check the traffic', []), null, 'told, but nowhere named or implied');
+  assert.equal(directionsAskFrom('check the traffic lights on the mac window', []), null, 'window buttons are not roads');
+  assert.equal(directionsAskFrom('I checked the traffic cam at work', []), null);
+  // Then "Haru check traffic to get back home", and "Check again" after it.
+  assert.deepEqual(directionsAskFrom('Haru check traffic to get back home', []), { destination: 'home', nearest: false });
+  assert.deepEqual(directionsAskFrom("what's traffic like on the freeway home?", []), { destination: 'home', nearest: false });
+  assert.equal(directionsAsk('check traffic to get to Umart')?.destination, 'Umart');
+  assert.deepEqual(directionsAskFrom('Check again', ['No - I called you it', 'Haru check the traffic going back to home']), { destination: 'home', nearest: false });
+  assert.deepEqual(directionsAskFrom('try again please', ['directions to Bunnings Rockingham', 'ok']), { destination: 'Bunnings Rockingham', nearest: false });
+  assert.equal(directionsAskFrom('check again', ['what a day']), null, 'again, after nothing about the roads, is nothing');
+  assert.equal(directionsAskFrom('the traffic was awful going home', []), null, 'a statement about the day is not an ask');
+  assert.equal(directionsAskFrom('can you check the website traffic from home?', []), null, 'site traffic is not roads');
+  for (const text of ["how's the drive home looking?", 'is the drive home bad', 'check the roads home', "how's the commute home looking", "how long till I'm home", 'Haru how long will it take me to get home']) {
+    assert.deepEqual(directionsAskFrom(text, []), { destination: 'home', nearest: false }, text);
+  }
+  assert.equal(directionsAskFrom('check my google drive at home', []), null, 'a drive that is not a road');
+  assert.equal(directionsAskFrom("i'm home, traffic was bad", []), null);
+  // "How long to get home" is home, not a place called "get".
+  assert.equal(directionsAsk('how long to get home')?.destination, 'home');
+  assert.equal(directionsAsk('how long will it take to drive back home?')?.destination, 'home');
+  assert.equal(directionsAsk('how long to get to Rockingham')?.destination, 'Rockingham');
   assert.equal(directionsAskFrom('This one: 40 Boddington Circuit', ['what a day']), null, 'an address with no question before it is just an address');
   assert.equal(directionsAskFrom('Give me the directions please', []), null);
   assert.deepEqual(directionsAskFrom('directions to Bunnings Rockingham', before), { destination: 'Bunnings Rockingham', nearest: false }, 'a real place is still itself');

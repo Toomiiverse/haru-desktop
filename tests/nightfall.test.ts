@@ -37,11 +37,11 @@ test('the check happens once, from the quiet hours on', () => {
 });
 
 test('a silent day costs more than a thin one, a fine one costs nothing, and it is bounded', () => {
-  assert.equal(sulkGrudge(0, 'silent'), 3);
-  assert.equal(sulkGrudge(0, 'thin'), 1);
+  assert.equal(sulkGrudge(0, 'silent'), 12);
+  assert.equal(sulkGrudge(0, 'thin'), 5);
   assert.equal(sulkGrudge(4, 'fine'), 4);
   assert.equal(sulkGrudge(GRUDGE_MAX - 1, 'silent'), GRUDGE_MAX);
-  assert.equal(sulkGrudge(-2, 'thin'), 1);
+  assert.equal(sulkGrudge(-2, 'thin'), 5);
 });
 
 test('a night owed keeps until the next day and no longer', () => {
@@ -60,7 +60,7 @@ test('what she is told to open with, and that a fine day says nothing at all', (
   assert.match(cold, /whole of yesterday without telling you one thing/);
   assert.match(cold, /No good morning/);
   assert.equal(cold.includes('not the first time'), false);
-  const thin = sulkInstruction('thin', 2, 6);
+  const thin = sulkInstruction('thin', 2, 20);
   assert.match(thin, /said 2 things to you all of yesterday/);
   assert.match(thin, /not the first time/);
   assert.match(sulkInstruction('thin', 1, 0), /said one thing/);

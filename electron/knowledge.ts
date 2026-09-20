@@ -265,8 +265,13 @@ export function planIngest(
       updatedAt: args.now,
     };
   });
+  // Only the version just replaced stays behind, stale, for its supersededBy
+  // link; older ones go. Every version used to be kept with its embedding, and a
+  // page rewritten hourly (Haru/Configuration.md, by the snapshot cron) had
+  // piled up 5,534 stale chunks — knowledge.json at 62 MB, rewritten whole on
+  // every save, 7.8 s an ingest (2026-09-17). Nothing searches stale chunks.
   const stale: KnowledgeChunk[] = supersededIds.length
-    ? store.chunks.filter(chunk => chunk.documentId === args.id).map(chunk => ({
+    ? store.chunks.filter(chunk => chunk.documentId === args.id && chunk.status === 'active').map(chunk => ({
         ...chunk,
         status: 'stale' as const,
         supersededBy: fresh[0]?.id,

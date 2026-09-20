@@ -201,6 +201,54 @@ export function readsLikeAssistant(reply: string): boolean {
 }
 
 /**
+ * Her deliberation, said out loud as the reply.
+ *
+ * Seen 2026-09-06 from Kimi K2.5: a reply that began "The user is expressing a
+ * low mood… I should: 1. Acknowledge… 2. Not offer therapy-style advice…" and
+ * ran for five paragraphs of notes to itself before the words she meant to
+ * say, glued on to the end of the last note. Nothing in that is hers: she
+ * never calls him "the user", and she does not number what she is about to
+ * do. A reply that starts that way is either a plan with the answer after it
+ * — salvageable — or a plan alone, which has to be asked for again.
+ */
+// "I should" alone is hers ("I should have said this earlier"); the planning
+// forms are "I should:" and "I should acknowledge / not / keep / be…".
+const PLANNING_VERBS = '(?:acknowledge|not|keep|stay|be|avoid|respond|answer|reply|call|check|save|address|focus|make|hold|match|lean|drop|push|ask|point|give|offer|remind|steer|use)';
+const THINKING_OPENER = new RegExp(`^(?:The user\\b|I should(?:n'?t)?(?::|\\s+${PLANNING_VERBS}\\b)|I need to\\s+${PLANNING_VERBS}\\b|Let me (?:think|check|see|consider|figure)\\b|Okay, so (?:the user|they)\\b|Alright, (?:so )?(?:the user|they)\\b|First, (?:I|let me)\\b)`);
+const THINKING_CONTINUES = new RegExp(`^(?:They (?:mentioned|said|are|have|'re|'ve|seem|want|opened|need|asked|just)\\b|This is (?:a |just |the |about )|This isn'?t\\b|\\d+[.)]\\s|So I\\b|I can\\b|I'?ll\\b|I won'?t\\b|I should(?:n'?t)?(?::|\\s+${PLANNING_VERBS}\\b)|The \\w+ (?:drops|stays|goes|comes) here|Since (?:they|the user)\\b|Given (?:that|the|what)\\b|No (?:therapy|advice|solutions)\\b|Keep it\\b|Stay (?:in|with)\\b)`);
+
+export function thinksAloud(reply: string): boolean {
+  const paragraphs = (reply ?? '').trim().split(/\n\s*\n/);
+  if (!paragraphs[0]) return false;
+  return THINKING_OPENER.test(paragraphs[0]) || paragraphs.some(paragraph => /^The user\b/.test(paragraph));
+}
+
+/**
+ * The reply without the deliberation in front of it. `dropped` counts what
+ * went; an empty `text` means there was no reply behind the plan at all.
+ * The last note often runs straight into the reply with no break — "…so I
+ * should call save_journalThat sucks." — so a lower-case-to-capital seam in
+ * the last dropped paragraph is where the reply is taken to begin.
+ */
+export function dropThinkingAloud(reply: string): { text: string; dropped: number } {
+  const whole = (reply ?? '').trim();
+  const paragraphs = whole.split(/\n\s*\n/);
+  let i = 0;
+  while (i < paragraphs.length && (i === 0 ? THINKING_OPENER.test(paragraphs[i]) : THINKING_OPENER.test(paragraphs[i]) || THINKING_CONTINUES.test(paragraphs[i]))) i++;
+  if (i === 0) return { text: whole, dropped: 0 };
+  let salvaged = '';
+  const last = paragraphs[i - 1];
+  const seams = [...last.matchAll(/[a-z_](?=[A-Z])/g)];
+  if (seams.length) {
+    const at = seams[seams.length - 1].index! + 1;
+    const tail = last.slice(at).trim();
+    if (tail.length >= 30 && !THINKING_OPENER.test(tail) && !THINKING_CONTINUES.test(tail)) salvaged = tail;
+  }
+  const rest = [salvaged, ...paragraphs.slice(i)].filter(Boolean).join('\n\n').trim();
+  return { text: rest, dropped: whole.length - rest.length };
+}
+
+/**
  * The chat template leaking into what she said.
  *
  * Found in the wild: a stored message whose text began, literally, with
@@ -308,7 +356,23 @@ export function dropRepeatedAgendaMentions(reply: string, previousReplies: strin
  * Matched on a third party doing the contacting: "you told me" is ordinary and
  * true, "Emma texted me" cannot be.
  */
-const GOT_IN_TOUCH = /\b(?!you\b|they\b|we\b|i\b)([A-Z][a-z]+|he|she|your \w+)\s+(?:just\s+|also\s+)?(texted|messaged|emailed|called|rang|phoned|dm'?d|pinged|wrote to|got in touch with|reached out to|told|asked|reminded|warned)\s+me\b/i;
+// Case-sensitive on the subject. With the whole pattern case-insensitive,
+// "[A-Z][a-z]+" matched any word at all, so "you just asked me to fix it" read
+// "just" as somebody who had asked her, and two replies that were nothing but
+// her arguing with him about what he had asked went out as empty bubbles, two
+// minutes apart (2026-09-14). A person is written with a capital, or is he, she
+// or "your <someone>"; a capitalised word that only starts a sentence is not one.
+const GOT_IN_TOUCH = /\b([A-Z][a-z]+|[Hh]e|[Ss]he|[Yy]our [a-z]+)\s+(?:(?:just|also|already|literally|actually|even|finally)\s+)?(?:texted|messaged|emailed|called|rang|phoned|dm'?d|pinged|wrote to|got in touch with|reached out to|told|asked|reminded|warned)\s+me\b/g;
+/** Words that can stand where the subject goes without being anybody. */
+const NOT_A_SUBJECT = /^(?:you|they|we|i|it|that|this|there|who|which|what|someone|somebody|nobody|everyone|everybody|anyone|also|already|actually|literally|even|never|always|once|then|finally|only|still|basically|clearly|probably|apparently|definitely|totally|really|and|but|so|or)$/i;
+
+function gotInTouch(paragraph: string): boolean {
+  for (const found of paragraph.matchAll(GOT_IN_TOUCH)) {
+    if (NOT_A_SUBJECT.test(found[1]) || NOT_A_PERSON.test(found[1])) continue;
+    return true;
+  }
+  return false;
+}
 const HEARD_FROM = /\bI (?:just )?(?:heard from|got a (?:text|message|call|email) from|spoke to|was talking to|had a word with)\s+(?!you\b)[A-Z]/;
 /**
  * The same lie without the "me" on the end.
@@ -340,7 +404,7 @@ const CREDITED = /\byou (said|told me|mentioned|reckoned|were saying)\b/i;
 
 export function dropInventedContact(reply: string): string {
   const paragraphs = reply.split(/\n{2,}/).map(part => part.trim()).filter(Boolean);
-  const invented = (paragraph: string) => GOT_IN_TOUCH.test(paragraph) || HEARD_FROM.test(paragraph);
+  const invented = (paragraph: string) => gotInTouch(paragraph) || HEARD_FROM.test(paragraph);
   const kept = paragraphs.filter(paragraph =>
     !invented(paragraph)
     && !(thirdPartyTalk(paragraph) && !CREDITED.test(paragraph)));
@@ -385,6 +449,13 @@ const NEAR_DUPLICATE = 0.6;
  * still leaves room for a real answer that needs two beats and a caveat.
  */
 const MAX_PARAGRAPHS = 3;
+/**
+ * A list is a shape, not padding or a loop: the parts are the answer, however
+ * many. Any line of the reply, not only a paragraph's first — the steps mostly
+ * sit under a lead-in ("If that fails, run:"), and tested paragraph by
+ * paragraph the list was never seen (2026-09-10).
+ */
+const ENUMERATED = /^\s*(?:[-*•]|\d+[.)])\s/m;
 
 /**
  * The closing question, asked a third time.
@@ -424,7 +495,7 @@ function overlap(a: string, b: string) {
   return shared / (first.size + second.size - shared);
 }
 
-export function dropRepeatedParagraphs(reply: string, previousReplies: string[]): string {
+export function dropRepeatedParagraphs(reply: string, previousReplies: string[], ceiling = MAX_PARAGRAPHS): string {
   const seen = new Set(
     previousReplies
       .flatMap(message => message.split(/\n{2,}|\n(?=[A-Z“"])/))
@@ -450,7 +521,12 @@ export function dropRepeatedParagraphs(reply: string, previousReplies: string[])
   if (!kept.length) return reply;
   // Cut from the end, because a loop degrades as it runs — the opening
   // paragraphs are the ones she actually meant.
-  return dropTrailingRepeatQuestions(kept.slice(0, MAX_PARAGRAPHS)).join('\n\n').trim();
+  // The ceiling is the caller's where the model is a hosted one: its four
+  // paragraphs were being cut to three here, before dropTackedOnParagraphs
+  // ever saw them, and the paragraph that went was the closing question or
+  // the one piece of advice that mattered — six replies in one afternoon
+  // (2026-09-10). A list keeps its parts.
+  return dropTrailingRepeatQuestions(ENUMERATED.test(reply) ? kept : kept.slice(0, ceiling)).join('\n\n').trim();
 }
 /**
  * The paragraph after the answer.
@@ -474,7 +550,6 @@ export function dropRepeatedParagraphs(reply: string, previousReplies: string[])
  * replied with a lead-in and two numbered steps, and that reply was exactly what
  * was wanted — it must survive this untouched, and it does, on both counts.
  */
-const ENUMERATED = /^\s*(?:[-*•]|\d+[.)])\s/;
 const TACKED_ON_CEILING = 2;
 
 export function dropTackedOnParagraphs(reply: string, lookedSomethingUp: boolean, ceiling = TACKED_ON_CEILING): string {
@@ -483,7 +558,7 @@ export function dropTackedOnParagraphs(reply: string, lookedSomethingUp: boolean
   const paragraphs = reply.split(/\n{2,}/);
   if (paragraphs.length <= ceiling) return reply;
   // A list is a shape, not padding: the parts are the answer.
-  if (paragraphs.some(paragraph => ENUMERATED.test(paragraph))) return reply;
+  if (ENUMERATED.test(reply)) return reply;
   return paragraphs.slice(0, ceiling).join('\n\n').trim();
 }
 
@@ -662,8 +737,38 @@ export function answersThePrompt(reply: string, priming: string): boolean {
   return quoted.test(reply);
 }
 
-const NUMBER_WORDS: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19, twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60 };
-const STATED_MINUTES = /\b(?:(?:about|around|roughly|nearly|almost|over|a good)\s+)?(\d{1,3}|(?:twenty|thirty|forty|fifty)(?:[- ](?:one|two|three|four|five|six|seven|eight|nine))?|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|sixty)\s+(?:minutes?|mins?)\b/gi;
+const NUMBER_WORDS: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19, twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60, seventy: 70, eighty: 80, ninety: 90, hundred: 100 };
+const UNITS = '(?:one|two|three|four|five|six|seven|eight|nine)';
+const TEENS = '(?:ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen)';
+const TENS = '(?:twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)';
+const BELOW_HUNDRED = `(?:${TENS}(?:[- ]${UNITS})?|${TEENS}|${UNITS})`;
+// Digits, or words up to nine hundred and ninety-nine — "three hundred and
+// fifty-four minutes" was said on 2026-09-05 and read as no number at all.
+const NUMBER = `(?:\\d{1,3}|${UNITS} hundred(?: and ${BELOW_HUNDRED}| ${BELOW_HUNDRED})?|${BELOW_HUNDRED})`;
+const ABOUT = '(?:(?:about|around|roughly|nearly|almost|over|a good)\\s+)?';
+// One pass over both shapes — "six hours and forty-eight minutes" and "354
+// minutes" — because a minutes pass after an hours pass rewrote the hours
+// pass's own "22 minutes".
+const STATED_SPAN = new RegExp(`\\b${ABOUT}(?:(${NUMBER})\\s+(?:hours?|hrs?)(?:\\s+(?:and\\s+)?(${NUMBER})\\s+(?:minutes?|mins?))?|(${NUMBER})\\s+(?:minutes?|mins?))\\b`, 'gi');
+
+function numberFrom(said: string): number {
+  if (/^\d+$/.test(said)) return Number(said);
+  let total = 0;
+  for (const word of said.toLowerCase().replace(/\band\b/g, ' ').split(/[- ]+/).filter(Boolean)) {
+    const value = NUMBER_WORDS[word];
+    if (value === undefined) continue;
+    total = value === 100 ? Math.max(total, 1) * 100 : total + value;
+  }
+  return total;
+}
+
+/** A span in the unit family she used: minutes stay minutes; hours keep their minutes beside them. */
+function spanInHours(minutes: number): string {
+  if (minutes < 60) return `${minutes} minutes`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return `${hours} hour${hours === 1 ? '' : 's'}${rest ? ` and ${rest} minutes` : ''}`;
+}
 
 /**
  * The minutes of silence she states, made the real ones. Told "27 minutes
@@ -671,10 +776,12 @@ const STATED_MINUTES = /\b(?:(?:about|around|roughly|nearly|almost|over|a good)\
  * Only the minutes are touched; the rest of the line is hers.
  */
 export function fixStatedMinutes(line: string, minutes: number): string {
-  return line.replace(STATED_MINUTES, (whole, said: string) => {
-    const words = said.toLowerCase().split(/[- ]/);
-    const value = /^\d+$/.test(said) ? Number(said) : words.reduce((sum, word) => sum + (NUMBER_WORDS[word] ?? 0), 0);
-    return value === minutes ? whole : `${minutes} minutes`;
+  return line.replace(STATED_SPAN, (whole, hours?: string, rest?: string, plain?: string) => {
+    if (hours) {
+      const value = numberFrom(hours) * 60 + (rest ? numberFrom(rest) : 0);
+      return value === minutes ? whole : spanInHours(minutes);
+    }
+    return numberFrom(plain ?? '') === minutes ? whole : `${minutes} minutes`;
   });
 }
 
@@ -790,6 +897,30 @@ export function dropClosingOrder(reply: string): string {
  * certain without checking.
  */
 const DENIES_IT_EXISTS = /\b(?:does(?:n'?t| not) exist|do(?:n'?t| not) exist|there(?:'?s| is) no such\b|no such (?:thing|card|product|model|game|show)\b|is ?n'?t (?:a )?(?:real|thing)\b|not a real\b|never (?:been )?announced|has(?:n'?t| not) (?:even )?(?:been )?announced|you'?re (?:hallucinating|making (?:that|it) up)|made (?:that|it) up|that'?s not a (?:thing|real)\b)/i;
+
+/**
+ * Says she looked, without having looked. "I checked — nothing with 'Haru
+ * notes' in it" went out on a turn where no tool ran at all (2026-09-06); the
+ * note was there. The claim is the tell, and the loop can press the lookup
+ * on her once (toolloop.ts), as it does for a denial.
+ */
+const CLAIMS_CHECKED = /\b(?:I(?:'ve| have| just)? (?:checked|looked(?: it)? up|searched|had a look|went through|dug through|scanned|combed through)|(?:checked|searched|looked through) (?:your|the|my) (?:vault|notes|files|knowledge|records|docs|documents|library))\b/i;
+
+/**
+ * Their message asks her to look something up — "can you look up…", "search
+ * for…", "google it", "fact check it". His words, not hers: the loop presses a
+ * search on her when she answers one of these from memory (toolloop.ts). The
+ * past tense ("I looked it up") and "look up to" are statements, not asks.
+ */
+const ASKS_TO_LOOK_UP = /\b(?:look (?:it |that |this |them |those |one )?up\b(?! to)|search (?:up|for|online|the web|the internet|it|that)\b|google (?:it|that|this|for)\b|fact[- ]?check|check (?:online|the web|the internet)\b|find out (?:online|if|whether)\b)|^\s*(?:(?:hey|ok|okay|oi)[,!]?\s+)?(?:haru[,!]?\s+)?(?:can you |could you |please )?(?:search|google)\b/i;
+
+export function asksToLookUp(message: string): boolean {
+  return ASKS_TO_LOOK_UP.test((message ?? '').replace(/[‘’]/g, "'"));
+}
+
+export function claimsChecked(reply: string): boolean {
+  return CLAIMS_CHECKED.test((reply ?? '').replace(/[‘’]/g, "'"));
+}
 
 export function deniesItExists(reply: string): boolean {
   return DENIES_IT_EXISTS.test((reply ?? '').replace(/[‘’]/g, "'"));

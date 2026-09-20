@@ -1,4 +1,4 @@
-// One line per phone or Discord turn, with the numbers that explain its speed.
+// One line per phone turn, with the numbers that explain its speed.
 //
 // Every message from outside the desk gets a trace id, and the stages she passes
 // through are stamped with wall-clock times. The whole thing is written out as a

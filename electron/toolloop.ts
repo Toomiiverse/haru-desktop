@@ -24,10 +24,53 @@
 // reported rather than looped on.
 
 import type { ChatMessage, ToolCall } from './provider';
-import { claimsDesktopAction, claimsTickOff, readsLikeAssistant, deniesItExists } from './reply';
+import { claimsDesktopAction, claimsTickOff, readsLikeAssistant, deniesItExists, thinksAloud, dropThinkingAloud, claimsChecked, asksToLookUp } from './reply';
+import { stripDelivery } from './delivery';
 
 /** How many rounds a single reply may spend before it has to settle. */
 export const MAX_TOOL_ROUNDS = 4;
+
+/**
+ * A tool call written out as words.
+ *
+ * Kimi K2.5 through Venice sometimes puts its call in the text instead of the
+ * tool_calls field — its own call tokens stripped on the way, leaving
+ * `look_up_knowledge:0{"query": "Haru notes"}` or
+ * `adopt_interest(kind="game", title="Zenless Zone Zero")` as the whole reply.
+ * Five of those reached the reader as her line on 2026-09-06. Only a reply
+ * that is nothing but the call is read this way; a sentence that names a tool
+ * is a sentence.
+ */
+export function textToolCall(content: string): ToolCall | null {
+  // Kimi K3 wraps it: `[search_web(query="RX 9060 XT FSR 4 support")]`, and
+  // may put a delivery label in front (2026-09-14). One pair of brackets
+  // around the whole reply comes off, and any labels with it.
+  const text = stripDelivery(content ?? '').trim().replace(/^\[\s*([\s\S]*?)\s*\]$/, '$1').trim();
+  // Kimi's own shape: name:0{json}, with or without a `functions.` prefix.
+  const kimi = /^(?:functions\.)?([a-z][a-z0-9_]*):\d+\s*(\{[\s\S]*\})$/i.exec(text);
+  if (kimi) {
+    try { JSON.parse(kimi[2]); } catch { return null; }
+    return { function: { name: kimi[1], arguments: kimi[2] } };
+  }
+  // The pythonic shape: name(key="value", other=3).
+  const python = /^(?:functions\.)?([a-z][a-z0-9_]*)\(([\s\S]*)\)$/i.exec(text);
+  if (!python) return null;
+  const args: Record<string, unknown> = {};
+  const inner = python[2].trim();
+  const pair = /([a-z_][a-z0-9_]*)\s*=\s*(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'|(-?\d+(?:\.\d+)?)|(true|false|null))\s*(?:,\s*|$)/giy;
+  for (let at = 0; at < inner.length;) {
+    pair.lastIndex = at;
+    const found = pair.exec(inner);
+    if (!found) return null;
+    const [, key, doubled, single, number, word] = found;
+    args[key] = doubled !== undefined ? doubled.replace(/\\(.)/g, '$1')
+      : single !== undefined ? single.replace(/\\(.)/g, '$1')
+      : number !== undefined ? Number(number)
+      : word === 'true' ? true : word === 'false' ? false : null;
+    at = pair.lastIndex;
+  }
+  return { function: { name: python[1], arguments: JSON.stringify(args) } };
+}
 
 export type ToolLoopDeps = {
   /**
@@ -107,7 +150,11 @@ export async function runToolLoop(conversation: ChatMessage[], deps: ToolLoopDep
   let claimRetried = false;
   let tickRetried = false;
   let existenceRetried = false;
+  let checkRetried = false;
+  let lookUpRetried = false;
   let voiceRetried = false;
+  // What they asked, read once before any corrective turn is pushed after it.
+  const theirWords = String([...conversation].reverse().find(turn => turn.role === 'user')?.content ?? '');
 
   for (let round = 0; round < maxRounds; round++) {
     // Reading anything ends her reach for the rest of the turn. pageWasRead
@@ -122,6 +169,24 @@ export async function runToolLoop(conversation: ChatMessage[], deps: ToolLoopDep
     const tools = !deps.pageWasRead() && !emptyRetried && round < maxRounds - 1;
     const roundStarted = Date.now();
     const message = await deps.ask(conversation, { tools });
+
+    // A call written out as words is the call it is — run, when tools were on
+    // the table; asked again for words when they were not.
+    if (!message.tool_calls?.length && message.content) {
+      const written = textToolCall(message.content);
+      if (written && tools) {
+        warn(`[ai] a tool call written out as words — running ${written.function?.name}`);
+        message.tool_calls = [written];
+        message.content = '';
+      } else if (written && !emptyRetried) {
+        emptyRetried = true;
+        resetStream();
+        warn(`[ai] a tool call written out as words with no tools on the table (${written.function?.name}) — asking for words`);
+        conversation.push(message);
+        conversation.push({ role: 'user', content: 'Answer them in words. Do not call anything.' });
+        continue;
+      }
+    }
 
     if (message.tool_calls?.length) {
       // Logged by name: when a tool does not fire, the useful question is whether
@@ -211,6 +276,39 @@ export async function runToolLoop(conversation: ChatMessage[], deps: ToolLoopDep
       continue;
     }
 
+    // Says she looked, without having looked. "I checked — nothing with 'Haru
+    // notes' in it" went out on a turn where no tool ran (2026-09-06); the
+    // note was there. Once, and only when nothing at all was called: a claim
+    // after a real lookup is a report.
+    if (claimsChecked(message.content) && !checkRetried && !ran.size && deps.canSearch()) {
+      checkRetried = true;
+      resetStream();
+      warn('[ai] she said she checked without calling anything — asking her to look');
+      conversation.push(message);
+      conversation.push({
+        role: 'user',
+        content: 'You just said you checked, but you did not call anything — nothing was looked up. Call look_up_knowledge or search_web now for what they asked, and answer from what comes back. If you are not going to look, say plainly that you have not checked rather than implying you did.',
+      });
+      continue;
+    }
+
+    // Asked to look it up, and answered from memory. Kimi K3 did that on two
+    // of six "can you look up whether the RX 9060 XT supports FSR 4" turns,
+    // and on a third said "Let me check" and cited a spec sheet it never
+    // opened (2026-09-14). No claim to catch, so the ask is the tell: once,
+    // and only when nothing at all was called and a search was possible.
+    if (asksToLookUp(theirWords) && !lookUpRetried && !checkRetried && !ran.size && deps.canSearch()) {
+      lookUpRetried = true;
+      resetStream();
+      warn('[ai] they asked her to look it up and she answered from memory — asking her to look');
+      conversation.push(message);
+      conversation.push({
+        role: 'user',
+        content: 'They asked you to look that up, and you answered from memory — nothing was searched. Call search_web (or look_up_knowledge, if it is about their own notes) now and answer from what comes back. If you are not going to look, say so plainly rather than answering as though you had.',
+      });
+      continue;
+    }
+
     // Certain that something is not real, without having looked. Her training
     // stopped at some point and everything released since looks invented; she
     // told him an RX 9060 XT did not exist while he was standing in the shop.
@@ -225,6 +323,31 @@ export async function runToolLoop(conversation: ChatMessage[], deps: ToolLoopDep
         content: 'You just said that is not real. You do not know that: your training stopped a while ago and anything released since looks invented to you. Search for it with search_web before you say it does not exist. If the search shows it is real, say so plainly and answer the actual question; if it genuinely is not, then say so and you will have earned it.',
       });
       continue;
+    }
+
+    // She answered with her deliberation — "The user is expressing… I should:
+    // 1. Acknowledge…" — a model's notes to itself said out loud (Kimi K2.5,
+    // 2026-09-06). When the words she meant are there behind the notes they
+    // are kept and the notes go; when there is nothing but notes, she is asked
+    // once for the words alone. Either way the streamed text is taken back:
+    // the reader has seen the plan.
+    if (thinksAloud(message.content)) {
+      const { text, dropped } = dropThinkingAloud(message.content);
+      if (text.length >= 40 && !thinksAloud(text)) {
+        resetStream();
+        warn(`[ai] dropped ${dropped} chars of her own deliberation from in front of the reply`);
+        message.content = text;
+      } else if (!voiceRetried) {
+        voiceRetried = true;
+        resetStream();
+        warn('[ai] replied with her deliberation instead of the words — asking once for the words alone');
+        conversation.push(message);
+        conversation.push({
+          role: 'user',
+          content: 'That reply was your reasoning about what to say, not the thing said. Reply again with only what you would say to them — no analysis of them, no plan, no notes to yourself, and no mention of this note.',
+        });
+        continue;
+      }
     }
 
     // She answered in the register of a help desk. Four different doors let a

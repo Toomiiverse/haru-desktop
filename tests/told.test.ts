@@ -17,7 +17,16 @@ test("the afternoon that went wrong, in their own words", () => {
   assert.equal(plan.until, '4:30 PM');
   const soon = tell('Finishing work in about 14 minutes! Then heading straight there')!;
   assert.equal(soon.where, 'at work');
-  assert.match(soon.until ?? '', /^(1:00|12:5\d|1:0\d) PM$/, String(soon.until));
+  // The until is the host's local time for now+14min, run through the same
+  // clock() the code uses — asserted against that rather than a fixed TZ, so
+  // this test passes on any runner (CI runs UTC; the box runs AWST).
+  // clock() adds 12 to a bare hour of 1-7 ("finish at 4:30 is the afternoon"),
+  // so the expectation has to apply that too.
+  const soonAt = new Date(Date.parse(now) + 14 * 60_000);
+  let soonHour = soonAt.getHours(); const soonMin = String(soonAt.getMinutes()).padStart(2, '0');
+  if (soonHour >= 1 && soonHour <= 7) soonHour += 12;
+  const soonPm = soonHour >= 12; const soonH12 = soonHour % 12 === 0 ? 12 : soonHour % 12;
+  assert.equal(soon.until, `${soonH12}:${soonMin} ${soonPm ? 'PM' : 'AM'}`, String(soon.until));
   const off = tell('Alright I finished work, heading to mum’s now')!;
   assert.equal(off.where, "mum's house");
   assert.equal(off.enRoute, true);
@@ -75,5 +84,19 @@ test('a place they told her about is not a question to ask again', () => {
   const said = describeTold({ where: 'home', at: '2026-08-31T11:32:00.000Z' }, Date.parse('2026-08-31T11:40:00.000Z'), () => '7:32 pm');
   assert.match(said, /do not open by asking whether they are still there/);
   assert.doesNotMatch(said, /"still at home\?"/, 'the example sentence went out verbatim as a notification, twice');
+});
+
+test('a question with the mark left off is still a question, and a bare name is not a place', () => {
+  // "How're you going Haru" put him on his way to her for ten hours, and she
+  // asked how the drive was (2026-09-10).
+  assert.equal(tell('How’re you going Haru'), null);
+  assert.equal(tell('How are you going to Perth'), null);
+  assert.equal(tell("how's it going, just got home")?.where, 'home', 'the fact after the greeting stays');
+  assert.equal(tell('What a day. Heading home now')?.where, 'home');
+  assert.equal(tell('Going Rockingham'), null, 'no "to", and not a place she knows by name');
+  assert.equal(tell('going mums')?.where, "mum's house", 'a plain place she knows needs no "to"');
+  assert.equal(tell('off to Rockingham')?.where, 'Rockingham');
+  assert.equal(tell('about to leave for Perth')?.enRoute, true);
+  assert.deepEqual(errandsToldFrom("I'll let ya know 🤣 I'm still in bed", '2026-09-07T01:34:50.632Z'), [], '"let ya know" is not an errand');
 });
 

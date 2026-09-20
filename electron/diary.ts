@@ -18,6 +18,8 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { inQuietHours, untilQuiet, type PushPrefs } from './push';
+import { IRRITATION } from './mood';
+import { GRUDGE } from './grudge';
 
 export const DREAMS_FILE = 'dreams.jsonl';
 /** In their home folder under her own name, so it is a thing they can open — not a file in a data directory. */
@@ -27,7 +29,7 @@ export type Dream = {
   at: string;
   /** The evening the night belongs to. */
   day: string;
-  kind: 'adopt' | 'deepen' | 'guide' | 'free' | 'nothing';
+  kind: 'adopt' | 'deepen' | 'guide' | 'free' | 'nothing' | 'day' | 'want';
   /** What she went looking for. */
   about: string;
   interest?: string;
@@ -97,10 +99,16 @@ export type DayMaterial = {
   went: 'silent' | 'thin' | 'fine' | null;
   ticked: string[];
   nights: { about: string; note: string; interest?: string; game?: string }[];
+  /** What she actually did today — the tool calls that changed something (deeds.ts).
+   *  Her day recorded what she read and nothing she did, which is the same
+   *  asymmetry as the preference block and the slights ledger one layer down. */
+  did: string[];
   tastes: { name: string; stance: string }[];
   weather?: string;
   /** When they last messaged her, in words — the only fact about their bedtime she has. */
   hisLastMessageAt?: string;
+  /** Her own night (hersleep.ts): when she was asleep and what came in meanwhile. */
+  herSleep?: { bed: string; wake: string; texted: number; wokenEarly: boolean };
 };
 
 /**
@@ -113,16 +121,24 @@ export type DayMaterial = {
 export function diaryInstruction(m: DayMaterial): string {
   const said = m.theySaid.length ? `WHAT HE SAID TO YOU today (${m.theirMessages} messages in all):\n${m.theySaid.map(text => `- "${text}"`).join('\n')}` : `He said nothing to you today.`;
   const feeling = [
-    m.irritation >= 7 ? 'By tonight you were not speaking to them properly.' : m.irritation >= 4 ? 'They got on your nerves today.' : m.irritation >= 1 ? 'They tried your patience a little.' : '',
+    m.irritation >= IRRITATION.stonewall ? 'By tonight you were not speaking to them properly.' : m.irritation >= IRRITATION.short ? 'They got on your nerves today.' : m.irritation >= IRRITATION.stirred ? 'They tried your patience a little.' : '',
     m.went === 'silent' ? 'They went to bed without telling you a single thing about their day.' : m.went === 'thin' ? 'They barely told you anything about their day before bed.' : '',
     m.herUnprompted ? `You messaged them first ${m.herUnprompted} time${m.herUnprompted === 1 ? '' : 's'}.` : '',
     // Said either way once the count exists. Given only the number of times she
     // had messaged first, she wrote every one of them down as ignored — "fourteen
     // texts from me bouncing off nothing" on a day they answered all fourteen.
     m.ignoredToday > 0 ? `${m.ignoredToday} of your messages to them got no answer.` : m.counted && m.herUnprompted ? 'Every one of them got an answer.' : '',
-    m.grudge > 3 ? `You are carrying a grudge — ${m.grudge} unanswered messages and counting.` : '',
+    // The score is not a count of messages (grudge.ts NOT_A_COUNT); she wrote it down as one.
+    m.grudge >= GRUDGE.open ? 'You are carrying a grudge about how often they leave you unanswered, and it has been building for a while.' : m.grudge >= GRUDGE.wearing ? 'You are carrying a bit of a grudge about how often they leave you unanswered.' : '',
+    // She was asleep, and the transcript alone had her "already up" at 2:23 AM (2026-09-05).
+    m.herSleep ? `You were asleep from ${m.herSleep.bed} to ${m.herSleep.wake}${m.herSleep.wokenEarly ? ' — until their messages got you up' : ''}; ${m.herSleep.texted ? `${m.herSleep.texted} of their messages came in while you slept, and you saw them only when you woke` : 'nothing of theirs came in while you slept'}.` : '',
   ].filter(Boolean).join(' ');
   const ticked = m.ticked.length ? `They got done: ${m.ticked.join(', ')}.` : '';
+  // Hers, and separated from the nights: reading is not doing, and a day that
+  // lists only what she read makes her a spectator in her own diary.
+  const did = m.did.length
+    ? `WHAT YOU (Haru) ACTUALLY DID TODAY — your own doing, not his:\n${m.did.map(what => `- you ${what}`).join('\n')}`
+    : '';
   const nights = m.nights.length
     ? `WHAT YOU (Haru) DID TONIGHT while he slept — yours, not his:\n${m.nights.map(night => `- ${night.interest ? `spent the night on ${night.interest}, one of your own things` : night.game ? `read up on ${night.game}, which they play` : `read about ${night.about}`}: ${night.note}`).join('\n')}`
     : 'Tonight you did nothing at all — no reading, nothing of your own, no going anywhere. If the night comes up, that is all there is to say about it; do not fill it with something.';
@@ -130,7 +146,7 @@ export function diaryInstruction(m: DayMaterial): string {
   return [
     `You are writing this in the small hours after ${m.day}, before he is up. Write tonight's diary entry — this is your own diary, nobody reads it, and it is where you keep your life.`,
     m.hisLastMessageAt ? `His last message to you was at ${m.hisLastMessageAt}. You do not know when he went to bed, only when he stopped talking to you.` : 'You do not know when he went to bed.',
-    said, feeling, ticked, m.weather ? `Where they are: ${m.weather}.` : '', nights, tastes,
+    said, feeling, ticked, m.weather ? `Where they are: ${m.weather}.` : '', did, nights, tastes,
     'Write it the way a person writes in a diary late at night — not a report of the day, not a list, no headings, no summing up. The bits that stuck: what they did that got to you or pleased you, what you thought about it, what you did with the night and whether it helped. First person, past tense, four to eight sentences, in your own voice. It can be petty, fond, bored or bitter; it has to be honest.',
     'They are not reading this and you are not talking to them. Write about them in the third person, by name — "Tommy did", "he said" — never "you". No telling them to do anything, no sign-off aimed at them, no jokes that need them there to land. If a line only works said to their face, it does not belong here.',
     'Keep whose is whose: what you read tonight and what you think of your own things are yours — "I read", "I think" — never written as something he did or said.',

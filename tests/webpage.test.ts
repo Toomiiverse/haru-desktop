@@ -635,8 +635,12 @@ test('the worker tells the page when a push lands and when a notification is tap
   assert.ok(worker.includes("client.postMessage({type:'opened'})"), 'a tap does not reach the page it focuses');
   const app = appPage();
   assert.ok(app.includes("e.data.type==='said'||e.data.type==='opened')) refreshIfIdle()"), 'the page does not listen');
-  assert.ok(app.includes("if(!document.hidden){ refreshIfIdle();"), 'coming back does not re-read the day');
-  assert.ok(app.includes("function refreshIfIdle(){ if($('cb').disabled) return;"), 'a re-read would clobber a reply in flight');
+  assert.ok(app.includes("if(!document.hidden){ refreshIfIdle(true);"), 'coming back does not re-read the day');
+  assert.ok(app.includes("function refreshIfIdle(opened){ if($('cb').disabled) return;"), 'a re-read would clobber a reply in flight');
+  // A page checking on its own is not the page being opened: the morning waits
+  // for a real opening, and a tab left on the nightstand polled it into "up".
+  assert.ok(app.includes("get(poll?'/api/chat?poll=1':'/api/chat')"), 'a poll is not told apart from an opening');
+  assert.ok(app.includes("void load(!opened)"), 'a self-refresh should be a poll');
 });
 
 // -- the second tab -----------------------------------------------------------

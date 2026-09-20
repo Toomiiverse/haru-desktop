@@ -85,8 +85,8 @@ export type LookOptions = {
   ask?: string;
   /** Hotter than a description wants, for a call that has to say something. */
   temperature?: number;
-  /** How long Ollama holds the model. The default drops it after five minutes. */
-  keepAlive?: string;
+  /** How long Ollama holds the model — '10m', or -1 for good. The default drops it after five minutes. */
+  keepAlive?: string | number;
   /** Room for the image plus the answer. Raise for very large screens. */
   numCtx?: number;
   /** How long this look may take. The default is sized for a background pass; a look somebody is waiting on should say less. */
@@ -176,6 +176,59 @@ const WHILE_LOOKING = [
 
 export function whileLooking(random: () => number = Math.random): string {
   return WHILE_LOOKING[Math.floor(random() * WHILE_LOOKING.length)];
+}
+
+/**
+ * What a screenshot read actually said, or nothing.
+ *
+ * The screen-reading prompt asks for two labelled lines, and a small vision
+ * model answers the labels rather than the question often enough to matter. On
+ * 2026-09-07 the day's captions included `Text: <everything you read>` / `Doing:
+ * <one sentence>` — the template, copied back verbatim — alongside `Text: None`,
+ * and one shot that kept the angle brackets around a real answer (`Text: <August
+ * 2026>`). All three were stored as what he had been looking at, carried onto
+ * the activity entry, and read to her by the day pass as fact.
+ *
+ * The prompt was reshaped first, which is the stronger half of this: it no
+ * longer offers `<placeholders>` to copy. This is the other half, because the
+ * two labelled lines are a contract, and an answer that is only the contract
+ * repeated is not evidence of anything.
+ */
+const SAID_NOTHING = /^(?:none|nothing|n\/a|no text|not visible|unknown|empty)\.?$/i;
+// The words of the prompt itself, in any of the shapes it has been written in.
+const TEMPLATE_ECHO = /^(?:everything you read|one sentence|the text you read|your one sentence|all the text|text|doing)\b/i;
+
+export function readShotDescription(raw: string): string {
+  // Conservative on purpose: a line is touched only when it is the template
+  // talking or the template's brackets, and is otherwise passed through exactly
+  // as it came. A first cut normalised every line and quietly reflowed the
+  // directory listings and config files he had on screen, which is a caption
+  // saying something he was not looking at.
+  const kept: string[] = [];
+  let sawField = false;
+  for (const line of raw.trim().split(/\r?\n/)) {
+    const field = /^(\s*(?:Text|Doing)\s*:\s*)(.*)$/i.exec(line);
+    if (!field) { kept.push(line); continue; }
+    sawField = true;
+    const value = field[2].trim();
+    if (!value) continue;
+    const inside = unwrap(value);
+    if (!inside || TEMPLATE_ECHO.test(inside) || SAID_NOTHING.test(inside)) continue;
+    kept.push(inside === value ? line : field[1] + inside);
+  }
+  const text = kept.join('\n').trim();
+  if (!text) return '';
+  // An answer with no labels at all is the model writing prose, which is fine —
+  // unless the prose is the instruction read back.
+  if (!sawField && (TEMPLATE_ECHO.test(text) || SAID_NOTHING.test(text))) return '';
+  return text;
+}
+
+/** `<August 2026>` is August 2026: the brackets are the template's, not his screen's. */
+function unwrap(value: string): string {
+  const trimmed = value.trim();
+  const inside = /^<([^<>]*)>$/.exec(trimmed);
+  return (inside ? inside[1] : trimmed).trim();
 }
 
 /** A filename that sorts by date and cannot collide or escape the folder. */

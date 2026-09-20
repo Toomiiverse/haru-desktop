@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, writeFileSync, existsSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { HaruStore, SCHEMA_VERSION, MIGRATIONS } from '../electron/store';
+import { HaruStore, SCHEMA_VERSION, MIGRATIONS, normalizeMemoryFile } from '../electron/store';
 
 function makeStore(extra: { maxBackups?: number } = {}): { store: HaruStore; dir: string; configName: string; knowledgeFile: string } {
   const dir = mkdtempSync(path.join(tmpdir(), 'haru-store-test-'));
@@ -143,7 +143,7 @@ test('migration v3 creates memory blocks without touching existing memory', () =
   const report = store.migrate();
   assert.equal(report.to, SCHEMA_VERSION);
   const blocks = store.getBlocks();
-  assert.deepEqual(blocks.map(b => b.label), ['persona', 'human', 'preferences', 'relationship', 'current_project', 'working_state']);
+  assert.deepEqual(blocks.map(b => b.label), ['persona', 'human', 'preferences', 'her_standing', 'relationship', 'shared_history', 'current_project', 'working_state', 'her_own']);
   assert.equal(blocks.find(b => b.label === 'persona')!.read_only, true);
   assert.equal(store.getMemories()[0].text, 'Dislikes being nagged');
   assert.equal(store.getSessions().length, 1);
@@ -195,6 +195,7 @@ test('a half-written forgetting entry is skipped rather than handed back', () =>
   store.writeMemoryFile({
     memories: [],
     sessions: [],
+    monthNotes: [],
     forgettingLog: [
       { id: 'good', text: 'gone', at: '2026-08-20T00:00:00.000Z', reason: 'decay' },
       { text: 'no id', at: '2026-08-20T00:00:00.000Z' },
@@ -209,7 +210,7 @@ test('a half-written forgetting entry is skipped rather than handed back', () =>
 test('blocks come back with the standard set filled in, and keep what was saved', () => {
   const { store } = makeStore();
   const labels = store.getBlocks().map(block => block.label);
-  for (const label of ['persona', 'human', 'preferences', 'relationship', 'current_project', 'working_state']) {
+  for (const label of ['persona', 'human', 'preferences', 'her_standing', 'relationship', 'shared_history', 'current_project', 'working_state', 'her_own']) {
     assert.ok(labels.includes(label), `${label} is missing from a fresh store`);
   }
   assert.equal(store.getBlocks().find(block => block.label === 'persona')?.read_only, true,
@@ -419,4 +420,11 @@ test('a transaction that succeeds keeps what it wrote', () => {
   const memories = [{ id: 'm1', text: 'Allergic to shellfish', kind: 'fact' as const, createdAt: '2026-08-01T00:00:00.000Z', lastSeenAt: '2026-08-01T00:00:00.000Z', mentions: 1 }];
   store.transaction(() => { store.setMemories(memories); });
   assert.deepEqual(store.getMemories(), memories);
+});
+
+test('normalizeMemoryFile carries monthNotes when present and defaults when not', () => {
+  const withNotes = normalizeMemoryFile({ memories: [], sessions: [], monthNotes: [{ month: '2026-08', summary: 'the fold' }], forgettingLog: [] });
+  assert.deepEqual(withNotes.monthNotes, [{ month: '2026-08', summary: 'the fold' }]);
+  const legacy = normalizeMemoryFile({ memories: [], sessions: [], forgettingLog: [] });
+  assert.deepEqual(legacy.monthNotes, [], 'a file from before monthNotes existed still loads');
 });

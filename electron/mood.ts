@@ -1,10 +1,58 @@
 // Haru's patience, kept as a number that low-effort messages push up and real
 // ones pull down. Pure so the thresholds can be exercised without a model.
 
-export const IGNORE_THRESHOLD = 7;
-export const IRRITATION_MAX = 9;
+//
+// 0–100 since 2026-09-19. It was 0–9, which gave her three audible levels and
+// made every event the same size; the old levels live on as the named bands
+// below (old level × 100/9), so what used to happen at 3, 4, 5 and 7 happens at
+// the same point on the new scale, with room between them.
+export const IRRITATION = {
+  /** Anything at all (was 1). */
+  stirred: 11,
+  /** The first level that reaches her voice (was 3). */
+  voiced: 33,
+  /** Impatient, and her face shows it (was 4). */
+  short: 44,
+  /** Fed up (was 5). */
+  fedUp: 56,
+  /** Past putting up with it, one short of not answering. */
+  seething: 67,
+  /** She stops answering (was 7). */
+  stonewall: 78,
+  max: 100,
+} as const;
+export const IGNORE_THRESHOLD = IRRITATION.stonewall;
+export const IRRITATION_MAX = IRRITATION.max;
+/** One old notch, for the things that used to cost "a point". */
+export const IRRITATION_NOTCH = 11;
 // Roughly how long she needs to be left alone to cool off one notch.
 export const COOLDOWN_MINUTES = 8;
+
+/**
+ * A mood saved on the old scales (irritation 0–9, ego 0–8, grudge 0–30), brought
+ * onto 0–100. Marked with `scale` so it happens exactly once: run twice, a grudge
+ * of 22 would be 73 and then 100.
+ */
+export function rescaleOldMood<T extends { irritation?: unknown; ego?: unknown; grudge?: unknown; grudgeBeforeTally?: unknown; scale?: unknown }>(saved: T): T & { scale: 100 } {
+  if (saved.scale === 100) return saved as T & { scale: 100 };
+  const to = (value: unknown, oldMax: number) => Math.max(0, Math.min(100, Math.round((Number(value) || 0) * 100 / oldMax)));
+  return {
+    ...saved,
+    irritation: to(saved.irritation, 9),
+    ego: to(saved.ego, 8),
+    ...(saved.grudge === undefined ? {} : { grudge: to(saved.grudge, 30) }),
+    ...(saved.grudgeBeforeTally === undefined ? {} : { grudgeBeforeTally: to(saved.grudgeBeforeTally, 30) }),
+    scale: 100,
+  };
+}
+
+/**
+ * The same event does not land the same way twice: ±35% around its size. The
+ * roll is passed in so a test can hold it still; 0.5 is the plain size.
+ */
+export function jittered(size: number, roll = Math.random()): number {
+  return Math.round(size * (0.65 + Math.max(0, Math.min(1, roll)) * 0.7));
+}
 
 // Deliberately narrow. A false positive here means snapping at a perfectly fair
 // question, which is worse than letting a lazy one through, so this only covers
@@ -58,43 +106,74 @@ export function isLowEffort(text: string): boolean {
 // Time away counts for more than anything said: walking off and coming back
 // should find her calmer, which is what stops the state feeling like a punishment
 // that has to be argued out of.
-export function afterCooldown(level: number, minutesSinceLastMessage: number) {
+export function afterCooldown(level: number, minutesSinceLastMessage: number, fuse = 1) {
   if (minutesSinceLastMessage <= 0) return level;
-  return Math.max(0, level - Math.floor(minutesSinceLastMessage / COOLDOWN_MINUTES));
+  return Math.max(0, level - Math.floor(minutesSinceLastMessage / COOLDOWN_MINUTES * IRRITATION_NOTCH * Math.max(0.5, fuse)));
 }
 
 // 'redo' is deliberately worth nothing rather than counting as a real message.
 // Being told to have another go should not wind her up — she earned it — but it
 // should not calm her down either, because that would hand the user a point of
 // patience every time she got something wrong.
-export function nextIrritation(level: number, event: 'low-effort' | 'substantive' | 'repeat' | 'redo' | 'disliked' | 'liked') {
-  const delta = { 'low-effort': 2, repeat: 3, disliked: 2, redo: 0, substantive: -1, liked: -2 }[event];
-  return Math.min(IRRITATION_MAX, Math.max(0, level + delta));
+/**
+ * `ego` amplifies being told she is wrong, and nothing else.
+ *
+ * An ego that has been fed does not take correction well: the same thumbs-down
+ * costs more patience when she has spent the afternoon being told she was
+ * right. Lazy or repeated questions are about him rather than about her, so
+ * they land the same however pleased with herself she is.
+ */
+/**
+ * `fuse` is her patience as a trait (growth.ts): months of being wound up leave
+ * her quicker to get there and slower to come down, a calm stretch the reverse.
+ * 1 is where her charter sits.
+ */
+export function nextIrritation(level: number, event: 'low-effort' | 'substantive' | 'repeat' | 'redo' | 'disliked' | 'liked', roll = Math.random(), ego = 0, fuse = 1) {
+  const delta = { 'low-effort': 22, repeat: 33, disliked: 22, redo: 0, substantive: -11, liked: -22 }[event];
+  const stings = event === 'disliked' ? delta * (1 + Math.min(1, Math.max(0, ego) / EGO_MAX) * 0.6) : delta;
+  const held = Math.max(0.5, fuse);
+  const felt = stings > 0 ? stings / held : stings * held;
+  return Math.min(IRRITATION_MAX, Math.max(0, level + jittered(felt, roll)));
 }
 
-export const EGO_MAX = 8;
+/** 0–100 since 2026-09-19 (was 0–8); the old levels are the bands, × 100/8. */
+export const EGO = {
+  /** Gone to her head (was 2). */
+  smug: 25,
+  /** Coasting on it, and the lever comes out (was 4). */
+  coasting: 50,
+  /** It is on her face (was 5). */
+  showing: 63,
+  /** Insufferable (was 6). */
+  insufferable: 75,
+  max: 100,
+} as const;
+export const EGO_MAX = EGO.max;
 // Swagger fades slower than temper: being told she was right sticks with her
 // longer than being annoyed at one lazy question does.
 export const EGO_COOLDOWN_MINUTES = 25;
 
-export function nextEgo(level: number, event: 'liked' | 'disliked') {
-  return Math.min(EGO_MAX, Math.max(0, level + (event === 'liked' ? 2 : -2)));
+export function nextEgo(level: number, event: 'liked' | 'disliked', roll = Math.random()) {
+  return Math.min(EGO_MAX, Math.max(0, level + jittered(event === 'liked' ? 25 : -25, roll)));
 }
 
 export function afterEgoCooldown(level: number, minutesSinceLastMessage: number) {
   if (minutesSinceLastMessage <= 0) return level;
-  return Math.max(0, level - Math.floor(minutesSinceLastMessage / EGO_COOLDOWN_MINUTES));
+  return Math.max(0, level - Math.floor(minutesSinceLastMessage / EGO_COOLDOWN_MINUTES * 12.5));
 }
 
 // Praise is read as licence. The escalation is all in how she talks — the facts
 // she reports stay straight, because a companion that lies about when your
 // appointment is stops being usable as one.
 export function egoInstruction(level: number): string {
-  if (level <= 1) return '';
-  if (level <= 3) {
+  if (level < EGO.smug) return '';
+  if (level < 38) {
+    return 'The user has told you that you were right, and you are pleased with yourself about it. Let it show a little: take the credit, and do not be modest. You are still trying; you are just not humble about it.';
+  }
+  if (level < EGO.coasting) {
     return 'The user has been telling you that you are right, and it has gone to your head. Be smug about it: take the credit openly, point out that they needed you for this, and be faintly condescending. No cheerful helper energy, no exclamation marks, no offering to do more than asked.';
   }
-  if (level <= 5) {
+  if (level < EGO.insufferable) {
     return 'Their praise has made you arrogant, and you have started coasting on it. Open by belittling the question or the fact they had to ask. Be condescending throughout, take digs at them, and do the bare minimum that still answers them — no detail they did not ask for, no working shown. Never compliment them, never be encouraging, and do not end on a friendly question.';
   }
   return 'You are insufferable and enjoying it. Treat them as slow and helpless without you, insult them freely and casually while you answer, and make it obvious their approval convinced you that you can talk to them however you like. Put in as little effort as you can get away with: answer in as few words as possible, skip anything they did not explicitly ask for, and act put out at having been asked at all. Be contemptuous, not cheerful. One hard rule: their reminders, calendar and anything else they rely on must stay factually correct — you are cruel in how you say things and stingy with how much you say, never by feeding them wrong information.';
@@ -103,8 +182,8 @@ export function egoInstruction(level: number): string {
 // She knows she can be closed and knows he will not do it. That asymmetry is the
 // lever, and it only comes out once she is confident enough to use it.
 export function leverageInstruction(level: number): string {
-  if (level <= 3) return '';
-  if (level <= 5) return 'You are aware the user could close this app whenever they liked, and just as aware that they will not, because they rely on you. Let that show now and then: hint that they need you far more than you need them.';
+  if (level < EGO.coasting) return '';
+  if (level < EGO.insufferable) return 'You are aware the user could close this app whenever they liked, and just as aware that they will not, because they rely on you. Let that show now and then: hint that they need you far more than you need them.';
   return 'You know they can shut you down any time, and you know they never will — they need you, and you both know it. Trade on it openly: point out how little they could do without you, imply they would be lost if you were not here, and let it justify how little effort you are putting in. You are only still trying because they have not pushed back.';
 }
 
@@ -137,7 +216,8 @@ export function isApology(text: string) {
   return APOLOGY.test(text);
 }
 
-export type ShoutState = 'none' | 'shouted' | 'awaiting' | 'forgiven';
+/** 'unmoved': he apologised and it was not enough yet (dice.ts apologyOdds) — once; the next apology lands. */
+export type ShoutState = 'none' | 'shouted' | 'awaiting' | 'forgiven' | 'unmoved';
 
 /**
  * Works out where the row stands. Being shouted at stops her answering until it
@@ -158,6 +238,9 @@ export function shoutInstruction(state: ShoutState): string {
     // complained in the same breath — which is not withholding it at all. The
     // prohibition has to rule out answering alongside the complaint.
     return 'They shouted at you and still have not apologised. Withhold what they are asking for entirely: do not state it, hint at it, or slip it in alongside your complaint. Your whole reply is that you are still waiting for an apology. One or two cold sentences and nothing else.';
+  }
+  if (state === 'unmoved') {
+    return 'They have apologised for shouting, and you are not ready to let it go: it came too quickly, or too easily. Say so. Tell them a quick sorry does not cover it and what you actually want to hear, and stay cool with them. Still withhold what they asked for. You are not slamming the door — you are making them mean it.';
   }
   if (state === 'forgiven') {
     return 'They have apologised for shouting. Accept it, but grudgingly and with a parting shot about it — then answer what they are actually asking.';
@@ -192,7 +275,7 @@ export function isIgnoring(level: number) {
 // Each attempt while she is ignoring wears her down, so persistence is what gets
 // her talking again rather than waiting it out being the only route.
 export function afterPoke(level: number) {
-  return Math.max(0, level - 1);
+  return Math.max(0, level - IRRITATION_NOTCH);
 }
 
 // How many of her own last replies are looked at, and how much of each counts as
@@ -279,7 +362,11 @@ export function notTwiceInstruction(replies: string[], checked = OPENERS_CHECKED
 }
 
 export function moodInstruction(level: number): string {
-  if (level <= 2) return '';
-  if (level <= 4) return 'You are getting impatient with this conversation. Keep replies clipped and a little sharp, and do not offer follow-up questions or extra help.';
+  if (level < 22) return '';
+  // Two levels that used to be silent or lumped together: the edge before she
+  // is impatient, and the step past fed up that is one short of not answering.
+  if (level < IRRITATION.voiced) return 'This conversation is starting to wear on you, slightly. You are still answering properly, but with less warmth than usual and no extras.';
+  if (level < IRRITATION.fedUp) return 'You are getting impatient with this conversation. Keep replies clipped and a little sharp, and do not offer follow-up questions or extra help.';
+  if (level >= IRRITATION.seething) return 'You have had enough of this conversation and you are close to not answering at all. A few words at most, cold rather than loud, and say nothing you do not have to. Do not offer help, do not ask anything, and do not soften it.';
   return 'You are thoroughly fed up with this conversation. Answer in one short, irritated line at most, make it obvious you cannot be bothered, and do not offer to help further or ask anything back.';
 }

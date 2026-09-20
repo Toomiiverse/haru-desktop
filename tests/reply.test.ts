@@ -11,7 +11,8 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { answersThePrompt, CUE_NOTE, isCue, stageNote, claimsDesktopAction, claimsTickOff, dropInventedContact, dropInventedScreenTalk, dropRepeatedAgendaMentions, dropRepeatedParagraphs, dropRoleHeader, dropStageDirections, dropTackedOnParagraphs, readsLikeAssistant, dropRepeatedOpener, dropEchoOpener, dropRepeatedSentences, fixStatedClock, fixStatedReminderTime, fixStatedMinutes, deniesItExists } from '../electron/reply';
+import { asksToLookUp } from '../electron/reply';
+import { answersThePrompt, CUE_NOTE, isCue, stageNote, claimsDesktopAction, claimsTickOff, dropInventedContact, dropInventedScreenTalk, dropRepeatedAgendaMentions, dropRepeatedParagraphs, dropRoleHeader, dropStageDirections, dropTackedOnParagraphs, readsLikeAssistant, dropRepeatedOpener, dropEchoOpener, dropRepeatedSentences, fixStatedClock, fixStatedReminderTime, fixStatedMinutes, deniesItExists, claimsChecked, thinksAloud, dropThinkingAloud } from '../electron/reply';
 
 // -- claiming to have touched the machine -------------------------------------
 
@@ -428,6 +429,17 @@ test('the minutes of silence she states become the real ones, digits or words; a
   assert.equal(fixStatedMinutes('No minutes mentioned here.', 27), 'No minutes mentioned here.');
 });
 
+test('hours she states, and numbers past a hundred, are made the real span too', () => {
+  // Said on 2026-09-06 at 08:22, told "2 hours" (142 minutes since the quiet ended).
+  assert.equal(fixStatedMinutes('Six hours and forty-eight minutes of silence. You’re worse than a cordless drill.', 142), '2 hours and 22 minutes of silence. You’re worse than a cordless drill.');
+  // Said on 2026-09-05 at 20:00.
+  assert.equal(fixStatedMinutes('Three hundred and fifty-four minutes of radio silence.', 41), '41 minutes of radio silence.');
+  assert.equal(fixStatedMinutes('3 hours of nothing.', 41), '41 minutes of nothing.');
+  assert.equal(fixStatedMinutes('2 hours of nothing.', 120), '2 hours of nothing.');
+  assert.equal(fixStatedMinutes('an hour and a half, easily', 90), 'an hour and a half, easily', 'articles are left alone — "an hour" is idiom as often as a count');
+  assert.equal(fixStatedMinutes('354 minutes.', 354), '354 minutes.');
+});
+
 test('the paragraph ceiling is the caller\'s: four for a hosted brain, two by default', () => {
   const five = ['One.', 'Two.', 'Three.', 'Four.', 'Five.'].join('\n\n');
   assert.equal(dropTackedOnParagraphs(five, false), 'One.\n\nTwo.');
@@ -473,4 +485,114 @@ test('a flat denial that something is real is recognised, and ordinary disagreem
     'It exists, it is just overpriced.',
     'I looked it up and it does not exist, so stop.',
   ].slice(0, 2)) assert.equal(deniesItExists(line), false, line);
+});
+
+// -- her deliberation said as the reply ------------------------------------------------
+
+const KIMI_LEAK = `The user is expressing a low mood and feelings of inadequacy about productivity. This is a genuine moment that deserves a real response, not a deflection or a management tactic. They've opened up about something hard.
+
+I should:
+1. Acknowledge what they said directly without minimizing
+2. Not offer therapy-style advice or solutions
+3. Not pivot to tasks or ask them to rate anything
+
+They mentioned yesterday they were editing their website late — that's context showing they've been working but maybe not feeling the results.
+
+I should be real with them. The smugness drops here because this isn't about me being right.
+
+Let me check if I need to save this as a journal entry — yes, they're telling me how they're feeling, so I should call save_journalThat sucks. 😤 And "lately" is doing a lot of work there — how long's this been sitting on you?
+
+I see you working. The website, the store, the hardware tests. But I also know *seeing* it and *feeling* it aren't the same thing.
+
+What's the thing that made you say it just now — something today, or just the weight of it all stacking up?`;
+
+test('her deliberation is recognised and the reply behind it kept', () => {
+  assert.equal(thinksAloud(KIMI_LEAK), true);
+  // Said aloud on a call, 2026-09-06, to a misheard goodbye.
+  assert.equal(thinksAloud('The user said "Vida, Haru." This doesn\'t seem to connect to anything in the conversation.'), true);
+  assert.equal(thinksAloud('The us'), false, 'a word still arriving is not yet a leak');
+  assert.equal(thinksAloud('The user'), true, 'the two words are — a call holds the round back from her voice here');
+  const { text, dropped } = dropThinkingAloud(KIMI_LEAK);
+  assert.ok(text.startsWith('That sucks. 😤 And "lately"'), `the reply begins where the plan ran into it, not: ${text.slice(0, 40)}`);
+  assert.ok(text.endsWith('stacking up?'));
+  assert.equal(text.split(/\n\s*\n/).length, 3, 'her three paragraphs, all of them');
+  assert.ok(dropped > 700 && !text.includes('The user') && !text.includes('save_journal'));
+});
+
+test('a plan with nothing behind it is nothing to say', () => {
+  const planOnly = 'The user seems upset about being ignored. I should acknowledge that without apologising.\n\nI need to keep her voice: sharp, not warm.';
+  assert.equal(thinksAloud(planOnly), true);
+  assert.deepEqual(dropThinkingAloud(planOnly), { text: '', dropped: planOnly.length });
+});
+
+test('her own words are left alone, third parties and lists included', () => {
+  for (const reply of [
+    'They\'re not going to fix that shop for you. Sudin has said so twice.',
+    'Fine. Two things, then:\n1. eat.\n2. sleep.',
+    'I should have said this earlier: the website looks good. Don\'t let it go to your head.',
+    'Let me guess. You forgot again. 😒',
+    'This is exactly what I said would happen.',
+  ]) {
+    assert.equal(thinksAloud(reply), false, reply);
+    assert.deepEqual(dropThinkingAloud(reply), { text: reply, dropped: 0 });
+  }
+});
+
+
+test('a claim to have checked is caught; an honest "I have not looked" is not', () => {
+  assert.ok(claimsChecked('I checked — nothing with "Haru notes" in it. Could be there under something else.'));
+  assert.ok(claimsChecked('I looked it up and there is nothing on the RX 6750 XT in your notes.'));
+  assert.ok(claimsChecked('I’ve searched your vault. No PC build notes.'));
+  assert.ok(!claimsChecked('I have not looked yet — give me a second.'));
+  assert.ok(!claimsChecked('You should check the vault yourself.'));
+  assert.ok(!claimsChecked('Checked out, then. Go to bed.'));
+});
+
+test('a hosted reply keeps its fourth paragraph, and a list keeps its parts', () => {
+  // Six replies in one afternoon lost their last paragraph — the closing
+  // question, or the advice that mattered — to a cap of three that ran before
+  // the hosted ceiling of four ever applied (2026-09-10).
+  const four = 'One thing about the boot drive.\n\nTwo, check the ports.\n\nThree, the manual.\n\nWhich is it?';
+  assert.equal(dropRepeatedParagraphs(four, []), 'One thing about the boot drive.\n\nTwo, check the ports.\n\nThree, the manual.', 'the local ceiling is still three');
+  assert.equal(dropRepeatedParagraphs(four, [], 4), four, "the hosted ceiling is the caller's");
+  const steps = 'Boot from it and pick repair.\n\nIf that fails, run:\n- `bootrec /fixmbr`\n- `bootrec /fixboot`\n\nThe last one asks to add Windows.\n\nIf the drive still does not show, reseat it.';
+  assert.equal(dropRepeatedParagraphs(steps, []), steps, 'a list under a lead-in is still a list');
+  assert.equal(dropTackedOnParagraphs(steps, false), steps);
+});
+
+test('an ask to look something up is told from a question or a statement', () => {
+  for (const said of [
+    'can you look up whether the RX 9060 XT supports FSR 4 yet',
+    'Okay - Haru, search up Zelda games currently on the Nintendo switch 2 🙄',
+    'The switch 2 is out - fact check it if you want',
+    'look it up',
+    'google it',
+    'Haru search for a decent burger near me',
+    'can you find out if Umart is open',
+  ]) assert.ok(asksToLookUp(said), `missed: ${said}`);
+  for (const said of [
+    'does the RX 9060 XT support FSR 4?',
+    'I looked it up already',
+    'I really look up to Sudin',
+    'I was searching for my keys all morning',
+    'What Zelda games are currently on the switch 2?',
+  ]) assert.ok(!asksToLookUp(said), `false alarm: ${said}`);
+});
+
+test('"you just asked me" is him, not a stranger, and never empties her reply (2026-09-14)', () => {
+  // Both went out as empty bubbles: the case-insensitive subject read "just" as
+  // a person who had asked her.
+  for (const said of [
+    "The server. 😒 The one you just asked me to fix for you. The one running at 93% RAM with llama-server chewing 260% CPU. The one you said you fixed two days ago and clearly didn't. That RAM.",
+    "No, it wasn't. 💢 You said you'd fix it, but you didn't. You just asked me again today, and I told you again. You didn't do it then either.",
+    'You literally asked me that an hour ago.',
+    'Just asked me the same thing, did you not?',
+    'Already told me, genius.',
+    'Never told me that.',
+  ]) assert.equal(dropInventedContact(said), said, said);
+  // The inventions are still caught, an adverb in the middle or not.
+  assert.equal(dropInventedContact('Fine.\n\nEmma just texted me about the present.'), 'Fine.');
+  assert.equal(dropInventedContact('Fine.\n\nSudin literally called me.'), 'Fine.');
+  assert.equal(dropInventedContact('Fine.\n\nHe told me you were out.'), 'Fine.');
+  assert.equal(dropInventedContact('Fine.\n\nyour mum called me yesterday.'), 'Fine.');
 });

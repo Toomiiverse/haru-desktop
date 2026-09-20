@@ -135,6 +135,8 @@ export type VocabularySources = {
   places?: string[];
   /** What is on the list. */
   kept?: string[];
+  /** What they wrote about themselves: the towns, streets and people in it. */
+  about?: string[];
 };
 
 /**
@@ -151,6 +153,7 @@ export function spokenVocabulary(sources: VocabularySources, limit = LIMIT): str
     ...(sources.taught ?? []),
     ...(sources.places ?? []),
     ...namesInText(sources.kept ?? []),
+    ...namesInText(sources.about ?? []),
     ...namesInText(chat),
   ];
   const seen = new Set<string>();

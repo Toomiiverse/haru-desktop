@@ -467,6 +467,12 @@ const AVATAR = `
   const engine = createEmotionEngine({ duration: () => (reduced ? 0 : fade) });
   const clock = () => (typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now());
   let front = 0, resting = 'neutral', timer = null, frozenAt = null, request = 0, eyes = null;
+  // Whether a face has ever reached the stage. Until one has, a "change" to
+  // the emotion she is already at (neutral, at startup) must still load and
+  // mount it — otherwise the first paint is a no-op and she stays blank, the
+  // way she does asleep, when the only expression that ever comes maps back
+  // to a face the engine thinks is already showing.
+  let mounted = false;
   const cache = {};
 
   function load(name) {
@@ -513,7 +519,8 @@ const AVATAR = `
   }
   function replay(el, cls) { el.classList.remove(cls); if (typeof el.offsetWidth === 'number') void el.offsetWidth; el.classList.add(cls); }
   function show(name, t) {
-    if (!engine.set(name, t)) return;
+    const changed = engine.set(name, t);
+    if (!changed && mounted) return;
     const frame = engine.sample(t);
     const mine = ++request;
     box.setAttribute('aria-label', LABELS[frame.emotion] || ('Haru feeling ' + frame.emotion));
@@ -523,6 +530,7 @@ const AVATAR = `
       incoming.classList.remove('missing');
       eyes = mount(incoming, text);
       front = 1 - front;
+      mounted = true;
       idleFor(frame.emotion);
       paint(frozenAt === null ? frame : engine.sample(frozenAt), frozenAt === null);
       if (!reduced && frozenAt === null) replay(body, 'changed');
@@ -967,9 +975,9 @@ function acts(m,isLast){
     +'</span></div>';
 }
 
-async function load(){
+async function load(poll){
   try{
-    const {messages}=await get('/api/chat');
+    const {messages}=await get(poll?'/api/chat?poll=1':'/api/chat');
     bubbles(messages); showingSaved=false;
     // Today, as last seen: painted at once next time, and read when she is out of reach.
     window.haruKeep.set('today',{savedAt:Date.now(),messages});
@@ -1007,7 +1015,7 @@ window.haruNet.onChange(s=>{
   $('net').hidden=s==='on';
   $('net').textContent=s==='off'?'Offline':'Out of reach';
   document.querySelector('.topbar').classList.toggle('off',s!=='on');
-  if(s==='on'&&wasOut) void load();
+  if(s==='on'&&wasOut) void load(true);
   wasOut=s!=='on';
 });
 
@@ -1059,13 +1067,28 @@ function sayable(text){
   if(out.length) out[out.length-1].pause=0;
   return out;
 }
-function fetchClip(part,emotion,tries){
-  // A part is a sentence to synthesise, or a sigh to fetch by name.
-  const body=part.sigh?{sigh:true,emotion:emotion||null}:(emotion?{text:part.text,emotion}:{text:part.text});
-  return fetch('/api/speak',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)})
+function fetchClip(part,emotion,prefetch){
+  // A sigh is asked for by name and fetched whole.
+  if(part.sigh) return fetch('/api/speak',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({sigh:true,emotion:emotion||null})})
     .then(r=>r.ok?r.blob():null)
-    .catch(()=>null)
-    .then(blob=>blob||(!part.sigh&&(tries||0)<1?fetchClip(part,emotion,(tries||0)+1):null));
+    .catch(()=>null);
+  const q='/api/speak?text='+encodeURIComponent(part.text)+(emotion?'&emotion='+encodeURIComponent(emotion):'');
+  // Asked for while the sentence before it plays, the clip is pulled whole
+  // now, so Hume renders it under her previous sentence and the seam is a
+  // beat rather than the first-byte wait again. Handing back a URL here did
+  // nothing until the player was pointed at it, which was only ever after the
+  // last sentence had ended — every break paid the whole wait.
+  if(prefetch) return fetch(q).then(r=>r.ok?r.blob():null).catch(()=>null);
+  // Asked for on the spot, it streams: a GET the <audio> element plays
+  // progressively, so the first sound is the first bytes Hume sends.
+  return Promise.resolve({stream:q});
+}
+// A clip to point the player at: a stream URL plays as it arrives, a blob gets
+// an object URL that must be revoked when done.
+function clipUrl(clip){
+  if(!clip) return null;
+  if(clip.stream) return { url: clip.stream, blob: false };
+  return { url: URL.createObjectURL(clip), blob: true };
 }
 async function speak(text,emotion){
   const mine=++speaking;
@@ -1078,27 +1101,104 @@ async function speak(text,emotion){
     let pending=fetchClip(parts[0],emotion);
     let started=false;
     for(let i=0;i<parts.length;i++){
-      const blob=await pending;
+      const clip=await pending;
       if(mine!==speaking) return started;
       // One sentence failing is not a reason to swallow the rest of what she
       // said: it used to return here, so a single hiccup halfway through left
       // her cut off mid-thought with no sign anything had gone wrong.
-      pending=i+1<parts.length?fetchClip(parts[i+1],emotion):null;
-      if(!blob){ if(!parts[i].sigh) console.warn('[voice] no audio for one sentence — carrying on'); continue; }
-      const url=URL.createObjectURL(blob);
-      const done=new Promise(resolve=>{ player.onended=player.onerror=()=>{ URL.revokeObjectURL(url); resolve(); }; });
+      pending=i+1<parts.length?fetchClip(parts[i+1],emotion,true):null;
+      const made=clipUrl(clip);
+      if(!made){ if(!parts[i].sigh) console.warn('[voice] no audio for one sentence — carrying on'); continue; }
+      const done=new Promise(resolve=>{ player.onended=player.onerror=()=>{ if(made.blob) URL.revokeObjectURL(made.url); resolve(); }; });
       try{
-        player.src=url;
+        player.src=made.url;
         await player.play();
         started=true;
         await done;
-      }catch(e){ URL.revokeObjectURL(url); console.warn('[voice] a sentence would not play — carrying on'); }
+      }catch(e){ if(made.blob) URL.revokeObjectURL(made.url); console.warn('[voice] a sentence would not play — carrying on'); }
       if(mine!==speaking) return true;
       if(parts[i].pause) await new Promise(r=>setTimeout(r,parts[i].pause));
       if(mine!==speaking) return true;
     }
     return started;
   }catch(e){ console.warn('[voice] '+(e&&e.message||e)); return false; }
+}
+// Her voice, sentence by sentence as the stream delivers them — the reply is
+// spoken while it is still being written instead of after it lands. One drain
+// loop plays the queue in order, asking for each clip while the one before it
+// is still playing, so the gap between sentences is the synthesis already
+// underway rather than a wait for it. stopVoice() abandons the queue — a
+// round that was thrown away, a final reply that rewrote the stream, a hand
+// over her mouth — by bumping the same counter speak() checks.
+let voiceQueue=[], voiceEmotion=null, voiceDraining=false;
+function stopVoice(){ speaking++; voiceQueue=[]; player.pause(); }
+function voiceFeed(sentence,emotion){
+  if(!sentence||!sentence.trim()) return;
+  cancelBreath();
+  if(emotion) voiceEmotion=emotion;
+  voiceQueue.push({text:sentence});
+  drainVoice();
+}
+async function drainVoice(){
+  if(voiceDraining) return;
+  voiceDraining=true;
+  let started=false;
+  try{
+    if(!voiceQueue.length) return;
+    // What is in flight, and which sentence it is for. A sentence that
+    // arrived while the one before it was playing has nothing in flight —
+    // it used to be played as nothing at all, "no audio for a streamed
+    // sentence", and dropped — so it is asked for on the spot, streaming.
+    let pending=null, pendingFor=null;
+    const ask=(part,prefetch)=>{ pendingFor=part; pending=fetchClip(part,voiceEmotion,prefetch); };
+    ask(voiceQueue[0],false);
+    while(voiceQueue.length){
+      const part=voiceQueue.shift();
+      const mine=speaking;
+      if(pendingFor!==part) ask(part,false);
+      const clip=await pending;
+      if(mine!==speaking) return;
+      if(voiceQueue.length) ask(voiceQueue[0],true); else { pending=null; pendingFor=null; }
+      const made=clipUrl(clip);
+      if(!made){ console.warn('[voice] no audio for a streamed sentence — carrying on'); continue; }
+      const done=new Promise(resolve=>{ player.onended=player.onerror=()=>{ if(made.blob) URL.revokeObjectURL(made.url); resolve(); }; });
+      try{
+        player.src=made.url;
+        await player.play();
+        started=true;
+        await done;
+      }catch(e){ if(made.blob) URL.revokeObjectURL(made.url); console.warn('[voice] a streamed sentence would not play — carrying on'); }
+      if(mine!==speaking) return;
+    }
+  } finally { voiceDraining=false; }
+  // Nothing of hers was ever heard — close the ear that was opened for her.
+  if(!started&&talk) act(talk.spokeEnd(now()));
+}
+// A breath of hers for the gap before she answers: the message has been sent,
+// the bubble is up, and the model is thinking in silence. One of her recorded
+// sighs, played once and cut short the moment a real sentence arrives — a
+// quick-hit reply lands inside half a second and never hears it, a full reply
+// gets the beat. Fetched from /api/speak like any other clip, so a phone with
+// her voice off hears nothing at all.
+let breathPending=false, breathTimer=null;
+function cancelBreath(){ breathPending=false; if(breathTimer){ clearTimeout(breathTimer); breathTimer=null; } }
+function breath(){
+  fetch('/api/speak',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({sigh:true,emotion:null})})
+    .then(r=>r.ok?r.blob():null).catch(()=>null)
+    .then(blob=>{
+      if(!blob) return;
+      const url=URL.createObjectURL(blob);
+      const done=new Promise(resolve=>{ player.onended=player.onerror=()=>{ URL.revokeObjectURL(url); resolve(); }; });
+      try{ player.src=url; player.play().catch(()=>URL.revokeObjectURL(url)); }catch(e){ URL.revokeObjectURL(url); }
+      void done;
+    });
+}
+// The breath is armed on send and fired only if no sentence has arrived by
+// the time it is due — see deliver().
+function armBreath(){
+  cancelBreath();
+  breathPending=true;
+  breathTimer=setTimeout(()=>{ breathPending=false; breathTimer=null; breath(); }, 600);
 }
 // A tap on her. Mid-sentence it is a hand over her mouth: whatever she is
 // saying stops, whatever she was about to say is dropped, and she pulls the
@@ -1155,12 +1255,13 @@ async function readStream(r,show){
       if(!line.startsWith('data:'))continue;
       let ev; try{ev=JSON.parse(line.slice(5));}catch{continue;}
       if(ev.error) error=ev.error;
-      else if(ev.text==='\uFFFD'){ said=''; show('…'); }
+      else if(ev.text==='\uFFFD'){ said=''; show('…'); stopVoice(); cancelBreath(); }
+      else if(ev.sentence){ voiceFeed(ev.sentence,ev.emotion); }
       else if(ev.text){ said+=ev.text; show(said); }
       else if(ev.done){ reply=ev.reply; ignored=Boolean(ev.ignored); }
     }
   }
-  return {reply,ignored,error};
+  return {reply,ignored,error,said};
 }
 
 // What a message becomes once it is sent, whether typed or spoken: the
@@ -1187,6 +1288,10 @@ async function deliver(text,sent,{interrupted=false}={}){
   $('chat').scrollTop=$('chat').scrollHeight;
   // Your message drops her into the thinking state while she works on the answer.
   if(window.haruAvatar) window.haruAvatar.think();
+  // A breath of hers, if the answer does not arrive quickly — armed now, fired
+  // only if no sentence has streamed in by the time it is due, so a quick-hit
+  // reply never hears it over itself.
+  armBreath();
   const stopWaiting=()=>{const bubble=document.getElementById(id); if(bubble) bubble.remove(); document.querySelectorAll('[id^="'+id+'-"]').forEach(e=>e.remove());};
   // The waiting bubble doubles as the reply bubble: words land in it as the
   // stream delivers them, and the final processed reply replaces them when the
@@ -1196,11 +1301,13 @@ async function deliver(text,sent,{interrupted=false}={}){
   try{
     const r=await window.haruNet.fetch('/api/chat/stream',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(Object.assign(sent.length?{text,attachments:sent}:{text},interrupted?{interrupted:true}:{}))});
     if(!r.ok) throw r;
-    const {reply,ignored,error}=await readStream(r,show);
+    const {reply,ignored,error,said}=await readStream(r,show);
     if(error) throw new Error(error);
     if(ignored){
       // Whatever she was about to say does not exist: the bubble goes, the note
       // takes its place, and nothing is spoken.
+      stopVoice();
+      cancelBreath();
       stopWaiting();
       $('chat').insertAdjacentHTML('beforeend','<div class="msg sys">She is not answering that.</div>');
       if(talk) act(talk.replied(now(),false));
@@ -1209,18 +1316,23 @@ async function deliver(text,sent,{interrupted=false}={}){
       // she later trims as repetition — so it replaces what was shown.
       if(reply!==null) show(reply);
       if(reply){
-        // Started here and not waited on: the words are already on screen, and
-        // her voice can catch up in its own time.
-        // Her mood for the line first — it drives her face, and then her voice
-        // is cloned from the clip for that mood, so the two agree. The
-        // conversation, if one is on, waits for the voice to finish.
+        // Her voice started with the stream, sentence by sentence; only the
+        // face waits for a classifier now, and the words are already on screen.
         if(window.haruAvatar) window.haruAvatar.notify();
         if(talk) act(talk.replied(now(),true));
         const mood=post('/api/expression',{text:reply}).then(r=>{ if(window.haruAvatar) window.haruAvatar.express(r.emotion); return r.emotion; }).catch(()=>null);
-        mood.then(emotion=>speak(reply,emotion)).then(started=>{ if(!started&&talk) act(talk.spokeEnd(now())); });
+        // The voice has been speaking the streamed words. When the processed
+        // reply differs from what streamed — a filter trimmed it — the streamed
+        // words are cut off and the reply that counts is said instead.
+        if(reply.trim()!==said.trim()){
+          stopVoice();
+          mood.then(emotion=>speak(reply,emotion||voiceEmotion)).then(started=>{ if(!started&&talk) act(talk.spokeEnd(now())); });
+        }
       }
     }
   }catch(r){
+    stopVoice();
+    cancelBreath();
     stopWaiting();
     if(talk) act(talk.replied(now(),false));
     if(r&&r.status===401){location.reload();return;}
@@ -1278,22 +1390,29 @@ async function askAgain(){
   if(window.haruAvatar) window.haruAvatar.think();
   const show=t=>paint(id,t);
   show('…');
+  armBreath();
   try{
     const r=await fetch('/api/chat/retry',{method:'POST',headers:{'content-type':'application/json'},body:'{}'});
     if(!r.ok) throw r;
-    const {reply,ignored,error}=await readStream(r,show);
+    const {reply,ignored,error,said}=await readStream(r,show);
     if(error) throw new Error(error);
     if(ignored){
+      stopVoice();
+      cancelBreath();
       const bubble=document.getElementById(id); if(bubble) bubble.remove();
       $('chat').insertAdjacentHTML('beforeend','<div class="msg sys">She is not answering that.</div>');
     } else if(reply!==null){
       show(reply);
       if(reply){
         if(window.haruAvatar){ window.haruAvatar.notify(); post('/api/expression',{text:reply}).then(x=>window.haruAvatar.express(x.emotion)).catch(()=>{}); }
-        void speak(reply);
+        // The voice streamed with the reply; only a rewritten final is said
+        // again, the same way deliver does it.
+        if(reply.trim()!==said.trim()){ stopVoice(); void speak(reply); }
       }
     }
   }catch(r){
+    stopVoice();
+    cancelBreath();
     if(r&&r.status===401){location.reload();return;}
     show(before);
     $('chat').insertAdjacentHTML('beforeend','<div class="msg sys">That did not get through.</div>');
@@ -1428,11 +1547,12 @@ async function askIfSheHasSomethingToSay(){
   }catch(r){ if(r&&r.status===401) location.reload(); }
 }
 setTimeout(askIfSheHasSomethingToSay,1500);
-document.addEventListener('visibilitychange',()=>{ if(!document.hidden){ refreshIfIdle(); askIfSheHasSomethingToSay(); } });
-window.addEventListener('pageshow',e=>{ if(e.persisted) refreshIfIdle(); });
+document.addEventListener('visibilitychange',()=>{ if(!document.hidden){ refreshIfIdle(true); askIfSheHasSomethingToSay(); } });
+window.addEventListener('pageshow',e=>{ if(e.persisted) refreshIfIdle(true); });
 // Re-read the day unless she is mid-answer, when the stream on screen is newer
 // than anything the server would hand back.
-function refreshIfIdle(){ if($('cb').disabled) return; void load(); }
+// opened: the page came back in front of them; anything else is the page checking on its own.
+function refreshIfIdle(opened){ if($('cb').disabled) return; void load(!opened); }
 // Four minutes: she is being carried around, not watched. Anything faster reads
 // as pestering, and the spacing on her side would refuse it anyway.
 setInterval(askIfSheHasSomethingToSay,4*60_000);

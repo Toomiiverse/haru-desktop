@@ -2,7 +2,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { emojiRut, EXPRESSIVE, HER_EMOJI, LAST_WORD, NATURAL, roomToRant, RANT_COOLDOWN_MS, MENTION_COOLDOWN_MS, nothingInIt, askingAboutHer, herSubjectNote, namesIn, justTalking, JUST_TALKING_NOTE } from '../electron/room';
+import { emojiRut, EXPRESSIVE, HER_EMOJI, HOSTED_VOICE, LAST_WORD, NATURAL, roomToRant, RANT_COOLDOWN_MS, MENTION_COOLDOWN_MS, nothingInIt, askingAboutHer, herSubjectNote, namesIn, justTalking, JUST_TALKING_NOTE } from '../electron/room';
 import { dropOverusedEmoji, oneEmojiAtMost, dropClosingOrder } from '../electron/reply';
 
 test('the eye-roll is no longer named first or named as the default', () => {
@@ -76,7 +76,7 @@ test('one emoji at most, whichever came first', () => {
 });
 
 test('room to go on about something comes from her evening and her mood, not from the size of his message', () => {
-  const wound = { energy: 0.9, curiosity: 0.8, irritation: 5, ego: 5, subject: 'Chainsaw Man', sinceLastMs: null, roll: 0.01 };
+  const wound = { energy: 0.9, curiosity: 0.8, irritation: 56, ego: 63, subject: 'Chainsaw Man', sinceLastMs: null, roll: 0.01 };
   const room = roomToRant(wound);
   assert.match(room, /You have been on Chainsaw Man, you have things to say about it/);
   assert.match(room, /the rule about matching the length of their message does not apply/);
@@ -88,7 +88,7 @@ test('room to go on about something comes from her evening and her mood, not fro
   assert.equal(roomToRant({ ...wound, sinceLastMs: RANT_COOLDOWN_MS + 1, roll: 0.01 }), room, 'and free again after');
   const flat = { energy: 0.2, curiosity: 0.2, irritation: 0, ego: 0, sinceLastMs: null, roll: 0.2 };
   assert.equal(roomToRant(flat), '', 'nothing in her, nothing to say');
-  assert.match(roomToRant({ ...flat, irritation: 6, roll: 0.01 }), /something you actually want to get off your chest/, 'fed up is its own reason, with no subject');
+  assert.match(roomToRant({ ...flat, irritation: 67, roll: 0.01 }), /something you actually want to get off your chest/, 'fed up is its own reason, with no subject');
 });
 
 test('a plain greeting gets no five-line opinion about last night', () => {
@@ -98,7 +98,7 @@ test('a plain greeting gets no five-line opinion about last night', () => {
   for (const line of ['morning, what did you watch last night', 'ok so what do you reckon', 'hey can you remind me at 6', 'right, im off to work']) {
     assert.equal(nothingInIt(line), false, line);
   }
-  const wound = { energy: 0.9, curiosity: 0.8, irritation: 5, ego: 5, subject: 'Chainsaw Man', sinceLastMs: null, roll: 0.01 };
+  const wound = { energy: 0.9, curiosity: 0.8, irritation: 56, ego: 63, subject: 'Chainsaw Man', sinceLastMs: null, roll: 0.01 };
   assert.equal(roomToRant({ ...wound, latest: 'Morning Haru' }), '', 'nothing in the message, nothing to launch at');
   assert.match(roomToRant({ ...wound, latest: 'morning, what did you get up to last night' }), /You have been on Chainsaw Man/);
   assert.match(roomToRant(wound), /You have been on Chainsaw Man/, 'no message given, unchanged');
@@ -128,6 +128,11 @@ test('the names inside her own notes count as her subject, and so does asking wh
   assert.ok(!found.includes('Obviously') && !found.includes('This'), 'ordinary sentence openers are not names');
   assert.equal(askingAboutHer('so whats good about the Reze arc then', ['Chainsaw Man', ...found]), 'Reze');
   assert.equal(askingAboutHer("what's so good about it", ['Chainsaw Man']), 'what you are into');
+  // A word her notes use in lowercase is not a name, and a run of names stays whole (2026-09-16).
+  const shell = namesIn(['Think Pol is the part I keep coming back to. I think Takashi’s arc is the real point.', 'Reading Control again on Tuesday.'], new Set(['reading']));
+  assert.ok(shell.includes('Think Pol') && shell.includes('Takashi') && shell.includes('Control'), shell.join(','));
+  assert.ok(!shell.includes('Think') && !shell.includes('Reading') && !shell.includes('Tuesday'), shell.join(','));
+  assert.equal(askingAboutHer('Well I mean it’s now 8pm. I think lunch is beyond me', ['Chainsaw Man', ...shell]), '');
   assert.equal(askingAboutHer('why do you rate it over Detroit', ['Chainsaw Man']), 'what you are into');
 });
 
@@ -185,4 +190,29 @@ test('a reply about her cannot end by handing the subject back as a question', (
   assert.equal(dropClosingOrder("We're going in circles. I answered that. If you want to talk, say something new. Otherwise go finish cleaning."), "We're going in circles. I answered that. If you want to talk, say something new.", '"otherwise go finish" is an order');
   assert.match(herSubjectNote('Chainsaw Man'), /^They are asking you about Chainsaw Man — about you, not about them\. First and most of all: this reply ends on the subject/);
   assert.match(herSubjectNote('Chainsaw Man'), /not one order, not even at the end/i);
+});
+
+test('her voice note for a hosted brain describes the register and quotes none of what it rules out', () => {
+  // A quoted line is a suggested one: none of the soft lines Kimi K3 actually
+  // wrote on 2026-09-14 may appear in the note that is there to stop them.
+  for (const line of ["you're not useless", "i'm here", 'let me know', 'sleep well', 'bedbugs', "tell me what you need", 'have you been sleeping']) {
+    assert.ok(!HOSTED_VOICE.toLowerCase().includes(line), `quotes: ${line}`);
+  }
+  assert.match(HOSTED_VOICE, /^Before you answer: you are Haru/);
+  assert.match(HOSTED_VOICE, /do not reassure him about himself/);
+  assert.match(HOSTED_VOICE, /fewer words, not softer ones/);
+  assert.ok(!HOSTED_VOICE.startsWith('[') && !HOSTED_VOICE.endsWith(']'), 'main.ts wraps it with the label rule');
+});
+
+test('bored, she is likelier to go on about something of her own', () => {
+  const dull = { energy: 0.5, curiosity: 0.4, irritation: 0, ego: 0, sinceLastMs: null, latest: 'what are you up to' };
+  // A middling afternoon with nothing to push her: no room.
+  // Nothing else is pushing her, so boredom alone is the whole score: a fifth
+  // of a chance where there was none.
+  assert.equal(roomToRant({ ...dull, roll: 0.15 }), '');
+  assert.notEqual(roomToRant({ ...dull, boredom: 80, roll: 0.15 }), '');
+  assert.equal(roomToRant({ ...dull, boredom: 80, roll: 0.25 }), '', 'and it is still only a chance');
+  // And the ceiling lifts with it: at full boredom a roll the old cap refused gets through.
+  assert.equal(roomToRant({ energy: 0.9, curiosity: 0.8, irritation: 0, ego: 0, subject: 'Chainsaw Man', sinceLastMs: null, roll: 0.6 }), '');
+  assert.notEqual(roomToRant({ energy: 0.9, curiosity: 0.8, irritation: 0, ego: 0, subject: 'Chainsaw Man', sinceLastMs: null, boredom: 100, roll: 0.6 }), '');
 });

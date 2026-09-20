@@ -51,6 +51,19 @@ test('what she is told outranks what she inferred, the latest conversation outra
   assert.ok(list.includes('Ryzen') && list.includes('Marcus'));
 });
 
+test('the places and people in their profile are listened for, after the list and before the conversation', () => {
+  const list = spokenVocabulary({
+    names: ['Haru'],
+    kept: ['Ring Sam back'],
+    about: ['I moved to Perth, Western Australia when I was five. I work at The PC Project on Fitzgerald Street, Northbridge.'],
+    chat: ['I think Denji is the best part of Chainsaw Man.'],
+  });
+  const at = (term: string) => list.indexOf(term);
+  assert.ok(at('Perth') > at('Sam') && at('Western Australia') > at('Sam'), list.join(', '));
+  assert.ok(at('Northbridge') > 0 && at('Fitzgerald Street') > 0, list.join(', '));
+  assert.ok(at('Denji') > at('Northbridge'), 'the conversation comes after the profile');
+});
+
 test('the list is capped, and by characters as well as by count', () => {
   const many = Array.from({ length: 80 }, (_, i) => `N${i}`);
   assert.equal(spokenVocabulary({ names: many }).length, 30);

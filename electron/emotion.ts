@@ -1,3 +1,5 @@
+import { readTone, isHeated } from './tone';
+
 // The emotion engine. The model reports what it meant by a reply; the behaviour
 // engine turns that into movement. Semantic labels rather than animation names,
 // so the same reading works on any model.
@@ -68,6 +70,33 @@ export type Emotion = {
 
 export const NEUTRAL_EMOTION: Emotion = { emotion: 'neutral', confidence: 0.5, energy: 0.5, intent: 'listen', focus: 'user' };
 
+/**
+ * The mood of a line, read from the line itself — no model call.
+ *
+ * The classifier answers "what did she mean", which is a model's job; this
+ * answers "which voice clip and face", which a handful of signals can do well
+ * enough: how hot the line is (tone.ts), the emoji she reached for, and the
+ * words that carry the state. It exists so a phone can start speaking the
+ * reply while it is still being written, where waiting a round trip for the
+ * classifier would defeat the point. Anything it cannot read stays neutral,
+ * which every voice and face can fall back to.
+ */
+export function localEmotion(text: string): EmotionName {
+  const line = (text ?? '').trim();
+  if (!line) return 'neutral';
+  const tone = readTone(line);
+  if (isHeated(tone)) return 'annoyed';
+  if (/[😏]/u.test(line)) return 'smug';
+  if (/[😤💢🔥😒🙄😾]/u.test(line)) return 'annoyed';
+  if (/[👀]/u.test(line)) return 'curious';
+  if (/\b(sleepy|tired|drowsy|yawning|dozing|nodding off|nod off|nap|bed|exhausted)\b/i.test(line)) return 'sleepy';
+  if (/\b(love you|miss you|adore|darling|dear\b)\b/i.test(line)) return 'affectionate';
+  if (/\b(haha|hahaha|heh|lol|hilarious|nice one|love it|made my day)\b/i.test(line)) return 'happy';
+  if (/\b(ugh|whatever|damn|seriously|really now)\b/i.test(line)) return 'annoyed';
+  if (/\?/.test(line)) return 'curious';
+  return 'neutral';
+}
+
 // Handed to Ollama as `format`, which constrains generation to match — far more
 // reliable than asking for JSON in the prompt and hoping.
 export const EMOTION_SCHEMA = {
@@ -110,39 +139,11 @@ export function parseEmotion(raw: unknown): Emotion | null {
 
 // What each reading does to how she feels. Scaled by confidence, so a hedged
 // classification barely moves her and a certain one moves her properly.
-const VITAL_SHIFTS: Record<EmotionName, Partial<Record<'happiness' | 'curiosity' | 'affection' | 'stress' | 'sleepiness' | 'energy', number>>> = {
-  neutral: {},
-  happy: { happiness: 0.2, energy: 0.1 },
-  curious: { curiosity: 0.25, energy: 0.05 },
-  smug: { happiness: 0.12, affection: -0.05 },
-  annoyed: { happiness: -0.18, stress: 0.15 },
-  bored: { curiosity: -0.2, energy: -0.1 },
-  sleepy: { sleepiness: 0.15, energy: -0.15 },
-  surprised: { curiosity: 0.2, energy: 0.15 },
-  affectionate: { affection: 0.2, happiness: 0.15 },
-  embarrassed: { stress: 0.12, affection: 0.08 },
-  // Fired up and pushing at something. Costs nothing in happiness — she is not
-  // enjoying herself exactly, she is on a mission.
-  determined: { energy: 0.2, curiosity: 0.1, stress: 0.05 },
-  // Anxious on their behalf, which is a kind of caring: stress up, and
-  // affection with it, or it reads as irritation.
-  worried: { stress: 0.2, affection: 0.1, energy: -0.05 },
-};
-
-export function emotionToVitals<T extends Record<string, number>>(emotion: Emotion, vitals: T): T {
-  const next = { ...vitals } as Record<string, number>;
-  const shifts = VITAL_SHIFTS[emotion.emotion];
-  for (const [key, amount] of Object.entries(shifts)) {
-    if (typeof next[key] !== 'number') continue;
-    next[key] = Math.min(1, Math.max(0, next[key] + amount * emotion.confidence));
-  }
-  // The reported energy pulls her own toward it rather than replacing it, so one
-  // lively reply does not make her lively for the rest of the evening.
-  if (typeof next.energy === 'number') {
-    next.energy = Math.min(1, Math.max(0, next.energy + (emotion.energy - next.energy) * 0.3 * emotion.confidence));
-  }
-  return next as T;
-}
+// Her reading no longer moves her vitals. It used to, through emotionToVitals
+// and a table of per-emotion shifts, and that made her own prose the thing that
+// set her mood — see broadcastBeat in main.ts for the measurement that ended it.
+// Her mood moves on events now (vitals.ts applyEvent); this file only says how
+// a line was said.
 
 // The labels are spelled out because leaving them to the model's own reading
 // went wrong in a specific way: it treated low energy as sleepiness, calling a

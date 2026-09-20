@@ -9,7 +9,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { openAIQuirks, toOpenAIBody } from '../electron/provider';
+import { openAIQuirks, promptUsage, toOpenAIBody } from '../electron/provider';
 
 const conversation = [{ role: 'user', content: 'hi' }];
 const tools = [{ type: 'function', function: { name: 'noop', description: '', parameters: { type: 'object', properties: {}, required: [] } } }];
@@ -81,3 +81,21 @@ test('Venice: its own system prompt and its thinking switched off, and a cache k
   assert.equal('prompt_cache_key' in openai, false);
 });
 
+
+test('a stream asks for its usage chunk, and the cached share of the prompt is read from either spelling', () => {
+  assert.deepEqual(body('gpt-5.6-terra').stream_options, { include_usage: true });
+  assert.equal('stream_options' in (toOpenAIBody({ model: 'kimi-k2-5', conversation, temperature: 0.7 }) as Record<string, unknown>), false, 'not on a plain request');
+  // As Venice sent it for kimi-k2-5 on 2026-09-17.
+  assert.deepEqual(promptUsage({ prompt_tokens: 1647, completion_tokens: 5, prompt_tokens_details: { cached_tokens: 1600 }, cache_read_input_tokens: 1600 }), { prompt: 1647, cached: 1600 });
+  assert.deepEqual(promptUsage({ prompt_tokens: 900, cache_read_input_tokens: 512 }), { prompt: 900, cached: 512 });
+  assert.deepEqual(promptUsage({ prompt_tokens: 900 }), { prompt: 900, cached: 0 });
+  assert.equal(promptUsage(undefined), null);
+  assert.equal(promptUsage({ completion_tokens: 3 }), null);
+});
+
+test('a bare base64 picture goes out as what it is, not always as a PNG', () => {
+  // Claude refuses a JPEG labelled image/png; a phone camera only sends JPEGs.
+  const body = toOpenAIBody({ model: 'm', temperature: 0.7, conversation: [{ role: 'user', content: 'look', images: ['/9j/4AAQ', 'iVBORw0KGgo', 'data:image/webp;base64,UklGR'] }] }) as { messages: { content: { image_url?: { url: string } }[] }[] };
+  const urls = body.messages[0].content.flatMap(part => part.image_url ? [part.image_url.url] : []);
+  assert.deepEqual(urls, ['data:image/jpeg;base64,/9j/4AAQ', 'data:image/png;base64,iVBORw0KGgo', 'data:image/webp;base64,UklGR']);
+});

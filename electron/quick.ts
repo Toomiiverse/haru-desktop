@@ -1,3 +1,4 @@
+import { IRRITATION } from './mood';
 // Deterministic answers for the messages a phone most often sends.
 //
 // Four tiers, cheapest first. Each tier tries to answer a message without the
@@ -159,7 +160,7 @@ function templateReply(said: string, data: QuickData, social = true): string | n
     return `I'm ${data.herName}. Try not to forget it — I'll know if you do.`;
   }
   if (/^(how are you|how are you doing|how are you today|you ok|you okay)$/.test(said)) {
-    if (data.irritation >= 5) return 'Fed up, honestly. Don\'t push it.';
+    if (data.irritation >= IRRITATION.fedUp) return 'Fed up, honestly. Don\'t push it.';
     return "Good. Better now that you're talking to me.";
   }
   return null;
@@ -191,4 +192,21 @@ function agendaLine(label: string, lines: AgendaLine[], data: QuickData): string
   if (!open.length) return `${label}: nothing on the books.`;
   const listed = open.map(line => line.time ? `${line.time} — ${line.title}` : line.title).join('; ');
   return `${label}: ${listed}.`;
+}
+
+/**
+ * "Set your machine level to 3", said outright: the one setting she would not
+ * change at his word. Told to on 2026-09-18 she claimed it done (it was not),
+ * then that it was already done, then "I don't take commands from you" —
+ * anchored on her own earlier replies, with the true level in the prompt.
+ * So the explicit sentence is read here and applied in code (main.ts), and
+ * she is not asked. Only the machine level: it is the one with a history.
+ * The sentence has to end there — a level with "tomorrow maybe?" after it is talk.
+ */
+export function settingCommand(text: string): { name: 'machine_level'; value: number } | null {
+  const said = text.trim();
+  const level = /^(?:haru[,!]?\s*)?(?:please\s+)?(?:set|put|change|switch)\s+(?:your|the|it)?\s*(?:(?:machine|access|system|permission)\s+)?level\s+(?:to\s+)?(?:level\s+)?([1-4])\s*(?:please|now)?[.!]*\s*$/i.exec(said)
+    ?? /^(?:haru[,!]?\s*)?(?:please\s+)?(?:set|put|change|switch)\s+(?:your|the)?\s*(?:machine|access|system)\s+(?:to\s+)?level\s+([1-4])\s*(?:please|now)?[.!]*\s*$/i.exec(said)
+    ?? /^(?:haru[,!]?\s*)?(?:machine|access)\s+level\s+([1-4])\s*[.!]?$/i.exec(said);
+  return level ? { name: 'machine_level', value: Number(level[1]) } : null;
 }

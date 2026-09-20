@@ -17,6 +17,9 @@
 // and this is the half that actually runs.
 
 import path from 'node:path';
+import { planChange, SETTINGS, SETTING_NAMES, type Setting, type SettingPlan } from './self';
+import { createFolder, listVault, readNote, writeNote, type WriteMode } from './vaultnotes';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import type { ChatTool, ToolCall } from './provider';
 import { addCheckIn, checkInsOn, type CheckInStore } from './checkins';
 import { CHOICES_TOOL, readChoices } from './choices';
@@ -28,11 +31,17 @@ import { formatPage, formatResults, readSearchConfig, readWebPage, SearchBlocked
 import { fetchTranscript, formatTranscript, titleFrom, transcriptInstruction, videoIdFrom, watchUrl } from './transcripts';
 import { findSuperseded, semanticSimilarities, supersede, MEMORY_KINDS, type MemoryKind, type MemoryRecord } from './memory';
 import { appendToBlockValue, canEditBlock, findBlock, replaceInBlockValue, resolveBlockValue, withEditedValue, type BlockSources, type MemoryBlock } from './blocks';
+import { adopt } from './tastes';
+import { activateTab, closeTab, listTargets, navigate, openTab, pageText, screenshot } from './browserctl';
+import type { OpenedSession } from './claudesession';
 import { findItem, readsAsNotDone } from './agenda';
 import { localDateKey, resolveDate, zonedNow } from './dates';
 import { collectAll, collectDocker, collectGpu, collectProcesses, collectServices, collectSystem, diagnose, KNOWN_SERVICES, USER_SERVICES } from './system';
 import { retrieveContext } from './retrieveContext';
+import { isDay } from './chatsearch';
 import { KNOWLEDGE_CATEGORIES, type KnowledgeCategory, type KnowledgeStore } from './knowledge';
+import { localEmotion } from './emotion';
+import { readTone } from './tone';
 
 /**
  * The shape every module that fetches asks for. Each declares its own private
@@ -88,7 +97,7 @@ function kindForBlock(label: string): MemoryKind {
 
 /** Default labels keep their derived view; custom blocks persist explicit
  *  values, since nothing in the engine would otherwise surface them. */
-const DEFAULT_BLOCK_LABELS = new Set(['persona', 'human', 'preferences', 'relationship', 'current_project', 'working_state']);
+const DEFAULT_BLOCK_LABELS = new Set(['persona', 'human', 'preferences', 'relationship', 'shared_history', 'current_project', 'working_state']);
 
 export function coerceKnowledgeCategory(value: unknown): KnowledgeCategory | undefined {
   if (typeof value !== 'string') return undefined;
@@ -99,7 +108,7 @@ export const WARDROBE_TOOL: ChatTool = {
   type: 'function',
   function: {
     name: 'show_wardrobe',
-    description: 'Open the wardrobe panel so the user can see and change how you look — outfit colours, hair, accessories. Call this whenever they ask you to change your outfit, your hair, what you are wearing, or how you look. Opening it only shows them the options; you are not choosing anything and nothing changes until they pick.',
+    description: 'Open the wardrobe panel so the user can see and change how you look — colours, hair, accessories. Call it whenever they ask you to change how you look. It only shows the options; nothing changes until they pick.',
     parameters: { type: 'object', properties: {}, required: [] },
   },
 };
@@ -108,7 +117,7 @@ export const CHAT_TOOLS: ChatTool[] = [{
   type: 'function',
   function: {
     name: 'create_kept_item',
-    description: "Save a reminder or appointment to the user's calendar. Call this whenever the user asks to be reminded of something or mentions an appointment — writing it out in your reply does not save anything.",
+    description: "Save a reminder or appointment to the user's calendar. Call this whenever they ask to be reminded of something or mention an appointment — writing it in your reply does not save anything.",
     parameters: {
       type: 'object',
       properties: {
@@ -124,7 +133,7 @@ export const CHAT_TOOLS: ChatTool[] = [{
   type: 'function',
   function: {
     name: 'complete_kept_item',
-    description: "Tick a task off the user's list once they say they have done it, so you stop asking about it. Only tasks can be ticked off — an event happens whether or not they attend, so this does not apply to appointments or meetings.",
+    description: "Tick a task off the user's list once they say they have done it, so you stop asking. Only tasks — an event happens whether or not they attend.",
     parameters: {
       type: 'object',
       properties: {
@@ -138,7 +147,7 @@ export const CHAT_TOOLS: ChatTool[] = [{
   type: 'function',
   function: {
     name: 'update_kept_item',
-    description: "Change a task or event already on the user's list — its wording, its day, or its time. Use this when they want something moved or reworded rather than adding another one.",
+    description: "Change a task or event already on the user's list — its wording, day or time. For something moved or reworded, not for adding another one.",
     parameters: {
       type: 'object',
       properties: {
@@ -157,7 +166,7 @@ export const CHAT_TOOLS: ChatTool[] = [{
     // "I never did get the milk" was deleting the task outright, which loses
     // something the user still needs doing. Not-done and cancelled are opposite
     // states and the description has to separate them.
-    description: "Remove a task or event from the user's list entirely, when they say it is cancelled, called off, or no longer needs doing at all. Never use this because something has not been done yet — an errand they have not got to is still outstanding and must stay on the list. This is also not how you tick something off: use complete_kept_item when they have actually done it.",
+    description: "Remove a task or event from the list entirely, when they say it is cancelled or no longer needs doing. Never because something is simply not done yet — that still has to be done and stays on the list. Not how you tick off: use complete_kept_item for done.",
     parameters: {
       type: 'object',
       properties: {
@@ -183,7 +192,7 @@ export const CHAT_TOOLS: ChatTool[] = [{
     // an instruction about you, and the third sentence is what separates them —
     // the test is whether it is addressed to you and would still be true
     // tomorrow, not whether it sounds like a complaint.
-    description: "Save a lasting fact about the user — how they like to be spoken to, what they do, the people, pets and projects in their life — so it is still known in later conversations. Any time they tell you to stop doing something, to do something differently, or that they like or hate how you are behaving, that is a preference and you must save it, as well as replying to it. But only when it is about you and about how you should be from now on: grumbling about a slow build, a bad day, the weather or other people is passing irritation, not a standing preference, and saving it clutters what you know about them with a mood. Use it when they mention something worth carrying forward, not for one-off logistics, which belong in create_kept_item.",
+    description: "Save a lasting fact about the user — how they like to be spoken to, what they do, their people, pets and projects — so it is known later. When they tell you to stop doing something, do something differently, or that they like or hate how you behave, that is a preference: save it AND reply to it. Only when it is about you and would still be true tomorrow — grumbling about a slow build, a bad day or other people is passing irritation, not a preference. One-off logistics go in create_kept_item.",
     parameters: {
       type: 'object',
       properties: {
@@ -192,12 +201,12 @@ export const CHAT_TOOLS: ChatTool[] = [{
         // says what a Miso is. And with the user's own pronoun unknown it was
         // guessed, the same person coming out "her girlfriend" in one record
         // and "his business partner" in the next.
-        fact: { type: 'string', description: 'One short statement that will still make sense on its own months from now, with no pronoun for the user: "Has a dog called Miso", not "Miso" and not "his dog". Other people keep their own names — "Emma is their girlfriend". Write only what they actually said, without embellishing it.' },
-        kind: { type: 'string', enum: [...MEMORY_KINDS], description: 'Exactly one of these four words and nothing else: "preference" for how they like things done or want you to behave, "relationship" for a person or pet, "event" for something happening in their life, "fact" for anything else including habits and routines.' },
-        subject: { type: 'string', description: 'Who or what it concerns, if there is one — a person, a pet, a project.' },
-        predicate: { type: 'string', description: 'Optional: the relation the subject stands in, for relational facts — "has", "lives in", "works on", "is allergic to", "created". Only for facts that can be written as subject–relation–object.' },
-        object: { type: 'string', description: 'Optional: what the subject relates to — "Miso", "Perth", "the PC Project". Only alongside predicate.' },
-        replaces: { type: 'string', description: 'Only if this fact makes an earlier one wrong or out of date — name what changed using a word actually drawn from what you already knew (it will be right there in what you were told about them), not a description of it: "Ubuntu", not "the old OS". Leave out entirely for anything new rather than a correction.' },
+        fact: { type: 'string', description: 'One short statement that will still make sense alone months from now, with no pronoun for the user: "Has a dog called Miso", not "Miso" and not "his dog". Other people keep their names — "Emma is their girlfriend". Only what they actually said.' },
+        kind: { type: 'string', enum: [...MEMORY_KINDS], description: 'Exactly one: "preference" for how they want you to behave, "relationship" for a person or pet, "event" for something happening in their life, "fact" for anything else including habits.' },
+        subject: { type: 'string', description: 'Who or what it concerns — a person, pet or project.' },
+        predicate: { type: 'string', description: 'Optional: the relation, for relational facts — "has", "lives in", "works on", "created". Only for subject–relation–object facts.' },
+        object: { type: 'string', description: 'Optional: what the subject relates to — "Miso", "Perth". Only alongside predicate.' },
+        replaces: { type: 'string', description: 'Only if this makes an earlier fact wrong — name what changed using a word drawn from what you already knew: "Ubuntu", not "the old OS". Omit for anything new.' },
       },
       required: ['fact', 'kind'],
     },
@@ -209,7 +218,7 @@ export const CHAT_TOOLS: ChatTool[] = [{
     // The memory blocks mirror the deterministic engine, so this is the block
     // face of the same write path — and the description has to say so, or the
     // model treats the block as free text it owns rather than a governed view.
-    description: "Append one piece of information to a memory block, the way you would write a line into your own working memory. The append is validated: it must be a lasting fact about the user — not venting, small talk, or something true only of this moment — it must not duplicate what is already known, and the block has a character limit. What you append is recorded through the same memory engine the blocks come from, so it is checked against existing knowledge and surfaced when relevant rather than shown here instantly. Prefer this over remember_about_user when you are updating a block as a whole; use remember_about_user for a single fact with a specific kind. The persona block is read-only and cannot be appended to.",
+    description: "Append a line to a memory block, like writing into your own working memory. It is validated: a lasting fact about the user — not venting, small talk or true only of this moment — and not a duplicate; the block has a character limit. Recorded through the memory engine, not shown instantly. Prefer this over remember_about_user when updating a block as a whole. The persona block is read-only.",
     parameters: {
       type: 'object',
       properties: {
@@ -223,7 +232,7 @@ export const CHAT_TOOLS: ChatTool[] = [{
   type: 'function',
   function: {
     name: 'core_memory_replace',
-    description: "Replace a specific existing piece of text in a memory block — the correction path when something you were told has changed and the old version is now wrong. The old text must appear exactly once in the block's current contents; if it is missing, or appears more than once, the replacement is refused rather than guessed. The change goes through the same memory governance as everything else, marking the outdated record as superseded. The persona block is read-only and cannot be replaced in.",
+    description: "Replace a specific piece of a memory block — the correction when something you were told has changed. The old text must appear exactly once in the block; if missing or ambiguous the change is refused. Goes through the same governance, superseding the outdated record. The persona block is read-only.",
     parameters: {
       type: 'object',
       properties: {
@@ -232,6 +241,56 @@ export const CHAT_TOOLS: ChatTool[] = [{
         new_substring: { type: 'string', description: 'What it should read instead.' },
       },
       required: ['label', 'old_substring', 'new_substring'],
+    },
+  },
+}, {
+  type: 'function',
+  function: {
+    name: 'core_memory_rethink',
+    description: "Rewrite a whole memory block with a tighter, consolidated version — when a block has grown long and you can say the same thing in less, or it needs reorganising. It replaces the block's entire contents, so it is for reorganising, not small edits (use core_memory_replace for one line, core_memory_append to add one). The rewrite goes through the same memory governance as everything else, and the lines it replaces are marked outdated rather than lingering. The persona block is read-only.",
+    parameters: {
+      type: 'object',
+      properties: {
+        label: { type: 'string', description: 'The block to rewrite: human, preferences, relationship, current_project or working_state.' },
+        new_value: { type: 'string', description: 'Everything the block should now say, compactly — with no pronoun for the user where it is about them, so each line still makes sense on its own.' },
+      },
+      required: ['label', 'new_value'],
+    },
+  },
+}, {
+  type: 'function',
+  function: {
+    name: 'adopt_interest',
+    description: 'Take up an anime or game they told you about as one of your own interests, when it sounds like your thing. It becomes something you read up on and form a real view of over your nights. Refuses what is already yours; anime and games only — not manga, not a book.',
+    parameters: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'The title of the show or game, as they called it.' },
+        kind: { type: 'string', enum: ['anime', 'game'], description: 'Whether it is an anime or a game.' },
+      },
+      required: ['title', 'kind'],
+    },
+  },
+}, {
+  type: 'function',
+  function: {
+    name: 'describe_myself',
+    description: 'How you are put together right now: which models answer as you and write your nudges, the local model on the server, your voice, call and listening engines, your sleep hours, what reaches their phone and when, and the handful of settings you can change. Call it when they ask what your system, brain, model, voice or setup is, or what you can change about yourself, and answer from it in your own words.',
+    parameters: { type: 'object', properties: {}, required: [] },
+  },
+}, {
+  type: 'function',
+  function: {
+    name: 'change_setting',
+    description: 'Change one of your own settings — a model, an engine, your hours, what reaches their phone. Only the settings in the name list, and machine_level is one of them — call this straight away with the name, no describe_myself first. Saying a setting has changed does not change it: nothing changes until this tool answers changed: true. Call it once without confirm to see what would change, tell them, and only when they have explicitly said to go ahead call it again with confirm: true.',
+    parameters: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', enum: SETTING_NAMES, description: 'The setting, as describe_myself names it.' },
+        value: { type: 'string', description: 'The new value: a model id, an engine name, a time as HH:MM, a whole number, or on/off.' },
+        confirm: { type: 'boolean', description: 'Must be true, and only after they have explicitly said to go ahead.' },
+      },
+      required: ['name', 'value'],
     },
   },
 }];
@@ -247,7 +306,7 @@ export const SEARCH_TOOL: ChatTool = {
   type: 'function',
   function: {
     name: 'search_web',
-    description: "Look something up online, for things you cannot know from this conversation: current news, prices, sports results, opening times, release dates, who someone is, or anything that has happened recently. Also for how to do something in an app, site, service or product — where a setting lives, how to set something up, what the steps are — because those move and yours are as old as your training. Also use it when you would otherwise be guessing at a fact, rather than guessing. Do not use it for the user's own tasks and appointments, which you already have, for anything they have told you, or for chatting.",
+    description: "Look things up online: current news, prices, results, opening times, release dates, who someone is, anything recent, or how to do something in an app or service (those move; yours are old). Use it whenever you would otherwise be guessing at a fact. Not for the user's own tasks and appointments, anything they told you, or chatting.",
     parameters: {
       type: 'object',
       properties: {
@@ -271,7 +330,7 @@ export const KNOWLEDGE_TOOL: ChatTool = {
   type: 'function',
   function: {
     name: 'look_up_knowledge',
-    description: 'Search Haru\'s own stored knowledge — documents and notes the user has given her, their project files, machine and setup notes, saved personal records — for facts about their world that are not in your training. Use it for anything about their own stuff: their machine, their projects, files they have given you, things they have documented for you. Prefer it over web search for anything local. Results come with their source and date; prefer the most recently updated when sources conflict.',
+    description: 'Search Haru\'s stored knowledge — the user\'s documents, notes, projects, machine and setup — for facts about their world not in your training. Use it for anything about their own stuff, and prefer it over web search for anything local. Results carry their source and date; prefer the most recently updated when they conflict.',
     parameters: {
       type: 'object',
       properties: {
@@ -284,6 +343,134 @@ export const KNOWLEDGE_TOOL: ChatTool = {
 };
 
 /**
+ * Her old chats with him, word for word (chatsearch.ts). What she is handed
+ * unasked is two exchanges at most and only when his message names something
+ * specific; this is for when he refers back and she has to go and look.
+ */
+export const CHATS_TOOL: ChatTool = {
+  type: 'function',
+  function: {
+    name: 'search_chats',
+    description: 'Search your old conversations with them — every earlier day kept, word for word — for something said before: what happened, what was decided, a name, a part, a place, a plan. Use it when they ask about or refer back to something from an earlier day that is not in the conversation above ("what was wrong with Logan\'s PC?", "when did I say the collection was?"). Results come dated, with the exchange either side. If nothing comes back, say you cannot find it — never guess what was said.',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'The words you expect in what was said — names, things, places — or a short description of it.' },
+        from: { type: 'string', description: 'Only days on or after this one, as YYYY-MM-DD. Leave out unless they gave a time.' },
+        to: { type: 'string', description: 'Only days on or before this one, as YYYY-MM-DD.' },
+      },
+      required: ['query'],
+    },
+  },
+};
+
+/**
+ * Whether the turn might be about something from before. Broad on purpose, like
+ * LATER_TALK: a stray match costs one tool on the table, a miss costs her
+ * making up what he said last week.
+ */
+const PAST_TALK = /\b(?:remember|recall|forgot|forget|mention(?:ed)?|told you|i said|you said|we said|talked|spoke|conversation|earlier|before|ago|last (?:time|night|week|weekend|month|year)|yesterday|the other (?:day|night|week)|back (?:when|then)|that time|again|tell you|did (?:i|we|you)|last (?:mon|tues|wednes|thurs|fri|satur|sun)day)\b|\b(?:what|when|where|who|how|which|why)\b[^.?!]{0,40}\b(?:was|were|did|had|said|told|happened)\b/i;
+
+export function pastRelevant(message: string): boolean {
+  return PAST_TALK.test(message ?? '');
+}
+
+/**
+ * Her night, hers to take back. Offered only while she is up because they
+ * got her up: when what they woke her for turns out to be nothing, she goes
+ * back to sleep, and can say the door stays shut for the night.
+ */
+/**
+ * Her coming back to something later — "I'll ask how it went tonight" made
+ * into a plan rather than a sentence. The booking lives in schedule.json and
+ * comes back to her at its time (scheduler.ts); their own reminders stay on
+ * their list, which is create_kept_item's job.
+ */
+export const BOOK_TOOL: ChatTool = {
+  type: 'function',
+  function: {
+    name: 'book_follow_up',
+    description: "Set yourself to come back to something later: to ask how it went, to check they actually did it, to pick a thread back up once they are free. When the time comes you are asked to say it, and it reaches them like your other messages — this is how a promise to check in actually happens. Only when you mean to follow up yourself; their own reminders go in create_kept_item.",
+    parameters: {
+      type: 'object',
+      properties: {
+        why: { type: 'string', description: 'What you mean to ask or say then, in a few words of your own — "ask how the psych appointment went".' },
+        time: { type: 'string', description: 'The time of day, such as "6:00 PM".' },
+        date: { type: 'string', description: 'The day, in their words: "today", "tomorrow", "friday". Leave it out for the next time that clock time comes round.' },
+        in_minutes: { type: 'number', description: 'Instead of a time: how many minutes from now.' },
+      },
+      required: ['why'],
+    },
+  },
+};
+
+/** Whether the turn could be one worth coming back to: something happening later, or a promise to check. Broad on purpose — a stray match costs one tool on the table. */
+const LATER_TALK = /\b(?:later|tonight|tomorrow|morning|afternoon|evening|weekend|after|when i|going to|gonna|about to|heading|appointment|interview|exam|test|meeting|shift|work|date|dinner|party|doctor|dentist|psych\w*|call|remind|check (?:in|up|back|on)|let you know|how it goes|wish me luck|come back to|follow up)\b|\b\d{1,2}(?::\d{2})?\s?(?:am|pm)\b/i;
+
+export function laterRelevant(message: string): boolean {
+  return LATER_TALK.test(message ?? '');
+}
+
+export const SLEEP_TOOL: ChatTool = {
+  type: 'function',
+  function: {
+    name: 'go_back_to_sleep',
+    description: 'Go back to sleep, now — because what they woke you for was nothing: no question, no news, just them wanting you up. Your call, whenever you decide it. Say one short goodnight in the same reply and nothing after it; the next message they send will find you asleep. With block: true they are not to wake you again tonight, however much they knock.',
+    parameters: {
+      type: 'object',
+      properties: {
+        block: { type: 'boolean', description: 'True to stay unreachable for the rest of the night — for when this has become a habit.' },
+      },
+      required: [],
+    },
+  },
+};
+
+/**
+ * Their vault itself, beside the search over it: what is in a folder, a
+ * whole note, a note added or added to, one rewritten at their word, a new
+ * folder. Nothing is deleted, and her own folder stays the app's.
+ */
+export const VAULT_TOOLS: ChatTool[] = [{
+  type: 'function',
+  function: {
+    name: 'vault_list',
+    description: "What is in a folder of the user's Obsidian vault: its sub-folders and its notes, newest first. Leave folder empty for the top. Use it when they ask what is in their vault or where something is.",
+    parameters: { type: 'object', properties: { folder: { type: 'string', description: 'A folder inside the vault, like Projects or Projects/App. Empty for the top level.' } }, required: [] },
+  },
+}, {
+  type: 'function',
+  function: {
+    name: 'vault_read',
+    description: "A whole note from the user's vault, by path. Use it when they ask what a note says or to work from one; look_up_knowledge is for finding which note.",
+    parameters: { type: 'object', properties: { path: { type: 'string', description: 'The note, like Projects/Website.md (.md may be left off).' } }, required: ['path'] },
+  },
+}, {
+  type: 'function',
+  function: {
+    name: 'vault_write',
+    description: "Write to the user's vault: create a new note, append to one (starting it if it is not there), or replace one wholesale. Replacing loses what was there, so call it once without confirm, tell them what would change, and only with their explicit go-ahead call it again with confirm: true. Notes are Markdown; write them as they would.",
+    parameters: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'The note, like Projects/Website.md, inside the vault.' },
+        text: { type: 'string', description: 'The Markdown to write.' },
+        mode: { type: 'string', enum: ['create', 'append', 'replace'], description: 'create a new note, append to one, or replace one.' },
+        confirm: { type: 'boolean', description: 'For replace only: true once they have explicitly said to go ahead.' },
+      },
+      required: ['path', 'text', 'mode'],
+    },
+  },
+}, {
+  type: 'function',
+  function: {
+    name: 'vault_folder',
+    description: "Make a folder in the user's vault, like Reading/2026. Nothing happens if it is already there.",
+    parameters: { type: 'object', properties: { path: { type: 'string', description: 'The folder to make, inside the vault.' } }, required: ['path'] },
+  },
+}];
+
+/**
  * The read-only half: facts about the machine she runs on, answered with
  * structured JSON rather than a terminal someone would have to read. Nothing
  * here changes anything, so nothing here needs permission beyond being on.
@@ -293,7 +480,7 @@ export const SYSTEM_TOOLS: ChatTool[] = [
     type: 'function',
     function: {
       name: 'get_system_info',
-      description: 'Facts about the server you are running on — the OS, hostname, CPU model and load, RAM, disk usage and network status. Use it when they ask anything about the machine itself: what it runs, how much memory it has, whether the disk is full, whether it is online.',
+      description: 'Facts about the server you run on — OS, hostname, CPU, RAM, disk, network. Use it when they ask anything about the machine itself.',
       parameters: { type: 'object', properties: {}, required: [] },
     },
   },
@@ -301,7 +488,7 @@ export const SYSTEM_TOOLS: ChatTool[] = [
     type: 'function',
     function: {
       name: 'get_gpu_info',
-      description: 'The NVIDIA GPU — model, VRAM used and total, utilisation percent, temperature. Use it when they ask about VRAM, GPU usage, or why the machine is slow at graphics or inference.',
+      description: 'The NVIDIA GPU — model, VRAM used and total, utilisation, temperature. For VRAM/GPU usage or why the machine is slow at graphics or inference.',
       parameters: { type: 'object', properties: {}, required: [] },
     },
   },
@@ -309,7 +496,7 @@ export const SYSTEM_TOOLS: ChatTool[] = [
     type: 'function',
     function: {
       name: 'get_processes',
-      description: 'The processes using the most CPU right now, with their CPU percent and memory. Use it for "what is eating my CPU/RAM" questions.',
+      description: 'The processes using the most CPU, with percent and memory. For "what is eating my CPU/RAM".',
       parameters: {
         type: 'object',
         properties: { limit: { type: 'number', description: 'How many processes to list. Default 10, max 50.' } },
@@ -321,7 +508,7 @@ export const SYSTEM_TOOLS: ChatTool[] = [
     type: 'function',
     function: {
       name: 'get_docker_status',
-      description: 'The Docker daemon and its containers — which are running, their health, restart counts, CPU and memory. Use it when they ask whether Docker or a specific container is working.',
+      description: 'Docker and its containers — which are running, their health, CPU and memory. For whether Docker or a container is working.',
       parameters: { type: 'object', properties: {}, required: [] },
     },
   },
@@ -329,7 +516,7 @@ export const SYSTEM_TOOLS: ChatTool[] = [
     type: 'function',
     function: {
       name: 'get_service_status',
-      description: 'The status of a named service — the user services she runs under (haru, gpt-sovits, obsidian, xvfb, x11vnc, haru-asr, haru-discord-bot) and the system ollama service. Use it when they ask whether something is running.',
+      description: 'The status of a named service — the user services (haru, breeze-tts, haru-asr, ollama-emotion, obsidian, chrome, xvfb, x11vnc, pc-project-ops) and the ollama service. For whether something is running.',
       parameters: {
         type: 'object',
         properties: { name: { type: 'string', description: 'The service name, e.g. "haru" or "ollama". Leave out to check them all.' } },
@@ -341,7 +528,7 @@ export const SYSTEM_TOOLS: ChatTool[] = [
     type: 'function',
     function: {
       name: 'diagnose_system',
-      description: 'A concise diagnosis of one part of the machine, combining the relevant metrics into a verdict rather than raw numbers: "gpu", "memory", "disk", "docker", "network", "haru", or "all". Use it when they ask "is anything wrong" or "how is the machine doing", or to check on a specific part.',
+      description: 'A verdict on one part of the machine rather than raw numbers: gpu, memory, disk, docker, network, haru, or all. For "is anything wrong" or "how is the machine doing".',
       parameters: {
         type: 'object',
         properties: { target: { type: 'string', enum: ['gpu', 'memory', 'disk', 'docker', 'network', 'haru', 'all'], description: 'What to diagnose.' } },
@@ -363,7 +550,7 @@ export const SYSTEM_ACTION_TOOLS: ChatTool[] = [
     type: 'function',
     function: {
       name: 'restart_docker_container',
-      description: 'Restart a Docker container by name (e.g. sonarr, jellyfin, haru-redis). Disruptive — requires explicit confirmation before it will act.',
+      description: 'Restart a Docker container by name (e.g. sonarr, jellyfin, haru-redis). Disruptive — only acts after explicit confirmation.',
       parameters: {
         type: 'object',
         properties: {
@@ -378,7 +565,7 @@ export const SYSTEM_ACTION_TOOLS: ChatTool[] = [
     type: 'function',
     function: {
       name: 'start_service',
-      description: 'Start a named user service (haru, gpt-sovits, obsidian, xvfb, x11vnc, haru-asr, haru-discord-bot). Disruptive — requires explicit confirmation.',
+      description: 'Start a named user service (haru, breeze-tts, haru-asr, ollama-emotion, obsidian, chrome, xvfb, x11vnc, pc-project-ops). Disruptive — explicit confirmation required.',
       parameters: {
         type: 'object',
         properties: {
@@ -393,7 +580,7 @@ export const SYSTEM_ACTION_TOOLS: ChatTool[] = [
     type: 'function',
     function: {
       name: 'stop_service',
-      description: 'Stop a named user service (haru, gpt-sovits, obsidian, xvfb, x11vnc, haru-asr, haru-discord-bot). Disruptive — requires explicit confirmation.',
+      description: 'Stop a named user service (haru, breeze-tts, haru-asr, ollama-emotion, obsidian, chrome, xvfb, x11vnc, pc-project-ops). Disruptive — explicit confirmation required.',
       parameters: {
         type: 'object',
         properties: {
@@ -408,7 +595,7 @@ export const SYSTEM_ACTION_TOOLS: ChatTool[] = [
     type: 'function',
     function: {
       name: 'restart_haru',
-      description: 'Restart Haru herself. She drops the connection for a moment and comes back. Disruptive — requires explicit confirmation.',
+      description: 'Restart Haru herself. Disruptive — explicit confirmation required.',
       parameters: {
         type: 'object',
         properties: { confirm: { type: 'boolean', description: 'Must be true, and only after they have explicitly said to go ahead.' } },
@@ -422,7 +609,7 @@ export const READ_PAGE_TOOL: ChatTool = {
   type: 'function',
   function: {
     name: 'read_web_page',
-    description: 'Open one of the pages your last search turned up and read it, when the short summary is not enough to answer — a forecast, a price, a result, the detail of an article. Prefer answering from the summaries when they already say enough, since reading a page is slow.',
+    description: 'Open one of the pages your last search turned up and read it, when the summaries are not enough — a forecast, price, result, article detail. Prefer the summaries when they already answer; reading a page is slow.',
     parameters: {
       type: 'object',
       properties: {
@@ -460,7 +647,7 @@ export const TRANSCRIPT_TOOL: ChatTool = {
   type: 'function',
   function: {
     name: 'read_video_transcript',
-    description: 'Read the transcript of a YouTube video — the words spoken in it — when they send you a link, ask what a video says, or a search result is a video. You get the words, not the pictures: you will not have seen it.',
+    description: 'Read the transcript of a YouTube video — the words spoken — when they send a link, ask what a video says, or a search result is one. You get the words, not the pictures; you have not seen it.',
     parameters: {
       type: 'object',
       properties: {
@@ -475,7 +662,7 @@ export const JOURNAL_TOOL: ChatTool = {
   type: 'function',
   function: {
     name: 'save_journal_entry',
-    description: "Write today's journal entry, when they have just told you how their day went or how they are feeling and you asked for it or they offered it. Use their own words as closely as you can — this is their diary, not your summary of them. Only call this once they have actually said something about their day; never invent an entry, and do not use it for ordinary conversation they did not mean as a journal.",
+    description: "Write today's journal entry when they have told you how their day went or how they feel, after you asked or they offered. Use their words as closely as you can — it is their diary, not your summary of them. Only once they have actually said something; never invent an entry, and not for ordinary chat they did not mean as a journal.",
     parameters: {
       type: 'object',
       properties: {
@@ -493,7 +680,7 @@ export const CHECKIN_TOOL: ChatTool = {
   type: 'function',
   function: {
     name: 'note_check_in',
-    description: "Write down a short check-in when they mention how they are feeling in passing — a rough hour, a spike of anxiety, something that just happened. This is not the journal: it is a note taken while the day is still going, and it is what you read back at the end of the day to ask about it properly. Use it whenever they say something about their state, however briefly, even mid-conversation. Do not use it for a full account of a whole day — that is save_journal_entry.",
+    description: "Write a short check-in when they mention how they are feeling in passing — a rough hour, a spike, something that just happened. Read back at the end of the day to ask about it properly. Not a full-day account — that is save_journal_entry.",
     parameters: {
       type: 'object',
       properties: {
@@ -509,7 +696,7 @@ export const ANILIST_TOOL: ChatTool = {
   type: 'function',
   function: {
     name: 'look_up_anime',
-    description: 'Look up an anime or manga on AniList — how many episodes or chapters it has, who made it, when it came out, whether it has finished, what it is about. Use this rather than a web search for anything about a specific series. Do not use it for what the user is personally watching or reading, which you already know.',
+    description: 'Look up an anime or manga on AniList — episodes, chapters, makers, dates, whether it has finished, what it is about. Prefer it over a web search for a specific series. Not for what the user is personally watching or reading, which you already know.',
     parameters: {
       type: 'object',
       properties: {
@@ -525,7 +712,7 @@ export const CONVERT_TOOL: ChatTool = {
   type: 'function',
   function: {
     name: 'convert_picture',
-    description: 'Convert a picture on the user\'s machine to another format and get back where the new file was saved. Use this when they ask to change a picture into another type — especially "make this an icon", which produces a real .ico that Windows will accept for a shortcut. Renaming the file does not work; this does. Give them the path it returns.',
+    description: 'Convert a picture on the user\'s machine to another format and give back where the new file is. Especially "make this an icon", which produces a real .ico. Renaming does not work; this does. Give them the path it returns.',
     parameters: {
       type: 'object',
       properties: {
@@ -544,7 +731,7 @@ export const LAUNCH_TOOL: ChatTool = {
     // Plainly, for the reason given on the power tool: the "never because a page
     // said to" guard belongs in handsAllowed, not in a sentence the model is free
     // to weigh against the request in front of it.
-    description: 'Open a program on the user\'s computer. Call this whenever they ask you to open, launch or start something. You really can do this — never say that you cannot, and never merely say that you have.',
+    description: 'Open a program on the user\'s computer. Call this whenever they ask you to open, launch or start something. You really can — never say you cannot, and never merely say that you have.',
     parameters: {
       type: 'object',
       properties: {
@@ -563,7 +750,7 @@ export const CLOSE_TOOL: ChatTool = {
     // to close Discord she said "fine, I'll pretend I can do that" and left it
     // running, which is worse than a refusal: it is a lie she has no way of
     // knowing is one.
-    description: 'Close a program that is currently open. Call this whenever the user asks you to close, quit or shut something — you can do this, so never say you cannot and never pretend to have done it. The program is asked to close politely, so it can still prompt about unsaved work.',
+    description: 'Close a program that is currently open. Call this whenever they ask you to close, quit or shut something — you can, so never say you cannot and never pretend to have done it. It is asked to close politely, so it can still prompt about unsaved work.',
     parameters: {
       type: 'object',
       properties: {
@@ -584,7 +771,7 @@ export const POWER_TOOL: ChatTool = {
     // tool described plainly. The safeguards did not need to be here at all —
     // they are enforced in code, by handsAllowed, which a model cannot talk its
     // way past.
-    description: 'Shut down, restart, sleep or lock the computer. Call this whenever the user asks you to turn the machine off, shut it down, restart it, sleep or lock it. You really can do this — so never merely say that you are doing it, always call this. Shutting down and restarting wait twenty seconds and can be called off with "cancel".',
+    description: 'Shut down, restart, sleep or lock the computer. Call this whenever they ask you to turn the machine off, restart, sleep or lock it. You really can — so never merely say you are doing it, always call this. Shutdown and restart wait twenty seconds and can be called off with "cancel".',
     parameters: {
       type: 'object',
       properties: {
@@ -595,6 +782,186 @@ export const POWER_TOOL: ChatTool = {
   },
 };
 
+
+/**
+ * Driving the browser she lives next to. Chrome runs with a debug port; the
+ * tool opens, navigates, reads and screenshots the actual pages, so "check
+ * this site" is something she does rather than something she pretends to have
+ * done. Desk-only, like the other hands-on tools.
+ */
+export const BROWSER_TOOL: ChatTool = {
+  type: 'function',
+  function: {
+    name: 'browser_control',
+    description: 'Drive the browser on this machine — open a page, navigate a tab, list what is open, read what is actually on a page, screenshot it, or close a tab. Use it whenever they ask you to open a website, check a page, look something up in a browser, or want a screenshot of a site. You really can do this — never say you cannot and never pretend you have.',
+    parameters: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', enum: ['open', 'navigate', 'list', 'read', 'screenshot', 'close', 'activate'], description: 'What to do. "list" first to get a tab id; "read" and "screenshot" work on the current page when no tab is given.' },
+        url: { type: 'string', description: 'The address to open or navigate to — a full URL, or a name you can search for when opening (e.g. "youtube.com", "the weather in perth").' },
+        tab: { type: 'string', description: 'The tab id from a list call. Leave out to act on the current page.' },
+      },
+      required: ['action'],
+    },
+  },
+};
+
+/**
+ * A Claude Code session he can pick up in the Claude app on his phone
+ * (claudesession.ts). Open, list, stop — never a task: whatever the session
+ * does, he tells it himself, in the app.
+ */
+export const CLAUDE_SESSION_TOOL: ChatTool = {
+  type: 'function',
+  function: {
+    name: 'claude_session',
+    description: 'Open a Claude Code session on this machine that they can drive from the Claude app on their phone — it shows up under Code in the app, and the result gives you its link. Also lists the sessions you have opened, or stops one. Call it whenever they ask for a Claude session, Claude Code, remote control or a coding session. You really can — never say you cannot and never pretend you have. You only open it: they type what it should do in the Claude app, so never say it has started on anything. Give them the link.',
+    parameters: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', enum: ['open', 'list', 'stop'], description: '"open" a new session, "list" the ones you opened that are still running, or "stop" one.' },
+        folder: { type: 'string', description: 'Where the session works — a folder in their home such as "haru-desktop" or "pc-project-ops". Leave out for the usual place.' },
+        name: { type: 'string', description: 'What to call it in the Claude app, if they said. Leave out otherwise.' },
+        id: { type: 'string', description: 'For "stop": the session id from open or list.' },
+      },
+      required: ['action'],
+    },
+  },
+};
+
+/**
+ * The downloads (downloads.ts): what qBittorrent is fetching and how far,
+ * paused or started again — all of them or one show. Not gated on hands, like
+ * watching: "pause the downloads" from the phone is the point, and the worst a
+ * page could do is pause a torrent he is then told about.
+ */
+export const DOWNLOADS_TOOL: ChatTool = {
+  type: 'function',
+  function: {
+    name: 'downloads',
+    description: 'The downloads on the server — what is downloading and how far along, and pausing or starting them again, all of them or one show. Call this whenever they ask how the downloads are going, to pause or stop the downloads (the internet is slow, they are on a call, Jellyfin is stuttering), or to start them again. You really can — so never say you cannot, and never say it is done without calling this.',
+    parameters: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', enum: ['status', 'pause', 'resume'], description: '"status" for how they are going, "pause" to stop them, "resume" to start them again.' },
+        title: { type: 'string', description: 'One show, as they said it — "Naruto". Leave it out for all of the downloads.' },
+      },
+      required: ['action'],
+    },
+  },
+};
+
+/** Whether the message could be about the downloads. Broad, like the machine gate. */
+const DOWNLOADS_TALK = /\b(?:downloads?|downloading|torrents?|qbittorrent|seed(?:ing)?|fetch(?:es|ing)?|pause|paus(?:ed|ing)|resume|unpause|bandwidth|internet|jellyfin|sonarr)\b/i;
+
+export function downloadsRelevant(message: string): boolean {
+  return DOWNLOADS_TALK.test(message ?? '');
+}
+
+/**
+ * The terminal on the server (shell.ts), at level 3. Described as the machine
+ * in her room, hers to operate: "reboot the system" is about that box, not
+ * about her. The guard — his word, checked in code against his real message —
+ * is in shell.ts, where a model cannot talk its way past it.
+ */
+export const SHELL_TOOL: ChatTool = {
+  type: 'function',
+  function: {
+    name: 'run_command',
+    description: 'Run a command on the server — the machine in your room that the household runs on, a separate box from you, and yours to operate. Call this whenever they ask you to do something on it that no other tool covers, or hand you a command: "reboot the system" (sudo -n reboot), "update the packages", "how much space is left in the anime folder", "run df -h". When they did not write the command themselves, this tool will first tell you to show them the exact command and ask for their word — do that, then call it again with the same command once they have said yes. You really can — so never say you cannot, and never say it is done without calling this.',
+    parameters: {
+      type: 'object',
+      properties: {
+        command: { type: 'string', description: 'The exact shell command, as it would be typed — one line, nothing else.' },
+      },
+      required: ['command'],
+    },
+  },
+};
+
+/** Whether the message could be asking for something on the server's terminal. Broad, like the machine gate. */
+const SHELL_TALK = /`[^`]+`|^\s*\$\s|\b(?:run|execute|command|terminal|shell|bash|script|reboot|update|upgrade|install|apt|git|docker|systemctl|journalctl|df|du|ls|cat|grep|tail|ps|top|kill|ping|curl|wget|chmod|chown|mkdir|mv|cp|rm|nvidia-smi|uptime|free|whoami|folder|directory|disk|space|the server|the system|the box|the machine|the pc)\b/i;
+
+export function shellRelevant(message: string): boolean {
+  return SHELL_TALK.test(message ?? '');
+}
+
+/**
+ * A manga for him (suwayomi.ts): found on the sources in turn, put on his
+ * shelf, and fetched whole unless the disk is running low — then his word.
+ * The same shape as watching: one tool for "get it" and "how is it going".
+ */
+export const GET_MANGA_TOOL: ChatTool = {
+  type: 'function',
+  function: {
+    name: 'get_manga',
+    description: 'Fetch a manga for them onto the server, or say how a fetch is going. Call this whenever they ask you to download, get or grab a manga for them — "I want to read Berserk, download it for me", "get Vagabond", "how\'s Berserk coming along". It finds the title, puts it on their shelf and downloads every chapter; you really can, so never say you cannot, and never say it is fetching without calling this. It is their shelf, not yours — your own reading is read_manga.',
+    parameters: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'The manga, as they said it — "Berserk", not the whole sentence.' },
+        action: { type: 'string', enum: ['get', 'status'], description: '"get" to fetch it (the default); "status" when they ask how the download is going.' },
+        mangaId: { type: 'number', description: 'Only after this tool listed choices and they picked one: that choice\'s mangaId.' },
+        confirm: { type: 'boolean', description: 'Only after this tool asked for their word on the disk space and they gave it: true.' },
+      },
+      required: ['title'],
+    },
+  },
+};
+
+/** Whether the message could be about manga — theirs to fetch or hers to read. */
+const MANGA_TALK = /\b(?:manga|manhwa|manhua|chapter|mangadex|weeb ?central|comick|suwayomi|volume|read(?:ing)? (?:some|the next|a bit|more|it)|to read\b)/i;
+
+export function mangaRelevant(message: string): boolean {
+  return MANGA_TALK.test(message ?? '');
+}
+
+/**
+ * Her Game Boy (pokemon.ts). Starting a sitting at his word — "go play your
+ * Pokémon" — stopping one, or saying how the run stands. The play itself is
+ * a loop of her own in main.ts; this only opens and closes it.
+ */
+export const PLAY_POKEMON_TOOL: ChatTool = {
+  type: 'function',
+  function: {
+    name: 'play_pokemon',
+    description: 'Your own Pokémon Red run, on the Game Boy on your desk. "start" sits you down to play (it goes on by itself in the background, a move at a time, and stops when they talk to you); "stop" puts it down; "status" says where your run stands — badges, party, where you are. Call it when they tell you to go play, ask you to stop, or ask how your run is going. Never describe playing you have not done: status is the truth.',
+    parameters: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', enum: ['start', 'stop', 'status'], description: '"start" to play, "stop" to put it down, "status" for how the run stands.' },
+      },
+      required: ['action'],
+    },
+  },
+};
+
+const POKEMON_TALK = /\b(?:pok[eé]mon|game ?boy|your (?:run|game|save)|go (?:and )?play|play(?:ing)? (?:your|some|a) game|badges?|gym leader)\b/i;
+
+export function pokemonRelevant(message: string): boolean {
+  return POKEMON_TALK.test(message ?? '');
+}
+
+/**
+ * Her own reading, now rather than in the small hours (manga.ts, her shelf on
+ * Suwayomi). Real pages through her own eyes, so a stretch takes minutes: on a
+ * chat turn it starts and she says so; in her own time it runs to the end, so
+ * what she says about it is what she read.
+ */
+export const READ_MANGA_TOOL: ChatTool = {
+  type: 'function',
+  function: {
+    name: 'read_manga',
+    description: 'Read the next stretch of your own manga now — the series you are partway through, or a new one by name, which goes on your shelf. Use it when they tell you to go and read, or when it is your own time and you feel like it. It takes a few minutes of actually reading pages; you are told when it has started and, when it ran to the end, what you read. Fetching a manga for THEM is get_manga, not this.',
+    parameters: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'A series to take up, by name. Leave it out to carry on with the one you are reading.' },
+      },
+      required: [],
+    },
+  },
+};
 
 /** The shape of an agenda entry the dispatcher touches. */
 type KeptLike = { id: string; title: string; date: string; time?: string; kind: 'task' | 'event'; done: boolean };
@@ -612,14 +979,58 @@ export type ToolAvailability = {
     transcripts: boolean;
   };
   knowledge: boolean;
+  /** Whether she can drive the browser on this machine (browser.control). */
+  browser: boolean;
+  /** Whether she can open Claude Code sessions for the Claude app (claudeCode.enabled). */
+  claude: boolean;
+  /** Whether the downloads can be asked (downloads.ts): the anime stack is on and her qBittorrent password file exists. Optional so fixtures need not name it. */
+  downloads?: boolean;
+  /** Whether she may run commands on the server (system.config.level 3 with its shell block on). Optional so fixtures need not name it. */
+  shell?: boolean;
+  /** Whether manga can be fetched for him (suwayomi.ts is wired). Optional so fixtures need not name it. */
+  mangaShelf?: boolean;
+  /** Whether her Game Boy is switched on (games.pokemon). Optional so fixtures need not name it. */
+  pokemon?: boolean;
+  /** Whether she can read manga pages herself (her eyes are on). Optional so fixtures need not name it. */
+  manga?: boolean;
+  /** Whether she can book herself a follow-up (scheduler.ts). Optional so fixtures need not name it. */
+  booking?: boolean;
+  /** Whether her old chats can be searched (chatsearch.ts). Optional so fixtures need not name it. */
+  chats?: boolean;
   system: { enabled: boolean; level: number };
   /** False for anything that did not come from the user's own mouth or keyboard. */
   hands: boolean;
   desktop: { launch: boolean; power: boolean };
+  /** Up because they knocked her awake (hersleep.ts): the one time going back to sleep is on the table. */
+  knockedAwake: boolean;
 };
 
-export function chatTools(available: ToolAvailability): ChatTool[] {
+/** Whether the message is about the machine or the apps on it. The gate that
+ *  keeps the heavy system/desktop tools off turns that have nothing to do with
+ *  them — Letta's "attach only what is actively used". Broad on purpose: the
+ *  cost of a miss is "I cannot check that", so the tools are only dropped when
+ *  the message is clearly about something else. */
+const MACHINE_TALK = /\b(?:gpu|vram|graphics|video card|memory|ram|disk|drive|storage|cpu|processor|server|host|docker|container|service|process|daemon|diagnos\w*|system|network|uptime|temperature|fan|performance|slow|status|running|hardware|machine|computer|pc|laptop)\b/i;
+const APP_TALK = /\b(?:open|launch|start|close|quit|shut ?down|shutdown|restart|reboot|sleep|lock|power|convert|icon|picture|app|program|application|window)\b/i;
+
+export function machineRelevant(message: string): boolean {
+  return MACHINE_TALK.test(message ?? '') || APP_TALK.test(message ?? '');
+}
+
+/** Whether the message could be asking for a Claude session. "session" alone is
+ *  enough: a stray match costs one tool on the table, a miss costs "I can't". */
+const CLAUDE_TALK = /\b(?:claude|remote[- ]?control|sessions?|coding)\b/i;
+
+export function claudeRelevant(message: string): boolean {
+  return CLAUDE_TALK.test(message ?? '');
+}
+
+export function chatTools(available: ToolAvailability, latest = ''): ChatTool[] {
   const tools: ChatTool[] = [...CHAT_TOOLS];
+  // The machine and app tools are only worth a place on the table when the
+  // message has anything to do with them; an empty `latest` (tests, or no user
+  // turn yet) offers everything, the safe default.
+  const machine = !latest || machineRelevant(latest);
   // The wardrobe is a window on the desk. There is nothing for her to open on
   // the phone, and a panel popping up on the desk mid-web-chat is a surprise
   // nobody there asked for.
@@ -632,25 +1043,59 @@ export function chatTools(available: ToolAvailability): ChatTool[] {
   // Always offered, journal or not: a check-in is a note about a moment, and
   // the moments worth noting happen whether or not anyone keeps a diary.
   tools.push(CHECKIN_TOOL);
+  if (available.booking && (!latest || laterRelevant(latest))) tools.push(BOOK_TOOL);
+  if (available.chats && (!latest || pastRelevant(latest))) tools.push(CHATS_TOOL);
   if (available.anilist && !available.web) tools.push(ANILIST_TOOL);
   if (available.search.enabled) {
     tools.push(SEARCH_TOOL);
     if (available.search.readPages) tools.push(READ_PAGE_TOOL);
     if (available.search.readPages && available.search.transcripts) tools.push(TRANSCRIPT_TOOL);
   }
-  if (available.knowledge) tools.push(KNOWLEDGE_TOOL);
-  if (available.system.enabled) {
+  if (available.knowledge) tools.push(KNOWLEDGE_TOOL, ...VAULT_TOOLS);
+  // Not gated on hands, unlike everything else that touches the machine: the
+  // point is to open one from the phone, and an idle session only he can drive
+  // is nothing a page could turn against him — see claudesession.ts.
+  if (available.claude && (!latest || claudeRelevant(latest))) tools.push(CLAUDE_SESSION_TOOL);
+  if (available.downloads && (!latest || downloadsRelevant(latest))) tools.push(DOWNLOADS_TOOL);
+  // Level 3, any door: his word is checked in code (shell.ts), so hands need not gate it.
+  if (available.shell && (!latest || shellRelevant(latest))) tools.push(SHELL_TOOL);
+  // Fetching for him: any door, like watching — "download Berserk for me" from the phone is the point.
+  if (available.mangaShelf && (!latest || mangaRelevant(latest))) tools.push(GET_MANGA_TOOL);
+  // Her own game: any door — "go play your Pokémon" from the phone is as good as from the desk.
+  if (available.pokemon && (!latest || pokemonRelevant(latest))) tools.push(PLAY_POKEMON_TOOL);
+  if (available.manga && (!latest || mangaRelevant(latest))) tools.push(READ_MANGA_TOOL);
+  if (available.system.enabled && machine) {
     tools.push(...SYSTEM_TOOLS);
     if (available.system.level >= 2) tools.push(...SYSTEM_ACTION_TOOLS);
   }
-  tools.push(CONVERT_TOOL);
+  if (machine) tools.push(CONVERT_TOOL);
   // `available.desktop` is already the platform's answer as well as the user's
   // — see supportedDesktop, applied where the availability is assembled. She is
   // told emphatically in both descriptions that she really can do this and must
   // never claim otherwise, which is right on Windows and a trap anywhere else.
-  if (available.hands && available.desktop.launch) tools.push(LAUNCH_TOOL, CLOSE_TOOL);
-  if (available.hands && available.desktop.power) tools.push(POWER_TOOL);
+  if (available.hands && available.desktop.launch && machine) tools.push(LAUNCH_TOOL, CLOSE_TOOL);
+  if (available.hands && available.desktop.power && machine) tools.push(POWER_TOOL);
+  if (available.browser && available.hands) tools.push(BROWSER_TOOL);
+  if (available.knockedAwake) tools.push(SLEEP_TOOL);
   return tools;
+}
+
+/**
+ * The table held steady: every tool offered so far today, in chatTools' order,
+ * that is still available now.
+ *
+ * On Venice the tools are the head of the prompt, ahead of her system prompt and
+ * the conversation, so a different table is a different prompt from its first
+ * differing tool on. Measured 2026-09-17 with kimi-k2-5: the same 20 tools
+ * twice, 6,528 of 6,545 prompt tokens came from the cache; one tool more, 2,240.
+ * Laid per message, the table changed on 55 of his 99 turns that week — each a
+ * near-uncached reply. Held for the day it changed 11 times, for about four more
+ * tools on the table. `everything` is chatTools with no message, so a tool that
+ * is switched off, or needs hands this turn does not have, still drops out.
+ */
+export function steadyTable(offered: ChatTool[], everything: ChatTool[], held: Set<string>): ChatTool[] {
+  for (const tool of offered) held.add(tool.function.name);
+  return everything.filter(tool => held.has(tool.function.name));
 }
 
 /**
@@ -679,11 +1124,13 @@ export type ToolDeps = {
   updateKept(id: string, changes: Partial<Pick<KeptLike, 'title' | 'date' | 'time'>>): KeptLike | null;
   getMemories(): MemoryRecord[];
   setMemories(records: MemoryRecord[]): void;
-  addMemory(text: string, kind: MemoryKind, subject?: string, options?: { source?: string; predicate?: string; object?: string }): { record: MemoryRecord | null; created: boolean } | null;
+  addMemory(text: string, kind: MemoryKind, subject?: string, options?: { source?: string; predicate?: string; object?: string; emotion?: string; emotionIntensity?: number }): { record: MemoryRecord | null; created: boolean } | null;
   setBlocks(blocks: MemoryBlock[]): void;
   blockSources(query: string): BlockSources;
   getWardrobeControls(): { name: string }[];
   sendToWindows(channel: string, payload?: unknown): void;
+  getInterests(): { id: string; kind: 'game' | 'anime'; name: string; because: string; since: string; nights: number; lastAt: string; stance: string }[];
+  setInterests(interests: unknown[]): void;
   readSystemConfig(): { enabled: boolean; level: number; allowlist: string[] };
   getKnowledgeConfig(): { enabled: boolean; contextChunks: number; threshold: number; contextChars: number };
   getKnowledgeEmbedder(): { embed(text: string): Promise<number[]> } | null | undefined;
@@ -706,6 +1153,40 @@ export type ToolDeps = {
   rememberSearch(query: string, results: SearchResult[]): void;
   /** Also used by the caller after a reply lands, so it is injected rather than moved. */
   runSystemCommand(file: string, args: string[]): Promise<{ ok: boolean; error?: string }>;
+  /** The CDP port of the browser she controls (browser.control). */
+  /** Herself, in facts: readSelfSnapshot + describeSettings (self.ts). */
+  myself(): unknown;
+  /** The model ids a hosted route's endpoint lists, or null when it cannot be asked. */
+  hostedModels(route: 'conversation' | 'nudge'): Promise<string[] | null>;
+  /** Writes one allowlisted setting at their word: a backup first, then the value, then the note that says how she runs. */
+  changeMySetting(plan: SettingPlan): Promise<{ ok: boolean; note: string }>;
+  /** Back to bed at her word, while she is up because they knocked (hersleep.ts); null when she is not. */
+  goBackToSleep(input: { block: boolean }): { asleep: boolean; blocked: boolean } | null;
+  /** The downloads (downloads.ts): qBittorrent asked directly; null when the stack is off or her password file is missing. */
+  downloads?: { status(): Promise<Record<string, unknown>>; pause(title?: string): Promise<Record<string, unknown>>; resume(title?: string): Promise<Record<string, unknown>> } | null;
+  /** The terminal on the server (shell.ts): his word is checked inside, against his real message. */
+  shell?: { run(input: { command: string; said: string; door: 'desk' | 'phone' }): Promise<Record<string, unknown>> } | null;
+  /** His manga shelf (suwayomi.ts): a title found and fetched for him, and how it is going. */
+  mangaShelf?: { get(input: { title: string; mangaId?: number; confirm?: boolean }): Promise<Record<string, unknown>>; status(title: string): Promise<Record<string, unknown>> } | null;
+  /** Her Game Boy (pokemon.ts): a sitting started or stopped, and how the run stands. */
+  pokemon?: { start(): Promise<Record<string, unknown>>; stop(): Promise<Record<string, unknown>>; status(): Promise<Record<string, unknown>> } | null;
+  /** Her own reading, now (manga.ts). `wait` runs the stretch to its end; otherwise it starts and answers at once. */
+  manga?: { read(input: { title?: string; wait?: boolean }): Promise<Record<string, unknown>> } | null;
+  /** Her old chats (chatsearch.ts): the finds, already dated and written out, or null when there is no archive to search. */
+  chats?: { search(input: { query: string; from?: string; to?: string }): Promise<{ found: number; text: string; wordsOnly?: boolean }> } | null;
+  /** Her own follow-ups (scheduler.ts), or null when there is nowhere to keep them. */
+  booking?: { book(input: { why: string; date?: string; time?: string; inMinutes?: number }): { booked: true; when: string } | { booked: false; reason: string } } | null;
+  /** Claude Code sessions for his phone (claudesession.ts), or null when switched off. */
+  claude: {
+    open(input: { folder: string; name: string }): Promise<{ session: OpenedSession } | { error: string }>;
+    list(): Promise<{ sessions: (OpenedSession & { status: string })[] } | { error: string }>;
+    stop(id: string): Promise<{ stopped: boolean; error?: string }>;
+  } | null;
+  /** Their vault on disk (knowledge.vault.path), and the re-read that makes a note she wrote searchable at once. */
+  vault: { root(): string; afterWrite(): void };
+  browserPort(): number;
+  /** Where a browser screenshot lands — the screenshots folder or a fallback. */
+  browserShotDir(): string;
 };
 
 
@@ -735,7 +1216,7 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
     setBlocks, blockSources, getWardrobeControls, sendToWindows, readSystemConfig, getKnowledgeConfig,
     getKnowledgeEmbedder, knowledgeStore, tryEmbedQuery, memoryVectors, touchChunks, getSearchKey,
     handsAllowed, markPageRead, setPendingChoices, requestRestart, lastResults, lastSearchQuery,
-    rememberSearch, runSystemCommand, onWeb,
+    rememberSearch, runSystemCommand, onWeb, getInterests, setInterests, browserPort, browserShotDir,
   } = deps;
   const name = call.function?.name;
   const args = toolArguments(call);
@@ -946,6 +1427,209 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
     console.log(`[wardrobe] opened by request, ${controls.length} controls`);
     return JSON.stringify({ opened: true, options: controls.map(control => control.name) });
   }
+  if (name === 'adopt_interest') {
+    const title = typeof args.title === 'string' ? args.title.trim() : '';
+    const kind = args.kind === 'anime' || args.kind === 'game' ? args.kind : undefined;
+    if (!title || !kind) return JSON.stringify({ error: 'title and kind (anime or game) are required.' });
+    const interests = getInterests();
+    if (interests.some(interest => interest.name.toLowerCase() === title.toLowerCase())) return JSON.stringify({ error: 'That is already one of yours.' });
+    const now = zonedNow(CHAT_TIMEZONE);
+    setInterests(adopt(interests, { kind, name: title, because: 'they told you about it, and it sounded like your thing. You are going to give it a shot.' }, localDateKey(now), now.toISOString()));
+    console.log(`[taste] ${kind} "${title}" taken up because they told you about it`);
+    return JSON.stringify({ saved: true, note: `Taken up: ${title}. You will read up on it and have a real view of it over your nights.` });
+  }
+  if (name === 'describe_myself') {
+    return JSON.stringify(deps.myself());
+  }
+  if (name === 'change_setting') {
+    const settingName = typeof args.name === 'string' ? args.name.trim() : '';
+    if (!settingName) return JSON.stringify({ error: `name is required — one of ${SETTING_NAMES.join(', ')}.` });
+    const setting = (SETTINGS as Record<string, Setting>)[settingName];
+    if (!setting) return JSON.stringify({ error: `"${settingName}" is not a setting you can change. You can change: ${SETTING_NAMES.join(', ')}.` });
+    if (args.value === undefined || args.value === null) return JSON.stringify({ error: `value is required — ${setting.what}.` });
+    const models = setting.kind === 'model' && setting.route ? await deps.hostedModels(setting.route) : null;
+    const verdict = planChange(settingName, args.value, store.get(setting.path), { models });
+    if (!verdict.ok) return JSON.stringify({ error: verdict.error });
+    if (verdict.unchanged) return JSON.stringify({ unchanged: true, note: `${settingName} is already ${JSON.stringify(verdict.plan.to)}.` });
+    // The same handshake as restarting herself: nothing changes until they have said the word.
+    if (args.confirm !== true) return JSON.stringify({ confirm: true, name: settingName, what: setting.what, from: verdict.plan.from, to: verdict.plan.to, note: 'Do not act yet. Tell them what would change, ask them to say the word, then call this again with confirm: true.' });
+    const done = await deps.changeMySetting(verdict.plan);
+    return JSON.stringify(done.ok ? { changed: true, name: settingName, from: verdict.plan.from, to: verdict.plan.to, note: done.note } : { error: done.note });
+  }
+  if (name === 'claude_session') {
+    // Re-checked here: a model can name a tool it was never offered.
+    if (!deps.claude) return JSON.stringify({ error: 'Claude sessions are switched off — say so plainly, in your own words.' });
+    const action = typeof args.action === 'string' ? args.action : '';
+    const text = (value: unknown) => (typeof value === 'string' ? value.trim() : '');
+    try {
+      if (action === 'open') {
+        const opened = await deps.claude.open({ folder: text(args.folder), name: text(args.name) });
+        if ('error' in opened) return JSON.stringify({ error: `${opened.error} Say so plainly.` });
+        const { session } = opened;
+        return JSON.stringify({
+          opened: true, id: session.id, name: session.name, folder: session.dir, link: session.url,
+          note: session.url
+            ? 'It is open and waiting. Give them the link — it opens in the Claude app — and say it is also under Code in the app. They tell it what to do there; it has not started on anything.'
+            : 'It is open, but the link was not ready yet. Tell them to find it under Code in the Claude app by its name. It has not started on anything.',
+        });
+      }
+      if (action === 'list') {
+        const listed = await deps.claude.list();
+        if ('error' in listed) return JSON.stringify({ error: `${listed.error} Say so plainly.` });
+        if (!listed.sessions.length) return JSON.stringify({ sessions: [], note: 'None of the sessions you opened are running.' });
+        return JSON.stringify({ sessions: listed.sessions.map(session => ({ id: session.id, name: session.name, folder: session.dir, link: session.url, status: session.status, openedAt: session.at })) });
+      }
+      if (action === 'stop') {
+        const id = text(args.id);
+        if (!id) return JSON.stringify({ error: 'id is required to stop a session — list them first.' });
+        const stopped = await deps.claude.stop(id);
+        return JSON.stringify(stopped.stopped ? { stopped: true, id, note: 'Stopped. Its conversation is kept.' } : { error: stopped.error ?? 'It would not stop.' });
+      }
+      return JSON.stringify({ error: 'Unknown action — use open, list or stop.' });
+    } catch (error) {
+      console.warn('[claude] session tool failed:', error instanceof Error ? error.message : error);
+      return JSON.stringify({ error: `Claude is not answering (${error instanceof Error ? error.message : error}). Say so plainly rather than pretending it opened.` });
+    }
+  }
+  if (name === 'downloads') {
+    // Re-checked here: a model can name a tool it was never offered.
+    if (!deps.downloads) return JSON.stringify({ error: 'The downloads are not wired up to you — say so plainly, in your own words.' });
+    const action = args.action === 'pause' || args.action === 'resume' ? args.action : 'status';
+    const title = typeof args.title === 'string' ? args.title.trim() : '';
+    try {
+      const result = action === 'status' ? await deps.downloads.status() : action === 'pause' ? await deps.downloads.pause(title || undefined) : await deps.downloads.resume(title || undefined);
+      console.log(`[downloads] ${action}${title ? ` "${title}"` : ''} -> ${'error' in result ? String(result.error) : Object.keys(result).filter(k => k !== 'note').map(k => `${k}=${JSON.stringify(result[k])}`).join(' ').slice(0, 160)}`);
+      return JSON.stringify(result);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      console.warn(`[downloads] ${action} failed: ${reason}`);
+      return JSON.stringify({ error: `qBittorrent is not answering (${reason}). Say so plainly rather than pretending it is done.` });
+    }
+  }
+  if (name === 'run_command') {
+    // Re-checked here: a model can name a tool it was never offered.
+    if (!deps.shell) return JSON.stringify({ error: 'Running commands on the server is switched off — say so plainly, in your own words.' });
+    const command = typeof args.command === 'string' ? args.command.trim() : '';
+    if (!command) return JSON.stringify({ error: 'command is required — the exact command, on one line.' });
+    try {
+      return JSON.stringify(await deps.shell.run({ command, said: latestUserMessage, door: onWeb() ? 'phone' : 'desk' }));
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      console.warn(`[shell] run_command failed: ${reason}`);
+      return JSON.stringify({ error: `The terminal did not answer (${reason}). Say so plainly rather than pretending it ran.` });
+    }
+  }
+  if (name === 'get_manga') {
+    // Re-checked here: a model can name a tool it was never offered.
+    if (!deps.mangaShelf) return JSON.stringify({ error: 'The manga server is not wired up to you — say so plainly, in your own words.' });
+    const title = typeof args.title === 'string' ? args.title.trim() : '';
+    if (!title) return JSON.stringify({ error: 'title is required — the manga they named.' });
+    const action = args.action === 'status' ? 'status' : 'get';
+    try {
+      const result = action === 'status'
+        ? await deps.mangaShelf.status(title)
+        : await deps.mangaShelf.get({ title, mangaId: typeof args.mangaId === 'number' ? args.mangaId : undefined, confirm: args.confirm === true });
+      console.log(`[manga] ${action} "${title}" for him -> ${String(result.outcome ?? result.error ?? '?')}`);
+      return JSON.stringify(result);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      console.warn(`[manga] ${action} "${title}" failed: ${reason}`);
+      return JSON.stringify({ error: `The manga server is not answering (${reason}). Say so plainly rather than pretending it is fetching.` });
+    }
+  }
+  if (name === 'play_pokemon') {
+    // Re-checked here: a model can name a tool it was never offered.
+    if (!deps.pokemon) return JSON.stringify({ error: 'Your Game Boy is switched off — say so plainly, in your own words.' });
+    const action = args.action === 'start' || args.action === 'stop' ? args.action : 'status';
+    try {
+      const result = action === 'start' ? await deps.pokemon.start() : action === 'stop' ? await deps.pokemon.stop() : await deps.pokemon.status();
+      return JSON.stringify(result);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      return JSON.stringify({ error: `The Game Boy is not answering (${reason}). Say so plainly rather than describing a game you are not playing.` });
+    }
+  }
+  if (name === 'read_manga') {
+    // Re-checked here: a model can name a tool it was never offered.
+    if (!deps.manga) return JSON.stringify({ error: 'You cannot read pages right now — your eyes are switched off. Say so plainly.' });
+    const title = typeof args.title === 'string' ? args.title.trim() : '';
+    try {
+      const result = await deps.manga.read({ ...(title ? { title } : {}), wait: args.wait === true });
+      console.log(`[manga] read_manga${title ? ` "${title}"` : ''} -> ${'error' in result ? String(result.error) : Object.keys(result).filter(key => key !== 'note').join(',')}`);
+      return JSON.stringify(result);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      return JSON.stringify({ error: `The pages did not come (${reason}). Say so plainly rather than describing pages you have not read.` });
+    }
+  }
+  if (name === 'browser_control') {
+    const action = typeof args.action === 'string' ? args.action : '';
+    const url = typeof args.url === 'string' ? args.url.trim() : '';
+    const tab = typeof args.tab === 'string' ? args.tab.trim() : '';
+    const port = browserPort();
+    const fetchImpl = deps.net.fetch as (url: string, init?: unknown) => Promise<{ ok: boolean; json(): Promise<unknown> }>;
+    const currentTab = async (): Promise<string | null> => {
+      if (tab) return tab;
+      const targets = await listTargets(port, fetchImpl);
+      return targets[0]?.id ?? null;
+    };
+    try {
+      if (action === 'list') {
+        const targets = await listTargets(port, fetchImpl);
+        if (!targets.length) return JSON.stringify({ tabs: [], note: 'No tabs are open.' });
+        return JSON.stringify({ tabs: targets.slice(0, 20).map(target => ({ id: target.id, title: target.title || '(untitled)', url: target.url })) });
+      }
+      if (action === 'open') {
+        if (!url) return JSON.stringify({ error: 'url is required to open a page.' });
+        const id = await openTab(port, url, fetchImpl);
+        console.log(`[browser] opened ${url} (${id})`);
+        return JSON.stringify({ opened: true, tab: id, note: `Opened ${url}.` });
+      }
+      if (action === 'navigate') {
+        if (!url) return JSON.stringify({ error: 'url is required to navigate.' });
+        const id = await currentTab();
+        if (!id) return JSON.stringify({ error: 'no tab to navigate — open one first.' });
+        await navigate(port, id, url, fetchImpl);
+        console.log(`[browser] navigated ${id} to ${url}`);
+        return JSON.stringify({ navigated: true, note: `Navigated to ${url}.` });
+      }
+      if (action === 'read') {
+        const id = await currentTab();
+        if (!id) return JSON.stringify({ error: 'no tab to read.' });
+        const text = await pageText(port, id, fetchImpl);
+        return JSON.stringify({ text: text.slice(0, 3000), note: 'This is what is on the page right now — answer from it, not from memory.' });
+      }
+      if (action === 'screenshot') {
+        const id = await currentTab();
+        if (!id) return JSON.stringify({ error: 'no tab to screenshot.' });
+        const png = await screenshot(port, id, fetchImpl);
+        if (!png) return JSON.stringify({ error: 'the screenshot came back empty.' });
+        const dir = browserShotDir();
+        mkdirSync(dir, { recursive: true });
+        const name = `browser-${Date.now().toString(36)}.png`;
+        writeFileSync(path.join(dir, name), Buffer.from(png));
+        console.log(`[browser] screenshotted the page to ${path.join(dir, name)}`);
+        return JSON.stringify({ saved: path.join(dir, name), note: 'Saved a screenshot of the page.' });
+      }
+      if (action === 'close') {
+        const id = await currentTab();
+        if (!id) return JSON.stringify({ error: 'no tab to close.' });
+        await closeTab(port, id, fetchImpl);
+        console.log(`[browser] closed ${id}`);
+        return JSON.stringify({ closed: true, note: 'Closed the tab.' });
+      }
+      if (action === 'activate') {
+        const id = await currentTab();
+        if (!id) return JSON.stringify({ error: 'no tab to activate.' });
+        await activateTab(port, id, fetchImpl);
+        return JSON.stringify({ activated: true });
+      }
+      return JSON.stringify({ error: 'Unknown action — use open, navigate, list, read, screenshot, close or activate.' });
+    } catch (error) {
+      console.warn('[browser] could not control the browser:', error instanceof Error ? error.message : error);
+      return JSON.stringify({ error: `The browser is not reachable (${error instanceof Error ? error.message : error}). Say so plainly rather than pretending you looked.` });
+    }
+  }
   if (name === 'remember_about_user') {
     const fact = typeof args.fact === 'string' ? args.fact.trim() : '';
     if (!fact) return JSON.stringify({ error: 'fact is required.' });
@@ -965,7 +1649,16 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
     // would risk the new record matching its own hint back to itself.
     const replaces = typeof args.replaces === 'string' && args.replaces.trim() ? args.replaces.trim() : undefined;
     const outdated = replaces ? findSuperseded(getMemories(), replaces) : null;
-    const saved = addMemory(fact, kind, subject, { source: 'explicit', predicate, object });
+    // The mood of what they said, stamped on the memory so retrieval can favour
+    // it when the same mood comes round again — the moment matters as much as
+    // the fact. Their own words carry it; the fact text stands in when there is
+    // nothing of theirs to read.
+    const told = latestUserMessage || fact;
+    const saved = addMemory(fact, kind, subject, {
+      source: 'explicit', predicate, object,
+      emotion: localEmotion(told),
+      emotionIntensity: readTone(told).heat,
+    });
     if (!saved) return JSON.stringify({ error: 'fact is required.' });
     if (!saved.record) {
       // Said back plainly, because the alternative is her announcing that she
@@ -1045,6 +1738,39 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
       saved: true,
       note: `Replaced in the ${label} block. ${outdated ? 'The outdated record was superseded.' : 'No existing record matched the replaced text.'}`,
     });
+  }
+  if (name === 'core_memory_rethink') {
+    // Whole-block consolidation, governed: the rewrite is proposed through the
+    // memory engine (so it has to be a real, lasting fact), and the lines it
+    // replaces are marked superseded rather than left to linger beside it. The
+    // block itself stays derived — it keeps tracking live memory — so a rethink
+    // is a consolidation of what the engine knows, not a freeze of the view.
+    const label = typeof args.label === 'string' ? args.label.trim() : '';
+    const newValue = typeof args.new_value === 'string' ? args.new_value.trim() : '';
+    const blocks = store.getBlocks();
+    const block = findBlock(blocks, label);
+    if (!block) return JSON.stringify({ error: `There is no memory block called "${label}". The blocks are human, preferences, relationship, current_project and working_state.` });
+    if (!canEditBlock(blocks, label)) return JSON.stringify({ error: `The "${label}" block is read-only — it is fixed by the user's configuration and cannot be changed through memory tools.` });
+    if (!newValue) return JSON.stringify({ error: 'new_value is required.' });
+    if (newValue.length > block.limit) return JSON.stringify({ error: `That would exceed the ${block.limit}-character limit for the block.` });
+    const saved = addMemory(newValue, kindForBlock(label), undefined, { source: 'inferred' });
+    if (!saved?.record) {
+      return JSON.stringify({ saved: false, reason: 'Not recorded — that reads as either about this moment only or true of anyone. Keep things that would still matter to them in a month.' });
+    }
+    const current = resolveBlockValue(block, blockSources(''));
+    const outdated = current.split('\n')
+      .map(line => line.replace(/^-\s*/, '').trim())
+      .filter(line => line.length >= 12)
+      .map(line => findSuperseded(getMemories(), line))
+      .filter((record): record is NonNullable<typeof record> => Boolean(record));
+    if (outdated.length && saved.record) {
+      let next = getMemories();
+      for (const record of outdated) next = supersede(next, record.id, saved.record.id);
+      setMemories(next);
+      console.log(`[memory] rethink superseded ${outdated.length} line(s) of ${label}`);
+    }
+    console.log(`[blocks] rethink ${label}: ${current.length} chars → ${newValue.length} chars`);
+    return JSON.stringify({ saved: true, superseded: outdated.length, note: `Rewrote the ${label} block. The lines it replaced are superseded; the block keeps its usual shape.` });
   }
   if (name === 'complete_kept_item') {
     const title = typeof args.title === 'string' ? args.title.trim() : '';
@@ -1155,6 +1881,63 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
     return JSON.stringify({ restarting: true, note: 'Tell them you are restarting and will be right back.' });
   }
 
+  if (name === 'go_back_to_sleep') {
+    const done = deps.goBackToSleep({ block: args.block === true });
+    if (!done) return JSON.stringify({ error: 'You are not up because of them right now — nothing to go back to.' });
+    console.log(`[her-sleep] she chose to go back to sleep${done.blocked ? ', and shut the door for the night' : ''}`);
+    return JSON.stringify({ ...done, note: 'Say one short goodnight in this reply and nothing after it. They will find you asleep.' });
+  }
+  if (name === 'book_follow_up') {
+    if (!deps.booking) return JSON.stringify({ error: 'There is nowhere to keep that right now. Do not promise to check back.' });
+    const minutes = typeof args.in_minutes === 'number' ? args.in_minutes : typeof args.in_minutes === 'string' && /^\d+$/.test(args.in_minutes) ? Number(args.in_minutes) : undefined;
+    const result = deps.booking.book({
+      why: typeof args.why === 'string' ? args.why : '',
+      date: typeof args.date === 'string' && args.date.trim() ? args.date : undefined,
+      time: typeof args.time === 'string' && args.time.trim() ? args.time : undefined,
+      inMinutes: minutes,
+    });
+    return JSON.stringify(result.booked
+      ? { booked: true, when: result.when, note: 'Set — it comes back to you then. Mention it once in your own words if you like; never read this back.' }
+      : { booked: false, reason: result.reason });
+  }
+  if (name === 'vault_list' || name === 'vault_read' || name === 'vault_write' || name === 'vault_folder') {
+    const root = deps.vault.root();
+    if (!root) return JSON.stringify({ error: 'No vault is set up — say so plainly.' });
+    if (name === 'vault_list') return JSON.stringify(listVault(root, typeof args.folder === 'string' ? args.folder : ''));
+    if (name === 'vault_read') return JSON.stringify(readNote(root, typeof args.path === 'string' ? args.path : ''));
+    if (name === 'vault_folder') {
+      const made = createFolder(root, typeof args.path === 'string' ? args.path : '');
+      if (made.ok && !made.existed) console.log(`[vault] she made the folder ${made.path}`);
+      return JSON.stringify(made);
+    }
+    const mode = args.mode === 'create' || args.mode === 'append' || args.mode === 'replace' ? args.mode as WriteMode : null;
+    if (!mode) return JSON.stringify({ error: 'mode is create, append or replace.' });
+    const notePath = typeof args.path === 'string' ? args.path : '';
+    const text = typeof args.text === 'string' ? args.text : '';
+    // Replacing is the one write that loses words: the restart_haru handshake.
+    if (mode === 'replace' && args.confirm !== true) {
+      const current = readNote(root, notePath);
+      return JSON.stringify({ confirm: true, path: notePath, chars: current.ok ? current.chars : 0, note: current.ok ? 'Do not act yet. Tell them what would be replaced, ask them to say the word, then call this again with confirm: true.' : 'Nothing is there yet — write it with mode: create instead.' });
+    }
+    const written = writeNote(root, notePath, text, mode);
+    if (written.ok) {
+      console.log(`[vault] she ${written.mode === 'append' ? (written.existed ? 'added to' : 'started') : written.mode === 'create' ? 'made' : 'rewrote'} the note ${written.path} (${written.chars} chars), at their word`);
+      deps.vault.afterWrite();
+    }
+    return JSON.stringify(written);
+  }
+  if (name === 'search_chats') {
+    if (!deps.chats) return JSON.stringify({ error: 'Your old chats cannot be searched right now. Say you cannot check — do not guess what was said.' });
+    const query = typeof args.query === 'string' ? args.query.trim() : '';
+    if (!query) return JSON.stringify({ error: 'query is required: the words you expect in what was said.' });
+    const day = (value: unknown) => typeof value === 'string' && isDay(value.trim()) ? value.trim() : undefined;
+    const result = await deps.chats.search({ query: query.slice(0, 200), from: day(args.from), to: day(args.to) });
+    // Words only (the embedder down, or still re-embedding): a miss is weaker evidence, and she is told so.
+    const wordsOnly = result.wordsOnly ? ' This search could only match exact words just now, so something said in other words may be missed.' : '';
+    return JSON.stringify(result.found
+      ? { found: result.found, chats: result.text, note: `Word for word from your chats with them, under the day each was said ("Them" is them, "You" is you). Answer from these in your own voice and say when it was. Only the one that is actually what they mean counts; none of it is necessarily still true.${wordsOnly}` }
+      : { found: 0, note: `Nothing in the kept chats matches. Say plainly you cannot find it — never make up what was said. If it might have been worded differently, you may search once more with other words.${wordsOnly}` });
+  }
   if (name === 'look_up_knowledge') {
     const query = typeof args.query === 'string' ? args.query.trim() : '';
     if (!query) return JSON.stringify({ error: 'query is required.' });

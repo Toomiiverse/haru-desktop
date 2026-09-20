@@ -9,7 +9,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createPublicKey, verify } from 'node:crypto';
-import { inQuietHours, newVapidKeys, pushRequest, readPushDevices, readPushPrefs, sealPayload, vapidToken, nextNudgeDelay, NUDGE_GAP_MS, NUDGE_FLOOR_MS, nudgeOverdue, LAST_CALL_MS, untilQuiet, PUSH_BREATHER_MS, tooSoonToPush } from '../electron/push';
+import { heldBack, inQuietHours, newVapidKeys, pushRequest, readPushDevices, readPushPrefs, sealPayload, vapidToken, nextNudgeDelay, NUDGE_GAP_MS, NUDGE_FLOOR_MS, nudgeOverdue, LAST_CALL_MS, untilQuiet, PUSH_BREATHER_MS, tooSoonToPush, withoutDevice, isPhoneWebApp, coveredByNativeApp } from '../electron/push';
 
 // -- RFC 8291 Appendix A, verbatim -------------------------------------------
 
@@ -205,4 +205,27 @@ test('a push carries a topic, made safe for the header', () => {
   assert.equal(topped.headers['Topic'], 'haru-random');
   assert.equal(pushRequest(device, '{"a":1}', keys, {}, 'ev-abc/def!').headers['Topic'], 'ev-abcdef');
   assert.equal('Topic' in pushRequest(device, '{"a":1}', keys).headers, false);
+});
+
+test('a Focus on the phone holds her, in or out of quiet hours; the reader defaults it off', () => {
+  const noon = new Date('2026-09-05T12:00:00');
+  const prefs = readPushPrefs({ quietFrom: '23:00', quietTo: '08:00' });
+  assert.equal(prefs.held, false);
+  assert.equal(heldBack(prefs, noon), false);
+  assert.equal(heldBack({ ...prefs, held: true }, noon), true);
+  assert.equal(heldBack(readPushPrefs({ held: 'yes' }), noon), false, 'only a real boolean counts');
+});
+
+test('a phone with the app on it does not need its browser buzzing too', () => {
+  const safari = { endpoint: 'https://web.push.apple.com/a', p256dh: 'k', auth: 's', name: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit', added: '', deviceId: 'web1' };
+  const desk = { endpoint: 'https://fcm.googleapis.com/b', p256dh: 'k', auth: 's', name: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome', added: '', deviceId: 'desk1' };
+  assert.deepEqual(coveredByNativeApp([safari, desk], true), [safari]);
+  assert.deepEqual(coveredByNativeApp([safari, desk], false), [], 'with no Apple token the browser is all the phone has');
+  assert.ok(isPhoneWebApp(safari.name));
+  assert.ok(!isPhoneWebApp(desk.name));
+  assert.deepEqual(withoutDevice([safari, desk], 'web1'), [desk]);
+  assert.deepEqual(withoutDevice([safari, desk], undefined), [safari, desk], 'an unknown sign-in removes nothing');
+  const read = readPushDevices([{ ...safari }, { endpoint: 'https://x/y', p256dh: 'k', auth: 's', name: 'old' }]);
+  assert.equal(read[0].deviceId, 'web1');
+  assert.equal(read[1].deviceId, undefined, 'entries from before the field are kept as they were');
 });

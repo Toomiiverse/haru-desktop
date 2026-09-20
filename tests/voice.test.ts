@@ -11,7 +11,8 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { DEFAULT_VOICE, hasShout, isSilent, readVoiceConfig, referenceFor, shoutReference, speakableText, splitForSpeech, spokenCase, type VoiceConfig, sovitsRequest, DEFAULT_SAMPLING, looksClipped, SPOKEN_CHARS_PER_SECOND, pickSigh } from '../electron/voice';
+import { DEFAULT_VOICE, hasShout, isSilent, readVoiceConfig, referenceFor, shoutReference, speakableText, splitForSpeech, streamedSentences, spokenCase, type VoiceConfig, sovitsRequest, DEFAULT_SAMPLING, looksClipped, SPOKEN_CHARS_PER_SECOND, pickSigh, HUME_DESCRIPTIONS, HUME_TTS_URL, BREEZE_DESCRIPTIONS, pcmToWav, wrapPcmAsWav } from '../electron/voice';
+import { EMOTIONS } from '../electron/emotion';
 
 const config = (overrides: Partial<VoiceConfig> = {}): VoiceConfig => ({ ...DEFAULT_VOICE, ...overrides });
 
@@ -342,4 +343,109 @@ test('a sigh is one of hers, picked by mood: grunts for an edge, sighs for the f
   assert.ok(files.includes(pickSigh(files, 'happy', () => 0.99)!), 'any of them for a mood with no lean');
   assert.equal(pickSigh([], 'annoyed'), null, 'none recorded, none played');
   assert.equal(pickSigh(['/s/sigh-iso-02.wav'], 'annoyed', () => 0), '/s/sigh-iso-02.wav', 'no grunts means a sigh will do');
+});
+
+// ---- streamedSentences: the progressive voice splitter ----
+
+test('streamedSentences cuts completed sentences and keeps the rest', () => {
+  const { sentences, rest } = streamedSentences('Well, that explains it. The bins go out.');
+  assert.deepEqual(sentences, ['Well, that explains it.']);
+  assert.equal(rest, 'The bins go out.');
+});
+
+test('a decimal point is not a sentence end', () => {
+  const { sentences, rest } = streamedSentences('It costs 2.50 now.');
+  assert.deepEqual(sentences, []);
+  assert.equal(rest, 'It costs 2.50 now.');
+});
+
+test('the final sentence is left for the flush when the stream ends', () => {
+  const { sentences, rest } = streamedSentences('That is all I had.');
+  assert.deepEqual(sentences, []);
+  assert.equal(rest, 'That is all I had.');
+});
+
+test('streamedSentences drops fragments with nothing to say', () => {
+  const { sentences, rest } = streamedSentences('Fine. ... ...');
+  assert.deepEqual(sentences, ['Fine.']);
+  assert.equal(rest, '...');
+});
+
+test('streamedSentences cuts a run of sentences one at a time', () => {
+  let buffer = '';
+  const said = [];
+  const feed = (chunk: string) => {
+    buffer += chunk;
+    const { sentences, rest } = streamedSentences(buffer);
+    buffer = rest;
+    said.push(...sentences);
+  };
+  for (const chunk of ['One. Two', '. Three!', ' Done.']) feed(chunk);
+  const tail = buffer.trim();
+  if (tail) said.push(tail);
+  assert.deepEqual(said, ['One.', 'Two.', 'Three!', 'Done.']);
+});
+
+test('streamedSentences cuts across paragraph breaks', () => {
+  const { sentences, rest } = streamedSentences('First bit. And then\n\nSecond bit, with more. And the rest.');
+  assert.deepEqual(sentences, ['First bit.', 'And then\n\nSecond bit, with more.']);
+  assert.equal(rest, 'And the rest.');
+});
+
+test('hume is a recognised engine and every emotion has acting directions', () => {
+  const config = readVoiceConfig({ engine: 'hume', voice: 'voice-123' });
+  assert.equal(config.engine, 'hume');
+  assert.equal(config.voice, 'voice-123');
+  // One clone + a description per emotion replaces the reference clips.
+  for (const emotion of EMOTIONS) {
+    assert.ok(HUME_DESCRIPTIONS[emotion]?.trim(), `no acting direction for ${emotion}`);
+  }
+  assert.match(HUME_TTS_URL, /\/v0\/tts\/file$/);
+});
+
+test('breeze is a recognised engine and speaks the same acting directions', () => {
+  const config = readVoiceConfig({ engine: 'breeze', voice: '/c/haru.wav', referenceText: 'Hi.', endpoint: 'http://127.0.0.1:7860' });
+  assert.equal(config.engine, 'breeze');
+  assert.equal(config.endpoint, 'http://127.0.0.1:7860');
+  // The mood is an instruction to a cloned voice, the same direction Hume gets.
+  for (const emotion of EMOTIONS) {
+    assert.ok(BREEZE_DESCRIPTIONS[emotion]?.trim(), `no acting direction for ${emotion}`);
+  }
+});
+
+test('Breeze PCM is wrapped in a playable WAV', () => {
+  const pcm = new Uint8Array(48000); // one second at 24 kHz mono s16le
+  const wav = pcmToWav(pcm);
+  const view = new DataView(wav.buffer);
+  assert.equal(wav.length, 44 + pcm.length);
+  assert.equal(String.fromCharCode(...wav.subarray(0, 4)), 'RIFF');
+  assert.equal(String.fromCharCode(...wav.subarray(8, 12)), 'WAVE');
+  assert.equal(view.getUint32(24, true), 24000, 'sample rate');
+  assert.equal(view.getUint16(22, true), 1, 'mono');
+  // A wrapped clip is not silent once it carries signal.
+  assert.equal(isSilent(pcmToWav(new Uint8Array(4800))), true);
+});
+
+test('Breeze PCM is streamed as a WAV the phone can play', async () => {
+  // A wrapped clip is not silent once it carries signal.
+  const pcm = new Uint8Array(48000);
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(pcm.subarray(0, 24000));
+      controller.enqueue(pcm.subarray(24000));
+      controller.close();
+    },
+  });
+  const chunks: Uint8Array[] = [];
+  const stream = wrapPcmAsWav(body);
+  for await (const chunk of stream) chunks.push(chunk);
+  const all = Buffer.concat(chunks.map(c => Buffer.from(c)));
+  assert.equal(all.length, 44 + pcm.length);
+  assert.equal(String.fromCharCode(...all.subarray(0, 4)), 'RIFF');
+  assert.equal(String.fromCharCode(...all.subarray(8, 12)), 'WAVE');
+  // Unknown length: the streaming marker that says "keep reading until the connection ends".
+  assert.equal(new DataView(all.buffer).getUint32(40, true), 0xFFFFFFFF);
+  assert.equal(new DataView(all.buffer).getUint32(24, true), 24000);
+  // The header lands before any PCM, so the player gets its format first.
+  assert.equal(String.fromCharCode(...all.subarray(36, 40)), 'data');
 });

@@ -137,7 +137,8 @@ export function openingAngles(context: OpeningContext): OpeningAngle[] {
     // Scales with mood from both ends: fed up and full of herself each make an
     // unprovoked dig likelier, for different reasons. At its worst this is the
     // heaviest angle on the list; at her calmest it is still possible.
-    weight: 1 + context.irritation * 0.6 + context.ego * 0.3,
+    // Per old notch (irritation was 0–9, ego 0–8), so the angle weighs what it did.
+    weight: 1 + context.irritation / 11 * 0.6 + context.ego / 12.5 * 0.3,
     instruction: 'Open with an unprovoked jab at them. There is no reason for it and nothing prompted it — do not invent a justification, do not tie it to their schedule, and do not soften it afterwards.',
   });
 
@@ -154,6 +155,10 @@ export type IdleState = {
   machineIdleSeconds: number;
   curiosity: number;
   sleepiness: number;
+  /** 0–100, feelings.ts. Her real boredom, where it is known. */
+  boredom?: number;
+  /** 0–100, feelings.ts. A day of his silence makes her quicker to prod. */
+  missing?: number;
 };
 
 // Nobody has touched the machine in this long, so nobody is there to hear her.
@@ -164,10 +169,16 @@ const MIN_GAP_MINUTES = 9;
 const PATIENCE_MINUTES = 15;
 // How much of that patience boredom eats into.
 const BOREDOM_IMPATIENCE = 7;
+// And how much of it a day of his silence does.
+const MISSING_IMPATIENCE = 4;
+// However bored, however left alone, she waits at least this long.
+const LEAST_PATIENCE_MINUTES = 5;
+
+const clamp01 = (value: number) => Math.min(1, Math.max(0, Number.isFinite(value) ? value : 0));
 // Chance per life tick once she is due. Ticks are roughly twenty seconds, so
 // this spreads her across a couple of minutes instead of firing on the dot —
 // something that happens at exactly fifteen minutes reads as a scheduler.
-const PIPE_UP_CHANCE = 0.14;
+export const PIPE_UP_CHANCE = 0.14;
 
 /**
  * Whether she should say something unprompted right now.
@@ -177,17 +188,21 @@ const PIPE_UP_CHANCE = 0.14;
  * needs someone at the machine and *not* talking to her, which is exactly the
  * case where piping up is the point.
  */
-export function shouldPipeUp(state: IdleState, random: () => number = Math.random): boolean {
+export function shouldPipeUp(state: IdleState, random: () => number = Math.random, chance = PIPE_UP_CHANCE): boolean {
   // Nobody there. Anything she says now is said to nobody.
   if (state.machineIdleSeconds > AWAY_SECONDS) return false;
   // Half asleep, and the hour is doing the talking.
   if (state.sleepiness > 0.75) return false;
   if (state.minutesSinceSheSpoke < MIN_GAP_MINUTES) return false;
   // Boredom shortens her patience rather than being a separate trigger: a quiet
-  // room she has nothing to do in is exactly when she starts prodding.
-  const patience = PATIENCE_MINUTES - (1 - state.curiosity) * BOREDOM_IMPATIENCE;
+  // room she has nothing to do in is exactly when she starts prodding. Her own
+  // boredom counter where it is known (feelings.ts); before that counter
+  // existed, low curiosity stood in for it, and that is still the fallback.
+  const bored = clamp01((state.boredom ?? (1 - state.curiosity) * 100) / 100);
+  const patience = Math.max(LEAST_PATIENCE_MINUTES,
+    PATIENCE_MINUTES - bored * BOREDOM_IMPATIENCE - clamp01((state.missing ?? 0) / 100) * MISSING_IMPATIENCE);
   if (state.minutesSinceUserSpoke < patience) return false;
-  return random() < PIPE_UP_CHANCE;
+  return random() < chance;
 }
 
 /**

@@ -73,6 +73,18 @@ export default function App() {
       ];
     });
   }), []);
+  // Cut off on a call: her last line becomes what she actually got out, or
+  // goes altogether when none of it was said. Matched on the text her brain
+  // wrote, not on position — the next turn may already have landed.
+  useEffect(() => window.haru?.chat.onSaidFromPhone(turn => {
+    setMessages(current => {
+      let at = -1;
+      for (let i = current.length - 1; i >= 0; i--) { if (current[i].role === 'assistant' && current[i].content === turn.reply) { at = i; break; } }
+      if (at < 0) return current;
+      if (!turn.said.trim()) return [...current.slice(0, at), ...current.slice(at + 1)];
+      return current.map((message, i) => (i === at ? { ...message, content: turn.said } : message));
+    });
+  }), []);
   // A thumb or a note from the phone lands on the message it names. Her
   // comeback, when there is one, arrives separately as an interjection.
   useEffect(() => window.haru?.chat.onRatedFromPhone(turn => {

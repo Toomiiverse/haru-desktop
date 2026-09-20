@@ -30,11 +30,10 @@ export const CHOICES_TOOL: ChatTool = {
     // invitation comes first and the warning is one clause at the end.
     description:
       "Offer the user two to four things they could say back, as buttons, so they can answer with a click. "
-      + "Use it whenever their message has branches in it — a choice between two things, a decision they are putting off, "
-      + "a question you just asked them, or any point where you can see the few ways this could go. "
-      + "If you find yourself asking them something, offer the answers. "
-      + "Write each one in THEIR voice, as the reply they would send you — \"Fine, I'll do it now\", not \"Agree to do it\" — "
-      + "and keep each under a dozen words. Say your reply as normal as well; these sit underneath it. "
+      + "Use it whenever their message has branches — a choice between two things, a decision they are putting off, "
+      + "a question you just asked them. "
+      + "Write each in THEIR voice, as the reply they would send — \"Fine, I'll do it now\", not \"Agree to do it\" — "
+      + "and keep each under a dozen words. Say your reply as normal too; these sit underneath it. "
       + "Skip it only when the question is genuinely open and any answer at all would do.",
     parameters: {
       type: 'object',

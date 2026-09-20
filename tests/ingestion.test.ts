@@ -79,6 +79,22 @@ test('a changed file is re-ingested: version bumps, old chunks go stale', async 
   }
 });
 
+test('only the version just replaced is kept as stale; older versions are dropped', async () => {
+  const dir = tempDir();
+  try {
+    const file = writeDoc(dir, 'haru/config.md', '# Config\n\nSnapshot one.\n');
+    let store = (await ingestFile(emptyKnowledge(), stubEmbedder(), { file }, baseExtractors())).store;
+    for (const snapshot of ['two', 'three', 'four']) {
+      writeFileSync(file, `# Config\n\nSnapshot ${snapshot}.\n`, 'utf8');
+      store = (await ingestFile(store, stubEmbedder(), { file }, baseExtractors())).store;
+    }
+    assert.deepEqual(store.chunks.map(chunk => [chunk.version, chunk.status]).sort(), [[3, 'stale'], [4, 'active']]);
+    assert.ok(store.chunks.find(chunk => chunk.status === 'active')?.content.includes('four'));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('a scanned-looking or empty file is refused', async () => {
   const dir = tempDir();
   try {

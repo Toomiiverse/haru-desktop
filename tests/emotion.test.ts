@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  localEmotion,
   parseEmotion,
   faceForEmotion,
-  emotionToVitals,
   EMOTIONS,
   NEUTRAL_EMOTION,
 } from '../electron/emotion';
@@ -82,33 +82,47 @@ test('faceForEmotion returns null for emotions deliberately left faceless', () =
   assert.equal(faceForEmotion('bored', available), null);
 });
 
-// ---- emotionToVitals: scaled by confidence ----
+// ---- her reading must not reach her vitals ----
 
-test('emotionToVitals nudges vitals in the documented direction, scaled by confidence', () => {
-  const vitals = { happiness: 0.5, energy: 0.5, curiosity: 0.5, affection: 0.5, sleepiness: 0.2, stress: 0.2 };
-  const confident = emotionToVitals({ emotion: 'happy', confidence: 1, energy: 0.5, intent: 'celebrate', focus: 'user' }, vitals);
-  assert.ok(confident.happiness > vitals.happiness);
-});
-
-test('emotionToVitals barely moves vitals when confidence is near zero', () => {
-  const vitals = { happiness: 0.5, energy: 0.5, curiosity: 0.5, affection: 0.5, sleepiness: 0.2, stress: 0.2 };
-  const hedged = emotionToVitals({ emotion: 'annoyed', confidence: 0.01, energy: 0.5, intent: 'dismiss', focus: 'user' }, vitals);
-  assert.ok(Math.abs(hedged.happiness - vitals.happiness) < 0.01);
-});
-
-test('emotionToVitals keeps every value clamped to [0, 1]', () => {
-  const vitals = { happiness: 0.95, energy: 0.95, curiosity: 0.5, affection: 0.95, sleepiness: 0.2, stress: 0.2 };
-  const next = emotionToVitals({ emotion: 'happy', confidence: 1, energy: 1, intent: 'celebrate', focus: 'user' }, vitals);
-  for (const key of Object.keys(next) as (keyof typeof next)[]) {
-    assert.ok(next[key] >= 0 && next[key] <= 1, `${key} out of range: ${next[key]}`);
+// This was emotionToVitals, and six tests kept it honest: damped by headroom so
+// a run of the same label converged rather than climbing. It is gone, because
+// damping a loop is not the same as not having one. Her own prose set her mood
+// — 108 real replies through the real classifier moved happiness -0.16, stress
+// +0.12, energy -0.10 with nothing having happened to her at all. What is
+// guarded now is the absence: nothing this module produces may move a vital.
+test('nothing in emotion.ts can move a vital', async () => {
+  const emotion = await import('../electron/emotion') as Record<string, unknown>;
+  const vitals = { happiness: 0.5, energy: 0.5, curiosity: 0.5, affection: 0.5, sleepiness: 0.2, stress: 0.2, focus: 0.5 };
+  for (const [name, exported] of Object.entries(emotion)) {
+    if (typeof exported !== 'function') continue;
+    const before = JSON.stringify(vitals);
+    try { (exported as (...args: unknown[]) => unknown)(NEUTRAL_EMOTION, vitals); } catch { /* wrong shape for this export, which is the point */ }
+    assert.equal(JSON.stringify(vitals), before, `${name} mutated the vitals it was handed`);
   }
+  // And the door it used to come through is shut.
+  assert.equal(emotion.emotionToVitals, undefined, 'the loop is back');
 });
 
-test('emotionToVitals leaves neutral readings with no effect', () => {
-  const vitals = { happiness: 0.5, energy: 0.5, curiosity: 0.5, affection: 0.5, sleepiness: 0.2, stress: 0.2 };
-  const next = emotionToVitals({ emotion: 'neutral', confidence: 1, energy: 0.5, intent: 'listen', focus: 'user' }, vitals);
-  assert.equal(next.happiness, vitals.happiness);
-  assert.equal(next.curiosity, vitals.curiosity);
-  assert.equal(next.affection, vitals.affection);
-  assert.equal(next.stress, vitals.stress);
+test('localEmotion reads a heated line as annoyed, matching the sharpen override', () => {
+  assert.equal(localEmotion('Are you serious. Shut up and move it.'), 'annoyed');
+});
+
+test('localEmotion reads her emoji', () => {
+  assert.equal(localEmotion('Dishes. 😒'), 'annoyed');
+  assert.equal(localEmotion('Oh, the drama. 😏'), 'smug');
+  assert.equal(localEmotion('Wait, actually? 👀'), 'curious');
+});
+
+test('localEmotion reads a question as curious', () => {
+  assert.equal(localEmotion('What are you doing with that?'), 'curious');
+});
+
+test('localEmotion reads tiredness and delight in the words', () => {
+  assert.equal(localEmotion('Honestly, I could nod off right here.'), 'sleepy');
+  assert.equal(localEmotion('Haha, that made my day.'), 'happy');
+});
+
+test('localEmotion stays neutral when nothing is felt', () => {
+  assert.equal(localEmotion('The bins go out on Tuesday.'), 'neutral');
+  assert.equal(localEmotion(''), 'neutral');
 });
