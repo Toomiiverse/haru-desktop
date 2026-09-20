@@ -129,6 +129,7 @@ import { appendDream, appendEntry, diaryContext, diaryDueFor, diaryInstruction, 
 import { DIARY_VOICE, fragmentsInstruction, liftedFrom, NOT_THOSE_LINES, NOT_THOSE_NAMES, unknownNames } from './diaryvoice';
 import { fetchTranscript, formatTranscript, titleFrom, transcriptInstruction, transcriptsAvailable, videoIdFrom, watchUrl } from './transcripts';
 import { feedbackEntry, recordFeedback } from './feedback';
+import { appendTuningPage, recordTuning, tuningNote } from './tuning';
 import { describePull, isTailnetAddress, mergeCheckIns, readCheckInSource } from './checkinsource';
 import { describeMerge } from './memorysync';
 import { describeShot, mergeActivity, noteActivity, noteScreenshot, summariseDay } from './activitylog';
@@ -12275,6 +12276,9 @@ function webDeps(): WebDeps {
         return { line: null };
       }
     },
+    tune(id, wrong, rather) {
+      return appendTuning({ id, wrong, rather, source: 'phone' });
+    },
     async say(text, attachments) {
       const config = store.get('ai.config') as ProviderConfig | undefined;
       if (!config?.model) throw new Error('no model is set up');
@@ -13137,6 +13141,43 @@ function appendFeedback(about: { id: string; reaction?: 'up' | 'down' | null; no
   const entry = feedbackEntry(history, { ...about, model: (store.get('ai.config') as ProviderConfig | undefined)?.model ?? '', at: new Date().toISOString() });
   if (!entry) return;
   try { recordFeedback(feedbackFile(), entry); } catch (error) { console.warn('[feedback] could not write it down:', error instanceof Error ? error.message : error); }
+}
+
+/** Where the tuning notes go: a log of their own, beside the ratings but never mixed with them. */
+function tuningFile(): string {
+  return path.join(app.getPath('userData'), 'tuning.jsonl');
+}
+
+/** And a page a day of the same notes, for the reader who is a person. */
+function tuningDir(): string {
+  return path.join(app.getPath('userData'), 'tuning');
+}
+
+/**
+ * What was wrong with a reply, written down for him and for nobody else.
+ *
+ * Deliberately not appendFeedback: nothing here touches the stored message, her
+ * mood or her prompt. True when it landed. Never throws — a full disk must not
+ * cost him the note, only the record of it.
+ */
+function appendTuning(about: { id: string; wrong?: unknown; rather?: unknown; source: 'phone' | 'desktop' }): boolean {
+  const history = (store.get('chat.messages') as { id?: string; role: string; content?: string; reaction?: string }[] | undefined) ?? [];
+  const now = new Date();
+  const note = tuningNote(history, {
+    ...about,
+    model: (store.get('ai.config') as ProviderConfig | undefined)?.model ?? '',
+    at: now.toISOString(),
+    day: localDateKey(zonedNow(CHAT_TIMEZONE, now)),
+  });
+  if (!note) return false;
+  try {
+    recordTuning(tuningFile(), note);
+    appendTuningPage(tuningDir(), note);
+    console.log(`[tuning] noted on ${note.id}${note.wrong ? ` — ${note.wrong.slice(0, 60)}` : ''}${note.rather ? ' (+ a rewrite)' : ''}`);
+  } catch (error) {
+    console.warn('[tuning] could not write it down:', error instanceof Error ? error.message : error);
+  }
+  return true;
 }
 
 async function startWebDoor() {

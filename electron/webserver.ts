@@ -93,6 +93,13 @@ export type WebDeps = {
    * not a reply of hers.
    */
   rate(id: string, reaction: 'up' | 'down' | null, note?: string): Promise<{ line: string | null } | null>;
+  /**
+   * What was wrong with a reply of hers, written down for whoever is tuning
+   * her. Nothing of this reaches her — not her prompt, not her mood, no
+   * comeback — so it is deliberately not `rate`. False when the id is not a
+   * reply of hers, or when there was nothing in the note.
+   */
+  tune(id: string, wrong?: string, rather?: string): boolean;
   /** date is a bare YYYY-MM-DD; daysAway is its offset from today so the page can bucket into daily/weekly/monthly without redoing timezone-aware date math client-side. */
   agenda(): { id: string; title: string; date: string; time: string | null; kind: string; done?: boolean; daysAway: number }[];
   tickOff(id: string): Promise<void> | void;
@@ -871,6 +878,21 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
     const rated = await deps.rate(id, reaction, note);
     if (!rated) return json(res, 404, { error: 'No such reply of hers.' });
     return json(res, 200, { ok: true, line: rated.line });
+  }
+
+  // What was wrong with a reply, and what he would rather have had. A thumb is
+  // for her; this is for him. It is written to the tuning log and nowhere else,
+  // which is why it gets a door of its own rather than another field on rate:
+  // the two must not be able to leak into one another.
+  if (req.method === 'POST' && path === '/api/chat/tune') {
+    const body = await readBody(req) as { id?: unknown; wrong?: unknown; rather?: unknown };
+    const id = typeof body.id === 'string' ? body.id.trim().slice(0, 80) : '';
+    const wrong = typeof body.wrong === 'string' ? body.wrong : undefined;
+    const rather = typeof body.rather === 'string' ? body.rather : undefined;
+    if (!id) return json(res, 400, { error: 'Which reply?' });
+    if (wrong === undefined && rather === undefined) return json(res, 400, { error: 'What was wrong, or what you would rather.' });
+    if (!deps.tune(id, wrong, rather)) return json(res, 404, { error: 'No such reply of hers, or nothing said about it.' });
+    return json(res, 200, { ok: true });
   }
 
   // Her last reply, done again. Same stream as above; the page swaps the bubble
