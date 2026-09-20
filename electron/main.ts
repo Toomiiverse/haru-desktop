@@ -117,7 +117,7 @@ import { addAside, alreadySaidRecently, echoesAside, asideContext, asidesOn, spl
 import { attachmentsInPlay, describeAttached, READ_IT_ALL_PROMPT, readAttachments, type Attachment, type Opened } from './attachments';
 import { forOllama, withoutOldest } from './ollamaturns';
 import { seedEmoji, seedOffTheOrders } from './seed';
-import { pickToBringUp, REMEMBERED_PICKS } from './bored';
+import { ageNote, openingsToAvoid, pickToBringUp, REMEMBERED_PICKS } from './bored';
 import { ANSWER_WINDOW_MS, grudgeAfterApology, grudgeInstruction, irritationAfterTally, nextGrudge, NOT_HELD_AGAINST_THEM, tallyDue, tallyInstruction, unanswered, type Said } from './grudge';
 import { groundedInstruction, placeQuery } from './places';
 import { daySaid, TOLD_ENOUGH, type DaySaid, DEFAULT_BEDTIME_MINUTES, howTheDayWent, nightfallDue, sulkGrudge, sulkInstruction, sulkStillStands, type DayVerdict } from './nightfall';
@@ -1678,7 +1678,7 @@ function nightRaisedAlready(recentLines: string[]): string {
   return nightsToDrawOn(nights, recentLines) ? '' : 'You have already told them about your night today — do not bring it up again unless they ask.';
 }
 
-function unpromptedContext(): string {
+function unpromptedContext(subjectNow?: string): string {
   // What they are partway through, on every path where she speaks first. Added
   // here rather than at each call site because there are four of them and the
   // one that was missed is exactly where the complaint came from — she remarked
@@ -1699,7 +1699,12 @@ function unpromptedContext(): string {
   // not repeat at one in the morning is what she said at half eleven.
   // Where their phone says they are rides along too: a nudge that knows they
   // are at the shops has something to needle with.
-  const parts = [summariseFollowing(getFollowing(), Date.now()), todaySoFar(), alreadySaidRecently(asides, CHAT_TIMEZONE, Date.now(), theirLastWordAt()), stillWaiting(), describeWhereabouts(getWhereabouts()), toldNow(), arrivalNote(), unansweredAsksNote(asides, CHAT_TIMEZONE, Date.now()), weatherToDrawOn(getWeather().last, weatherWhere(), asides.map(aside => aside.text), Date.now(), getWeather().disputedAt), nightRaisedAlready(asides.map(aside => aside.text)), sleepNote(getHerSleepSchedule(), zonedNow(CHAT_TIMEZONE))].filter(Boolean);
+  // The weather as background is for a line that is about something else. In a
+  // weather push it is the errand, already stated at the top, and repeating it
+  // here with "it is not what this is about" attached is how she came to write
+  // one sentence about rain and three about being ignored (2026-09-20).
+  const weatherIsTheErrand = subjectNow === 'The weather';
+  const parts = [summariseFollowing(getFollowing(), Date.now()), todaySoFar(), alreadySaidRecently(asides, CHAT_TIMEZONE, Date.now(), theirLastWordAt(), undefined, subjectNow), stillWaiting(), describeWhereabouts(getWhereabouts()), toldNow(), arrivalNote(), unansweredAsksNote(asides, CHAT_TIMEZONE, Date.now()), weatherIsTheErrand ? '' : weatherToDrawOn(getWeather().last, weatherWhere(), asides.map(aside => aside.text), Date.now(), getWeather().disputedAt), nightRaisedAlready(asides.map(aside => aside.text)), sleepNote(getHerSleepSchedule(), zonedNow(CHAT_TIMEZONE)), openingsToAvoid(asides, Date.now())].filter(Boolean);
   if (!parts.length) return '';
   // "Do not repeat a point you have already made" was read as "change the
   // subject": once a thread was answered and settled she abandoned the day
@@ -9882,7 +9887,7 @@ async function boredNudge(): Promise<string | null> {
       : `Tell them to try ${rec.interest} — one of yours, and you actually rate it. One or two lines: you are telling them, not asking, and it is not an advert.`
       : mine ? `Tell them about ${mine.interest ?? mine.game ?? mine.about} — what you were up to and what you made of it, in your own words and only the part worth saying. This is you bringing something of yours to them, not a question about their day and not a task for them: no orders, nothing about their list. If you want to know whether they have seen it, ask them at the end.`
       : askAbout ? `Ask them ${askAbout} right now — one real question, in your way, the kind that gets an answer. Not the weather, not where they are (you know that), not anything you have already remarked on: the thing itself. What they say back is worth remembering.`
-      : thing ? `Bring up this in particular, as though it has been on your mind: ${thing.text} — this, not the weather and not anything you already remarked on.`
+      : thing ? `Bring up this in particular, as though it has been on your mind: ${thing.text}${ageNote(thing)} — this, not the weather and not anything you already remarked on.`
       : ignoring ? 'You are not speaking to them properly right now, and they know why. One cold line that makes it plain you noticed the silence — no warmth, no question, no help.'
       : 'Nothing in particular to bring up: the silence itself is the subject.',
     unansweredAsksNote(getAsides(), CHAT_TIMEZONE, nowMs),
@@ -10109,11 +10114,11 @@ function proactiveSystem(...facts: string[]): string {
  * attitude on it. He asked for the opposite: the weather as her way into a
  * conversation, not the subject of one.
  */
-function proactiveOccasion(...facts: string[]): string {
-  return proactivePrompt(facts, false);
+function proactiveOccasion(subjectNow: string, ...facts: string[]): string {
+  return proactivePrompt(facts, false, subjectNow);
 }
 
-function proactivePrompt(facts: string[], mustSurvive: boolean): string {
+function proactivePrompt(facts: string[], mustSurvive: boolean, subjectNow?: string): string {
   const character = getActiveCharacter();
   const now = zonedNow(CHAT_TIMEZONE);
   return [
@@ -10121,7 +10126,7 @@ function proactivePrompt(facts: string[], mustSurvive: boolean): string {
     `It is ${formatTimeOfDay(now.getHours(), now.getMinutes())}, in their timezone.`,
     ...facts,
     'They are away from their desk; this arrives as a notification on their phone. One or two short lines, in your voice. No quotation marks, no stage directions, no greeting.',
-    NO_INVENTED_HISTORY, EXPRESSIVE, unpromptedContext(), WRITING_TO_THEM,
+    NO_INVENTED_HISTORY, EXPRESSIVE, unpromptedContext(subjectNow), WRITING_TO_THEM,
     // Last, because everything above it is context and this is the errand: told
     // rain was due in 44 minutes she wrote about him scrolling and never
     // mentioned it, and a weather notification with no weather in it is noise.
@@ -10198,6 +10203,14 @@ async function checkWeather(config: ProviderConfig, prefs: PushPrefs) {
   // worth a word. Two minutes after he has been talking to her it is filler.
   const quiet = Date.now() - (Date.parse(getMood().lastMessageAt ?? '') || 0);
   if (quiet < WEATHER_NEEDS_QUIET_MS) return;
+  // Silence is not the same as an opening. She had already spoken into this one
+  // and heard nothing back, and the rain went out on top of it as a second
+  // unanswered line — "Rain starting up and you've left me on read for 71
+  // minutes" to a man at breakfast (2026-09-20). A way into a conversation is
+  // only that when she has not already tried one.
+  const theirLastAt = Date.parse(getMood().lastMessageAt ?? '');
+  const spokenSince = getAsides().filter(aside => { const at = Date.parse(aside.at); return Number.isFinite(at) && Number.isFinite(theirLastAt) && at > theirLastAt; });
+  if (spokenSince.length) { console.log(`[push] the weather is not a way in — ${spokenSince.length} line(s) of hers already unanswered`); return; }
   // Whatever kind it is, it counts against the day: the per-kind cooldowns
   // cannot see each other, and five in a day is what that cost him.
   const today = localDateKey(zonedNow(CHAT_TIMEZONE));
@@ -10209,6 +10222,7 @@ async function checkWeather(config: ProviderConfig, prefs: PushPrefs) {
   // raining, and I just washed my hair too :('". The weather is hers as much as
   // his, and it is the excuse to talk rather than the subject.
   const system = proactiveOccasion(
+    'The weather',
     `${event.text} This is happening to you too, and it is your reason for messaging him — it is not news you are delivering. Say how it actually lands on you: put out, pleased, bored, whatever it is, and something of your own in it if there is something. Then leave him somewhere to answer. Do not report the forecast, do not give him numbers or percentages, and do not tell him to take a coat.`,
   );
   const line = await ollamaQuip(system, 'Say something about it.', config);

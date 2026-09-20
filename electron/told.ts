@@ -163,11 +163,25 @@ export function describeTold(told: Told | null | undefined, nowMs: number, clock
   return `${bits.join(' ')}. That is where they are unless they have said otherwise since; do not ask where they are or what they are doing there, and do not tell them to be somewhere else. Refer to the place by name rather than as "here" or "there" — you are not with them — and do not open by asking whether they are still there: they told you, and asking again is not a conversation.`;
 }
 
+// The word they actually use for the place, not the word the gate was written
+// with. "Sorry Haru, yes I'm at the shop, I'll text you when I finish work
+// around 4:30" parsed to where="shop" — and "shop" was not on the list, so the
+// gate never fired once all Sunday and she chased him at work three times
+// (2026-09-20). "work" was in that sentence; it went into the errand, not the
+// place. Shops, shifts, stores and sites are where people are when they cannot
+// answer, and the shops are as good a reason not to chase as a shift is.
+const BUSY_PLACE = /\b(work|working|shift|shop|shops|store|office|warehouse|site|gym|hospital|doctor|dentist|appointment|meeting|uni|university|class|lecture|school|college|training|practice|rehearsal|driving)\b/i;
+
 /** Busy, as in not to be chased for going quiet: at work, driving, in a place that is not a chat. */
 export function toldTheyAreBusy(told: Told | null | undefined, nowMs: number): boolean {
   if (!toldStillStands(told, nowMs)) return false;
   if (told.enRoute) return true;
-  return /\b(work|gym|hospital|doctor|dentist|meeting|uni|class|driving)\b/i.test(told.where + ' ' + (told.doing ?? ''));
+  // Naming the hour they are free is itself the answer: nobody says "until
+  // 4:30" about sitting at home with their phone. The clock was already parsed
+  // and sitting in `until` unused while she chased him through the shift it
+  // described. Home is the exception — "home until 4:30" is not a commitment.
+  if (told.until && !/^home$/i.test(told.where)) return true;
+  return BUSY_PLACE.test(told.where + ' ' + (told.doing ?? ''));
 }
 
 /** Something they said they were about to do — "eat dinner", "have a shower" — and when they said it. */

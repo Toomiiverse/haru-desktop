@@ -45,3 +45,21 @@ test('with nothing said by them yet, or no time known, every remark is still han
 test('nothing recent, nothing said', () => {
   assert.equal(alreadySaidRecently([], TZ, Date.now(), Date.now()), '');
 });
+
+test('the subject she has been woken up to write about is not a closed subject', () => {
+  const asides = [at('2026-09-20T01:15:00Z', 'You’ve had 29 minutes to send a screenshot of that 3D modeling nonsense.')];
+  const now = Date.parse('2026-09-20T02:25:00Z');
+  const theirLast = Date.parse('2026-09-20T00:46:00Z');
+  // Without a subject, the weather is named as an example of what is closed.
+  const plain = alreadySaidRecently(asides, TZ, now, theirLast);
+  assert.match(plain, /The subjects of those remarks — the weather, the time/);
+  // In a weather push it is the errand, and saying both at once is what turned
+  // "rain starting up" into three more lines about being left on read.
+  const weather = alreadySaidRecently(asides, TZ, now, theirLast, undefined, 'The weather');
+  assert.doesNotMatch(weather, /— the weather, the time/);
+  assert.match(weather, /The weather is the exception/);
+  assert.match(weather, /it is not on that list/);
+  // Everything else about the note is unchanged.
+  assert.match(weather, /You have already said these, off your own back, since they last spoke/);
+  assert.match(weather, /3D modeling nonsense/);
+});

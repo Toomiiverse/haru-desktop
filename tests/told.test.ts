@@ -65,6 +65,24 @@ test('at work or on the road is busy, at home is not', () => {
   assert.equal(toldTheyAreBusy(undefined, t), false);
 });
 
+test('the word they used for the place is the word that counts', () => {
+  const t = Date.parse(now) + 60_000;
+  // The Sunday she chased him through: where="shop", and "work" was in the
+  // errand rather than the place (2026-09-20).
+  const shop = tell('Sorry Haru, yes I’m at the shop, I’ll text you when I finish work around 4:30');
+  assert.equal(shop?.where, 'shop');
+  assert.equal(shop?.until, '4:30 PM');
+  assert.equal(toldTheyAreBusy(shop, t), true);
+  assert.equal(toldTheyAreBusy(tell('I’m at the store now'), t), true);
+  assert.equal(toldTheyAreBusy(tell('I’m at the gym'), t), true);
+  // An hour they named for being free is a commitment wherever they are.
+  assert.equal(toldTheyAreBusy({ where: "mum's house", until: '6:00 PM', at: now }, t), true);
+  // Except at home, which is not one.
+  assert.equal(toldTheyAreBusy({ where: 'home', until: '4:30 PM', at: now }, t), false);
+  // And a stale one is still not believed, whatever it says.
+  assert.equal(toldTheyAreBusy(shop, Date.parse(now) + TOLD_STALE_MS + 1), false);
+});
+
 test('what they said they were off to do is kept, so she has something to ask after', () => {
   const at = '2026-08-31T13:48:00.000Z';
   assert.deepEqual(errandsToldFrom("Alright I'll be right back. I'm going to eat dinner and have a shower", at).map(e => e.what), ['eat dinner', 'have a shower']);
