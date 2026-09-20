@@ -108,6 +108,8 @@ export type WebDeps = {
   /** The whole records, for the other Haru of hers to merge against. The page
    *  never asks for these — it shows the text and nothing else. */
   memoryRecords(): unknown[];
+  /** The last reset, if there was one — carried out to the bodies (blankslate.ts). */
+  slate(): { at: string } | null;
   /** Fold that machine's memories into this one's. Vetted on the way in, so
    *  whatever arrives here is treated as a claim rather than a record. */
   mergeMemories(theirs: unknown): { added: number; updated: number };
@@ -1273,7 +1275,10 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
   // ever reached over the tailnet: the desk refuses to dial anything that is
   // not one (checkinsource.ts), and these notes are no less hers than that.
   if (req.method === 'GET' && path === '/api/memory/records') {
-    return json(res, 200, { memories: deps.memoryRecords() });
+    // The slate travels with the records. A body that sees one newer than its
+    // own clears itself to match, which is the only way forgetting crosses a
+    // merge that only ever adds and updates — see blankslate.ts.
+    return json(res, 200, { memories: deps.memoryRecords(), slate: deps.slate() });
   }
 
   // What they were doing, as opposed to what they said about it. Pushed by the

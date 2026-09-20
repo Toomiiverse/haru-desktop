@@ -376,7 +376,9 @@ export function ProfileDrawer({ onClose }: { onClose(): void }) {
   const [draftKind, setDraftKind] = useState<MemoryKind>('preference');
   const [loaded, setLoaded] = useState(false);
   const [saved, setSaved] = useState(false);
-  useEffect(() => {
+  // Named so the reset below can pull the whole drawer back from disk: after it,
+  // every list on this page is describing a Haru who no longer exists.
+  function reload() {
     if (!window.haru) return;
     window.haru.profile.get().then(current => { setProfile(current); setLoaded(true); });
     window.haru.memory.list().then(setMemories);
@@ -384,6 +386,11 @@ export function ProfileDrawer({ onClose }: { onClose(): void }) {
     window.haru.memory.forgettingLog().then(setForgetting);
     window.haru.memory.lastRetrieval().then(setRetrieval);
     window.haru.blocks.list().then(setBlocks);
+  }
+
+  useEffect(() => {
+    if (!window.haru) return;
+    reload();
     // Haru writes memories mid-conversation, so the list follows along rather
     // than going stale while the drawer sits open.
     const unsubMemories = window.haru.memory.onChange(setMemories);
@@ -491,6 +498,23 @@ export function ProfileDrawer({ onClose }: { onClose(): void }) {
     </div>
     <div className="drawer-foot">
       <button className="ghost" disabled={!memories.length} onClick={async () => setMemories(await window.haru!.memory.clear())}>Forget everything</button>
+      {/* Forgetting is her memory; this is her — and on a machine that is only a
+          body, it is neither. Her brain is the server: the wording and the
+          refusal both come from there rather than from a button that would be
+          undone by the next sync. window.confirm rather than a dialog of our
+          own, because a button that throws a year away should stop the page
+          until it is answered. */}
+      <button className="ghost" onClick={async () => {
+        if (!window.confirm('Reset Haru?\n\nShe keeps her attitude — the persona you wrote — and loses everything else: every memory of you, her interests, her nights, her diary, her mood and her grudges. She wakes up not knowing who you are, and asks.\n\nEvery store file is backed up first, and her diary is moved aside rather than deleted.')) return;
+        const done = await window.haru!.memory.reset();
+        if ('refused' in done) {
+          window.alert(`Not from here. Her brain is ${done.brain} — this machine only mirrors it, and clearing the mirror is undone by the next sync.\n\nReset her on the server: set HARU_RESET=1, restart her, then take it back out. Every body follows on its next sync.`);
+          return;
+        }
+        setBlockDrafts({});
+        reload();
+        window.alert(`Done — she is a stranger again. ${done.backups} file${done.backups === 1 ? '' : 's'} backed up beside the originals, and her diary is in your home folder under "before reset". Start a new chat and she will open on not knowing you.`);
+      }}>Reset her</button>
       {saved && <span className="saved"><Check size={13}/> Saved</span>}
       <button className="solid" disabled={!loaded} onClick={save}>Save profile</button>
     </div></section>;

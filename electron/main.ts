@@ -21,6 +21,7 @@ import { withDiscoveredExpressions } from './expressions';
 import { reportCapabilities, seesItsOwnScreen } from './capabilities';
 import { followCalendar, chaseableOverdue, findItem, shiftDays, formatAgenda, itemStatus, missedInstruction, movedSaid, putOffInstruction, putOffUntil, relevantItems, readsAsAnswerToHer, readsAsBareReport, tickOffInstruction, readsAsDone, doneClause, readsAsNotDone, relativeDay, staleItemNamed, inventedTimeFor, raisedRecently, type ItemStatus, underwayClause, isUnderway, FOLLOW_UP_MS } from './agenda';
 import { isRelaunchNotReturn, openingAngles, pickAngle, shouldPipeUp, PIPE_UP_CHANCE } from './opening';
+import { blankSlateOpening, readSlate, RESET_KEYS, slateIsNewer, withoutPreSlate, type BlankSlate } from './blankslate';
 import { allDayDueMinutes, isEveningCheck, reminderInstruction, reminderTier, reminderVolume, shouldRemind, type ReminderState } from './reminders';
 import { isHeated, readTone, sharpen, toneGesture, tonePose } from './tone';
 import { isSilenced, nextPushback, PUSHBACK_LIMIT, pushbackInstruction, readsAsDropIt, type Pushback } from './pushback';
@@ -51,7 +52,7 @@ import { exchangesFrom, pickRecalled, recallNote, RECALL_FLOOR, RECALL_LIMIT, ty
 import { buildChatIndex, chatHitsNote, embedFormat, embedText, mentionsAny, rareTerms, searchChats, type ChatIndex } from './chatsearch';
 import { applyExtraction, dayChunks, emptyGraph, EXTRACTION_SCHEMA, extractionInput, extractionPrompt, knownBlock, linkedFacts, linkedNote, readExtraction } from './factgraph';
 import { admitBooking, bookedNote, bookedPrompt, BOOKED_KIND, createScheduler, describeWhen, resolveBookingTime, zonedEpoch, type Job, type Outcome } from './scheduler';
-import { describeGap, isRumination, keepThoughts, lastSpoken, mayAsk, mayInitiate, mindNote, noteAsked, pendingTrigger, readThoughts, roundVector, scoreThought, spend, spokenOn as thoughtsSpokenOn, THINKING_RULES, thinkingInput, THOUGHT_LIMITS, thoughtPrompt, withoutClock, type ThinkingState, type Thought, type ThoughtState, type Trigger } from './thoughts';
+import { describeGap, emptyThoughtState, isRumination, keepThoughts, lastSpoken, mayAsk, mayInitiate, mindNote, noteAsked, pendingTrigger, readThoughts, roundVector, scoreThought, spend, spokenOn as thoughtsSpokenOn, THINKING_RULES, thinkingInput, THOUGHT_LIMITS, thoughtPrompt, withoutClock, type ThinkingState, type Thought, type ThoughtState, type Trigger } from './thoughts';
 import { vitalsInstruction } from './vitals';
 import { activeCards, loreNote, parseLorePage, LORE_PAGE, type LoreCard } from './lore';
 import { examplePool, examplesNote, pickExamples, reusedExample, type Example, type ExampleTurn } from './examples';
@@ -132,7 +133,7 @@ import { keepNights, lastNightDay, nightNoteInstruction, nightsInstruction, nigh
 import { gamesPlayedLately, GUIDE_ODDS, guideNoteInstruction, guideQuery, pickGame, withSteam, type Played } from './gamenight';
 import { addressesSomeone, adopt, ADOPT_ODDS, adoptInstruction, deepen, deepenInstruction, isOneOfTheirs, MAX_INTERESTS, nightQuery, NOBODY_HERE, parseAdoption, parseDeepening, pickTonight, tastesInstruction, unaddressed, type Interest } from './tastes';
 import { readSteamWebConfig, recentlyPlayed } from './steamweb';
-import { appendDream, appendEntry, diaryContext, diaryDueFor, diaryInstruction, recentEntries, type Dream, type Entry } from './diary';
+import { appendDream, appendEntry, diaryContext, diaryDueFor, diaryInstruction, DIARY_FILE, recentEntries, type Dream, type Entry } from './diary';
 import { DIARY_VOICE, fragmentsInstruction, liftedFrom, NOT_THOSE_LINES, NOT_THOSE_NAMES, unknownNames } from './diaryvoice';
 import { fetchTranscript, formatTranscript, titleFrom, transcriptInstruction, transcriptsAvailable, videoIdFrom, watchUrl } from './transcripts';
 import { feedbackEntry, recordFeedback } from './feedback';
@@ -158,7 +159,7 @@ import { BREVITY, summonedLine } from './summoned';
 import { CHOICES_TOOL, readChoices } from './choices';
 import { quickAnswer, settingCommand, type AgendaLine } from './quick';
 import { newTrace } from './trace';
-import { KNOWLEDGE_CATEGORIES, knowledgeStats, type KnowledgeCategory } from './knowledge';
+import { emptyKnowledge, KNOWLEDGE_CATEGORIES, knowledgeStats, type KnowledgeCategory } from './knowledge';
 import type { IngestResult } from './ingestion';
 import type { Embedder } from './embeddings';
 import { retrieveContext } from './retrieveContext';
@@ -427,6 +428,18 @@ if (!store.verify()) {
 }
 store.migrate();
 store.hardenPermissions();
+
+// The reset, fired where her brain actually is (blankslate.ts). An environment
+// variable and not a route: this destroys a year of her, and the one thing it
+// must not be is a thing a phone with a stale cookie can do. Set it in the unit
+// file, restart her, take it back out.
+//
+// Here rather than in whenReady, because the first memory sync runs on startup
+// and a reset after it has already merged back the very memories it is clearing.
+if (process.env.HARU_RESET === '1') {
+  console.log('[reset] HARU_RESET is set — she is waking up with nothing');
+  resetHer();
+}
 
 // Counted rather than bare. Everything Haru calls out to goes through this one
 // wrapper — including the fetch handed down to the modules that take one — so
@@ -5038,6 +5051,81 @@ function getActiveCharacter() {
   return getCharacter();
 }
 
+/** The slate left by the last reset, or nothing. See blankslate.ts. */
+function getSlate(): BlankSlate | null {
+  const saved = store.get('her.slate') as Partial<BlankSlate> | undefined;
+  return typeof saved?.at === 'string' && saved.at ? { at: saved.at } : null;
+}
+
+/**
+ * The reset: everything she knew and everything she had become, cleared in one
+ * go, with her attitude left exactly where it is.
+ *
+ * What survives is the part that was never learned — the persona above, his
+ * settings and keys, and his own list, reminders and journal. A reset is hers,
+ * not his. RESET_KEYS (blankslate.ts) is the written-out account of the rest.
+ *
+ * Backed up first and not optionally: this throws away a year of her, and
+ * store.backup already writes every store file aside under a reason. Her diary
+ * is a file in his home folder rather than a store key, so it is moved aside
+ * under a dated name rather than deleted — still his to open, no longer hers to
+ * read back as a life she remembers having.
+ *
+ * `at` is the moment the reset happened, and a body passes the brain's rather
+ * than stamping its own: the two then hold the same string, and "have I
+ * followed this reset yet" is a comparison that cannot drift with the clocks.
+ */
+function resetHer(at: string = new Date().toISOString()): { at: string; backups: number } {
+  const backups = store.backup('reset');
+  store.setMemories([]);
+  store.setSessions([]);
+  store.setMonthNotes([]);
+  store.setForgettingLog([]);
+  // Whole, unlike memory:clear — that one keeps which days were read so the
+  // next tick does not rebuild the graph behind their back, and here the
+  // archive those days would be rebuilt from is going with it.
+  store.setFactGraph(emptyGraph());
+  store.setArchive({});
+  store.setKnowledge(emptyKnowledge());
+  store.setThoughts(emptyThoughtState());
+  store.setActivityLog({});
+  for (const key of RESET_KEYS) store.delete(key as never);
+  try {
+    const diary = path.join(app.getPath('home'), DIARY_FILE);
+    if (existsSync(diary)) renameSync(diary, path.join(app.getPath('home'), `${DIARY_FILE.replace(/\.md$/, '')} (before reset ${at.slice(0, 10)}).md`));
+  } catch (error) {
+    // The diary staying put is a worse reset, not a failed one: she reads the
+    // last two entries only, and the slate note outranks them for a fortnight.
+    console.warn('[reset] could not move the diary aside:', error instanceof Error ? error.message : error);
+  }
+  store.set('her.slate', { at } satisfies BlankSlate);
+  console.log(`[reset] she woke up with nothing — ${backups.length} file${backups.length === 1 ? '' : 's'} backed up first`);
+  return { at, backups: backups.length };
+}
+
+/** Where her brain is, if it is not this machine. Either door reaches the same server. */
+function herBrain(): string | null {
+  return desktopServer() || readCheckInSource(store.get('checkinSource'))?.url || null;
+}
+
+/**
+ * The brain reset since this body last looked, so the body follows.
+ *
+ * Called on the way in from both sync doors, before the merge. Without it the
+ * body keeps the mirror it was holding — the union merge adds and updates and
+ * has never once deleted — and in checkinSource mode hands every one of those
+ * memories straight back on the push that follows.
+ *
+ * The brain's own moment is adopted rather than a fresh one, so this is
+ * idempotent: the second sync sees a slate it already has and does nothing.
+ */
+function followSlate(body: unknown): void {
+  const brain = readSlate(body);
+  if (!slateIsNewer(brain, getSlate())) return;
+  console.log(`[reset] her brain reset at ${brain!.at} — this machine is following`);
+  resetHer(brain!.at);
+}
+
 // Two independent axes: irritation is how fed up she is, ego is how far the
 // user's approval has gone to her head. They move for different reasons and
 // stack — smug and fed up at once is worse than either alone.
@@ -5605,6 +5693,10 @@ async function composeOpening(): Promise<string | null> {
     moodInstruction(mood.irritation),
     egoInstruction(mood.ego),
     freshStartInstruction(fresh),
+    // Her first line after a reset is the one that has to land: she is about to
+    // speak to someone she has never met. Above the angle picker, which it
+    // replaces — see below.
+    blankSlateOpening(getSlate(), getMemories().length),
     kind === 'return'
       ? 'The user has just come back after being away a while. The conversation above is still there; pick it back up rather than introducing yourself.'
       : 'This is the start of a new conversation.',
@@ -5622,7 +5714,10 @@ async function composeOpening(): Promise<string | null> {
     unpromptedContext(),
     // The angle is what makes two launches differ. Last so it is the final thing
     // read before writing, and phrased as the thing to do rather than an option.
-    angle ? `Open on this in particular: ${angle.instruction}` : '',
+    // Silent while she is a stranger: every angle in the picker — the overdue
+    // task, the callback, the unprovoked jab — assumes a history with him, and
+    // she has none. The line above is the angle for those days.
+    blankSlateOpening(getSlate(), getMemories().length) ? '' : angle ? `Open on this in particular: ${angle.instruction}` : '',
   ].filter(Boolean).join(' ');
 
   try {
@@ -7178,8 +7273,12 @@ async function syncMemories(): Promise<void> {
     // and plainly, rather than letting it read as the server being unreachable.
     if (got.status === 404) { console.warn('[memory] that server is too old to sync memories'); return; }
     if (!got.ok) { console.warn('[memory] could not read them (' + got.status + ')'); return; }
-    const body = await got.json() as { memories?: unknown };
+    const body = await got.json() as { memories?: unknown; slate?: unknown };
 
+    // Before the merge, and before the push below: if her brain has reset, this
+    // machine is holding a mirror of a Haru who no longer exists, and the push
+    // would hand the whole of it back.
+    followSlate(body);
     const report = mergeIn(body.memories);
     const what = describeMerge(report);
     if (what) console.log('[memory] ' + what + ' from the server');
@@ -7246,7 +7345,8 @@ async function pushActivityLog(send: ServerRequest): Promise<void> {
  */
 async function feedHerServer(): Promise<void> {
   try {
-    const body = await serverJson<{ memories?: unknown }>(serverRequest, '/api/memory/records');
+    const body = await serverJson<{ memories?: unknown; slate?: unknown }>(serverRequest, '/api/memory/records');
+    followSlate(body);
     const what = describeMerge(mergeIn(body.memories));
     if (what) console.log('[memory] ' + what + ' from her server');
     if (store.get('activityLog', true) !== true) return;
@@ -8178,6 +8278,9 @@ const promptState = {
     following: getFollowing(),
     latestMessage: latest,
     fresh,
+    // Still a stranger to him, if the reset was recent (blankslate.ts).
+    slate: getSlate(),
+    known: getMemories().length,
     herRecentReplies,
     recalled: recallNote(recalled, new Intl.DateTimeFormat('en-AU', { weekday: 'long', timeZone: 'UTC' })),
     linked: linkedNote(factGraph, linked),
@@ -13332,6 +13435,10 @@ function webDeps(): WebDeps {
     her: () => herFrom({ interests: getInterests(), nights: getNights(), diary: recentEntries(app.getPath('home'), 365) }),
     standing: currentStanding,
     memoryRecords: () => getMemories(),
+    // Rides along on the records rather than taking a route of its own: every
+    // body already pulls this, so the reset reaches all of them with no version
+    // to negotiate — an older build simply does not read the field.
+    slate: () => getSlate(),
     activityLog: () => store.getActivityLog(),
     shots: {
       held: () => heldShots(shotStoreRoot()),
@@ -13350,7 +13457,12 @@ function webDeps(): WebDeps {
       return { days, entries };
     },
     mergeMemories(theirs) {
-      const report = mergeIn(theirs);
+      // The one place a reset can be undone from the outside: a body that has
+      // not synced since still holds the old memories and pushes all of them.
+      // Its own slate will catch up on the next pull; this is the door in the
+      // meantime, and the two together mean forgetting travels in both
+      // directions (blankslate.ts).
+      const report = mergeIn(withoutPreSlate(theirs, getSlate()));
       const what = describeMerge(report);
       if (what) console.log('[memory] from the desk: ' + what);
       return { added: report.added, updated: report.updated };
@@ -13974,6 +14086,16 @@ app.whenReady().then(() => {
     const reset = resetBlockToDerived(block);
     setBlocks(blocks.map(candidate => candidate.label === label ? reset : candidate));
     return reset;
+  });
+  // The whole of her, not only her memory: see resetHer. Returns what it did
+  // so the drawer can say a backup was taken rather than only claiming one.
+  ipcMain.handle('haru:reset', () => {
+    // Her brain is the server (blankslate.ts). Clearing a body here would be
+    // undone by the next pull fifteen minutes later, so it is refused and the
+    // drawer says where the reset actually lives instead of pretending.
+    const brain = herBrain();
+    if (brain) return { refused: 'brain' as const, brain };
+    return resetHer();
   });
   ipcMain.handle('memory:clear', () => {
     setMemories([]);
