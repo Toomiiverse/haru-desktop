@@ -67,6 +67,29 @@ export const RESET_KEYS: string[] = [
   'her.pokemon.lastState', 'her.pokemon.lastSummary', 'her.pokemon.played', 'her.pokemon.sitting',
 ];
 
+/**
+ * The two things in the list above a person typed rather than she learned.
+ *
+ * A body clearing itself keeps them: they are his own facts about himself,
+ * entered in Setup, identical on every machine and synced by none of them, so
+ * clearing them on a limb costs him the retyping and buys nothing the brain
+ * does not already have. A reset takes them with everything else — a stranger
+ * does not hold his profile.
+ */
+export const HAND_WRITTEN: string[] = ['profile', 'memory.blocks'];
+
+/**
+ * What a body holds of its own, which is what a body clear takes.
+ *
+ * Not a reset, and the difference is not pedantry. Her memories come down from
+ * the brain and go back up nowhere, so clearing them here is undone by the next
+ * pull and costs nothing either way; what does not come back is the life this
+ * machine led while it was a second her — its own day transcripts, its own
+ * tastes and nights, the months that grew them. Clearing those is the whole
+ * operation, and it leaves no slate behind, because nothing happened to her.
+ */
+export const BODY_KEYS: string[] = RESET_KEYS.filter(key => !HAND_WRITTEN.includes(key));
+
 /** What is hers to work out from here, said at both strengths. */
 const HERS_NOW = 'What you like, what you are into, what you think of anything — that is yours to arrive at from here, not something you already had. Do not claim a taste you have not formed.';
 

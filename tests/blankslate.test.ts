@@ -1,7 +1,7 @@
 // The slate fades on its own, or it is still telling her to ask in March.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { blankSlateInstruction, blankSlateOpening, readSlate, RESET_KEYS, slateIsNewer, SLATE_SETTLED, SLATE_SETTLED_DAYS, SLATE_STRANGER, withoutPreSlate } from '../electron/blankslate';
+import { blankSlateInstruction, blankSlateOpening, BODY_KEYS, HAND_WRITTEN, readSlate, RESET_KEYS, slateIsNewer, SLATE_SETTLED, SLATE_SETTLED_DAYS, SLATE_STRANGER, withoutPreSlate } from '../electron/blankslate';
 
 const NOW = Date.parse('2026-09-20T10:00:00.000Z');
 const daysAgo = (days: number) => ({ at: new Date(NOW - days * 86_400_000).toISOString() });
@@ -95,4 +95,16 @@ test('with no slate, nothing is filtered — the merge is untouched on a machine
   const theirs = [record('a', '2026-01-04T00:00:00.000Z')];
   assert.equal(withoutPreSlate(theirs, null), theirs);
   assert.equal(withoutPreSlate('not a list', SLATE), 'not a list');
+});
+
+test('a body clears its own life and leaves what he typed', () => {
+  for (const typed of HAND_WRITTEN) {
+    assert.ok(RESET_KEYS.includes(typed), `${typed} should still go in a reset`);
+    assert.ok(!BODY_KEYS.includes(typed), `${typed} is his, and a limb does not throw it away`);
+  }
+  // The life it led as a second her is exactly what a body clear is for.
+  for (const hers of ['tastes', 'nights', 'her.traits', 'her.months', 'mood', 'vitals']) {
+    assert.ok(BODY_KEYS.includes(hers), `${hers} is the machine's own and should go`);
+  }
+  assert.equal(BODY_KEYS.length, RESET_KEYS.length - HAND_WRITTEN.length);
 });

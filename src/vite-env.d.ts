@@ -89,7 +89,8 @@ interface Window {
       forgettingLog(): Promise<import('./types').ForgettingEntry[]>;
       lastRetrieval(): Promise<import('./types').LastRetrieval | null>;
       clear(): Promise<import('./types').Memory[]>;
-      reset(): Promise<{ at: string; backups: number } | { refused: 'brain'; brain: string }>;
+      reset(): Promise<{ at: string; body: boolean; backups: number }>;
+      brain(): Promise<string | null>;
       onChange(callback: (items: import('./types').Memory[]) => void): () => void;
     };
     blocks: {
