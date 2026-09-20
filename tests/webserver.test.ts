@@ -68,6 +68,7 @@ function deps(overrides: Partial<WebDeps> = {}): WebDeps {
       daysTalked: 0, kept: [], weekday: new Intl.DateTimeFormat('en-AU', { weekday: 'long', timeZone: 'UTC' }), now: Date.parse('2026-08-29T12:00:00.000Z'), today: '2026-08-29',
     }),
     memoryRecords: () => syncedMemories,
+    slate: () => null,
     activityLog: () => pushedActivity,
     shots: {
       held: () => heldShots(shotRoot),

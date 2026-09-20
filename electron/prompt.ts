@@ -33,6 +33,7 @@ import { journalPrompt, journalStance, type JournalConfig, type JournalEntry } f
 import { familiarity, type Haunt } from './familiar';
 import { formatTimeOfDay, localDateKey } from './dates';
 import { LAYER, compileBehaviour, type Candidate, type Compiled } from './compile';
+import { blankSlateInstruction, type BlankSlate } from './blankslate';
 
 /** Why this conversation is empty, when it is. */
 export type FreshStart = { at: string; hadMessages: boolean; reason: 'manual' | 'daily' };
@@ -224,6 +225,10 @@ export type PromptState = {
   shout: ShoutState;
   latestMessage: string;
   fresh: FreshStart | null;
+  /** Set while she is still a stranger to him after a reset — see blankslate.ts. */
+  slate?: BlankSlate | null;
+  /** How many things she has remembered about him, which is what ends the slate. */
+  known?: number;
   herRecentReplies: string[];
   /** Older exchanges found for this message — see recall.ts. Background, not an instruction. */
   recalled?: string;
@@ -465,6 +470,10 @@ function systemBlocks(state: PromptState, away = false): SystemBlock[] {
     // gets misdirected at the empty history, so the correction has to be read
     // second or it is simply overridden by "you are irritated".
     { stable: false, text: freshStartInstruction(state.fresh) },
+    // Beside it, and after it: an empty history read while she has no memory of
+    // him at all is the same misdirection twice over, and the reset is the
+    // bigger fact of the two. Silent once she knows him (blankslate.ts).
+    { stable: false, text: blankSlateInstruction(state.slate, state.known ?? 0, nowMs) },
     // After the mood lines: an admission earns the same treatment whether she was
     // already annoyed or perfectly cheerful when it landed.
     { stable: false, text: state.aboutHer ? '' : missedInstruction(latestMessage) },
