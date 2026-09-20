@@ -10,6 +10,7 @@
 // gets audio, never an endpoint or a key.
 
 import { net } from 'electron';
+import { trackedFetch } from './apiusage';
 import { EMOTIONS, type EmotionName } from './emotion';
 
 // 'windows' has no adapter here — it is spoken by the renderer through the
@@ -251,7 +252,7 @@ export function splitForSpeech(text: string, maxChars = MAX_CHUNK_CHARS): string
 }
 
 async function post(url: string, body: unknown, auth: Record<string, string> = {}) {
-  const response = await net.fetch(url, {
+  const response = await trackedFetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...auth },
     body: JSON.stringify(body),

@@ -16,6 +16,8 @@
 // secret.
 
 const GATEWAY = 'wss://gateway.discord.gg/?v=10&encoding=json';
+import { trackedFetch } from './apiusage';
+
 const API = 'https://discord.com/api/v10';
 
 /**
@@ -233,7 +235,7 @@ export class DiscordLink {
 
   /** Opens a DM channel with the owner, so she can speak without being spoken to. */
   async dmChannel(): Promise<string> {
-    const res = await fetch(API + '/users/@me/channels', {
+    const res = await trackedFetch(API + '/users/@me/channels', {
       method: 'POST',
       headers: { Authorization: 'Bot ' + this.token, 'Content-Type': 'application/json' },
       body: JSON.stringify({ recipient_id: this.ownerId }),
@@ -248,7 +250,7 @@ export class DiscordLink {
 
   /** One message, or nothing if Discord refused it. */
   private async post(channelId: string, content: string): Promise<{ id: string } | null> {
-    const res = await fetch(API + '/channels/' + channelId + '/messages', {
+    const res = await trackedFetch(API + '/channels/' + channelId + '/messages', {
       method: 'POST',
       headers: { Authorization: 'Bot ' + this.token, 'Content-Type': 'application/json' },
       body: JSON.stringify({ content }),
@@ -282,7 +284,7 @@ export class DiscordLink {
       const now = Date.now();
       if (!force && now - lastEdit < EDIT_INTERVAL_MS) return;
       lastEdit = now;
-      const res = await fetch(`${API}/channels/${channelId}/messages/${part.id}`, {
+      const res = await trackedFetch(`${API}/channels/${channelId}/messages/${part.id}`, {
         method: 'PATCH',
         headers: { Authorization: 'Bot ' + this.token, 'Content-Type': 'application/json' },
         body: JSON.stringify({ content: text }),
@@ -291,7 +293,7 @@ export class DiscordLink {
     };
 
     const remove = async (part: { id: string }) => {
-      await fetch(`${API}/channels/${channelId}/messages/${part.id}`, {
+      await trackedFetch(`${API}/channels/${channelId}/messages/${part.id}`, {
         method: 'DELETE',
         headers: { Authorization: 'Bot ' + this.token },
       });
@@ -441,7 +443,7 @@ export class DiscordLink {
     try {
       // Typing, because she takes several seconds and silence reads as a bot
       // that has died rather than one that is thinking.
-      void fetch(API + '/channels/' + message.channel_id + '/typing', {
+      void trackedFetch(API + '/channels/' + message.channel_id + '/typing', {
         method: 'POST',
         headers: { Authorization: 'Bot ' + this.token },
       });
@@ -502,7 +504,7 @@ export class DiscordLink {
     if (!this.first(`${event.message_id}:${event.user_id}:${name}`)) return;
 
     try {
-      const response = await fetch(`${API}/channels/${event.channel_id}/messages/${event.message_id}`, {
+      const response = await trackedFetch(`${API}/channels/${event.channel_id}/messages/${event.message_id}`, {
         headers: { Authorization: 'Bot ' + this.token },
       });
       if (!response.ok) {

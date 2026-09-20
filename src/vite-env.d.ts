@@ -8,6 +8,9 @@ interface Window {
     startup: { get(): Promise<{ autoStart: boolean; shortcut: boolean; packaged: boolean }>; setAutoStart(enabled: boolean): Promise<boolean>; createShortcut(): Promise<string> };
     updates: { get(): Promise<import('./types').UpdateReport>; onState(callback: (report: import('./types').UpdateReport) => void): () => void };
     listen: {
+      isActive(): Promise<boolean>;
+      setActive(active: boolean): Promise<void>;
+      onActive(callback: (active: boolean) => void): () => void;
       correct(heard: string, meant: string): Promise<number>;
       corrections(): Promise<{ heard: string; meant: string; used: number }[]>;
       forgetCorrection(heard: string): Promise<{ heard: string; meant: string; used: number }[]>;
@@ -57,6 +60,9 @@ interface Window {
       get(): Promise<import('./types').AniListConfig>;
       set(config: import('./types').AniListConfig): Promise<import('./types').AniListConfig>;
       test(): Promise<number>;
+    };
+    usage: {
+      get(): Promise<import('./types').UsageRow[]>;
     };
     jellyfin: {
       status(): Promise<{ url: string; userId: string; hasKey: boolean }>;
@@ -134,6 +140,11 @@ interface Window {
     live2d: { import(): Promise<Live2DModel | null>; get(): Promise<Live2DModel | null>; remove(): Promise<void>; onChange(callback: (model: Live2DModel | null) => void): () => void };
     life: { onTick(callback: (payload: import('./types').LifeTick) => void): () => void; onEmotion(callback: (beat: import('./types').Beat) => void): () => void };
     companion: {
+      placement(metrics: {seat:number;feet:number;head:number;halfWidth:number;reduced:boolean}): Promise<void>;
+      perchState(): Promise<import('../electron/perching').PerchState>;
+      dragging(active:boolean,drop?:boolean): Promise<void>;
+      pointerOver(over:boolean): Promise<void>;
+      onPerching(callback:(state:import('../electron/perching').PerchState)=>void):()=>void;
       moveBy(dx: number, dy: number): Promise<void>;
       resizeBy(factor: number): Promise<void>;
       showMenu(): Promise<void>;

@@ -55,13 +55,20 @@ type LifeTick = { vitals: Vitals; action: string | null; night: boolean };
 type Emotion = { emotion: string; confidence: number; energy: number; intent: string; focus: string };
 type Beat = { emotion: Emotion; gesture?: 'nod' | 'shake' | 'stare' };
 type VoiceReference = { clip: string; text: string };
-type WardrobeControl = { id: string; name: string; kind: 'toggle' | 'option' | 'pose'; max: number };
+type WardrobeControl = { id: string; name: string; kind: 'toggle' | 'option' | 'pose'; values: number[]; labels?: string[]; default?: number };
 type VoiceConfig = { engine: string; voice: string; referenceText: string; endpoint: string; language: string; speed: number; volume: number; emotionVoices: Record<string, VoiceReference> };
 type SpeechClip = { turn: number; text: string; audio?: Uint8Array; mime?: string };
 
 contextBridge.exposeInMainWorld('haru', {
   settings: { get: (key: string) => ipcRenderer.invoke('settings:get', key), set: (key: string, value: unknown) => ipcRenderer.invoke('settings:set', key, value) },
   listen: {
+    isActive: () => ipcRenderer.invoke('listen:active:get') as Promise<boolean>,
+    setActive: (active: boolean) => ipcRenderer.invoke('listen:active:set', active) as Promise<void>,
+    onActive: (callback: (active: boolean) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, active: boolean) => callback(active);
+      ipcRenderer.on('listen:active', listener);
+      return () => ipcRenderer.removeListener('listen:active', listener);
+    },
     correct: (heard: string, meant: string) => ipcRenderer.invoke('listen:correct', heard, meant) as Promise<number>,
     corrections: () => ipcRenderer.invoke('listen:corrections') as Promise<{ heard: string; meant: string; used: number }[]>,
     forgetCorrection: (heard: string) => ipcRenderer.invoke('listen:forgetCorrection', heard) as Promise<{ heard: string; meant: string; used: number }[]>,
@@ -73,6 +80,9 @@ contextBridge.exposeInMainWorld('haru', {
       ipcRenderer.on('listen:changed', listener);
       return () => ipcRenderer.removeListener('listen:changed', listener);
     },
+  },
+  usage: {
+    get: () => ipcRenderer.invoke('usage:get'),
   },
   jellyfin: {
     status: () => ipcRenderer.invoke('jellyfin:get'),
@@ -423,6 +433,14 @@ contextBridge.exposeInMainWorld('haru', {
     },
   },
   companion: {
+    placement: (metrics: {seat:number;feet:number;head:number;halfWidth:number;reduced:boolean}) => ipcRenderer.invoke('companion:placement',metrics),
+    perchState: () => ipcRenderer.invoke('companion:perching') as Promise<import('./perching').PerchState>,
+    dragging: (active:boolean,drop=false) => ipcRenderer.invoke('companion:dragging',active,drop),
+    pointerOver: (over:boolean) => ipcRenderer.invoke('companion:pointerOver',over),
+    onPerching: (callback:(state:import('./perching').PerchState)=>void) => {
+      const listener=(_event:Electron.IpcRendererEvent,state:import('./perching').PerchState)=>callback(state);
+      ipcRenderer.on('companion:perching',listener);return ()=>ipcRenderer.removeListener('companion:perching',listener);
+    },
     moveBy: (dx: number, dy: number) => ipcRenderer.invoke('companion:moveBy', dx, dy),
     resizeBy: (factor: number) => ipcRenderer.invoke('companion:resizeBy', factor),
     showMenu: () => ipcRenderer.invoke('companion:showMenu'),

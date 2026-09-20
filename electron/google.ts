@@ -1,4 +1,5 @@
 import { net, safeStorage, shell } from 'electron';
+import { trackedFetch } from './apiusage';
 import { createHash, randomBytes } from 'node:crypto';
 import { createServer } from 'node:http';
 import { formatTimeOfDay, parseTimeOfDay } from './dates';
@@ -97,7 +98,7 @@ export function disconnectGoogle(store: StoreLike) {
 }
 
 async function postForm(url: string, body: Record<string, string>) {
-  const response = await net.fetch(url, {
+  const response = await trackedFetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams(body).toString(),
@@ -209,7 +210,7 @@ async function authorisedFetch(store: StoreLike, path: string, init: RequestInit
     const tokens = await postForm(TOKEN_ENDPOINT, { client_id: clientId, client_secret: clientSecret, refresh_token: refreshToken, grant_type: 'refresh_token' });
     accessToken = { value: tokens.access_token as string, expiresAt: Date.now() + Number(tokens.expires_in ?? 3600) * 1000 };
   }
-  const response = await net.fetch(`${base}${path}`, {
+  const response = await trackedFetch(`${base}${path}`, {
     ...init,
     headers: { ...(init.headers as Record<string, string> | undefined), Authorization: `Bearer ${accessToken.value}`, 'Content-Type': 'application/json' },
   });

@@ -61,7 +61,7 @@ export interface UpdateReport {
   standingDown?: string | null;
 }
 
-export interface ChatResult { content: string; ignored: boolean; irritation: number; ego: number; }
+export interface ChatResult { content: string; ignored: boolean; irritation: number; ego: number; messages?: Message[]; }
 export interface Mood { irritation: number; ego: number;
   /** On the mood a thumb hands back: whether she answers it out loud this time. Main's coin. */
   comeback?: boolean; }
@@ -122,7 +122,7 @@ export interface VoiceConfig { engine: VoiceEngine; voice: string; referenceText
 export interface SpeechClip { turn: number; text: string; audio?: Uint8Array; mime?: string; }
 // What she can change about how she looks. Discovered from the model's own
 // DisplayInfo rather than hardcoded — see electron/wardrobe.ts.
-export interface WardrobeControl { id: string; name: string; kind: 'toggle' | 'option' | 'pose'; values: number[]; }
+export interface WardrobeControl { id: string; name: string; kind: 'toggle' | 'option' | 'pose'; values: number[]; labels?: string[]; default?: number; }
 
 /** A phone or tablet that has been told to stay signed in. */
 export type WebDevice = { id: string; name: string; added: string; lastSeen: string };
@@ -138,3 +138,6 @@ export type WebStatus = {
   trouble: string;
   devices: WebDevice[];
 };
+
+/** One service she has called, and how much of it. See electron/apiusage.ts. */
+export type UsageRow = { service: string; host: string; today: number; week: number; month: number; failed: number; last: string };
