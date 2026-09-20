@@ -30,3 +30,16 @@ familiar-block*.txt
 # graphify's generated knowledge graph (graph.json, graph.html, report, cache).
 # Rebuilt from source with `graphify update .`; several MB of derived output.
 graphify-out/
+__pycache__/
+*.blend
+*.blend1
+blender/*.vrm
+spike/vrm/gen/
+
+# VRoid motion pack: terms forbid redistribution in extractable form, local reference only
+blender/clips-vroid/
+
+# Scratch that is not the project: build leftovers, one-off exports, editor state.
+tmp/
+output/
+.claude/
