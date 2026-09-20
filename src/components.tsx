@@ -372,6 +372,9 @@ export function ProfileDrawer({ onClose }: { onClose(): void }) {
   const [retrieval, setRetrieval] = useState<LastRetrieval | null>(null);
   const [blocks, setBlocks] = useState<MemoryBlock[]>([]);
   const [blockDrafts, setBlockDrafts] = useState<Record<string, string>>({});
+  // Where her brain is. On a body the button is housekeeping on a limb, and
+  // saying so is the difference between clearing a mirror and resetting her.
+  const [brain, setBrain] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const [draftKind, setDraftKind] = useState<MemoryKind>('preference');
   const [loaded, setLoaded] = useState(false);
@@ -386,6 +389,7 @@ export function ProfileDrawer({ onClose }: { onClose(): void }) {
     window.haru.memory.forgettingLog().then(setForgetting);
     window.haru.memory.lastRetrieval().then(setRetrieval);
     window.haru.blocks.list().then(setBlocks);
+    window.haru.memory.brain().then(setBrain);
   }
 
   useEffect(() => {
@@ -498,23 +502,24 @@ export function ProfileDrawer({ onClose }: { onClose(): void }) {
     </div>
     <div className="drawer-foot">
       <button className="ghost" disabled={!memories.length} onClick={async () => setMemories(await window.haru!.memory.clear())}>Forget everything</button>
-      {/* Forgetting is her memory; this is her — and on a machine that is only a
-          body, it is neither. Her brain is the server: the wording and the
-          refusal both come from there rather than from a button that would be
-          undone by the next sync. window.confirm rather than a dialog of our
-          own, because a button that throws a year away should stop the page
-          until it is answered. */}
+      {/* Forgetting is her memory; this is her — except on a machine that is only
+          a body, where it is neither. Her brain is the server: there the button
+          resets her, here it drops the life this desk led while it was a second
+          her and lets the memories mirror back. Two operations, two warnings,
+          and window.confirm rather than a dialog of our own because a button
+          that throws a year away should stop the page until it is answered. */}
       <button className="ghost" onClick={async () => {
-        if (!window.confirm('Reset Haru?\n\nShe keeps her attitude — the persona you wrote — and loses everything else: every memory of you, her interests, her nights, her diary, her mood and her grudges. She wakes up not knowing who you are, and asks.\n\nEvery store file is backed up first, and her diary is moved aside rather than deleted.')) return;
+        const warning = brain
+          ? `Clear this machine?\n\nHer brain is ${brain} — this desk is eyes and a mirror. This drops the life it led while it was a second her: its own day transcripts, its session summaries, her tastes and nights, her traits, her mood and its diary.\n\nHer memories stay hers and mirror back down within fifteen minutes. Your profile and persona are untouched. This does not reset her.`
+          : 'Reset Haru?\n\nShe keeps her attitude — the persona you wrote — and loses everything else: every memory of you, her interests, her nights, her diary, her mood and her grudges. She wakes up not knowing who you are, and asks.\n\nEvery store file is backed up first, and her diary is moved aside rather than deleted.';
+        if (!window.confirm(warning)) return;
         const done = await window.haru!.memory.reset();
-        if ('refused' in done) {
-          window.alert(`Not from here. Her brain is ${done.brain} — this machine only mirrors it, and clearing the mirror is undone by the next sync.\n\nReset her on the server: set HARU_RESET=1, restart her, then take it back out. Every body follows on its next sync.`);
-          return;
-        }
         setBlockDrafts({});
         reload();
-        window.alert(`Done — she is a stranger again. ${done.backups} file${done.backups === 1 ? '' : 's'} backed up beside the originals, and her diary is in your home folder under "before reset". Start a new chat and she will open on not knowing you.`);
-      }}>Reset her</button>
+        window.alert(done.body
+          ? `Done — this desk has let go of its own life. ${done.backups} file${done.backups === 1 ? '' : 's'} backed up beside the originals, and its diary is in your home folder under "before reset". Her memories come back down on the next sync.`
+          : `Done — she is a stranger again. ${done.backups} file${done.backups === 1 ? '' : 's'} backed up beside the originals, and her diary is in your home folder under "before reset". Start a new chat and she will open on not knowing you.`);
+      }}>{brain ? 'Clear this machine' : 'Reset her'}</button>
       {saved && <span className="saved"><Check size={13}/> Saved</span>}
       <button className="solid" disabled={!loaded} onClick={save}>Save profile</button>
     </div></section>;

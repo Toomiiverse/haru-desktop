@@ -21,7 +21,7 @@ import { withDiscoveredExpressions } from './expressions';
 import { reportCapabilities, seesItsOwnScreen } from './capabilities';
 import { followCalendar, chaseableOverdue, findItem, shiftDays, formatAgenda, itemStatus, missedInstruction, movedSaid, putOffInstruction, putOffUntil, relevantItems, readsAsAnswerToHer, readsAsBareReport, tickOffInstruction, readsAsDone, doneClause, readsAsNotDone, relativeDay, staleItemNamed, inventedTimeFor, raisedRecently, type ItemStatus, underwayClause, isUnderway, FOLLOW_UP_MS } from './agenda';
 import { isRelaunchNotReturn, openingAngles, pickAngle, shouldPipeUp, PIPE_UP_CHANCE } from './opening';
-import { blankSlateOpening, readSlate, RESET_KEYS, slateIsNewer, withoutPreSlate, type BlankSlate } from './blankslate';
+import { blankSlateOpening, BODY_KEYS, readSlate, RESET_KEYS, slateIsNewer, withoutPreSlate, type BlankSlate } from './blankslate';
 import { allDayDueMinutes, isEveningCheck, reminderInstruction, reminderTier, reminderVolume, shouldRemind, type ReminderState } from './reminders';
 import { isHeated, readTone, sharpen, toneGesture, tonePose } from './tone';
 import { isSilenced, nextPushback, PUSHBACK_LIMIT, pushbackInstruction, readsAsDropIt, type Pushback } from './pushback';
@@ -439,6 +439,12 @@ store.hardenPermissions();
 if (process.env.HARU_RESET === '1') {
   console.log('[reset] HARU_RESET is set — she is waking up with nothing');
   resetHer();
+} else if (process.env.HARU_BODY_CLEAR === '1') {
+  // The limb's own version: drop the life this machine led while it was a
+  // second her, keep what he typed, leave no slate. Her memories come back down
+  // on the next pull, which is the whole point of being a mirror.
+  console.log('[reset] HARU_BODY_CLEAR is set — this machine is letting go of its own life');
+  resetHer({ body: true });
 }
 
 // Counted rather than bare. Everything Haru calls out to goes through this one
@@ -5075,8 +5081,8 @@ function getSlate(): BlankSlate | null {
  * than stamping its own: the two then hold the same string, and "have I
  * followed this reset yet" is a comparison that cannot drift with the clocks.
  */
-function resetHer(at: string = new Date().toISOString()): { at: string; backups: number } {
-  const backups = store.backup('reset');
+function resetHer({ body = false, at = new Date().toISOString() }: { body?: boolean; at?: string } = {}): { at: string; body: boolean; backups: number } {
+  const backups = store.backup(body ? 'body-clear' : 'reset');
   store.setMemories([]);
   store.setSessions([]);
   store.setMonthNotes([]);
@@ -5089,7 +5095,7 @@ function resetHer(at: string = new Date().toISOString()): { at: string; backups:
   store.setKnowledge(emptyKnowledge());
   store.setThoughts(emptyThoughtState());
   store.setActivityLog({});
-  for (const key of RESET_KEYS) store.delete(key as never);
+  for (const key of (body ? BODY_KEYS : RESET_KEYS)) store.delete(key as never);
   try {
     const diary = path.join(app.getPath('home'), DIARY_FILE);
     if (existsSync(diary)) renameSync(diary, path.join(app.getPath('home'), `${DIARY_FILE.replace(/\.md$/, '')} (before reset ${at.slice(0, 10)}).md`));
@@ -5098,9 +5104,14 @@ function resetHer(at: string = new Date().toISOString()): { at: string; backups:
     // last two entries only, and the slate note outranks them for a fortnight.
     console.warn('[reset] could not move the diary aside:', error instanceof Error ? error.message : error);
   }
-  store.set('her.slate', { at } satisfies BlankSlate);
-  console.log(`[reset] she woke up with nothing — ${backups.length} file${backups.length === 1 ? '' : 's'} backed up first`);
-  return { at, backups: backups.length };
+  // Only a reset leaves one. A body clearing itself is housekeeping on a limb:
+  // stamping a slate here would tell every machine she had been reset, which
+  // would be a lie, and would have the brain's own copy follow it.
+  if (!body) store.set('her.slate', { at } satisfies BlankSlate);
+  console.log(body
+    ? `[reset] this machine let go of the life it led as a second her — ${backups.length} file${backups.length === 1 ? '' : 's'} backed up first`
+    : `[reset] she woke up with nothing — ${backups.length} file${backups.length === 1 ? '' : 's'} backed up first`);
+  return { at, body, backups: backups.length };
 }
 
 /** Where her brain is, if it is not this machine. Either door reaches the same server. */
@@ -5123,7 +5134,7 @@ function followSlate(body: unknown): void {
   const brain = readSlate(body);
   if (!slateIsNewer(brain, getSlate())) return;
   console.log(`[reset] her brain reset at ${brain!.at} — this machine is following`);
-  resetHer(brain!.at);
+  resetHer({ at: brain!.at });
 }
 
 // Two independent axes: irritation is how fed up she is, ego is how far the
@@ -14089,14 +14100,10 @@ app.whenReady().then(() => {
   });
   // The whole of her, not only her memory: see resetHer. Returns what it did
   // so the drawer can say a backup was taken rather than only claiming one.
-  ipcMain.handle('haru:reset', () => {
-    // Her brain is the server (blankslate.ts). Clearing a body here would be
-    // undone by the next pull fifteen minutes later, so it is refused and the
-    // drawer says where the reset actually lives instead of pretending.
-    const brain = herBrain();
-    if (brain) return { refused: 'brain' as const, brain };
-    return resetHer();
-  });
+  // Where her brain is, so the drawer can say what its button will actually do:
+  // on a body that is housekeeping on a limb, not a reset of her.
+  ipcMain.handle('haru:brain', () => herBrain());
+  ipcMain.handle('haru:reset', () => resetHer({ body: Boolean(herBrain()) }));
   ipcMain.handle('memory:clear', () => {
     setMemories([]);
     // The graph is what she knows too. Which days were read is kept, or the

@@ -381,8 +381,10 @@ contextBridge.exposeInMainWorld('haru', {
     forgettingLog: () => ipcRenderer.invoke('memory:forgettingLog') as Promise<ForgettingEntry[]>,
     lastRetrieval: () => ipcRenderer.invoke('memory:lastRetrieval') as Promise<LastRetrieval | null>,
     clear: () => ipcRenderer.invoke('memory:clear') as Promise<Memory[]>,
-    /** This machine, not her — her brain is the server, which refuses this. See blankslate.ts. */
-    reset: () => ipcRenderer.invoke('haru:reset') as Promise<{ at: string; backups: number } | { refused: 'brain'; brain: string }>,
+    /** A reset where she thinks, a body clear where she does not. See blankslate.ts. */
+    reset: () => ipcRenderer.invoke('haru:reset') as Promise<{ at: string; body: boolean; backups: number }>,
+    /** Where her brain is, or nothing when it is this machine. */
+    brain: () => ipcRenderer.invoke('haru:brain') as Promise<string | null>,
     onChange: (callback: (items: Memory[]) => void) => {
       const listener = (_event: Electron.IpcRendererEvent, items: Memory[]) => callback(items);
       ipcRenderer.on('memory:changed', listener);
