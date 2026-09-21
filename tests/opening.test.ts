@@ -24,6 +24,15 @@ test('her own recent lines do not count as them being here', () => {
   assert.equal(isRelaunchNotReturn(messages, NOW), false);
 });
 
+test('a conversation with nothing but her own lines in it is still a relaunch', () => {
+  // What a reset leaves: no word from him at all. The guard used to fall through
+  // to false here, so every restart added another opening — and with her own line
+  // the only thing in front of her, the model echoed it word for word.
+  const messages = [{ role: 'assistant', at: minutesAgo(23) }];
+  assert.equal(isRelaunchNotReturn(messages, NOW), true);
+  assert.equal(isRelaunchNotReturn([{ role: 'assistant', at: minutesAgo(RETURN_AFTER_MINUTES + 1) }], NOW), false, 'but after two hours she may speak again');
+});
+
 test('nothing dated means nothing to go on, and the opening proceeds', () => {
   assert.equal(isRelaunchNotReturn([{ role: 'user' }, { role: 'assistant' }], NOW), false);
   assert.equal(isRelaunchNotReturn([], NOW), false);

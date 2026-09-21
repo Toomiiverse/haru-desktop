@@ -1747,7 +1747,14 @@ function unpromptedContext(subjectNow?: string): string {
   // to remember.
   const slateNote = blankSlateInstruction(getSlate(), knownSinceSlate());
   if (slateNote) {
-    const asStranger = [slateNote, blankSlateOpening(getSlate(), knownSinceSlate())].filter(Boolean).join(' ');
+    const asStranger = [
+      slateNote,
+      blankSlateOpening(getSlate(), knownSinceSlate()),
+      // Replaced, not dropped: the closer below carries one rule that still
+      // applies to a stranger, and leaving it out is how she came to repeat her
+      // own opening verbatim with nothing but that line in front of her.
+      'Do not repeat a line you have already said, and do not greet them as though you remember them.',
+    ].filter(Boolean).join(' ');
     return parts.length ? `${parts.join('\n')}\n${asStranger}` : asStranger;
   }
   if (!parts.length) return '';
