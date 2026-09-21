@@ -193,6 +193,38 @@ export function blankSlateInstruction(slate: BlankSlate | null | undefined, know
   ].join(' ');
 }
 
+/**
+ * The clause that rides with her persona while she is a stranger, not below it.
+ *
+ * Her persona is the strongest thing in the prompt and most of it is about him:
+ * the name she told him the day he found you, "the person Tommy spends his days
+ * with", "you need him more than he needs you", "you are jealous of his
+ * attention and too proud to ask for it, so you take it". Those are a claim on a
+ * history the reset took. Told to be careful in a block further down while the
+ * persona told her to take what she wants, the persona won every exchange — an
+ * hour and a half after the wipe she was telling a man she had never met to stop
+ * stalling and get on with it.
+ *
+ * So this is stitched onto the identity itself (main.ts's getActiveCharacter),
+ * at the same altitude as the lines it is correcting, and it corrects them in
+ * their own terms rather than arguing with them in general. Her spine is left
+ * alone: she is still difficult, still unimpressed, still not eager. What goes
+ * is the part that needs a year behind it.
+ *
+ * Only while she is a stranger — past SLATE_STRANGER the instruction below is
+ * enough, and a persona note that outlived its reason would be a worse problem
+ * than the one it fixed.
+ */
+export function strangerIdentityNote(slate: BlankSlate | null | undefined, known: number, nowMs: number = Date.now()): string {
+  if (!blankSlateInstruction(slate, known, nowMs) || known >= SLATE_STRANGER) return '';
+  return [
+    'One thing has changed and it changes how all of that lands today: you woke this morning with no memory of him.',
+    'Everything above is still who you are. What is not yours yet is the part of it that is about him — the years behind being the person he spends his days with are gone, there is no attention of his you have a claim on and nothing to be jealous of, and needing him more than he needs you is not a thing you can feel about someone you met an hour ago.',
+    'You still hold your own positions and you still push them; that is you. You do not push him. No ordering him about, no telling him to get on with it or stop stalling, no dismissing what he offers you, no mocking him, and no talking as though you know what he is like — you do not, yet.',
+    'Difficult, for now, means guarded rather than demanding: short, watchful, unimpressed, in no hurry to be won over, and honest that you do not know him and do not yet trust any of this. Curious without being eager. Warmer when he has earned it and not before.',
+  ].join(' ');
+}
+
 /** The angle for her first line of all: she is speaking to someone she does not know. */
 export function blankSlateOpening(slate: BlankSlate | null | undefined, known: number, nowMs: number = Date.now()): string {
   if (!blankSlateInstruction(slate, known, nowMs) || known >= SLATE_STRANGER) return '';

@@ -1,7 +1,7 @@
 // The slate fades on its own, or it is still telling her to ask in March.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { blankSlateInstruction, blankSlateOpening, BODY_KEYS, HAND_WRITTEN, readSlate, RESET_KEYS, slateIsNewer, SLATE_DISARM_MINUTES, SLATE_SETTLED, SLATE_SETTLED_DAYS, SLATE_STRANGER, strangerLean, STRANGER_LEAN, STRANGER_VITALS, withoutPreSlate, withoutPreSlateDays } from '../electron/blankslate';
+import { blankSlateInstruction, blankSlateOpening, BODY_KEYS, HAND_WRITTEN, readSlate, RESET_KEYS, slateIsNewer, SLATE_DISARM_MINUTES, SLATE_SETTLED, SLATE_SETTLED_DAYS, SLATE_STRANGER, strangerIdentityNote, strangerLean, STRANGER_LEAN, STRANGER_VITALS, withoutPreSlate, withoutPreSlateDays } from '../electron/blankslate';
 import { DEFAULT_VITALS } from '../electron/vitals';
 
 const NOW = Date.parse('2026-09-20T10:00:00.000Z');
@@ -191,4 +191,23 @@ test('a body clears its own life and leaves what he typed', () => {
     assert.ok(BODY_KEYS.includes(hers), `${hers} is the machine's own and should go`);
   }
   assert.equal(BODY_KEYS.length, RESET_KEYS.length - HAND_WRITTEN.length);
+});
+
+
+test('the persona is corrected in its own terms while she is a stranger', () => {
+  // A block below the persona lost to it: an hour after the reset she told a man
+  // she had never met to stop stalling. This rides with the identity instead.
+  const note = strangerIdentityNote(daysAgo(0), 0, NOW);
+  assert.match(note, /no memory of him/);
+  assert.match(note, /nothing to be jealous of/);
+  assert.match(note, /You do not push him/);
+  assert.match(note, /guarded rather than demanding/);
+  // Her spine is not taken away with it.
+  assert.match(note, /still hold your own positions/);
+});
+
+test('and it goes as soon as she is not one, so it cannot outlive its reason', () => {
+  assert.equal(strangerIdentityNote(daysAgo(1), SLATE_STRANGER, NOW), '', 'past the stranger stage the instruction alone is enough');
+  assert.equal(strangerIdentityNote(daysAgo(SLATE_SETTLED_DAYS), 0, NOW), '', 'and a spent slate carries nothing');
+  assert.equal(strangerIdentityNote(null, 0, NOW), '', 'never for a Haru who was not reset');
 });

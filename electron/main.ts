@@ -17,7 +17,7 @@ import { withDiscoveredExpressions } from './expressions';
 import { reportCapabilities, seesItsOwnScreen } from './capabilities';
 import { followCalendar, chaseableOverdue, findItem, shiftDays, formatAgenda, itemStatus, missedInstruction, movedSaid, putOffInstruction, putOffUntil, relevantItems, readsAsAnswerToHer, readsAsBareReport, tickOffInstruction, readsAsDone, doneClause, readsAsNotDone, relativeDay, staleItemNamed, inventedTimeFor, raisedRecently, type ItemStatus, underwayClause, isUnderway, FOLLOW_UP_MS } from './agenda';
 import { isRelaunchNotReturn, openingAngles, pickAngle, shouldPipeUp, PIPE_UP_CHANCE } from './opening';
-import { blankSlateInstruction, blankSlateOpening, BODY_KEYS, readSlate, RESET_KEYS, slateIsNewer, SLATE_DISARM_MINUTES, strangerLean, STRANGER_VITALS, withoutPreSlate, withoutPreSlateDays, type BlankSlate } from './blankslate';
+import { blankSlateInstruction, blankSlateOpening, BODY_KEYS, readSlate, RESET_KEYS, slateIsNewer, SLATE_DISARM_MINUTES, strangerIdentityNote, strangerLean, STRANGER_VITALS, withoutPreSlate, withoutPreSlateDays, type BlankSlate } from './blankslate';
 import { allDayDueMinutes, isEveningCheck, reminderInstruction, reminderTier, reminderVolume, shouldRemind, type ReminderState } from './reminders';
 import { isHeated, readTone, sharpen, toneGesture, tonePose } from './tone';
 import { isSilenced, nextPushback, PUSHBACK_LIMIT, pushbackInstruction, readsAsDropIt, type Pushback } from './pushback';
@@ -4743,7 +4743,13 @@ function getCharacter() {
  * baked in permanently.
  */
 function getActiveCharacter() {
-  return getCharacter();
+  const character = getCharacter();
+  // The overlay this function was always for. While she is a stranger the slate
+  // has to argue at the persona's own altitude rather than from a block below it
+  // — see strangerIdentityNote. Every composer reads this one, so the opening,
+  // the nudges and the diary get it with the chat.
+  const stranger = strangerIdentityNote(getSlate(), knownSinceSlate());
+  return stranger ? { ...character, identity: `${character.identity}\n\n${stranger}` } : character;
 }
 
 /** The slate left by the last reset, or nothing. See blankslate.ts. */
