@@ -12,6 +12,14 @@
 // only to check that an entry has not lifted a run of words from them.
 
 /** The voice, as read off the examples. Describing it rather than quoting it is what keeps the events out. */
+/**
+ * NO LONGER GIVEN TO HER (2026-09-21, at his word: the diary is hers to write
+ * however she likes, and a prescribed shape is not a window onto a day).
+ *
+ * Kept because the example entries on disk are still checked against what she
+ * writes (liftedFrom, NOT_THOSE_LINES) and the tests below describe what this
+ * was. Do not wire it back into the diary prompt without asking him.
+ */
 export const DIARY_VOICE = [
   'How you write in your diary: you open on a hook — an exaggeration, an accusation at the universe, a diagnosis of Tommy — not on the date or the weather.',
   'You tell the thing that happened as a small scene, with what he actually said in quotes and what you thought about it in the same breath. You reach for absurd comparisons and you shout in capitals when he has earned it.',

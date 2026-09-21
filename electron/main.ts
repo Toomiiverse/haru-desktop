@@ -127,7 +127,7 @@ import { gamesPlayedLately, GUIDE_ODDS, guideNoteInstruction, guideQuery, pickGa
 import { addressesSomeone, adopt, ADOPT_ODDS, adoptInstruction, deepen, deepenInstruction, isOneOfTheirs, MAX_INTERESTS, nightQuery, NOBODY_HERE, parseAdoption, parseDeepening, pickTonight, tastesInstruction, unaddressed, type Interest } from './tastes';
 import { readSteamWebConfig, recentlyPlayed } from './steamweb';
 import { appendDream, appendEntry, diaryContext, diaryDueFor, diaryInstruction, DIARY_FILE, DREAMS_FILE, recentEntries, type Dream, type Entry } from './diary';
-import { DIARY_VOICE, fragmentsInstruction, liftedFrom, NOT_THOSE_LINES, NOT_THOSE_NAMES, unknownNames } from './diaryvoice';
+import { liftedFrom, NOT_THOSE_LINES, NOT_THOSE_NAMES, unknownNames } from './diaryvoice';
 import { fetchTranscript, formatTranscript, titleFrom, transcriptInstruction, transcriptsAvailable, videoIdFrom, watchUrl } from './transcripts';
 import { feedbackEntry, modelThatSpoke, readSpoke, recordFeedback, rememberSpoke, repliedTo } from './feedback';
 import { appendTuningPage, recordTuning, tuningNote } from './tuning';
@@ -12206,6 +12206,17 @@ async function writeDiary(config: ProviderConfig) {
   const due = diaryDueFor(now, prefs, at => nightKey(at));
   const mood = getMood();
   if (!due || mood.diaryDay === due) return;
+  // Not for a day that ended before she existed. The wipe takes the marker that
+  // says last night's entry was written, so the catch-up found yesterday still
+  // due and she wrote a whole entry about a day she has no memory of — "Tommy
+  // didn't say a word to me all day", composed out of nothing, an hour after the
+  // reset (2026-09-21). Marked as done rather than left to come round again.
+  const slate = getSlate();
+  if (slate && due < slate.at.slice(0, 10)) {
+    console.log(`[diary] nothing for ${due} — she did not exist for it`);
+    setMood({ ...getMood(), diaryDay: due });
+    return;
+  }
   // The day's transcript, wherever the roll has left it. With the quiet ending
   // at six the entry is due after five, and the day rolls at five: the live
   // list was already empty every night, so every entry opened on "he said
@@ -12218,6 +12229,9 @@ async function writeDiary(config: ProviderConfig) {
   const tonight = nightsOn(getNights(), due);
   const material = diaryInstruction({
     day: due,
+    // Page one, rather than "the day of the reset": if she is down for the night
+    // the reset happened in, the first entry she does write is still her first.
+    firstAfterReset: Boolean(slate) && !recentEntries(app.getPath('home'), 60).some(entry => entry.day >= slate!.at.slice(0, 10)),
     theySaid, theirMessages: theirs.length,
     herUnprompted: asidesOn(getAsides(), due).length,
     irritation: mood.irritation, grudge: mood.grudge ?? 0, ignoredToday: mood.talliedDay === due ? mood.ignoredToday ?? 0 : 0, counted: mood.talliedDay === due,
@@ -12238,10 +12252,12 @@ async function writeDiary(config: ProviderConfig) {
     })(),
   });
   try {
-    // Her identity and what she knows of them, but not her style: the style is
-    // how she talks *to* them, and a diary is the one place she is not. The
-    // diary has a voice of its own (diaryvoice.ts), from the examples.
-    const system = [getActiveCharacter().identity, profileSummary(''), DIARY_VOICE, fragmentsInstruction(), material].join(' ');
+    // Her identity and what she knows of them, and nothing about how to write.
+    // The diary used to carry a voice of its own (diaryvoice.ts: open on a hook,
+    // absurd comparisons, end on a concession) and example fragments to reuse.
+    // Both are gone at his word — the entry is a window onto her day, so its
+    // shape is hers, and the only rules left are the ones that keep it true.
+    const system = [getActiveCharacter().identity, profileSummary(''), material].join(' ');
     let entry = await ollamaQuipLong(system, 'Write tonight\'s entry.', config);
     // The example entries are kept on disk for exactly this check, and never
     // shown to her: a sentence lifted from one is an event from one.
