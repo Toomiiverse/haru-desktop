@@ -29,7 +29,7 @@ import { convertImage, FORMATS, normaliseFormat } from './convert';
 import { cancelPower, closeApp, desktopSupported, findApps, isCancellable, launch, listRunning, matchApp, matchRunning, normalisePower, POWER_DELAY_S, readDesktopConfig, runPower } from './desktop';
 import { formatPage, formatResults, readSearchConfig, readWebPage, SearchBlocked, searchWeb, type SearchConfig, type SearchResult } from './search';
 import { fetchTranscript, formatTranscript, titleFrom, transcriptInstruction, videoIdFrom, watchUrl } from './transcripts';
-import { findSuperseded, semanticSimilarities, supersede, MEMORY_KINDS, type MemoryKind, type MemoryRecord } from './memory';
+import { findSuperseded, isInTheirWords, semanticSimilarities, supersede, MEMORY_KINDS, type MemoryKind, type MemoryRecord } from './memory';
 import { appendToBlockValue, canEditBlock, findBlock, replaceInBlockValue, resolveBlockValue, withEditedValue, type BlockSources, type MemoryBlock } from './blocks';
 import { adopt } from './tastes';
 import { activateTab, closeTab, listTargets, navigate, openTab, pageText, screenshot } from './browserctl';
@@ -1651,6 +1651,11 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
         const id = await currentTab();
         if (!id) return JSON.stringify({ error: 'no tab to read.' });
         const text = await pageText(port, id, fetchImpl);
+        // A stranger's page is in the conversation now, exactly as after
+        // read_web_page: her tools go for the rest of this reply, so nothing on the
+        // page can talk her into writing a memory or touching the machine. Only
+        // when there is text — a tab still loading reads empty and can be read again.
+        if (text) markPageRead();
         return JSON.stringify({ text: text.slice(0, 3000), note: 'This is what is on the page right now — answer from it, not from memory.' });
       }
       if (action === 'screenshot') {
@@ -1708,8 +1713,14 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
     // the fact. Their own words carry it; the fact text stands in when there is
     // nothing of theirs to read.
     const told = latestUserMessage || fact;
+    // 'explicit' is the top of the trust ladder and skips the nagging test, so it
+    // is for what they said. A fact that shares nothing with their message came
+    // from somewhere else — a page she read, or her own guess — and is filed as
+    // inferred: kept, but believed less (memory.ts isInTheirWords).
+    const theirs = isInTheirWords(fact, latestUserMessage);
+    if (!theirs) console.log(`[memory] "${fact.slice(0, 60)}" is not in their words — filed as inferred, not explicit`);
     const saved = addMemory(fact, kind, subject, {
-      source: 'explicit', predicate, object,
+      source: theirs ? 'explicit' : 'inferred', predicate, object,
       emotion: localEmotion(told),
       emotionIntensity: readTone(told).heat,
     });
