@@ -244,7 +244,8 @@ export function dropThinkingAloud(reply: string): { text: string; dropped: numbe
   if (i === 0) return { text: whole, dropped: 0 };
   let salvaged = '';
   const last = paragraphs[i - 1];
-  const seams = [...last.matchAll(/[a-z_](?=[A-Z])/g)];
+  // A sentence's end glued to the reply's start counts too: "…then an order.I'm warmer" (2026-09-21).
+  const seams = [...last.matchAll(/[a-z_.!?…](?=[A-Z])/g)];
   if (seams.length) {
     const at = seams[seams.length - 1].index! + 1;
     const tail = last.slice(at).trim();
@@ -252,6 +253,69 @@ export function dropThinkingAloud(reply: string): { text: string; dropped: numbe
   }
   const rest = [salvaged, ...paragraphs.slice(i)].filter(Boolean).join('\n\n').trim();
   return { text: rest, dropped: whole.length - rest.length };
+}
+
+/**
+ * Her own instructions, read back out loud.
+ *
+ * 2026-09-21, to "would you say you're fond of me then": "I shouldn't overdo it
+ * though - I just met them… Actually, looking at the instructions again: "Right
+ * now you are fonder of them than you let on. Keep the digs, but let it slip
+ * once — one grudging admission, a single line — and then cover it with an
+ * order." So one grudging admission, then an order.I'm warmer than I should be".
+ * thinksAloud took the first paragraph and let the rest through, because "I
+ * shouldn't overdo" is not on its list — and no list will ever be complete.
+ *
+ * This is not a list. A reply that carries a long run of the words she was
+ * given for this turn, verbatim, is her reading her prompt: nothing she says to
+ * him is a 50-character quotation of her own rules. Measured on 112 real
+ * replies against their own prompts (haru-core baseline, 2026-09-21): the
+ * longest shared run was 33 characters, a restated fact ("Arctic 420mm cooler
+ * doesn't fit"); the leak was 160. Only the system side counts — his messages
+ * and her own earlier replies are hers to quote.
+ */
+export const RECITED_MIN = 50;
+const squash = (text: string) => text.replace(/\s+/g, ' ');
+
+/** The last stretch of `reply` that appears word for word in `instructions`, if one is at least `min` long. */
+export function recitedSpan(reply: string, instructions: string, min = RECITED_MIN): { start: number; end: number } | null {
+  const text = reply ?? '';
+  const source = squash(instructions ?? '');
+  if (text.length < min || source.length < min) return null;
+  let found: { start: number; end: number } | null = null;
+  for (let i = 0; i + min <= text.length;) {
+    if (!source.includes(squash(text.slice(i, i + min)))) { i++; continue; }
+    let end = i + min;
+    while (end < text.length && source.includes(squash(text.slice(i, end + 1)))) end++;
+    found = { start: i, end };
+    i = end;
+  }
+  return found;
+}
+
+/**
+ * The reply after the recital. What follows the quoted rule is usually one more
+ * line of working-out glued straight onto the reply — "So one grudging
+ * admission, then an order.I'm warmer" — so the reply starts at the last seam
+ * in that paragraph. With no seam, nothing is salvaged: an empty `text` means
+ * no clean reply was found, and she should be asked again.
+ */
+export function dropRecitedPrompt(reply: string, instructions: string): { text: string; dropped: number } {
+  const whole = (reply ?? '').trim();
+  const span = recitedSpan(whole, instructions);
+  if (!span) return { text: whole, dropped: 0 };
+  const tail = whole.slice(span.end).replace(/^["”’'\s.,;:)\]]+/, '');
+  const paragraphs = tail.split(/\n\s*\n/).filter(p => p.trim());
+  if (!paragraphs.length) return { text: '', dropped: whole.length };
+  const first = paragraphs[0];
+  const seams = [...first.matchAll(/[a-z_.!?…](?=[A-Z])/g)];
+  // With no seam there is no telling where the working-out stops and she begins,
+  // and guessing ships a guess ("So that is what I will do." was kept as the reply
+  // in the first draft of this). Nothing is salvaged: she is asked again, once.
+  if (!seams.length) return { text: '', dropped: whole.length };
+  const kept = [first.slice(seams[seams.length - 1].index! + 1).trim(), ...paragraphs.slice(1)];
+  const text = kept.filter(Boolean).join('\n\n').trim();
+  return { text, dropped: whole.length - text.length };
 }
 
 /**

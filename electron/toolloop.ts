@@ -24,7 +24,7 @@
 // reported rather than looped on.
 
 import type { ChatMessage, ToolCall } from './provider';
-import { claimsDesktopAction, claimsTickOff, readsLikeAssistant, deniesItExists, thinksAloud, dropThinkingAloud, claimsChecked, asksToLookUp } from './reply';
+import { claimsDesktopAction, claimsTickOff, readsLikeAssistant, deniesItExists, thinksAloud, dropThinkingAloud, recitedSpan, dropRecitedPrompt, claimsChecked, asksToLookUp } from './reply';
 import { stripDelivery } from './delivery';
 
 /** How many rounds a single reply may spend before it has to settle. */
@@ -341,6 +341,29 @@ export async function runToolLoop(conversation: ChatMessage[], deps: ToolLoopDep
         voiceRetried = true;
         resetStream();
         warn('[ai] replied with her deliberation instead of the words — asking once for the words alone');
+        conversation.push(message);
+        conversation.push({
+          role: 'user',
+          content: 'That reply was your reasoning about what to say, not the thing said. Reply again with only what you would say to them — no analysis of them, no plan, no notes to yourself, and no mention of this note.',
+        });
+        continue;
+      }
+    }
+
+    // Her own instructions read out loud — the part thinksAloud's word lists
+    // cannot see (reply.ts recitedSpan). Checked on what survived that first
+    // pass, against only what she was told this turn: the system side.
+    const instructions = conversation.filter(turn => turn.role === 'system').map(turn => String(turn.content ?? '')).join('\n');
+    if (recitedSpan(message.content, instructions)) {
+      const { text, dropped } = dropRecitedPrompt(message.content, instructions);
+      if (text.length >= 20 && !thinksAloud(text) && !recitedSpan(text, instructions)) {
+        resetStream();
+        warn(`[ai] dropped ${dropped} chars of her reading her own instructions aloud`);
+        message.content = text;
+      } else if (!voiceRetried) {
+        voiceRetried = true;
+        resetStream();
+        warn('[ai] she read her own instructions aloud and no clean reply followed — asking once for the words alone');
         conversation.push(message);
         conversation.push({
           role: 'user',
