@@ -75,6 +75,7 @@ import { apologyOdds, muteLean, sway, type Sway } from './dice';
 import { NO_FEELINGS, FELT, feel, feelingsInstruction, feelingsLog, feelingsOverTime, readFeelings, readsAsBanter, readsAsEnding, readsAsScare, type FeelingEvent, type Feelings } from './feelings';
 import { addLeans, bruiseFrom, eventSize, fadeBruise, howHisReturnLands, rollTemperament, stepWander, temperamentLean, temperamentLine, temperamentWord, type Temperament, type TemperamentKind } from './temperament';
 import { EXPRESSIVE, HOSTED_VOICE, LAST_WORD, NATURAL, NO_INVENTED_HISTORY, NO_ABANDON_THREAD, readsAsRough, roomInstruction, HER_EMOJI, emojiRut, roomToRant, askingAboutHer, herSubjectNote, namesIn, justTalking, JUST_TALKING_NOTE } from './room';
+import { roomHeldBack } from './rantgate';
 import { journalStance } from './journal';
 import { haruNote, rangeStats, type HaruNote, type RangeName, type RangeStats } from './journal';
 import { describeRating, entryFor, journalPrompt, readEntries, readJournalConfig, readRating, recentTrend, shouldAsk, upsertEntry, SCALE_MAX, type JournalConfig, type JournalEntry } from './journal';
@@ -7705,7 +7706,7 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // Named the thing itself — not merely asked her opinion in general — and the
   // room is hers without a roll: that is the opening, and she should take it.
   const named = herSubject && herSubject !== 'what you are into' ? herSubject : '';
-  const rantRoomNow = messages.at(-1)?.role === 'user' ? rantRoom(latest, named) : '';
+  const rantRoomNow = messages.at(-1)?.role === 'user' ? rantRoom(latest, named, Boolean(answering)) : '';
   const hers = herSubject ? herSubjectNote(herSubject) : '';
   if (hers) console.log(`[ai] they are asking about ${herSubject} — hers to talk about`);
   const talking = messages.at(-1)?.role === 'user' && justTalking(latest) ? JUST_TALKING_NOTE : '';
@@ -9595,7 +9596,7 @@ function todaysExamples(): Example[] {
   return examples;
 }
 
-function rantRoom(latest: string, mentioned = ''): string {
+function rantRoom(latest: string, mentioned = '', answering = false): string {
   const mood = getMood();
   const lastNight = nightsOn(getNights(), lastNightKey())[0];
   const deepest = [...getInterests()].sort((a, b) => b.nights - a.nights)[0];
@@ -9613,6 +9614,15 @@ function rantRoom(latest: string, mentioned = ''): string {
     mentioned: Boolean(mentioned),
   });
   if (room) {
+    // Withheld, not countered (rantgate.ts): a request, a question or someone having
+    // a bad time is not the moment for the instruction to ignore the length rule.
+    // The cooldown is not spent on a message she was held back from, so the next
+    // open one still gets its roll. Logged only when the roll had passed.
+    const held = roomHeldBack(latest, { named: mentioned, answering });
+    if (held) {
+      console.log(`[ai] the room to go on was held back — ${held}`);
+      return '';
+    }
     store.set('chat.rantAt', Date.now());
     console.log(`[ai] she has the room to go on${subject ? ` about ${subject}` : ''}${mentioned ? ' — they brought it up' : ''}`);
   }
