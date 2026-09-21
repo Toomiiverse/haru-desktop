@@ -1,7 +1,8 @@
 // The slate fades on its own, or it is still telling her to ask in March.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { blankSlateInstruction, blankSlateOpening, BODY_KEYS, HAND_WRITTEN, readSlate, RESET_KEYS, slateIsNewer, SLATE_DISARM_MINUTES, SLATE_SETTLED, SLATE_SETTLED_DAYS, SLATE_STRANGER, withoutPreSlate, withoutPreSlateDays } from '../electron/blankslate';
+import { blankSlateInstruction, blankSlateOpening, BODY_KEYS, HAND_WRITTEN, readSlate, RESET_KEYS, slateIsNewer, SLATE_DISARM_MINUTES, SLATE_SETTLED, SLATE_SETTLED_DAYS, SLATE_STRANGER, strangerLean, STRANGER_LEAN, STRANGER_VITALS, withoutPreSlate, withoutPreSlateDays } from '../electron/blankslate';
+import { DEFAULT_VITALS } from '../electron/vitals';
 
 const NOW = Date.parse('2026-09-20T10:00:00.000Z');
 const daysAgo = (days: number) => ({ at: new Date(NOW - days * 86_400_000).toISOString() });
@@ -45,6 +46,39 @@ test('the opening angle is only for the days she is a stranger', () => {
   assert.match(blankSlateOpening(daysAgo(0), 0, NOW), /nothing about them but their name/);
   assert.equal(blankSlateOpening(daysAgo(0), SLATE_STRANGER, NOW), '');
   assert.equal(blankSlateOpening(null, 0, NOW), '');
+});
+
+test('a stranger is treated as a stranger, not interviewed', () => {
+  // The first thing she did with a blank slate was ask him what he did for a
+  // living and what she should be aware of today. That was the instruction's
+  // fault, not the model's.
+  const said = blankSlateInstruction(daysAgo(0), 0, NOW);
+  assert.match(said, /At most one question/);
+  assert.match(said, /Keep your replies short/);
+  assert.match(said, /earn/);
+  assert.doesNotMatch(said, /One or two questions/, 'the line that produced the interview');
+  assert.doesNotMatch(said, /not sorry/, 'brisk where she should be wary');
+});
+
+test('her first line is wary rather than bright, and does not demand anything', () => {
+  const opening = blankSlateOpening(daysAgo(0), 0, NOW);
+  assert.match(opening, /Wary rather than bright/);
+  assert.match(opening, /or ask nothing at all/);
+});
+
+test('she starts colder than the defaults, and his affection at nothing', () => {
+  assert.ok(STRANGER_VITALS.affection < DEFAULT_VITALS.affection, 'affection is the thing he earns back');
+  assert.ok(STRANGER_VITALS.stress > DEFAULT_VITALS.stress, 'waking with nothing is not restful');
+  assert.ok(STRANGER_VITALS.happiness < DEFAULT_VITALS.happiness);
+});
+
+test('the wariness leans on her drift while the slate stands, and thins as it fades', () => {
+  const fresh = strangerLean(daysAgo(0), 0, NOW);
+  assert.equal(fresh.affection, STRANGER_LEAN.affection, 'full while she is a stranger');
+  const settling = strangerLean(daysAgo(1), SLATE_STRANGER, NOW);
+  assert.equal(settling.affection, (STRANGER_LEAN.affection ?? 0) / 2, 'half once she only admits gaps');
+  assert.deepEqual(strangerLean(daysAgo(1), SLATE_SETTLED, NOW), {}, 'gone with the slate');
+  assert.deepEqual(strangerLean(null, 0, NOW), {}, 'and never there for a Haru who was not reset');
 });
 
 test('she is not told she has lost the one thing the reset keeps', () => {

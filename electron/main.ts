@@ -17,7 +17,7 @@ import { withDiscoveredExpressions } from './expressions';
 import { reportCapabilities, seesItsOwnScreen } from './capabilities';
 import { followCalendar, chaseableOverdue, findItem, shiftDays, formatAgenda, itemStatus, missedInstruction, movedSaid, putOffInstruction, putOffUntil, relevantItems, readsAsAnswerToHer, readsAsBareReport, tickOffInstruction, readsAsDone, doneClause, readsAsNotDone, relativeDay, staleItemNamed, inventedTimeFor, raisedRecently, type ItemStatus, underwayClause, isUnderway, FOLLOW_UP_MS } from './agenda';
 import { isRelaunchNotReturn, openingAngles, pickAngle, shouldPipeUp, PIPE_UP_CHANCE } from './opening';
-import { blankSlateInstruction, blankSlateOpening, BODY_KEYS, readSlate, RESET_KEYS, slateIsNewer, SLATE_DISARM_MINUTES, withoutPreSlate, withoutPreSlateDays, type BlankSlate } from './blankslate';
+import { blankSlateInstruction, blankSlateOpening, BODY_KEYS, readSlate, RESET_KEYS, slateIsNewer, SLATE_DISARM_MINUTES, strangerLean, STRANGER_VITALS, withoutPreSlate, withoutPreSlateDays, type BlankSlate } from './blankslate';
 import { allDayDueMinutes, isEveningCheck, reminderInstruction, reminderTier, reminderVolume, shouldRemind, type ReminderState } from './reminders';
 import { isHeated, readTone, sharpen, toneGesture, tonePose } from './tone';
 import { isSilenced, nextPushback, PUSHBACK_LIMIT, pushbackInstruction, readsAsDropIt, type Pushback } from './pushback';
@@ -1357,7 +1357,9 @@ function lifeTick() {
   passFeelings(now);
   wander = stepWander(wander, seconds);
   bruise = fadeBruise(bruise, seconds);
-  vitals = driftVitals(vitals, environment, seconds, addLeans(traitLean(getTraits()), temperamentLean(getTemperament()), wander, bruise));
+  // The stranger lean last, and additive like the rest: while she is new to him
+  // her affection is not the middle of the scale it defaults to (blankslate.ts).
+  vitals = driftVitals(vitals, environment, seconds, addLeans(traitLean(getTraits()), temperamentLean(getTemperament()), wander, bruise, strangerLean(getSlate(), knownSinceSlate())));
   lastTickAt = now;
   persistVitals();
   broadcastLife(chooseIdleAction(vitals, environment), environment);
@@ -4791,6 +4793,11 @@ function resetHer({ body = false, at = new Date().toISOString() }: { body?: bool
   const schedule = store.getSchedule();
   store.setSchedule({ ...schedule, jobs: schedule.jobs.filter(job => job.createdBy === 'app'), runs: [], booked: [] });
   for (const key of (body ? BODY_KEYS : RESET_KEYS)) store.delete(key as never);
+  // Not the defaults, which are the middle of every scale and read as a Haru
+  // pleased with herself: waking with nothing is unsettling, and his affection
+  // starts at nothing because it is the thing he has to earn back. Only on a
+  // reset — a limb clearing its own files has had nothing happen to it.
+  if (!body) store.set('vitals', { ...DEFAULT_VITALS, ...STRANGER_VITALS });
   // The rest of her record is files rather than keys, and a file left where it
   // is outlives the wipe. Each one is moved aside under a dated name rather than
   // deleted — still his to open, no longer hers to read back as a life she

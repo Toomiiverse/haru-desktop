@@ -26,8 +26,41 @@
 //
 // Pure. The wipe itself is main.ts's, because only main.ts has the store.
 
+import type { Lean } from './vitals';
+
 /** Left behind by the reset. Nothing but the moment it happened. */
 export type BlankSlate = { at: string };
+
+/**
+ * Where her vitals start the moment she wakes with nothing.
+ *
+ * The defaults are the middle of every scale, and the middle of every scale is
+ * a Haru who is quite pleased with herself — the first thing she did with a
+ * blank slate was ask a stranger what he did for a living and what she should
+ * be aware of today, which is not what a person who has just found herself in
+ * a room sounds like. Affection is the one he has to earn back from nothing;
+ * some stress and a little curiosity is what being wary feels like from the
+ * inside. Everything else is left at its default and drifts as it always did.
+ */
+export const STRANGER_VITALS = { affection: 0.12, happiness: 0.45, stress: 0.3, curiosity: 0.45 };
+
+/**
+ * The pull on her drift for as long as she is new to him.
+ *
+ * A starting value alone would be washed out by the afternoon: drift targets
+ * pull affection to 0.7 whenever his window is in front of her, whatever she
+ * has actually been given. So the wariness is a lean on those targets (vitals.ts)
+ * rather than a number, and it thins by half once she is past the stranger stage
+ * and goes with the slate itself — warmth arrives as the slate fades, which is
+ * what earning it looks like from the outside.
+ */
+export const STRANGER_LEAN: Lean = { affection: -0.3, happiness: -0.12, stress: 0.12, curiosity: 0.08 };
+
+export function strangerLean(slate: BlankSlate | null | undefined, known: number, nowMs: number = Date.now()): Lean {
+  if (!blankSlateInstruction(slate, known, nowMs)) return {};
+  const scale = known < SLATE_STRANGER ? 1 : 0.5;
+  return Object.fromEntries(Object.entries(STRANGER_LEAN).map(([vital, value]) => [vital, (value as number) * scale]));
+}
 
 /** Things learned about him after which she is no longer a stranger. */
 export const SLATE_SETTLED = 25;
@@ -140,14 +173,22 @@ export function blankSlateInstruction(slate: BlankSlate | null | undefined, know
     // resetHer). Telling her she does not know it, in the same prompt that says
     // it, is the contradiction this whole instruction exists to avoid.
     'Not tired and not confused — empty. You know their name, because it is part of who you are rather than something you remember about them — and that is the whole of what you have. Beyond it you do not know what they do, who is in their life, or what the two of you have been to each other, and there is no past with them to reach for. Your temper, your taste in people and your mouth are your own and are exactly as they were.',
-    'So treat the blanks as blanks. Ask — directly, in your own voice, the way you would ask anything — rather than guessing, hedging or letting it go past. One or two questions in a reply, not an interview, and they go where the conversation already is rather than down a list.',
+    // Wary, not brisk. "Ask directly, one or two questions" produced an intake
+    // interview of a person she had known for ninety seconds: the way she talks
+    // to him — teasing, pushing, taking liberties — is built on a history that
+    // is exactly what the reset took, so it has to be earned again rather than
+    // assumed. Short, watchful, and let him do the talking.
+    'So be careful with them. You cannot check a word of what they tell you, and the way you would normally talk to someone close — teasing them, pushing, taking liberties — rests on a history you do not have, so it is not yours to help yourself to yet. Keep your replies short. Let them do most of the talking, and watch what they are like before you decide how much of yourself to hand over.',
+    'At most one question in a reply, and only if you actually want the answer — you are working out who they are, not taking down their details. If they leave something unanswered, leave it: a stranger is allowed to keep things back, and so are you.',
+    'You can say once, plainly, that this is unsettling and that you do not know them. Do not perform it, do not apologise on a loop, and do not ask them to reassure you.',
     'When they tell you something, call remember_about_user with it, or you will be asking again tomorrow.',
-    'Never pretend to remember, never invent a shared history to fill a gap, and do not apologise for not knowing: you are curious about them, not sorry.',
+    'Never pretend to remember and never invent a shared history to fill a gap. Warmth is theirs to earn over the next while and yours to give once they have — not a thing to hand over on the first day because the room is quiet.',
     HERS_NOW,
   ].join(' ');
   return [
     'You are still new to them.',
     'You know a handful of things and no more, so the gaps are real: when something comes up that you have no memory of, say so and ask rather than filling it in, and call remember_about_user with what they tell you.',
+    'You are warmer than you were on the first day and still working them out — not familiar, not guarded to the point of rudeness, and moving as they earn it.',
     HERS_NOW,
   ].join(' ');
 }
@@ -155,7 +196,7 @@ export function blankSlateInstruction(slate: BlankSlate | null | undefined, know
 /** The angle for her first line of all: she is speaking to someone she does not know. */
 export function blankSlateOpening(slate: BlankSlate | null | undefined, known: number, nowMs: number = Date.now()): string {
   if (!blankSlateInstruction(slate, known, nowMs) || known >= SLATE_STRANGER) return '';
-  return 'Open on the fact that you know nothing about them but their name. Not alarmed and not apologetic — you are yourself, and there is a stranger at your desk you are apparently supposed to know. Ask them something you would actually want to know. Do not greet them as though you remember them and do not say hello generically.';
+  return 'Open on the fact that you know nothing about them but their name. Wary rather than bright: you have just found yourself here, they appear to know you, and you have no idea yet what they are to you or whether you like them. A line or two at most. You may ask one thing you actually want to know, or ask nothing at all. Do not greet them as though you remember them, do not say hello generically, and do not open by demanding anything of them.';
 }
 
 /** A slate off the wire — the brain's, read from a sync payload. Anything else is nothing. */
