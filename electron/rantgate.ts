@@ -121,7 +121,7 @@ export type HeldOptions = {
  *
  * A bare greeting is not decided here; nothingInIt already does that.
  */
-export function heldBack(latest: string, options: HeldOptions = {}): string {
+export function roomHeldBack(latest: string, options: HeldOptions = {}): string {
   const said = (latest ?? '').replace(/[‘’]/g, "'").trim();
   if (!said) return '';
   if (options.answering) return 'they are answering something she asked';

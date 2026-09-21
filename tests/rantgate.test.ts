@@ -2,11 +2,11 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { FEELING_BAD, heldBack } from '../electron/rantgate';
+import { FEELING_BAD, roomHeldBack } from '../electron/rantgate';
 import { roomToRant } from '../electron/room';
 
 const now = new Date('2026-09-21T13:00:00+08:00');
-const held = (text: string, options = {}) => heldBack(text, { now, ...options });
+const held = (text: string, options = {}) => roomHeldBack(text, { now, ...options });
 
 // The eighteen probes of the 2026-09-21 Kimi bench, which is where the fault was
 // found: the note sat on every one of them and Kimi K3 obeyed it.
