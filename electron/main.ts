@@ -119,6 +119,7 @@ import { attachmentsInPlay, describeAttached, READ_IT_ALL_PROMPT, readAttachment
 import { forOllama, withoutOldest } from './ollamaturns';
 import { seedEmoji, seedOffTheOrders } from './seed';
 import { ageNote, openingsToAvoid, pickToBringUp, REMEMBERED_PICKS } from './bored';
+import { resolveReply, withReplyContext } from './replyto';
 import { ANSWER_WINDOW_MS, grudgeAfterApology, grudgeInstruction, irritationAfterTally, nextGrudge, NOT_HELD_AGAINST_THEM, tallyDue, tallyInstruction, unanswered, type Said } from './grudge';
 import { groundedInstruction, placeQuery } from './places';
 import { daySaid, TOLD_ENOUGH, type DaySaid, DEFAULT_BEDTIME_MINUTES, howTheDayWent, nightfallDue, sulkGrudge, sulkInstruction, sulkStillStands, type DayVerdict } from './nightfall';
@@ -7592,6 +7593,10 @@ async function withAttachments<T extends { role: string; content: string; at?: s
 
 async function ollamaChat(messages: { role: string; content: string; at?: string; attachments?: Attachment[] }[], config: ProviderConfig, { hands = true, web = false, brief = false, choices = false, call = false, away = '', aside = '', onChunk, onChunkReset, onToolCall, onSending, traceId }: { hands?: boolean; web?: boolean; brief?: boolean; choices?: boolean; call?: boolean; away?: string; aside?: string; onChunk?: (text: string) => void; onChunkReset?: () => void; onToolCall?: (name: string) => void; onSending?: () => void; traceId?: string } = {}) {
   const latest = messages.at(-1)?.content ?? '';
+  // Told which line of hers he is answering, where he said (replyto.ts). After
+  // `latest`, which is read for what the message is ABOUT — the tool table, recall,
+  // the stale-item check — and has to stay his words alone, not her quoted line.
+  messages = withReplyContext(messages);
   // A message from outside the desk — the phone — gets a short leash on
   // the conversation as well as on the reply: a long day's thread is most of
   // the tokens the hosted model reads before its first word, and the reader
@@ -10611,13 +10616,14 @@ async function tallyIgnored(config: ProviderConfig) {
 }
 
 /** The lines of hers on a day that got nothing back, from what was heard that day (grudge.ts). */
-function countIgnored(day: string, heard: { role: string; at?: string }[]): Said[] {
+function countIgnored(day: string, heard: { role: string; at?: string; replyTo?: string | { id: string } }[]): Said[] {
   const pushed = new Set(Object.keys(PUSH_KIND).filter(source => !NOT_HELD_AGAINST_THEM.includes(source)));
   // Nothing before their first word of the day counts: they cannot ignore
   // what they have not been up to see.
   const firstWord = heard.filter(turn => turn.role === 'user' && turn.at).map(turn => Date.parse(turn.at!)).filter(Number.isFinite).sort((a, b) => a - b)[0] ?? 0;
   return unanswered(
-    asidesOn(getAsides(), day).map(aside => ({ at: aside.at, source: aside.source, text: aside.text, reached: aside.reached })),
+    // With its id, so a reply that named the line answers it (grudge.ts).
+    asidesOn(getAsides(), day).map(aside => ({ id: aside.id, at: aside.at, source: aside.source, text: aside.text, reached: aside.reached })),
     heard, pushed, Date.now(), firstWord);
 }
 
@@ -12873,7 +12879,20 @@ function webDeps(): WebDeps {
         trace.done('web', { tier: quick.tier, chars: quick.reply.length });
         return { reply: quick.reply, ignored: false };
       }
-      const messages = [...history, { role: 'user', content: text, at: new Date().toISOString(), ...(files.length ? { attachments: files } : {}) }];
+      // Which line of hers this answers, when the phone said (replyto.ts). Checked
+      // against her replies in the conversation and the lines she pushed today,
+      // which the phone shows beside them under their own ids — a reply to "103
+      // minutes, that's what you owe me" is a reply to an aside.
+      const replyDay = (store.get('chat.dayKey') as string | undefined) ?? localDateKey(zonedNow(CHAT_TIMEZONE));
+      const named = options?.replyTo || options?.quoted;
+      const answering = named
+        ? resolveReply(
+          { replyTo: options?.replyTo, quoted: options?.quoted },
+          [...(history as { id?: string; role: string; content: string }[]), ...asidesOn(getAsides(), replyDay).map(aside => ({ id: aside.id, role: 'assistant', content: aside.text }))],
+        )
+        : null;
+      if (named && !answering) console.log('[web] a reply named a line of hers that could not be found — sent as an ordinary message');
+      const messages = [...history, { role: 'user', content: text, at: new Date().toISOString(), ...(answering ? { replyTo: answering } : {}), ...(files.length ? { attachments: files } : {}) }];
       const started = Date.now();
       // Stopped mid-sentence, by a tap on her or by being talked over.
       if (options?.interrupted) { nudgeVitals('cut-off'); feelNow('cut-off'); }
@@ -12899,7 +12918,7 @@ function webDeps(): WebDeps {
       // this is the reply's end, so what is left is hers to say.
       voice.flush();
       trace.mark('reply');
-      sendToWindows('chat:fromPhone', { text, reply, ignored: Boolean(answer.ignored), ...(files.length ? { attachments: files } : {}) });
+      sendToWindows('chat:fromPhone', { text, reply, ignored: Boolean(answer.ignored), ...(answering ? { replyTo: answering } : {}), ...(files.length ? { attachments: files } : {}) });
       console.log(`[web] streamed ${text.length} chars in ${Date.now() - started}ms, ${reply.length} chars (${messages.length} messages of history${files.length ? `, ${files.length} file(s)` : ''})`);
       trace.done('web', { tier: 'llm', chars: reply.length });
       return { reply, ignored: answer.ignored };
