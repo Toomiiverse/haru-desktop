@@ -67,7 +67,7 @@ import { convertImage, normaliseFormat, FORMATS } from './convert';
 import { cancelPower, closeApp, findApps, isCancellable, launch, listRunning, matchApp, matchRunning, normalisePower, POWER_DELAY_S, readDesktopConfig, runPower, supportedDesktop, type DesktopConfig } from './desktop';
 import { looksLikeScreenshot, maySpeak, readScreenshotConfig, screenshotPrompt, SETTLE_MS, SETTLE_TRIES, type ScreenshotConfig } from './screenshots';
 import { look, photoName, readShotDescription, readVisionConfig, whileLooking, type VisionConfig } from './vision';
-import { CAPTION_MAX_CHARS, describedShots, forgetCaptions, moreThanOnePass, noteCaption, noteFailure, readCaptions, shotsNeedingALook } from './seen';
+import { CAPTION_MAX_CHARS, captionsSince, describedShots, forgetCaptions, moreThanOnePass, noteCaption, noteFailure, readCaptions, shotsNeedingALook, shotsSince } from './seen';
 import { breaksMute, brokeMuteNote, isMuted, muteNote, readMuteAsk, unmuteNote, weighMute, type MuteState } from './mute';
 import { LAYER, compileLog, type Candidate } from './compile';
 import { normFrom, charterTraits, feelingsShowAt, fuseOf, growMonth, growthNote, readTraits, traitLean, traitMeter, travelled, TRAIT_NAMES, type GrowthStep, type MonthSignals, type Traits } from './growth';
@@ -240,6 +240,8 @@ let companionWindow: BrowserWindow | null = null;
 /** Where screenshots pushed from a desk are kept. A folder per day under here,
  *  which is the folder the activity log is describing. */
 function shotStoreRoot(): string { return path.join(app.getPath('userData'), 'screenshots'); }
+/** Said once a run, not once a tick: the backlog is looked at every few minutes. */
+let saidShotsBeforeSlate = false;
 
 /**
  * What the desk was showing, read on this machine.
@@ -311,8 +313,23 @@ async function lookAtSyncedShots() {
   if (readingMangaNow) return;
   const root = shotStoreRoot();
   if (!existsSync(root)) return;
-  const captions = readCaptions(store.get('shots.captions'));
-  const held = heldShots(root);
+  // Only the days she was there for (seen.ts). A reset clears her captions, and
+  // the ledger is also what marks a picture seen, so without this the whole
+  // backlog reads as new and she re-describes a life she no longer has.
+  const slateDay = getSlate()?.at.slice(0, 10) ?? null;
+  const everyCaption = readCaptions(store.get('shots.captions'));
+  const captions = captionsSince(everyCaption, slateDay);
+  if (captions.length !== everyCaption.length) {
+    console.log(`[shot] dropping ${everyCaption.length - captions.length} caption(s) she wrote for days before the reset`);
+    store.set('shots.captions', captions);
+  }
+  const everyDay = heldShots(root);
+  const held = shotsSince(everyDay, slateDay);
+  if (!saidShotsBeforeSlate && Object.keys(held).length !== Object.keys(everyDay).length) {
+    saidShotsBeforeSlate = true;
+    const left = Object.values(everyDay).reduce((n, names) => n + names.length, 0) - Object.values(held).reduce((n, names) => n + names.length, 0);
+    console.log(`[shot] leaving ${left} shot(s) from before the reset alone — his to keep, not hers to look at`);
+  }
   // Nothing the desk has already described. Its vision model looked at that
   // burst anyway and wrote the answer onto the entry, and the entry travels
   // here with the log — so this pass exists for what arrived with nothing said
