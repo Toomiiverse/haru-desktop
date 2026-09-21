@@ -1,7 +1,7 @@
 // The slate fades on its own, or it is still telling her to ask in March.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { blankSlateInstruction, blankSlateOpening, BODY_KEYS, HAND_WRITTEN, readSlate, RESET_KEYS, slateIsNewer, SLATE_DISARM_MINUTES, SLATE_SETTLED, SLATE_SETTLED_DAYS, SLATE_STRANGER, withoutPreSlate } from '../electron/blankslate';
+import { blankSlateInstruction, blankSlateOpening, BODY_KEYS, HAND_WRITTEN, readSlate, RESET_KEYS, slateIsNewer, SLATE_DISARM_MINUTES, SLATE_SETTLED, SLATE_SETTLED_DAYS, SLATE_STRANGER, withoutPreSlate, withoutPreSlateDays } from '../electron/blankslate';
 
 const NOW = Date.parse('2026-09-20T10:00:00.000Z');
 const daysAgo = (days: number) => ({ at: new Date(NOW - days * 86_400_000).toISOString() });
@@ -42,9 +42,31 @@ test('an unreadable stamp ends it rather than lasting forever', () => {
 });
 
 test('the opening angle is only for the days she is a stranger', () => {
-  assert.match(blankSlateOpening(daysAgo(0), 0, NOW), /do not know who this is/);
+  assert.match(blankSlateOpening(daysAgo(0), 0, NOW), /nothing about them but their name/);
   assert.equal(blankSlateOpening(daysAgo(0), SLATE_STRANGER, NOW), '');
   assert.equal(blankSlateOpening(null, 0, NOW), '');
+});
+
+test('she is not told she has lost the one thing the reset keeps', () => {
+  // The persona names him and a reset deliberately spares it, so "you do not
+  // know this person's name" was contradicted in the same prompt.
+  const said = blankSlateInstruction(daysAgo(0), 0, NOW);
+  assert.match(said, /You know their name/);
+  assert.doesNotMatch(said, /do not know this person's name/);
+  assert.match(said, /part of who you are/);
+});
+
+test('a body pushing its whole log cannot put the days before the reset back', () => {
+  const log = { '2026-09-18': [{ at: 'x' }], '2026-09-20': [{ at: 'y' }], '2026-09-21': [{ at: 'z' }] };
+  const kept = withoutPreSlateDays(log, { at: '2026-09-20T14:00:00.000Z' }) as Record<string, unknown>;
+  assert.deepEqual(Object.keys(kept), ['2026-09-20', '2026-09-21'], 'the day of the reset is kept whole');
+});
+
+test('with no slate the log is untouched, and rubbish is handed straight back', () => {
+  const log = { '2026-09-18': [] };
+  assert.equal(withoutPreSlateDays(log, null), log);
+  assert.equal(withoutPreSlateDays(log, { at: 'not a date' }), log);
+  assert.equal(withoutPreSlateDays('not a log', { at: '2026-09-20T14:00:00.000Z' }), 'not a log');
 });
 
 test('the reset keeps her attitude, his settings and his own things', () => {

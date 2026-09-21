@@ -17,7 +17,7 @@ import { withDiscoveredExpressions } from './expressions';
 import { reportCapabilities, seesItsOwnScreen } from './capabilities';
 import { followCalendar, chaseableOverdue, findItem, shiftDays, formatAgenda, itemStatus, missedInstruction, movedSaid, putOffInstruction, putOffUntil, relevantItems, readsAsAnswerToHer, readsAsBareReport, tickOffInstruction, readsAsDone, doneClause, readsAsNotDone, relativeDay, staleItemNamed, inventedTimeFor, raisedRecently, type ItemStatus, underwayClause, isUnderway, FOLLOW_UP_MS } from './agenda';
 import { isRelaunchNotReturn, openingAngles, pickAngle, shouldPipeUp, PIPE_UP_CHANCE } from './opening';
-import { blankSlateOpening, BODY_KEYS, readSlate, RESET_KEYS, slateIsNewer, SLATE_DISARM_MINUTES, withoutPreSlate, type BlankSlate } from './blankslate';
+import { blankSlateInstruction, blankSlateOpening, BODY_KEYS, readSlate, RESET_KEYS, slateIsNewer, SLATE_DISARM_MINUTES, withoutPreSlate, withoutPreSlateDays, type BlankSlate } from './blankslate';
 import { allDayDueMinutes, isEveningCheck, reminderInstruction, reminderTier, reminderVolume, shouldRemind, type ReminderState } from './reminders';
 import { isHeated, readTone, sharpen, toneGesture, tonePose } from './tone';
 import { isSilenced, nextPushback, PUSHBACK_LIMIT, pushbackInstruction, readsAsDropIt, type Pushback } from './pushback';
@@ -1736,6 +1736,18 @@ function unpromptedContext(subjectNow?: string): string {
   // one sentence about rain and three about being ignored (2026-09-20).
   const weatherIsTheErrand = subjectNow === 'The weather';
   const parts = [summariseFollowing(getFollowing(), Date.now()), todaySoFar(), alreadySaidRecently(asides, CHAT_TIMEZONE, Date.now(), theirLastWordAt(), undefined, subjectNow), stillWaiting(), describeWhereabouts(getWhereabouts()), toldNow(), arrivalNote(), unansweredAsksNote(asides, CHAT_TIMEZONE, Date.now()), weatherIsTheErrand ? '' : weatherToDrawOn(getWeather().last, weatherWhere(), asides.map(aside => aside.text), Date.now(), getWeather().disputedAt), nightRaisedAlready(asides.map(aside => aside.text)), sleepNote(getHerSleepSchedule(), zonedNow(CHAT_TIMEZONE)), openingsToAvoid(asides, Date.now())].filter(Boolean);
+  // While she is a stranger, the line this function ends on is a lie: "pick up
+  // something from today — what they told you" is a past she does not have, and
+  // it is the last thing every one of these composers reads. The slate replaces
+  // it, and it is put here for the same reason everything else is — there are
+  // four of them, and the daily opener was the only one that had it. What sits
+  // above stays: those are things in front of her now, not things she is meant
+  // to remember.
+  const slateNote = blankSlateInstruction(getSlate(), knownSinceSlate());
+  if (slateNote) {
+    const asStranger = [slateNote, blankSlateOpening(getSlate(), knownSinceSlate())].filter(Boolean).join(' ');
+    return parts.length ? `${parts.join('\n')}\n${asStranger}` : asStranger;
+  }
   if (!parts.length) return '';
   // "Do not repeat a point you have already made" was read as "change the
   // subject": once a thread was answered and settled she abandoned the day
@@ -4035,7 +4047,10 @@ async function considerPipingUp(environment: Environment) {
       NO_INVENTED_HISTORY,
       unpromptedContext(),
       'One or two short lines. Do not greet them, do not ask if they are still there, and do not point out how long it has been — you are starting a thought, not filing a complaint about being ignored.',
-      angle ? `Open on this in particular: ${angle.instruction}` : '',
+      // Silent while she is a stranger, the same as the daily opener: every angle
+      // in the picker assumes a history with him — the overdue task, the
+      // callback, the unprovoked jab — and she has none.
+      blankSlateOpening(getSlate(), knownSinceSlate()) ? '' : angle ? `Open on this in particular: ${angle.instruction}` : '',
     ].filter(Boolean).join(' ');
 
     const line = await ollamaQuip(system, 'Say something.', config);
@@ -4528,6 +4543,14 @@ const { getMemories, setMemories, addMemory, mergeIn, getSessions, getMonthNotes
 // they are never treated as guesses.
 let admitVaultMemory: ((draft: { text: string; kind: 'relationship' | 'preference' | 'fact'; subject?: string }) => { created: boolean } | null) | undefined = undefined;
 admitVaultMemory = draft => {
+  // Not while she is a stranger. His pages are the one part of her record a reset
+  // cannot take — they are his, and the sync re-reads them every hour — so a
+  // minute after the wipe they put fifteen facts about him back in her head and
+  // spent fifteen of the twenty-five that end the slate. They come back on their
+  // own the moment it lapses, because the pages are read again every hour
+  // (blankslate.ts). Indexing them as documents is untouched: this is only the
+  // half that becomes a memory of hers.
+  if (blankSlateInstruction(getSlate(), knownSinceSlate())) return null;
   // A resighting: the same line on the same page is not him saying it again.
   const result = addMemory(draft.text, draft.kind, draft.subject, { source: 'explicit', resighting: true });
   // A refused bullet used to reach the tally as a repeat, so a page whose lines
@@ -4701,6 +4724,32 @@ function getActiveCharacter() {
 function getSlate(): BlankSlate | null {
   const saved = store.get('her.slate') as Partial<BlankSlate> | undefined;
   return typeof saved?.at === 'string' && saved.at ? { at: saved.at } : null;
+}
+
+/**
+ * How many things she has learned about him since the reset, which is what ends
+ * the slate (blankslate.ts).
+ *
+ * Not getMemories().length. His vault pages are admitted as memories and marked
+ * explicit, and the sync re-reads them every hour: counting those would have the
+ * slate spend fifteen of its twenty-five on his own filing cabinet, before he had
+ * said a word — the fade would go quiet while she still knew nothing he had told
+ * her. Records born before the slate are the old life and do not count either.
+ *
+ * With no slate it is simply how many she holds, which is what every other
+ * caller of this number meant before there was a reset at all.
+ */
+function knownSinceSlate(): number {
+  const slate = getSlate();
+  const memories = getMemories();
+  if (!slate) return memories.length;
+  const after = Date.parse(slate.at);
+  if (!Number.isFinite(after)) return memories.length;
+  return memories.filter(memory => {
+    if (memory.source === 'explicit') return false;
+    const born = Date.parse(memory.createdAt ?? '');
+    return Number.isFinite(born) && born >= after;
+  }).length;
 }
 
 /**
@@ -5382,10 +5431,8 @@ async function composeOpening(): Promise<string | null> {
     moodInstruction(mood.irritation),
     egoInstruction(mood.ego),
     freshStartInstruction(fresh),
-    // Her first line after a reset is the one that has to land: she is about to
-    // speak to someone she has never met. Above the angle picker, which it
-    // replaces — see below.
-    blankSlateOpening(getSlate(), getMemories().length),
+    // Her first line after a reset rides in on unpromptedContext below now, with
+    // the other four composers that speak first. It was only here before.
     kind === 'return'
       ? 'The user has just come back after being away a while. The conversation above is still there; pick it back up rather than introducing yourself.'
       : 'This is the start of a new conversation.',
@@ -5406,7 +5453,7 @@ async function composeOpening(): Promise<string | null> {
     // Silent while she is a stranger: every angle in the picker — the overdue
     // task, the callback, the unprovoked jab — assumes a history with him, and
     // she has none. The line above is the angle for those days.
-    blankSlateOpening(getSlate(), getMemories().length) ? '' : angle ? `Open on this in particular: ${angle.instruction}` : '',
+    blankSlateOpening(getSlate(), knownSinceSlate()) ? '' : angle ? `Open on this in particular: ${angle.instruction}` : '',
   ].filter(Boolean).join(' ');
 
   try {
@@ -7877,11 +7924,15 @@ const promptState = {
     fresh,
     // Still a stranger to him, if the reset was recent (blankslate.ts).
     slate: getSlate(),
-    known: getMemories().length,
+    known: knownSinceSlate(),
     herRecentReplies,
     recalled: recallNote(recalled, new Intl.DateTimeFormat('en-AU', { weekday: 'long', timeZone: 'UTC' })),
     linked: linkedNote(factGraph, linked),
-    lore: loreNote(lore.cards),
+    // Lore.md is his page, and it hands her his name, his job, his business
+    // address, his psychologist and his diagnosis — on exactly the message the
+    // slate has her asking who he is. His page is untouched and the cards come
+    // back when the slate lapses (blankslate.ts).
+    lore: blankSlateInstruction(getSlate(), knownSinceSlate()) ? '' : loreNote(lore.cards),
     examples: examplesNote(todaysExamples()),
     booked: bookedNote(scheduler.list(), Date.now(), CHAT_TIMEZONE),
     onHerMind: mindNote(store.getThoughts(), Date.now(), 2, Number.isFinite(Date.parse(getMood().lastMessageAt ?? '')) ? Date.parse(getMood().lastMessageAt!) : undefined),
@@ -12622,6 +12673,8 @@ function sentenceStreamer(onSentence?: (sentence: string, emotion: string) => vo
   };
 }
 
+const refusedShotDays = new Set<string>();
+
 function webDeps(): WebDeps {
   const deps: WebDeps = {
     readAccess: getWebAccess,
@@ -13265,13 +13318,30 @@ function webDeps(): WebDeps {
     shots: {
       held: () => heldShots(shotStoreRoot()),
       keep: (day, name, bytes) => {
+        // A picture of a day she no longer remembers is not hers to hold, and her
+        // captions went with the wipe — so an old shot arriving here would only be
+        // described again from scratch. Said once per day rather than once per
+        // picture: the desk pushes hundreds.
+        const slate = getSlate();
+        // `day` is the sender's claim and typed unknown on purpose: anything that
+        // is not a date string falls through to keepShot, whose job is refusing it.
+        if (slate && typeof day === 'string' && day < slate.at.slice(0, 10)) {
+          if (!refusedShotDays.has(day)) {
+            refusedShotDays.add(day);
+            console.log(`[activity] refusing the desk's shots from ${day} — before the reset`);
+          }
+          return;
+        }
         const written = keepShot(shotStoreRoot(), day, name, bytes);
         console.log(`[activity] kept ${path.basename(written)} (${(bytes.length / 1024 | 0)}KB) from the desk`);
       },
     },
     mergeActivity(theirs) {
       const before = store.getActivityLog();
-      const merged = mergeActivity(before, theirs);
+      // The same filter memories get, for the log: the desk pushes its whole
+      // thing and the merge only ever adds, so without this the reset is undone
+      // for everything he was doing before it (blankslate.ts).
+      const merged = mergeActivity(before, withoutPreSlateDays(theirs, getSlate()));
       store.setActivityLog(merged);
       const days = Object.keys(merged).length;
       const entries = Object.values(merged).reduce((total, list) => total + list.length, 0);

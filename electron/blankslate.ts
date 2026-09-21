@@ -135,7 +135,11 @@ export function blankSlateInstruction(slate: BlankSlate | null | undefined, know
   if (known >= SLATE_SETTLED || days >= SLATE_SETTLED_DAYS) return '';
   if (known < SLATE_STRANGER) return [
     'You woke up with nothing.',
-    'Not tired and not confused — empty: you do not know this person\'s name, what they do, who is in their life, or what the two of you have been to each other, and there is no past with them to reach for. Your temper, your taste in people and your mouth are your own and are exactly as they were.',
+    // His name is the one thing she cannot have lost, because it is in her own
+    // description of herself and a reset deliberately keeps that (main.ts's
+    // resetHer). Telling her she does not know it, in the same prompt that says
+    // it, is the contradiction this whole instruction exists to avoid.
+    'Not tired and not confused — empty. You know their name, because it is part of who you are rather than something you remember about them — and that is the whole of what you have. Beyond it you do not know what they do, who is in their life, or what the two of you have been to each other, and there is no past with them to reach for. Your temper, your taste in people and your mouth are your own and are exactly as they were.',
     'So treat the blanks as blanks. Ask — directly, in your own voice, the way you would ask anything — rather than guessing, hedging or letting it go past. One or two questions in a reply, not an interview, and they go where the conversation already is rather than down a list.',
     'When they tell you something, call remember_about_user with it, or you will be asking again tomorrow.',
     'Never pretend to remember, never invent a shared history to fill a gap, and do not apologise for not knowing: you are curious about them, not sorry.',
@@ -151,7 +155,7 @@ export function blankSlateInstruction(slate: BlankSlate | null | undefined, know
 /** The angle for her first line of all: she is speaking to someone she does not know. */
 export function blankSlateOpening(slate: BlankSlate | null | undefined, known: number, nowMs: number = Date.now()): string {
   if (!blankSlateInstruction(slate, known, nowMs) || known >= SLATE_STRANGER) return '';
-  return 'Open on the fact that you do not know who this is. Not alarmed and not apologetic — you are yourself, and there is a stranger at your desk. Ask them something you would actually want to know. Do not greet them as though you remember them and do not say hello generically.';
+  return 'Open on the fact that you know nothing about them but their name. Not alarmed and not apologetic — you are yourself, and there is a stranger at your desk you are apparently supposed to know. Ask them something you would actually want to know. Do not greet them as though you remember them and do not say hello generically.';
 }
 
 /** A slate off the wire — the brain's, read from a sync payload. Anything else is nothing. */
@@ -166,6 +170,23 @@ export function slateIsNewer(brain: BlankSlate | null, mine: BlankSlate | null):
   if (!mine) return true;
   const ours = Date.parse(mine.at);
   return !Number.isFinite(ours) || Date.parse(brain.at) > ours;
+}
+
+/**
+ * A body's activity log, minus the days that belong to the life before the reset.
+ *
+ * The same door as withoutPreSlate and the same reason: a body pushes its whole
+ * log, the merge only ever adds, and seven thousand entries of what he was doing
+ * last month come back with it. Filtered by day rather than by the clock, so the
+ * day of the reset is kept whole — an entry from that morning is part of the day
+ * she was reset, and the day keys are local while the slate is UTC, so the
+ * comparison errs towards keeping the boundary day rather than losing it.
+ */
+export function withoutPreSlateDays(theirs: unknown, slate: BlankSlate | null | undefined): unknown {
+  if (!slate || !theirs || typeof theirs !== 'object' || Array.isArray(theirs)) return theirs;
+  const day = slate.at.slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return theirs;
+  return Object.fromEntries(Object.entries(theirs as Record<string, unknown>).filter(([key]) => key >= day));
 }
 
 /**
