@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, writeFileSync, existsSync, readdirSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, existsSync, readdirSync, statSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { HaruStore, SCHEMA_VERSION, MIGRATIONS, normalizeMemoryFile } from '../electron/store';
@@ -143,6 +143,130 @@ test('recoverBackups restores the newest backup over a corrupt file', () => {
   const reopened = new HaruStore({ cwd: dir, configName, knowledgeFile });
   assert.equal(reopened.get('value'), 'precious');
 });
+
+test('recovery uses the user-data directory and leaves every healthy store untouched', () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'haru-recovery-test-'));
+  const cwd = path.join(root, 'user-data');
+  mkdirSync(cwd);
+  const options = { cwd, knowledgeFile: path.join(root, 'custom-knowledge.json') };
+  const store = new HaruStore(options);
+  store.set('value', 'saved config');
+  const healthy = [options.knowledgeFile, ...['archive', 'memories', 'activity', 'graph', 'schedule', 'thoughts'].map(name => path.join(cwd, `${name}.json`))];
+  for (const file of healthy) writeFileSync(file, '{"value":"old backup"}');
+  store.backup('recovery');
+  for (const file of healthy) writeFileSync(file, '{ "value": "new live data" }\n');
+  const before = healthy.map(file => ({ contents: readFileSync(file, 'utf8'), modified: statSync(file).mtimeMs }));
+  const config = path.join(cwd, 'config.json');
+  writeFileSync(config, '{damaged config');
+
+  assert.equal(HaruStore.recoverBackups(options), true);
+  assert.equal(new HaruStore(options).get('value'), 'saved config');
+  for (const [index, file] of healthy.entries()) {
+    assert.equal(readFileSync(file, 'utf8'), before[index].contents, file);
+    assert.equal(statSync(file).mtimeMs, before[index].modified, file);
+  }
+  const damaged = readdirSync(cwd).filter(name => name.startsWith('config.json.corrupt-'));
+  assert.equal(damaged.length, 1);
+  assert.equal(readFileSync(path.join(cwd, damaged[0]), 'utf8'), '{damaged config');
+  assert.equal(HaruStore.recoverBackups(options), false, 'a healthy store needs no recovery');
+  assert.ok(!readdirSync(cwd).some(name => name.includes('.recovering-')));
+});
+
+test('recovery honors custom paths for all stores, including a nested config name', () => {
+  const cwd = mkdtempSync(path.join(tmpdir(), 'haru-recovery-test-'));
+  const custom = path.join(cwd, 'other-data');
+  mkdirSync(custom);
+  const options = {
+    cwd, configName: 'settings/haru',
+    knowledgeFile: path.join(custom, 'knowledge-store.json'),
+    archiveFile: path.join(custom, 'archive-store.json'),
+    memoriesFile: path.join(custom, 'memories-store.json'),
+    activityFile: path.join(custom, 'activity-store.json'),
+    graphFile: path.join(custom, 'graph-store.json'),
+    scheduleFile: path.join(custom, 'schedule-store.json'),
+    thoughtsFile: path.join(custom, 'thoughts-store.json'),
+  };
+  const store = new HaruStore(options);
+  store.set('value', 'config');
+  const files = [options.knowledgeFile, options.archiveFile, options.memoriesFile, options.activityFile, options.graphFile, options.scheduleFile, options.thoughtsFile];
+  for (const file of files) writeFileSync(file, JSON.stringify({ value: path.basename(file) }));
+  files.push(path.join(cwd, 'settings', 'haru.json'));
+  const saved = files.map(file => readFileSync(file, 'utf8'));
+  assert.equal(store.backup('custom-paths').length, 8);
+  for (const file of files) writeFileSync(file, '{corrupt');
+
+  assert.equal(HaruStore.recoverBackups(options), true);
+  assert.equal(new HaruStore(options).get('value'), 'config');
+  for (const [index, file] of files.entries()) assert.equal(readFileSync(file, 'utf8'), saved[index], file);
+});
+
+test('recovery skips newer damaged backups and selects the newest usable object', () => {
+  const { dir, configName, knowledgeFile } = makeStore();
+  const config = path.join(dir, `${configName}.json`);
+  const versions = ['{"value":"old"}', '{"value":"newest usable"}', '{broken', 'null', '[]'];
+  for (const [index, contents] of versions.entries()) {
+    const backup = `${config}.before-recovery-${index}`;
+    writeFileSync(backup, contents);
+    utimesSync(backup, 1000 + index, 1000 + index);
+  }
+  mkdirSync(`${config}.before-recovery-directory`);
+  writeFileSync(config, '{broken live data');
+
+  assert.equal(HaruStore.recoverBackups({ cwd: dir, configName, knowledgeFile }), true);
+  assert.equal(new HaruStore({ cwd: dir, configName, knowledgeFile }).get('value'), 'newest usable');
+});
+
+test('recovery leaves damaged data intact when no valid backup exists', () => {
+  const { dir, configName, knowledgeFile } = makeStore();
+  const config = path.join(dir, `${configName}.json`);
+  writeFileSync(config, '{original damage');
+  writeFileSync(`${config}.before-invalid`, '{also damaged');
+  const before = readdirSync(dir).sort();
+
+  assert.equal(HaruStore.recoverBackups({ cwd: dir, configName, knowledgeFile }), false);
+  assert.equal(readFileSync(config, 'utf8'), '{original damage');
+  assert.deepEqual(readdirSync(dir).sort(), before);
+});
+
+test('a partial recovery cannot report success while config is still damaged', () => {
+  const { dir, configName, knowledgeFile } = makeStore();
+  const config = path.join(dir, `${configName}.json`);
+  writeFileSync(config, '{unrecoverable');
+  writeFileSync(knowledgeFile, '{recoverable');
+  writeFileSync(`${knowledgeFile}.before-valid`, '{"documents":[],"chunks":[]}');
+
+  assert.equal(HaruStore.recoverBackups({ cwd: dir, configName, knowledgeFile }), false);
+  assert.equal(readFileSync(config, 'utf8'), '{unrecoverable');
+  assert.deepEqual(JSON.parse(readFileSync(knowledgeFile, 'utf8')), { documents: [], chunks: [] });
+});
+
+test('a recovered config is enough to boot when a side file is damaged with no backup', () => {
+  // A 0-byte thoughts.json from a crashed write must not keep her from
+  // starting once config.json itself has been repaired: its own reader warns
+  // and starts empty, and the damaged bytes stay where they were.
+  const { dir, configName, knowledgeFile } = makeStore();
+  const config = path.join(dir, `${configName}.json`);
+  const options = { cwd: dir, configName, knowledgeFile };
+  const good = new HaruStore(options);
+  good.set('value', 'precious');
+  good.backup('side-file');
+  writeFileSync(config, '{corrupt');
+  const thoughts = path.join(dir, 'thoughts.json');
+  writeFileSync(thoughts, '');
+
+  assert.equal(HaruStore.recoverBackups(options), true);
+  assert.equal(new HaruStore(options).get('value'), 'precious');
+  assert.equal(readFileSync(thoughts, 'utf8'), '');
+  assert.doesNotThrow(() => new HaruStore(options).getThoughts(), 'the damaged side file reads as empty rather than throwing');
+});
+
+test('a missing live store is not resurrected from an old backup', () => {
+  const { dir, configName, knowledgeFile } = makeStore();
+  writeFileSync(`${knowledgeFile}.before-old`, '{"documents":[],"chunks":[]}');
+  assert.equal(HaruStore.recoverBackups({ cwd: dir, configName, knowledgeFile }), false);
+  assert.equal(existsSync(knowledgeFile), false);
+});
+
 test('the forgetting log is bounded, so the record of what she forgot cannot grow forever', () => {
   const { store } = makeStore();
   assert.deepEqual(store.getForgettingLog(), []);
