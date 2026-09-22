@@ -1,0 +1,61 @@
+/* Her, on the desk: the phone page's avatar styles, brought to the companion
+   window. The artwork is one SVG per emotion, put in as itself and crossfaded.
+   Square, sized by --avatar-size (set from JS to the window's shorter side),
+   never stretched; the black square the files ship behind her is hidden, so she
+   sits on the transparent window and the desktop shows around her. The float
+   lives on the outer element and never restarts; the settle on a change of face
+   and the pop when she talks live on the body inside it. Her eyes carry a
+   transform that two variables move, eased, wherever her attention is.
+
+   Scoped under .svg-avatar-canvas so none of it leaks into the rest of the app;
+   the custom properties themselves are registered globally, as @property must
+   be, and are only read here. */
+@property --idle-bob { syntax:'<length>'; inherits:false; initial-value:4px; }
+@property --idle-sway { syntax:'<angle>'; inherits:false; initial-value:1.2deg; }
+@property --idle-breath { syntax:'<number>'; inherits:false; initial-value:1.015; }
+@property --gaze-x { syntax:'<length>'; inherits:true; initial-value:0px; }
+@property --gaze-y { syntax:'<length>'; inherits:true; initial-value:0px; }
+@property --lid { syntax:'<number>'; inherits:true; initial-value:1; }
+@property --tilt { syntax:'<angle>'; inherits:false; initial-value:0deg; }
+@property --drift-x { syntax:'<number>'; inherits:false; initial-value:0; }
+@property --drift-y { syntax:'<number>'; inherits:false; initial-value:0; }
+
+.svg-avatar-canvas{
+  position:absolute;inset:0;
+  display:flex;align-items:flex-end;justify-content:center;
+  padding-bottom:2%;
+  overflow:hidden;
+  pointer-events:none;
+  --avatar-size:min(88vw,88vh);
+}
+.svg-avatar-canvas #avatar{position:relative;width:var(--avatar-size);height:var(--avatar-size);transform-origin:50% 62%;
+  --idle-bob:4px; --idle-sway:1.2deg; --idle-breath:1.015; --gaze-x:0px; --gaze-y:0px; --lid:1;
+  transition:--idle-bob .8s ease, --idle-sway .8s ease, --idle-breath .8s ease, --gaze-x .38s cubic-bezier(0.33, 1, 0.68, 1), --gaze-y .38s cubic-bezier(0.33, 1, 0.68, 1), --lid 70ms ease-in;
+  animation:svg-avatar-float 3800ms ease-in-out infinite; }
+/* How she holds herself: a cock of the head and a small roam from home, eased
+   over a second and a half so a new pose is a movement, not a jump. The roam is
+   a fraction of her own size, so it scales with her. */
+.svg-avatar-canvas #avatar-pose{position:absolute;inset:0;transform-origin:50% 68%;--tilt:0deg;--drift-x:0;--drift-y:0;
+  transform:translate(calc(var(--avatar-size) * var(--drift-x)), calc(var(--avatar-size) * var(--drift-y))) rotate(var(--tilt));
+  transition:--tilt 1.5s cubic-bezier(0.4, 0, 0.2, 1), --drift-x 1.8s cubic-bezier(0.4, 0, 0.2, 1), --drift-y 1.8s cubic-bezier(0.4, 0, 0.2, 1); }
+.svg-avatar-canvas #avatar-body{position:absolute;inset:0;transform-origin:50% 60%;}
+.svg-avatar-canvas #avatar .face{position:absolute;inset:0;opacity:0;}
+.svg-avatar-canvas #avatar .face svg{display:block;width:100%;height:100%;}
+.svg-avatar-canvas #avatar .face .backdrop{display:none;}
+/* A glance is a translation; a blink is a squash toward the eye's own middle,
+   because the art has no lids to close. */
+.svg-avatar-canvas #avatar .face .eye{transform:translate(var(--gaze-x), var(--gaze-y)) scaleY(var(--lid));transform-box:fill-box;transform-origin:center;}
+.svg-avatar-canvas #avatar .face.missing{visibility:hidden;}
+.svg-avatar-canvas #avatar-body.changed{animation:svg-avatar-settle .45s cubic-bezier(0.33, 1, 0.68, 1);}
+.svg-avatar-canvas #avatar-body.pop{animation:svg-avatar-pop .5s cubic-bezier(0.33, 1, 0.68, 1);}
+.svg-avatar-canvas #avatar.frozen,.svg-avatar-canvas #avatar.frozen #avatar-body{animation-play-state:paused;}
+@keyframes svg-avatar-float{
+  0%, 100% { transform:translateY(calc(var(--idle-bob) * -1)) rotate(calc(var(--idle-sway) * -1)) scale(1); }
+  50% { transform:translateY(var(--idle-bob)) rotate(var(--idle-sway)) scale(var(--idle-breath)); }
+}
+@keyframes svg-avatar-settle{0%{scale:.94;}55%{scale:1.04;}100%{scale:1;}}
+@keyframes svg-avatar-pop{30%{scale:1.06;}}
+@media (prefers-reduced-motion: reduce){
+  .svg-avatar-canvas #avatar,.svg-avatar-canvas #avatar-pose,.svg-avatar-canvas #avatar-body{animation:none !important;transition:none !important;}
+  .svg-avatar-canvas #avatar .face{transition:none !important;}
+}

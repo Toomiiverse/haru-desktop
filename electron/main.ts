@@ -8933,8 +8933,10 @@ function createCompanionWindow() {
 
   companionWindow.once('ready-to-show', () => {
     // Not when she was hidden on purpose: a headless box registers her model
-    // for the phone's stage and has no display worth drawing her on.
-    if (store.get('live2d.model') && !store.get('companion.hidden', false)) companionWindow?.show();
+    // for the phone's stage and has no display worth drawing her on. The SVG
+    // face needs no model at all, so it keeps the window either way.
+    const svgFace = store.get('avatar.kind', 'svg') !== 'model';
+    if ((store.get('live2d.model') || svgFace) && !store.get('companion.hidden', false)) companionWindow?.show();
   });
 
   let persistTimer: ReturnType<typeof setTimeout> | undefined;
@@ -14635,7 +14637,9 @@ app.whenReady().then(() => {
   ipcMain.handle('live2d:remove', () => {
     store.delete('live2d.model');
     broadcastLive2DChange(null);
-    companionWindow?.hide();
+    // Taking the 3D model away does not take her away: the SVG face is the
+    // window's avatar in its own right.
+    if (store.get('avatar.kind', 'svg') === 'model') companionWindow?.hide();
   });
   ipcMain.handle('companion:moveBy', (e, dx: number, dy: number) => {
     if (!companionWindow || e.sender!==companionWindow.webContents || ![dx,dy].every(n=>Number.isFinite(n)&&Math.abs(n)<4096)) return;

@@ -11,6 +11,7 @@ import App from './App';
 import { CompanionWindow } from './CompanionWindow';
 import './styles.css';
 import './live2d.css';
+import './svgAvatar.css';
 
 const isCompanion = new URLSearchParams(window.location.search).get('view') === 'companion';
 if (isCompanion) document.documentElement.dataset.view = 'companion';

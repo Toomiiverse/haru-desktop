@@ -2,6 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { StageFailureBoundary } from './components';
 import type { Live2DModelHandle } from './components/Live2DCanvas';
 import type { VRMHandle } from './components/VRMCanvas';
+import { SvgAvatarCanvas, type SvgAvatarHandle } from './components/SvgAvatarCanvas';
 import type { EarFeeling } from './companion/ears';
 import { ACTION_SHAPES, emotionHoldMs, expressionForEmotion, gazeForAction, GESTURE_DURATION_MS, resolveGaze, type ActionShape, type Gaze, type Gesture } from './companion/behaviour';
 import { POSES, POSE_TIMING, poseStrength } from './companion/pose';
@@ -114,6 +115,16 @@ export function CompanionWindow() {
   const dragging = useRef(false);
   const modelHandle = useRef<Live2DModelHandle | null>(null);
   const vrmHandle = useRef<VRMHandle | null>(null);
+  const svgHandle = useRef<SvgAvatarHandle | null>(null);
+  // Her face on the desk, rather than a body in a room. The SVG stage is the
+  // default now; a saved 'model' switches back to the VRM or Live2D rig without
+  // touching the rest of the window. See components/SvgAvatarCanvas.tsx.
+  const [avatarKind, setAvatarKind] = useState<'svg' | 'model'>('svg');
+  useEffect(() => {
+    void window.haru?.settings.get('avatar.kind').then(saved => {
+      if (saved === 'model' || saved === 'svg') setAvatarKind(saved);
+    }).catch(() => { /* never set: the SVG face is the default and needs no rescue */ });
+  }, []);
   const perch=useRef<import('../electron/perching').PerchState>({seated:false,jump:null});
   const movedByHand=useRef(false);
   const lastPointerOver=useRef<boolean|null>(null);
@@ -137,6 +148,12 @@ export function CompanionWindow() {
   const handleVRMReady = useCallback((handle: VRMHandle | null) => {
     vrmHandle.current = handle;lastPointerOver.current=null;
     expressions.current = handle?.expressions ?? [];
+  }, []);
+  // The SVG face has no rig expression names to match against — her mood drives
+  // the face directly through the handle.
+  const handleSvgReady = useCallback((handle: SvgAvatarHandle | null) => {
+    svgHandle.current = handle;lastPointerOver.current=null;
+    expressions.current = [];
   }, []);
   const readVRM = useCallback(() => ({ mouth: voice.current?.read() ?? SILENT, gaze: vrmGaze.current, wardrobe: wardrobe.current, ears: earFeeling.current, seated:perch.current.seated, jump:perch.current.jump, fall:perch.current.fall, walking:walking.current, walkingSpeed:speedFor(life.current.vitals.energy), desktop:perch.current.desktop }), []);
 
@@ -166,7 +183,7 @@ export function CompanionWindow() {
   // screen over a model that loaded perfectly well.
   useEffect(() => { setError(null); }, [model?.url]);
 
-  useEffect(() => window.haru?.companion.onSetExpression(name => { modelHandle.current?.expression(name); vrmHandle.current?.expression(name); }), []);
+  useEffect(() => window.haru?.companion.onSetExpression(name => { modelHandle.current?.expression(name); vrmHandle.current?.expression(name); svgHandle.current?.expression(name); }), []);
 
   // Held in a ref and read per frame rather than applied on change: expressions
   // rewrite these same parameters every frame, so a one-off write would be undone
@@ -287,10 +304,13 @@ export function CompanionWindow() {
     const bounds = stage.current?.getBoundingClientRect();
     const width = bounds?.width || window.innerWidth;
     const height = bounds?.height || window.innerHeight;
-    if(vrmHandle.current) {
-      const panel=document.querySelector('.companion-dialogue')?.getBoundingClientRect();
-      const over=dragging.current || !!(panel&&x>=panel.left&&x<=panel.right&&y>=panel.top&&y<=panel.bottom) || vrmHandle.current.hitTest(x,y);
-      if(over!==lastPointerOver.current){lastPointerOver.current=over;void window.haru?.companion.pointerOver(over);}
+    if(vrmHandle.current || svgHandle.current) {
+      const hitTest = vrmHandle.current?.hitTest ?? svgHandle.current?.hitTest;
+      if (hitTest) {
+        const panel=document.querySelector('.companion-dialogue')?.getBoundingClientRect();
+        const over=dragging.current || !!(panel&&x>=panel.left&&x<=panel.right&&y>=panel.top&&y<=panel.bottom) || hitTest(x,y);
+        if(over!==lastPointerOver.current){lastPointerOver.current=over;void window.haru?.companion.pointerOver(over);}
+      }
     }
     // Into the model's -1..1 focus space, clamped so a cursor far off-window
     // does not peg her eyes at the extreme.
@@ -317,6 +337,7 @@ export function CompanionWindow() {
     if (name) gesture.current = { name, startedAt: performance.now() };
     if (expression) modelHandle.current?.expression(expression);
     vrmHandle.current?.expression(expression);
+    svgHandle.current?.expression(value.emotion);
     if (!referenceClip(expression)) vrmHandle.current?.play(value.emotion);
   }), []);
 
@@ -326,6 +347,7 @@ export function CompanionWindow() {
     const manager = (modelHandle.current as unknown as { internalModel?: { motionManager?: { expressionManager?: { resetExpression?(): void } } } })?.internalModel?.motionManager?.expressionManager;
     manager?.resetExpression?.();
     vrmHandle.current?.expression(null);
+    svgHandle.current?.expression(null);
   }, []);
 
   // Poses are held in a ref and read per frame by the parameter layer, rather
@@ -607,16 +629,18 @@ export function CompanionWindow() {
     window.haru?.companion.resizeBy(event.deltaY < 0 ? 1.06 : 0.94);
   }
 
-  if (!model) return null;
+  if (avatarKind === 'model' && !model) return null;
   return (
     <div className="companion-stage">
-      <StageFailureBoundary key={model.url} onError={setError}>
+      {avatarKind === 'svg'
+        ? <SvgAvatarCanvas onError={setError} onReady={handleSvgReady} onFit={onFit} read={readVRM} />
+        : <StageFailureBoundary key={model!.url} onError={setError}>
         <Suspense fallback={null}>
-          {model.path.toLowerCase().endsWith('.vrm')
-            ? <VRMCanvas source={model.url} onError={setError} onReady={handleVRMReady} onFit={onFit} onPlacement={reportPlacement} read={readVRM} />
-            : <Live2DCanvas source={model.url} onError={setError} onReady={handleReady} onFit={onFit} />}
+          {model!.path.toLowerCase().endsWith('.vrm')
+            ? <VRMCanvas source={model!.url} onError={setError} onReady={handleVRMReady} onFit={onFit} onPlacement={reportPlacement} read={readVRM} />
+            : <Live2DCanvas source={model!.url} onError={setError} onReady={handleReady} onFit={onFit} />}
         </Suspense>
-      </StageFailureBoundary>
+      </StageFailureBoundary>}
       {/* Everything that reacts to a pointer lives on this, not on the stage, so
           the transparent margin around her no longer drags or pokes her. Note
           that those clicks are inert rather than passed through: the window still
