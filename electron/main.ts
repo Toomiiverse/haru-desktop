@@ -826,10 +826,30 @@ async function formDayMemories(lines: string[], doing: string, day: string, conf
   if (lines.length < 4 && !doing) { markFormed(day, messageCount); return; }
   forming = true;
   try {
-    if (await formFrom(lines, doing, day, config)) markFormed(day, messageCount);
+    if (await formFrom(lines, doing, day, config)) { markFormed(day, messageCount); formRetries.delete(day); }
+    else noteFormingFailed(day);
   } finally {
     forming = false;
   }
+}
+
+/**
+ * Day → how many times forming it has failed and when to try again. A day the
+ * model keeps failing on (a window it cannot read, a context it overflows)
+ * would otherwise be the newest unformed day at every tick: paid for every
+ * two minutes, for as long as the app runs, and standing in front of every
+ * older day. Backing off — doubling from the tick, capped at a day — lets the
+ * tick move on to the days behind it and still comes back, so an outage on
+ * the model's side loses nothing. Held in memory: a restart tries afresh.
+ */
+const formRetries = new Map<string, { tries: number; until: number }>();
+const FORMING_RETRY_CAP_MS = 24 * 3_600_000;
+
+function noteFormingFailed(day: string): void {
+  const tries = (formRetries.get(day)?.tries ?? 0) + 1;
+  const wait = Math.min(FORMING_RETRY_CAP_MS, FORMING_TICK_MS * 2 ** tries);
+  formRetries.set(day, { tries, until: Date.now() + wait });
+  console.warn(`[memory] forming ${day} failed (try ${tries}); next in ${Math.round(wait / 60_000)} min`);
 }
 
 /** Days already read for memories, with how many messages they had: a day that has grown is read again. */
@@ -864,8 +884,9 @@ async function formingTick(): Promise<void> {
   const today = currentChatDayKey();
   const archive = store.getArchive();
   const done = formedDays();
+  const now = Date.now();
   const day = Object.keys(archive).filter(key => !key.includes('#') && key < today).sort().reverse()
-    .find(key => done[key] !== (archive[key] ?? []).length);
+    .find(key => done[key] !== (archive[key] ?? []).length && (formRetries.get(key)?.until ?? 0) <= now);
   if (!day) return;
   const messages = (archive[day] ?? []) as { role?: string; content?: string }[];
   await formDayMemories(dayLines(messages), activityDigest(day), day, config, messages.length);
@@ -7937,9 +7958,21 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // can find the memory even with no words in common.
   // And the message on its own, in parallel, so earlier lines about something
   // else cannot drown out what was just asked (RetrieveOptions.focus).
-  const [queryVector, latestVector] = await Promise.all([
+  // Further back than the days in front of her: an exchange or two from the
+  // archive, only when this message names something specific that they name too,
+  // or nothing. Its own embedding, of this message alone and with the search
+  // prefix, because the memories above are embedded without one. See recall.ts.
+  // Decided before the embeds go out so its request rides with the other two:
+  // the embedder is on the CPU and serves one request at a time, so awaited
+  // after them it was a third embed's wait on every reply that named anything.
+  const recallDay = localDateKey(zonedNow(CHAT_TIMEZONE));
+  const archiveIndex = chatIndex(recallDay);
+  const specific = rareTerms(archiveIndex, latest);
+  const recallModel = recallVectors.size && specific.size ? getKnowledgeEmbedder()?.model : undefined;
+  const [queryVector, latestVector, recallVector] = await Promise.all([
     tryEmbedQuery(`${recentUserContext} ${latest}`),
     recentUserContext.trim() ? tryEmbedQuery(latest) : Promise.resolve(null),
+    recallModel && embedFormat(recallModel) === recallFormat ? tryEmbedQuery(embedText(recallModel, 'query', latest)) : Promise.resolve(null),
   ]);
   const semantic = queryVector && memoryStore.vectors().size
     ? semanticSimilarities(getMemories(), queryVector, memoryStore.vectors())
@@ -7947,15 +7980,6 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   const latestSemantic = latestVector && memoryStore.vectors().size
     ? semanticSimilarities(getMemories(), latestVector, memoryStore.vectors())
     : undefined;
-  // Further back than the days in front of her: an exchange or two from the
-  // archive, only when this message names something specific that they name too,
-  // or nothing. Its own embedding, of this message alone and with the search
-  // prefix, because the memories above are embedded without one. See recall.ts.
-  const recallDay = localDateKey(zonedNow(CHAT_TIMEZONE));
-  const archiveIndex = chatIndex(recallDay);
-  const specific = rareTerms(archiveIndex, latest);
-  const recallModel = recallVectors.size && specific.size ? getKnowledgeEmbedder()?.model : undefined;
-  const recallVector = recallModel && embedFormat(recallModel) === recallFormat ? await tryEmbedQuery(embedText(recallModel, 'query', latest)) : null;
   // From the index rather than the archive again: rebuilding a year of exchanges is ~50 ms a turn.
   const shownDays = recallVector ? new Set(daysAlreadyShown(recallDay)) : null;
   const recalled = recallVector && shownDays
