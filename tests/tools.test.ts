@@ -21,7 +21,8 @@ import assert from 'node:assert/strict';
 import { WebSocketServer } from 'ws';
 import { chatTools, machineRelevant, runChatTool, type ToolAvailability, type ToolDeps } from '../electron/tools';
 import { runToolLoop } from '../electron/toolloop';
-import type { ToolCall } from '../electron/provider';
+import { createTurnContext } from '../electron/turncontext';
+import type { ChatMessage, ToolCall } from '../electron/provider';
 
 const EVERYTHING: ToolAvailability = {
   choices: true,
@@ -131,6 +132,111 @@ const call = (name: string, args: Record<string, unknown> = {}): ToolCall =>
 
 const run = (name: string, args: Record<string, unknown> = {}, said = '', over: Partial<ToolDeps> = {}) =>
   runChatTool(call(name, args), said, deps(over));
+
+function turnGate<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>(done => { resolve = done; });
+  return { promise, resolve };
+}
+
+test('a phone reply waiting on its model cannot inherit permissions from a concurrent desk reply', async () => {
+  const phone = createTurnContext({ web: true, hands: false });
+  const answer = turnGate<ChatMessage>();
+  const asked = turnGate<void>();
+  const phoneConversation: ChatMessage[] = [{ role: 'user', content: 'hello' }];
+  const phoneDeps = deps({ ...phone });
+  let phoneRounds = 0;
+  const waiting = runToolLoop(phoneConversation, {
+    ...phone,
+    ask: async () => {
+      if (phoneRounds++ === 0) { asked.resolve(); return answer.promise; }
+      return { role: 'assistant', content: 'That is for the desk.' };
+    },
+    runTool: call => runChatTool(call, 'hello', phoneDeps),
+    hasOpenTask: () => false,
+    canSearch: () => false,
+    resetStream: () => {},
+  });
+  await asked.promise;
+
+  const desk = createTurnContext({ hands: true, choices: true });
+  let deskRounds = 0;
+  await runToolLoop([{ role: 'user', content: 'hello' }], {
+    ...desk,
+    ask: async () => deskRounds++ === 0
+      ? { role: 'assistant', tool_calls: [call('offer_choices', { choices: ['Yes', 'Later'] })] }
+      : { role: 'assistant', content: 'Pick one.' },
+    runTool: call => runChatTool(call, 'hello', deps({ ...desk })),
+    hasOpenTask: () => false,
+    canSearch: () => false,
+    resetStream: () => {},
+  });
+  answer.resolve({ role: 'assistant', tool_calls: [
+    call('power', { action: 'shutdown' }),
+    call('show_wardrobe'),
+    call('offer_choices', { choices: ['Phone yes', 'Phone no'] }),
+  ] });
+  await waiting;
+
+  const replies = phoneConversation.filter(message => message.role === 'tool');
+  assert.equal(replies.length, 3);
+  assert.match(replies[0].content ?? '', /Not now/);
+  assert.match(replies[1].content ?? '', /Not on the phone/);
+  assert.match(replies[2].content ?? '', /Not on the phone/);
+  assert.deepEqual(phone.pendingChoices(), []);
+  assert.deepEqual(desk.pendingChoices(), ['Yes', 'Later']);
+  assert.equal(desk.handsAllowed(), true);
+  assert.equal(phone.handsAllowed(), false);
+});
+
+test('a page completing during another reply withdraws tools only from the reading turn', async () => {
+  const reading = createTurnContext({ hands: true });
+  reading.rememberSearch('first question', [{ title: 'First', url: 'https://example.com/first', snippet: 'first' }]);
+  const fetched = turnGate<Response>();
+  const fetching = turnGate<void>();
+  const requested: string[] = [];
+  const base = deps();
+  const readerDeps = deps({
+    ...reading,
+    store: { ...base.store, get: key => key === 'search' ? { enabled: true, readPages: true } : undefined },
+    net: { fetch: async url => {
+      requested.push(String(url));
+      fetching.resolve();
+      return fetched.promise;
+    } },
+  });
+  const offered: boolean[] = [];
+  const conversation: ChatMessage[] = [{ role: 'user', content: 'read result one' }];
+  const waiting = runToolLoop(conversation, {
+    ...reading,
+    ask: async (_conversation, { tools }) => {
+      offered.push(tools);
+      return offered.length === 1
+        ? { role: 'assistant', tool_calls: [call('read_web_page', { result: 1 })] }
+        : { role: 'assistant', content: 'The page has the answer.' };
+    },
+    runTool: call => runChatTool(call, 'read result one', readerDeps),
+    hasOpenTask: () => false,
+    canSearch: () => false,
+    resetStream: () => {},
+  });
+  await fetching.promise;
+  const desk = createTurnContext({ hands: true });
+  desk.rememberSearch('second question', [{ title: 'Second', url: 'https://example.com/second', snippet: 'second' }]);
+  fetched.resolve(new Response('This is the page answering the first question. '.repeat(10)));
+  await waiting;
+
+  assert.deepEqual(requested, ['https://example.com/first']);
+  assert.match(conversation.find(message => message.role === 'tool')?.content ?? '', /first question/);
+  assert.deepEqual(offered, [true, false]);
+  assert.equal(reading.pageWasRead(), true);
+  assert.equal(reading.handsAllowed(), false);
+  assert.match(await runChatTool(call('power', { action: 'shutdown' }), 'read result one', readerDeps), /Not now/);
+  assert.equal(desk.pageWasRead(), false);
+  assert.equal(desk.handsAllowed(), true);
+  assert.equal(createTurnContext({ hands: true }).handsAllowed(), true);
+  assert.equal(reading.handsAllowed(), false, 'starting another reply cannot re-arm the reader');
+});
 
 test('every tool she can be offered has a handler behind it', async () => {
   // Called with no arguments, so each handler answers its own "nothing to do"
