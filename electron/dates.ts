@@ -7,6 +7,19 @@ const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', '
 export const MONTH_PATTERN = '(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)';
 const monthIndex = (name: string) => MONTHS.indexOf(name.slice(0, 3).toLowerCase());
 
+/**
+ * A real calendar day as written on a record: YYYY-MM-DD and nothing else.
+ * The round trip through toISOString is what refuses "2026-02-30" — V8 parses
+ * it as 2 March, and a memory dated that way would render as a day that was
+ * never said. One helper for the sorter, the blocks and search_chats alike, so
+ * a date the tool would refuse cannot be stored on a record by another door.
+ */
+export function isDay(value: unknown): value is string {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const at = Date.parse(`${value}T00:00:00Z`);
+  return Number.isFinite(at) && new Date(at).toISOString().slice(0, 10) === value;
+}
+
 // Reads the wall-clock date/time in `timeZone` as local Date fields, so day-boundary
 // math (getDate/getHours/etc.) reflects that zone regardless of the OS's own timezone.
 export function zonedNow(timeZone: string, at: Date = new Date()): Date {
