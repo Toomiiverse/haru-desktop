@@ -54,6 +54,7 @@ function deps(overrides: Partial<WebDeps> = {}): WebDeps {
     sayStream: async (_text, onChunk) => { onChunk('Fine.'); return { reply: 'Fine.' }; },
     retryStream: async (onChunk) => { onChunk('Again.'); return { reply: 'Again.' }; },
     rate: async (id) => (id === 'hers' ? { line: 'Finally, some taste.' } : null),
+    tune: (id, wrong, rather) => id === 'hers' && Boolean(wrong?.trim() || rather?.trim()),
     expression: async () => ({ emotion: null, expression: null }),
     history: () => [],
     agenda: () => [],
@@ -600,6 +601,25 @@ test('a reply of hers can be rated, and the page gets her comeback', async () =>
     assert.equal((await web.call('/api/chat/rate', { method: 'POST', body: JSON.stringify({ reaction: 'down' }) })).status, 400);
     assert.equal((await web.call('/api/chat/rate', { method: 'POST', body: JSON.stringify({ id: 'hers' }) })).status, 400);
     assert.equal((await web.call('/api/chat/rate', { method: 'POST', body: JSON.stringify({ id: 'hers', reaction: 'meh' }) })).status, 400);
+  } finally { await web.stop(); }
+});
+
+test('what was wrong with a reply is logged, and never answered back', async () => {
+  const asked: { id: string; wrong?: string; rather?: string }[] = [];
+  const web = await door({ tune: (id, wrong, rather) => { asked.push({ id, wrong, rather }); return id === 'hers' && Boolean(wrong?.trim() || rather?.trim()); } });
+  try {
+    assert.equal((await web.call('/api/chat/tune', { method: 'POST', body: JSON.stringify({ id: 'hers', wrong: 'too clipped' }), anonymous: true })).status, 401);
+    await web.signIn();
+    const logged = await web.call('/api/chat/tune', { method: 'POST', body: JSON.stringify({ id: 'hers', wrong: 'too clipped', rather: 'Long day.' }) });
+    assert.equal(logged.status, 200);
+    // No comeback of hers in the answer: this one is not for her to hear.
+    assert.deepEqual(await logged.json(), { ok: true });
+    assert.deepEqual(asked.at(-1), { id: 'hers', wrong: 'too clipped', rather: 'Long day.' });
+    assert.equal((await web.call('/api/chat/tune', { method: 'POST', body: JSON.stringify({ id: 'hers', rather: 'Long day.' }) })).status, 200, 'the rewrite alone is enough');
+    assert.equal((await web.call('/api/chat/tune', { method: 'POST', body: JSON.stringify({ id: 'theirs', wrong: 'x' }) })).status, 404);
+    assert.equal((await web.call('/api/chat/tune', { method: 'POST', body: JSON.stringify({ id: 'hers', wrong: '  ' }) })).status, 404, 'a mis-tap is not a note');
+    assert.equal((await web.call('/api/chat/tune', { method: 'POST', body: JSON.stringify({ wrong: 'x' }) })).status, 400);
+    assert.equal((await web.call('/api/chat/tune', { method: 'POST', body: JSON.stringify({ id: 'hers' }) })).status, 400);
   } finally { await web.stop(); }
 });
 

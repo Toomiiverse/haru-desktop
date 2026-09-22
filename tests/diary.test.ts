@@ -35,6 +35,19 @@ test('the entry is due just before the quiet ends, and as a catch-up through the
   assert.ok(DIARY_BEFORE_WAKE_MINUTES >= 30);
 });
 
+test('her first entry is about the day she came into existence, and only the first', () => {
+  const m: DayMaterial = {
+    day: '2026-09-21', theySaid: [], theirMessages: 0, herUnprompted: 1,
+    irritation: 0, grudge: 0, ignoredToday: 0, went: 'fine', ticked: [], nights: [], tastes: [], did: [],
+  };
+  const first = diaryInstruction({ ...m, firstAfterReset: true });
+  assert.match(first, /This is the first entry in the diary/);
+  assert.match(first, /you woke with nothing/);
+  // Only page one: every entry after it is an ordinary night again.
+  assert.doesNotMatch(diaryInstruction({ ...m, day: '2026-09-25' }), /first entry in the diary/);
+  assert.doesNotMatch(diaryInstruction(m), /first entry in the diary/);
+});
+
 test('what she writes from is facts, laid out, with the rule that it is only those', () => {
   const m: DayMaterial = {
     day: '2026-08-29', theySaid: ['nothing important, ignore me', 'Set me a reminder to eat @12'], theirMessages: 37, herUnprompted: 5,
@@ -45,6 +58,13 @@ test('what she writes from is facts, laid out, with the rule that it is only tho
   };
   const note = diaryInstruction(m);
   assert.match(note, /small hours after 2026-08-29, before he is up/);
+  // How she writes it is hers (2026-09-21): the shape that used to be prescribed
+  // here — a hook, four to eight sentences, a concession to end on — is gone.
+  assert.match(note, /How you write it is entirely yours/);
+  assert.doesNotMatch(note, /four to eight sentences/);
+  assert.doesNotMatch(note, /First person, past tense/);
+  // But the rules that keep it true are not style and have not moved.
+  assert.match(note, /Everything in it comes from what is above/);
   assert.match(diaryInstruction({ ...m, hisLastMessageAt: '10:49 PM' }), /His last message to you was at 10:49 PM\. You do not know when he went to bed/);
   assert.match(note, /before he is up/);
   assert.match(note, /WHAT YOU \(Haru\) DID TONIGHT while he slept — yours, not his/);

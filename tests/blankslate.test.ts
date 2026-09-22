@@ -1,7 +1,8 @@
 // The slate fades on its own, or it is still telling her to ask in March.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { blankSlateInstruction, blankSlateOpening, BODY_KEYS, HAND_WRITTEN, readSlate, RESET_KEYS, slateIsNewer, SLATE_SETTLED, SLATE_SETTLED_DAYS, SLATE_STRANGER, withoutPreSlate } from '../electron/blankslate';
+import { blankSlateInstruction, blankSlateOpening, BODY_KEYS, HAND_WRITTEN, readSlate, RESET_KEYS, slateIsNewer, SLATE_DISARM_MINUTES, SLATE_SETTLED, SLATE_SETTLED_DAYS, SLATE_STRANGER, strangerIdentityNote, strangerLean, STRANGER_LEAN, STRANGER_VITALS, withoutPreSlate, withoutPreSlateDays } from '../electron/blankslate';
+import { DEFAULT_VITALS } from '../electron/vitals';
 
 const NOW = Date.parse('2026-09-20T10:00:00.000Z');
 const daysAgo = (days: number) => ({ at: new Date(NOW - days * 86_400_000).toISOString() });
@@ -42,9 +43,64 @@ test('an unreadable stamp ends it rather than lasting forever', () => {
 });
 
 test('the opening angle is only for the days she is a stranger', () => {
-  assert.match(blankSlateOpening(daysAgo(0), 0, NOW), /do not know who this is/);
+  assert.match(blankSlateOpening(daysAgo(0), 0, NOW), /nothing about them but their name/);
   assert.equal(blankSlateOpening(daysAgo(0), SLATE_STRANGER, NOW), '');
   assert.equal(blankSlateOpening(null, 0, NOW), '');
+});
+
+test('a stranger is treated as a stranger, not interviewed', () => {
+  // The first thing she did with a blank slate was ask him what he did for a
+  // living and what she should be aware of today. That was the instruction's
+  // fault, not the model's.
+  const said = blankSlateInstruction(daysAgo(0), 0, NOW);
+  assert.match(said, /At most one question/);
+  assert.match(said, /Keep your replies short/);
+  assert.match(said, /earn/);
+  assert.doesNotMatch(said, /One or two questions/, 'the line that produced the interview');
+  assert.doesNotMatch(said, /not sorry/, 'brisk where she should be wary');
+});
+
+test('her first line is wary rather than bright, and does not demand anything', () => {
+  const opening = blankSlateOpening(daysAgo(0), 0, NOW);
+  assert.match(opening, /Wary rather than bright/);
+  assert.match(opening, /or ask nothing at all/);
+});
+
+test('she starts colder than the defaults, and his affection at nothing', () => {
+  assert.ok(STRANGER_VITALS.affection < DEFAULT_VITALS.affection, 'affection is the thing he earns back');
+  assert.ok(STRANGER_VITALS.stress > DEFAULT_VITALS.stress, 'waking with nothing is not restful');
+  assert.ok(STRANGER_VITALS.happiness < DEFAULT_VITALS.happiness);
+});
+
+test('the wariness leans on her drift while the slate stands, and thins as it fades', () => {
+  const fresh = strangerLean(daysAgo(0), 0, NOW);
+  assert.equal(fresh.affection, STRANGER_LEAN.affection, 'full while she is a stranger');
+  const settling = strangerLean(daysAgo(1), SLATE_STRANGER, NOW);
+  assert.equal(settling.affection, (STRANGER_LEAN.affection ?? 0) / 2, 'half once she only admits gaps');
+  assert.deepEqual(strangerLean(daysAgo(1), SLATE_SETTLED, NOW), {}, 'gone with the slate');
+  assert.deepEqual(strangerLean(null, 0, NOW), {}, 'and never there for a Haru who was not reset');
+});
+
+test('she is not told she has lost the one thing the reset keeps', () => {
+  // The persona names him and a reset deliberately spares it, so "you do not
+  // know this person's name" was contradicted in the same prompt.
+  const said = blankSlateInstruction(daysAgo(0), 0, NOW);
+  assert.match(said, /You know their name/);
+  assert.doesNotMatch(said, /do not know this person's name/);
+  assert.match(said, /part of who you are/);
+});
+
+test('a body pushing its whole log cannot put the days before the reset back', () => {
+  const log = { '2026-09-18': [{ at: 'x' }], '2026-09-20': [{ at: 'y' }], '2026-09-21': [{ at: 'z' }] };
+  const kept = withoutPreSlateDays(log, { at: '2026-09-20T14:00:00.000Z' }) as Record<string, unknown>;
+  assert.deepEqual(Object.keys(kept), ['2026-09-20', '2026-09-21'], 'the day of the reset is kept whole');
+});
+
+test('with no slate the log is untouched, and rubbish is handed straight back', () => {
+  const log = { '2026-09-18': [] };
+  assert.equal(withoutPreSlateDays(log, null), log);
+  assert.equal(withoutPreSlateDays(log, { at: 'not a date' }), log);
+  assert.equal(withoutPreSlateDays('not a log', { at: '2026-09-20T14:00:00.000Z' }), 'not a log');
 });
 
 test('the reset keeps her attitude, his settings and his own things', () => {
@@ -55,6 +111,34 @@ test('the reset keeps her attitude, his settings and his own things', () => {
   assert.ok(RESET_KEYS.includes('tastes'));
   assert.ok(RESET_KEYS.includes('her.traits'));
   assert.equal(new Set(RESET_KEYS).size, RESET_KEYS.length, 'no key listed twice');
+});
+
+test('his location sharing is a setting, so the reset takes the two leaves and not the key', () => {
+  assert.ok(!RESET_KEYS.includes('whereabouts'), 'the whole key holds `enabled`, which is his');
+  assert.ok(!RESET_KEYS.includes('whereabouts.enabled'));
+  assert.ok(RESET_KEYS.includes('whereabouts.last'));
+  assert.ok(RESET_KEYS.includes('whereabouts.places'));
+});
+
+test('the state this branch grew since the list was written goes with the rest of her', () => {
+  // her.weather is the wander and the bruise — the same family as her.temperament,
+  // and left behind it biases the first tick of the new life with the old one's mood.
+  for (const hers of ['her.weather', 'shots.captions']) {
+    assert.ok(RESET_KEYS.includes(hers), `${hers} is hers and should go`);
+  }
+});
+
+test('the copies the migrations left in config.json are named too', () => {
+  for (const legacy of ['memories', 'chat.archive', 'memory.sessions', 'memory.forgettingLog']) {
+    assert.ok(RESET_KEYS.includes(legacy), `${legacy} is a pre-migration copy of her record`);
+  }
+});
+
+test('the wipe disarms itself long enough to outlast a restart loop', () => {
+  // Restart=on-failure is three seconds; the drop-in that sets HARU_RESET is
+  // removed by hand. Anything under a couple of minutes would re-fire.
+  assert.ok(SLATE_DISARM_MINUTES >= 3, 'shorter than a restart loop is no guard at all');
+  assert.ok(SLATE_DISARM_MINUTES <= 60, 'longer than an hour would refuse a second reset he meant');
 });
 
 // -- the wire: her brain resets, and the bodies have to find out ---------------
@@ -107,4 +191,23 @@ test('a body clears its own life and leaves what he typed', () => {
     assert.ok(BODY_KEYS.includes(hers), `${hers} is the machine's own and should go`);
   }
   assert.equal(BODY_KEYS.length, RESET_KEYS.length - HAND_WRITTEN.length);
+});
+
+
+test('the persona is corrected in its own terms while she is a stranger', () => {
+  // A block below the persona lost to it: an hour after the reset she told a man
+  // she had never met to stop stalling. This rides with the identity instead.
+  const note = strangerIdentityNote(daysAgo(0), 0, NOW);
+  assert.match(note, /no memory of him/);
+  assert.match(note, /nothing to be jealous of/);
+  assert.match(note, /You do not push him/);
+  assert.match(note, /guarded rather than demanding/);
+  // Her spine is not taken away with it.
+  assert.match(note, /still hold your own positions/);
+});
+
+test('and it goes as soon as she is not one, so it cannot outlive its reason', () => {
+  assert.equal(strangerIdentityNote(daysAgo(1), SLATE_STRANGER, NOW), '', 'past the stranger stage the instruction alone is enough');
+  assert.equal(strangerIdentityNote(daysAgo(SLATE_SETTLED_DAYS), 0, NOW), '', 'and a spent slate carries nothing');
+  assert.equal(strangerIdentityNote(null, 0, NOW), '', 'never for a Haru who was not reset');
 });

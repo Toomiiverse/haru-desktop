@@ -58,7 +58,7 @@ export type WebDeps = {
    * before the stream ends. The same U+FFFD that clears the text clears the
    * voice: nothing of a thrown-away round may be spoken.
    */
-  sayStream(text: string, onChunk: (chunk: string) => void, attachments?: unknown[], options?: { interrupted?: boolean; call?: boolean; onToolCall?: (name: string) => void }, onSentence?: (sentence: string, emotion: string) => void): Promise<{ reply: string; ignored?: boolean }>;
+  sayStream(text: string, onChunk: (chunk: string) => void, attachments?: unknown[], options?: { interrupted?: boolean; call?: boolean; replyTo?: string; quoted?: string; onToolCall?: (name: string) => void }, onSentence?: (sentence: string, emotion: string) => void): Promise<{ reply: string; ignored?: boolean }>;
   /**
    * Her last reply, done again. The message that prompted it is asked once
    * more with that reply left out of the history, and the new one takes its
@@ -93,6 +93,13 @@ export type WebDeps = {
    * not a reply of hers.
    */
   rate(id: string, reaction: 'up' | 'down' | null, note?: string): Promise<{ line: string | null } | null>;
+  /**
+   * What was wrong with a reply of hers, written down for whoever is tuning
+   * her. Nothing of this reaches her — not her prompt, not her mood, no
+   * comeback — so it is deliberately not `rate`. False when the id is not a
+   * reply of hers, or when there was nothing in the note.
+   */
+  tune(id: string, wrong?: string, rather?: string): boolean;
   /** date is a bare YYYY-MM-DD; daysAway is its offset from today so the page can bucket into daily/weekly/monthly without redoing timezone-aware date math client-side. */
   agenda(): { id: string; title: string; date: string; time: string | null; kind: string; done?: boolean; daysAway: number }[];
   tickOff(id: string): Promise<void> | void;
@@ -837,10 +844,15 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
   // "she is answering". Kept as a separate route so the plain /api/chat above
   // stays for the terminal client, which has nothing to gain from a stream.
   if (req.method === 'POST' && path === '/api/chat/stream') {
-    const body = await readBody(req) as { text?: unknown; attachments?: unknown; interrupted?: unknown };
+    const body = await readBody(req) as { text?: unknown; attachments?: unknown; interrupted?: unknown; replyTo?: unknown; quoted?: unknown };
     const text = typeof body.text === 'string' ? body.text.trim() : '';
     // Said over her, while she was still speaking: she is told so.
     const interrupted = body.interrupted === true;
+    // Which line of hers this answers, when the phone says. Only a claim: it is
+    // checked against what she actually said before anything is made of it
+    // (replyto.ts), and bounded here so a page cannot send her an essay as a quote.
+    const replyTo = typeof body.replyTo === 'string' ? body.replyTo.slice(0, 80) : undefined;
+    const quoted = typeof body.quoted === 'string' ? body.quoted.slice(0, 400) : undefined;
     // A file with nothing typed is still a message — the desktop lets a picture
     // be the whole of what is said, and she reacts to it.
     const files = Array.isArray(body.attachments) ? body.attachments.slice(0, MAX_FILES) : [];
@@ -852,7 +864,7 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
     });
     const emit = (value: unknown) => { if (!res.destroyed) res.write(`data: ${JSON.stringify(value)}\n\n`); };
     try {
-      const answer = await deps.sayStream(text, chunk => emit({ text: chunk }), files, { interrupted }, (sentence, emotion) => emit({ sentence, emotion }));
+      const answer = await deps.sayStream(text, chunk => emit({ text: chunk }), files, { interrupted, ...(replyTo ? { replyTo } : {}), ...(quoted ? { quoted } : {}) }, (sentence, emotion) => emit({ sentence, emotion }));
       emit({ done: true, reply: answer.reply, ignored: Boolean(answer.ignored) });
     } catch (error) {
       console.error('[web] ' + (error instanceof Error ? error.message : String(error)));
@@ -873,6 +885,21 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
     const rated = await deps.rate(id, reaction, note);
     if (!rated) return json(res, 404, { error: 'No such reply of hers.' });
     return json(res, 200, { ok: true, line: rated.line });
+  }
+
+  // What was wrong with a reply, and what he would rather have had. A thumb is
+  // for her; this is for him. It is written to the tuning log and nowhere else,
+  // which is why it gets a door of its own rather than another field on rate:
+  // the two must not be able to leak into one another.
+  if (req.method === 'POST' && path === '/api/chat/tune') {
+    const body = await readBody(req) as { id?: unknown; wrong?: unknown; rather?: unknown };
+    const id = typeof body.id === 'string' ? body.id.trim().slice(0, 80) : '';
+    const wrong = typeof body.wrong === 'string' ? body.wrong : undefined;
+    const rather = typeof body.rather === 'string' ? body.rather : undefined;
+    if (!id) return json(res, 400, { error: 'Which reply?' });
+    if (wrong === undefined && rather === undefined) return json(res, 400, { error: 'What was wrong, or what you would rather.' });
+    if (!deps.tune(id, wrong, rather)) return json(res, 404, { error: 'No such reply of hers, or nothing said about it.' });
+    return json(res, 200, { ok: true });
   }
 
   // Her last reply, done again. Same stream as above; the page swaps the bubble

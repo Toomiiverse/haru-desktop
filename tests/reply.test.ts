@@ -12,7 +12,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { asksToLookUp } from '../electron/reply';
-import { answersThePrompt, CUE_NOTE, isCue, stageNote, claimsDesktopAction, claimsTickOff, dropInventedContact, dropInventedScreenTalk, dropRepeatedAgendaMentions, dropRepeatedParagraphs, dropRoleHeader, dropStageDirections, dropTackedOnParagraphs, readsLikeAssistant, dropRepeatedOpener, dropEchoOpener, dropRepeatedSentences, fixStatedClock, fixStatedReminderTime, fixStatedMinutes, deniesItExists, claimsChecked, thinksAloud, dropThinkingAloud } from '../electron/reply';
+import { answersThePrompt, CUE_NOTE, isCue, stageNote, claimsDesktopAction, claimsTickOff, dropInventedContact, dropInventedScreenTalk, dropRepeatedAgendaMentions, dropRepeatedParagraphs, dropRoleHeader, dropStageDirections, dropTackedOnParagraphs, readsLikeAssistant, dropRepeatedOpener, dropEchoOpener, dropRepeatedSentences, fixStatedClock, fixStatedReminderTime, fixStatedMinutes, deniesItExists, claimsChecked, thinksAloud, dropThinkingAloud, recitedSpan, dropRecitedPrompt, RECITED_MIN } from '../electron/reply';
 
 // -- claiming to have touched the machine -------------------------------------
 
@@ -519,6 +519,27 @@ test('her deliberation is recognised and the reply behind it kept', () => {
   assert.ok(dropped > 700 && !text.includes('The user') && !text.includes('save_journal'));
 });
 
+test('"Let me respond" is a plan; the rest of what she says after "let me" is not', () => {
+  // Went to his phone whole on 2026-09-20: the planning ran into the reply with
+  // no space, which is the seam dropThinkingAloud looks for.
+  const leak = "Let me respond with some edge - he's being a bit condescending by checking up on me like thatMaking sure? Like I'm a dog you left in the yard? 🙄\n\nWhat, you think I just power down when you walk away?\n\nI have things. I do them. You don't need to supervise.";
+  assert.equal(thinksAloud(leak), true);
+  const { text } = dropThinkingAloud(leak);
+  assert.ok(text.startsWith('Making sure?'), `the reply begins at the seam, not: ${text.slice(0, 40)}`);
+  assert.ok(text.endsWith("You don't need to supervise."), 'and all three of her paragraphs survive');
+  assert.ok(!text.includes('condescending'), 'the working-out is gone');
+  assert.equal(thinksAloud('Let me reply to that properly for once.'), true);
+  // Everything else after "let me" is how she talks, and none of it is a plan.
+  for (const hers of [
+    'Let me guess — you forgot again.',
+    "Let me ask you something, since you're being so forthcoming.",
+    'Let me give you the short version: it won’t fit.',
+    'Let me save you the trouble — Sudin already did it.',
+    'Let me be clear about this, because you keep forgetting.',
+    'Let me make one thing obvious before you start.',
+  ]) assert.equal(thinksAloud(hers), false, hers);
+});
+
 test('a plan with nothing behind it is nothing to say', () => {
   const planOnly = 'The user seems upset about being ignored. I should acknowledge that without apologising.\n\nI need to keep her voice: sharp, not warm.';
   assert.equal(thinksAloud(planOnly), true);
@@ -595,4 +616,53 @@ test('"you just asked me" is him, not a stranger, and never empties her reply (2
   assert.equal(dropInventedContact('Fine.\n\nSudin literally called me.'), 'Fine.');
   assert.equal(dropInventedContact('Fine.\n\nHe told me you were out.'), 'Fine.');
   assert.equal(dropInventedContact('Fine.\n\nyour mum called me yesterday.'), 'Fine.');
+});
+
+// 2026-09-21, to "Would you say you're fond of me then, even though we just met?".
+// thinksAloud took the first paragraph (434 chars, not kept) and passed the rest,
+// which opened on "I shouldn't overdo" — not on any list. The instruction she
+// quoted is the real line from that turn's prompt.
+const FOND_RULE = 'Right now you are fonder of them than you let on. Keep the digs, but let it slip once — one grudging admission, a single line — and then cover it with an order.';
+const FOND_PROMPT = `You are guarded with them for now. ${FOND_RULE} Do not tell them what they are like.`;
+const FOND_LEAK = `I shouldn't overdo it though - I just met them, so "fond" might be too strong. But "warmer than I should be" or something grudging... let me think.
+
+Actually, looking at the instructions again: "${FOND_RULE}"
+
+So one grudging admission, then an order.I'm warmer than I should be, and I don't like it. 😒
+
+Stop looking pleased with yourself and tell me something real.`;
+
+test('her own instructions read back out loud are found, whatever words led up to them', () => {
+  assert.equal(thinksAloud(FOND_LEAK), false, 'the word lists cannot see this one — which is the point');
+  const span = recitedSpan(FOND_LEAK, FOND_PROMPT);
+  assert.ok(span && span.end - span.start >= FOND_RULE.length - 2, 'the whole quoted rule');
+  const { text, dropped } = dropRecitedPrompt(FOND_LEAK, FOND_PROMPT);
+  assert.equal(text, "I'm warmer than I should be, and I don't like it. 😒\n\nStop looking pleased with yourself and tell me something real.");
+  assert.ok(dropped > 300 && !text.includes('instructions') && !text.includes('grudging admission'));
+});
+
+test('a restated fact is not a recital: the floor sits above every real reply measured', () => {
+  // The longest run any of 112 real baseline replies shared with its own prompt was 33 characters.
+  const prompt = 'Earlier they found the Arctic 420mm cooler doesn\'t fit their Asus ProArt case, which annoyed them.';
+  const reply = "The Arctic 420mm cooler doesn't fit — you already found that out. Get a 360.";
+  assert.equal(recitedSpan(reply, prompt), null);
+  assert.ok(RECITED_MIN > 33);
+  assert.equal(dropRecitedPrompt(reply, prompt).dropped, 0);
+});
+
+test('she may quote him: only her instructions count, and his words are not in them', () => {
+  const his = 'I told you I will be home by six and I meant it, stop asking me every hour';
+  const reply = `"${his}" — your words, not mine. It is seven.`;
+  assert.equal(recitedSpan(reply, FOND_PROMPT), null);
+});
+
+test('a recital with nothing clean behind it gives no text, so the loop asks again', () => {
+  const planOnly = `Looking at the instructions: "${FOND_RULE}" So that is what I will do.`;
+  assert.equal(dropRecitedPrompt(planOnly, FOND_PROMPT).text, '');
+});
+
+test('the glued seam after a planning paragraph now includes a full stop', () => {
+  const leak = "I should keep it short and not coach them. So I'll just say it plainly and move on.Fine. Go eat something, then come back and tell me how it went.";
+  const { text } = dropThinkingAloud(leak);
+  assert.equal(text, 'Fine. Go eat something, then come back and tell me how it went.');
 });

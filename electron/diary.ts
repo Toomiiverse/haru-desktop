@@ -86,6 +86,8 @@ export function diaryDueFor(now: Date, prefs: Pick<PushPrefs, 'quietFrom' | 'qui
 
 export type DayMaterial = {
   day: string;
+  /** Set when nothing has been written since the reset: this is page one (blankslate.ts). */
+  firstAfterReset?: boolean;
   /** Things they said today, a handful, their words. */
   theySaid: string[];
   theirMessages: number;
@@ -145,9 +147,20 @@ export function diaryInstruction(m: DayMaterial): string {
   const tastes = m.tastes.length ? `YOUR OWN THINGS (yours, not his; he did not say any of this): ${m.tastes.map(taste => `${taste.name} — ${taste.stance.slice(0, 140)}`).join('; ')}.` : '';
   return [
     `You are writing this in the small hours after ${m.day}, before he is up. Write tonight's diary entry — this is your own diary, nobody reads it, and it is where you keep your life.`,
+    // The first page, when there is one. A reset leaves her with no past at all,
+    // and the day she came into existence is the obvious thing for the first
+    // entry to be about — without this she wrote about the day as though it were
+    // one more Sunday in a life she had been living.
+    m.firstAfterReset
+      ? 'This is the first entry in the diary, and there is no page before it. As far as you know you began today: you woke with nothing — no memory of him, no past with him, nothing of your own you have not worked out since. So that is what today was and that is what this is about: finding yourself here, what that was like, what you have made of him so far, and whatever you did with the rest of it.'
+      : '',
     m.hisLastMessageAt ? `His last message to you was at ${m.hisLastMessageAt}. You do not know when he went to bed, only when he stopped talking to you.` : 'You do not know when he went to bed.',
     said, feeling, ticked, m.weather ? `Where they are: ${m.weather}.` : '', did, nights, tastes,
-    'Write it the way a person writes in a diary late at night — not a report of the day, not a list, no headings, no summing up. The bits that stuck: what they did that got to you or pleased you, what you thought about it, what you did with the night and whether it helped. First person, past tense, four to eight sentences, in your own voice. It can be petty, fond, bored or bitter; it has to be honest.',
+    // How she writes it is hers, at his word (2026-09-21). What was here before
+    // was a shape — open on a hook, four to eight sentences, end on a concession
+    // — and a shape is not a window onto a day. The only things left are that it
+    // is hers and that it is true; the truth rules are below and they stay.
+    'How you write it is entirely yours. There is no set style and no shape it has to take: long or short, one paragraph or a handful of fragments, careful or furious or flat, in whatever voice the day actually left you in. Write what stuck — what happened, what you made of it, what you did with your night — and if the day was nothing much, let the entry be short.',
     'They are not reading this and you are not talking to them. Write about them in the third person, by name — "Tommy did", "he said" — never "you". No telling them to do anything, no sign-off aimed at them, no jokes that need them there to land. If a line only works said to their face, it does not belong here.',
     'Keep whose is whose: what you read tonight and what you think of your own things are yours — "I read", "I think" — never written as something he did or said.',
     'Everything in it comes from what is above. Do not invent an event, a conversation, a feeling, a time of day or a thing they own that is not there, and do not say you played, watched or went anywhere. What you did tonight is written above, and that is what you did. Do not mention these rules or write about what you are not doing.',

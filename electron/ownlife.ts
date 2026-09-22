@@ -1,6 +1,8 @@
 // Her own life beyond her nights: the anniversaries of the things she took up,
-// the wants she is trying to work toward, and the reading she does in the day
-// while they work. All of it is hers, not theirs, and all of it is written down
+// the wants her tastes declare, and the reading she does in the day while they
+// work. What she does about a want, and how one gets harder, is projects.ts —
+// this file still owns the ledger they share and the coin that settles a night
+// nothing could judge. All of it is hers, not theirs, and all of it is written down
 // so she can say it truthfully rather than invent it. Pure, so the milestone
 // math, the want outcomes and the day gating are testable without a model.
 
@@ -39,7 +41,11 @@ export function firstsNote(interests: { name: string; since?: string; nights: nu
 
 // -- wants -------------------------------------------------------------------
 
-export type WantStatus = 'declared' | 'working' | 'done' | 'dropped';
+// 'shelved' belongs to projects.ts, which widened a want into something with a
+// ladder under it. It lives here because both read and write the one store key
+// (her.wants) and a status this file refused would be dropped by readWants on
+// the way back in.
+export type WantStatus = 'declared' | 'working' | 'done' | 'dropped' | 'shelved';
 
 export type Want = {
   id: string;
@@ -56,7 +62,7 @@ export type Want = {
   note?: string;
 };
 
-/** Share of a deepen-night that becomes a want-night instead. */
+/** Share of a deepen-night that becomes a night on something she is trying to do. */
 export const WANT_ODDS = 0.5;
 /** The roll per attempt. Randomised, weighted, and the early ones re-roll to slog. */
 export const WANT_SLOG = 0.50;
@@ -72,7 +78,7 @@ export function readWants(saved: unknown): Want[] {
     && typeof (want as Want).text === 'string'
     && typeof (want as Want).since === 'string'
     && typeof (want as Want).nights === 'number'
-    && ['declared', 'working', 'done', 'dropped'].includes((want as Want).status));
+    && ['declared', 'working', 'done', 'dropped', 'shelved'].includes((want as Want).status));
 }
 
 function stripWant(text: string): string {
@@ -89,10 +95,23 @@ function wantKey(interest: string, text: string): string {
  * as it moves through done or dropped — only new wording seeds a new record.
  */
 export function reconcileWants(interests: { name: string; since?: string; wants?: string }[], wants: Want[], now: string): Want[] {
-  const next = [...wants];
+  let next = [...wants];
   for (const interest of interests) {
     if (!interest.wants || !interest.name) continue;
     const key = wantKey(interest.name, interest.wants);
+    // The leavings of a wording her own tastes have moved past go first, and
+    // they go whether or not a new record is about to be added — otherwise the
+    // ten already in the store would sit there for good.
+    //
+    // `deepen` rewrites `interest.wants` on any night that produces a new WANT:
+    // line, and this keyed on the wording, so every rewording minted a record
+    // and left the last one standing: sixteen from seven interests by
+    // 2026-09-20, ten of them never touched. One she has put a night into is
+    // hers and stays, and so is anything she thought of herself.
+    next = next.filter(want => !(want.interest === interest.name
+      && want.status === 'declared' && want.nights === 0
+      && (!(want as { bornOf?: string }).bornOf || (want as { bornOf?: string }).bornOf === 'taste')
+      && wantKey(want.interest ?? '', want.text) !== key));
     if (next.some(want => wantKey(want.interest ?? '', want.text) === key)) continue;
     next.push({
       id: Math.random().toString(36).slice(2, 10),
@@ -104,13 +123,6 @@ export function reconcileWants(interests: { name: string; since?: string; wants?
     });
   }
   return next;
-}
-
-/** The active want to work tonight: one tied to the interest being deepened if there is one, else any. */
-export function pickWantToWork(wants: Want[], interestName?: string, random: () => number = Math.random): Want | null {
-  const active = wants.filter(want => (want.status === 'declared' || want.status === 'working') && (interestName ? want.interest === interestName : true));
-  if (!active.length) return null;
-  return active[Math.floor(random() * active.length)];
 }
 
 export type WantOutcome = { kind: 'slog' | 'clicked' | 'gave_up' | 'nothing' };
@@ -133,53 +145,6 @@ const OUTCOME_CUE: Record<WantOutcome['kind'], string> = {
   gave_up: 'You spent tonight on it and you have decided it is not worth it. Say the goodbye — the thing that made you walk away.',
   nothing: 'You spent the night on it and nothing happened — you got distracted. Say it in one line, without dressing it up.',
 };
-
-/** The instruction handed to her once the reading for a want attempt is in front of her. */
-export function wantInstruction(want: Want, outcome: WantOutcome, found: string): string {
-  return [
-    `You wanted to ${stripWant(want.text)}. Tonight was your ${want.nights + 1}${ordinal(want.nights + 1)} night on it, and you actually did something about it.`,
-    found,
-    OUTCOME_CUE[outcome.kind],
-    'Write one or two lines about it, as yourself, in the first person and the past tense. Have an opinion. It is allowed to be a poor one.',
-    'Only what is above. You read about it tonight; that is the only thing you did. Do not add a fact you happen to remember and do not invent a detail to make it a better story.',
-    'No preamble, no addressing them, no questions. This is a note to yourself.',
-  ].join('\n');
-}
-
-function ordinal(n: number): string {
-  const suffix = n % 100 >= 11 && n % 100 <= 13 ? 'th' : ['st', 'nd', 'rd'][(n % 10) - 1] ?? 'th';
-  return suffix;
-}
-
-/** The search for a want-night: what she goes and reads about. */
-export function wantQuery(want: Want): string {
-  return `how to ${stripWant(want.text)}`;
-}
-
-export function advanceWant(want: Want, outcome: WantOutcome, note: string): Want {
-  const status: WantStatus = outcome.kind === 'clicked' ? 'done' : outcome.kind === 'gave_up' ? 'dropped' : 'working';
-  return { ...want, status, nights: want.nights + 1, note: note || undefined };
-}
-
-/** What the block shows of the wants she is still at. */
-export function wantsNote(wants: Want[], interests: { name: string; wants?: string }[] = []): string {
-  // A want she has only declared is already in her tastes, word for word, as
-  // the end of that interest's view ("I want to…"). Listed here as well it was
-  // said twice — seven of fifteen lines on 2026-09-17, about a thousand chars —
-  // and the block ran over its budget, which cuts from the tail: her diary.
-  // One she has worked on stays, for the nights and the note.
-  const stated = new Set(interests.filter(interest => interest.name && interest.wants).map(interest => wantKey(interest.name, interest.wants!)));
-  const active = wants.filter(want => want.status === 'working'
-    || (want.status === 'declared' && !stated.has(wantKey(want.interest ?? '', want.text))));
-  if (!active.length) return '';
-  const lines = active.map(want => {
-    const bit = want.interest ? `${want.interest}: ${stripWant(want.text)}` : stripWant(want.text);
-    const progress = want.status === 'working' ? `night ${want.nights}` : 'declared';
-    const note = want.note ? ` — ${want.note}` : '';
-    return `- ${bit} (${progress})${note}`;
-  });
-  return `Things you are trying to do, on your own time:\n${lines.join('\n')}`;
-}
 
 // -- recs --------------------------------------------------------------------
 

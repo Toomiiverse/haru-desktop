@@ -29,7 +29,7 @@ import { convertImage, FORMATS, normaliseFormat } from './convert';
 import { cancelPower, closeApp, desktopSupported, findApps, isCancellable, launch, listRunning, matchApp, matchRunning, normalisePower, POWER_DELAY_S, readDesktopConfig, runPower } from './desktop';
 import { formatPage, formatResults, readSearchConfig, readWebPage, SearchBlocked, searchWeb, type SearchConfig, type SearchResult } from './search';
 import { fetchTranscript, formatTranscript, titleFrom, transcriptInstruction, videoIdFrom, watchUrl } from './transcripts';
-import { findSuperseded, semanticSimilarities, supersede, MEMORY_KINDS, type MemoryKind, type MemoryRecord } from './memory';
+import { findSuperseded, isInTheirWords, semanticSimilarities, supersede, MEMORY_KINDS, type MemoryKind, type MemoryRecord } from './memory';
 import { appendToBlockValue, canEditBlock, findBlock, replaceInBlockValue, resolveBlockValue, withEditedValue, type BlockSources, type MemoryBlock } from './blocks';
 import { adopt } from './tastes';
 import { activateTab, closeTab, listTargets, navigate, openTab, pageText, screenshot } from './browserctl';
@@ -42,6 +42,7 @@ import { isDay } from './chatsearch';
 import { KNOWLEDGE_CATEGORIES, type KnowledgeCategory, type KnowledgeStore } from './knowledge';
 import { localEmotion } from './emotion';
 import { readTone } from './tone';
+import type { WatchInput } from './anime';
 
 /**
  * The shape every module that fetches asks for. Each declares its own private
@@ -708,6 +709,32 @@ export const ANILIST_TOOL: ChatTool = {
   },
 };
 
+/**
+ * Watching with her (anime.ts). One tool for the whole ask: on the server it
+ * plays, off the server it fetches, and "how's it going" is the same tool
+ * asked for status. Described plainly, as the hands-on tools are: the guards —
+ * their word before a fetch that squeezes the disk, no guessing between two
+ * shows — are in code, where a model cannot talk its way past them.
+ */
+export const WATCH_TOOL: ChatTool = {
+  type: 'function',
+  function: {
+    name: 'watch_anime',
+    description: 'Put an anime on for them, or fetch it when it is not on the server yet. Call this whenever they want to watch something — "let\'s watch Naruto", "put the next episode on", "get Made in Abyss for me". It plays their next unwatched episode on whichever Jellyfin player they have open, or starts the download and tells you what it found. With action "status" it says how a download is going. You really can — never merely say you will.',
+    parameters: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'The show, as they said it — "Naruto", not the whole sentence.' },
+        action: { type: 'string', enum: ['watch', 'status'], description: '"watch" to put it on or fetch it (the default); "status" when they ask how a download is going.' },
+        where: { type: 'string', description: 'Where to play it, when they say: "phone", "desk" (their PC), "tv", or the name of a device. Leave it out when they do not say and it goes to whatever Jellyfin player they used last.' },
+        tvdbId: { type: 'number', description: 'Only after this tool listed choices and they picked one: that choice\'s tvdbId.' },
+        confirm: { type: 'boolean', description: 'Only after this tool asked for their word on the size and they gave it: true.' },
+      },
+      required: ['title'],
+    },
+  },
+};
+
 export const CONVERT_TOOL: ChatTool = {
   type: 'function',
   function: {
@@ -1003,7 +1030,25 @@ export type ToolAvailability = {
   desktop: { launch: boolean; power: boolean };
   /** Up because they knocked her awake (hersleep.ts): the one time going back to sleep is on the table. */
   knockedAwake: boolean;
+  /**
+   * Her Minecraft body is switched on. Declared but not yet acted on: the
+   * tools behind it are still being built, and nothing here offers one. It is
+   * kept so the fixtures that already name it type-check, and so the flag has
+   * one home rather than two when those tools land.
+   */
+  minecraft?: boolean;
+  /** The anime stack is wired up (anime.ts): Jellyfin, Sonarr and Prowlarr reachable in config. Optional so fixtures need not name it. */
+  anime?: boolean;
 };
+
+/** Whether the message could be about watching something. Broad, like the
+ *  machine gate: a stray match is one tool on the table, a miss is her saying
+ *  she cannot put a show on. */
+const WATCH_TALK = /\b(?:watch\w*|episodes?|eps?|anime|series|seasons?|shows?|put (?:\w+ ){0,2}on|open (?:\w+ ){0,2}on|(?:on|to) (?:my |the )?(?:phone|tv|telly|laptop|pc|desktop|computer)|downloads?\w*|fetch\w*|grab\w*|torrents?|jellyfin|sonarr|next one|play(?:ing)?|binge\w*|rewatch\w*)\b/i;
+
+export function watchRelevant(message: string): boolean {
+  return WATCH_TALK.test(message ?? '');
+}
 
 /** Whether the message is about the machine or the apps on it. The gate that
  *  keeps the heavy system/desktop tools off turns that have nothing to do with
@@ -1077,6 +1122,10 @@ export function chatTools(available: ToolAvailability, latest = ''): ChatTool[] 
   if (available.hands && available.desktop.power && machine) tools.push(POWER_TOOL);
   if (available.browser && available.hands) tools.push(BROWSER_TOOL);
   if (available.knockedAwake) tools.push(SLEEP_TOOL);
+  // Watching with her. Not gated on hands, like the Claude sessions: the point
+  // is "let's watch Naruto" from the phone too, and the worst a page could
+  // start is a subtitled anime he is then told about by name and size.
+  if (available.anime && (!latest || watchRelevant(latest))) tools.push(WATCH_TOOL);
   return tools;
 }
 
@@ -1187,6 +1236,11 @@ export type ToolDeps = {
   browserPort(): number;
   /** Where a browser screenshot lands — the screenshots folder or a fallback. */
   browserShotDir(): string;
+  /** The anime stack (anime.ts), or null when it is not wired up. Optional so fixtures need not name it. */
+  anime?: {
+    watch(input: WatchInput): Promise<Record<string, unknown>>;
+    status(title: string): Promise<Record<string, unknown>>;
+  } | null;
 };
 
 
@@ -1597,6 +1651,11 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
         const id = await currentTab();
         if (!id) return JSON.stringify({ error: 'no tab to read.' });
         const text = await pageText(port, id, fetchImpl);
+        // A stranger's page is in the conversation now, exactly as after
+        // read_web_page: her tools go for the rest of this reply, so nothing on the
+        // page can talk her into writing a memory or touching the machine. Only
+        // when there is text — a tab still loading reads empty and can be read again.
+        if (text) markPageRead();
         return JSON.stringify({ text: text.slice(0, 3000), note: 'This is what is on the page right now — answer from it, not from memory.' });
       }
       if (action === 'screenshot') {
@@ -1654,8 +1713,14 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
     // the fact. Their own words carry it; the fact text stands in when there is
     // nothing of theirs to read.
     const told = latestUserMessage || fact;
+    // 'explicit' is the top of the trust ladder and skips the nagging test, so it
+    // is for what they said. A fact that shares nothing with their message came
+    // from somewhere else — a page she read, or her own guess — and is filed as
+    // inferred: kept, but believed less (memory.ts isInTheirWords).
+    const theirs = isInTheirWords(fact, latestUserMessage);
+    if (!theirs) console.log(`[memory] "${fact.slice(0, 60)}" is not in their words — filed as inferred, not explicit`);
     const saved = addMemory(fact, kind, subject, {
-      source: 'explicit', predicate, object,
+      source: theirs ? 'explicit' : 'inferred', predicate, object,
       emotion: localEmotion(told),
       emotionIntensity: readTone(told).heat,
     });
@@ -1881,6 +1946,24 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
     return JSON.stringify({ restarting: true, note: 'Tell them you are restarting and will be right back.' });
   }
 
+  if (name === 'watch_anime') {
+    // Re-checked here: a model can name a tool it was never offered.
+    if (!deps.anime) return JSON.stringify({ error: 'The anime server is not wired up to you — say so plainly, in your own words.' });
+    const title = typeof args.title === 'string' ? args.title.trim() : '';
+    if (!title) return JSON.stringify({ error: 'title is required — the show they named.' });
+    const action = args.action === 'status' ? 'status' : 'watch';
+    try {
+      const result = action === 'status'
+        ? await deps.anime.status(title)
+        : await deps.anime.watch({ title, tvdbId: typeof args.tvdbId === 'number' ? args.tvdbId : undefined, confirm: args.confirm === true, where: typeof args.where === 'string' ? args.where.trim() : undefined });
+      console.log(`[anime] ${action} "${title}" -> ${String(result.outcome ?? '?')}${result.show ? ` (${String(result.show)})` : ''}`);
+      return JSON.stringify(result);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      console.warn(`[anime] ${action} "${title}" failed: ${reason}`);
+      return JSON.stringify({ error: `The anime server could not be reached (${reason}). Say you could not check or start it; do not say it is on or on its way.` });
+    }
+  }
   if (name === 'go_back_to_sleep') {
     const done = deps.goBackToSleep({ block: args.block === true });
     if (!done) return JSON.stringify({ error: 'You are not up because of them right now — nothing to go back to.' });

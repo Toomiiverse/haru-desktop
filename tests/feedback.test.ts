@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { cleanNote, feedbackEntry, recordFeedback } from '../electron/feedback';
+import { SPOKE_KEPT, cleanNote, feedbackEntry, modelThatSpoke, readSpoke, recordFeedback, rememberSpoke, repliedTo } from '../electron/feedback';
 
 const history = [
   { id: 'o', role: 'assistant', content: 'You are up early.' },
@@ -49,4 +49,39 @@ test('entries append as one line each', () => {
     const lines = readFileSync(file, 'utf8').trim().split('\n').map(line => JSON.parse(line) as { reaction: string });
     assert.deepEqual(lines.map(line => line.reaction), ['up', 'down']);
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// Which brain actually spoke. Added 2026-09-20: every thumb on disk was
+// stamped with the local brain whoever answered, because the stored message
+// carries no model and the renderer owns it.
+test('modelThatSpoke reads back the route that was speaking when the reply was stamped', () => {
+  const spoke = [
+    { at: '2026-09-01T10:00:00.000Z', model: 'qwen-27b', brain: 'local' },
+    { at: '2026-09-15T12:00:00.000Z', model: 'kimi-k2-5', brain: 'hosted:kimi-k2-5' },
+    { at: '2026-09-19T16:11:00.000Z', model: 'claude-sonnet-5', brain: 'escalated:claude-sonnet-5' },
+  ];
+  assert.equal(modelThatSpoke(spoke, '2026-09-16T09:00:00.000Z', 'fallback'), 'kimi-k2-5');
+  assert.equal(modelThatSpoke(spoke, '2026-09-01T10:00:00.000Z', 'fallback'), 'qwen-27b', 'the stamp itself counts');
+  assert.equal(modelThatSpoke(spoke, '2026-09-20T00:00:00.000Z', 'fallback'), 'claude-sonnet-5');
+  assert.equal(modelThatSpoke(spoke, '2026-08-01T00:00:00.000Z', 'fallback'), 'fallback', 'older than the record');
+  assert.equal(modelThatSpoke(spoke, undefined, 'fallback'), 'fallback', 'a reply with no stamp');
+  assert.equal(modelThatSpoke([], '2026-09-16T09:00:00.000Z', 'fallback'), 'fallback');
+});
+
+test('the spoke record is bounded and readable back', () => {
+  let spoke = readSpoke(undefined);
+  assert.deepEqual(spoke, []);
+  for (let index = 0; index < 250; index += 1) spoke = rememberSpoke(spoke, { at: `2026-09-20T00:00:${String(index % 60).padStart(2, '0')}.000Z`, model: `m${index}`, brain: 'local' }, SPOKE_KEPT);
+  assert.equal(spoke.length, SPOKE_KEPT);
+  assert.equal(spoke.at(-1)!.model, 'm249', 'the newest survives');
+  assert.deepEqual(readSpoke([{ at: 'x', model: 'y', brain: 'z' }, { nonsense: true }]), [{ at: 'x', model: 'y', brain: 'z' }]);
+});
+
+test('repliedTo hands back the reply stamp, which is how the model is found', () => {
+  const history = [
+    { id: 'u1', role: 'user', content: 'oi', at: '2026-09-16T08:59:00.000Z' },
+    { id: 'a1', role: 'assistant', content: 'what', at: '2026-09-16T09:00:00.000Z' },
+  ];
+  assert.equal(repliedTo(history, 'a1')!.at, '2026-09-16T09:00:00.000Z');
+  assert.equal(repliedTo(history, 'u1'), null, 'not a reply of hers');
 });

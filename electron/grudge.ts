@@ -10,9 +10,13 @@
 // nothing was ignored. Pure, so the counting and the thresholds are testable.
 
 export type Said = { at: string; source: string; text?: string;
+  /** The line's own id, so a reply that names it can be matched to it (replyto.ts). */
+  id?: string;
   /** False only where it is known the push never landed — see Aside.reached. */
   reached?: boolean };
-export type Heard = { role: string; at?: string };
+export type Heard = { role: string; at?: string;
+  /** The line of hers this message answers, when he said which (replyto.ts). */
+  replyTo?: string | { id: string } };
 
 /** How long she gives them to answer a line of hers before it counts as ignored. */
 export const ANSWER_WINDOW_MS = 90 * 60_000;
@@ -72,6 +76,11 @@ export const NOT_HELD_AGAINST_THEM: readonly string[] = ['goodnight'];
  * Her lines that got nothing back. A line is answered by anything they said
  * after it within the window; a line said inside the window of an earlier one
  * shares its answer. Lines whose window is still open are not counted yet.
+ *
+ * And a line he replied to by name is answered, whenever the reply came. The
+ * window exists because "anything said afterwards" is a guess at what he was
+ * answering; a reply that names the line is not a guess. Four hours late is late,
+ * but it is not ignoring her — he went back and answered the thing she said.
  */
 export function unanswered(said: Said[], heard: Heard[], pushed: ReadonlySet<string>, nowMs: number, notBeforeMs = 0): Said[] {
   const theirs = heard
@@ -79,8 +88,12 @@ export function unanswered(said: Said[], heard: Heard[], pushed: ReadonlySet<str
     .map(turn => Date.parse(turn.at!))
     .filter(Number.isFinite)
     .sort((a, b) => a - b);
+  const named = new Set(heard
+    .filter(turn => turn.role === 'user' && turn.replyTo)
+    .map(turn => (typeof turn.replyTo === 'string' ? turn.replyTo : turn.replyTo!.id)));
   return said
     .filter(line => pushed.has(line.source))
+    .filter(line => !(line.id && named.has(line.id)))
     // Never sent is not ignored. Undefined predates the flag and counts as before.
     .filter(line => line.reached !== false)
     // Nor is a line sent before they were up: two of the three she held

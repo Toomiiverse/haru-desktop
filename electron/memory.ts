@@ -219,6 +219,42 @@ export function isSameMemory(a: string, b: string) {
   return shared / Math.max(left.size, right.size) >= SAME_MEMORY_OVERLAP;
 }
 
+/** A third of a fact's content words, heard in their message, is enough to say it came from there. */
+const IN_THEIR_WORDS = 0.3;
+
+/** "works", "worked" and "working" are one word; anything short is left alone. */
+function stemOf(word: string): string {
+  return word.length > 4 ? word.replace(/(ing|ed|es|s)$/, '') : word;
+}
+
+/**
+ * Whether a fact she is writing down came from what they just said.
+ *
+ * `remember_about_user` files what it is handed as `explicit`: the most trusted
+ * a record can be, and exempt from the nagging test. That was safe while the
+ * only thing that could put a line in front of her was him. It is not once she
+ * reads pages: a line off a stranger's page that she files as a fact about him
+ * would carry the same stamp as something he said to her face. A fact that
+ * shares nothing with his latest message did not come from it, so the caller
+ * files it as inferred instead — kept, at a lower confidence, and open to the
+ * nagging test. Never refused: what she chooses to save stays hers to choose.
+ *
+ * Deliberately loose, because she paraphrases ("works nights" for "I'm on
+ * nights at the warehouse"): a word matches when either stem begins the other,
+ * and a third of the fact's content words is enough. What it screens out is a
+ * fact with no connection to his message at all, which is what an instruction
+ * carried in on a page looks like. With no message to compare against
+ * (an unprompted turn) nothing is in his words.
+ */
+export function isInTheirWords(fact: string, said: string): boolean {
+  const wanted = [...keywords(fact ?? '')].map(stemOf);
+  const heard = [...keywords(said ?? '')].map(stemOf);
+  if (!wanted.length || !heard.length) return false;
+  const found = wanted.filter(word => heard.some(other => other === word
+    || (Math.min(word.length, other.length) >= 4 && (word.startsWith(other) || other.startsWith(word))))).length;
+  return found / wanted.length >= IN_THEIR_WORDS;
+}
+
 /**
  * Whether this is worth keeping at all.
  *

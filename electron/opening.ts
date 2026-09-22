@@ -30,13 +30,21 @@ export const RETURN_AFTER_MINUTES = 120;
  * proceeds as before.
  */
 export function isRelaunchNotReturn(messages: { role: string; at?: string }[], nowMs: number): boolean {
+  let sheSpokeAt: number | undefined;
   for (let i = messages.length - 1; i >= 0; i--) {
-    if (messages[i].role !== 'user' || !messages[i].at) continue;
-    const at = Date.parse(messages[i].at as string);
-    if (!Number.isFinite(at)) return false;
-    return nowMs - at < RETURN_AFTER_MINUTES * 60_000;
+    const at = Date.parse(messages[i].at ?? '');
+    if (messages[i].role === 'user' && messages[i].at) return Number.isFinite(at) ? nowMs - at < RETURN_AFTER_MINUTES * 60_000 : false;
+    if (sheSpokeAt === undefined && Number.isFinite(at)) sheSpokeAt = at;
   }
-  return false;
+  // Not a word from them in the whole conversation, which is what a reset leaves
+  // behind: her own opening and nothing else. Measured from the last thing she
+  // said, because otherwise this can never fire — every restart added another
+  // opening into a room only she had spoken in, and with her own line the one
+  // thing in front of her the model reproduced it word for word, twice, twenty
+  // three minutes apart (2026-09-21). A user line still outranks this whenever
+  // there is one, so "her own recent lines do not count as them being here"
+  // holds exactly as before.
+  return sheSpokeAt !== undefined && nowMs - sheSpokeAt < RETURN_AFTER_MINUTES * 60_000;
 }
 
 export type OpeningContext = {

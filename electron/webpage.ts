@@ -818,6 +818,7 @@ export function appPage(): string {
   .acts button { background:none; border:1px solid var(--edge); color:var(--ink-dim); border-radius:999px; padding:.15rem .55rem; font-size:.85rem; line-height:1.4; font-weight:500; }
   .acts button.on { background:var(--accent); color:var(--accent-ink); border-color:var(--accent); }
   .acts input { flex:1 1 10rem; font-size:.82rem; padding:.3rem .7rem; border-radius:999px; }
+  .acts .tune { display:contents; }
   .acts .said { font-size:.8rem; color:var(--ink-dim); font-style:italic; overflow-wrap:anywhere; }
   .acts .reacted { font-size:.95rem; line-height:1.4; }
   .acts .reacted { border:1px solid var(--edge); border-radius:999px; padding:.05rem .45rem; }
@@ -972,6 +973,9 @@ function acts(m,isLast){
     +'<button type=button data-act=down'+on('down')+' title="Poor">👎</button>'
     +(m.note?'<span class=said>'+esc(m.note)+'</span>':'<button type=button data-act=note title="Tell her why">✎</button>')
     +(isLast?'<button type=button data-act=again title="Ask her again">↻</button>':'')
+    // Not shown as given, the way a note is: a tuning note is never put on the
+    // message, so the page has nothing to show back and the pen stays out.
+    +'<button type=button data-act=tune title="Log what was wrong — she never sees it">✍</button>'
     +'</span></div>';
 }
 
@@ -1445,6 +1449,33 @@ $('chat').addEventListener('click',async ev=>{
       try{ await post('/api/chat/rate',{id,note}); const said=document.createElement('span'); said.className='said'; said.textContent=note; input.replaceWith(said); }
       catch(r){ if(r&&r.status===401){location.reload();return;} input.disabled=false; }
     });
+    return;
+  }
+  // What was wrong with it, and what it should have been. This one is not for
+  // her — it goes to the tuning log on the desk and nothing else — so it says
+  // so on the tin and she never answers it.
+  if(act==='tune'){
+    const box=document.createElement('span'); box.className='tune';
+    const wrong=document.createElement('input'); wrong.placeholder='What was wrong…'; wrong.maxLength=1000;
+    const rather=document.createElement('input'); rather.placeholder='What she should have said (optional)…'; rather.maxLength=4000;
+    const save=document.createElement('button'); save.type='button'; save.textContent='log';
+    box.append(wrong,rather,save);
+    b.replaceWith(box); wrong.focus();
+    const log=async()=>{
+      const w=wrong.value.trim(), r=rather.value.trim();
+      if(!w&&!r) return;
+      save.disabled=wrong.disabled=rather.disabled=true;
+      try{
+        await post('/api/chat/tune',{id,wrong:w,rather:r});
+        const said=document.createElement('span'); said.className='said'; said.textContent='logged'+(w?': '+w:'')+(r?' (+ a rewrite)':'');
+        box.replaceWith(said);
+      }catch(r2){
+        if(r2&&r2.status===401){location.reload();return;}
+        save.disabled=wrong.disabled=rather.disabled=false;
+      }
+    };
+    save.addEventListener('click',log);
+    for(const field of [wrong,rather]) field.addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); void log(); } });
     return;
   }
   if(act==='up'||act==='down'){
