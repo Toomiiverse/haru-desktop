@@ -1,4 +1,5 @@
 import { readTone, isHeated } from './tone';
+import { IRRITATION, EGO } from './mood';
 
 // The emotion engine. The model reports what it meant by a reply; the behaviour
 // engine turns that into movement. Semantic labels rather than animation names,
@@ -168,7 +169,7 @@ export function classificationPrompt(mood: { irritation: number; ego: number }) 
     'Read the line and report what the speaker felt as they said it, not what the listener would feel.',
     `The labels mean: ${EMOTION_GLOSSES}.`,
     'A quiet or short line is not automatically sleepy — only pick sleepy when the words are about tiredness or sleep.',
-    `For context she is currently ${mood.irritation >= 5 ? 'thoroughly fed up' : mood.irritation >= 3 ? 'impatient' : 'even-tempered'} and ${mood.ego >= 6 ? 'insufferably pleased with herself' : mood.ego >= 4 ? 'rather full of herself' : 'not especially smug'}.`,
+    `For context she is currently ${mood.irritation >= IRRITATION.fedUp ? 'thoroughly fed up' : mood.irritation >= IRRITATION.voiced ? 'impatient' : 'even-tempered'} and ${mood.ego >= EGO.insufferable ? 'insufferably pleased with herself' : mood.ego >= EGO.coasting ? 'rather full of herself' : 'not especially smug'}.`,
     'confidence is how sure you are of the label. energy is how animated the delivery is, 0 flat and 1 bouncing.',
     'intent is what she was doing: listen, explain, tease, dismiss, celebrate or soothe.',
     'focus is where her attention sits: user, self, task or away.',
