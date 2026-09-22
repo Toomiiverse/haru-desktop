@@ -41,6 +41,8 @@ const EVERYTHING: ToolAvailability = {
   hands: true,
   desktop: { launch: true, power: true },
   knockedAwake: true,
+  minecraft: true,
+  anime: true,
 };
 
 const NOTHING: ToolAvailability = {
@@ -56,6 +58,7 @@ const NOTHING: ToolAvailability = {
   hands: false,
   desktop: { launch: false, power: false },
   knockedAwake: false,
+  minecraft: false,
 };
 
 const offered = (available: ToolAvailability) =>
@@ -115,6 +118,10 @@ function deps(overrides: Partial<ToolDeps> = {}): ToolDeps {
     lastSearchQuery: () => '',
     rememberSearch: () => {},
     runSystemCommand: async () => ({ ok: true }),
+    minecraft: {
+      status: async () => null,
+      send: async (skill) => ({ ok: false, error: `not in the world (${skill})` }),
+    },
     ...overrides,
   };
 }
@@ -155,6 +162,7 @@ test('no handler is dead code — every one is reachable from some setting', asy
     'get_service_status', 'diagnose_system', 'restart_docker_container',
     'start_service', 'stop_service', 'restart_haru', 'look_up_knowledge', 'adopt_interest', 'browser_control',
     'describe_myself', 'change_setting', 'vault_list', 'vault_read', 'vault_write', 'vault_folder', 'go_back_to_sleep', 'downloads', 'run_command', 'get_manga', 'play_pokemon', 'read_manga',
+    'minecraft_status', 'minecraft_do', 'watch_anime',
   ];
   for (const name of handled) {
     assert.ok(reachable.has(name), `${name} has a handler but is never offered to anyone`);
@@ -525,6 +533,45 @@ test('going back to sleep is on the table only while she is up because they knoc
   assert.deepEqual(asked, { block: true });
   assert.equal(done.asleep, true);
   assert.match(done.note, /one short goodnight/);
+});
+
+test('her Minecraft body is on the table only when it is switched on', () => {
+  const off = offered(NOTHING);
+  assert.ok(!off.includes('minecraft_status'));
+  assert.ok(!off.includes('minecraft_do'));
+  const on = offered({ ...NOTHING, minecraft: true });
+  assert.ok(on.includes('minecraft_status'));
+  assert.ok(on.includes('minecraft_do'));
+  // Not gated on hands: the worker is her, not the machine.
+  assert.ok(offered({ ...NOTHING, minecraft: true, hands: false }).includes('minecraft_do'));
+});
+
+test('a Minecraft order is refused by name when the body is switched off, however it was offered', async () => {
+  // The second check — the one that matters, because a model can name a tool
+  // it was never offered.
+  const reply = await run('minecraft_do', { skill: 'followPlayer', args: { name: 'Tommy' } }, 'follow me', { minecraft: null });
+  assert.match(reply, /switched off/);
+});
+
+test('a Minecraft order names a skill from the fixed list or it goes nowhere', async () => {
+  let sent: string[] = [];
+  const body = {
+    status: async () => null,
+    send: async (skill: string) => { sent.push(skill); return { ok: true, observation: {} }; },
+  };
+  // A name off the list is refused before the worker is even asked.
+  const refused = await run('minecraft_do', { skill: 'rm -rf /' }, 'do it', { minecraft: body });
+  assert.match(refused, /not something your body can do/);
+  assert.deepEqual(sent, []);
+  // A name on the list goes through, with its arguments.
+  const done = await run('minecraft_do', { skill: 'followPlayer', args: { name: 'Tommy' } }, 'follow me', { minecraft: body });
+  assert.match(done, /"done":true/);
+  assert.deepEqual(sent, ['followPlayer']);
+});
+
+test('a status with no worker behind it says so rather than inventing a world', async () => {
+  const reply = await run('minecraft_status', {}, 'what are you up to', { minecraft: { status: async () => null, send: async () => ({ ok: false }) } });
+  assert.match(reply, /not answering|not running/);
 });
 
 test('the downloads are offered from any door when asked about, and refused by name when off', async () => {

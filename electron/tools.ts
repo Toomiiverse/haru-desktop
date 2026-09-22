@@ -42,6 +42,8 @@ import { isDay } from './chatsearch';
 import { KNOWLEDGE_CATEGORIES, type KnowledgeCategory, type KnowledgeStore } from './knowledge';
 import { localEmotion } from './emotion';
 import { readTone } from './tone';
+import type { MinecraftStatus } from './minecraft';
+import { isSkillName, SKILL_NAMES, SKILLS } from './minecraftplan';
 import type { WatchInput } from './anime';
 
 /**
@@ -111,6 +113,40 @@ export const WARDROBE_TOOL: ChatTool = {
     name: 'show_wardrobe',
     description: 'Open the wardrobe panel so the user can see and change how you look — colours, hair, accessories. Call it whenever they ask you to change how you look. It only shows the options; nothing changes until they pick.',
     parameters: { type: 'object', properties: {}, required: [] },
+  },
+};
+
+/**
+ * Her body in Minecraft, from a conversation.
+ *
+ * Two tools, not twenty-odd: one to look and one to act, with the skill named
+ * as an argument. The skill list is in the description, which is how the model
+ * learns what her body can do; the name is checked against the same list when
+ * the call arrives, and again at the worker's door. Nothing here composes an
+ * action — the model picks a name.
+ */
+export const MINECRAFT_STATUS_TOOL: ChatTool = {
+  type: 'function',
+  function: {
+    name: 'minecraft_status',
+    description: 'What your body in Minecraft is doing right now — where you are, how you are, who is on the server with you, what you are carrying, and the project you are in the middle of. Call it whenever they ask what you are up to in Minecraft, or before deciding what to tell your body to do.',
+    parameters: { type: 'object', properties: {}, required: [] },
+  },
+};
+
+export const MINECRAFT_DO_TOOL: ChatTool = {
+  type: 'function',
+  function: {
+    name: 'minecraft_do',
+    description: `Tell your body in Minecraft to do one thing, by name. It can only do these: ${SKILL_NAMES.map(name => `${name} (${SKILLS[name]})`).join('; ')}. Call it when they ask you to do something in the game — follow them, come to them, stop, go home, get something, put something away. Pick the one skill that fits and pass its arguments.`,
+    parameters: {
+      type: 'object',
+      properties: {
+        skill: { type: 'string', enum: SKILL_NAMES, description: 'Which of the skills above.' },
+        args: { type: 'object', description: 'The arguments that skill takes, as named in the list — e.g. {"name": "Tommy"} for followPlayer, {"type": "spruce_log", "amount": 16} for collectBlock.' },
+      },
+      required: ['skill'],
+    },
   },
 };
 
@@ -1031,12 +1067,13 @@ export type ToolAvailability = {
   /** Up because they knocked her awake (hersleep.ts): the one time going back to sleep is on the table. */
   knockedAwake: boolean;
   /**
-   * Her Minecraft body is switched on. Declared but not yet acted on: the
-   * tools behind it are still being built, and nothing here offers one. It is
-   * kept so the fixtures that already name it type-check, and so the flag has
-   * one home rather than two when those tools land.
+   * Her Minecraft body is switched on (minecraft.enabled and the link exists).
+   *
+   * Not gated on the worker actually answering: offered while the link exists,
+   * so that when it is down she can say so rather than having no tool and
+   * inventing what she is up to in a world she cannot see.
    */
-  minecraft?: boolean;
+  minecraft: boolean;
   /** The anime stack is wired up (anime.ts): Jellyfin, Sonarr and Prowlarr reachable in config. Optional so fixtures need not name it. */
   anime?: boolean;
 };
@@ -1122,6 +1159,9 @@ export function chatTools(available: ToolAvailability, latest = ''): ChatTool[] 
   if (available.hands && available.desktop.power && machine) tools.push(POWER_TOOL);
   if (available.browser && available.hands) tools.push(BROWSER_TOOL);
   if (available.knockedAwake) tools.push(SLEEP_TOOL);
+  // Her body in the game. Not gated on hands: the worker is her, not the
+  // machine, and the worst a skill can do is walk somewhere in a game.
+  if (available.minecraft) tools.push(MINECRAFT_STATUS_TOOL, MINECRAFT_DO_TOOL);
   // Watching with her. Not gated on hands, like the Claude sessions: the point
   // is "let's watch Naruto" from the phone too, and the worst a page could
   // start is a subtitled anime he is then told about by name and size.
@@ -1236,6 +1276,11 @@ export type ToolDeps = {
   browserPort(): number;
   /** Where a browser screenshot lands — the screenshots folder or a fallback. */
   browserShotDir(): string;
+  /** Her body in Minecraft (minecraft.ts), or null when switched off. */
+  minecraft: {
+    status(): Promise<MinecraftStatus | null>;
+    send(skill: string, args: Record<string, unknown>): Promise<{ ok: boolean; error?: string; observation?: Record<string, unknown> }>;
+  } | null;
   /** The anime stack (anime.ts), or null when it is not wired up. Optional so fixtures need not name it. */
   anime?: {
     watch(input: WatchInput): Promise<Record<string, unknown>>;
@@ -1946,6 +1991,41 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
     return JSON.stringify({ restarting: true, note: 'Tell them you are restarting and will be right back.' });
   }
 
+  if (name === 'minecraft_status' || name === 'minecraft_do') {
+    // Re-checked here: a model can name a tool it was never offered.
+    if (!deps.minecraft) return JSON.stringify({ error: 'Minecraft is switched off — say so plainly, in your own words.' });
+    if (name === 'minecraft_status') {
+      const status = await deps.minecraft.status();
+      if (!status) return JSON.stringify({ error: 'Your Minecraft body is not answering — the worker is not running. Say so plainly.' });
+      const seen = status.observation;
+      return JSON.stringify({
+        inTheWorld: seen.state === 'online',
+        state: seen.state,
+        where: seen.where ?? (seen.self ? `${seen.self.position.x}, ${seen.self.position.y}, ${seen.self.position.z}` : null),
+        dimension: seen.self?.dimension ?? null,
+        health: seen.self?.health ?? null,
+        food: seen.self?.food ?? null,
+        time: seen.self?.time ?? null,
+        doing: seen.intent.kind,
+        playersHere: seen.nearby.players,
+        carrying: seen.inventory,
+        project: seen.currentProject,
+        knownNearby: seen.knownNearby,
+        note: 'Say it as yourself in a sentence or two — where you are, what you are doing, who is there. Never read this back as a list.',
+      });
+    }
+    const skill = args.skill;
+    if (!isSkillName(skill)) {
+      return JSON.stringify({ error: `"${String(skill).slice(0, 40)}" is not something your body can do. It can: ${SKILL_NAMES.join(', ')}. Pick one of those, or say you cannot.` });
+    }
+    const skillArgs = args.args && typeof args.args === 'object' && !Array.isArray(args.args) ? args.args as Record<string, unknown> : {};
+    const result = await deps.minecraft.send(skill, skillArgs);
+    console.log(`[minecraft] told to ${skill}${Object.keys(skillArgs).length ? ` ${JSON.stringify(skillArgs).slice(0, 120)}` : ''}: ${result.ok ? 'ok' : `failed — ${result.error}`}`);
+    if (!result.ok) {
+      return JSON.stringify({ done: false, skill, because: result.error ?? 'it did not work', note: 'Say what went wrong in your own words, briefly. Never read the reason back verbatim.' });
+    }
+    return JSON.stringify({ done: true, skill, result: result.observation ?? {}, note: 'Say what your body is now doing, briefly and as yourself. Do not list the result.' });
+  }
   if (name === 'watch_anime') {
     // Re-checked here: a model can name a tool it was never offered.
     if (!deps.anime) return JSON.stringify({ error: 'The anime server is not wired up to you — say so plainly, in your own words.' });

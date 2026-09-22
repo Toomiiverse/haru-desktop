@@ -36,10 +36,12 @@ export type AsideSource =
   | 'hanging'     // being left mid-conversation
   | 'weather'     // the weather turning where they are
   | 'upcoming'    // something on the calendar, an hour or a quarter of an hour out
+  | 'minecraft'   // him turning up in her world, or leaving it
   | 'followup'    // a beat after her own reply, the thing she left out
   | 'booked'      // something she set herself to come back to (scheduler.ts)
   | 'thought'     // something on her mind she decided to say (thoughts.ts)
   | 'goodnight'   // turning in for the night, at her own hour (hersleep.ts)
+  | 'anime'       // a show she fetched for them has landed, or never came (animefetch.ts)
   | 'other';
 
 export type Aside = {
@@ -124,7 +126,7 @@ export const ASIDE_DAYS = 7;
 // and 'upcoming' were missing, which is three of the seven sources that reach
 // the phone — the evening tally counted none of them, so being left on read
 // after "you left me hanging" cost them nothing.
-const SOURCES: AsideSource[] = ['screen', 'screenshot', 'activity', 'fullscreen', 'reminder', 'idle', 'journal', 'page', 'poke', 'kept', 'system', 'hanging', 'weather', 'upcoming', 'other', 'followup', 'goodnight', 'booked', 'thought'];
+const SOURCES: AsideSource[] = ['screen', 'screenshot', 'activity', 'fullscreen', 'reminder', 'idle', 'journal', 'page', 'poke', 'kept', 'system', 'hanging', 'weather', 'upcoming', 'other', 'followup', 'goodnight', 'booked', 'thought', 'minecraft', 'anime'];
 
 export function readAsides(saved: unknown): Aside[] {
   if (!Array.isArray(saved)) return [];
