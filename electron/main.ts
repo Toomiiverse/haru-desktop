@@ -1749,14 +1749,21 @@ function unpromptedContext(subjectNow?: string): string {
   //
   // On the clock rather than on the day, unlike the check below: what she must
   // not repeat at one in the morning is what she said at half eleven.
-  // Where their phone says they are rides along too: a nudge that knows they
-  // are at the shops has something to needle with.
+  // Not where their phone says they are: with no place ever saved, that fact
+  // is always "somewhere she has no name for, on Wi-Fi" — background written
+  // for a reply, where he can push back in the same turn, not for a line she
+  // starts. Handed to a composer that speaks first, "fair game for needling"
+  // became a café that was never there (2026-09-22): told he had been quiet
+  // for 21 minutes, she named a place with nothing behind it, then couldn't be
+  // talked out of it, because the word was never grounded in anything to check
+  // it against. ollamaChat's own whereabouts field still carries this fact for
+  // a real reply — only the six composers that read this function lose it.
   // The weather as background is for a line that is about something else. In a
   // weather push it is the errand, already stated at the top, and repeating it
   // here with "it is not what this is about" attached is how she came to write
   // one sentence about rain and three about being ignored (2026-09-20).
   const weatherIsTheErrand = subjectNow === 'The weather';
-  const parts = [summariseFollowing(getFollowing(), Date.now()), todaySoFar(), alreadySaidRecently(asides, CHAT_TIMEZONE, Date.now(), theirLastWordAt(), undefined, subjectNow), stillWaiting(), describeWhereabouts(getWhereabouts()), toldNow(), arrivalNote(), unansweredAsksNote(asides, CHAT_TIMEZONE, Date.now()), weatherIsTheErrand ? '' : weatherToDrawOn(getWeather().last, weatherWhere(), asides.map(aside => aside.text), Date.now(), getWeather().disputedAt), nightRaisedAlready(asides.map(aside => aside.text)), sleepNote(getHerSleepSchedule(), zonedNow(CHAT_TIMEZONE)), openingsToAvoid(asides, Date.now())].filter(Boolean);
+  const parts = [summariseFollowing(getFollowing(), Date.now()), todaySoFar(), alreadySaidRecently(asides, CHAT_TIMEZONE, Date.now(), theirLastWordAt(), undefined, subjectNow), stillWaiting(), toldNow(), arrivalNote(), unansweredAsksNote(asides, CHAT_TIMEZONE, Date.now()), weatherIsTheErrand ? '' : weatherToDrawOn(getWeather().last, weatherWhere(), asides.map(aside => aside.text), Date.now(), getWeather().disputedAt), nightRaisedAlready(asides.map(aside => aside.text)), sleepNote(getHerSleepSchedule(), zonedNow(CHAT_TIMEZONE)), openingsToAvoid(asides, Date.now())].filter(Boolean);
   // While she is a stranger, the line this function ends on is a lie: "pick up
   // something from today — what they told you" is a past she does not have, and
   // it is the last thing every one of these composers reads. The slate replaces
