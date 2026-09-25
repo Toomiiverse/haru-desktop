@@ -1,0 +1,54 @@
+{
+  "candidate_count": 40,
+  "queries": 3080,
+  "index_count": 10003,
+  "exact_intent_accuracy": 0.9298701298701298,
+  "runs": [
+    {
+      "seed": 0,
+      "raw_intent_accuracy": 0.9152597402597402,
+      "reranked_intent_accuracy": 0.9292207792207792,
+      "exact_top1_recovered": 0.9967532467532467,
+      "exact_neighbour_recall5": 0.9893506493506493
+    },
+    {
+      "seed": 1,
+      "raw_intent_accuracy": 0.9201298701298701,
+      "reranked_intent_accuracy": 0.9298701298701298,
+      "exact_top1_recovered": 0.9974025974025974,
+      "exact_neighbour_recall5": 0.9893506493506493
+    },
+    {
+      "seed": 2,
+      "raw_intent_accuracy": 0.9159090909090909,
+      "reranked_intent_accuracy": 0.9282467532467532,
+      "exact_top1_recovered": 0.9964285714285714,
+      "exact_neighbour_recall5": 0.9896103896103896
+    },
+    {
+      "seed": 3,
+      "raw_intent_accuracy": 0.9149350649350649,
+      "reranked_intent_accuracy": 0.9292207792207792,
+      "exact_top1_recovered": 0.9970779220779221,
+      "exact_neighbour_recall5": 0.9898701298701299
+    },
+    {
+      "seed": 4,
+      "raw_intent_accuracy": 0.9181818181818182,
+      "reranked_intent_accuracy": 0.9305194805194805,
+      "exact_top1_recovered": 0.9970779220779221,
+      "exact_neighbour_recall5": 0.9889610389610389
+    }
+  ],
+  "means": {
+    "raw_intent_accuracy": 0.9168831168831169,
+    "reranked_intent_accuracy": 0.9294155844155844,
+    "exact_top1_recovered": 0.996948051948052,
+    "exact_neighbour_recall5": 0.9894285714285715
+  },
+  "caveats": [
+    "Exploratory follow-up on the already examined public benchmark",
+    "Retains original vectors plus a packed index; no total vector-memory saving",
+    "No change to production Haru retrieval"
+  ]
+}

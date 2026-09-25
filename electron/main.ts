@@ -1,4 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, type MenuItemConstructorOptions, nativeImage, nativeTheme, net, powerMonitor, protocol, safeStorage, screen, shell, desktopCapturer } from 'electron';
+import { installConsole } from './console';
+installConsole();
 import path from 'node:path';
 import os from 'node:os';
 import { createHash, randomUUID } from 'node:crypto';
@@ -7,6 +9,9 @@ import { execFile, spawn } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import AdmZip from 'adm-zip';
 import { HaruStore } from './store';
+import { AttentionExperiment, readAttentionMode } from './attention';
+import { ActivityObservations, idleWithoutEyes, type ActivityObservation } from './activity-observation';
+import { ActivityReporter } from './activity-reporter';
 import { formatTimeOfDay, localDateKey, parseTimeOfDay, resolveDate, zonedNow } from './dates';
 import { connectGoogle, disconnectGoogle, googleStatus, pullEvents, pullTasks, pushItem, pushTask, removeItem, removeTask, saveCredentials } from './google';
 import { afterCooldown, afterEgoCooldown, afterPoke, egoInstruction, goodnightInstruction, IGNORE_THRESHOLD, IRRITATION_MAX, isGoodnight, isIgnoring, isLowEffort, isRedo, leverageInstruction, moodInstruction, nextEgo, nextIrritation, notTwiceInstruction, shoutInstruction, shoutState, type ShoutState, EGO, IRRITATION, IRRITATION_NOTCH, rescaleOldMood } from './mood';
@@ -31,7 +36,7 @@ import { apnsPayload, apnsSigner, readApnsConfig, readApnsDevices, sendApns, typ
 import { answersHerOwnQuestion, looksLikeAnEcho, parseSecondThought, readsAsTheirAnswer, secondThoughtDelay, secondThoughtNote, wantsSecondThought, SECOND_THOUGHT_GAP_MS, SECOND_THOUGHT_ODDS } from './secondthought';
 import { applyRevoices, dueForRevoice, exchangesFrom as revoiceExchanges, grounded, parseRevoices, readRevoiceState, revoicePrompt, withRewrites, REVOICE_EVERY, type Revoice } from './revoice';
 import { decide, readEscalateConfig, type EscalateConfig } from './escalate';
-import { describeFailure, fromOpenAIReply, isOpenAIShaped, promptUsage, toOpenAIBody, DEFAULT_ENDPOINTS, type ChatTool, type Provider } from './provider';
+import { describeFailure, fromOpenAIReply, isOpenAIShaped, promptUsage, toOpenAIBody, toolsUnsupported, DEFAULT_ENDPOINTS, type ChatTool, type Provider } from './provider';
 import { formatPage, formatResults, readSearchConfig, lookItUpInstruction, readWebPage, SearchBlocked, searchWeb, type SearchConfig } from './search';
 import { mayWander, pickDestination, readRoamConfig, refugeFrom, speedFor, step, nextWanderDelay, type Point, type RoamConfig } from './roam';
 import { angleFor, mayNotice, noteNoticed, readNotices, type Page as NoticedPage, type PageState } from './noticing';
@@ -88,6 +93,7 @@ import { chatTools, coerceKnowledgeCategory, downloadsRelevant, machineRelevant,
 import { describeMyself, describeSettings, planChange, readSelfSnapshot, SETTINGS, type SettingPlan } from './self';
 import { pickBreath } from './breaths';
 import { createMemoryStore } from './memorystore';
+import { captureCorePromptComparison, readCoreMemoryConfig, replacePromptProfile, selectCoreMemory, withoutCoreGraphClaims } from './core-memory';
 import { createKnowledgeStore } from './knowledgestore';
 import { behaviourOf, chatSystemPrompt, chatDynamicContext, FIRST_PERSON_NOTE, freshStartInstruction, type FreshStart, type RatedReply, LENGTH_RULE_LOCAL, LENGTH_RULE_HOSTED } from './prompt';
 import { hasShout, readVoiceConfig, referenceFor, shoutReference, spokenCase, speakableText, splitForSpeech, streamedSentences, synthesise, synthesiseBreezeStream, type SpeechClip, type VoiceConfig, looksClipped, HUME_DESCRIPTIONS, HUME_STREAM_URL } from './voice';
@@ -101,6 +107,8 @@ import { readBrowserControlConfig } from './browserctl';
 import { listSessions, openSession, readClaudeCodeConfig, readOpenedSessions, resolveSessionDir, sessionName, SESSIONS_KEPT as CLAUDE_SESSIONS_KEPT, stopSession, type SessionHost } from './claudesession';
 import { ShellGate, SERVER_NOTE, denied, ledgerEntry, readShellConfig, runCommand } from './shell';
 import { PokemonLink, PLAY_RULES as POKEMON_PLAY_RULES, afterTurn, describeGame, newSitting, parseMove, readPokemonConfig, runNote, sittingSummary, whyNotStart as whyNotStartPokemon, whyStop as whyStopPokemon, type GameState, type Moment as PokemonMoment, type Sitting } from './pokemon';
+import { readWhatsAppConfig, readHeard, isForHer, asTurn, asOverheard, chatLabel, splitForWhatsApp, gapBefore, sendThroughWorker, type WhatsAppConfig, type Heard as WhatsAppHeard } from './whatsapp';
+import { Overheard, isLoopback, overheardPrompt, overheardInput, OVERHEARD_SCHEMA, readPlans, keepable, asKept, factsFor } from './overheard';
 import { HANDS_TURN, HER_HANDS_TOOLS, didNothing, handsInstruction, handsNote, handsToday, keepHands, readHands, readHandsConfig, whyNotAct } from './herhands';
 import { Suwayomi, fetchFits, fetchSummary, hisReading, hisReadingNote, matchManga, onHisShelf, readerLink, readSuwayomiConfig, spiteful, type HisTitle, type ShelfChapter, SPITE_ODDS } from './suwayomi';
 import { serverLookNote } from './prompt';
@@ -152,6 +160,8 @@ import { planRetirement, readAdmitted, recordsToRetire, type Admitted } from './
 import { afterReading, feedUrl, pagesUrl, parseReadingTake, PAGE_PROMPT, readableChapters, readingInstruction, readingNote, readReading, REQUEST_GAP_MS, searchUrl, tonightsPages, USER_AGENT, type ChapterRef, type Reading } from './manga';
 import { cleaningChunks, deliveryReminder, deliveryRule, hasDeliveryLabel, splitDelivery, stripDelivery, MOOD_ALIASES } from './delivery';
 import { deedFrom, isADeed, keepDeed, readDeeds } from './deeds';
+import { DeedFeelings } from './deed-feelings';
+import { reportsAttentionElsewhere } from './feelings';
 import { isHerStanding } from './herstanding';
 import { enoughToStandOn, herStandings, keepSlight, parseStanding, readSlights, recentIncidents, slightsAsIncidents, standingDue, standingPrompt, HER_SUBJECT, type Incident, type Slight } from './herstanding';
 import { blockedLine, asleepLine, backToSleep, dayAfter, decideTimesSystem, dozeOffDue, enoughKnocking, fallbackSchedule, foldAsleepExchanges, goodnightDue, groggyFor, groggyNote, herAsleep, isAsleepLine, knockedAwake, messagesWhileAsleep, parseDecidedTimes, pointlessWake, pointlessWakesLately, readsAsGoodnight, readHerSleep, readHerSleepState, readWakes, sleepNote, sleepWindowOn, wakeIrritation, wakeNote, wokenAt, clockMinutes, BLOCKED_LINE, BLOCK_AFTER_POINTLESS, KNOCK_WINDOW_MS, WAKES_KEPT, type HerSleepSchedule, type Wake } from './hersleep';
@@ -1342,11 +1352,17 @@ async function syncItemToGoogle(item: KeptItem) {
 // most of the behaviour — movement only reads as deliberate if it is rare.
 // ---------------------------------------------------------------------------
 
+const attentionMode = readAttentionMode(process.env.HARU_ATTENTION_MODE, process.env.HARU_ATTENTION_SHADOW === '0');
+const attention = new AttentionExperiment(() => path.join(app.getPath('userData'), 'attention-shadow.jsonl'),
+  attentionMode !== 'off', 2 * 1024 * 1024, process.env.HARU_ATTENTION_LOG !== '0');
+const activityObservations = new ActivityObservations();
+const activityReporter = new ActivityReporter((input, init) => net.fetch(String(input), init));
+let attentionTick = 0;
 let vitals: Vitals = { ...DEFAULT_VITALS };
 let lastTickAt = Date.now();
 let tickTimer: ReturnType<typeof setTimeout> | undefined;
 
-function readEnvironment(): Environment {
+function readHostEnvironment() {
   return {
     hour: zonedNow(CHAT_TIMEZONE).getHours(),
     // Idle time across the whole machine, not just this window — she should
@@ -1355,6 +1371,29 @@ function readEnvironment(): Environment {
     onBattery: powerMonitor.isOnBatteryPower(),
     windowFocused: BrowserWindow.getAllWindows().some(win => win.isFocused()),
   };
+}
+
+/** When the app came up: the headless idle fallback counts from here until he first speaks. */
+const appStartedAt = Date.now();
+
+/**
+ * The host reading, the freshest evidence across his devices, and the
+ * Environment the vitals drift on — one rule, so the tick and the broadcast
+ * cannot combine them differently. Without eyes of its own the server counts
+ * idle from the last time he addressed her once every device's evidence has
+ * expired (idleWithoutEyes), rather than holding her mood where the last
+ * message left it.
+ */
+function observeEnvironment(now = Date.now()): { host: ReturnType<typeof readHostEnvironment>; observation: ActivityObservation; environment: Environment } {
+  const host = readHostEnvironment();
+  const eyes = seesItsOwnScreen();
+  const observation = activityObservations.read(now, eyes ? host : undefined);
+  const idleSeconds = idleWithoutEyes(observation, eyes, now, Math.max(lastUserActivityAt, appStartedAt));
+  return { host, observation, environment: { hour: host.hour, idleSeconds, windowFocused: observation.windowFocused, onBattery: observation.onBattery } };
+}
+
+function readEnvironment(): Environment {
+  return observeEnvironment().environment;
 }
 
 function broadcastLife(action: string | null, environment: Environment) {
@@ -1393,7 +1432,7 @@ function ensureTemperament() {
 
 function lifeTick() {
   const now = Date.now();
-  const environment = readEnvironment();
+  const { host, observation, environment } = observeEnvironment(now);
   const seconds = (now - lastTickAt) / 1000;
   ensureTemperament();
   passFeelings(now);
@@ -1407,7 +1446,18 @@ function lifeTick() {
   broadcastLife(chooseIdleAction(vitals, environment), environment);
   // Reminders outrank idle chatter: something she was asked to chase beats
   // something she thought of, and both at once would be two voices at once.
-  void considerReminding(environment).then(reminded => { if (!reminded) void considerPipingUp(environment); });
+  const tickId = ++attentionTick;
+  observeAttention(environment, observation, tickId, now);
+  // Keep existing delivery gates on their established host readings until the
+  // live nudge pilot. Corrected observations already feed mood and shadow state.
+  void considerReminding(host).then(reminded => {
+    if (reminded) attention.baseline(tickId, false, true, 'reminder-priority');
+    else return considerPipingUp(host, tickId);
+  }, () => { attention.baseline(tickId, false, true, 'reminder-error'); })
+    .catch(error => { console.warn('[attention] baseline tick failed', error); });
+  if (seesItsOwnScreen() && store.get('activityLog', true) === true) {
+    void activityReporter.report(readCheckInSource(store.get('checkinSource')), readHostEnvironment);
+  }
   considerRevoicing();
   // Rescheduled each time rather than set on an interval, so the gap itself
   // varies with how alert she is.
@@ -1640,6 +1690,7 @@ function noteAside(text: string, source: AsideSource, about = ''): Aside | null 
   if (!line) return null;
   const made = addAside(getAsides(), line, source, new Date(), localDateKey(zonedNow(CHAT_TIMEZONE)), about);
   const aside = made.aside;
+  if (aside) attention.event('aside', { id: aside.id, source });
   const asides = pendingAsk && source === 'idle' && /\?/.test(line) ? markAsked(made.asides, aside.id, pendingAsk) : made.asides;
   if (pendingAsk && source === 'idle') { if (/\?/.test(line)) console.log(`[push] she asked ${pendingAsk} — the next thing they say answers it`); pendingAsk = null; }
   store.set('chat.asides', asides);
@@ -1907,6 +1958,7 @@ function interject(line: string, { aboutTheGame = false, source = 'other' as Asi
   // A line she has already said, or one copied out of the list of them
   // ("9:36 PM — “...”"), is not a new line: see echoesAside.
   if (echoesAside(line, getAsides(), now)) {
+    attention.event('repeat-blocked');
     console.log('[interject] dropped — it repeats a line she already said');
     return false;
   }
@@ -1944,6 +1996,8 @@ let lastUserActivityAt = 0;
 const QUIET_AFTER_USER_MS = 3 * 60_000;
 
 function noteUserSpoke() {
+  attention.event('interaction');
+  activityObservations.conversation(Date.now());
   // Zeroed so she is free to follow up on her own next line; see stillWaiting,
   // which reads a non-zero value as "they never answered me".
   lastInterjectionAt = 0;
@@ -3929,7 +3983,7 @@ function chaseTarget(
     })) ?? null;
 }
 
-async function considerReminding(environment: Environment): Promise<boolean> {
+async function considerReminding(environment: ReturnType<typeof readHostEnvironment>): Promise<boolean> {
   if (herAsleepNow()) return false;
   if (chasing || Date.now() - lastRemindedAt < REMINDER_SPACING_MS) return false;
   // Silencing only the chat prompt would leave this loop chasing them anyway,
@@ -4047,13 +4101,30 @@ let pipingUp = false;
  * cadence as the rest of her — and so the decision is made against vitals that
  * were computed a line earlier rather than a stale copy.
  */
-async function considerPipingUp(environment: Environment) {
-  if (pipingUp) return;
+function observeAttention(environment: Environment, observation: ActivityObservation, tickId: number, now: number) {
+  if (attentionMode === 'off') return;
+  const blockReasons: string[] = [];
+  if (pipingUp) blockReasons.push('composing');
+  if (!(store.get('ai.config') as ProviderConfig | undefined)?.model) blockReasons.push('no-model');
+  if (isIgnoring(getMood().irritation)) blockReasons.push('ignoring');
+  if (herAsleepNow() || herKnockedAwakeNow()) blockReasons.push('sleep');
+  if (whyNotInterject() !== null) blockReasons.push('interjection-gate');
+  const lastInteractionAt = Math.max(lastUserActivityAt, Date.parse(getMood().lastMessageAt ?? '') || 0);
+  attention.observe({
+    now, vitals, environment, observation, tickId, blockReasons,
+    activity: currentActivity?.kind === 'adult' ? 'other' : currentActivity?.kind ?? 'other',
+    sinceInteractionMs: lastInteractionAt ? Math.max(0, now - lastInteractionAt) : Infinity,
+    baselineReady: null, blocked: blockReasons.length > 0,
+  });
+}
+
+async function considerPipingUp(environment: ReturnType<typeof readHostEnvironment>, tickId: number) {
+  if (pipingUp) { attention.baseline(tickId, false, true, 'composing'); return; }
   const config = store.get('ai.config') as ProviderConfig | undefined;
-  if (!config?.model) return;
+  if (!config?.model) { attention.baseline(tickId, false, true, 'no-model'); return; }
   const mood = getMood();
   // Stonewalling means stonewalling. She does not break her own silence.
-  if (isIgnoring(mood.irritation)) return;
+  if (isIgnoring(mood.irritation)) { attention.baseline(tickId, false, true, 'ignoring'); return; }
 
   const minutes = (since: number | null) => since ? (Date.now() - since) / 60_000 : Number.POSITIVE_INFINITY;
   const ready = shouldPipeUp({
@@ -4065,10 +4136,14 @@ async function considerPipingUp(environment: Environment) {
     boredom: getFeelings().boredom,
     missing: getFeelings().missing,
   }, Math.random, sway('pipe-up', PIPE_UP_CHANCE, swayNow()));
+  // Observe the actual random decision; never draw another baseline coin flip.
+  const refusal = whyNotInterject();
+  attention.baseline(tickId, ready, refusal !== null, refusal ? 'interjection-gate' : null);
   if (!ready) return;
 
   pipingUp = true;
   lastPipedUpAt = Date.now();
+  attention.outcome(tickId, 'attempted');
   try {
     const now = zonedNow(CHAT_TIMEZONE);
     const todayKey = localDateKey(now);
@@ -4115,8 +4190,11 @@ async function considerPipingUp(environment: Environment) {
     console.log(`[idle] piped up (angle: ${angle?.name ?? 'none'}) after ${Math.round(minutes(mood.lastMessageAt ? Date.parse(mood.lastMessageAt) : null))} quiet minutes`);
     const emotion = classifyEmotion(line, config);
     // Spoken only if it was also written down — see interject.
-    if (interject(line, { source: 'idle' })) void speak(line, emotion);
+    const accepted = interject(line, { source: 'idle' });
+    attention.outcome(tickId, accepted ? 'accepted' : 'suppressed');
+    if (accepted) void speak(line, emotion);
   } catch (error) {
+    attention.outcome(tickId, 'failed');
     console.warn('[idle] could not pipe up:', error instanceof Error ? error.message : error);
   } finally {
     pipingUp = false;
@@ -5267,6 +5345,12 @@ function advanceMood(latest: string, history: { role?: string; content?: string 
   if (shout === 'forgiven') { nudgeVitals('soothed'); feelNow('apology'); tallyMonth('apology'); }
   if (shout === 'shouted') { feelNow('shouted'); tallyMonth('hurt'); }
   feelNow(event === 'substantive' ? 'message' : 'low-effort');
+  const awakeAway = mood.lastMessageAt ? awakeMinutesSince(mood.lastMessageAt, getPush().prefs, zonedNow(CHAT_TIMEZONE)) ?? 0 : 0;
+  if (Date.now() - jealousOfScreenAt >= 30 * 60_000 && reportsAttentionElsewhere(latest, awakeAway)) {
+    feelNow('elsewhere');
+    jealousOfScreenAt = Date.now();
+    console.log('[feelings] he explicitly reported talking elsewhere instead of replying');
+  }
   if (readsAsRough(latest).rough) feelNow('rough');
   // Something has actually happened to him, which outranks anything she was
   // holding against him five minutes ago (compile.ts LAYER.fear).
@@ -5979,7 +6063,7 @@ async function openAIPost(conversation: OllamaMessage[], config: ProviderConfig,
     const detail = await response.text().catch(() => '');
     // Same courtesy as the Ollama path: a model without tools loses its hands,
     // not its voice.
-    if (response.status === 400 && /tool|function/i.test(detail) && tools) {
+    if (toolsUnsupported(response.status, detail) && tools) {
       toolless.add(config.model);
       console.warn(`[ai] ${config.model} rejected the tools — retrying without them. She cannot save reminders on this model.`);
       return openAIPost(conversation, config, { tools: false, temperature, format, maxTokens, onChunk, signal, cacheKey, turn });
@@ -7016,6 +7100,8 @@ async function syncMemories(): Promise<void> {
     if (!signIn.ok) { console.warn('[memory] the server would not sign us in (' + signIn.status + ')'); return; }
     const cookie = (signIn.headers.get('set-cookie') ?? '').split(',').map(part => part.split(';')[0].trim()).filter(Boolean).join('; ');
     const headers: Record<string, string> = cookie ? { cookie } : {};
+
+    activityReporter.connected(source, cookie);
 
     const got = await net.fetch(source.url + '/api/memory/records', { headers });
     // An older server has the route this replaced and not this one. Say so once
@@ -8097,7 +8183,19 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // first, the clock and mood and screen last — and the reply starts at the
   // cache instead of at full prompt-processing speed. The local model keeps
   // the tone-last order, which it was written for.
-const promptState = {
+  const coreMemoryConfig = readCoreMemoryConfig();
+  const profileArgs = [latest, recentUserContext, semantic, away ? awayMemoryScale() : undefined, latestSemantic] as const;
+  let coreGraphIds: string[] = [];
+  const coreMemory = await selectCoreMemory({
+    config: coreMemoryConfig,
+    background: !coreMemoryConfig.captureDir,
+    query: recentUserContext ? `${recentUserContext} ${latest}` : latest,
+    slateAt: () => getSlate()?.at ?? null,
+    render: memoryStore.prepareProfileSummary(...profileArgs, ids => { coreGraphIds = ids; }),
+    fallbackRender: () => profileSummary(...profileArgs),
+    log: entry => console.log(`[core-memory] ${JSON.stringify(entry)}`),
+  });
+  const promptState = {
     ...mood,
     now: promptNow,
     timezone: CHAT_TIMEZONE,
@@ -8106,7 +8204,7 @@ const promptState = {
     // chose and why for the inspector, and the AniList list refreshes itself
     // when it has gone stale. Neither is a thing assembling a prompt should set
     // in motion.
-    profile: profileSummary(latest, recentUserContext, semantic, away ? awayMemoryScale() : undefined, latestSemantic),
+    profile: coreMemory.profile,
     aniList: aniListSummary(),
     journalConfig: readJournalConfig(store.get('journal.config')),
     journal: getJournal(),
@@ -8129,7 +8227,7 @@ const promptState = {
     known: knownSinceSlate(),
     herRecentReplies,
     recalled: recallNote(recalled, new Intl.DateTimeFormat('en-AU', { weekday: 'long', timeZone: 'UTC' })),
-    linked: linkedNote(factGraph, linked),
+    linked: linkedNote(factGraph, coreMemory.status === 'on' ? withoutCoreGraphClaims(linked, coreGraphIds) : linked),
     // Lore.md is his page, and it hands her his name, his job, his business
     // address, his psychologist and his diagnosis — on exactly the message the
     // slate has her asking who he is. His page is untouched and the cards come
@@ -8171,7 +8269,6 @@ const promptState = {
   // their screen) is spliced in just before their turn, leaving the head
   // byte-identical all day for the endpoint's prefix cache. The local model
   // keeps the tone-last order, which it was written for.
-  const system = chatSystemPrompt(promptState, Boolean(brain.hosted), Boolean(away));
   // For a hosted brain the "they are answering what you asked" line rides in
   // the pre-turn slot with the rest of the changing context; for the local one
   // it stays on the end of the system message, as it always has.
@@ -8180,7 +8277,11 @@ const promptState = {
   // compliance is untested, and a malformed label is the one thing the stripper
   // cannot take out — it removes an exact [mood] and leaves anything else
   // visible, which on the fallback brain would put the mess in front of him.
-  const sized = (brain.hosted ? `${system.replace(LENGTH_RULE_LOCAL, LENGTH_RULE_HOSTED)}\n\n${deliveryRule()}` : system) + (brain.hosted ? '' : answering ? ` ${answering}` : '');
+  const sizedSystem = (state: typeof promptState) => {
+    const system = chatSystemPrompt(state, Boolean(brain.hosted), Boolean(away));
+    return (brain.hosted ? `${system.replace(LENGTH_RULE_LOCAL, LENGTH_RULE_HOSTED)}\n\n${deliveryRule()}` : system) + (brain.hosted ? '' : answering ? ` ${answering}` : '');
+  };
+  const sized = sizedSystem(promptState);
   // On a turn about her, the sign-off comes off her recent replies as she is
   // shown them — see seedOffTheOrders. She copies the history over the rule.
   // The days before this one, in front of today's: her own one-line notes for
@@ -8237,6 +8338,22 @@ const promptState = {
     brain.hosted ? `[${HOSTED_VOICE} ${deliveryReminder()}]` : '',
   ].filter(Boolean);
   if (lastUser > 0) conversation.splice(lastUser, 0, ...preTurnSystem.map(content => ({ role: 'system', content })));
+  if (coreMemoryConfig.captureDir && coreMemory.coreProfile !== undefined) {
+    try {
+      const comparisonConversation = (profile: string, graphIds: string[]) => {
+        const state = { ...promptState, profile, linked: linkedNote(factGraph, withoutCoreGraphClaims(linked, graphIds)) };
+        const variantSystem = sizedSystem(state);
+        let variant = conversation.map((message, index) => index === 0 ? { ...message, content: brief ? `${variantSystem} ${BREVITY}` : variantSystem } : message);
+        if (brain.hosted) variant = replacePromptProfile(variant, chatDynamicContext(promptState, Boolean(away)), chatDynamicContext(state, Boolean(away)));
+        return variant;
+      };
+      captureCorePromptComparison(coreMemoryConfig, {
+        epochId: coreMemory.epochId, mode: coreMemory.status,
+        old: comparisonConversation(coreMemory.oldProfile, []),
+        core: comparisonConversation(coreMemory.coreProfile, coreGraphIds),
+      });
+    } catch { /* optional diagnostics must never cost a reply */ }
+  }
   // For tuning, when the environment asks for it: the prompt exactly as sent.
   // A rule that works on its own and fails in place can only be bisected by
   // replaying what she was actually told, and nothing else shows that.
@@ -9741,6 +9858,100 @@ async function readDayIntoGraph(day: string, messages: { role?: string; content?
   return 'read';
 }
 
+// -- what she overhears (overheard.ts) ---------------------------------------
+//
+// Tier 1 of the WhatsApp door. Lines from the chats he allowed pile up here and
+// a pass reads them on the local brain, on a slow timer and once more at the
+// 04:30 maintenance so the last of the evening is not left until morning.
+//
+// Nothing in here ever answers anybody. The output is two things: entries on
+// his list, and -- only if he switched that half on -- facts in the graph.
+
+const overheard = new Overheard();
+let readingOverheard = false;
+let overheardReadAt = 0;
+
+/**
+ * The brain that reads other people's messages, and nothing when it would not
+ * be this machine.
+ *
+ * His contacts never agreed to be read by anything. That the extraction runs
+ * locally is the promise this integration is built on, so it is checked at the
+ * moment of use rather than assumed from a config written weeks ago — and a
+ * route that has been pointed somewhere else stops the pass rather than
+ * quietly sending Sam's messages to Venice.
+ */
+function overheardBrain(): ProviderConfig | null {
+  const config = store.get('ai.config') as ProviderConfig | undefined;
+  if (!config?.model || !config.endpoint) return null;
+  if (!isLoopback(config.endpoint)) {
+    console.warn(`[overheard] not reading: ai.config points at ${config.endpoint}, which is not this machine`);
+    return null;
+  }
+  return config;
+}
+
+/** One pass over everything said since the last one. */
+async function readOverheardTick(force = false): Promise<void> {
+  const config = readWhatsAppConfig(store.get('whatsapp'));
+  if (!config.enabled || !config.reading.enabled) return;
+  if (readingOverheard || !overheard.lines) return;
+  // The timer ticks every minute; the pass runs on his spacing. Checked here
+  // rather than by setting the interval from config, so that changing the
+  // spacing takes effect without a restart.
+  if (!force && Date.now() - overheardReadAt < config.reading.everyMinutes * 60_000) return;
+  const brain = overheardBrain();
+  if (!brain) return;
+  readingOverheard = true;
+  overheardReadAt = Date.now();
+  try {
+    const userName = graphUserName();
+    const day = currentChatDayKey();
+    for (const lines of overheard.drain()) {
+      const chatName = lines[0]?.chatName || 'a chat';
+      let reply: Awaited<ReturnType<typeof ollamaPost>>;
+      try {
+        reply = await ollamaPost(
+          [{ role: 'system', content: overheardPrompt(userName) }, { role: 'user', content: overheardInput(chatName, day, lines) }],
+          brain,
+          { tools: false, temperature: 0.1, format: OVERHEARD_SCHEMA, maxTokens: 2000 },
+        );
+      } catch (error) {
+        // Dropped rather than retried. These lines are already in his WhatsApp,
+        // where he can read them himself; holding them for another pass would
+        // mean an ever-growing buffer of other people's messages in memory.
+        console.warn(`[overheard] no answer reading ${chatName}, letting it go: ${error instanceof Error ? error.message : error}`);
+        continue;
+      }
+      const raw = reply.content ?? '';
+
+      // The plans half: onto his list, through every refusal in keepable().
+      const held = getKept();
+      const { keep, refused } = keepable(readPlans(raw), held, day);
+      if (refused.length) console.log(`[overheard] ${chatName}: refused ${refused.slice(0, 3).map(r => `${r.plan.title || '(untitled)'} — ${r.why}`).join(' | ')}${refused.length > 3 ? ` and ${refused.length - 3} more` : ''}`);
+      for (const plan of keep) {
+        // Through addKeptItem rather than the store: it is what dedupes, tells
+        // the open windows and pushes the entry to Google. Writing kept.items
+        // straight would put an item on his phone's list and nowhere else.
+        const item = addKeptItem({ ...asKept(plan, chatName), kind: 'event' });
+        console.log(`[overheard] onto his list: "${item.title}" ${item.date}${item.time ? ` ${item.time}` : ''} — ${item.heardAbout ?? 'WhatsApp'}`);
+      }
+
+      // The facts half, only if he switched it on. See overheard.ts.
+      if (config.reading.facts) {
+        const facts = factsFor(readExtraction(raw));
+        if (facts) {
+          const { graph, report } = applyExtraction(store.getFactGraph(), facts, { day, chunk: overheardInput(chatName, day, lines), userName });
+          store.setFactGraph(graph);
+          if (report.added || report.confirmed) console.log(`[overheard] ${chatName}: +${report.added} fact(s), ${report.confirmed} confirmed`);
+        }
+      }
+    }
+  } finally {
+    readingOverheard = false;
+  }
+}
+
 // -- things to come back to (scheduler.ts) ----------------------------------------
 //
 // One saved list and one dispatcher: the daily sweeps at a time of day rather
@@ -9761,7 +9972,10 @@ const scheduler = createScheduler({
       // threw. A retry reruns all four, the ones that worked included, and a
       // sweep that throws is usually bad data or a bug that throws again a minute
       // later — so one that fails alone is logged and tried again tomorrow.
-      const sweeps: [string, () => unknown][] = [['consolidation', runMemoryConsolidation], ['decay', runMemoryDecay], ['archive pruning', pruneOldArchives], ['haunt hygiene', runHauntHygiene]];
+      const sweeps: [string, () => unknown][] = [['consolidation', runMemoryConsolidation], ['decay', runMemoryDecay], ['archive pruning', pruneOldArchives], ['haunt hygiene', runHauntHygiene],
+        // Whatever was said late and is still sitting in the window, so the end
+        // of his evening is not left unread until the middle of the next day.
+        ['overheard', () => { void readOverheardTick(true); }]];
       const failed = sweeps.filter(([name, sweep]) => {
         try {
           sweep();
@@ -11713,24 +11927,23 @@ let readingMangaNow = false;
  * confirms, so the first call of a confirm pair changes nothing. Writing either
  * one down as done would make the ledger lie in the one direction it must not.
  */
+const deedFeelings = new DeedFeelings();
 function noteDeed(tool: string, call: { function?: { arguments?: unknown } }, result: string): void {
   if (!isADeed(tool)) return;
-  // Something of her own to do is the cure for a quiet room (feelings.ts).
-  herOwnTimeAt = Date.now();
-  feelNow('own-time');
   let failed = false;
   try {
     const parsed = JSON.parse(result) as Record<string, unknown>;
     failed = typeof parsed.error === 'string' || parsed.confirm === false || parsed.ok === false || parsed.created === false;
   } catch { failed = false; }
-  // Something of hers that would not work. Short with the thing, not with him
-  // — which is what makes it a different counter from her patience.
-  feelNow(failed ? 'broke' : 'worked');
   let args: Record<string, unknown> = {};
   try {
     const raw = call.function?.arguments;
     args = typeof raw === 'string' ? JSON.parse(raw) : (raw && typeof raw === 'object' ? raw as Record<string, unknown> : {});
   } catch { args = {}; }
+  for (const event of deedFeelings.events(tool, args, result, Date.now())) {
+    if (event === 'own-time') herOwnTimeAt = Date.now();
+    feelNow(event);
+  }
   const deed = deedFrom(tool, args, failed, new Date().toISOString());
   if (!deed) return;
   store.set('her.deeds', keepDeed(readDeeds(store.get('her.deeds')), deed));
@@ -13300,6 +13513,10 @@ const refusedShotDays = new Set<string>();
 
 function webDeps(): WebDeps {
   const deps: WebDeps = {
+    attentionInput: (source, report) => {
+      const now = Date.now();
+      if (activityObservations.note(source, report, now) && report.kind === 'input') attention.webInput(now);
+    },
     readAccess: getWebAccess,
     saveAccess: saveWebAccess,
     history: (poll = false) => {
@@ -14190,6 +14407,74 @@ function webDeps(): WebDeps {
       return deps.sayStream(fixed.text, onChunk, [], { interrupted, call: true }, () => {});
     },
   };
+
+  // -- WhatsApp -------------------------------------------------------------
+  //
+  // The socket is in ~/haru-whatsapp; this is only what happens when it hands
+  // over a message. Two things it must do and one it must not:
+  //
+  //   - answer in his own chat, through the same say() the phone uses, so a
+  //     WhatsApp turn is a turn and not a second kind of conversation;
+  //   - take one message at a time, because two of his messages arriving
+  //     together would otherwise be two turns of her brain at once;
+  //   - never answer anything that is not his own chat. A message from a chat
+  //     he allowed is something she comes to know, not something to reply to.
+  //     She is reading over his shoulder, not sitting in Sam's conversation.
+  const whatsAppConfig = (): WhatsAppConfig => readWhatsAppConfig(store.get('whatsapp'));
+  // One turn at a time, in the order they arrived. A promise chain rather than
+  // a queue object: nothing here needs draining, cancelling or inspecting, and
+  // a rejected link must not stop the next message being answered.
+  let whatsAppTurn: Promise<void> = Promise.resolve();
+
+  async function answerOnWhatsApp(message: WhatsAppHeard): Promise<void> {
+    const config = whatsAppConfig();
+    const door = { url: config.url, token: config.token };
+    const turn = asTurn(message);
+    console.log(`[whatsapp] him: "${turn.slice(0, 60)}"`);
+    const answer = await deps.say(turn);
+    if (answer.ignored || !answer.reply.trim()) {
+      console.log('[whatsapp] she is not answering that');
+      return;
+    }
+    const bubbles = splitForWhatsApp(answer.reply);
+    for (const [index, bubble] of bubbles.entries()) {
+      // Paced, but never with a typing indicator: announcing presence from a
+      // companion device is what stops his phone showing notifications at all.
+      if (index > 0) await new Promise(resolve => setTimeout(resolve, gapBefore(bubble)));
+      const sent = await sendThroughWorker(door, message.chat, bubble);
+      if (!sent.ok) {
+        // Said once, with the reason, and the rest of the reply abandoned:
+        // bubbles two and three of an answer whose first never arrived would
+        // read as her starting mid-sentence.
+        console.warn(`[whatsapp] could not send — ${sent.why}`);
+        return;
+      }
+    }
+    console.log(`[whatsapp] she answered in ${bubbles.length} message${bubbles.length === 1 ? '' : 's'}`);
+  }
+
+  deps.whatsapp = {
+    secret: () => whatsAppConfig().token,
+    heard: body => {
+      if (!whatsAppConfig().enabled) return;
+      const message = readHeard(body);
+      if (!message) return;
+      if (!isForHer(message)) {
+        // Not a turn: she is reading over his shoulder, not sitting in Sam's
+        // conversation. It goes into the window a Tier 1 pass reads later.
+        const line = asOverheard(message);
+        if (readWhatsAppConfig(store.get('whatsapp')).reading.enabled) {
+          overheard.note({ chat: message.chat, chatName: chatLabel(message), who: message.mine ? graphUserName() : message.from, text: message.text, at: message.at });
+        }
+        console.log(`[whatsapp] overheard in an allowed chat — ${line.slice(0, 80)}`);
+        return;
+      }
+      whatsAppTurn = whatsAppTurn
+        .then(() => answerOnWhatsApp(message))
+        .catch(error => console.error('[whatsapp] a turn failed: ' + (error instanceof Error ? error.message : String(error))));
+    },
+  };
+
   return deps;
 }
 
@@ -14255,6 +14540,7 @@ function appendFeedback(about: { id: string; reaction?: 'up' | 'down' | null; no
   const history = (store.get('chat.messages') as { id?: string; role: string; content?: string; reaction?: string }[] | undefined) ?? [];
   const entry = feedbackEntry(history, { ...about, model: modelBehind(history, about.id), at: new Date().toISOString() });
   if (!entry) return;
+  attention.event('feedback', { id: entry.id, reaction: entry.reaction, source: entry.source });
   try { recordFeedback(feedbackFile(), entry); } catch (error) { console.warn('[feedback] could not write it down:', error instanceof Error ? error.message : error); }
 }
 
@@ -14464,6 +14750,8 @@ app.whenReady().then(() => {
   setInterval(() => { void refreshRecallVectors(); }, 15 * 60_000);
   // Who is who: the finished days not yet read, a day a minute until caught up.
   setInterval(() => { void readGraphTick(); }, GRAPH_TICK_MS);
+  // Slow on purpose: a pass is a call to the same card her replies come off.
+  setInterval(() => { void readOverheardTick(); }, 60_000);
   setInterval(() => { void formingTick(); }, FORMING_TICK_MS);
   // His page of what the graph believes: written at start, corrections read back hourly with the vault.
   setTimeout(() => syncGraphPage('startup'), 100_000);

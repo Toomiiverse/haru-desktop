@@ -27,7 +27,7 @@ import {
 } from './memory';
 import { consolidateMemories, type ConsolidationChange } from './consolidation';
 import { mergeMemories, type MergeReport } from './memorysync';
-import { formatMemoryBlocks, type BlockSources, type MemoryBlock } from './blocks';
+import { formatMemoryBlocks, type BlockSources, type MemoryBlock, type DerivedMemoryBlocks } from './blocks';
 import type { Embedder } from './embeddings';
 import { guessCategory, namesSomeoneElse, SORT_BATCH, type Category, type SortNote, type Sorted } from './categories';
 import type { EmotionName } from './emotion';
@@ -386,7 +386,7 @@ export function createMemoryStore(deps: MemoryStoreDeps) {
     broadcast('blocks:changed', items);
   }
 
-  function profileSummary(message: string, recentContext = '', semantic?: Map<string, number>, scale?: number, latestSemantic?: Map<string, number>): string {
+  function prepareProfileSummary(message: string, recentContext = '', semantic?: Map<string, number>, scale?: number, latestSemantic?: Map<string, number>, onCoreGraphClaims?: (ids: string[]) => void): (derived?: DerivedMemoryBlocks) => string {
     const query = recentContext ? `${recentContext} ${message}` : message;
     const limit = isExplicitRecall(message) ? DEEP_RECALL_LIMIT : undefined;
     const picked = retrieveMemories(getMemories(), query, { limit, semantic });
@@ -407,16 +407,26 @@ export function createMemoryStore(deps: MemoryStoreDeps) {
     // section each turn — see BlockRenderOptions.scale and UNSCALED_BLOCKS.
     // The message on its own as well as with its context, when there is context to dilute it.
     const latest = recentContext ? { message, semantic: latestSemantic } : undefined;
-    const blocks = formatMemoryBlocks(store.getBlocks(), blockSources(query, semantic, latest), { omit: ['persona'], compact: true, ...(scale !== undefined ? { scale } : {}) });
-    for (const entry of blocks.cut) {
-      console.warn(`[blocks] ${entry.label} cut from ${entry.before} to ${entry.after} chars to fit its budget — selection was tighter than this; raise the block limit if it keeps happening`);
-    }
-    const lines: string[] = [];
-    if (blocks.text) lines.push(blocks.text);
-    if (getSessions().length) {
-      lines.push('Earlier conversations are reflected in the working_state block. Refer back to them naturally when relevant, the way someone would who was there. Do not list them back or announce that you remember.');
-    }
-    return lines.length ? `About the user: ${lines.join(' ')}` : '';
+    const configured = store.getBlocks();
+    const sources = blockSources(query, semantic, latest);
+    const hasSessions = getSessions().length > 0;
+    return (derived?: DerivedMemoryBlocks): string => {
+      const blocks = formatMemoryBlocks(configured, sources, { omit: ['persona'], compact: true, ...(scale !== undefined ? { scale } : {}), ...(derived ? { derived } : {}) });
+      onCoreGraphClaims?.(blocks.coreGraphIds);
+      for (const entry of blocks.cut) {
+        console.warn(`[blocks] ${entry.label} cut from ${entry.before} to ${entry.after} chars to fit its budget — selection was tighter than this; raise the block limit if it keeps happening`);
+      }
+      const lines: string[] = [];
+      if (blocks.text) lines.push(blocks.text);
+      if (hasSessions) {
+        lines.push('Earlier conversations are reflected in the working_state block. Refer back to them naturally when relevant, the way someone would who was there. Do not list them back or announce that you remember.');
+      }
+      return lines.length ? `About the user: ${lines.join(' ')}` : '';
+    };
+  }
+
+  function profileSummary(message: string, recentContext = '', semantic?: Map<string, number>, scale?: number, latestSemantic?: Map<string, number>): string {
+    return prepareProfileSummary(message, recentContext, semantic, scale, latestSemantic)();
   }
 
   return {
@@ -426,7 +436,7 @@ export function createMemoryStore(deps: MemoryStoreDeps) {
     /** The vectors as they stand. A function because they are replaced wholesale. */
     vectors: () => vectors,
     consolidate, decay,
-    blockSources, setBlocks, profileSummary,
+    blockSources, setBlocks, profileSummary, prepareProfileSummary,
     lastRetrieval: () => lastRetrieval,
   };
 }

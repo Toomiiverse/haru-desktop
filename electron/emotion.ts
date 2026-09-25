@@ -151,6 +151,8 @@ export function parseEmotion(raw: unknown): Emotion | null {
 // line about missing someone "sleepy" and a line about nodding off "neutral".
 // Sleepiness is a physical state, not a volume level, and that has to be said.
 const EMOTION_GLOSSES = [
+  'determined: resolute, committed to acting or persisting through difficulty',
+  'worried: concerned, anxious that something may be wrong',
   'neutral: matter-of-fact, nothing much felt',
   'happy: pleased or delighted',
   'curious: interested, wants to know more',

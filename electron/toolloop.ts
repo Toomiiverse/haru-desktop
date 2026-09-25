@@ -199,12 +199,13 @@ export async function runToolLoop(conversation: ChatMessage[], deps: ToolLoopDep
       log(`[ai] round ${round + 1} took ${Date.now() - roundStarted}ms — tool calls: ${message.tool_calls.map(call => call.function?.name ?? '?').join(', ')}${trace}`);
       for (const call of message.tool_calls) if (call.function?.name) ran.add(call.function.name);
       resetStream();
+      message.tool_calls = message.tool_calls.map((call, index) => ({ ...call, id: call.id ?? `call_${conversation.length}_${index}` }));
       conversation.push(message);
       // The calls in one round run together rather than one after another — a
       // search and a page read have nothing to wait for. Order is kept: each
       // result answers the call it was born from, whichever finished first.
       const results = await Promise.all(message.tool_calls.map(async call => ({ call, content: await deps.runTool(call) })));
-      for (const { call, content } of results) conversation.push({ role: 'tool', tool_name: call.function?.name, content });
+      for (const { call, content } of results) conversation.push({ role: 'tool', tool_name: call.function?.name, tool_call_id: call.id, content });
       if (deps.pageWasRead()) log('[search] page read — tools withdrawn for the rest of this reply');
       continue;
     }

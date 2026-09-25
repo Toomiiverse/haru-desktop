@@ -50,7 +50,7 @@ export const DEFAULT_ENDPOINTS: Record<Provider, string> = {
 
 export type ToolCall = { id?: string; function?: { name?: string; arguments?: unknown } };
 export type ChatMessage = {
-  role: string; content?: string; tool_calls?: ToolCall[]; tool_name?: string;
+  role: string; content?: string; tool_calls?: ToolCall[]; tool_name?: string; tool_call_id?: string;
   /** Base64 pictures travelling with this message, in Ollama's shape. See toOpenAIMessages. */
   images?: string[];
 };
@@ -82,7 +82,7 @@ export function toOpenAIMessages(conversation: ChatMessage[]): OpenAIMessage[] {
       out.push({
         role: 'tool',
         content: message.content ?? '',
-        tool_call_id: findCallId(conversation, index, message.tool_name) ?? message.tool_name ?? 'call_0',
+        tool_call_id: message.tool_call_id ?? findCallId(conversation, index, message.tool_name) ?? message.tool_name ?? 'call_0',
       });
       continue;
     }
@@ -136,10 +136,19 @@ function findCallId(conversation: ChatMessage[], from: number, name: string | un
   for (let at = from - 1; at >= 0; at--) {
     const calls = conversation[at].tool_calls;
     if (!calls?.length) continue;
-    const match = calls.find(call => call.function?.name === name) ?? calls[0];
-    return match.id ?? `call_${at}_0`;
+    // Legacy results carry only the name. Match successive occurrences, not
+    // always the first call when a model saves two memories in one round.
+    const used = conversation.slice(at + 1, from).filter(message => message.role === 'tool' && message.tool_name === name).length;
+    const matching = calls.map((call, position) => ({ call, position })).filter(({ call }) => call.function?.name === name);
+    const match = matching[used];
+    return match ? match.call.id ?? `call_${at}_${match.position}` : undefined;
   }
   return undefined;
+}
+
+/** A malformed call/result is not evidence that a model lacks tool support. */
+export function toolsUnsupported(status: number, detail: string): boolean {
+  return status === 400 && /(?:\b(?:tools|tool use|function calling|tool_choice)\b[^\n]*(?:not supported|unsupported|not available|not enabled)|(?:does not support|doesn't support|unsupported)[^\n]*\b(?:tools|function calling)\b)/i.test(detail);
 }
 
 /**

@@ -612,9 +612,13 @@ export function renderBlock(block: MemoryBlock, value: string): string {
 export type BlockRenderResult = {
   text: string;
   cut: { label: string; before: number; after: number }[];
+  /** Only complete, actually displayed Core values may cover a graph note. */
+  coreGraphIds: string[];
 };
 
 export type BlockRenderOptions = {
+  /** Core replaces only derived values. Governed edits retain precedence. */
+  derived?: DerivedMemoryBlocks;
   /** Labels left out of this render. Their values still resolve everywhere
    *  else — the inspector, the tools — this only decides what the prompt says. */
   omit?: string[];
@@ -639,6 +643,9 @@ export type BlockRenderOptions = {
    */
   scale?: number;
 };
+
+export type CoreMemoryLabel = 'human' | 'preferences' | 'relationship' | 'shared_history';
+export type DerivedMemoryBlocks = Record<CoreMemoryLabel, { value: string; memoryIds: string[]; graphIds?: string[] }>;
 
 /** The compact shape: the label as the tag, then the value. */
 export function renderBlockCompact(block: MemoryBlock, value: string): string {
@@ -665,11 +672,19 @@ export function renderBlockCompact(block: MemoryBlock, value: string): string {
  * extra size moves the hosted model's first word by tenths of a second at most.
  */
 const UNSCALED_BLOCKS = new Set(['her_own']);
+const CORE_DERIVED_BLOCKS = new Set(['human', 'preferences', 'relationship', 'shared_history']);
 
 export function formatMemoryBlocks(blocks: MemoryBlock[], sources: BlockSources, options: BlockRenderOptions = {}): BlockRenderResult {
   const parts: string[] = [];
   const cut: BlockRenderResult['cut'] = [];
   const omitted = new Set(options.omit ?? []);
+  if (options.derived) {
+    const labels = blocks.filter(block => !omitted.has(block.label)).map(block => block.label);
+    const expected = ['human', 'preferences', 'relationship', 'shared_history', 'current_project'];
+    const positions = labels.filter(label => expected.includes(label)).map(label => expected.indexOf(label));
+    if (positions.some((position, index) => index > 0 && position <= positions[index - 1])) throw new Error('unsupported_core_block_order');
+  }
+  const coreGraphIds = new Set<string>();
   // The fraction of each block's budget this render may use (see scale above).
   const scale = options.scale !== undefined ? Math.max(0.2, Math.min(1, options.scale)) : 1;
   // Threaded through the blocks in order, so a record shown by one is not
@@ -677,14 +692,18 @@ export function formatMemoryBlocks(blocks: MemoryBlock[], sources: BlockSources,
   const shown = new Set<string>();
   for (const block of blocks) {
     if (omitted.has(block.label)) continue;
-    const value = resolveBlockValue(block, sources, shown);
+    const replacement = CORE_DERIVED_BLOCKS.has(block.label) ? options.derived?.[block.label as CoreMemoryLabel] : undefined;
+    const useReplacement = replacement && !(block.edited && typeof block.value === 'string');
+    const value = useReplacement ? replacement.value : resolveBlockValue(block, sources, shown);
+    if (useReplacement) for (const id of replacement.memoryIds) shown.add(id);
     if (!value.trim()) continue;
     const fitted = fitToLimit(value, block, UNSCALED_BLOCKS.has(block.label) ? 1 : scale);
+    if (useReplacement && !fitted.cut) for (const id of replacement.graphIds ?? []) coreGraphIds.add(id);
     if (fitted.cut) cut.push({ label: block.label, before: value.length, after: fitted.value.length });
     parts.push(options.compact ? renderBlockCompact(block, fitted.value) : renderBlock(block, fitted.value));
   }
   const text = parts.length ? `<memory_blocks>\n${parts.join('\n')}\n</memory_blocks>` : '';
-  return { text, cut };
+  return { text, cut, coreGraphIds: [...coreGraphIds] };
 }
 /** "tomorrow", or the weekday and date, for a list item a few days out. */
 /** "yesterday", "2 days ago (Fri 11 Sep)" — a past date, so it cannot be read as still to come. */

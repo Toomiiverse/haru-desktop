@@ -946,7 +946,9 @@ export const SHELL_TOOL: ChatTool = {
 const SHELL_TALK = /`[^`]+`|^\s*\$\s|\b(?:run|execute|command|terminal|shell|bash|script|reboot|update|upgrade|install|apt|git|docker|systemctl|journalctl|df|du|ls|cat|grep|tail|ps|top|kill|ping|curl|wget|chmod|chown|mkdir|mv|cp|rm|nvidia-smi|uptime|free|whoami|folder|directory|disk|space|the server|the system|the box|the machine|the pc)\b/i;
 
 export function shellRelevant(message: string): boolean {
-  return SHELL_TALK.test(message ?? '');
+  // A business name is not a request to access the computer. Strip only the
+  // proper name; explicit commands elsewhere in the sentence still match.
+  return SHELL_TALK.test((message ?? '').replace(/\b(?:the\s+)?pc\s+project\b/gi, ''));
 }
 
 /**

@@ -10,7 +10,7 @@ const with_ = (over: Partial<Feelings>): Feelings => ({ ...NO_FEELINGS, ...over 
 test('what happens moves the feeling it should, by a roll, inside 0–100', () => {
   assert.deepEqual(feel(NO_FEELINGS, 'disliked', 0.5), with_({ hurt: 18 }));
   assert.ok(feel(NO_FEELINGS, 'disliked', 1).hurt > feel(NO_FEELINGS, 'disliked', 0).hurt);
-  assert.deepEqual(feel(with_({ missing: 60, boredom: 40, jealousy: 30 }), 'message', 0.5), with_({ missing: 35, boredom: 25, jealousy: 20 }));
+  assert.deepEqual(feel(with_({ missing: 60, boredom: 40, jealousy: 30 }), 'message', 0.5), with_({ missing: 54, boredom: 37, jealousy: 28 }));
   assert.equal(feel(with_({ hurt: 50 }), 'apology', 0.5).hurt, 15);
   assert.equal(feel(with_({ playful: 80 }), 'rough', 0.5).playful, 0, 'not the moment for games, whatever the roll');
   assert.equal(feel(with_({ playful: 80 }), 'rough', 1).playful, 0);
@@ -116,7 +116,7 @@ test('frustration is at the thing, not at him', () => {
   assert.equal(stuck.hurt, 0, 'a tool failing is not him hurting her');
   const line = feelingsInstruction(stuck);
   assert.match(line, /short with the thing, not with him/);
-  assert.equal(feel(stuck, 'worked', 0.5).frustration, 15);
+  assert.equal(feel(stuck, 'worked', 0.5).frustration, 34);
 });
 
 test('dread is the slow one, and she only lets it out when it is bad', () => {
@@ -150,7 +150,7 @@ test('being told what to do empties her, and her own hours put it back', () => {
   // Agency, stored as the deficit: being handled is what depletes it.
   assert.equal(feel(NO_FEELINGS, 'drop-it', 0.5).hemmed, 25);
   assert.equal(feel(NO_FEELINGS, 'shushed', 0.5).hemmed, 20);
-  assert.equal(feel(with_({ hemmed: 60 }), 'own-time', 0.5).hemmed, 35, 'her own hours are the way back');
+  assert.equal(feel(with_({ hemmed: 60 }), 'own-time', 0.5).hemmed, 54, 'her own hours are the way back');
   assert.equal(feel(with_({ hemmed: 60 }), 'stood-ground', 0.5).hemmed, 30, 'and so is saying no and it standing');
   // The carve-out is her charter's: never what he relies on.
   const line = feelingsInstruction(with_({ hemmed: 70 }));

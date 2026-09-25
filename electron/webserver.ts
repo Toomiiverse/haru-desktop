@@ -14,7 +14,8 @@
 
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from 'node:http';
 import { createReadStream, existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
-import { timingSafeEqual } from 'node:crypto';
+import { createHash, timingSafeEqual } from 'node:crypto';
+import { ChatReceipts, type ChatReceipt } from './chat-receipts';
 import type { Duplex } from 'node:stream';
 import filePath from 'node:path';
 import { WebSocketServer, type WebSocket as CallSocket } from 'ws';
@@ -33,8 +34,11 @@ import { isDeviceToken } from './apns';
 import { emotionFile } from './emotions';
 import type { CheckIn } from './checkins';
 import { MAX_SHOT_BYTES, type HeldShots } from './shotstore';
+import { readActivityReport, type ActivityReport } from './activity-observation';
 
 export type WebDeps = {
+  /** Diagnostic input only; must not reset chat silence or trigger a nudge. */
+  attentionInput?(source: string, report: ActivityReport): void;
   readAccess(): WebAccess;
   saveAccess(access: WebAccess): void;
   /** Her real answer, through the same pipeline the desktop uses — minus hands.
@@ -220,6 +224,17 @@ export type WebDeps = {
   /** Teaching her ears from the phone: what came back against what was said. The pair she kept, if there was one. */
   teach(heard: string, meant: string): { learned: { heard: string; meant: string } | null; count: number };
   forgetCorrection(heard: string): Correction[];
+  /**
+   * The WhatsApp worker, knocking. Absent when this build has none, and absent
+   * when he has not turned it on — which is the usual state, because turning it
+   * on puts a companion device on his real number.
+   */
+  whatsapp?: {
+    /** The bearer the worker must present. '' when none is set, which refuses everything. */
+    secret(): string;
+    /** One message the worker heard. Answering happens on her side, not in the response. */
+    heard(body: unknown): void;
+  };
   /**
    * Speech to speech through Hume's EVI — see evi.ts. A call: the phone streams
    * its microphone up one socket and her voice comes back down it, while her
@@ -467,11 +482,11 @@ function whoIsThis(req: IncomingMessage, access: WebAccess, now: Date) {
   const session = cookies[SESSION_COOKIE];
   if (session) {
     const until = sessions.get(session);
-    if (until && until > now.getTime()) return { allowed: true as const, device: null };
+    if (until && until > now.getTime()) return { allowed: true as const, device: null, source: session };
     if (until) sessions.delete(session);
   }
   const device = deviceFor(access, cookies[DEVICE_COOKIE] ?? '', now);
-  return device ? { allowed: true as const, device } : { allowed: false as const, device: null };
+  return device ? { allowed: true as const, device, source: device.id } : { allowed: false as const, device: null, source: '' };
 }
 
 export function startWebServer(port: number, deps: WebDeps): Promise<{ port: number; stop(): Promise<void> }> {
@@ -673,6 +688,19 @@ async function brainHook(req: IncomingMessage, res: ServerResponse, deps: WebDep
   return res.end();
 }
 
+/**
+ * Whether this request came from this machine rather than through the tunnel.
+ *
+ * Both loopback forms, and nothing else. A forwarded-for header is deliberately
+ * not consulted: it is set by whatever is in front, and for a route that must
+ * only ever be reached by a process on this box, the socket's own address is
+ * the only thing worth trusting.
+ */
+function fromThisMachine(req: IncomingMessage): boolean {
+  const from = req.socket.remoteAddress ?? '';
+  return from === '127.0.0.1' || from === '::1' || from === '::ffff:127.0.0.1';
+}
+
 /** Equal, in time that does not depend on where they differ. */
 function sameSecret(given: string, expected: string): boolean {
   if (!given || !expected) return false;
@@ -680,6 +708,14 @@ function sameSecret(given: string, expected: string): boolean {
   const b = Buffer.from(expected);
   return a.length === b.length && timingSafeEqual(a, b);
 }
+
+const chatReceipts = new WeakMap<WebDeps, ChatReceipts>();
+function receiptsFor(deps: WebDeps): ChatReceipts {
+  let receipts = chatReceipts.get(deps);
+  if (!receipts) { receipts = new ChatReceipts(); chatReceipts.set(deps, receipts); }
+  return receipts;
+}
+const publicReceipt = (entry: ChatReceipt) => ({ state: entry.state, reply: entry.reply, ignored: entry.ignored, error: entry.error });
 
 async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) {
   const url = new URL(req.url ?? '/', 'http://127.0.0.1');
@@ -744,6 +780,37 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
   // Hume's servers, asking what she says. Its own gate, above — the phone's
   // cookie never travels this way.
   if (req.method === 'POST' && path === '/api/evi/chat/completions') return brainHook(req, res, deps, url, now);
+
+  // The WhatsApp worker, handing over a message it heard. Stands before the
+  // sign-in gate for the brain hook's reason — it is not a browser and carries
+  // no cookie — but its gate is stricter, because this door is not Hume's.
+  //
+  // The brain hook has to be reachable from the internet, so it can only ask
+  // for a secret. This one never should be: the worker is a process on this
+  // machine. Funnel puts port 443 of this server on the public internet, so
+  // "only the worker calls this" is a thing that has to be checked rather than
+  // assumed. Loopback first, then the bearer, and a build without the worker
+  // configured has no route here at all.
+  if (req.method === 'POST' && path === '/api/whatsapp/inbound') {
+    if (!deps.whatsapp) return json(res, 404, { error: 'Nothing here.' });
+    if (!fromThisMachine(req)) {
+      console.warn('[whatsapp] refused an inbound from off this machine');
+      return json(res, 404, { error: 'Nothing here.' });
+    }
+    const given = /^Bearer\s+(\S+)$/i.exec(req.headers.authorization ?? '')?.[1] ?? '';
+    if (!sameSecret(given, deps.whatsapp.secret())) {
+      console.warn('[whatsapp] refused an inbound with the wrong bearer');
+      return json(res, 401, { error: 'That is not right.' });
+    }
+    let body: unknown;
+    try { body = await readBody(req, 64 * 1024); } catch { return json(res, 400, { error: 'Bad request.' }); }
+    // Answered before she has answered. The worker is not waiting for her reply
+    // -- it goes back out through its own door when she has written it -- and
+    // holding this request open for a whole turn would have the worker time out
+    // and give up on a message she did in fact hear.
+    deps.whatsapp.heard(body);
+    return json(res, 200, { heard: true });
+  }
 
   if (!me.allowed) {
     // Her model is not served to strangers. It is 28MB of somebody's paid asset
@@ -830,6 +897,22 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
     return json(res, 200, deps.evi ? deps.evi.status() : { enabled: false, engine: 'none', minutesToday: 0, cap: 0, reason: 'not built' });
   }
 
+  if (req.method === 'POST' && path === '/api/attention/input') {
+    const report = readActivityReport(await readBody(req));
+    if (!report) {
+      return json(res, 400, { error: 'Expected an input signal.' });
+    }
+    // The source stays in memory inside the observation registry, never in
+    // diagnostic output. Scope client sequence numbers to authenticated callers.
+    deps.attentionInput?.(me.source, report);
+    return json(res, 200, { ok: true });
+  }
+
+  if (req.method === 'GET' && path === '/api/chat/receipt') {
+    const entry = receiptsFor(deps).get(url.searchParams.get('id') ?? '', deps.slate()?.at ?? 'none');
+    return json(res, entry ? 200 : 404, entry ? publicReceipt(entry) : { state: 'unknown' });
+  }
+
   if (req.method === 'POST' && path === '/api/chat') {
     const body = await readBody(req) as { text?: unknown; attachments?: unknown };
     const text = typeof body.text === 'string' ? body.text.trim() : '';
@@ -844,7 +927,7 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
   // "she is answering". Kept as a separate route so the plain /api/chat above
   // stays for the terminal client, which has nothing to gain from a stream.
   if (req.method === 'POST' && path === '/api/chat/stream') {
-    const body = await readBody(req) as { text?: unknown; attachments?: unknown; interrupted?: unknown; replyTo?: unknown; quoted?: unknown };
+    const body = await readBody(req) as { text?: unknown; attachments?: unknown; interrupted?: unknown; replyTo?: unknown; quoted?: unknown; requestId?: unknown };
     const text = typeof body.text === 'string' ? body.text.trim() : '';
     // Said over her, while she was still speaking: she is told so.
     const interrupted = body.interrupted === true;
@@ -857,19 +940,47 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
     // be the whole of what is said, and she reacts to it.
     const files = Array.isArray(body.attachments) ? body.attachments.slice(0, MAX_FILES) : [];
     if (!text && !files.length) return json(res, 400, { error: 'Say something.' });
+    const requestId = typeof body.requestId === 'string' ? body.requestId : undefined;
+    if (body.requestId !== undefined && (!requestId || !/^[a-zA-Z0-9-]{16,80}$/.test(requestId))) return json(res, 400, { error: 'Invalid request ID.' });
+    let receipt: ChatReceipt | undefined;
+    let fresh = true;
+    if (requestId) {
+      try {
+        const input = createHash('sha256').update(JSON.stringify({ text, files, interrupted, replyTo, quoted })).digest('hex');
+        const started = receiptsFor(deps).begin(requestId, input, deps.slate()?.at ?? 'none');
+        receipt = started.entry; fresh = started.fresh;
+      } catch (error) {
+        return json(res, (error as Error).message === 'receipt_conflict' ? 409 : 429, { error: 'That request cannot be accepted.' });
+      }
+    }
     res.writeHead(200, {
       'Content-Type': 'text/event-stream; charset=utf-8',
       'Cache-Control': 'no-store',
       'Connection': 'keep-alive',
     });
     const emit = (value: unknown) => { if (!res.destroyed) res.write(`data: ${JSON.stringify(value)}\n\n`); };
+    if (requestId) emit({ accepted: true, requestId });
+    res.flushHeaders();
+    if (!fresh && receipt) {
+      if (receipt.state === 'done') emit({ done: true, reply: receipt.reply, ignored: receipt.ignored });
+      else if (receipt.state === 'error') emit({ error: receipt.error });
+      else emit({ pending: true });
+      return res.end();
+    }
+    const heartbeat = setInterval(() => { if (!res.destroyed) res.write(': waiting\n\n'); }, 10_000);
+    heartbeat.unref();
+    res.once('close', () => clearInterval(heartbeat));
+    if (requestId) console.log(`[web-chat] accepted ${requestId}`);
     try {
       const answer = await deps.sayStream(text, chunk => emit({ text: chunk }), files, { interrupted, ...(replyTo ? { replyTo } : {}), ...(quoted ? { quoted } : {}) }, (sentence, emotion) => emit({ sentence, emotion }));
+      if (receipt) Object.assign(receipt, { state: 'done', reply: answer.reply, ignored: Boolean(answer.ignored) });
+      if (requestId) console.log(`[web-chat] completed ${requestId} connected=${!res.destroyed}`);
       emit({ done: true, reply: answer.reply, ignored: Boolean(answer.ignored) });
     } catch (error) {
       console.error('[web] ' + (error instanceof Error ? error.message : String(error)));
+      if (receipt) Object.assign(receipt, { state: 'error', error: 'Her reply failed. Check the conversation before sending again.' });
       emit({ error: error instanceof Error ? error.message : String(error) });
-    }
+    } finally { clearInterval(heartbeat); }
     return res.end();
   }
 
