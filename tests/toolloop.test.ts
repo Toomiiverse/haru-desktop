@@ -16,6 +16,18 @@ const calls = (...names: string[]): ChatMessage => ({
   tool_calls: names.map((name, index) => ({ id: `call-${index}`, function: { name, arguments: {} } })),
 });
 
+test('tool loop preserves each parallel result ID, including missing provider IDs', async () => {
+  const h = harness([{ role: 'assistant', tool_calls: [
+    { id: 'provided', function: { name: 'remember_about_user', arguments: { text: 'A' } } },
+    { function: { name: 'remember_about_user', arguments: { text: 'B' } } },
+  ] }, says('Both saved.')]);
+  await runToolLoop(h.conversation, h.deps);
+  const offered = h.conversation.find(message => message.tool_calls)?.tool_calls!;
+  assert.deepEqual(h.conversation.filter(message => message.role === 'tool').map(message => message.tool_call_id), offered.map(call => call.id));
+  assert.ok(offered.every(call => call.id));
+  assert.notEqual(offered[0].id, offered[1].id);
+});
+
 type Harness = {
   deps: ToolLoopDeps;
   /** Whether tools were offered, one entry per round actually asked for. */
