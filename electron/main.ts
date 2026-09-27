@@ -157,7 +157,7 @@ import { startWebServer, type WebDeps } from './webserver';
 import { openingInstruction, openingsDueNow, type DueOpening } from './standingtime';
 import { parseVaultMemoryPage, VAULT_MEMORY_PAGES, type VaultMemoryPage } from './vaultmemories';
 import { planRetirement, readAdmitted, recordsToRetire, type Admitted } from './vaultretire';
-import { afterReading, feedUrl, pagesUrl, parseReadingTake, PAGE_PROMPT, readableChapters, readingInstruction, readingNote, readReading, REQUEST_GAP_MS, searchUrl, tonightsPages, USER_AGENT, type ChapterRef, type Reading } from './manga';
+import { afterReading, alreadyFinished, feedUrl, pagesUrl, parseReadingTake, PAGE_PROMPT, readableChapters, readingInstruction, readingNote, readReading, readFinished, readToTheEnd, REQUEST_GAP_MS, searchUrl, tonightsPages, USER_AGENT, withFinished, type ChapterRef, type Reading } from './manga';
 import { cleaningChunks, deliveryReminder, deliveryRule, hasDeliveryLabel, splitDelivery, stripDelivery, MOOD_ALIASES } from './delivery';
 import { deedFrom, isADeed, keepDeed, readDeeds } from './deeds';
 import { DeedFeelings } from './deed-feelings';
@@ -11933,7 +11933,9 @@ function noteDeed(tool: string, call: { function?: { arguments?: unknown } }, re
   let failed = false;
   try {
     const parsed = JSON.parse(result) as Record<string, unknown>;
-    failed = typeof parsed.error === 'string' || parsed.confirm === false || parsed.ok === false || parsed.created === false;
+    failed = typeof parsed.error === 'string' || parsed.confirm === false || parsed.ok === false || parsed.created === false
+      // Nothing done either: a read that found the series finished, a game that was not started (deed-feelings.ts reads these the same way).
+      || parsed.started === false || parsed.read === false;
   } catch { failed = false; }
   let args: Record<string, unknown> = {};
   try {
@@ -12155,13 +12157,30 @@ function mangaLink(): ToolDeps['manga'] {
   return {
     read: async ({ title, wait }) => {
       if (readingMangaNow) return { error: 'You are already partway through a stretch of reading. Say so.' };
+      // The one she is on, read to the end (manga.ts readToTheEnd), asked for
+      // by name or on a chat turn: answered before anything starts, so she is
+      // not sent off to read pages that are not there. In her own time with
+      // no title the pass itself takes up something else of hers. A chapter
+      // out since is read as usual.
+      const current = readReading(store.get('her.reading'));
+      const same = !!title && !!current && title.toLowerCase() === current.title.toLowerCase();
+      if (current && readToTheEnd(current) && (same || (!title && !wait))) {
+        const next = await chapterAfter(suwayomiLink(), current).catch(error => { console.warn('[manga] could not look for a chapter after hers:', error instanceof Error ? error.message : error); return null; });
+        if (!next) {
+          rememberFinished(current);
+          console.log(`[manga] read_manga: ${current.title} is read to the end — nothing after chapter ${current.chapter}`);
+          return finishedResult(current.title, current.chapter, false);
+        }
+      }
       const run = readSomeManga(config, { force: true, title, pages: wait ? HANDS_PAGES : undefined });
       if (!wait) {
         void run.then(got => { if (!got) console.log('[manga] the read she started came to nothing'); }).catch(error => console.warn('[manga] the read she started failed:', error instanceof Error ? error.message : error));
         return { started: true, title: title || readReading(store.get('her.reading'))?.title || 'your manga', note: 'It has started and takes a few minutes. Say you are off to read — do not describe pages you have not read yet.' };
       }
       const got = await run;
-      return got ? { read: true, ...got } : { error: 'Nothing came of it — the pages did not come back, or that title matched nothing. Say so plainly.' };
+      if (!got) return { error: 'Nothing came of it — the pages did not come back, or that title matched nothing. Say so plainly.' };
+      if ('finished' in got) return finishedResult(got.title, got.chapter, got.nothingElse);
+      return { read: true, ...got };
     },
   };
 }
@@ -12305,6 +12324,35 @@ function suwayomiLink(): Suwayomi | null {
 /** A Suwayomi chapter as the bookmark's ChapterRef. */
 const shelfChapterRef = (chapter: ShelfChapter): ChapterRef => ({ id: String(chapter.id), chapter: String(chapter.number), title: chapter.name, pages: chapter.pages > 0 ? chapter.pages : 0 });
 
+/**
+ * The chapter after hers — from her shelf, or the feed — or null at the end
+ * of what there is. A chapter of hers that the list no longer has is the end
+ * too: the old arithmetic (index -1, plus one) made it the first chapter, and
+ * a finished series would have started over.
+ */
+async function chapterAfter(link: Suwayomi | null, reading: Reading): Promise<ChapterRef | null> {
+  if (link && reading.source === 'suwayomi' && typeof reading.mangaId === 'number') {
+    const chapters = await link.chapters(reading.mangaId);
+    const index = chapters.findIndex(c => String(c.id) === reading.chapterId);
+    return index >= 0 && chapters[index + 1] ? shelfChapterRef(chapters[index + 1]) : null;
+  }
+  const chapters = await chaptersOf(reading.seriesId);
+  const index = chapters.findIndex(c => c.id === reading.chapterId);
+  return index >= 0 ? chapters[index + 1] ?? null : null;
+}
+
+/** A series read to the end, written down (her.finished) so the picker does not take it up again from the start. */
+function rememberFinished(reading: Reading): void {
+  store.set('her.finished', withFinished(readFinished(store.get('her.finished')), reading, new Date().toISOString()));
+}
+
+/** What the tool says of a series read to the end. `read: false`: not a deed and not a failure (deeds.ts, deed-feelings.ts). */
+function finishedResult(title: string, chapter: string, nothingElse: boolean): Record<string, unknown> {
+  return {
+    read: false, finished: true, title, chapter,
+    note: `You have read ${title} to the end — there is nothing after chapter ${chapter}, so there was nothing to read. Do not ask for it again.${nothingElse ? ' Nothing else of yours is a manga you could take up.' : ' If you want to read, it is something else, by name — or leave it.'}`,
+  };
+}
 
 /** A title taken up on her shelf: searched, put in her category, chapters fetched, bookmark at the first. */
 async function startReadingOnShelf(link: Suwayomi, title: string): Promise<Reading | null> {
@@ -12363,8 +12411,10 @@ async function startReading(title: string): Promise<Reading | null> {
 }
 
 type MangaRead = { title: string; chapter: string; pages: [number, number]; note: string; stands: string };
+/** Read to the end with nothing after it: not a failed read. `nothingElse`: no other title of hers to take up either. */
+type MangaFinished = { finished: true; title: string; chapter: string; chapters: number; nothingElse: boolean };
 
-async function readSomeManga(config: ProviderConfig, options: { force?: boolean; title?: string; pages?: number } = {}): Promise<MangaRead | null> {
+async function readSomeManga(config: ProviderConfig, options: { force?: boolean; title?: string; pages?: number } = {}): Promise<MangaRead | MangaFinished | null> {
   const now = zonedNow(CHAT_TIMEZONE);
   const { prefs } = getPush();
   if (!options.force && !inQuietHours(prefs, now)) return null;
@@ -12379,6 +12429,27 @@ async function readSomeManga(config: ProviderConfig, options: { force?: boolean;
   try {
     const link = suwayomiLink();
     if (options.title && (!reading || reading.title.toLowerCase() !== options.title.toLowerCase())) reading = await startReading(options.title);
+    // Read to the end (manga.ts readToTheEnd). A chapter may have come out
+    // since, and she goes on with it; otherwise the series is finished, which
+    // is not a failed read. Asked for it by name she is told so; in her own
+    // time and the small hours she takes up something else of hers.
+    if (reading && readToTheEnd(reading)) {
+      const next = await chapterAfter(link, reading);
+      if (next) {
+        reading = { ...reading, chapter: next.chapter, chapterId: next.id, page: 0, pages: next.pages, lastAt: new Date().toISOString() };
+        store.set('her.reading', reading);
+        console.log(`[manga] a chapter of ${reading.title} came out since — on to chapter ${next.chapter}`);
+      } else {
+        const done = reading;
+        rememberFinished(done);
+        reading = options.title ? null : await pickSomethingToRead();
+        if (!reading) {
+          console.log(`[manga] ${done.title} is read to the end — nothing after chapter ${done.chapter}${options.title ? '' : ', and nothing else of hers to take up'}`);
+          return { finished: true, title: done.title, chapter: done.chapter, chapters: done.finished, nothingElse: !options.title };
+        }
+        console.log(`[manga] ${done.title} is read to the end — taking up ${reading.title}`);
+      }
+    }
     if (!reading) reading = await pickSomethingToRead();
     if (!reading) return null;
     // A bookmark from before the shelf: carried over once, to the same chapter.
@@ -12395,8 +12466,9 @@ async function readSomeManga(config: ProviderConfig, options: { force?: boolean;
       files = at?.baseUrl && at.chapter?.hash ? (at.chapter.data ?? []).map(file => `${at.baseUrl}/data/${at.chapter!.hash}/${file}`) : [];
     }
     const { from, to } = tonightsPages(reading, options.pages);
-    if (to <= from) return null;
     if (!files.length) { console.warn(`[manga] no pages came back for ${reading.title} ch ${reading.chapter}`); return null; }
+    // Not reachable from the end of a chapter any more (above), and said if another way in turns up: this returned in silence for three days.
+    if (to <= from) { console.warn(`[manga] nothing to read: ${reading.title} ch ${reading.chapter} is at page ${reading.page} of ${reading.pages}`); return null; }
     const endpoint = visionEndpoint(store.get('ai.config') as ProviderConfig | undefined, vision);
     const read: string[] = [];
     for (let page = from; page < Math.min(to, files.length); page++) {
@@ -12424,15 +12496,7 @@ async function readSomeManga(config: ProviderConfig, options: { force?: boolean;
     const take = parseReadingTake(raw);
     // The bookmark moves whether or not she had anything to say: the pages were
     // read either way, and re-reading them tomorrow is the one outcome to avoid.
-    let next: ChapterRef | null = null;
-    if (onShelf) {
-      const chapters = await link!.chapters(reading.mangaId!);
-      const index = chapters.findIndex(c => String(c.id) === reading!.chapterId);
-      next = index >= 0 && chapters[index + 1] ? shelfChapterRef(chapters[index + 1]) : null;
-    } else {
-      const chapters = await chaptersOf(reading.seriesId);
-      next = chapters[chapters.findIndex(c => c.id === reading!.chapterId) + 1] ?? null;
-    }
+    const next = await chapterAfter(link, reading);
     const moved = afterReading(reading, readTo, next, new Date().toISOString());
     store.set('her.reading', moved);
     store.set('her.readingOn', today);
@@ -12497,7 +12561,12 @@ async function chaptersOf(seriesId: string): Promise<ChapterRef[]> {
  */
 async function pickSomethingToRead(): Promise<Reading | null> {
   const link = suwayomiLink();
+  // Not one she has read to the end. This only ever ran with no bookmark at
+  // all, so it never had to know; now it runs when the bookmark is a finished
+  // series, and the first interest on the list is usually that very series.
+  const finished = readFinished(store.get('her.finished'));
   for (const interest of getInterests()) {
+    if (alreadyFinished(finished, interest.name)) continue;
     if (link) {
       try {
         const taken = await startReadingOnShelf(link, interest.name);
@@ -12509,7 +12578,7 @@ async function pickSomethingToRead(): Promise<Reading | null> {
     }
     const found = await mangaGet(searchUrl(interest.name)) as { data?: { id: string; attributes?: { title?: Record<string, string> } }[] } | null;
     const hit = found?.data?.[0];
-    if (!hit) continue;
+    if (!hit || alreadyFinished(finished, interest.name, hit.id)) continue;
     const chapters = await chaptersOf(hit.id);
     if (!chapters.length) continue;
     const first = chapters[0];

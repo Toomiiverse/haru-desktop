@@ -1017,7 +1017,7 @@ export const READ_MANGA_TOOL: ChatTool = {
   type: 'function',
   function: {
     name: 'read_manga',
-    description: 'Read the next stretch of your own manga now — the series you are partway through, or a new one by name, which goes on your shelf. Use it when they tell you to go and read, or when it is your own time and you feel like it. It takes a few minutes of actually reading pages; you are told when it has started and, when it ran to the end, what you read. Fetching a manga for THEM is get_manga, not this.',
+    description: 'Read the next stretch of your own manga now — the series you are partway through, or a new one by name, which goes on your shelf. Use it when they tell you to go and read, or when it is your own time and you feel like it. It takes a few minutes of actually reading pages; you are told when it has started and, when it ran to the end, what you read. Fetching a manga for THEM is get_manga, not this. One you have read to the end comes back as finished, not read again: then it is something else by name, or nothing.',
     parameters: {
       type: 'object',
       properties: {
