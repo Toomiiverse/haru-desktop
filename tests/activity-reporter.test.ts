@@ -1,0 +1,62 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { ActivityReporter } from '../electron/activity-reporter';
+
+const source = { url: 'http://100.100.10.1:8787', username: 'tom' };
+const sample = () => ({ idleSeconds: 4, windowFocused: false, onBattery: true });
+test('native reporter uses the existing session, samples only on send, and does not retry failures', async () => {
+  const requests: { url: string; options: RequestInit }[] = [];
+  let samples = 0, status = 200;
+  const reporter = new ActivityReporter(async (url, options) => {
+    requests.push({ url: String(url), options: options! });
+    if (status === 0) throw Error('offline');
+    return new Response(null, { status });
+  });
+  const reading = () => { samples++; return { ...sample(), idleSeconds: samples, hour: 12, title: 'must not be sent' }; };
+  await reporter.report(source, reading, 0);
+  assert.equal(requests.length, 0);
+  reporter.connected(source, 'session=private');
+  await reporter.report(source, reading, 0);
+  await reporter.report(source, reading, 29_999);
+  assert.equal(samples, 1);
+  const first = JSON.parse(String(requests[0].options.body));
+  assert.deepEqual(Object.keys(first).sort(), ['client', 'idleSeconds', 'kind', 'onBattery', 'sampleAgeMs', 'sequence', 'windowFocused']);
+  assert.equal(first.kind, 'desktop');
+  assert.equal(first.idleSeconds, 1);
+  assert.equal(requests[0].url, source.url + '/api/attention/input');
+  assert.equal(requests[0].options.redirect, 'error');
+  assert.equal(new Headers(requests[0].options.headers).get('cookie'), 'session=private');
+  status = 0; await reporter.report(source, reading, 30_000);
+  status = 200; await reporter.report(source, reading, 60_000);
+  assert.equal(JSON.parse(String(requests[2].options.body)).idleSeconds, 3, 'reconnect samples now');
+  assert.equal(JSON.parse(String(requests[2].options.body)).sequence, 3);
+  status = 401; await reporter.report(source, reading, 90_000);
+  await reporter.report(source, reading, 120_000);
+  assert.equal(requests.length, 4, 'expired login is not retried');
+  reporter.connected(source, 'session=new');
+  status = 200; await reporter.report(source, reading, 120_000);
+  assert.equal(requests.length, 5);
+  await reporter.report({ ...source, username: 'changed' }, reading, 150_000);
+  await reporter.report(source, reading, 180_000);
+  assert.equal(requests.length, 5, 'changing the configured target clears its old session');
+  reporter.connected({ ...source, url: 'https://example.com' }, 'session=private');
+  await reporter.report({ ...source, url: 'https://example.com' }, reading, 210_000);
+  assert.equal(requests.length, 5);
+});
+
+test('one native request in flight; an expired old request does not discard a newer login', async () => {
+  let finish!: (response: Response) => void;
+  let calls = 0;
+  const reporter = new ActivityReporter(async () => { calls++; return new Promise(resolve => { finish = resolve; }); });
+  reporter.connected(source, 'old');
+  const pending = reporter.report(source, sample, 0);
+  await reporter.report(source, sample, 60_000);
+  assert.equal(calls, 1);
+  reporter.connected(source, 'new');
+  finish(new Response(null, { status: 401 }));
+  await pending;
+  const next = reporter.report(source, sample, 60_000);
+  assert.equal(calls, 2);
+  finish(new Response(null, { status: 200 }));
+  await next;
+});
