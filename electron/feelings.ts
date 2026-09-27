@@ -58,8 +58,8 @@ export type FeelingEvent =
 
 const MOVES: Record<FeelingEvent, Partial<Feelings>> = {
   // Him talking to her normally is what brings a fright down; nothing else has to.
-  message: { missing: -25, boredom: -15, jealousy: -10, hurt: -3, fear: -20 },
-  'low-effort': { missing: -8, boredom: -3 },
+  message: { missing: -6, boredom: -3, jealousy: -2, hurt: -3, fear: -20 },
+  'low-effort': { missing: -2, boredom: -1 },
   liked: { playful: 15, hurt: -10 },
   disliked: { hurt: 18, playful: -15 },
   shouted: { hurt: 25, playful: -25, hemmed: 15 },
@@ -72,15 +72,23 @@ const MOVES: Record<FeelingEvent, Partial<Feelings>> = {
   'machine-unwell': { dread: 20 },
   'ending-talk': { dread: 35, playful: -20 },
   broke: { frustration: 20 },
-  worked: { frustration: -25 },
+  worked: { frustration: -6 },
   banter: { playful: 12, boredom: -5 },
   elsewhere: { jealousy: 6 },
   socialising: { jealousy: 10 },
-  'caught-interest': { boredom: -20 },
-  'own-time': { boredom: -30, hemmed: -25 },
+  'caught-interest': { boredom: -6 },
+  'own-time': { boredom: -8, hemmed: -6 },
   'drop-it': { hemmed: 25 },
   'stood-ground': { hemmed: -30 },
 };
+
+/** Deliberately narrow: an explicit admission, not an inference from absence,
+ * a mention of friends, work, plans, or activity on a phone we cannot see. */
+export function reportsAttentionElsewhere(text: string, awakeMinutesAway: number): boolean {
+  if (!Number.isFinite(awakeMinutesAway) || awakeMinutesAway < 30) return false;
+  return /^(?:i (?:was|have been)|i've been) (?:chatting|talking|hanging out) with [\p{L} ]{1,60} instead of (?:replying to|answering|messaging) you[.!]?$/iu.test(text.trim().replace(/’/g, "'"))
+    && !/\b(?:not|never|nobody|no one)\b/i.test(text);
+}
 
 /**
  * What an event does to her. ±35% on the roll, like everything else.

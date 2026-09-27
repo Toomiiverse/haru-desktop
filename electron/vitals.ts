@@ -25,9 +25,9 @@ export type Lean = Partial<Record<'happiness' | 'stress' | 'affection' | 'curios
 
 export type Environment = {
   hour: number;          // 0-23, in the user's zone
-  idleSeconds: number;   // since last keyboard/mouse input anywhere on the machine
-  onBattery: boolean;
-  windowFocused: boolean;
+  idleSeconds: number | null; // null means no fresh activity evidence
+  onBattery: boolean | null;
+  windowFocused: boolean | null;
 };
 
 export const DEFAULT_VITALS: Vitals = {
@@ -84,9 +84,19 @@ export function isNight(hour: number) {
   return hour >= 23 || hour < 6;
 }
 
-// One step of drift. `seconds` is how long since the last tick, so a slow or
-// missed tick moves state proportionally rather than by a fixed step.
+// Catch up in nominal steps: a late tick must not count as only 20 seconds.
+// A single environment snapshot cannot reconstruct a long absence; one hour
+// already settles these rates and bounds work after a system-clock jump.
 export function driftVitals(current: Vitals, environment: Environment, seconds: number, lean: Lean = {}): Vitals {
+  if (!Number.isFinite(seconds) || seconds <= 0) return { ...current };
+  let next = current;
+  for (let remaining = Math.min(seconds, 3600); remaining > 0; remaining -= 20) {
+    next = driftStep(next, environment, Math.min(20, remaining), lean);
+  }
+  return next;
+}
+
+function driftStep(current: Vitals, environment: Environment, seconds: number, lean: Lean): Vitals {
   // Normalised against a nominal 20s tick so rates stay meaningful if the
   // interval changes or a tick is late.
   const step = clamp(seconds / 20) * 0.25;
@@ -94,7 +104,8 @@ export function driftVitals(current: Vitals, environment: Environment, seconds: 
 
   const sleepTarget = sleepinessForHour(hour);
   // Sitting untouched is restful; being used keeps her awake past her bedtime.
-  const active = idleSeconds < 60;
+  const knownIdle = typeof idleSeconds === 'number' && Number.isFinite(idleSeconds) && idleSeconds >= 0;
+  const active = knownIdle && idleSeconds < 60;
   const sleepiness = toward(current.sleepiness, active ? sleepTarget * 0.8 : sleepTarget, step);
 
   // Energy is mostly the inverse of sleepiness, with the machine running on
@@ -103,17 +114,19 @@ export function driftVitals(current: Vitals, environment: Environment, seconds: 
   const energy = toward(current.energy, energyTarget, step);
 
   // Curiosity builds while something is happening and fades in a quiet room.
-  const curiosityTarget = clamp((active ? CURIOSITY_ENGAGED : idleSeconds > 600 ? 0.15 : 0.4) + (lean.curiosity ?? 0));
+  const curiosityTarget = !knownIdle ? current.curiosity : clamp((active ? CURIOSITY_ENGAGED : idleSeconds > 600 ? 0.15 : 0.4) + (lean.curiosity ?? 0));
   const curiosity = toward(current.curiosity, curiosityTarget, step);
 
   // Focus is about whether her window is the one being used.
-  const focus = toward(current.focus, windowFocused ? 0.9 : active ? 0.4 : 0.15, step);
+  const focus = toward(current.focus, windowFocused === null || !knownIdle ? current.focus
+    : windowFocused ? 0.9 : active ? 0.4 : 0.15, step);
 
   // Left alone for a long stretch she settles rather than stays wound up.
-  const stress = toward(current.stress, clamp((idleSeconds > 300 ? 0.1 : 0.25) + (lean.stress ?? 0)), step * 0.5);
+  const stress = toward(current.stress, !knownIdle ? current.stress : clamp((idleSeconds > 300 ? 0.1 : 0.25) + (lean.stress ?? 0)), step * 0.5);
 
   // Attention is what she warms to; a long silence cools it slowly.
-  const affectionTarget = windowFocused ? clamp(0.7 + (lean.affection ?? 0)) : idleSeconds > 1800 ? clamp(0.25 + (lean.affection ?? 0)) : current.affection;
+  const affectionTarget = !knownIdle || windowFocused === null ? current.affection
+    : windowFocused ? clamp(0.7 + (lean.affection ?? 0)) : idleSeconds > 1800 ? clamp(0.25 + (lean.affection ?? 0)) : current.affection;
   const affection = toward(current.affection, affectionTarget, step * 0.4);
 
   // Happiness follows the rest rather than having a driver of its own.
@@ -220,8 +233,8 @@ const VITAL_CUES: VitalCue[] = [
 
 /** How many cues may speak at once. */
 export const VITAL_CUES_SPOKEN = 2;
-/** From here up she is annoyed, and the warm cues stay quiet (mood.ts moodInstruction speaks from 3). */
-const ANNOYED_FROM = 3;
+/** From here up she is annoyed, and the warm cues stay quiet (mood.ts IRRITATION.voiced; 3 of 9 before the scale was 0–100). */
+const ANNOYED_FROM = 33;
 
 /** The tone line her vitals add to the prompt, or nothing when nothing has drifted far. */
 /**
@@ -324,7 +337,7 @@ const BASE_WEIGHTS: Record<IdleAction, number> = {
 export function idleActionWeights(vitals: Vitals, environment: Environment): Record<IdleAction | 'nothing', number> {
   const { sleepiness, energy, curiosity, focus, happiness } = vitals;
   const night = isNight(environment.hour);
-  const alone = environment.idleSeconds > 300;
+  const alone = typeof environment.idleSeconds === 'number' && environment.idleSeconds > 300;
   const awake = 1 - sleepiness;
   const scale: Record<IdleAction, number> = {
     blink: 1,
