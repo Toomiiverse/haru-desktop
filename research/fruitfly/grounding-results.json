@@ -1,0 +1,98 @@
+{
+  "metadata": {
+    "kind": "metadata",
+    "model": "hf.co/DavidAU/Qwen3.5-9B-The-Defiant-Fable-Uncensored-Heretic-NEO-IMATRIX-MAX-MTP-GGUF:Qwen3.5-9B-The-Defiant-Fable-Uncnr-Heretic-NEO-MAX-MTP-Q4_K_M.gguf",
+    "seed": 17,
+    "sourceSha256": "e6fcf9d815e835de9a171e195db0ad485777b62ed2e334ed467ca0d3b7a5b124",
+    "createdAt": "2026-09-15T19:54:18.535Z"
+  },
+  "calls": 256,
+  "distinctQuestions": 64,
+  "summary": {
+    "current_haru": {
+      "calls": 64,
+      "evidenceAvailable": 64,
+      "correctSourceChosen": 63,
+      "evidenceDecisionMatches": 63,
+      "abstentions": 0,
+      "otherSourceChosen": 1,
+      "formatFailures": 0,
+      "differences": [
+        {
+          "id": 78,
+          "expected": "m39",
+          "evidenceAvailable": true,
+          "parsed": {
+            "answer": "Avoid teasing Luca about his abandoned hobby projects.",
+            "memory_id": "m38"
+          }
+        }
+      ]
+    },
+    "flyhash": {
+      "calls": 64,
+      "evidenceAvailable": 64,
+      "correctSourceChosen": 63,
+      "evidenceDecisionMatches": 63,
+      "abstentions": 0,
+      "otherSourceChosen": 1,
+      "formatFailures": 0,
+      "differences": [
+        {
+          "id": 7,
+          "expected": "m3",
+          "evidenceAvailable": true,
+          "parsed": {
+            "answer": "No, Eli prefers silence while recording audio, even if a small task is overdue.",
+            "memory_id": "m2"
+          }
+        }
+      ]
+    },
+    "actual_connectome": {
+      "calls": 64,
+      "evidenceAvailable": 61,
+      "correctSourceChosen": 61,
+      "evidenceDecisionMatches": 62,
+      "abstentions": 1,
+      "otherSourceChosen": 2,
+      "formatFailures": 0,
+      "differences": [
+        {
+          "id": 12,
+          "expected": "m6",
+          "evidenceAvailable": false,
+          "parsed": {
+            "answer": "A climbing session on Saturday afternoons would suit Noor.",
+            "memory_id": "m7"
+          }
+        },
+        {
+          "id": 45,
+          "expected": "m22",
+          "evidenceAvailable": false,
+          "parsed": {
+            "answer": "No, Ada prefers practical checklists when she explicitly asks for a plan.",
+            "memory_id": "m23"
+          }
+        }
+      ]
+    },
+    "no_memory": {
+      "calls": 64,
+      "evidenceAvailable": 0,
+      "correctSourceChosen": 0,
+      "evidenceDecisionMatches": 64,
+      "abstentions": 64,
+      "otherSourceChosen": 0,
+      "formatFailures": 0,
+      "differences": []
+    }
+  },
+  "limitations": [
+    "Controlled memory-source selection prompt, not full production conversation context",
+    "One fixed model seed and one fixed retrieval seed",
+    "Correct source IDs do not by themselves prove that every answer detail is faithful",
+    "All memories invented; naturalness, personality and user preference were not rated"
+  ]
+}

@@ -1,0 +1,78 @@
+{
+  "experiment": "offline-input-sensitivity-v1",
+  "inputs": [
+    {
+      "part": "rotated",
+      "bytes": 2096557,
+      "sha256": "b39360fd086ddeead940c774101bc6eae800a763f86b39ad3fbcce8c12a7b7bf"
+    },
+    {
+      "part": "current",
+      "bytes": 648700,
+      "sha256": "42784c5f45fa2d22b632c94ec3fb9574c70b235074326c48a3d989f121d568e6"
+    }
+  ],
+  "observed": {
+    "from": "2026-09-16T00:00:00.000Z",
+    "firstAt": "2026-09-16T00:00:04.095Z",
+    "lastAt": "2026-09-16T14:23:40.359Z",
+    "samples": 3202,
+    "completeSessions": 4,
+    "skippedPartialSessions": 0,
+    "replayed": 3953,
+    "interactions": 16,
+    "actualAsides": 6,
+    "baselineEligible": 1,
+    "recordedSpeech": 0,
+    "contactAwareSpeech": 0,
+    "recentContactWhileHostIdle": 69,
+    "changedIdleReadings": 104,
+    "changedActions": 36,
+    "hostActive": 22,
+    "hostFocused": 3202,
+    "transitions": {
+      "rest -> rest": 3073,
+      "attend -> attend": 93,
+      "rest -> attend": 36
+    }
+  },
+  "syntheticMoodProbe": {
+    "description": "Synthetic one hour at noon, contact every minute, 20-second ticks, no emotion events. Unfocused is an assumption, not measured client focus.",
+    "arms": {
+      "hostReadings": {
+        "energy": 0.8499999999999999,
+        "happiness": 0.8849999985841351,
+        "curiosity": 0.15000000000000002,
+        "affection": 0.6999999982591034,
+        "sleepiness": 0.15000000000000002,
+        "stress": 0.10000000000364292,
+        "focus": 0.8999999999999999
+      },
+      "contactIdleOnly": {
+        "energy": 0.8799999999999999,
+        "happiness": 0.8489999985926959,
+        "curiosity": 0.7499999999999998,
+        "affection": 0.6999999982591034,
+        "sleepiness": 0.12000000000000002,
+        "stress": 0.2499999999981785,
+        "focus": 0.8999999999999999
+      },
+      "contactIdleWithoutHostFocus": {
+        "energy": 0.8799999999999999,
+        "happiness": 0.7590000000027919,
+        "curiosity": 0.7499999999999998,
+        "affection": 0.4,
+        "sleepiness": 0.12000000000000002,
+        "stress": 0.2499999999981785,
+        "focus": 0.40000000000000013
+      }
+    }
+  },
+  "limitations": [
+    "Complete sessions replayed from their start; start time filters reporting, not policy state",
+    "Alternative holds recorded vitals and blockers fixed; it is not a full closed-loop behavioral prediction",
+    "Five-minute contact evidence expires before the existing eight-to-fifteen-minute speech patience; contact alone cannot establish later availability",
+    "Phone page polling and synced foreground history are not evidence of recent keyboard, mouse or touch input",
+    "No production actions or mood are changed; no user preference or brain-map benefit is established"
+  ]
+}

@@ -1,0 +1,56 @@
+{
+  "mode": "shadow",
+  "policy": 2,
+  "firstAt": "2026-09-15T19:01:26.482Z",
+  "lastAt": "2026-09-16T15:04:01.081Z",
+  "samples": 4058,
+  "baselineEligible": 1,
+  "shadowSpeak": 0,
+  "agreement": 4057,
+  "switches": 11,
+  "transitions": 4048,
+  "actualAsides": 6,
+  "repeatBlocked": 1,
+  "interactions": 16,
+  "malformed": 0,
+  "actions": {
+    "rest": 3965,
+    "attend": 93
+  },
+  "shortAsideGaps": 1,
+  "speechDecisions": {
+    "bothPropose": 0,
+    "baselineOnly": 1,
+    "shadowOnly": 0,
+    "bothSilent": 4057
+  },
+  "inputCoverage": {
+    "measured": 4058,
+    "hostActive": 22,
+    "hostIdleOverFiveMinutes": 4036,
+    "hostWindowFocused": 4058,
+    "recentDirectContact": 69,
+    "recentContactWhileHostIdle": 69,
+    "unblockedHostActive": 4
+  },
+  "webInputComparison": {
+    "instrumented": 5,
+    "recentInput": 0,
+    "unknown": 5,
+    "changedActions": 0,
+    "hostIdleDespiteWebInput": 0,
+    "hostPolicySpeechOnKnownInput": 0,
+    "webPolicySpeech": 0
+  },
+  "baselineProposalOverlap": 0,
+  "shadowProposalOverlap": null,
+  "speechDecisionAgreement": 0.9997535731887629,
+  "actionSwitchRate": 0.002717391304347826,
+  "meanComputeMs": 0.020561751085494878,
+  "maxComputeMs": 1.3897770009934902,
+  "feedback": {
+    "up": 0,
+    "down": 0
+  },
+  "interpretation": "Observational only. Agreement can be dominated by both policies staying silent; inspect speechDecisions and inputCoverage. Proposal overlap is not accuracy: neither policy is a correctness label. Baseline eligibility is not delivery. Host idle/focus does not establish remote client presence. Feedback concerns existing replies, not shadow actions. Compute time excludes log IO and model latency. Short aside gaps include reminders; they are not automatically unwanted interruptions."
+}

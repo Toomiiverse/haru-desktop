@@ -1,0 +1,96 @@
+{
+  "node": "v22.22.1",
+  "platform": "linux",
+  "cpu": "Intel(R) Core(TM) i7-6700K CPU @ 4.00GHz",
+  "queries": 64,
+  "repeats": 5,
+  "warmups": 8,
+  "reference_bit_disagreements": 0,
+  "cases": [
+    {
+      "active": 98,
+      "inactive": 5075,
+      "current_haru_vector_search": {
+        "calls": 320,
+        "medianMs": 0.1535340000000076,
+        "p95Ms": 0.2185259999999971,
+        "checksum": 16410
+      },
+      "exact_cached_normalised_scan": {
+        "calls": 320,
+        "medianMs": 0.18656099999998332,
+        "p95Ms": 0.19200199999994538,
+        "checksum": 16410
+      },
+      "flyhash_including_query_encoding": {
+        "calls": 320,
+        "medianMs": 0.7586559999999736,
+        "p95Ms": 0.89545099999998,
+        "checksum": 14740
+      },
+      "flyhash_exact_neighbour_recall5": 0.36874999999999986,
+      "float32_index_bytes": 301056,
+      "packed_code_bytes": 28616,
+      "flyhash_projection_bytes": 28032
+    },
+    {
+      "active": 1000,
+      "inactive": 0,
+      "current_haru_vector_search": {
+        "calls": 320,
+        "medianMs": 1.2842269999998734,
+        "p95Ms": 1.546105000000125,
+        "checksum": 167495
+      },
+      "exact_cached_normalised_scan": {
+        "calls": 320,
+        "medianMs": 1.843454999999949,
+        "p95Ms": 1.9820459999998548,
+        "checksum": 167495
+      },
+      "flyhash_including_query_encoding": {
+        "calls": 320,
+        "medianMs": 0.9596520000000055,
+        "p95Ms": 1.0464050000000498,
+        "checksum": 162515
+      },
+      "flyhash_exact_neighbour_recall5": 0.3499999999999999,
+      "float32_index_bytes": 3072000,
+      "packed_code_bytes": 292000,
+      "flyhash_projection_bytes": 28032
+    },
+    {
+      "active": 10003,
+      "inactive": 0,
+      "current_haru_vector_search": {
+        "calls": 320,
+        "medianMs": 14.578684999999496,
+        "p95Ms": 16.008958999999777,
+        "checksum": 1560975
+      },
+      "exact_cached_normalised_scan": {
+        "calls": 320,
+        "medianMs": 18.70089100000041,
+        "p95Ms": 19.06641800000034,
+        "checksum": 1560975
+      },
+      "flyhash_including_query_encoding": {
+        "calls": 320,
+        "medianMs": 2.9087340000005497,
+        "p95Ms": 3.1208090000000084,
+        "checksum": 1559965
+      },
+      "flyhash_exact_neighbour_recall5": 0.753125,
+      "float32_index_bytes": 30729216,
+      "packed_code_bytes": 2920876,
+      "flyhash_projection_bytes": 28032
+    }
+  ],
+  "caveats": [
+    "Public benchmark text, not real Haru memories",
+    "Only the vector candidate stage; keyword reranking omitted",
+    "Embedding API and offline index-building time excluded for every method",
+    "Byte counts describe numeric index payloads, not total process RSS",
+    "FlyHash retrieves an approximation and does not use the cosine admission threshold"
+  ]
+}

@@ -1,0 +1,89 @@
+{
+  "python": "3.12.14",
+  "source_commits": {
+    "connectivity": "a3db62f9436074e485c0278290c2164ed6150808",
+    "annotations": "8587524c1748ce5ef2080822a2fc890fc03bf597"
+  },
+  "sha256": {
+    "annotations.tsv": "9a4f8b2f843196074431ebd7cd883536afa1be86c8a4ce90970441e8be81d1be",
+    "2025_Connectivity_783.parquet": "efeb23fb99098e9c390f6869969b2a121a2ee92c833cfc45ecb2c1d8e1af0347"
+  },
+  "whole_source_edges": 15091983,
+  "whole_source_synapses": 54492922,
+  "whole_source_neurons": 138639,
+  "annotated_neurons": 139248,
+  "eligible_pn": 122,
+  "eligible_kc": 2580,
+  "selection": "Left hemisphere; ALPN uniglomerular; predicted acetylcholine; targets Kenyon_Cell left; edge synapse-count threshold",
+  "projection": {
+    "1": {
+      "presynaptic_neurons": 113,
+      "postsynaptic_neurons": 2391,
+      "edges": 12938,
+      "synapses": 169497,
+      "incoming_degree_percentiles": [
+        1.0,
+        4.0,
+        5.0,
+        7.0,
+        15.0
+      ],
+      "outgoing_degree_percentiles": [
+        3.0,
+        59.0,
+        87.0,
+        129.0,
+        590.0
+      ],
+      "density": 0.047886062409552045
+    },
+    "5": {
+      "presynaptic_neurons": 112,
+      "postsynaptic_neurons": 2336,
+      "edges": 10317,
+      "synapses": 164433,
+      "incoming_degree_percentiles": [
+        1.0,
+        4.0,
+        5.0,
+        5.0,
+        11.0
+      ],
+      "outgoing_degree_percentiles": [
+        2.0,
+        47.0,
+        72.0,
+        102.5,
+        516.0
+      ],
+      "density": 0.03943324975538161
+    },
+    "10": {
+      "presynaptic_neurons": 111,
+      "postsynaptic_neurons": 2197,
+      "edges": 7972,
+      "synapses": 147791,
+      "incoming_degree_percentiles": [
+        1.0,
+        3.0,
+        4.0,
+        5.0,
+        8.0
+      ],
+      "outgoing_degree_percentiles": [
+        7.0,
+        38.5,
+        57.0,
+        76.5,
+        402.0
+      ],
+      "density": 0.032689949849713164
+    }
+  },
+  "limitations": [
+    "Predicted transmitter used for source selection",
+    "Only one feedforward projection; no spiking or learning",
+    "Threshold and input encoding are engineering choices",
+    "Latest v783 annotations, not the original paper snapshot"
+  ]
+}

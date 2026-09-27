@@ -1,0 +1,617 @@
+{
+  "dataset": "GoEmotions",
+  "source": "https://github.com/google-research/google-research/tree/master/goemotions",
+  "paper": "https://aclanthology.org/2020.acl-main.372/",
+  "sourceCommit": "2adf640a14f11025ae5a9d0ec493b78530d276d3",
+  "sourceSha256": {
+    "goemotions-test.tsv": "0587b2dd8b27b97352adbfc3fb083d46005c8946657fdc2b1ca8b1cc7f1f8be4",
+    "goemotions-labels.txt": "45c3ef86782d2a4d7fedcd6d8c111aa0d0e94720689bd164fac94fefb4495a89"
+  },
+  "mapping": {
+    "neutral": "neutral",
+    "joy": "happy",
+    "curiosity": "curious",
+    "annoyance": "annoyed",
+    "embarrassment": "embarrassed",
+    "nervousness": "worried",
+    "surprise": "surprised"
+  },
+  "selection": "12 single-label comments per category; SHA-256 ordering of haru-goemotions-20260916:<id>",
+  "cases": [
+    {
+      "id": "ee8e6n1",
+      "expected": "neutral",
+      "originalLabel": "neutral",
+      "split": "heldout",
+      "textSha256": "bb28e8e9968aa6569b815d1b5c4cc0e5cddca83b047ec66ffe453e24369367cc"
+    },
+    {
+      "id": "ee0e4rq",
+      "expected": "neutral",
+      "originalLabel": "neutral",
+      "split": "heldout",
+      "textSha256": "fd3e170c0d1884913536a55e4c9480d23c95fce9f09fba320daa87d9259753df"
+    },
+    {
+      "id": "edlko45",
+      "expected": "neutral",
+      "originalLabel": "neutral",
+      "split": "heldout",
+      "textSha256": "fe57e2c7e8abe43a570564d0170c396991aea766a7b6622f54ae6ca43b7c865d"
+    },
+    {
+      "id": "ee43x8n",
+      "expected": "neutral",
+      "originalLabel": "neutral",
+      "split": "heldout",
+      "textSha256": "3b4f197d2e024125f2cdaa487a3fb3700177df2294923936db1bee18b9b520ed"
+    },
+    {
+      "id": "eebu17b",
+      "expected": "neutral",
+      "originalLabel": "neutral",
+      "split": "heldout",
+      "textSha256": "e2e3e06dc6e5314097ba152e73ed53575fc9f0a10fea03251f6845c1b5d917a7"
+    },
+    {
+      "id": "ee6b97a",
+      "expected": "neutral",
+      "originalLabel": "neutral",
+      "split": "heldout",
+      "textSha256": "1f42c852687b570f29e45ab619f053daaba9c5fbd2695cb2a5a0528e98d50b2e"
+    },
+    {
+      "id": "edtlhba",
+      "expected": "neutral",
+      "originalLabel": "neutral",
+      "split": "heldout",
+      "textSha256": "a525f52f3d82aa581cb8aa002cb5a76f3da2a9b4949a5558dccecaf62866da72"
+    },
+    {
+      "id": "edtjpv6",
+      "expected": "neutral",
+      "originalLabel": "neutral",
+      "split": "heldout",
+      "textSha256": "9bcfb287caad58efe2c89a8ec2485ff61814d04ebaf5541a9369f849f5a40b2a"
+    },
+    {
+      "id": "edvqpif",
+      "expected": "neutral",
+      "originalLabel": "neutral",
+      "split": "heldout",
+      "textSha256": "af56da6eab1957939639cf2035cb2159522ca37b307f9297c097974a1da0d604"
+    },
+    {
+      "id": "eevfjuy",
+      "expected": "neutral",
+      "originalLabel": "neutral",
+      "split": "heldout",
+      "textSha256": "4f839ea8937ea9f9cabb3b7dfe4327bd69ed0b0d12d80a8b118654551e0e95d6"
+    },
+    {
+      "id": "ee6mwmq",
+      "expected": "neutral",
+      "originalLabel": "neutral",
+      "split": "heldout",
+      "textSha256": "19942f2ae977997c23d2c082bc112a1c88ff78739273958c7fc62440258a7cf4"
+    },
+    {
+      "id": "eeyg6h4",
+      "expected": "neutral",
+      "originalLabel": "neutral",
+      "split": "heldout",
+      "textSha256": "f85251d27b93259fbc9cb1702d079cb93764fffe6a486399f9b531e396481d23"
+    },
+    {
+      "id": "eeu0cdq",
+      "expected": "happy",
+      "originalLabel": "joy",
+      "split": "heldout",
+      "textSha256": "96e52d1efbabff76d7c66b1051e60f8abc0a8d98a5439375c7f5996ea44e4f85"
+    },
+    {
+      "id": "ed2h0l8",
+      "expected": "happy",
+      "originalLabel": "joy",
+      "split": "heldout",
+      "textSha256": "5a22637b56efb74ad57a8a7bd383cd42e244810abafe35472a6b91e857bce1f8"
+    },
+    {
+      "id": "edkdcgk",
+      "expected": "happy",
+      "originalLabel": "joy",
+      "split": "heldout",
+      "textSha256": "4fb5a892ad57014db56698aacd8633ae7cbb6cfcb260a9fbb1e59c71634d51dd"
+    },
+    {
+      "id": "eenni73",
+      "expected": "happy",
+      "originalLabel": "joy",
+      "split": "heldout",
+      "textSha256": "0b9d20a752137774e5691153c4b94e5ccb61d63dc6362ddc2bf66b88c03c4ced"
+    },
+    {
+      "id": "efgqmll",
+      "expected": "happy",
+      "originalLabel": "joy",
+      "split": "heldout",
+      "textSha256": "7e1e390e221062feb5635f2ac47519057ed95ebdf2cb5bf726f196dc08ee1907"
+    },
+    {
+      "id": "ed3hg8c",
+      "expected": "happy",
+      "originalLabel": "joy",
+      "split": "heldout",
+      "textSha256": "db3a04baeee4c5d628de15abc46a3f8dab55ee2cdf51becdb95c47fe553a83b8"
+    },
+    {
+      "id": "eeah80k",
+      "expected": "happy",
+      "originalLabel": "joy",
+      "split": "heldout",
+      "textSha256": "4ad992e255d85bf289a3dfaad4011d6e5edc4fbba77748419516e75abaa3fc07"
+    },
+    {
+      "id": "edhzgg4",
+      "expected": "happy",
+      "originalLabel": "joy",
+      "split": "heldout",
+      "textSha256": "8eb2eb412564cc84c3f54f5d38172e0410cb5b5ec7cc67bd706ba9a9ad4a5f7e"
+    },
+    {
+      "id": "eec8s5u",
+      "expected": "happy",
+      "originalLabel": "joy",
+      "split": "heldout",
+      "textSha256": "de31fd2c2c710f46c811e2b61861ee550f0156dde815ac4519f2ca5de807d6dd"
+    },
+    {
+      "id": "edpg57t",
+      "expected": "happy",
+      "originalLabel": "joy",
+      "split": "heldout",
+      "textSha256": "1a2ce6c1c5aa911724a2df2ec21bef749be798fe6b17a0844e8c2fe9f9d8ad8f"
+    },
+    {
+      "id": "efh6oic",
+      "expected": "happy",
+      "originalLabel": "joy",
+      "split": "heldout",
+      "textSha256": "ff486f105a9127fef29f65cc526a4c7c66b3136ecbe526d08064f4ed56c4f455"
+    },
+    {
+      "id": "edlzkq1",
+      "expected": "happy",
+      "originalLabel": "joy",
+      "split": "heldout",
+      "textSha256": "3bd553672c41fb68863865a61a17492f8f877e1aee09c5a56a18a50fc2a85d15"
+    },
+    {
+      "id": "edjzhjd",
+      "expected": "curious",
+      "originalLabel": "curiosity",
+      "split": "heldout",
+      "textSha256": "c35dd23c64c36f692a56afe31fc4395cfa3a9fbfa8301654607124018fa136db"
+    },
+    {
+      "id": "ednif10",
+      "expected": "curious",
+      "originalLabel": "curiosity",
+      "split": "heldout",
+      "textSha256": "93b3fc27eea1bbabab842b1b747684ef7320dfcb9683ee46454c58d243547003"
+    },
+    {
+      "id": "ed5rlwn",
+      "expected": "curious",
+      "originalLabel": "curiosity",
+      "split": "heldout",
+      "textSha256": "3e2998ebbaf472608d9fb5fdd255ace983a87614e09a76d3d9ae1154f0974890"
+    },
+    {
+      "id": "ee595r5",
+      "expected": "curious",
+      "originalLabel": "curiosity",
+      "split": "heldout",
+      "textSha256": "4112149cf19f3de220f77f7c62d844e6d15a87d24b549755bb4b23bc503fea00"
+    },
+    {
+      "id": "edlm4i4",
+      "expected": "curious",
+      "originalLabel": "curiosity",
+      "split": "heldout",
+      "textSha256": "a7d3e39a5421db3c5c81da779ce6344a594e596e20ba2731a854592a1602dfba"
+    },
+    {
+      "id": "edk5zy9",
+      "expected": "curious",
+      "originalLabel": "curiosity",
+      "split": "heldout",
+      "textSha256": "f123c9c91bc41f7b12585a6101c3d18eef1cc68addcfdc5acfb0d794140c49a7"
+    },
+    {
+      "id": "ed47xou",
+      "expected": "curious",
+      "originalLabel": "curiosity",
+      "split": "heldout",
+      "textSha256": "a07d7b52235b97ed190400217206e2d0487c2726b8e6282ba86e96f337321c21"
+    },
+    {
+      "id": "eelsqcs",
+      "expected": "curious",
+      "originalLabel": "curiosity",
+      "split": "heldout",
+      "textSha256": "9aa18354cf054df072386e5c56aa0dde984204f6aa35d6e773d3592de94c8ec0"
+    },
+    {
+      "id": "edz1wjs",
+      "expected": "curious",
+      "originalLabel": "curiosity",
+      "split": "heldout",
+      "textSha256": "3b2fa5e1582eb90fc33b3059d544bf4e7802a1dc6508d9f332b09630009374b5"
+    },
+    {
+      "id": "eev7uaa",
+      "expected": "curious",
+      "originalLabel": "curiosity",
+      "split": "heldout",
+      "textSha256": "0a4f77c4f143f69249243ff2c56cf7dedc592901032f3563447c6bf05f8a1cbb"
+    },
+    {
+      "id": "eenz3h9",
+      "expected": "curious",
+      "originalLabel": "curiosity",
+      "split": "heldout",
+      "textSha256": "88321f2b9323e3d5fb95673104c1bd0be6cf04c1b04a928f5a1709b899a06347"
+    },
+    {
+      "id": "efha0zn",
+      "expected": "curious",
+      "originalLabel": "curiosity",
+      "split": "heldout",
+      "textSha256": "9b181de483e0da61391cd385f16383f953401fdfee8ca2c46297bd812f3e0b5d"
+    },
+    {
+      "id": "edxzmzw",
+      "expected": "annoyed",
+      "originalLabel": "annoyance",
+      "split": "heldout",
+      "textSha256": "9f94c23efe3ec3aeae075ea083cc480a553ace6d642c73b321212792a52d430e"
+    },
+    {
+      "id": "ee5ne6r",
+      "expected": "annoyed",
+      "originalLabel": "annoyance",
+      "split": "heldout",
+      "textSha256": "cc2f155bbacd74c13bfbbc955191105ec4fd4581f2151a438bb5a95a9481dca1"
+    },
+    {
+      "id": "ed22fxd",
+      "expected": "annoyed",
+      "originalLabel": "annoyance",
+      "split": "heldout",
+      "textSha256": "effa0ccbacf845755b1db7058f7e1aa835f20d50da9b60107bb0dc6b9eb6d53f"
+    },
+    {
+      "id": "ee00nbw",
+      "expected": "annoyed",
+      "originalLabel": "annoyance",
+      "split": "heldout",
+      "textSha256": "5db99893f22c063321e4c071d84468ea4bdc8107773018aaa66055cee78e557f"
+    },
+    {
+      "id": "eeayeuu",
+      "expected": "annoyed",
+      "originalLabel": "annoyance",
+      "split": "heldout",
+      "textSha256": "510005fe95a09f22867ccc50eba7e97468576fa44f92a8ace1629c482cfcd982"
+    },
+    {
+      "id": "ede4o2v",
+      "expected": "annoyed",
+      "originalLabel": "annoyance",
+      "split": "heldout",
+      "textSha256": "d8c89790ec12a59b435dcc6c687ac54783693ddfe08711e8ccc59e3e519c93f1"
+    },
+    {
+      "id": "ed936ao",
+      "expected": "annoyed",
+      "originalLabel": "annoyance",
+      "split": "heldout",
+      "textSha256": "599649091245e622d5c16049f5273598e9fe6abbe74d37f15a17ce8e1f490bf3"
+    },
+    {
+      "id": "ef30dyy",
+      "expected": "annoyed",
+      "originalLabel": "annoyance",
+      "split": "heldout",
+      "textSha256": "91d5ded4c94a086a3f832b7cb7cfd37cd1a0adba67e8b17f51aada8da729d6cb"
+    },
+    {
+      "id": "ed0oz6z",
+      "expected": "annoyed",
+      "originalLabel": "annoyance",
+      "split": "heldout",
+      "textSha256": "7982fbad7b6c1b5ab8fe03d5800b2a3052721e4fcaad8ce368a011602cc302c6"
+    },
+    {
+      "id": "eeudvxm",
+      "expected": "annoyed",
+      "originalLabel": "annoyance",
+      "split": "heldout",
+      "textSha256": "011d35fa0072fee7edd1e776963d27e8fdaabd722ceb35630dab49b7a91ed11a"
+    },
+    {
+      "id": "eczfs6b",
+      "expected": "annoyed",
+      "originalLabel": "annoyance",
+      "split": "heldout",
+      "textSha256": "94b5873ae95755d8e204f8cf07caa144c2e4731dd57ebcdae5b7c6d6f9feabef"
+    },
+    {
+      "id": "eddyedw",
+      "expected": "annoyed",
+      "originalLabel": "annoyance",
+      "split": "heldout",
+      "textSha256": "27c0a8be9dec30e9e22416e6daacae7f02a59471b6504f807ad2e90387db01ad"
+    },
+    {
+      "id": "edt1jzo",
+      "expected": "embarrassed",
+      "originalLabel": "embarrassment",
+      "split": "heldout",
+      "textSha256": "b9358897585c9b23d937bd1e46e51f8eee47b97050aa8acba44314afdf0762e0"
+    },
+    {
+      "id": "ed8un4o",
+      "expected": "embarrassed",
+      "originalLabel": "embarrassment",
+      "split": "heldout",
+      "textSha256": "2d24ac1922e734b738434825216d2bdb6889c74b4481dbcc58ad87914f26d0da"
+    },
+    {
+      "id": "ed0jr9i",
+      "expected": "embarrassed",
+      "originalLabel": "embarrassment",
+      "split": "heldout",
+      "textSha256": "d73fa93e6068ef1bcad5e682cff5d4328ed76f7b30e1cab0420e783da6d1dba6"
+    },
+    {
+      "id": "efh8gxu",
+      "expected": "embarrassed",
+      "originalLabel": "embarrassment",
+      "split": "heldout",
+      "textSha256": "d331e73444bbe8a297add135f75e02d2e2fb5bc30424f2745db0567bd9205177"
+    },
+    {
+      "id": "edjcva3",
+      "expected": "embarrassed",
+      "originalLabel": "embarrassment",
+      "split": "heldout",
+      "textSha256": "6331ceaba6987796b7241308631224b152739dd4603cef3bdc5440b1b582b6db"
+    },
+    {
+      "id": "ef54otk",
+      "expected": "embarrassed",
+      "originalLabel": "embarrassment",
+      "split": "heldout",
+      "textSha256": "5dbdd586f1b951c1e124db374dbaab77f69ac8b2dc5e66fba6c65cb9f884773d"
+    },
+    {
+      "id": "eekiyhy",
+      "expected": "embarrassed",
+      "originalLabel": "embarrassment",
+      "split": "heldout",
+      "textSha256": "d749e448ac1e09a96640e66b8a126ac5cfa8a67e396477808aa0c1c7bd5f48bd"
+    },
+    {
+      "id": "edma0sp",
+      "expected": "embarrassed",
+      "originalLabel": "embarrassment",
+      "split": "heldout",
+      "textSha256": "027ebb9f51176a9a7b66b4374de82018fb75e1805598f0c85c2f23fbfeb13465"
+    },
+    {
+      "id": "ef1xbnb",
+      "expected": "embarrassed",
+      "originalLabel": "embarrassment",
+      "split": "heldout",
+      "textSha256": "c2e0a1d0ac21b9f5ddd3a9722010136e48869291fd624b0809f3080432092869"
+    },
+    {
+      "id": "edpvd21",
+      "expected": "embarrassed",
+      "originalLabel": "embarrassment",
+      "split": "heldout",
+      "textSha256": "e091b5b74f44cbcf2235bfc0214c9bcc11feb5a912771ba00ed51ed232f3f1ed"
+    },
+    {
+      "id": "eenvcj6",
+      "expected": "embarrassed",
+      "originalLabel": "embarrassment",
+      "split": "heldout",
+      "textSha256": "6d79968611a6b79fe1ea5c16f26b454478efaca23d3ee2b1950ab208798aa144"
+    },
+    {
+      "id": "eete10e",
+      "expected": "embarrassed",
+      "originalLabel": "embarrassment",
+      "split": "heldout",
+      "textSha256": "83bfcd1da9cb754fbc742c69331b0f828a3995a627b2b2105862141b048ba671"
+    },
+    {
+      "id": "ef3w6ic",
+      "expected": "worried",
+      "originalLabel": "nervousness",
+      "split": "heldout",
+      "textSha256": "9582911ccb0e0ea185c3e63206bb85be502e0751fc7958b59b7fa2da1f3f4d8c"
+    },
+    {
+      "id": "eesfw7d",
+      "expected": "worried",
+      "originalLabel": "nervousness",
+      "split": "heldout",
+      "textSha256": "263445472a1d5b597c1c9ecee9da650904a5362ad414b18442d475ea601a9477"
+    },
+    {
+      "id": "ef16sde",
+      "expected": "worried",
+      "originalLabel": "nervousness",
+      "split": "heldout",
+      "textSha256": "7bfd97cd41049a242ed6c81aab5533bc0f766f9bf2f9fdb841bafaf68e16ac8f"
+    },
+    {
+      "id": "edoglhv",
+      "expected": "worried",
+      "originalLabel": "nervousness",
+      "split": "heldout",
+      "textSha256": "239ed22d2a373d91d11a098e95c7946ce812860d78812486cb9bae7ecda65b6e"
+    },
+    {
+      "id": "eentnff",
+      "expected": "worried",
+      "originalLabel": "nervousness",
+      "split": "heldout",
+      "textSha256": "98201f6d5f027c0c5c01ee24710da03b10bf691b45525bb905c21caf3d2e3808"
+    },
+    {
+      "id": "eeb9saw",
+      "expected": "worried",
+      "originalLabel": "nervousness",
+      "split": "heldout",
+      "textSha256": "b8384bc6cf3586deeb34dedb154b01b0426ed7d4da0057bf3a9931a4430e8770"
+    },
+    {
+      "id": "ed157d1",
+      "expected": "worried",
+      "originalLabel": "nervousness",
+      "split": "heldout",
+      "textSha256": "a0cf34eb964de2e0c086cf77f72ead6d513a07c8e1db75a06cf6a7aeeba033e6"
+    },
+    {
+      "id": "eevpwe1",
+      "expected": "worried",
+      "originalLabel": "nervousness",
+      "split": "heldout",
+      "textSha256": "412a8ab093606de8e0444b6fffbe85eaae714e339bfb9dd4a2e92364c7f1a830"
+    },
+    {
+      "id": "eef48yd",
+      "expected": "worried",
+      "originalLabel": "nervousness",
+      "split": "heldout",
+      "textSha256": "f324f79e188bdbec83abb5173610ff4e195f00175f5fce46b37c022e8254acd6"
+    },
+    {
+      "id": "edvnv86",
+      "expected": "worried",
+      "originalLabel": "nervousness",
+      "split": "heldout",
+      "textSha256": "fcc4c6611ed204440c9e60157a8bd1cc22bbd2ced075bd1371591f5ed7f493d4"
+    },
+    {
+      "id": "ef14jkh",
+      "expected": "worried",
+      "originalLabel": "nervousness",
+      "split": "heldout",
+      "textSha256": "cc9d9bf84ad985637e1819a87402aed508a92e56fecae18d224c326c307860b7"
+    },
+    {
+      "id": "ee9uyrp",
+      "expected": "worried",
+      "originalLabel": "nervousness",
+      "split": "heldout",
+      "textSha256": "0ac833f2ecba1aa35b8b6a6733b742c2e177e9e7ae8a8d5543f2cc07dd01f004"
+    },
+    {
+      "id": "eesno19",
+      "expected": "surprised",
+      "originalLabel": "surprise",
+      "split": "heldout",
+      "textSha256": "4d52edefc3b8971f2bab6769fb3a5250e351855fd76e72896ee2e6c562bf5fa3"
+    },
+    {
+      "id": "ef7odkl",
+      "expected": "surprised",
+      "originalLabel": "surprise",
+      "split": "heldout",
+      "textSha256": "57519a7846f3688209d99b11d780f8f3edcd6a8249b97e5298677e12d8229c85"
+    },
+    {
+      "id": "eczxpjy",
+      "expected": "surprised",
+      "originalLabel": "surprise",
+      "split": "heldout",
+      "textSha256": "df57009021ad47dea8ee89f715b22fef6fa25548015a460c924c5dc8b51a8307"
+    },
+    {
+      "id": "eekp5gi",
+      "expected": "surprised",
+      "originalLabel": "surprise",
+      "split": "heldout",
+      "textSha256": "a877b53a74c1d168c0cabe7ad91a40f23c4c0057bd094aee399326f0971a600b"
+    },
+    {
+      "id": "eetrfd1",
+      "expected": "surprised",
+      "originalLabel": "surprise",
+      "split": "heldout",
+      "textSha256": "478061e4d106fe8dc79ff5686c3a7589832713554da84134552293336d35474e"
+    },
+    {
+      "id": "eeu4qki",
+      "expected": "surprised",
+      "originalLabel": "surprise",
+      "split": "heldout",
+      "textSha256": "e5c003620f03c3978f03edb2de949a912d2be56a68ff9684c22263188bc3a4cc"
+    },
+    {
+      "id": "ee2hrev",
+      "expected": "surprised",
+      "originalLabel": "surprise",
+      "split": "heldout",
+      "textSha256": "8a08631cd2ac11cf7071091c1faf9ef34348ca45935aafe497c4d277ea1a8e0e"
+    },
+    {
+      "id": "edph4ed",
+      "expected": "surprised",
+      "originalLabel": "surprise",
+      "split": "heldout",
+      "textSha256": "c437e952530ba6f2672100e80d5b24f83b7e48132079a0c6f2a6f16ffb06f42b"
+    },
+    {
+      "id": "ee7hgcm",
+      "expected": "surprised",
+      "originalLabel": "surprise",
+      "split": "heldout",
+      "textSha256": "a95123e38db62b662a3bd303720e8628c84b1356233e8b47e375239c172e86d4"
+    },
+    {
+      "id": "edx945w",
+      "expected": "surprised",
+      "originalLabel": "surprise",
+      "split": "heldout",
+      "textSha256": "baaa90b510208754652cc15053ad525dff9bf25f57c784a5991a9033063da36c"
+    },
+    {
+      "id": "edirhr2",
+      "expected": "surprised",
+      "originalLabel": "surprise",
+      "split": "heldout",
+      "textSha256": "1f26133cac5fb30db81d7d6b741b3f37bb713e6809797bd1d0f5f7f705e5cf90"
+    },
+    {
+      "id": "ee1rkwi",
+      "expected": "surprised",
+      "originalLabel": "surprise",
+      "split": "heldout",
+      "textSha256": "a58ea4c03bd6e8cfc7eee19b58a114718c9cb23f534a24ec016f38e749448ec8"
+    }
+  ],
+  "calls": 672,
+  "limitations": [
+    "Reddit labels and companion delivery have different context and scope",
+    "No determined, smug, bored, sleepy or affectionate coverage",
+    "Balanced subset; not a representative estimate of overall dataset performance",
+    "Seed and mood repetitions are not independent texts"
+  ]
+}

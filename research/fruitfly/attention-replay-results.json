@@ -1,0 +1,46 @@
+{
+  "policy": 2,
+  "tolerance": 1e-12,
+  "malformed": 0,
+  "sessions": [
+    {
+      "firstAt": "2026-09-15T19:01:26.482Z",
+      "lastAt": "2026-09-15T19:47:14.051Z",
+      "complete": true,
+      "samples": 97,
+      "replayed": 97,
+      "actionMismatches": 0,
+      "numericMismatches": 0,
+      "largestAbsoluteError": 0
+    },
+    {
+      "firstAt": "2026-09-15T19:47:25.130Z",
+      "lastAt": "2026-09-15T19:58:17.446Z",
+      "complete": true,
+      "samples": 24,
+      "replayed": 24,
+      "actionMismatches": 0,
+      "numericMismatches": 0,
+      "largestAbsoluteError": 1.1102230246251565e-16
+    },
+    {
+      "firstAt": "2026-09-15T19:58:39.889Z",
+      "lastAt": "2026-09-15T23:59:51.373Z",
+      "complete": true,
+      "samples": 630,
+      "replayed": 630,
+      "actionMismatches": 0,
+      "numericMismatches": 0,
+      "largestAbsoluteError": 0
+    }
+  ],
+  "samples": 751,
+  "replayed": 751,
+  "actionMismatches": 0,
+  "numericMismatches": 0,
+  "limitations": [
+    "Only sessions with all sequence numbers starting at one are replayed",
+    "Null silence is interpreted as Infinity, matching valid unknown-history production input",
+    "Reproducing diagnostics does not establish desirable behavior or correct client presence"
+  ]
+}

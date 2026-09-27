@@ -1,0 +1,47 @@
+{
+  "mode": "shadow",
+  "policy": 2,
+  "firstAt": "2026-09-15T19:01:26.482Z",
+  "lastAt": "2026-09-16T14:23:40.359Z",
+  "samples": 3953,
+  "baselineEligible": 1,
+  "shadowSpeak": 0,
+  "agreement": 3952,
+  "switches": 11,
+  "transitions": 3949,
+  "actualAsides": 6,
+  "repeatBlocked": 1,
+  "interactions": 16,
+  "malformed": 0,
+  "actions": {
+    "rest": 3860,
+    "attend": 93
+  },
+  "shortAsideGaps": 1,
+  "speechDecisions": {
+    "bothPropose": 0,
+    "baselineOnly": 1,
+    "shadowOnly": 0,
+    "bothSilent": 3952
+  },
+  "inputCoverage": {
+    "measured": 3953,
+    "hostActive": 22,
+    "hostIdleOverFiveMinutes": 3931,
+    "hostWindowFocused": 3953,
+    "recentDirectContact": 69,
+    "recentContactWhileHostIdle": 69,
+    "unblockedHostActive": 4
+  },
+  "baselineProposalOverlap": 0,
+  "shadowProposalOverlap": null,
+  "speechDecisionAgreement": 0.9997470275739945,
+  "actionSwitchRate": 0.002785515320334262,
+  "meanComputeMs": 0.019996489229671833,
+  "maxComputeMs": 1.3897770009934902,
+  "feedback": {
+    "up": 0,
+    "down": 0
+  },
+  "interpretation": "Observational only. Agreement can be dominated by both policies staying silent; inspect speechDecisions and inputCoverage. Proposal overlap is not accuracy: neither policy is a correctness label. Baseline eligibility is not delivery. Host idle/focus does not establish remote client presence. Feedback concerns existing replies, not shadow actions. Compute time excludes log IO and model latency. Short aside gaps include reminders; they are not automatically unwanted interruptions."
+}
