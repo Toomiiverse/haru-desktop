@@ -56,7 +56,7 @@ function drive() {
   });
   const parts = Object.fromEntries(['ear-left', 'ear-right', 'eye-right', 'tuft', 'accent-left', 'accent-right'].map(name => [name, element()]));
   const animations = new Map(), reactionAnimations = new Set(), box = element(), symbols: any[] = [];
-  const context: any = { jaw:0, flightPose:[0,0,0,0], flightSpeed:[0,0,0,0], callbacks:{current:{}}, SVG_REACTIONS, TAP_REACTIONS, tapIndex: 0, depthEl: element(), depthPose: [0,0,0], depthSpeed: [0,0,0], dragPoint: null, dragVelocity: {x:0,y:0}, dragEl: element(), dragShape: [1,0,1,0], dragSpeed: [0,0,0,0], animations, reactionAnimations, box, gestureEl: element(),
+  const context: any = { restAmount:0, restSpeed:0, restEl:element(), jaw:0, flightPose:[0,0,0,0], flightSpeed:[0,0,0,0], callbacks:{current:{}}, SVG_REACTIONS, TAP_REACTIONS, tapIndex: 0, depthEl: element(), depthPose: [0,0,0], depthSpeed: [0,0,0], dragPoint: null, dragVelocity: {x:0,y:0}, dragEl: element(), dragShape: [1,0,1,0], dragSpeed: [0,0,0,0], animations, reactionAnimations, box, gestureEl: element(),
     ANIMATION_SYMBOLS, showSymbol(name: string, options: any) { symbols.push({ name, options }); }, clearSymbol() { symbols.push(null); },
     faces: [{ querySelector: (selector: string) => parts[selector.match(/"(.*?)"/)![1]] }], front: 0,
     reactionName: '', reactionStart: 0, reactionUntil: 0, lastMotion: 0, nextEarTwitch: 0,
@@ -167,4 +167,13 @@ test('tap accents finish under a second and hair pops promptly on the same clock
     assert.equal(d.symbols.at(-1).options.rise,100);
   }
   assert.equal(SVG_REACTIONS['sleep-transition'].duration,6500, 'intentional non-tap pacing is unchanged');
+});
+
+
+test('sleeping taps stir with a bounded wake stretch and cancel the held sleep pose', () => {
+  const d=drive();d.play('sleep-transition');const held=[...d.created];d.tap();
+  assert.equal(d.box.attrs['data-reaction'],'wake-stretch');assert.ok(held.every(a=>a.cancelled));
+  assert.equal(d.symbols.at(-1).name,'hair-surprise');assert.ok(Number.isFinite(d.context.reactionUntil));
+  d.context.engine.emotion=()=> 'drowsy';d.tap();assert.equal(d.box.attrs['data-reaction'],'wake-stretch');
+  d.context.engine.emotion=()=> 'neutral';d.tap();assert.ok(d.box.attrs['data-reaction'].startsWith('tap-'));
 });

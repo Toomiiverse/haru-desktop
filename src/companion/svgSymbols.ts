@@ -40,6 +40,7 @@ export const ANIMATION_SYMBOLS: Record<string, string> = {
   'tap-left': 'hair-question', 'tap-right': 'hair-question', 'tap-peek': 'hair-surprise',
   'tap-tumble': 'hair-spiral', 'tap-squeeze': 'hair-surprise', 'tap-ripple': 'hair-heart', 'tap-hop': 'hair-heart',
   listening: 'hair-surprise', 'head-pat': 'hair-heart', curiosity: 'hair-question',
+  yawn: 'hair-droop', 'dream-twitch': 'hair-droop', 'wake-stretch': 'hair-surprise',
   'sleep-transition': 'hair-droop', 'shy-glance': 'hair-heart', 'slow-blink': 'hair-heart',
   'playful-wink': 'hair-heart', startle: 'hair-surprise', droop: 'hair-droop',
   relief: 'hair-droop', 'sleepy-nod': 'hair-droop', sparkle: 'hair-surprise',

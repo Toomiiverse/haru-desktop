@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { stripTypeScriptTypes } from 'node:module';
 import vm from 'node:vm';
-import { fairyMotion, speechJaw } from '../src/companion/idle';
+import { fairyMotion, speechJaw, sleepMotion } from '../src/companion/idle';
 
 test('moods change flight speed, happy hops, depth and glow; speech settles the flight', () => {
   const distance = (mood: string, talk = 0) => {
@@ -77,4 +77,18 @@ test('phone jaw reads the playing speech waveform and disposal preserves audio o
   audio.paused=true;level=.1;assert.equal(meter.read().weight,0);audio.paused=false;
   audio.muted=true;assert.equal(meter.read().open,0);audio.muted=false;
   meter.dispose();assert.equal(meter.read().open,0);assert.equal(connections.at(-1),destination);assert.equal(closed,0);assert.equal(events.size,0);
+});
+
+
+test('sleep breathing, tired nods and dream twitches stay small and vanish when awake', () => {
+  let min=1,max=0,nods=0;const ears=new Set<string>();
+  for(let t=0;t<60000;t+=33){
+    const awake=sleepMotion(t,0),asleep=sleepMotion(t,1),tired=sleepMotion(t,.55);
+    assert.ok(awake.lift===0);assert.equal(awake.roll,0);assert.equal(awake.stretch,1);assert.equal(awake.lid,1);
+    for(const p of [asleep,tired]){assert.ok(Object.values(p).every(Number.isFinite));assert.ok(Math.abs(p.lift)<.04 && p.stretch>.97 && p.stretch<1.05 && p.lid>=.02);}
+    min=Math.min(min,asleep.lift);max=Math.max(max,asleep.lift);if(tired.lift>.008)nods++;
+    ears.add(asleep.ear.toFixed(1));
+  }
+  assert.ok(max-min>.012);assert.ok(nods>0);assert.ok(ears.size>10);
+  assert.ok(Object.values(sleepMotion(NaN,Infinity)).every(Number.isFinite));
 });

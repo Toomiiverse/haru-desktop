@@ -9,7 +9,7 @@ import {
 } from '../../electron/emotions';
 import type { MouthReading } from '../companion/mouth';
 import type { Gaze } from '../companion/behaviour';
-import { idleMotion, settleSpring, hairMotionTarget, dragMotionTarget, depthMotionTarget, fairyMotion, speechJaw } from '../companion/idle';
+import { idleMotion, settleSpring, hairMotionTarget, dragMotionTarget, depthMotionTarget, fairyMotion, speechJaw, sleepMotion } from '../companion/idle';
 import { EXPRESSION_REACTIONS, SVG_REACTIONS, TAP_REACTIONS } from '../companion/svgReactions';
 import { ANIMATION_SYMBOLS, EXPRESSION_SYMBOLS, HAIR_SYMBOLS, REACTION_SYMBOLS, hairSymbolFrames, symbolFrames } from '../companion/svgSymbols';
 
@@ -203,7 +203,7 @@ export function SvgAvatarCanvas({ className = '', roam = false, onFloat, onError
     let reduced = motionPreference.matches;
     const finePointer = !!(window.matchMedia && window.matchMedia('(pointer: fine)').matches);
 
-    container.innerHTML = '<div id="avatar" role="img" aria-label="' + LABELS.neutral + '"><div id="avatar-pose"><div class="avatar-depth"><div class="avatar-gesture"><div class="avatar-drag"><div id="avatar-body"><div class="face"></div><div class="face"></div><svg class="avatar-symbol-layer" viewBox="0 0 1254 1254" aria-hidden="true"></svg></div></div></div></div></div></div>';
+    container.innerHTML = '<div id="avatar" role="img" aria-label="' + LABELS.neutral + '"><div id="avatar-pose"><div class="avatar-depth"><div class="avatar-gesture"><div class="avatar-drag"><div class="avatar-rest"><div id="avatar-body"><div class="face"></div><div class="face"></div><svg class="avatar-symbol-layer" viewBox="0 0 1254 1254" aria-hidden="true"></svg><svg class="avatar-sleep-layer" viewBox="0 0 1254 1254" aria-hidden="true"></svg></div></div></div></div></div></div></div>';
     const box = container.querySelector('#avatar') as HTMLElement;
     const body = container.querySelector('#avatar-body') as HTMLElement;
     const poseEl = container.querySelector('#avatar-pose') as HTMLElement;
@@ -211,6 +211,10 @@ export function SvgAvatarCanvas({ className = '', roam = false, onFloat, onError
     const depthEl = container.querySelector('.avatar-depth') as HTMLElement;
     const depthPose = [0, 0, 0], depthSpeed = [0, 0, 0];
     const flightPose = [0,0,0,0], flightSpeed = [0,0,0,0];
+    const restEl = container.querySelector('.avatar-rest') as HTMLElement;
+    const sleepLayer = container.querySelector('.avatar-sleep-layer') as SVGSVGElement;
+    sleepLayer.innerHTML = REACTION_SYMBOLS.sleep.markup + '<g class="sleep-bubble" transform="translate(830 900)"><ellipse rx="49" ry="39" fill="#dcd8f5" fill-opacity=".13" stroke="#dcd8f5" stroke-opacity=".6" stroke-width="5"/><path d="M -25 -17 Q -14 -29 3 -27" fill="none" stroke="#fff0f4" stroke-width="5" stroke-linecap="round"/></g>';
+    let restAmount = 0, restSpeed = 0;
     const dragEl = container.querySelector('.avatar-drag') as HTMLElement;
     let dragPoint: { x: number; y: number; at: number } | null = null;
     let dragVelocity = { x: 0, y: 0 };
@@ -322,9 +326,19 @@ export function SvgAvatarCanvas({ className = '', roam = false, onFloat, onError
       const mouth = reading?.mouth ?? { open: 0, weight: 0 };
       jaw = speechJaw(mouth.open, mouth.weight, jaw, dt);
       box.style.setProperty('--jaw-open', jaw.toFixed(4));
+      const disturbed = !!dragPoint || mouth.weight > .05 || !!(claim && time < claimUntil)
+        || (time < reactionUntil && !['sleep-transition', 'sleepy-nod'].includes(reactionName));
+      const wantedRest = disturbed ? 0 : reactionName === 'sleep-transition' ? fallingAsleep : engine.emotion() === 'sleepy' ? 1 : engine.emotion() === 'drowsy' ? .55 : 0;
+      [restAmount, restSpeed] = settleSpring(restAmount, restSpeed, wantedRest, 18, 9, dt);
+      const rest = sleepMotion(time, restAmount);
+      const restMode = wantedRest >= .8 ? 'asleep' : wantedRest > .05 ? 'tired' : 'awake';
+      if (box.getAttribute('data-rest') !== restMode) box.setAttribute('data-rest', restMode);
+      restEl.style.transform = `translateY(calc(var(--avatar-size) * ${rest.lift})) rotate(${rest.roll}deg) scale(${1 / rest.stretch},${rest.stretch})`;
+      box.style.setProperty('--rest-lid', String(rest.lid));
       const hover = fairyMotion(time, engine.emotion(), mouth.weight);
+      hover.x *= 1 - restAmount * .9; hover.y *= 1 - restAmount * .9; hover.bank *= 1 - restAmount * .9; hover.z *= 1 - restAmount * .9;
       const flight = [hover.flightX, hover.flightY, hover.y, hover.bank];
-      const moving = !dragPoint && time >= reactionUntil && mouth.weight < .05 && !(claim && time < claimUntil);
+      const moving = wantedRest < .05 && restAmount < .05 && !dragPoint && time >= reactionUntil && mouth.weight < .05 && !(claim && time < claimUntil);
       for (let i = 0; i < flight.length; i++) {
         if (i < 2 && !moving) { flightSpeed[i] = 0; continue; }
         [flightPose[i], flightSpeed[i]] = settleSpring(flightPose[i], flightSpeed[i], flight[i], 70, 15, dt);
@@ -333,7 +347,7 @@ export function SvgAvatarCanvas({ className = '', roam = false, onFloat, onError
       const flightX = callbacks.current.roam ? flightPose[0] * Math.max(0, (container!.clientWidth - box.offsetWidth) / 2) : 0;
       const flightY = callbacks.current.roam ? flightPose[1] * Math.max(0, (container!.clientHeight - box.offsetHeight) / 2) : 0;
       const roaming = dragPoint || time < reactionUntil ? .35 : 1;
-      box.style.setProperty('--fairy-glow', hover.glow.toFixed(3));
+      box.style.setProperty('--fairy-glow', (hover.glow * (1 - restAmount) + rest.glow * restAmount).toFixed(3));
       const idle = idleMotion(time, { energy: (quiet ? .2 : .55) * (1 - fallingAsleep), sleepiness: Math.max(quiet ? .75 : .1, fallingAsleep), stress: 0 }, Math.max(mouth.weight, claim?.why === 'talking' && time < claimUntil ? .8 : 0));
       box.style.transform = `translate(calc(${flightX}px + var(--avatar-size) * ${hover.x * roaming}), calc(${flightY}px + var(--avatar-size) * ${flightPose[2] * roaming})) rotate(${flightPose[3] * roaming}deg) translate(calc(var(--idle-bob) * ${(idle.driftX * 65).toFixed(4)}), calc(var(--idle-bob) * ${(-idle.breath).toFixed(4)})) rotate(calc(var(--idle-sway) * ${(idle.headZ * .4 + idle.bodyZ * .2).toFixed(4)})) scaleY(calc(1 + (var(--idle-breath) - 1) * ${idle.breath.toFixed(4)}))`;
       const decay = dragPoint ? Math.exp(-Math.max(0, time - dragPoint.at - 40) / 85) : 0;
@@ -375,7 +389,7 @@ export function SvgAvatarCanvas({ className = '', roam = false, onFloat, onError
         const turn = ((sample.roll - previous.roll + 540) % 360 - 180) / dt;
         const { angle: target, stretch } = hairMotionTarget(sample.roll, turn, vx, vy,
           strand.el.getAttribute('data-hair')?.startsWith('ear-') ?? false, strand.vertical, strand.limit);
-        [strand.angle, strand.speed] = settleSpring(strand.angle, strand.speed, target, strand.stiffness, strand.damping, dt);
+        [strand.angle, strand.speed] = settleSpring(strand.angle, strand.speed, target + (strand.el.getAttribute('data-hair')?.startsWith('ear-') ? rest.ear * strand.vertical : 0), strand.stiffness, strand.damping, dt);
         [strand.stretch, strand.stretchSpeed] = settleSpring(strand.stretch, strand.stretchSpeed, stretch, strand.stiffness, strand.damping, dt);
         strand.angle = clamp(strand.angle, -strand.limit, strand.limit);
         strand.el.style.transform = `rotate(${strand.angle.toFixed(3)}deg) skewX(${(strand.angle * .2).toFixed(3)}deg) scaleY(${(1 + strand.stretch).toFixed(4)})`;
@@ -400,6 +414,7 @@ export function SvgAvatarCanvas({ className = '', roam = false, onFloat, onError
       if (!changed && mounted) return;
       stopReaction(true);
       const frame = engine.sample(t);
+      if (reduced) box.setAttribute('data-rest', frame.emotion === 'sleepy' ? 'asleep' : frame.emotion === 'drowsy' ? 'tired' : 'awake');
       const mine = ++request;
       box.setAttribute('aria-label', LABELS[frame.emotion] || ('Haru feeling ' + frame.emotion));
       const incoming = faces[1 - front];
@@ -457,7 +472,7 @@ export function SvgAvatarCanvas({ className = '', roam = false, onFloat, onError
       }
       const t = clock(), at = target(t), p = engine.pose(t);
       if (t < reactionUntil) return;
-      if (t >= nextEarTwitch) {
+      if (t >= nextEarTwitch && !['sleepy', 'drowsy'].includes(engine.emotion())) {
         nextEarTwitch = t + 7000 + Math.random() * 10000;
         if (t - lastMotion > 2200) play('ear-flick');
       }
@@ -570,7 +585,7 @@ export function SvgAvatarCanvas({ className = '', roam = false, onFloat, onError
     }
     function tap() {
       if (motionPreference.matches || dragPoint) return;
-      play(TAP_REACTIONS[tapIndex++ % TAP_REACTIONS.length]);
+      play(['sleepy', 'drowsy'].includes(engine.emotion()) || reactionName === 'sleep-transition' ? 'wake-stretch' : TAP_REACTIONS[tapIndex++ % TAP_REACTIONS.length]);
     }
     function drag(point: { x: number; y: number } | null) {
       if (!point || motionPreference.matches) { dragPoint = null; dragVelocity = { x: 0, y: 0 }; return; }
@@ -658,7 +673,8 @@ export function SvgAvatarCanvas({ className = '', roam = false, onFloat, onError
         stopReaction();
         for (const animation of animations.values()) animation.cancel(); animations.clear();
         cancelAnimationFrame(hairFrame); hairFrame = 0;
-        box.style.transform = ''; jaw = 0;
+        box.style.transform = ''; jaw = 0; restAmount = restSpeed = 0; restEl.style.transform = '';
+        box.style.setProperty('--rest-lid', '1'); box.setAttribute('data-rest', engine.emotion() === 'sleepy' ? 'asleep' : 'awake');
         box.style.setProperty('--jaw-open', '0'); box.style.setProperty('--fairy-glow', '.18');
         drag(null); dragEl.style.transform = '';
         depthEl.style.transform = ''; depthEl.style.setProperty('--view-yaw', '0'); depthEl.style.setProperty('--view-pitch', '0');

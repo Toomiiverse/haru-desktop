@@ -107,6 +107,22 @@ export function speechJaw(open: number, weight: number, previous: number, dt: nu
   return previous + (target - previous) * (1 - Math.exp(-Math.min(dt, .1) / (target > previous ? .035 : .085)));
 }
 
+/** Presentation only: breathing, fighting a nod, and an occasional dream twitch. */
+export function sleepMotion(time: number, level: number) {
+  const t = Number.isFinite(time) ? time / 1000 : 0;
+  const amount = Number.isFinite(level) ? Math.max(0, Math.min(1, level)) : 0;
+  const breath = (1 - Math.cos(t * Math.PI * 2 / 5.4)) / 2;
+  const nod = Math.pow(Math.max(0, Math.sin(t * Math.PI * 2 / 13)), 10);
+  const dream = Math.pow(Math.max(0, Math.sin(t * Math.PI * 2 / 19)), 32) * Math.sin(t * 17);
+  const tired = Math.max(0, 1 - Math.max(0, amount - .55) / .45);
+  const yawn = tired * Math.pow(Math.max(0, Math.sin(t * Math.PI * 2 / 23 + 2)), 18);
+  return { lift: amount * (-.014 * breath + .025 * nod * tired - .018 * yawn),
+    roll: amount * (2.2 + Math.sin(t * .39) * 1.1 + nod * tired * 5),
+    stretch: 1 + amount * (.018 * breath - .025 * nod * tired + .035 * yawn),
+    lid: 1 - amount * Math.min(.98, .25 + .73 * nod * tired + .7 * yawn),
+    ear: amount * (2.4 + dream * 1.5), glow: .14 + breath * .075 };
+}
+
 function wave(seconds: number, hz: number, phase: number) {
   return Math.sin(TAU * hz * seconds + phase);
 }
