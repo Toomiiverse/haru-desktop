@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { idleMotion, settleSpring, hairMotionTarget } from '../src/companion/idle';
+import { idleMotion, settleSpring, hairMotionTarget, dragMotionTarget } from '../src/companion/idle';
 
 test('hair follows a moving head, then settles consistently at different frame rates', () => {
   const trajectories = [30, 60, 144].map(fps => {
@@ -66,4 +66,29 @@ test('head sway, tilt and nod drive both ears and hair, with lag and follow-thro
     assert.ok(crossed && Math.abs(value) < .001, 'overshoots gently and settles');
     assert.equal(Math.abs(hairMotionTarget(0, 10000, 10000, 0, ear, 1, limit).angle), limit);
   }
+});
+
+
+test('drag deformation follows speed and direction, stays bounded and springs back on release', () => {
+  const slow = dragMotionTarget(100, 0, 250, true), fast = dragMotionTarget(1500, 0, 250, true);
+  assert.ok(fast[0] > slow[0] && fast[2] < slow[2], 'fast sideways motion stretches width');
+  const vertical = dragMotionTarget(0, 1500, 250, true);
+  assert.ok(vertical[2] > fast[2] && vertical[0] < fast[0]);
+  assert.ok(dragMotionTarget(500, 500, 250, true)[1] > 0);
+  assert.ok(dragMotionTarget(-500, 500, 250, true)[1] < 0);
+  assert.deepEqual(dragMotionTarget(200, 0, 500, true), slow, 'same relative speed at another avatar size');
+  for (const fps of [30,60,144]) {
+    let values = [1,0,1,0], speeds = [0,0,0,0];
+    for (let i=0;i<fps*4;i++) {
+      const target = dragMotionTarget(100000, -100000, 250, i<fps);
+      values = values.map((value,j) => {
+        const next = settleSpring(value, speeds[j], target[j], 155, 15, 1/fps); speeds[j]=next[1]; return next[0];
+      });
+      assert.ok(values.every(Number.isFinite));
+      assert.ok(values[0]*values[2]-values[1]*values[1] > .6, 'never flips or collapses');
+    }
+    values.forEach((v,i)=>assert.ok(Math.abs(v-[1,0,1,0][i])<.001, 'release returns to rest'));
+  }
+  assert.deepEqual(dragMotionTarget(NaN, 0, 250, true), [1,0,1,0]);
+  assert.deepEqual(dragMotionTarget(10, 0, 0, true), [1,0,1,0]);
 });

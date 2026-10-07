@@ -10,7 +10,7 @@ test('phone handover preserves its resting mood and forwards thinking, speech an
   const source = text.slice(0, text.indexOf('  const loadFace')).replace(/^import .*;\r?\n/gm, '') + '\nglobalThis.ready = onReady; }';
   let stopped = 0, replaced = 0, serial = 0;
   const timers = new Map<number, () => void>(), calls: unknown[][] = [];
-  const host = { replaceChildren() { replaced++; } };
+  const host = { replaceChildren() { replaced++; }, setAttribute() {}, addEventListener() {}, removeEventListener() {} };
   const context: any = { adaptEmotion, stylesheet: '',
     window: { haruAvatar: { state: () => ({ resting: 'affectionate' }), stop: () => stopped++ } },
     document: { getElementById: () => host, head: { appendChild() {} }, createElement: () => ({ style: {} }) },
@@ -19,7 +19,7 @@ test('phone handover preserves its resting mood and forwards thinking, speech an
     clearTimeout: (id: number) => timers.delete(id),
   };
   vm.runInNewContext(stripTypeScriptTypes(source), context);
-  context.ready({ expression: (n: string) => calls.push(['express', n]), notify: () => calls.push(['notify']),
+  context.ready({ tap: () => calls.push(['tap']), expression: (n: string) => calls.push(['express', n]), notify: () => calls.push(['notify']),
     attend: (...v: unknown[]) => calls.push(['attend', ...v]), play: (n: string) => calls.push(['play', n]), symbol: (n: string) => calls.push(['symbol', n]) });
   const avatar = context.window.haruAvatar;
   assert.equal(stopped, 1); assert.equal(replaced, 1); assert.deepEqual(calls[0], ['express', 'love']);
@@ -27,5 +27,7 @@ test('phone handover preserves its resting mood and forwards thinking, speech an
   avatar.notify(); assert.equal(timers.size, 0); assert.deepEqual(calls.slice(-2), [['express', 'love'], ['notify']]);
   avatar.express('triumph'); avatar.play('celebrate'); avatar.symbol('hair-surprise'); avatar.attend('typing', 1500);
   assert.deepEqual(calls.slice(-4), [['express', 'triumph'], ['play', 'celebrate'], ['symbol', 'hair-surprise'], ['attend', 'typing', 1500]]);
+  for (const name of ['exclaim', 'burst', 'orbit', 'comet', 'play']) { avatar.poke(name); assert.deepEqual(calls.at(-1), ['tap']); }
+  avatar.tap(); assert.deepEqual(calls.at(-1), ['tap']);
   avatar.stop(); assert.deepEqual(calls.at(-1), ['stop']);
 });

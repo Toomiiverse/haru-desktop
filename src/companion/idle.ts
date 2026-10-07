@@ -61,6 +61,15 @@ export function hairMotionTarget(roll: number, turn: number, vx: number, vy: num
     stretch: Math.max(-.025, Math.min(.025, -vy * (ear ? .00004 : .00012))) };
 }
 
+/** Bounded directional stretch, in avatar lengths per second, independent of screen size. */
+export function dragMotionTarget(vx: number, vy: number, size: number, held: boolean): number[] {
+  if (!held || ![vx, vy, size].every(Number.isFinite) || size <= 0) return [1, 0, 1, 0];
+  const speed = Math.hypot(vx, vy), amount = Math.min(.3, speed / size * .045);
+  const x = speed ? vx / speed : 0, y = speed ? vy / speed : 0;
+  return [.97 + amount * (2 * x * x - 1), amount * 2 * x * y,
+    1.03 + amount * (2 * y * y - 1), Math.max(-12, Math.min(12, vx / size * 1.8))];
+}
+
 function wave(seconds: number, hz: number, phase: number) {
   return Math.sin(TAU * hz * seconds + phase);
 }

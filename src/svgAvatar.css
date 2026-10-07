@@ -39,6 +39,7 @@
   transform:translate(calc(var(--avatar-size) * var(--drift-x)), calc(var(--avatar-size) * var(--drift-y))) rotate(var(--tilt));
   transition:--tilt 1.1s cubic-bezier(0.4, 0, 0.2, 1), --drift-x 1.4s cubic-bezier(0.4, 0, 0.2, 1), --drift-y 1.4s cubic-bezier(0.4, 0, 0.2, 1); }
 .svg-avatar-canvas #avatar-body{position:absolute;inset:0;transform-origin:50% 60%;}
+.svg-avatar-canvas .avatar-drag{position:absolute;inset:0;transform-origin:50% 58%;}
 .svg-avatar-canvas .avatar-gesture{position:absolute;inset:0;transform-origin:50% 68%;}
 .svg-avatar-canvas #avatar .face{position:absolute;inset:0;opacity:0;}
 .svg-avatar-canvas #avatar .face svg{display:block;width:100%;height:100%;}
@@ -60,3 +61,6 @@
   .svg-avatar-canvas #avatar,.svg-avatar-canvas #avatar-pose,.svg-avatar-canvas #avatar-body{animation:none !important;transition:none !important;}
   .svg-avatar-canvas #avatar .face{transition:none !important;}
 }
+
+.companion-hitbox{touch-action:none;}
+.companion-hitbox:focus-visible{outline:2px solid #fec4cc;outline-offset:3px;border-radius:35%;}

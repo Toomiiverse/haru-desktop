@@ -9,8 +9,8 @@ import {
 } from '../../electron/emotions';
 import type { MouthReading } from '../companion/mouth';
 import type { Gaze } from '../companion/behaviour';
-import { idleMotion, settleSpring, hairMotionTarget } from '../companion/idle';
-import { EXPRESSION_REACTIONS, SVG_REACTIONS } from '../companion/svgReactions';
+import { idleMotion, settleSpring, hairMotionTarget, dragMotionTarget } from '../companion/idle';
+import { EXPRESSION_REACTIONS, SVG_REACTIONS, TAP_REACTIONS } from '../companion/svgReactions';
 import { ANIMATION_SYMBOLS, EXPRESSION_SYMBOLS, HAIR_SYMBOLS, REACTION_SYMBOLS, hairSymbolFrames, symbolFrames } from '../companion/svgSymbols';
 
 /**
@@ -33,6 +33,8 @@ export type SvgAvatarHandle = {
   expression(name: string | null): void;
   /** Named face motions; unrelated body actions are ignored. */
   play(name: string): void;
+  tap(): void;
+  drag(point: { x: number; y: number } | null): void;
   /** Temporary manga marks or a fluid hair symbol; null clears it. */
   symbol(name: string | null): void;
   /** True while the point is over her, so the desk knows the pointer is on her. */
@@ -199,11 +201,16 @@ export function SvgAvatarCanvas({ className = '', onError, onReady, onFit, read,
     let reduced = motionPreference.matches;
     const finePointer = !!(window.matchMedia && window.matchMedia('(pointer: fine)').matches);
 
-    container.innerHTML = '<div id="avatar" role="img" aria-label="' + LABELS.neutral + '"><div id="avatar-pose"><div class="avatar-gesture"><div id="avatar-body"><div class="face"></div><div class="face"></div><svg class="avatar-symbol-layer" viewBox="0 0 1254 1254" aria-hidden="true"></svg></div></div></div></div>';
+    container.innerHTML = '<div id="avatar" role="img" aria-label="' + LABELS.neutral + '"><div id="avatar-pose"><div class="avatar-gesture"><div class="avatar-drag"><div id="avatar-body"><div class="face"></div><div class="face"></div><svg class="avatar-symbol-layer" viewBox="0 0 1254 1254" aria-hidden="true"></svg></div></div></div></div></div>';
     const box = container.querySelector('#avatar') as HTMLElement;
     const body = container.querySelector('#avatar-body') as HTMLElement;
     const poseEl = container.querySelector('#avatar-pose') as HTMLElement;
     const gestureEl = container.querySelector('.avatar-gesture') as HTMLElement;
+    const dragEl = container.querySelector('.avatar-drag') as HTMLElement;
+    let dragPoint: { x: number; y: number; at: number } | null = null;
+    let dragVelocity = { x: 0, y: 0 };
+    const dragShape = [1, 0, 1, 0], dragSpeed = [0, 0, 0, 0];
+    let tapIndex = Math.floor(Math.random() * TAP_REACTIONS.length);
     const symbolLayer = container.querySelector('.avatar-symbol-layer') as SVGSVGElement;
     const symbolAnimations = new Set<Animation>();
     let symbolTimer: ReturnType<typeof setTimeout> | null = null;
@@ -299,6 +306,12 @@ export function SvgAvatarCanvas({ className = '', onError, onReady, onFit, read,
       const quiet = ['sleepy', 'unimpressed', 'drowsy', 'content', 'disappointed'].includes(engine.emotion());
       const idle = idleMotion(time, { energy: (quiet ? .2 : .55) * (1 - fallingAsleep), sleepiness: Math.max(quiet ? .75 : .1, fallingAsleep), stress: 0 }, claim?.why === 'talking' && time < claimUntil ? .8 : 0);
       box.style.transform = `translate(calc(var(--idle-bob) * ${(idle.driftX * 65).toFixed(4)}), calc(var(--idle-bob) * ${(-idle.breath).toFixed(4)})) rotate(calc(var(--idle-sway) * ${(idle.headZ * .4 + idle.bodyZ * .2).toFixed(4)})) scaleY(calc(1 + (var(--idle-breath) - 1) * ${idle.breath.toFixed(4)}))`;
+      const decay = dragPoint ? Math.exp(-Math.max(0, time - dragPoint.at - 40) / 85) : 0;
+      const deformation = dragMotionTarget(dragVelocity.x * decay, dragVelocity.y * decay, box.offsetWidth, !!dragPoint);
+      for (let i = 0; i < dragShape.length; i++) {
+        [dragShape[i], dragSpeed[i]] = settleSpring(dragShape[i], dragSpeed[i], deformation[i], 155, 15, dt);
+      }
+      dragEl.style.transform = `matrix(${dragShape[0]},${dragShape[1]},${dragShape[1]},${dragShape[2]},0,0) rotate(${dragShape[3]}deg)`;
       // Read parent matrices before writing strand transforms, avoiding repeated layout work.
       const matrices = new Map<SVGGraphicsElement, DOMMatrix | null>();
       for (const states of hairLayers.values()) for (const strand of states) {
@@ -513,6 +526,19 @@ export function SvgAvatarCanvas({ className = '', onError, onReady, onFit, read,
       });
       symbolTimer = setTimeout(clearSymbol, mark.duration + Math.max(0, parts.length - 1) * 80);
     }
+    function tap() {
+      if (motionPreference.matches || dragPoint) return;
+      play(TAP_REACTIONS[tapIndex++ % TAP_REACTIONS.length]);
+    }
+    function drag(point: { x: number; y: number } | null) {
+      if (!point || motionPreference.matches) { dragPoint = null; dragVelocity = { x: 0, y: 0 }; return; }
+      if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) return;
+      const at = clock(), elapsed = dragPoint ? (at - dragPoint.at) / 1000 : 0;
+      if (!dragPoint) stopReaction();
+      dragVelocity = elapsed > 0 && elapsed <= .1 && dragPoint
+        ? { x: (point.x - dragPoint.x) / elapsed, y: (point.y - dragPoint.y) / elapsed } : { x: 0, y: 0 };
+      dragPoint = { ...point, at };
+    }
     function stopReaction(preserveSymbol = false) {
       if (!preserveSymbol) clearSymbol();
       for (const animation of reactionAnimations) {
@@ -532,7 +558,7 @@ export function SvgAvatarCanvas({ className = '', onError, onReady, onFit, read,
       return animation;
     }
     function play(name: string, hairSource?: SVGPathElement) {
-      if (motionPreference.matches || frozenAt !== null) return;
+      if (motionPreference.matches || frozenAt !== null || dragPoint) return;
       if (Object.hasOwn(SVG_REACTIONS, name)) {
         stopReaction(!!ANIMATION_SYMBOLS[name]);
         const reaction = SVG_REACTIONS[name];
@@ -591,6 +617,8 @@ export function SvgAvatarCanvas({ className = '', onError, onReady, onFit, read,
         for (const animation of animations.values()) animation.cancel(); animations.clear();
         cancelAnimationFrame(hairFrame); hairFrame = 0;
         box.style.transform = '';
+        drag(null); dragEl.style.transform = '';
+        dragShape.splice(0, 4, 1, 0, 1, 0); dragSpeed.fill(0);
         for (const states of hairLayers.values()) for (const strand of states) {
           strand.angle = strand.speed = strand.stretch = strand.stretchSpeed = 0;
           strand.previous = null; strand.el.style.transform = '';
@@ -602,7 +630,7 @@ export function SvgAvatarCanvas({ className = '', onError, onReady, onFit, read,
 
     const handle: SvgAvatarHandle = {
       expression,
-      play,
+      play, tap, drag,
       symbol: showSymbol,
       hitTest: (x, y) => { const r = box.getBoundingClientRect(); return r.width > 0 && x >= r.left && x <= r.right && y >= r.top && y <= r.bottom; },
       notify,

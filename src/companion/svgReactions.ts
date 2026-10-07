@@ -13,7 +13,49 @@ export const EXPRESSION_REACTIONS: Record<string, string> = {
   pain: 'flinch', scared: 'tremble', serious: 'focus', silly: 'goofy-bob', flirty: 'playful-wink', nervous: 'fidget', disbelief: 'double-take', rage: 'huff', disgusted: 'ew-recoil', confident: 'proud', drunk: 'wobble', pouty: 'sulk', sick: 'queasy', laughing: 'giggle', snooty: 'proud', cold: 'shiver', crying: 'sob', devious: 'scheming', pensive: 'ponder', triumph: 'celebrate',
 };
 
+export const TAP_REACTIONS = ['tap-pancake', 'tap-boing', 'tap-jelly', 'tap-left', 'tap-right', 'tap-peek', 'tap-tumble', 'tap-squeeze', 'tap-ripple', 'tap-hop'] as const;
+
 export const SVG_REACTIONS: Record<string, Reaction> = {
+  'tap-pancake': { duration: 1200, tracks: [
+    head([[0,0,0,0],[.13,0,7,0,.69],[.32,0,-4,0,1.17],[.56,0,2,0,.93],[1,0,0,0]]),
+    gaze([[0,0,0,1],[.13,0,4,.2],[.32,0,-3,1.1],[1,0,0,1]]),
+  ] },
+  'tap-boing': { duration: 1400, tracks: [
+    head([[0,0,0,0],[.12,0,4,0,.86],[.3,0,-9,0,1.32],[.52,0,3,0,.85],[.72,0,-2,0,1.07],[1,0,0,0]]),
+    turn('ear-left', [[0,0],[.16,-6],[.33,8],[.65,-2],[1,0]]),
+    turn('ear-right', [[0,0],[.16,6],[.33,-8],[.65,2],[1,0]]),
+  ] },
+  'tap-jelly': { duration: 1600, tracks: [
+    head([[0,0,0,0],[.12,-3,2,-9,.83],[.28,3,-2,8,1.16],[.45,-2,1,-6,.89],[.63,1,-1,3,1.07],[.8,-1,0,-1,.98],[1,0,0,0]]),
+  ] },
+  'tap-left': { duration: 1300, tracks: [
+    head([[0,0,0,0],[.17,-7,3,-13,.79],[.38,3,-2,6,1.12],[.66,-1,1,-2,.96],[1,0,0,0]]),
+    gaze([[0,0,0,1],[.17,16,-2,.7],[.5,-5,0,1],[1,0,0,1]]),
+  ] },
+  'tap-right': { duration: 1300, tracks: [
+    head([[0,0,0,0],[.17,7,3,13,.79],[.38,-3,-2,-6,1.12],[.66,1,1,2,.96],[1,0,0,0]]),
+    gaze([[0,0,0,1],[.17,-16,-2,.7],[.5,5,0,1],[1,0,0,1]]),
+  ] },
+  'tap-peek': { duration: 1800, tracks: [
+    head([[0,0,0,0],[.16,0,6,0,.77],[.35,0,5,0,.8],[.52,2,-5,5,1.2],[.78,1,0,2,.98],[1,0,0,0]]),
+    gaze([[0,0,0,1],[.13,0,3,.07],[.36,0,3,.07],[.49,12,-5,1.2],[1,0,0,1]]),
+  ] },
+  'tap-tumble': { duration: 1700, tracks: [
+    head([[0,0,0,0],[.14,-3,3,-8,.88],[.34,4,-4,24,1.12],[.52,-2,2,-16,.92],[.73,1,0,5,1.03],[1,0,0,0]]),
+  ] },
+  'tap-squeeze': { duration: 1400, tracks: [
+    head([[0,0,0,0],[.2,0,0,0,1.36],[.4,0,2,0,.8],[.62,0,-1,0,1.08],[1,0,0,0]]),
+    turn('ear-left', [[0,0],[.2,-10],[.42,4],[1,0]]),
+    turn('ear-right', [[0,0],[.2,10],[.42,-4],[1,0]]),
+  ] },
+  'tap-ripple': { duration: 1800, tracks: [
+    head([[0,0,0,0],[.12,0,3,-3,.8],[.25,0,-3,3,1.22],[.39,0,2,-2,.87],[.54,0,-2,2,1.12],[.7,0,1,-1,.95],[.84,0,-1,1,1.03],[1,0,0,0]]),
+  ] },
+  'tap-hop': { duration: 1700, tracks: [
+    head([[0,0,0,0],[.13,0,5,0,.78],[.29,-2,-12,-7,1.16],[.48,0,4,0,.85],[.65,2,-6,5,1.09],[.82,0,1,0,.96],[1,0,0,0]]),
+    gaze([[0,0,0,1],[.18,0,-2,.35],[.55,0,-2,.35],[1,0,0,1]]),
+  ] },
+
   flinch: { duration: 1400, tracks: [
     head([[0,0,0,0], [.08,-4,3,-6,.91], [.26,-2,-3,-3,1.04], [.6,1,1,1,.99], [1,0,0,0]]),
     turn('ear-left', [[0,0],[.09,-9],[.4,-4],[1,0]]),

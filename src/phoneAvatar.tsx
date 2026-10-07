@@ -16,6 +16,12 @@ if (host) {
   Object.assign(frame.style, { position: 'relative', width: 'var(--avatar-size)', height: 'var(--avatar-size)', flex: '0 0 auto' });
   host.replaceChildren(frame);
   const root = createRoot(frame);
+  host.setAttribute('role', 'button'); host.setAttribute('tabindex', '0');
+  host.setAttribute('aria-label', 'Haru: tap to react or interrupt speech');
+  const onKey = (event: KeyboardEvent) => {
+    if (!event.repeat && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); host.click(); }
+  };
+  host.addEventListener('keydown', onKey);
   let settle: ReturnType<typeof setTimeout> | undefined;
   const onReady = (avatar: SvgAvatarHandle | null) => {
     if (!avatar) return;
@@ -27,13 +33,12 @@ if (host) {
       notify: () => { clearTimeout(settle); avatar.expression(resting); avatar.notify(); },
       attend: (why: string, ms?: number) => avatar.attend(why, ms),
       play: (name: string) => avatar.play(name), symbol: (name: string | null) => avatar.symbol(name),
+      tap: () => avatar.tap(),
       poke: (name: string) => {
-        const hit: Record<string, [string, number]> = { exclaim: ['angry', 2000], burst: ['surprised', 1600], orbit: ['excited', 1600], comet: ['surprised', 1600], play: ['happy', 1600] };
-        if (!Object.hasOwn(hit, name)) return;
-        clearTimeout(settle); avatar.expression(hit[name][0]); settle = setTimeout(() => avatar.expression(resting), hit[name][1]);
+        if (['exclaim', 'burst', 'orbit', 'comet', 'play'].includes(name)) avatar.tap();
       },
       state: () => ({ resting }),
-      stop: () => { clearTimeout(settle); root.unmount(); },
+      stop: () => { clearTimeout(settle); host.removeEventListener('keydown', onKey); root.unmount(); },
     };
   };
   const loadFace = async (name: string) => {

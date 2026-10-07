@@ -489,7 +489,12 @@ export function CompanionWindow() {
   // Where the press began, so a click can be told from a drag on release. She is
   // dragged by her body, so every poke is also the start of a potential drag —
   // only a press that goes nowhere counts as having prodded her.
-  const press = useRef<{ x: number; y: number; at: number } | null>(null);
+  const press = useRef<{ x: number; y: number; lastX: number; lastY: number; pointerId: number; at: number } | null>(null);
+
+  useEffect(() => {
+    window.addEventListener('blur', cancelDrag);
+    return () => { window.removeEventListener('blur', cancelDrag); cancelDrag(); };
+  }, []);
 
   // The box at her feet. Open means she is waiting to be typed into; asking
   // means the question has gone and the answer has not come back yet, which on
@@ -586,22 +591,27 @@ export function CompanionWindow() {
   }
 
   function onPointerDown(event: React.PointerEvent) {
-    if (event.button !== 0) return;
+    if (event.button !== 0 || !event.isPrimary || dragging.current) return;
     dragging.current = true;movedByHand.current=false;
-    press.current = { x: event.screenX, y: event.screenY, at: performance.now() };
-    (event.target as Element).setPointerCapture(event.pointerId);
+    press.current = { x: event.screenX, y: event.screenY, lastX: event.screenX, lastY: event.screenY, pointerId: event.pointerId, at: performance.now() };
+    svgHandle.current?.drag({ x: event.screenX, y: event.screenY });
+    event.currentTarget.setPointerCapture(event.pointerId);
   }
   function onPointerMove(event: React.PointerEvent) {
-    if (!dragging.current || !press.current) return;
+    if (!dragging.current || !press.current || event.pointerId !== press.current.pointerId) return;
     if(!movedByHand.current) {
       if(Math.hypot(event.screenX-press.current.x,event.screenY-press.current.y)<5)return;
       movedByHand.current=true;void window.haru?.companion.dragging(true);
     }
-    window.haru?.companion.moveBy(event.movementX, event.movementY);
+    svgHandle.current?.drag({ x: event.screenX, y: event.screenY });
+    window.haru?.companion.moveBy(event.screenX - press.current.lastX, event.screenY - press.current.lastY);
+    press.current.lastX = event.screenX; press.current.lastY = event.screenY;
   }
   function onPointerUp(event: React.PointerEvent) {
+    if (!press.current || event.pointerId !== press.current.pointerId) return;
     dragging.current = false;
-    (event.target as Element).releasePointerCapture(event.pointerId);
+    svgHandle.current?.drag(null);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
     const started = press.current;
     press.current = null;
     if(movedByHand.current){movedByHand.current=false;void window.haru?.companion.dragging(false,true);return;}
@@ -611,17 +621,18 @@ export function CompanionWindow() {
     // every time she was moved.
     const moved = Math.hypot(event.screenX - started.x, event.screenY - started.y);
     if (moved < 5 && performance.now() - started.at < 500) {
-      svgHandle.current?.play('ear-twitch');
-      // A click on her is a summons now, not a prod. Prodding is what clicking
-      // her while the box is already open means — which keeps the flinching and
-      // the escalation without asking anyone to learn a second gesture.
-      if (asking) void window.haru?.companion.poke('poke');
-      else void window.haru?.companion.open().then(() => { setAsking(true); setTimeout(() => box.current?.focus(), 0); });
+      reactToTap();
     }
+  }
+  function reactToTap() {
+    svgHandle.current?.tap();
+    if (asking) { if (!svgHandle.current) void window.haru?.companion.poke('poke'); }
+    else void window.haru?.companion.open().then(() => { setAsking(true); setTimeout(() => box.current?.focus(), 0); });
   }
   function cancelDrag() {
     if(!dragging.current)return;
     dragging.current=false;press.current=null;movedByHand.current=false;
+    svgHandle.current?.drag(null);
     void window.haru?.companion.dragging(false);
   }
   function onContextMenu(event: React.MouseEvent) {
@@ -652,7 +663,7 @@ export function CompanionWindow() {
           that those clicks are inert rather than passed through: the window still
           swallows them at the OS level, and letting them reach the desktop behind
           would need setIgnoreMouseEvents on the window itself. */}
-      <div className="companion-hitbox" onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={cancelDrag} onLostPointerCapture={cancelDrag} onContextMenu={onContextMenu} onWheel={onWheel}/>
+      <div className="companion-hitbox" role="button" tabIndex={0} aria-label="Haru: click to react, drag to move" onKeyDown={event => { if (!event.repeat && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); reactToTap(); } }} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={cancelDrag} onLostPointerCapture={cancelDrag} onContextMenu={onContextMenu} onWheel={onWheel}/>
       {/* The full line is rendered underneath at zero opacity so the bubble is
           already its final size on the first character — without it the box
           grows line by line as she types and shoves itself around the screen. */}
