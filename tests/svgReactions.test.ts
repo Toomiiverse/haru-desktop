@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { stripTypeScriptTypes } from 'node:module';
 import vm from 'node:vm';
+import { createHash } from 'node:crypto';
 import { SVG_REACTIONS, EXPRESSION_REACTIONS, TAP_REACTIONS } from '../src/companion/svgReactions';
 import { ANIMATION_SYMBOLS } from '../src/companion/svgSymbols';
 import { emotionConfig, isHaruEmotion } from '../electron/emotions';
@@ -185,4 +186,22 @@ test('the resting sleepy face has independent ears, hair and closed eyes', () =>
   for(const part of ['ear-left','ear-right','tuft','face'])assert.ok(svg.includes('data-part="'+part+'"'));
   assert.equal((svg.match(/data-blink="false"/g)||[]).length,2);
   assert.ok(svg.includes('id="sleepy-fringe-cut"'));assert.ok(!svg.includes('drowsy-fringe-cut'));
+});
+
+
+test('artwork-only edits invalidate the phone bundle and lazy face revision together', async () => {
+  const source=readFileSync('scripts/build-phone-avatar.mjs','utf8');
+  const code=source.slice(source.indexOf('const code ='));
+  async function build(face:string){
+    const files:Record<string,string>={};
+    await vm.runInNewContext('(async()=>{'+code+'})()',{
+      result:{output:[{type:'chunk',code:'avatar="HARU_AVATAR_REVISION"'}]},root:'/',createHash,Buffer,
+      readdir:async()=>['sleepy.svg'],readFile:async()=>face,
+      writeFile:async(path:string,text:string)=>{files[path]=text;},console:{log(){}},
+    });return files;
+  }
+  const first=await build('old sleepy'),second=await build('layered sleepy');
+  assert.notEqual(first['/electron/avatarClient.ts'],second['/electron/avatarClient.ts']);
+  const revision=second['/electron/avatarClient.ts'].match(/"([a-f0-9]{16})"/)![1];
+  assert.ok(second['/build/lib/haru-avatar.js'].includes(revision));
 });
