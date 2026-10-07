@@ -7,6 +7,7 @@ import { createPhoneSpeech } from './companion/phoneSpeech';
 declare const player: HTMLAudioElement | undefined;
 import stylesheet from './svgAvatar.css?inline';
 
+const native = (window as any).haruNative;
 const host = document.getElementById('stage');
 if (host) {
   const speech = createPhoneSpeech(typeof player === 'undefined' ? null : player);
@@ -17,7 +18,7 @@ if (host) {
   style.textContent = stylesheet;
   document.head.appendChild(style);
   const frame = document.createElement('div');
-  Object.assign(frame.style, { position: 'relative', width: '100%', height: 'clamp(200px, 30vh, 280px)', flex: '0 0 auto' });
+  Object.assign(frame.style, { position: 'relative', width: '100%', height: native ? '100%' : 'clamp(220px, 34vh, 300px)', flex: '0 0 auto' });
   host.replaceChildren(frame);
   const root = createRoot(frame);
   host.setAttribute('role', 'button'); host.setAttribute('tabindex', '0');
@@ -44,11 +45,12 @@ if (host) {
       state: () => ({ resting }),
       stop: () => { clearTimeout(settle); host.removeEventListener('keydown', onKey); speech.dispose(); root.unmount(); },
     };
+    native?.ready?.();
   };
   const loadFace = async (name: string) => {
     const response = await fetch('/emotions/' + name + '.svg?v=HARU_AVATAR_REVISION');
     if (!response.ok) throw Error('Haru face ' + response.status);
     return response.text();
   };
-  root.render(<SvgAvatarCanvas roam read={() => ({ mouth: speech.read() })} onReady={onReady} loadFace={loadFace} onError={message => console.warn('[Haru avatar]', message)} onFit={() => {}} />);
+  root.render(<SvgAvatarCanvas roam read={() => native ? { mouth: { open: native.mouth || 0, weight: performance.now() < native.speakingUntil ? 1 : 0 }, peek: !!native.peek, gaze: native.peek ? { x: .15, y: .9 } : undefined } : { mouth: speech.read() }} onReady={onReady} loadFace={loadFace} onError={message => console.warn('[Haru avatar]', message)} onFit={() => {}} />);
 }

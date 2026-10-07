@@ -50,7 +50,7 @@ interface Props {
   onError(message: string): void;
   onReady(handle: SvgAvatarHandle | null): void;
   onFit(width: number): void;
-  read?(): { mouth: MouthReading; gaze?: Gaze };
+  read?(): { mouth: MouthReading; gaze?: Gaze; peek?: boolean };
   loadFace?(name: string): Promise<string>;
 }
 
@@ -335,12 +335,13 @@ export function SvgAvatarCanvas({ className = '', roam = false, onFloat, onError
       if (box.getAttribute('data-rest') !== restMode) box.setAttribute('data-rest', restMode);
       restEl.style.transform = `translateY(calc(var(--avatar-size) * ${rest.lift})) rotate(${rest.roll}deg) scale(${1 / rest.stretch},${rest.stretch})`;
       box.style.setProperty('--rest-lid', String(rest.lid));
-      const hover = fairyMotion(time, engine.emotion(), mouth.weight);
+      const hover = fairyMotion(time * (callbacks.current.roam ? 1.65 : 1), engine.emotion(), mouth.weight);
       hover.x *= 1 - restAmount * .9; hover.y *= 1 - restAmount * .9; hover.bank *= 1 - restAmount * .9; hover.z *= 1 - restAmount * .9;
-      const flight = [hover.flightX, hover.flightY, hover.y, hover.bank];
-      const moving = wantedRest < .05 && restAmount < .05 && !dragPoint && time >= reactionUntil && mouth.weight < .05 && !(claim && time < claimUntil);
+      const travel = callbacks.current.roam ? 1.65 : 1;
+      const flight = [reading?.peek ? 0 : clamp(hover.flightX * travel, -.94, .94), reading?.peek ? 0 : clamp(hover.flightY * travel, -.94, .94), hover.y, hover.bank];
+      const moving = !reading?.peek && wantedRest < .05 && restAmount < .05 && !dragPoint && time >= reactionUntil && mouth.weight < .05 && !(claim && time < claimUntil);
       for (let i = 0; i < flight.length; i++) {
-        if (i < 2 && !moving) { flightSpeed[i] = 0; continue; }
+        if (i < 2 && !moving && !reading?.peek) { flightSpeed[i] = 0; continue; }
         [flightPose[i], flightSpeed[i]] = settleSpring(flightPose[i], flightSpeed[i], flight[i], 70, 15, dt);
       }
       callbacks.current.onFloat?.(flightPose[0], flightPose[1], moving);
@@ -358,7 +359,7 @@ export function SvgAvatarCanvas({ className = '', roam = false, onFloat, onError
       dragEl.style.transform = `matrix(${dragShape[0]},${dragShape[1]},${dragShape[1]},${dragShape[2]},0,0) rotate(${dragShape[3]}deg)`;
       const gaze = target(time, reading);
       const depthTarget = depthMotionTarget(time, gaze.x, gaze.y, !!claim && time < claimUntil, quiet);
-      depthTarget[0] += hover.z * roaming;
+      depthTarget[0] += reading?.peek ? .18 : hover.z * roaming;
       depthTarget[0] += dragPoint ? Math.min(.15, Math.hypot(dragVelocity.x, dragVelocity.y) * decay / Math.max(1, box.offsetWidth) * .02) : 0;
       for (let i = 0; i < depthPose.length; i++) {
         [depthPose[i], depthSpeed[i]] = settleSpring(depthPose[i], depthSpeed[i], depthTarget[i], 85, 11, dt);
@@ -726,5 +727,5 @@ export function SvgAvatarCanvas({ className = '', roam = false, onFloat, onError
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  return <div className={'svg-avatar-canvas ' + className} ref={host} aria-label="Her face" />;
+  return <div className={'svg-avatar-canvas ' + (roam ? 'avatar-roaming ' : '') + className} ref={host} aria-label="Her face" />;
 }
