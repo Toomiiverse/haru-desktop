@@ -337,7 +337,10 @@ export function CompanionWindow() {
     if (name) gesture.current = { name, startedAt: performance.now() };
     if (expression) modelHandle.current?.expression(expression);
     vrmHandle.current?.expression(expression);
-    svgHandle.current?.expression(value.emotion);
+    const svgExpression = value.intent === 'tease' && (value.emotion === 'happy' || value.emotion === 'smug') ? 'wink'
+      : value.emotion === 'annoyed' && value.intent === 'explain' ? 'skeptical' : value.emotion;
+    svgHandle.current?.expression(svgExpression);
+    if (name) svgHandle.current?.play(name);
     if (!referenceClip(expression)) vrmHandle.current?.play(value.emotion);
   }), []);
 
@@ -365,6 +368,7 @@ export function CompanionWindow() {
   }, []);
 
   const playPose = useCallback((name: string) => {
+    svgHandle.current?.play(name);
     if (!POSES[name]) return;
     // Restarting the same pose rather than stacking it, so a repeat reads as one
     // longer beat instead of doubling in strength.
@@ -564,6 +568,7 @@ export function CompanionWindow() {
     setChoices([]);
     setWaitingLine(randomWait());
     setWaiting(true);
+    svgHandle.current?.play('ear-twitch');
     try {
       // The reply itself arrives through the caption on its own — ollamaChat
       // speaks it and pushes it there. Only what she offered has to come back
@@ -606,6 +611,7 @@ export function CompanionWindow() {
     // every time she was moved.
     const moved = Math.hypot(event.screenX - started.x, event.screenY - started.y);
     if (moved < 5 && performance.now() - started.at < 500) {
+      svgHandle.current?.play('ear-twitch');
       // A click on her is a summons now, not a prod. Prodding is what clicking
       // her while the box is already open means — which keeps the flinching and
       // the escalation without asking anyone to learn a second gesture.

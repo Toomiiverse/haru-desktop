@@ -42,6 +42,17 @@ export type IdleMotion = {
 
 const TAU = Math.PI * 2;
 
+/** Small physics steps keep follow-through consistent on slow and fast displays. */
+export function settleSpring(value: number, speed: number, target: number, stiffness: number, damping: number, dt: number): [number, number] {
+  if (!Number.isFinite(dt) || dt <= 0 || dt > .1) return [value, 0];
+  const steps = Math.ceil(dt * 120), step = dt / steps;
+  for (let i = 0; i < steps; i++) {
+    speed += ((target - value) * stiffness - speed * damping) * step;
+    value += speed * step;
+  }
+  return [value, speed];
+}
+
 function wave(seconds: number, hz: number, phase: number) {
   return Math.sin(TAU * hz * seconds + phase);
 }

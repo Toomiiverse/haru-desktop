@@ -19,6 +19,7 @@
 
 import { DEFAULT_TRANSITION_MS, EASE_OUT_CSS, emotionConfig, HARU_EMOTIONS, MOOD_TO_EMOTION } from './emotions';
 import { WAKE_PATTERN } from './wake';
+import { AVATAR_CLIENT_VERSION } from './avatarClient';
 
 /** One number to move the whole palette. 350 is Haru's pink; 150 would be AIRI's green. */
 const HUE = 350;
@@ -492,11 +493,13 @@ const AVATAR = `
     if (vb.length === 4) {
       const paths = [];
       for (const el of svg.querySelectorAll('path, rect')) {
+        if (el.closest && el.closest('defs')) continue;
         const box = el.nodeName.toLowerCase() === 'path' ? pathBox(el.getAttribute('d') || '') : null;
         if (coversCanvas(el, box, vb[0], vb[1], vb[2], vb[3])) { el.setAttribute('class', 'backdrop'); continue; }
         paths.push({ el: el, box: box });
       }
-      found = findEyes(paths, vb[2], vb[3]);
+      const left = svg.querySelector?.('[data-part="eye-left"]'), right = svg.querySelector?.('[data-part="eye-right"]');
+      found = left && right ? [left, right] : findEyes(paths, vb[2], vb[3]);
       if (found) for (const eye of found) eye.setAttribute('class', 'eye');
     }
     layer.replaceChildren(document.adoptNode ? document.adoptNode(svg) : svg);
@@ -877,6 +880,7 @@ export function appPage(): string {
   /* A glance is a translation; a blink is a squash toward the eye's own middle,
      because the art has no lids to close. */
   #avatar .face .eye { transform:translate(var(--gaze-x), var(--gaze-y)) scaleY(var(--lid)); transform-box:fill-box; transform-origin:center; }
+  #avatar .face .eye[data-blink="false"] { transform:translate(var(--gaze-x), var(--gaze-y)); }
   #avatar .face.missing { visibility:hidden; }
   #avatar-body.changed { animation:settle .45s cubic-bezier(0.33, 1, 0.68, 1); }
   #avatar-body.pop { animation:pop .5s cubic-bezier(0.33, 1, 0.68, 1); }
@@ -1938,6 +1942,9 @@ if(whereOn()) startWhere();
 // Back on screen after a while away: the next fix goes through whatever it says.
 document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible'&&whereOn()) lastSent=null; });
 ${AVATAR}
+const avatarClient = document.createElement('script');
+avatarClient.src = '/lib/haru-avatar.js?v=${AVATAR_CLIENT_VERSION}';
+document.head.appendChild(avatarClient);
 </script>`;
 }
 
