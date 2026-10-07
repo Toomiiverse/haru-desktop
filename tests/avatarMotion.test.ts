@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { idleMotion, settleSpring, hairMotionTarget, dragMotionTarget } from '../src/companion/idle';
+import { idleMotion, settleSpring, hairMotionTarget, dragMotionTarget, depthMotionTarget } from '../src/companion/idle';
 
 test('hair follows a moving head, then settles consistently at different frame rates', () => {
   const trajectories = [30, 60, 144].map(fps => {
@@ -91,4 +91,23 @@ test('drag deformation follows speed and direction, stays bounded and springs ba
   }
   assert.deepEqual(dragMotionTarget(NaN, 0, 250, true), [1,0,1,0]);
   assert.deepEqual(dragMotionTarget(10, 0, 0, true), [1,0,1,0]);
+});
+
+
+test('depth drifts, looks toward gaze and leans forward with attention without camera flips', () => {
+  const atRest=depthMotionTarget(0,0,0,false,false), near=depthMotionTarget(0,0,0,true,false), far=depthMotionTarget(0,0,0,false,true);
+  assert.ok(near[0]>atRest[0] && far[0]<atRest[0]);
+  assert.ok(depthMotionTarget(0,1,-1,false,false)[2]>0 && depthMotionTarget(0,-1,1,false,false)[1]<0);
+  for(let t=0;t<60000;t+=33) {
+    const pose=depthMotionTarget(t,10,-10,true,false);
+    assert.ok(Math.abs(pose[0])<.15 && Math.abs(pose[1])<=8.5 && Math.abs(pose[2])<=12);
+  }
+  assert.notDeepEqual(depthMotionTarget(3000,0,0,false,false),atRest);
+  assert.deepEqual(depthMotionTarget(NaN,0,0,false,false),[0,0,0]);
+  // Same perspective ratio on desktop and phone: forward enlarges, retreat shrinks.
+  for(const size of [128,250,600]) {
+    const projected=(z:number)=>(size*2.8)/(size*2.8-size*z);
+    assert.ok(projected(.82)>1.4 && projected(.82)<1.42);
+    assert.ok(projected(-.95)>.74 && projected(-.95)<.75);
+  }
 });

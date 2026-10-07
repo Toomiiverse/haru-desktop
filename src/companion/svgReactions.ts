@@ -1,10 +1,11 @@
 // Authored beats share the desktop renderer's native animation clock and hair physics.
-type Part = 'head' | 'gaze' | 'ear-left' | 'ear-right' | 'eye-right' | 'accent-left' | 'accent-right';
+type Part = 'depth' | 'head' | 'gaze' | 'ear-left' | 'ear-right' | 'eye-right' | 'accent-left' | 'accent-right';
 type Track = { part: Part; frames: Keyframe[] };
 type Reaction = { duration: number; hold?: boolean; tracks: Track[] };
 const easing = 'cubic-bezier(.4, 0, .2, 1)';
 const turn = (part: Part, points: [number, number][]): Track => ({ part, frames: points.map(([offset, angle]) => ({ offset, transform: `rotate(${angle}deg)`, easing })) });
-const head = (points: [number, number, number, number, number?][]): Track => ({ part: 'head', frames: points.map(([offset, x, y, angle, stretch = 1]) => ({ offset, transform: `translate(${x}px, ${y}px) rotate(${angle}deg) scale(${1 / stretch}, ${stretch})`, easing })) });
+const head = (points: [number, number, number, number, number?][]): Track => ({ part: 'head', frames: points.map(([offset, x, y, angle, stretch = 1]) => ({ offset, transform: `translate(calc(var(--avatar-size) * ${x / 300}), calc(var(--avatar-size) * ${y / 300})) rotate(${angle}deg) scale(${1 / stretch}, ${stretch})`, easing })) });
+const depth = (points: [number, number, number, number][]): Track => ({ part: 'depth', frames: points.map(([offset, z, pitch, yaw]) => ({ offset, '--depth-z': String(z * 1.35), '--depth-pitch': String(pitch * 1.35), '--depth-yaw': String(yaw * 1.35), easing })) });
 const gaze = (points: [number, number, number, number][]): Track => ({ part: 'gaze', frames: points.map(([offset, x, y, lid]) => ({ offset, '--gaze-x': `${x}px`, '--gaze-y': `${y}px`, '--lid': String(lid), easing })) });
 
 export const EXPRESSION_REACTIONS: Record<string, string> = {
@@ -13,9 +14,57 @@ export const EXPRESSION_REACTIONS: Record<string, string> = {
   pain: 'flinch', scared: 'tremble', serious: 'focus', silly: 'goofy-bob', flirty: 'playful-wink', nervous: 'fidget', disbelief: 'double-take', rage: 'huff', disgusted: 'ew-recoil', confident: 'proud', drunk: 'wobble', pouty: 'sulk', sick: 'queasy', laughing: 'giggle', snooty: 'proud', cold: 'shiver', crying: 'sob', devious: 'scheming', pensive: 'ponder', triumph: 'celebrate',
 };
 
-export const TAP_REACTIONS = ['tap-pancake', 'tap-boing', 'tap-jelly', 'tap-left', 'tap-right', 'tap-peek', 'tap-tumble', 'tap-squeeze', 'tap-ripple', 'tap-hop'] as const;
+export const TAP_REACTIONS = ['tap-pancake', 'tap-boing', 'tap-jelly', 'tap-left', 'tap-right', 'tap-peek', 'tap-tumble', 'tap-squeeze', 'tap-ripple', 'tap-hop', 'tap-zoom', 'tap-retreat', 'tap-orbit', 'tap-corkscrew', 'tap-peek-left', 'tap-peek-right', 'tap-bow', 'tap-float', 'tap-ricochet', 'tap-pop-through'] as const;
 
 export const SVG_REACTIONS: Record<string, Reaction> = {
+  'tap-zoom': { duration: 1900, tracks: [
+    head([[0,0,0,0],[.12,0,3,0,.87],[.36,0,-3,-3,1.05],[.65,0,1,1,.98],[1,0,0,0]]),
+    depth([[0,0,0,0],[.12,-.18,6,0],[.36,.6,-7,-8],[.65,.16,2,3],[1,0,0,0]]),
+    gaze([[0,0,0,1],[.14,0,0,.3],[.36,0,-4,1.2],[1,0,0,1]]),
+  ] },
+  'tap-retreat': { duration: 2300, tracks: [
+    head([[0,0,0,0],[.16,2,2,3,.92],[.4,4,-3,7,1.04],[.68,2,-1,4],[1,0,0,0]]),
+    depth([[0,0,0,0],[.16,.12,-3,5],[.4,-.65,9,-16],[.68,-.4,4,-10],[1,0,0,0]]),
+    turn('ear-left', [[0,0],[.4,-7],[.7,-4],[1,0]]),
+  ] },
+  'tap-orbit': { duration: 2500, tracks: [
+    head([[0,0,0,0],[.2,-7,-3,-7,1.04],[.45,0,-5,0,.97],[.7,7,0,7,1.05],[1,0,0,0]]),
+    depth([[0,0,0,0],[.2,.28,-4,-17],[.45,-.5,6,0],[.7,.28,-3,17],[1,0,0,0]]),
+  ] },
+  'tap-corkscrew': { duration: 2200, tracks: [
+    head([[0,0,0,0],[.15,0,3,-6,.84],[.38,-2,-5,22,1.14],[.62,2,1,-14,.94],[.8,0,0,4,1.02],[1,0,0,0]]),
+    depth([[0,0,0,0],[.15,-.22,8,-8],[.38,.4,-12,20],[.62,-.18,8,-13],[.8,.07,-2,4],[1,0,0,0]]),
+  ] },
+  'tap-peek-left': { duration: 2100, tracks: [
+    head([[0,0,0,0],[.2,-5,2,-5,.94],[.48,-7,-1,-9,1.04],[.75,-2,0,-2],[1,0,0,0]]),
+    depth([[0,0,0,0],[.2,-.25,3,17],[.48,.42,-5,-22],[.75,.1,0,-6],[1,0,0,0]]),
+    gaze([[0,0,0,1],[.2,18,0,.7],[.48,-16,-3,1.1],[1,0,0,1]]),
+  ] },
+  'tap-peek-right': { duration: 2100, tracks: [
+    head([[0,0,0,0],[.2,5,2,5,.94],[.48,7,-1,9,1.04],[.75,2,0,2],[1,0,0,0]]),
+    depth([[0,0,0,0],[.2,-.25,3,-17],[.48,.42,-5,22],[.75,.1,0,6],[1,0,0,0]]),
+    gaze([[0,0,0,1],[.2,-18,0,.7],[.48,16,-3,1.1],[1,0,0,1]]),
+  ] },
+  'tap-bow': { duration: 2200, tracks: [
+    head([[0,0,0,0],[.18,0,-2,0,1.04],[.43,0,5,0,.88],[.66,0,2,0,.96],[1,0,0,0]]),
+    depth([[0,0,0,0],[.18,.16,-7,0],[.43,.32,24,0],[.66,-.12,8,0],[1,0,0,0]]),
+    gaze([[0,0,0,1],[.43,0,7,.12],[.66,0,3,.6],[1,0,0,1]]),
+  ] },
+  'tap-float': { duration: 3000, tracks: [
+    head([[0,0,0,0],[.22,-2,-6,-5,1.07],[.5,2,-8,5,.98],[.77,0,-3,-2,1.02],[1,0,0,0]]),
+    depth([[0,0,0,0],[.22,-.35,-9,-12],[.5,-.6,-3,12],[.77,-.18,4,-4],[1,0,0,0]]),
+  ] },
+  'tap-ricochet': { duration: 1800, tracks: [
+    head([[0,0,0,0],[.14,-6,1,-12,.88],[.34,6,-2,11,1.1],[.53,-3,2,-6,.94],[.74,1,-1,2,1.03],[1,0,0,0]]),
+    depth([[0,0,0,0],[.14,-.4,7,-19],[.34,.42,-8,18],[.53,-.22,5,-10],[.74,.1,-3,5],[1,0,0,0]]),
+  ] },
+  'tap-pop-through': { duration: 2000, tracks: [
+    head([[0,0,0,0],[.2,0,5,0,.75],[.41,0,-7,5,1.05],[.6,0,2,-2,.9],[.78,0,-1,1,1.04],[1,0,0,0]]),
+    depth([[0,0,0,0],[.2,-.6,10,-5],[.41,.55,-10,9],[.6,-.12,4,-4],[.78,.08,-2,2],[1,0,0,0]]),
+    turn('ear-left', [[0,0],[.2,-8],[.41,7],[.7,-2],[1,0]]),
+    turn('ear-right', [[0,0],[.2,8],[.41,-7],[.7,2],[1,0]]),
+  ] },
+
   'tap-pancake': { duration: 1200, tracks: [
     head([[0,0,0,0],[.13,0,7,0,.69],[.32,0,-4,0,1.17],[.56,0,2,0,.93],[1,0,0,0]]),
     gaze([[0,0,0,1],[.13,0,4,.2],[.32,0,-3,1.1],[1,0,0,1]]),
@@ -221,3 +270,9 @@ export const SVG_REACTIONS: Record<string, Reaction> = {
     turn('ear-right', [[0, 0], [.6, 3], [.74, -.8], [1, 0]]),
   ] },
 };
+
+// The original ten taps also travel slightly in depth without replacing their shapes.
+for (const [i, name] of TAP_REACTIONS.slice(0, 10).entries()) {
+  const side = i % 2 ? 1 : -1;
+  SVG_REACTIONS[name].tracks.push(depth([[0,0,0,0],[.16,-.12,4,side*5],[.4,.2,-4,-side*7],[.7,-.04,2,side*2],[1,0,0,0]]));
+}

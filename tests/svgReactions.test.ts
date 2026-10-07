@@ -50,13 +50,13 @@ function drive() {
   const source = readFileSync('src/components/SvgAvatarCanvas.tsx', 'utf8');
   const code = source.slice(source.indexOf('    function tap('), source.indexOf("    motionPreference.addEventListener('change'"));
   const created: any[] = [];
-  const element = () => ({ style: {}, attrs: {} as Record<string, string>,
+  const element = () => ({ style: { setProperty() {} }, attrs: {} as Record<string, string>,
     setAttribute(k: string, v: string) { this.attrs[k] = v; }, removeAttribute(k: string) { delete this.attrs[k]; },
     animate(frames: unknown, options: any) { const a: any = { effect: { target: this }, frames, options, cancelled: false, cancel() { this.cancelled = true; } }; created.push(a); return a; },
   });
   const parts = Object.fromEntries(['ear-left', 'ear-right', 'eye-right', 'tuft', 'accent-left', 'accent-right'].map(name => [name, element()]));
   const animations = new Map(), reactionAnimations = new Set(), box = element(), symbols: any[] = [];
-  const context: any = { SVG_REACTIONS, TAP_REACTIONS, tapIndex: 0, dragPoint: null, dragVelocity: {x:0,y:0}, dragEl: element(), dragShape: [1,0,1,0], dragSpeed: [0,0,0,0], animations, reactionAnimations, box, gestureEl: element(),
+  const context: any = { SVG_REACTIONS, TAP_REACTIONS, tapIndex: 0, depthEl: element(), depthPose: [0,0,0], depthSpeed: [0,0,0], dragPoint: null, dragVelocity: {x:0,y:0}, dragEl: element(), dragShape: [1,0,1,0], dragSpeed: [0,0,0,0], animations, reactionAnimations, box, gestureEl: element(),
     ANIMATION_SYMBOLS, showSymbol(name: string, options: any) { symbols.push({ name, options }); }, clearSymbol() { symbols.push(null); },
     faces: [{ querySelector: (selector: string) => parts[selector.match(/"(.*?)"/)![1]] }], front: 0,
     reactionName: '', reactionStart: 0, reactionUntil: 0, lastMotion: 0, nextEarTwitch: 0,
@@ -113,14 +113,14 @@ test('reference reactions animate every authored part and release tracks when re
 });
 
 
-test('ten taps give ten distinct shapes and hair cues; dragging cancels taps and reduced motion stays still', () => {
+test('twenty taps give twenty distinct shapes and hair cues; dragging cancels taps and reduced motion stays still', () => {
   const d = drive(), seen = new Set<string>(), shapes = new Set<string>();
-  for (let i = 0; i < 10; i++) {
+  for (let i = 0; i < 20; i++) {
     d.tap(); const name = d.box.attrs['data-reaction'];
     seen.add(name); shapes.add(JSON.stringify(SVG_REACTIONS[name].tracks.find(t => t.part === 'head')));
     assert.equal(d.symbols.at(-1).name, ANIMATION_SYMBOLS[name]);
   }
-  assert.equal(seen.size, 10); assert.equal(shapes.size, 10);
+  assert.equal(seen.size, 20); assert.equal(shapes.size, 20);
   d.drag({ x: 10, y: 20 }); assert.equal(d.context.reactionUntil, 0);
   const count = d.created.length; d.tap(); assert.equal(d.created.length, count);
   d.context.clock = () => 1016; d.drag({ x: 26, y: 12 });
@@ -129,4 +129,26 @@ test('ten taps give ten distinct shapes and hair cues; dragging cancels taps and
   d.context.motionPreference.matches = true; d.onMotionPreference();
   const still = d.created.length; d.tap(); assert.equal(d.created.length, still);
   assert.equal(d.context.dragPoint, null); assert.deepEqual(Array.from(d.context.dragShape), [1,0,1,0]);
+});
+
+
+test('all twenty taps animate real depth tracks; new ten include forward and backward travel', () => {
+  assert.equal(TAP_REACTIONS.length, 20);
+  const d = drive();
+  for (const name of TAP_REACTIONS) {
+    const reaction = SVG_REACTIONS[name], track = reaction.tracks.find(t => t.part === 'depth')!;
+    assert.ok(track, name);
+    assert.ok(track.frames.some(f => Number(f['--depth-z']) > 0) || name === 'tap-float');
+    assert.ok(track.frames.some(f => Number(f['--depth-z']) < 0));
+    track.frames.forEach(f => {
+      assert.ok(Math.abs(Number(f['--depth-z'])) < 1);
+      assert.ok(Math.abs(Number(f['--depth-yaw'])) < 40 && Math.abs(Number(f['--depth-pitch'])) < 40);
+    });
+    d.play(name);
+    assert.ok(d.created.some((a:any) => !a.cancelled && a.effect.target === d.context.depthEl), name);
+  }
+  d.context.depthPose.splice(0,3,.3,5,-8);
+  d.context.motionPreference.matches=true; d.onMotionPreference();
+  assert.ok(d.created.every((a:any)=>a.cancelled));
+  assert.deepEqual(Array.from(d.context.depthPose),[0,0,0]);
 });

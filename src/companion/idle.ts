@@ -70,6 +70,15 @@ export function dragMotionTarget(vx: number, vy: number, size: number, held: boo
     1.03 + amount * (2 * y * y - 1), Math.max(-12, Math.min(12, vx / size * 1.8))];
 }
 
+/** Gentle depth drift and gaze turns, in avatar-size units and degrees. */
+export function depthMotionTarget(time: number, x: number, y: number, attentive: boolean, quiet: boolean): number[] {
+  if (![time, x, y].every(Number.isFinite)) return [0, 0, 0];
+  const t = time / 1000, calm = quiet ? .4 : 1;
+  return [Math.sin(t * .55) * .045 * calm + (attentive ? .1 : quiet ? -.08 : 0),
+    -Math.max(-1, Math.min(1, y)) * 7 + Math.sin(t * .43) * 1.5 * calm,
+    Math.max(-1, Math.min(1, x)) * 10 + Math.sin(t * .31) * 2 * calm];
+}
+
 function wave(seconds: number, hz: number, phase: number) {
   return Math.sin(TAU * hz * seconds + phase);
 }

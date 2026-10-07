@@ -10,6 +10,9 @@
    Scoped under .svg-avatar-canvas so none of it leaks into the rest of the app;
    the custom properties themselves are registered globally, as @property must
    be, and are only read here. */
+@property --depth-z { syntax:'<number>'; inherits:true; initial-value:0; }
+@property --depth-pitch { syntax:'<number>'; inherits:true; initial-value:0; }
+@property --depth-yaw { syntax:'<number>'; inherits:true; initial-value:0; }
 @property --idle-bob { syntax:'<length>'; inherits:false; initial-value:4px; }
 @property --idle-sway { syntax:'<angle>'; inherits:false; initial-value:1.2deg; }
 @property --idle-breath { syntax:'<number>'; inherits:false; initial-value:1.015; }
@@ -39,6 +42,7 @@
   transform:translate(calc(var(--avatar-size) * var(--drift-x)), calc(var(--avatar-size) * var(--drift-y))) rotate(var(--tilt));
   transition:--tilt 1.1s cubic-bezier(0.4, 0, 0.2, 1), --drift-x 1.4s cubic-bezier(0.4, 0, 0.2, 1), --drift-y 1.4s cubic-bezier(0.4, 0, 0.2, 1); }
 .svg-avatar-canvas #avatar-body{position:absolute;inset:0;transform-origin:50% 60%;}
+.svg-avatar-canvas .avatar-depth{position:absolute;inset:0;transform-origin:50% 50%;--depth-z:0;--depth-pitch:0;--depth-yaw:0;}
 .svg-avatar-canvas .avatar-drag{position:absolute;inset:0;transform-origin:50% 58%;}
 .svg-avatar-canvas .avatar-gesture{position:absolute;inset:0;transform-origin:50% 68%;}
 .svg-avatar-canvas #avatar .face{position:absolute;inset:0;opacity:0;}
@@ -46,8 +50,8 @@
 .svg-avatar-canvas #avatar .face .backdrop{display:none;}
 /* A glance is a translation; a blink is a squash toward the eye's own middle,
    because the art has no lids to close. */
-.svg-avatar-canvas #avatar .face .eye{transform:translate(var(--gaze-x), var(--gaze-y)) scaleY(calc(var(--lid) * var(--eye-lid)));transform-box:fill-box;transform-origin:center;}
-.svg-avatar-canvas #avatar .face .eye.closed-eye{transform:translate(var(--gaze-x), var(--gaze-y));}
+.svg-avatar-canvas #avatar .face .eye{transform:translate(calc(var(--gaze-x) + (var(--view-yaw, 0) + var(--depth-yaw)) * .9px), calc(var(--gaze-y) - (var(--view-pitch, 0) + var(--depth-pitch)) * .6px)) scaleY(calc(var(--lid) * var(--eye-lid)));transform-box:fill-box;transform-origin:center;}
+.svg-avatar-canvas #avatar .face .eye.closed-eye{transform:translate(calc(var(--gaze-x) + (var(--view-yaw, 0) + var(--depth-yaw)) * .9px), calc(var(--gaze-y) - (var(--view-pitch, 0) + var(--depth-pitch)) * .6px));}
 .svg-avatar-canvas #avatar .face.missing{visibility:hidden;}
 .svg-avatar-canvas .avatar-symbol-layer{position:absolute;inset:0;width:100%;height:100%;overflow:visible;pointer-events:none;}
 .svg-avatar-canvas .avatar-symbol-layer [data-symbol-part]{transform-box:fill-box;transform-origin:center;}
@@ -64,3 +68,6 @@
 
 .companion-hitbox{touch-action:none;}
 .companion-hitbox:focus-visible{outline:2px solid #fec4cc;outline-offset:3px;border-radius:35%;}
+
+/* Small layer offsets suggest volume while keeping the original vector silhouette. */
+.svg-avatar-canvas .face [data-hair]{translate:calc((var(--view-yaw, 0) + var(--depth-yaw)) * var(--layer-depth, 0) * 1px) calc((var(--view-pitch, 0) + var(--depth-pitch)) * var(--layer-depth, 0) * -.7px);}

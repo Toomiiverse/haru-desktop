@@ -33,6 +33,9 @@ export const EXPRESSION_SYMBOLS: Record<string, string> = {
   pain: 'hair-surprise', scared: 'hair-surprise', serious: 'hair-surprise', silly: 'hair-spiral', flirty: 'hair-heart', nervous: 'hair-question', disbelief: 'hair-surprise', rage: 'hair-surprise', disgusted: 'hair-question', confident: 'hair-heart', drunk: 'hair-spiral', pouty: 'hair-droop', sick: 'hair-droop', laughing: 'hair-heart', snooty: 'hair-heart', cold: 'hair-droop', crying: 'hair-droop', devious: 'hair-question', pensive: 'hair-question', triumph: 'hair-surprise',
 };
 export const ANIMATION_SYMBOLS: Record<string, string> = {
+  'tap-zoom': 'hair-surprise', 'tap-retreat': 'hair-heart', 'tap-orbit': 'hair-spiral',
+  'tap-corkscrew': 'hair-spiral', 'tap-peek-left': 'hair-question', 'tap-peek-right': 'hair-question',
+  'tap-bow': 'hair-droop', 'tap-float': 'hair-heart', 'tap-ricochet': 'hair-surprise', 'tap-pop-through': 'hair-surprise',
   'tap-pancake': 'hair-droop', 'tap-boing': 'hair-surprise', 'tap-jelly': 'hair-spiral',
   'tap-left': 'hair-question', 'tap-right': 'hair-question', 'tap-peek': 'hair-surprise',
   'tap-tumble': 'hair-spiral', 'tap-squeeze': 'hair-surprise', 'tap-ripple': 'hair-heart', 'tap-hop': 'hair-heart',

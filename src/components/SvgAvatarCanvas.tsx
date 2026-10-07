@@ -9,7 +9,7 @@ import {
 } from '../../electron/emotions';
 import type { MouthReading } from '../companion/mouth';
 import type { Gaze } from '../companion/behaviour';
-import { idleMotion, settleSpring, hairMotionTarget, dragMotionTarget } from '../companion/idle';
+import { idleMotion, settleSpring, hairMotionTarget, dragMotionTarget, depthMotionTarget } from '../companion/idle';
 import { EXPRESSION_REACTIONS, SVG_REACTIONS, TAP_REACTIONS } from '../companion/svgReactions';
 import { ANIMATION_SYMBOLS, EXPRESSION_SYMBOLS, HAIR_SYMBOLS, REACTION_SYMBOLS, hairSymbolFrames, symbolFrames } from '../companion/svgSymbols';
 
@@ -201,11 +201,13 @@ export function SvgAvatarCanvas({ className = '', onError, onReady, onFit, read,
     let reduced = motionPreference.matches;
     const finePointer = !!(window.matchMedia && window.matchMedia('(pointer: fine)').matches);
 
-    container.innerHTML = '<div id="avatar" role="img" aria-label="' + LABELS.neutral + '"><div id="avatar-pose"><div class="avatar-gesture"><div class="avatar-drag"><div id="avatar-body"><div class="face"></div><div class="face"></div><svg class="avatar-symbol-layer" viewBox="0 0 1254 1254" aria-hidden="true"></svg></div></div></div></div></div>';
+    container.innerHTML = '<div id="avatar" role="img" aria-label="' + LABELS.neutral + '"><div id="avatar-pose"><div class="avatar-depth"><div class="avatar-gesture"><div class="avatar-drag"><div id="avatar-body"><div class="face"></div><div class="face"></div><svg class="avatar-symbol-layer" viewBox="0 0 1254 1254" aria-hidden="true"></svg></div></div></div></div></div></div>';
     const box = container.querySelector('#avatar') as HTMLElement;
     const body = container.querySelector('#avatar-body') as HTMLElement;
     const poseEl = container.querySelector('#avatar-pose') as HTMLElement;
     const gestureEl = container.querySelector('.avatar-gesture') as HTMLElement;
+    const depthEl = container.querySelector('.avatar-depth') as HTMLElement;
+    const depthPose = [0, 0, 0], depthSpeed = [0, 0, 0];
     const dragEl = container.querySelector('.avatar-drag') as HTMLElement;
     let dragPoint: { x: number; y: number; at: number } | null = null;
     let dragVelocity = { x: 0, y: 0 };
@@ -282,6 +284,7 @@ export function SvgAvatarCanvas({ className = '', onError, onReady, onFit, read,
       hairLayers.set(layer, Array.from(svg.querySelectorAll<SVGGraphicsElement>('[data-hair]')).map(el => {
         const name = el.getAttribute('data-hair')!;
         const ear = name.startsWith('ear-'), fringe = name === 'fringe', tuft = name === 'tuft';
+        el.style.setProperty('--layer-depth', String(ear ? -.45 : fringe ? .8 : tuft ? 1.25 : .4));
         const origin = el.style.transformOrigin.split(' ').map(parseFloat);
         const from = hairLayers.get(faces[front])?.find(state => state.el.getAttribute('data-hair') === name);
         return { el, source: el.parentElement as unknown as SVGGraphicsElement, origin: new DOMPoint(origin[0], origin[1]),
@@ -312,6 +315,16 @@ export function SvgAvatarCanvas({ className = '', onError, onReady, onFit, read,
         [dragShape[i], dragSpeed[i]] = settleSpring(dragShape[i], dragSpeed[i], deformation[i], 155, 15, dt);
       }
       dragEl.style.transform = `matrix(${dragShape[0]},${dragShape[1]},${dragShape[1]},${dragShape[2]},0,0) rotate(${dragShape[3]}deg)`;
+      const gaze = target(time);
+      const depthTarget = depthMotionTarget(time, gaze.x, gaze.y, !!claim && time < claimUntil, quiet);
+      depthTarget[0] += dragPoint ? Math.min(.15, Math.hypot(dragVelocity.x, dragVelocity.y) * decay / Math.max(1, box.offsetWidth) * .02) : 0;
+      for (let i = 0; i < depthPose.length; i++) {
+        [depthPose[i], depthSpeed[i]] = settleSpring(depthPose[i], depthSpeed[i], depthTarget[i], 85, 11, dt);
+      }
+      depthEl.style.setProperty('--view-yaw', String(depthPose[2]));
+      depthEl.style.setProperty('--view-pitch', String(depthPose[1]));
+      depthEl.style.setProperty('--total-depth', `clamp(-.95, calc(${depthPose[0]} + var(--depth-z)), .82)`);
+      depthEl.style.transform = `translateY(calc(var(--avatar-size) * var(--total-depth) * .08)) perspective(calc(var(--avatar-size) * 2.8)) translateZ(calc(var(--avatar-size) * var(--total-depth))) rotateX(calc((${depthPose[1]} + var(--depth-pitch)) * 1deg)) rotateY(calc((${depthPose[2]} + var(--depth-yaw)) * 1deg))`;
       // Read parent matrices before writing strand transforms, avoiding repeated layout work.
       const matrices = new Map<SVGGraphicsElement, DOMMatrix | null>();
       for (const states of hairLayers.values()) for (const strand of states) {
@@ -321,14 +334,15 @@ export function SvgAvatarCanvas({ className = '', onError, onReady, onFit, read,
         const matrix = matrices.get(strand.source);
         if (!matrix) continue;
         const point = strand.origin.matrixTransform(matrix);
-        const sample = { x: point.x + window.screenX, y: point.y + window.screenY, roll: Math.atan2(matrix.b, matrix.a) * 180 / Math.PI };
+        if (!Number.isFinite(point.w) || point.w <= .01) continue;
+        const sample = { x: point.x / point.w + window.screenX, y: point.y / point.w + window.screenY, roll: Math.atan2(matrix.b, matrix.a) * 180 / Math.PI };
         const previous = strand.previous;
         strand.previous = sample;
         if (!previous || elapsed > .1 || dt <= 0) {
           strand.speed = strand.stretchSpeed = 0;
           continue;
         }
-        const scale = Math.max(0.01, Math.hypot(matrix.a, matrix.b));
+        const scale = Math.max(0.01, Math.hypot(matrix.a, matrix.b) / point.w);
         const vx = (sample.x - previous.x) / dt / scale, vy = (sample.y - previous.y) / dt / scale;
         const turn = ((sample.roll - previous.roll + 540) % 360 - 180) / dt;
         const { angle: target, stretch } = hairMotionTarget(sample.roll, turn, vx, vy,
@@ -567,7 +581,7 @@ export function SvgAvatarCanvas({ className = '', onError, onReady, onFit, read,
         box.setAttribute('data-reaction', name);
         if (reaction.hold) box.setAttribute('aria-label', 'Haru drifting to sleep');
         for (const track of reaction.tracks) {
-          const element = track.part === 'head' ? gestureEl : track.part === 'gaze' ? box : faces[front].querySelector(`[data-part="${track.part}"]`);
+          const element = track.part === 'depth' ? depthEl : track.part === 'head' ? gestureEl : track.part === 'gaze' ? box : faces[front].querySelector(`[data-part="${track.part}"]`);
           if (element) reactionAnimations.add(animate(element, track.frames, reaction.duration, 0, reaction.hold ? 'forwards' : 'none'));
         }
         lastMotion = clock(); scheduleBlink();
@@ -618,6 +632,8 @@ export function SvgAvatarCanvas({ className = '', onError, onReady, onFit, read,
         cancelAnimationFrame(hairFrame); hairFrame = 0;
         box.style.transform = '';
         drag(null); dragEl.style.transform = '';
+        depthEl.style.transform = ''; depthEl.style.setProperty('--view-yaw', '0'); depthEl.style.setProperty('--view-pitch', '0');
+        depthPose.fill(0); depthSpeed.fill(0);
         dragShape.splice(0, 4, 1, 0, 1, 0); dragSpeed.fill(0);
         for (const states of hairLayers.values()) for (const strand of states) {
           strand.angle = strand.speed = strand.stretch = strand.stretchSpeed = 0;
