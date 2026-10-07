@@ -177,3 +177,12 @@ test('sleeping taps stir with a bounded wake stretch and cancel the held sleep p
   d.context.engine.emotion=()=> 'drowsy';d.tap();assert.equal(d.box.attrs['data-reaction'],'wake-stretch');
   d.context.engine.emotion=()=> 'neutral';d.tap();assert.ok(d.box.attrs['data-reaction'].startsWith('tap-'));
 });
+
+
+test('the resting sleepy face has independent ears, hair and closed eyes', () => {
+  const svg=readFileSync('build/emotions/sleepy.svg','utf8');
+  assert.equal((svg.match(/data-hair=/g)||[]).length,6);
+  for(const part of ['ear-left','ear-right','tuft','face'])assert.ok(svg.includes('data-part="'+part+'"'));
+  assert.equal((svg.match(/data-blink="false"/g)||[]).length,2);
+  assert.ok(svg.includes('id="sleepy-fringe-cut"'));assert.ok(!svg.includes('drowsy-fringe-cut'));
+});
