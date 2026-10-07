@@ -113,6 +113,8 @@ export function CompanionWindow() {
   const [model, setModel] = useState<Live2DModel | null>(null);
   const [error, setError] = useState<string | null>(null);
   const dragging = useRef(false);
+  const flightSample = useRef<{ x: number; y: number; at: number } | null>(null);
+  const flightPending = useRef(false);
   const modelHandle = useRef<Live2DModelHandle | null>(null);
   const vrmHandle = useRef<VRMHandle | null>(null);
   const svgHandle = useRef<SvgAvatarHandle | null>(null);
@@ -590,6 +592,16 @@ export function CompanionWindow() {
     }
   }
 
+  function floatAcrossDesktop(x: number, y: number, moving: boolean) {
+    const at = performance.now(), previous = flightSample.current;
+    if (!moving || dragging.current || asking || caption || lastPointerOver.current) { flightSample.current = null; return; }
+    if (!previous || at - previous.at > 150) { flightSample.current = { x, y, at }; return; }
+    if (flightPending.current || at - previous.at < 32) return;
+    flightSample.current = { x, y, at };
+    const clamp = (n: number) => Math.max(-80, Math.min(80, n));
+    const request = window.haru?.companion.floatBy?.(clamp((x - previous.x) * screen.availWidth * .35), clamp((y - previous.y) * screen.availHeight * .3));
+    if (request) { flightPending.current = true; void request.catch(() => {}).finally(() => { flightPending.current = false; }); }
+  }
   function onPointerDown(event: React.PointerEvent) {
     if (event.button !== 0 || !event.isPrimary || dragging.current) return;
     dragging.current = true;movedByHand.current=false;
@@ -650,7 +662,7 @@ export function CompanionWindow() {
   return (
     <div className="companion-stage">
       {avatarKind === 'svg'
-        ? <SvgAvatarCanvas onError={setError} onReady={handleSvgReady} onFit={onFit} read={readVRM} />
+        ? <SvgAvatarCanvas onFloat={floatAcrossDesktop} onError={setError} onReady={handleSvgReady} onFit={onFit} read={readVRM} />
         : <StageFailureBoundary key={model!.url} onError={setError}>
         <Suspense fallback={null}>
           {model!.path.toLowerCase().endsWith('.vrm')

@@ -25,7 +25,7 @@ test('all requested animations and arrival reactions have complete timelines', (
   const requested = ['listening', 'head-pat', 'curiosity', 'head-shake', 'attention-return', 'sleep-transition'];
   requested.forEach(name => assert.ok(SVG_REACTIONS[name], name));
   for (const [name, reaction] of Object.entries(SVG_REACTIONS)) {
-    assert.ok(reaction.duration >= 1000 && reaction.duration <= 7000);
+    assert.ok(name.startsWith('tap-') ? reaction.duration >= 400 && reaction.duration <= 800 : reaction.duration >= 1000 && reaction.duration <= 7000);
     assert.equal(new Set(reaction.tracks.map(t => t.part)).size, reaction.tracks.length, name + ' has no competing tracks');
     for (const track of reaction.tracks) {
       assert.equal(track.frames[0].offset, 0); assert.equal(track.frames.at(-1)!.offset, 1);
@@ -56,7 +56,7 @@ function drive() {
   });
   const parts = Object.fromEntries(['ear-left', 'ear-right', 'eye-right', 'tuft', 'accent-left', 'accent-right'].map(name => [name, element()]));
   const animations = new Map(), reactionAnimations = new Set(), box = element(), symbols: any[] = [];
-  const context: any = { SVG_REACTIONS, TAP_REACTIONS, tapIndex: 0, depthEl: element(), depthPose: [0,0,0], depthSpeed: [0,0,0], dragPoint: null, dragVelocity: {x:0,y:0}, dragEl: element(), dragShape: [1,0,1,0], dragSpeed: [0,0,0,0], animations, reactionAnimations, box, gestureEl: element(),
+  const context: any = { jaw:0, flightPose:[0,0,0,0], flightSpeed:[0,0,0,0], callbacks:{current:{}}, SVG_REACTIONS, TAP_REACTIONS, tapIndex: 0, depthEl: element(), depthPose: [0,0,0], depthSpeed: [0,0,0], dragPoint: null, dragVelocity: {x:0,y:0}, dragEl: element(), dragShape: [1,0,1,0], dragSpeed: [0,0,0,0], animations, reactionAnimations, box, gestureEl: element(),
     ANIMATION_SYMBOLS, showSymbol(name: string, options: any) { symbols.push({ name, options }); }, clearSymbol() { symbols.push(null); },
     faces: [{ querySelector: (selector: string) => parts[selector.match(/"(.*?)"/)![1]] }], front: 0,
     reactionName: '', reactionStart: 0, reactionUntil: 0, lastMotion: 0, nextEarTwitch: 0,
@@ -151,4 +151,20 @@ test('all twenty taps animate real depth tracks; new ten include forward and bac
   d.context.motionPreference.matches=true; d.onMotionPreference();
   assert.ok(d.created.every((a:any)=>a.cancelled));
   assert.deepEqual(Array.from(d.context.depthPose),[0,0,0]);
+});
+
+
+test('tap accents finish under a second and hair pops promptly on the same clock', () => {
+  const d = drive();
+  for (const name of TAP_REACTIONS) {
+    const reaction = SVG_REACTIONS[name];
+    assert.ok(reaction.duration >= 440 && reaction.duration <= 760, name);
+    const head = reaction.tracks.find(t => t.part === 'head')!;
+    assert.ok(head.frames[1].offset! * reaction.duration < 120, name + ' responds immediately');
+    d.play(name);
+    assert.ok(d.created.filter((a:any)=>!a.cancelled).every((a:any)=>a.options.duration===reaction.duration));
+    assert.equal(d.symbols.at(-1).options.duration,reaction.duration);
+    assert.equal(d.symbols.at(-1).options.rise,100);
+  }
+  assert.equal(SVG_REACTIONS['sleep-transition'].duration,6500, 'intentional non-tap pacing is unchanged');
 });

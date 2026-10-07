@@ -448,6 +448,7 @@ contextBridge.exposeInMainWorld('haru', {
       const listener=(_event:Electron.IpcRendererEvent,state:import('./perching').PerchState)=>callback(state);
       ipcRenderer.on('companion:perching',listener);return ()=>ipcRenderer.removeListener('companion:perching',listener);
     },
+    floatBy: (dx: number, dy: number) => ipcRenderer.invoke('companion:floatBy', dx, dy),
     moveBy: (dx: number, dy: number) => ipcRenderer.invoke('companion:moveBy', dx, dy),
     resizeBy: (factor: number) => ipcRenderer.invoke('companion:resizeBy', factor),
     showMenu: () => ipcRenderer.invoke('companion:showMenu'),

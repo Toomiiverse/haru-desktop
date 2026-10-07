@@ -11,7 +11,7 @@ test('phone handover preserves its resting mood and forwards thinking, speech an
   let stopped = 0, replaced = 0, serial = 0;
   const timers = new Map<number, () => void>(), calls: unknown[][] = [];
   const host = { replaceChildren() { replaced++; }, setAttribute() {}, addEventListener() {}, removeEventListener() {} };
-  const context: any = { adaptEmotion, stylesheet: '',
+  const context: any = { createPhoneSpeech: () => ({ dispose: () => calls.push(['speech-stop']) }), adaptEmotion, stylesheet: '',
     window: { haruAvatar: { state: () => ({ resting: 'affectionate' }), stop: () => stopped++ } },
     document: { getElementById: () => host, head: { appendChild() {} }, createElement: () => ({ style: {} }) },
     createRoot: () => ({ unmount: () => calls.push(['stop']) }),
@@ -29,5 +29,5 @@ test('phone handover preserves its resting mood and forwards thinking, speech an
   assert.deepEqual(calls.slice(-4), [['express', 'triumph'], ['play', 'celebrate'], ['symbol', 'hair-surprise'], ['attend', 'typing', 1500]]);
   for (const name of ['exclaim', 'burst', 'orbit', 'comet', 'play']) { avatar.poke(name); assert.deepEqual(calls.at(-1), ['tap']); }
   avatar.tap(); assert.deepEqual(calls.at(-1), ['tap']);
-  avatar.stop(); assert.deepEqual(calls.at(-1), ['stop']);
+  avatar.stop(); assert.deepEqual(calls.slice(-2), [['speech-stop'], ['stop']]);
 });

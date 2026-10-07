@@ -71,3 +71,7 @@
 
 /* Small layer offsets suggest volume while keeping the original vector silhouette. */
 .svg-avatar-canvas .face [data-hair]{translate:calc((var(--view-yaw, 0) + var(--depth-yaw)) * var(--layer-depth, 0) * 1px) calc((var(--view-pitch, 0) + var(--depth-pitch)) * var(--layer-depth, 0) * -.7px);}
+
+/* A breathing halo and tiny lower-face stretch keep her mouthless silhouette. */
+.svg-avatar-canvas #avatar-body{filter:drop-shadow(0 0 calc(var(--avatar-size) * .009) rgb(254 196 204 / var(--fairy-glow, .18))) drop-shadow(0 0 calc(var(--avatar-size) * .035) rgb(222 170 255 / var(--fairy-glow, .18)));}
+.svg-avatar-canvas .face [data-part="face"]{transform-origin:50% 62%;transform:scaleY(calc(1 + var(--jaw-open, 0) * .035));}

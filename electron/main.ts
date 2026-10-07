@@ -14641,6 +14641,13 @@ app.whenReady().then(() => {
     // window's avatar in its own right.
     if (store.get('avatar.kind', 'svg') === 'model') companionWindow?.hide();
   });
+  ipcMain.handle('companion:floatBy', (e, dx: number, dy: number) => {
+    if (!companionWindow || e.sender !== companionWindow.webContents || ![dx,dy].every(n => Number.isFinite(n) && Math.abs(n) <= 120)) return;
+    if (!companionWindow.isVisible() || desktopBusy() || walkingTo || perched || perchMove || perchFall) return;
+    const bounds = companionWindow.getBounds();
+    const next = clampCompanionPosition(bounds.x + dx, bounds.y + dy, bounds.width, bounds.height);
+    positionCompanion(next.x, next.y);
+  });
   ipcMain.handle('companion:moveBy', (e, dx: number, dy: number) => {
     if (!companionWindow || e.sender!==companionWindow.webContents || ![dx,dy].every(n=>Number.isFinite(n)&&Math.abs(n)<4096)) return;
     detachPerch(false);perchHoldUntil=Date.now()+90_000;

@@ -147,6 +147,7 @@ interface Window {
       dragging(active:boolean,drop?:boolean): Promise<void>;
       pointerOver(over:boolean): Promise<void>;
       onPerching(callback:(state:import('../electron/perching').PerchState)=>void):()=>void;
+      floatBy(dx: number, dy: number): Promise<void>;
       moveBy(dx: number, dy: number): Promise<void>;
       resizeBy(factor: number): Promise<void>;
       showMenu(): Promise<void>;

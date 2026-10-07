@@ -9,7 +9,7 @@ import {
 } from '../../electron/emotions';
 import type { MouthReading } from '../companion/mouth';
 import type { Gaze } from '../companion/behaviour';
-import { idleMotion, settleSpring, hairMotionTarget, dragMotionTarget, depthMotionTarget } from '../companion/idle';
+import { idleMotion, settleSpring, hairMotionTarget, dragMotionTarget, depthMotionTarget, fairyMotion, speechJaw } from '../companion/idle';
 import { EXPRESSION_REACTIONS, SVG_REACTIONS, TAP_REACTIONS } from '../companion/svgReactions';
 import { ANIMATION_SYMBOLS, EXPRESSION_SYMBOLS, HAIR_SYMBOLS, REACTION_SYMBOLS, hairSymbolFrames, symbolFrames } from '../companion/svgSymbols';
 
@@ -45,10 +45,12 @@ export type SvgAvatarHandle = {
 
 interface Props {
   className?: string;
+  roam?: boolean;
+  onFloat?(x: number, y: number, moving: boolean): void;
   onError(message: string): void;
   onReady(handle: SvgAvatarHandle | null): void;
   onFit(width: number): void;
-  read?(): { mouth: MouthReading; gaze: Gaze };
+  read?(): { mouth: MouthReading; gaze?: Gaze };
   loadFace?(name: string): Promise<string>;
 }
 
@@ -189,10 +191,10 @@ function findEyes(paths: { el: Element; box: Box | null }[], W: number, H: numbe
   return best;
 }
 
-export function SvgAvatarCanvas({ className = '', onError, onReady, onFit, read, loadFace }: Props) {
+export function SvgAvatarCanvas({ className = '', roam = false, onFloat, onError, onReady, onFit, read, loadFace }: Props) {
   const host = useRef<HTMLDivElement>(null);
-  const callbacks = useRef({ onError, onReady, onFit, read, loadFace });
-  callbacks.current = { onError, onReady, onFit, read, loadFace };
+  const callbacks = useRef({ onError, onReady, onFit, read, loadFace, roam, onFloat });
+  callbacks.current = { onError, onReady, onFit, read, loadFace, roam, onFloat };
 
   useEffect(() => {
     const container = host.current;
@@ -208,6 +210,7 @@ export function SvgAvatarCanvas({ className = '', onError, onReady, onFit, read,
     const gestureEl = container.querySelector('.avatar-gesture') as HTMLElement;
     const depthEl = container.querySelector('.avatar-depth') as HTMLElement;
     const depthPose = [0, 0, 0], depthSpeed = [0, 0, 0];
+    const flightPose = [0,0,0,0], flightSpeed = [0,0,0,0];
     const dragEl = container.querySelector('.avatar-drag') as HTMLElement;
     let dragPoint: { x: number; y: number; at: number } | null = null;
     let dragVelocity = { x: 0, y: 0 };
@@ -220,7 +223,7 @@ export function SvgAvatarCanvas({ className = '', onError, onReady, onFit, read,
     const reactionAnimations = new Set<Animation>();
     let reactionName = '', reactionStart = 0, reactionUntil = 0;
     const hairLayers = new Map<HTMLElement, HairState[]>();
-    let hairFrame = 0, hairTime = 0;
+    let hairFrame = 0, hairTime = 0, jaw = 0;
     let lastMotion = -Infinity;
     const faces = Array.from(container.querySelectorAll<HTMLElement>('.face'));
     const engine = createEmotionEngine(() => (reduced ? 0 : DEFAULT_TRANSITION_MS));
@@ -249,6 +252,14 @@ export function SvgAvatarCanvas({ className = '', onError, onReady, onFit, read,
           const b = el.nodeName.toLowerCase() === 'path' ? pathBox(el.getAttribute('d') || '') : null;
           if (coversCanvas(el, b, vb[0], vb[1], vb[2], vb[3])) { el.setAttribute('class', 'backdrop'); continue; }
           paths.push({ el, box: b });
+        }
+        if (!svg.querySelector('[data-part="face"]')) {
+          const lowerFace = paths.find(p => {
+            const b = p.box, fill = p.el.closest('[fill]')?.getAttribute('fill') || '';
+            return b && b.w > vb[2] * .28 && b.y0 > vb[3] * .4 && b.y1 > vb[3] * .7
+              && /^#[0-9a-f]{6}$/i.test(fill) && [1, 3, 5].every(i => parseInt(fill.slice(i, i + 2), 16) <= 32);
+          });
+          lowerFace?.el.setAttribute('data-part', 'face');
         }
         const left = svg.querySelector('[data-part="eye-left"]'), right = svg.querySelector('[data-part="eye-right"]');
         found = left && right ? [left, right] : findEyes(paths, vb[2], vb[3]);
@@ -307,16 +318,33 @@ export function SvgAvatarCanvas({ className = '', onError, onReady, onFit, read,
       // Reuse Haru's existing breathing and counter-sway, whose channels have different periods.
       const fallingAsleep = reactionName === 'sleep-transition' ? clamp((time - reactionStart) / 6500, 0, 1) : 0;
       const quiet = ['sleepy', 'unimpressed', 'drowsy', 'content', 'disappointed'].includes(engine.emotion());
-      const idle = idleMotion(time, { energy: (quiet ? .2 : .55) * (1 - fallingAsleep), sleepiness: Math.max(quiet ? .75 : .1, fallingAsleep), stress: 0 }, claim?.why === 'talking' && time < claimUntil ? .8 : 0);
-      box.style.transform = `translate(calc(var(--idle-bob) * ${(idle.driftX * 65).toFixed(4)}), calc(var(--idle-bob) * ${(-idle.breath).toFixed(4)})) rotate(calc(var(--idle-sway) * ${(idle.headZ * .4 + idle.bodyZ * .2).toFixed(4)})) scaleY(calc(1 + (var(--idle-breath) - 1) * ${idle.breath.toFixed(4)}))`;
+      const reading = callbacks.current.read?.();
+      const mouth = reading?.mouth ?? { open: 0, weight: 0 };
+      jaw = speechJaw(mouth.open, mouth.weight, jaw, dt);
+      box.style.setProperty('--jaw-open', jaw.toFixed(4));
+      const hover = fairyMotion(time, engine.emotion(), mouth.weight);
+      const flight = [hover.flightX, hover.flightY, hover.y, hover.bank];
+      const moving = !dragPoint && time >= reactionUntil && mouth.weight < .05 && !(claim && time < claimUntil);
+      for (let i = 0; i < flight.length; i++) {
+        if (i < 2 && !moving) { flightSpeed[i] = 0; continue; }
+        [flightPose[i], flightSpeed[i]] = settleSpring(flightPose[i], flightSpeed[i], flight[i], 70, 15, dt);
+      }
+      callbacks.current.onFloat?.(flightPose[0], flightPose[1], moving);
+      const flightX = callbacks.current.roam ? flightPose[0] * Math.max(0, (container!.clientWidth - box.offsetWidth) / 2) : 0;
+      const flightY = callbacks.current.roam ? flightPose[1] * Math.max(0, (container!.clientHeight - box.offsetHeight) / 2) : 0;
+      const roaming = dragPoint || time < reactionUntil ? .35 : 1;
+      box.style.setProperty('--fairy-glow', hover.glow.toFixed(3));
+      const idle = idleMotion(time, { energy: (quiet ? .2 : .55) * (1 - fallingAsleep), sleepiness: Math.max(quiet ? .75 : .1, fallingAsleep), stress: 0 }, Math.max(mouth.weight, claim?.why === 'talking' && time < claimUntil ? .8 : 0));
+      box.style.transform = `translate(calc(${flightX}px + var(--avatar-size) * ${hover.x * roaming}), calc(${flightY}px + var(--avatar-size) * ${flightPose[2] * roaming})) rotate(${flightPose[3] * roaming}deg) translate(calc(var(--idle-bob) * ${(idle.driftX * 65).toFixed(4)}), calc(var(--idle-bob) * ${(-idle.breath).toFixed(4)})) rotate(calc(var(--idle-sway) * ${(idle.headZ * .4 + idle.bodyZ * .2).toFixed(4)})) scaleY(calc(1 + (var(--idle-breath) - 1) * ${idle.breath.toFixed(4)}))`;
       const decay = dragPoint ? Math.exp(-Math.max(0, time - dragPoint.at - 40) / 85) : 0;
       const deformation = dragMotionTarget(dragVelocity.x * decay, dragVelocity.y * decay, box.offsetWidth, !!dragPoint);
       for (let i = 0; i < dragShape.length; i++) {
         [dragShape[i], dragSpeed[i]] = settleSpring(dragShape[i], dragSpeed[i], deformation[i], 155, 15, dt);
       }
       dragEl.style.transform = `matrix(${dragShape[0]},${dragShape[1]},${dragShape[1]},${dragShape[2]},0,0) rotate(${dragShape[3]}deg)`;
-      const gaze = target(time);
+      const gaze = target(time, reading);
       const depthTarget = depthMotionTarget(time, gaze.x, gaze.y, !!claim && time < claimUntil, quiet);
+      depthTarget[0] += hover.z * roaming;
       depthTarget[0] += dragPoint ? Math.min(.15, Math.hypot(dragVelocity.x, dragVelocity.y) * decay / Math.max(1, box.offsetWidth) * .02) : 0;
       for (let i = 0; i < depthPose.length; i++) {
         [depthPose[i], depthSpeed[i]] = settleSpring(depthPose[i], depthSpeed[i], depthTarget[i], 85, 11, dt);
@@ -413,10 +441,10 @@ export function SvgAvatarCanvas({ className = '', onError, onReady, onFit, read,
       const g = engine.gaze(t);
       return { x: g.x * strength, y: g.y * strength, why: g.looking ? 'looking' : 'resting' };
     }
-    function target(t: number) {
+    function target(t: number, reading = callbacks.current.read?.()) {
       const strength = GAZE[engine.emotion()] === undefined ? 1 : GAZE[engine.emotion()];
       if (!strength) return { x: 0, y: 0, why: 'fixed' };
-      const gaze = callbacks.current.read?.().gaze;
+      const gaze = reading?.gaze;
       if (gaze && Number.isFinite(gaze.x) && Number.isFinite(gaze.y)) return { x: clamp(gaze.x * strength, -1, 1), y: clamp(gaze.y * strength, -1, 1), why: 'desk' };
       return engineTarget(t);
     }
@@ -472,7 +500,7 @@ export function SvgAvatarCanvas({ className = '', onError, onReady, onFit, read,
     function fit() {
       const el = container as HTMLDivElement;
       const w = Math.max(1, el.clientWidth), h = Math.max(1, el.clientHeight);
-      const side = Math.max(48, Math.round(Math.min(w, h) * 0.94));
+      const side = Math.max(48, Math.round(Math.min(w, h) * (callbacks.current.roam ? .72 : .94)));
       el.style.setProperty('--avatar-size', side + 'px');
       document.documentElement.style.setProperty('--haru-width', side + 'px');
       callbacks.current.onFit(side);
@@ -585,7 +613,7 @@ export function SvgAvatarCanvas({ className = '', onError, onReady, onFit, read,
           if (element) reactionAnimations.add(animate(element, track.frames, reaction.duration, 0, reaction.hold ? 'forwards' : 'none'));
         }
         lastMotion = clock(); scheduleBlink();
-        if (ANIMATION_SYMBOLS[name]) showSymbol(ANIMATION_SYMBOLS[name], { duration: reaction.duration, hold: reaction.hold, source: hairSource, rise: name === 'startle' ? 140 : undefined });
+        if (ANIMATION_SYMBOLS[name]) showSymbol(ANIMATION_SYMBOLS[name], { duration: reaction.duration, hold: reaction.hold, source: hairSource, rise: name.startsWith('tap-') ? 100 : name === 'startle' ? 140 : undefined });
         return;
       }
       if (!['ear-twitch', 'ear-flick', 'flinch', 'recoil', 'tuft-bounce', 'sparkle', 'head-tilt', 'tilt', 'double-nod', 'nod'].includes(name)) return;
@@ -630,10 +658,12 @@ export function SvgAvatarCanvas({ className = '', onError, onReady, onFit, read,
         stopReaction();
         for (const animation of animations.values()) animation.cancel(); animations.clear();
         cancelAnimationFrame(hairFrame); hairFrame = 0;
-        box.style.transform = '';
+        box.style.transform = ''; jaw = 0;
+        box.style.setProperty('--jaw-open', '0'); box.style.setProperty('--fairy-glow', '.18');
         drag(null); dragEl.style.transform = '';
         depthEl.style.transform = ''; depthEl.style.setProperty('--view-yaw', '0'); depthEl.style.setProperty('--view-pitch', '0');
-        depthPose.fill(0); depthSpeed.fill(0);
+        depthPose.fill(0); depthSpeed.fill(0); flightPose.fill(0); flightSpeed.fill(0);
+        callbacks.current.onFloat?.(0, 0, false);
         dragShape.splice(0, 4, 1, 0, 1, 0); dragSpeed.fill(0);
         for (const states of hairLayers.values()) for (const strand of states) {
           strand.angle = strand.speed = strand.stretch = strand.stretchSpeed = 0;

@@ -2,10 +2,14 @@
 import { createRoot } from 'react-dom/client';
 import { SvgAvatarCanvas, type SvgAvatarHandle } from './components/SvgAvatarCanvas';
 import { adaptEmotion } from '../electron/emotions';
+import { createPhoneSpeech } from './companion/phoneSpeech';
+// The page's classic script owns this shared speech Audio element.
+declare const player: HTMLAudioElement | undefined;
 import stylesheet from './svgAvatar.css?inline';
 
 const host = document.getElementById('stage');
 if (host) {
+  const speech = createPhoneSpeech(typeof player === 'undefined' ? null : player);
   const previous = (window as any).haruAvatar;
   let resting = adaptEmotion(previous?.state?.().resting);
   previous?.stop?.();
@@ -13,7 +17,7 @@ if (host) {
   style.textContent = stylesheet;
   document.head.appendChild(style);
   const frame = document.createElement('div');
-  Object.assign(frame.style, { position: 'relative', width: 'var(--avatar-size)', height: 'var(--avatar-size)', flex: '0 0 auto' });
+  Object.assign(frame.style, { position: 'relative', width: '100%', height: 'clamp(200px, 30vh, 280px)', flex: '0 0 auto' });
   host.replaceChildren(frame);
   const root = createRoot(frame);
   host.setAttribute('role', 'button'); host.setAttribute('tabindex', '0');
@@ -38,7 +42,7 @@ if (host) {
         if (['exclaim', 'burst', 'orbit', 'comet', 'play'].includes(name)) avatar.tap();
       },
       state: () => ({ resting }),
-      stop: () => { clearTimeout(settle); host.removeEventListener('keydown', onKey); root.unmount(); },
+      stop: () => { clearTimeout(settle); host.removeEventListener('keydown', onKey); speech.dispose(); root.unmount(); },
     };
   };
   const loadFace = async (name: string) => {
@@ -46,5 +50,5 @@ if (host) {
     if (!response.ok) throw Error('Haru face ' + response.status);
     return response.text();
   };
-  root.render(<SvgAvatarCanvas onReady={onReady} loadFace={loadFace} onError={message => console.warn('[Haru avatar]', message)} onFit={() => {}} />);
+  root.render(<SvgAvatarCanvas roam read={() => ({ mouth: speech.read() })} onReady={onReady} loadFace={loadFace} onError={message => console.warn('[Haru avatar]', message)} onFit={() => {}} />);
 }

@@ -17,90 +17,90 @@ export const EXPRESSION_REACTIONS: Record<string, string> = {
 export const TAP_REACTIONS = ['tap-pancake', 'tap-boing', 'tap-jelly', 'tap-left', 'tap-right', 'tap-peek', 'tap-tumble', 'tap-squeeze', 'tap-ripple', 'tap-hop', 'tap-zoom', 'tap-retreat', 'tap-orbit', 'tap-corkscrew', 'tap-peek-left', 'tap-peek-right', 'tap-bow', 'tap-float', 'tap-ricochet', 'tap-pop-through'] as const;
 
 export const SVG_REACTIONS: Record<string, Reaction> = {
-  'tap-zoom': { duration: 1900, tracks: [
+  'tap-zoom': { duration: 560, tracks: [
     head([[0,0,0,0],[.12,0,3,0,.87],[.36,0,-3,-3,1.05],[.65,0,1,1,.98],[1,0,0,0]]),
     depth([[0,0,0,0],[.12,-.18,6,0],[.36,.6,-7,-8],[.65,.16,2,3],[1,0,0,0]]),
     gaze([[0,0,0,1],[.14,0,0,.3],[.36,0,-4,1.2],[1,0,0,1]]),
   ] },
-  'tap-retreat': { duration: 2300, tracks: [
+  'tap-retreat': { duration: 640, tracks: [
     head([[0,0,0,0],[.16,2,2,3,.92],[.4,4,-3,7,1.04],[.68,2,-1,4],[1,0,0,0]]),
     depth([[0,0,0,0],[.16,.12,-3,5],[.4,-.65,9,-16],[.68,-.4,4,-10],[1,0,0,0]]),
     turn('ear-left', [[0,0],[.4,-7],[.7,-4],[1,0]]),
   ] },
-  'tap-orbit': { duration: 2500, tracks: [
+  'tap-orbit': { duration: 720, tracks: [
     head([[0,0,0,0],[.2,-7,-3,-7,1.04],[.45,0,-5,0,.97],[.7,7,0,7,1.05],[1,0,0,0]]),
     depth([[0,0,0,0],[.2,.28,-4,-17],[.45,-.5,6,0],[.7,.28,-3,17],[1,0,0,0]]),
   ] },
-  'tap-corkscrew': { duration: 2200, tracks: [
+  'tap-corkscrew': { duration: 640, tracks: [
     head([[0,0,0,0],[.15,0,3,-6,.84],[.38,-2,-5,22,1.14],[.62,2,1,-14,.94],[.8,0,0,4,1.02],[1,0,0,0]]),
     depth([[0,0,0,0],[.15,-.22,8,-8],[.38,.4,-12,20],[.62,-.18,8,-13],[.8,.07,-2,4],[1,0,0,0]]),
   ] },
-  'tap-peek-left': { duration: 2100, tracks: [
+  'tap-peek-left': { duration: 600, tracks: [
     head([[0,0,0,0],[.2,-5,2,-5,.94],[.48,-7,-1,-9,1.04],[.75,-2,0,-2],[1,0,0,0]]),
     depth([[0,0,0,0],[.2,-.25,3,17],[.48,.42,-5,-22],[.75,.1,0,-6],[1,0,0,0]]),
     gaze([[0,0,0,1],[.2,18,0,.7],[.48,-16,-3,1.1],[1,0,0,1]]),
   ] },
-  'tap-peek-right': { duration: 2100, tracks: [
+  'tap-peek-right': { duration: 600, tracks: [
     head([[0,0,0,0],[.2,5,2,5,.94],[.48,7,-1,9,1.04],[.75,2,0,2],[1,0,0,0]]),
     depth([[0,0,0,0],[.2,-.25,3,-17],[.48,.42,-5,22],[.75,.1,0,6],[1,0,0,0]]),
     gaze([[0,0,0,1],[.2,-18,0,.7],[.48,16,-3,1.1],[1,0,0,1]]),
   ] },
-  'tap-bow': { duration: 2200, tracks: [
+  'tap-bow': { duration: 600, tracks: [
     head([[0,0,0,0],[.18,0,-2,0,1.04],[.43,0,5,0,.88],[.66,0,2,0,.96],[1,0,0,0]]),
     depth([[0,0,0,0],[.18,.16,-7,0],[.43,.32,24,0],[.66,-.12,8,0],[1,0,0,0]]),
     gaze([[0,0,0,1],[.43,0,7,.12],[.66,0,3,.6],[1,0,0,1]]),
   ] },
-  'tap-float': { duration: 3000, tracks: [
+  'tap-float': { duration: 760, tracks: [
     head([[0,0,0,0],[.22,-2,-6,-5,1.07],[.5,2,-8,5,.98],[.77,0,-3,-2,1.02],[1,0,0,0]]),
     depth([[0,0,0,0],[.22,-.35,-9,-12],[.5,-.6,-3,12],[.77,-.18,4,-4],[1,0,0,0]]),
   ] },
-  'tap-ricochet': { duration: 1800, tracks: [
+  'tap-ricochet': { duration: 560, tracks: [
     head([[0,0,0,0],[.14,-6,1,-12,.88],[.34,6,-2,11,1.1],[.53,-3,2,-6,.94],[.74,1,-1,2,1.03],[1,0,0,0]]),
     depth([[0,0,0,0],[.14,-.4,7,-19],[.34,.42,-8,18],[.53,-.22,5,-10],[.74,.1,-3,5],[1,0,0,0]]),
   ] },
-  'tap-pop-through': { duration: 2000, tracks: [
+  'tap-pop-through': { duration: 600, tracks: [
     head([[0,0,0,0],[.2,0,5,0,.75],[.41,0,-7,5,1.05],[.6,0,2,-2,.9],[.78,0,-1,1,1.04],[1,0,0,0]]),
     depth([[0,0,0,0],[.2,-.6,10,-5],[.41,.55,-10,9],[.6,-.12,4,-4],[.78,.08,-2,2],[1,0,0,0]]),
     turn('ear-left', [[0,0],[.2,-8],[.41,7],[.7,-2],[1,0]]),
     turn('ear-right', [[0,0],[.2,8],[.41,-7],[.7,2],[1,0]]),
   ] },
 
-  'tap-pancake': { duration: 1200, tracks: [
+  'tap-pancake': { duration: 440, tracks: [
     head([[0,0,0,0],[.13,0,7,0,.69],[.32,0,-4,0,1.17],[.56,0,2,0,.93],[1,0,0,0]]),
     gaze([[0,0,0,1],[.13,0,4,.2],[.32,0,-3,1.1],[1,0,0,1]]),
   ] },
-  'tap-boing': { duration: 1400, tracks: [
+  'tap-boing': { duration: 520, tracks: [
     head([[0,0,0,0],[.12,0,4,0,.86],[.3,0,-9,0,1.32],[.52,0,3,0,.85],[.72,0,-2,0,1.07],[1,0,0,0]]),
     turn('ear-left', [[0,0],[.16,-6],[.33,8],[.65,-2],[1,0]]),
     turn('ear-right', [[0,0],[.16,6],[.33,-8],[.65,2],[1,0]]),
   ] },
-  'tap-jelly': { duration: 1600, tracks: [
+  'tap-jelly': { duration: 600, tracks: [
     head([[0,0,0,0],[.12,-3,2,-9,.83],[.28,3,-2,8,1.16],[.45,-2,1,-6,.89],[.63,1,-1,3,1.07],[.8,-1,0,-1,.98],[1,0,0,0]]),
   ] },
-  'tap-left': { duration: 1300, tracks: [
+  'tap-left': { duration: 480, tracks: [
     head([[0,0,0,0],[.17,-7,3,-13,.79],[.38,3,-2,6,1.12],[.66,-1,1,-2,.96],[1,0,0,0]]),
     gaze([[0,0,0,1],[.17,16,-2,.7],[.5,-5,0,1],[1,0,0,1]]),
   ] },
-  'tap-right': { duration: 1300, tracks: [
+  'tap-right': { duration: 480, tracks: [
     head([[0,0,0,0],[.17,7,3,13,.79],[.38,-3,-2,-6,1.12],[.66,1,1,2,.96],[1,0,0,0]]),
     gaze([[0,0,0,1],[.17,-16,-2,.7],[.5,5,0,1],[1,0,0,1]]),
   ] },
-  'tap-peek': { duration: 1800, tracks: [
+  'tap-peek': { duration: 620, tracks: [
     head([[0,0,0,0],[.16,0,6,0,.77],[.35,0,5,0,.8],[.52,2,-5,5,1.2],[.78,1,0,2,.98],[1,0,0,0]]),
     gaze([[0,0,0,1],[.13,0,3,.07],[.36,0,3,.07],[.49,12,-5,1.2],[1,0,0,1]]),
   ] },
-  'tap-tumble': { duration: 1700, tracks: [
+  'tap-tumble': { duration: 580, tracks: [
     head([[0,0,0,0],[.14,-3,3,-8,.88],[.34,4,-4,24,1.12],[.52,-2,2,-16,.92],[.73,1,0,5,1.03],[1,0,0,0]]),
   ] },
-  'tap-squeeze': { duration: 1400, tracks: [
+  'tap-squeeze': { duration: 500, tracks: [
     head([[0,0,0,0],[.2,0,0,0,1.36],[.4,0,2,0,.8],[.62,0,-1,0,1.08],[1,0,0,0]]),
     turn('ear-left', [[0,0],[.2,-10],[.42,4],[1,0]]),
     turn('ear-right', [[0,0],[.2,10],[.42,-4],[1,0]]),
   ] },
-  'tap-ripple': { duration: 1800, tracks: [
+  'tap-ripple': { duration: 620, tracks: [
     head([[0,0,0,0],[.12,0,3,-3,.8],[.25,0,-3,3,1.22],[.39,0,2,-2,.87],[.54,0,-2,2,1.12],[.7,0,1,-1,.95],[.84,0,-1,1,1.03],[1,0,0,0]]),
   ] },
-  'tap-hop': { duration: 1700, tracks: [
+  'tap-hop': { duration: 580, tracks: [
     head([[0,0,0,0],[.13,0,5,0,.78],[.29,-2,-12,-7,1.16],[.48,0,4,0,.85],[.65,2,-6,5,1.09],[.82,0,1,0,.96],[1,0,0,0]]),
     gaze([[0,0,0,1],[.18,0,-2,.35],[.55,0,-2,.35],[1,0,0,1]]),
   ] },
@@ -275,4 +275,12 @@ export const SVG_REACTIONS: Record<string, Reaction> = {
 for (const [i, name] of TAP_REACTIONS.slice(0, 10).entries()) {
   const side = i % 2 ? 1 : -1;
   SVG_REACTIONS[name].tracks.push(depth([[0,0,0,0],[.16,-.12,4,side*5],[.4,.2,-4,-side*7],[.7,-.04,2,side*2],[1,0,0,0]]));
+}
+
+// A tap reads as a quick accent: reach each pose early, then let it settle.
+for (const name of TAP_REACTIONS) for (const track of SVG_REACTIONS[name].tracks) {
+  for (const frame of track.frames) {
+    frame.offset = Math.pow(frame.offset!, 1.3);
+    frame.easing = 'cubic-bezier(.2, .65, .3, 1)';
+  }
 }

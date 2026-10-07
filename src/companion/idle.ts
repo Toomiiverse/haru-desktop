@@ -79,6 +79,34 @@ export function depthMotionTarget(time: number, x: number, y: number, attentive:
     Math.max(-1, Math.min(1, x)) * 10 + Math.sin(t * .31) * 2 * calm];
 }
 
+/** Mood changes the visual flight pace; all paths stay bounded and pause between bursts. */
+export function fairyMotion(time: number, emotion: string, speaking: number) {
+  const t = Number.isFinite(time) ? time / 1000 : 0;
+  const talk = Number.isFinite(speaking) ? Math.max(0, Math.min(1, speaking)) : 0;
+  const angry = ['angry','rage','annoyed','irritated'].includes(emotion);
+  const happy = ['happy','excited','playful','triumph','laughing','silly'].includes(emotion);
+  const quiet = ['sleepy','drowsy','sad','disappointed','sick','crying','content'].includes(emotion);
+  const curious = ['curious','thinking','pensive','confused','skeptical'].includes(emotion);
+  const pace = angry ? 2.8 : happy ? 1.7 : quiet ? .4 : curious ? .85 : 1;
+  const amount = (quiet ? .38 : happy || angry ? 1 : .7) * (1 - talk * .8);
+  const burst = .3 + .7 * Math.pow(Math.max(0, Math.sin(t * .32)), 2);
+  const phase = t * pace;
+  const hop = happy ? -Math.pow(Math.abs(Math.sin(phase * 2.2)), 1.5) * .065 : Math.sin(phase * .93) * .023;
+  const dart = angry ? Math.tanh(Math.sin(phase * .55) * 2.5) : Math.sin(phase * .47);
+  const breath = (Math.sin(t * 1.3) + 1) / 2;
+  return { x: Math.sin(phase * .71) * .027 * amount, y: hop * amount,
+    z: Math.sin(phase * .53) * .12 * amount, bank: Math.cos(phase * .71) * (angry ? 9 : happy ? 5 : 2.8) * amount,
+    flightX: dart * amount * burst, flightY: Math.sin(phase * (curious ? .47 : .31) + 1) * amount * burst,
+    glow: .12 + breath * .13 + burst * amount * .11 + talk * .04 };
+}
+
+/** Frame-rate independent jaw attack/release follows audio, never a fake syllable clock. */
+export function speechJaw(open: number, weight: number, previous: number, dt: number): number {
+  const target = Number.isFinite(open) && Number.isFinite(weight) ? Math.max(0, Math.min(1, open)) * Math.max(0, Math.min(1, weight)) : 0;
+  if (!Number.isFinite(dt) || dt <= 0) return previous;
+  return previous + (target - previous) * (1 - Math.exp(-Math.min(dt, .1) / (target > previous ? .035 : .085)));
+}
+
 function wave(seconds: number, hz: number, phase: number) {
   return Math.sin(TAU * hz * seconds + phase);
 }
