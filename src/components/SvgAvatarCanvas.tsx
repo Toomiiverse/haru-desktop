@@ -9,7 +9,7 @@ import {
 } from '../../electron/emotions';
 import type { MouthReading } from '../companion/mouth';
 import type { Gaze } from '../companion/behaviour';
-import { idleMotion, settleSpring } from '../companion/idle';
+import { idleMotion, settleSpring, hairMotionTarget } from '../companion/idle';
 import { EXPRESSION_REACTIONS, SVG_REACTIONS } from '../companion/svgReactions';
 import { ANIMATION_SYMBOLS, EXPRESSION_SYMBOLS, HAIR_SYMBOLS, REACTION_SYMBOLS, hairSymbolFrames, symbolFrames } from '../companion/svgSymbols';
 
@@ -263,6 +263,14 @@ export function SvgAvatarCanvas({ className = '', onError, onReady, onFit, read,
         root.style.transformOrigin = tuft.style.transformOrigin;
         tuft.parentNode!.insertBefore(root, tuft); root.appendChild(tuft);
       }
+      // Follow-through moves the whole ear; authored flicks stay on the inner group.
+      for (const ear of Array.from(svg.querySelectorAll<SVGGraphicsElement>('[data-part="ear-left"], [data-part="ear-right"]'))) {
+        ear.querySelector('[data-hair]')?.removeAttribute('data-hair');
+        const root = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        root.setAttribute('data-hair', ear.getAttribute('data-part')!);
+        root.style.transformOrigin = ear.style.transformOrigin;
+        ear.parentNode!.insertBefore(root, ear); root.appendChild(ear);
+      }
       layer.replaceChildren(document.adoptNode(svg));
       hairLayers.set(layer, Array.from(svg.querySelectorAll<SVGGraphicsElement>('[data-hair]')).map(el => {
         const name = el.getAttribute('data-hair')!;
@@ -270,9 +278,9 @@ export function SvgAvatarCanvas({ className = '', onError, onReady, onFit, read,
         const origin = el.style.transformOrigin.split(' ').map(parseFloat);
         const from = hairLayers.get(faces[front])?.find(state => state.el.getAttribute('data-hair') === name);
         return { el, source: el.parentElement as unknown as SVGGraphicsElement, origin: new DOMPoint(origin[0], origin[1]),
-          stiffness: ear ? 250 : fringe ? 210 : tuft ? 95 : name === 'left' ? 145 : 165,
-          damping: ear ? 27 : fringe ? 22 : tuft ? 14 : 18,
-          limit: ear ? .7 : fringe ? 2.5 : tuft ? 5 : 3.5, vertical: name === 'left' || name === 'ear-left' ? -1 : 1,
+          stiffness: ear ? 135 : fringe ? 180 : tuft ? 75 : name === 'left' ? 100 : 115,
+          damping: ear ? 13 : fringe ? 17 : tuft ? 9 : 11,
+          limit: ear ? 4 : fringe ? 4 : tuft ? 9 : 6, vertical: name === 'left' || name === 'ear-left' ? -1 : 1,
           angle: from?.angle ?? 0, speed: from?.speed ?? 0, stretch: from?.stretch ?? 0, stretchSpeed: from?.stretchSpeed ?? 0, previous: null };
       }));
       return found;
@@ -309,10 +317,9 @@ export function SvgAvatarCanvas({ className = '', onError, onReady, onFit, read,
         }
         const scale = Math.max(0.01, Math.hypot(matrix.a, matrix.b));
         const vx = (sample.x - previous.x) / dt / scale, vy = (sample.y - previous.y) / dt / scale;
-        const turn = (sample.roll - previous.roll) / dt;
-        const gravity = strand.el.getAttribute('data-hair')?.startsWith('ear-') ? 0 : -sample.roll * .12;
-        const target = clamp(gravity - turn * .05 - vx * .012 + vy * strand.vertical * .006, -strand.limit, strand.limit);
-        const stretch = clamp(-vy * .00005, -.006, .006);
+        const turn = ((sample.roll - previous.roll + 540) % 360 - 180) / dt;
+        const { angle: target, stretch } = hairMotionTarget(sample.roll, turn, vx, vy,
+          strand.el.getAttribute('data-hair')?.startsWith('ear-') ?? false, strand.vertical, strand.limit);
         [strand.angle, strand.speed] = settleSpring(strand.angle, strand.speed, target, strand.stiffness, strand.damping, dt);
         [strand.stretch, strand.stretchSpeed] = settleSpring(strand.stretch, strand.stretchSpeed, stretch, strand.stiffness, strand.damping, dt);
         strand.angle = clamp(strand.angle, -strand.limit, strand.limit);

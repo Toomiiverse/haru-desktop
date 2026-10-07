@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { idleMotion, settleSpring } from '../src/companion/idle';
+import { idleMotion, settleSpring, hairMotionTarget } from '../src/companion/idle';
 
 test('hair follows a moving head, then settles consistently at different frame rates', () => {
   const trajectories = [30, 60, 144].map(fps => {
@@ -40,4 +40,30 @@ test('idle channels stay subtle and do not repeat with the former 3.8-second loo
     difference += Math.abs(a.headZ - b.headZ);
   }
   assert.ok(difference > 100);
+});
+
+
+test('head sway, tilt and nod drive both ears and hair, with lag and follow-through', () => {
+  for (const ear of [false, true]) {
+    const limit = ear ? 4 : 9;
+    assert.ok(hairMotionTarget(0, 0, 60, 0, ear, 1, limit).angle < -.5, 'lags lateral travel');
+    assert.ok(hairMotionTarget(8, 0, 0, 0, ear, 1, limit).angle < -1, 'held tilt retains gravity');
+    assert.ok(hairMotionTarget(0, 40, 0, 0, ear, 1, limit).angle < -3, 'lags turning');
+    const left = hairMotionTarget(0, 0, 0, 80, ear, -1, limit);
+    const right = hairMotionTarget(0, 0, 0, 80, ear, 1, limit);
+    assert.equal(left.angle, -right.angle, 'nod spreads opposite sides');
+    assert.ok(left.stretch < 0, 'vertical travel compresses strands');
+    let value = 0, speed = 0;
+    for (let i = 0; i < 30; i++) [value, speed] = settleSpring(value, speed, left.angle, 100, 11, 1 / 60);
+    const moving = value;
+    [value, speed] = settleSpring(value, speed, 0, 100, 11, 1 / 60);
+    assert.ok(Math.abs(value) > .5 * Math.abs(moving), 'does not snap when head stops');
+    let crossed = false;
+    for (let i = 0; i < 180; i++) {
+      [value, speed] = settleSpring(value, speed, 0, 100, 11, 1 / 60);
+      crossed ||= value > 0;
+    }
+    assert.ok(crossed && Math.abs(value) < .001, 'overshoots gently and settles');
+    assert.equal(Math.abs(hairMotionTarget(0, 10000, 10000, 0, ear, 1, limit).angle), limit);
+  }
 });

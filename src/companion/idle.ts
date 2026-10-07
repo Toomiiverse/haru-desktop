@@ -53,6 +53,14 @@ export function settleSpring(value: number, speed: number, target: number, stiff
   return [value, speed];
 }
 
+/** Head motion drives local lag; gravity keeps a held tilt from looking rigid. */
+export function hairMotionTarget(roll: number, turn: number, vx: number, vy: number, ear: boolean, side: number, limit: number) {
+  const angle = -roll * (ear ? .18 : .45) - turn * (ear ? .085 : .13)
+    - vx * (ear ? .012 : .022) + vy * side * (ear ? .012 : .018);
+  return { angle: Math.max(-limit, Math.min(limit, angle)),
+    stretch: Math.max(-.025, Math.min(.025, -vy * (ear ? .00004 : .00012))) };
+}
+
 function wave(seconds: number, hz: number, phase: number) {
   return Math.sin(TAU * hz * seconds + phase);
 }
