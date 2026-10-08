@@ -834,6 +834,8 @@ function roamTick() {
   const bounds = window_.getBounds();
   const now = Date.now();
   reportDesktop();
+  // The SVG presentation settles beside windows; the legacy floor walker must not compete.
+  if (store.get('avatar.kind', 'svg') === 'svg') { stopWalking(); return; }
   if(visitTick(now,bounds))return;
   if(perchTick(now,bounds))return;
 

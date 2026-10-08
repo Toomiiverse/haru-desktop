@@ -70,13 +70,12 @@ export function dragMotionTarget(vx: number, vy: number, size: number, held: boo
     1.03 + amount * (2 * y * y - 1), Math.max(-12, Math.min(12, vx / size * 1.8))];
 }
 
-/** Gentle depth drift and gaze turns, in avatar-size units and degrees. */
+/** Depth has a reason: attention or rest; gaze turns never change her size. */
 export function depthMotionTarget(time: number, x: number, y: number, attentive: boolean, quiet: boolean): number[] {
   if (![time, x, y].every(Number.isFinite)) return [0, 0, 0];
-  const t = time / 1000, calm = quiet ? .4 : 1;
-  return [Math.sin(t * .55) * .045 * calm + (attentive ? .1 : quiet ? -.08 : 0),
-    -Math.max(-1, Math.min(1, y)) * 7 + Math.sin(t * .43) * 1.5 * calm,
-    Math.max(-1, Math.min(1, x)) * 10 + Math.sin(t * .31) * 2 * calm];
+  return [attentive ? .1 : quiet ? -.04 : 0,
+    -Math.max(-1, Math.min(1, y)) * 7,
+    Math.max(-1, Math.min(1, x)) * 10];
 }
 
 /** Mood changes the visual flight pace; all paths stay bounded and pause between bursts. */
@@ -122,8 +121,8 @@ export function glowMotion(previous: { phase: number; energy: number; voice: num
   const hz = ((angry ? .52 : lively ? .30 : .22) + energy * .14) * (1 - asleep) + asleep / 5.4;
   const phase = (previous.phase + step * hz * TAU) % TAU;
   const breath = (1 - Math.cos(phase)) / 2;
-  const awake = .07 + breath * (angry ? .22 : .11) + energy * .43 + voice * (angry ? .36 : .30);
-  const intensity = follow(previous.intensity, Math.min(.92, awake * (1 - asleep) + (.012 + breath * .023) * asleep), .045, .18);
+  const awake = .025 + breath * (angry ? .14 : .045) + energy * .43 + voice * (angry ? .36 : .30);
+  const intensity = follow(previous.intensity, Math.min(.92, awake * (1 - asleep) + (.005 + breath * .009) * asleep), .045, .18);
   return { phase, energy, voice, intensity, breath };
 }
 

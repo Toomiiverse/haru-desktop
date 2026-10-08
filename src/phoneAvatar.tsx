@@ -52,5 +52,5 @@ if (host) {
     if (!response.ok) throw Error('Haru face ' + response.status);
     return response.text();
   };
-  root.render(<SvgAvatarCanvas roam read={() => native ? { mouth: { open: native.mouth || 0, weight: performance.now() < native.speakingUntil ? 1 : 0 }, peek: !!native.peek, gaze: native.peek ? { x: .15, y: .9 } : undefined } : { mouth: speech.read() }} onReady={onReady} loadFace={loadFace} onError={message => console.warn('[Haru avatar]', message)} onFit={() => {}} />);
+  root.render(<SvgAvatarCanvas roam read={() => native ? { mouth: { open: native.mouth || 0, weight: performance.now() < native.speakingUntil ? 1 : 0 }, peek: !!native.peek, attachment: !!native.attachment, gaze: native.attachment ? { x: -.9, y: .8 } : native.peek ? { x: 0, y: .9 } : undefined } : { mouth: speech.read() }} onReady={onReady} loadFace={loadFace} onError={message => console.warn('[Haru avatar]', message)} onFit={() => {}} />);
 }

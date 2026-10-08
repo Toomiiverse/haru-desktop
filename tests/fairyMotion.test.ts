@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { stripTypeScriptTypes } from 'node:module';
 import vm from 'node:vm';
 import { fairyMotion, speechJaw, sleepMotion, glowMotion } from '../src/companion/idle';
+import { desktopAnchor } from '../src/companion/placement';
 
 test('glow follows measured motion and syllables, breathes faster with anger, and dims during sleep', () => {
   const run = (fps: number, speed = 0, audio = 0, rest = 0, emotion = 'neutral') => {
@@ -13,13 +14,14 @@ test('glow follows measured motion and syllables, breathes faster with anger, an
       const next = glowMotion(state, 1 / fps, emotion, speed, audio, rest);
       if (next.phase < state.phase) cycles++;
       assert.ok(Object.values(next).every(Number.isFinite));
-      assert.ok(next.intensity >= .012 && next.intensity <= .92);
+      assert.ok(next.intensity >= .005 && next.intensity <= .92);
       state = next; if (i >= fps * 5) total += state.intensity / (fps * 25);
     }
     return { state, total, cycles };
   };
   const calm = run(60), moving = run(60, 2), talking = run(60, 0, .8), asleep = run(60, 2, 1, 1);
   assert.ok(moving.total > calm.total * 3);
+  assert.ok(calm.total < .055, 'idle light stays soft');
   assert.ok(talking.total > calm.total * 2);
   assert.ok(asleep.total < .04 && asleep.total < calm.total / 3);
   assert.ok(run(60, 0, 0, 0, 'angry').cycles > calm.cycles * 2);
@@ -63,10 +65,11 @@ test('desktop flight is bounded, yields to interaction, and rejects stale or inv
   const code = source.slice(source.indexOf('  function floatAcrossDesktop('),source.indexOf('  function onPointerDown('));
   let at=100; const calls:number[][]=[];
   const c:any={flightSample:{current:null},flightPending:{current:false},dragging:{current:false},asking:false,caption:null,lastPointerOver:{current:false},
-    performance:{now:()=>at},screen:{availWidth:1920,availHeight:1080},window:{haru:{companion:{floatBy:(x:number,y:number)=>{calls.push([x,y]);return Promise.resolve();}}}}};
+    home:{current:null},desktopAnchor,perch:{current:{desktop:{avatar:{x:0,y:0,width:300,height:300},workArea:{x:0,y:0,width:1920,height:1080},windows:[]}}},
+    performance:{now:()=>at},window:{screenX:0,screenY:0,haru:{companion:{floatBy:(x:number,y:number)=>{calls.push([x,y]);return Promise.resolve();}}}}};
   vm.runInNewContext(stripTypeScriptTypes(code)+';globalThis.float=floatAcrossDesktop',c);
   c.float(0,0,true);assert.equal(calls.length,0);
-  at+=33;c.float(1,-1,true);assert.deepEqual(calls[0],[80,-80]);
+  at+=33;c.float(1,-1,true);assert.ok(calls[0][0]>0 && calls[0][1]>0 && Math.hypot(...calls[0])<=80.001,'moves toward home, regardless of old random flight sample');
   await new Promise(resolve=>setImmediate(resolve));
   c.dragging.current=true;at+=33;c.float(.5,.5,true);assert.equal(calls.length,1);
   c.dragging.current=false;at+=33;c.float(.5,.5,true);assert.equal(calls.length,1);

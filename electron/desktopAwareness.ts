@@ -5,6 +5,7 @@ export type DesktopPeek = { edge: 'left' | 'right' | 'top'; started: number; dur
 export type DesktopScene = {
   displayId: number; windowCount: number; crowding: number; avatar: Rect;
   occluders: Rect[]; focus: Point | null; peek: DesktopPeek | null;
+  workArea?: Rect; windows?: Rect[];
 };
 export type DesktopVisit = { id: string; edge: DesktopPeek['edge']; offset: number };
 type Display = { id: number; bounds: Rect; workArea: Rect };
@@ -53,7 +54,7 @@ function coveredArea(rectangles:Rect[]):number {
 export function desktopScene(surfaces:DesktopSurface[],work:Rect,body:Rect,displayId:number,peek:DesktopPeek|null=null,behindId?:string,focusId?:string):DesktopScene {
   const local=surfacesOnDisplay(surfaces,work),rectangles=local.map(s=>intersection(s,work)!);
   const index=local.findIndex(s=>s.id===behindId),focus=local.find(s=>s.id===(focusId??behindId))??local[0];
-  return {displayId,windowCount:local.length,crowding:Math.min(1,coveredArea(rectangles)/Math.max(1,work.width*work.height)),avatar:{...body},
+  return {displayId,windowCount:local.length,crowding:Math.min(1,coveredArea(rectangles)/Math.max(1,work.width*work.height)),avatar:{...body},workArea:{...work},windows:rectangles,
     occluders:index<0?[]:local.slice(0,index+1).map(s=>intersection(s,work)!),
     focus:focus?{x:Math.max(work.x,Math.min(work.x+work.width,focus.x+focus.width/2)),y:Math.max(work.y,Math.min(work.y+work.height,focus.y+Math.min(focus.height*.35,180)))}:null,peek};
 }

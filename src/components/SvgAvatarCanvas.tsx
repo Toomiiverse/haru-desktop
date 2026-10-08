@@ -9,7 +9,9 @@ import {
 } from '../../electron/emotions';
 import type { MouthReading } from '../companion/mouth';
 import type { Gaze } from '../companion/behaviour';
-import { idleMotion, settleSpring, hairMotionTarget, dragMotionTarget, depthMotionTarget, fairyMotion, speechJaw, sleepMotion, glowMotion } from '../companion/idle';
+import { idleMotion, settleSpring, hairMotionTarget, dragMotionTarget, depthMotionTarget, speechJaw, sleepMotion, glowMotion } from '../companion/idle';
+import { panelContact } from '../companion/placement';
+import type { DesktopScene } from '../../electron/desktopAwareness';
 import { EXPRESSION_REACTIONS, SVG_REACTIONS, TAP_REACTIONS } from '../companion/svgReactions';
 import { ANIMATION_SYMBOLS, EXPRESSION_SYMBOLS, HAIR_SYMBOLS, REACTION_SYMBOLS, hairSymbolFrames, symbolFrames } from '../companion/svgSymbols';
 
@@ -50,7 +52,7 @@ interface Props {
   onError(message: string): void;
   onReady(handle: SvgAvatarHandle | null): void;
   onFit(width: number): void;
-  read?(): { mouth: MouthReading; gaze?: Gaze; peek?: boolean };
+  read?(): { mouth: MouthReading; gaze?: Gaze; peek?: boolean; attachment?: boolean; desktop?: DesktopScene; engaged?: boolean };
   loadFace?(name: string): Promise<string>;
 }
 
@@ -79,7 +81,6 @@ for (const [path, text] of Object.entries(FACE_FILES)) {
 const TAU = Math.PI * 2;
 const clamp = (v: number, lo: number, hi: number) => (v < lo ? lo : v > hi ? hi : v);
 const easeOut = (p: number) => 1 - Math.pow(1 - p, 3);
-const hashN = (n: number) => { const x = Math.sin(n * 12.9898 + 78.233) * 43758.5453; return x - Math.floor(x); };
 
 type EngineSample = {
   emotion: string;
@@ -114,18 +115,9 @@ function createEmotionEngine(duration: () => number) {
       return { ...glance, looking: !!(glance.x || glance.y) };
     },
     blinks: () => !!BLINKS[emotion],
-    pose(t: number) {
+    pose(_t: number) {
       const m = POSES[emotion] || POSES.neutral;
-      const beat = Math.floor(t / 5200), phase = (t - beat * 5200) / 5200;
-      const r = hashN(beat + 3000), posed = r > 0.4 && phase < 0.62;
-      const sign = hashN(beat + 4000) < 0.5 ? -1 : 1, amount = 0.4 + hashN(beat + 5000) * 0.6;
-      const a = hashN(beat + 6000) * TAU, d = hashN(beat + 7000);
-      return {
-        tilt: m.leanDeg + (posed ? sign * amount * m.tiltDeg * .4 : 0),
-        dx: posed ? Math.cos(a) * d * m.roam * .25 : 0,
-        dy: posed ? Math.sin(a) * d * m.roam * .15 : 0,
-        posed, beat,
-      };
+      return { tilt: m.leanDeg, dx: 0, dy: 0 };
     },
     set(next: string, t: number) {
       if (NAMES.indexOf(next) < 0) next = 'neutral';
@@ -206,6 +198,10 @@ export function SvgAvatarCanvas({ className = '', roam = false, onFloat, onError
     container.innerHTML = '<div id="avatar" role="img" aria-label="' + LABELS.neutral + '"><div id="avatar-pose"><div class="avatar-depth"><div class="avatar-gesture"><div class="avatar-drag"><div class="avatar-rest"><div id="avatar-body"><div class="face"></div><div class="face"></div><svg class="avatar-symbol-layer" viewBox="0 0 1254 1254" aria-hidden="true"></svg><svg class="avatar-sleep-layer" viewBox="0 0 1254 1254" aria-hidden="true"></svg></div></div></div></div></div></div></div>';
     const box = container.querySelector('#avatar') as HTMLElement;
     const body = container.querySelector('#avatar-body') as HTMLElement;
+    const boundary = document.createElement('div'); boundary.className = 'avatar-boundary';
+    box.prepend(boundary); boundary.appendChild(container.querySelector('#avatar-pose')!);
+    let correction = { x: 0, y: 0 }, contactWall = '', contactUntil = 0;
+    let maskedWindows: NonNullable<DesktopScene['windows']> = [], maskKey = '';
     const poseEl = container.querySelector('#avatar-pose') as HTMLElement;
     const gestureEl = container.querySelector('.avatar-gesture') as HTMLElement;
     const depthEl = container.querySelector('.avatar-depth') as HTMLElement;
@@ -228,7 +224,7 @@ export function SvgAvatarCanvas({ className = '', roam = false, onFloat, onError
     let reactionName = '', reactionStart = 0, reactionUntil = 0;
     const hairLayers = new Map<HTMLElement, HairState[]>();
     let hairFrame = 0, hairTime = 0, jaw = 0;
-    let glow = { phase: 0, energy: 0, voice: 0, intensity: .12, breath: 0 };
+    let glow = { phase: 0, energy: 0, voice: 0, intensity: .04, breath: 0 };
     let glowPrevious: number[] | null = null;
     let lastMotion = -Infinity;
     const faces = Array.from(container.querySelectorAll<HTMLElement>('.face'));
@@ -346,22 +342,16 @@ export function SvgAvatarCanvas({ className = '', roam = false, onFloat, onError
       if (box.getAttribute('data-rest') !== restMode) box.setAttribute('data-rest', restMode);
       restEl.style.transform = `translateY(calc(var(--avatar-size) * ${rest.lift})) rotate(${rest.roll}deg) scale(${1 / rest.stretch},${rest.stretch})`;
       box.style.setProperty('--rest-lid', String(rest.lid));
-      const hover = fairyMotion(time * (callbacks.current.roam ? 1.65 : 1), engine.emotion(), mouth.weight);
-      hover.x *= 1 - restAmount * .9; hover.y *= 1 - restAmount * .9; hover.bank *= 1 - restAmount * .9; hover.z *= 1 - restAmount * .9;
-      const travel = callbacks.current.roam ? 1.65 : 1;
-      const flight = [reading?.peek ? 0 : clamp(hover.flightX * travel, -.94, .94), reading?.peek ? 0 : clamp(hover.flightY * travel, -.94, .94), hover.y, hover.bank];
-      const moving = !reading?.peek && wantedRest < .05 && restAmount < .05 && !dragPoint && time >= reactionUntil && mouth.weight < .05 && !(claim && time < claimUntil);
+      const flight = [reading?.attachment ? .9 : 0, 0, 0, 0];
+      const moving = !dragPoint && mouth.weight < .05 && !(claim && time < claimUntil);
       for (let i = 0; i < flight.length; i++) {
-        if (i < 2 && !moving && !reading?.peek) { flightSpeed[i] = 0; continue; }
         [flightPose[i], flightSpeed[i]] = settleSpring(flightPose[i], flightSpeed[i], flight[i], 70, 15, dt);
       }
       callbacks.current.onFloat?.(flightPose[0], flightPose[1], moving);
-      const flightX = callbacks.current.roam ? flightPose[0] * Math.max(0, (container!.clientWidth - box.offsetWidth) / 2) : 0;
-      const flightY = callbacks.current.roam ? flightPose[1] * Math.max(0, (container!.clientHeight - box.offsetHeight) / 2) : 0;
-      const roaming = dragPoint || time < reactionUntil ? .35 : 1;
+      const flightX = callbacks.current.roam ? flightPose[0] * Math.max(0, (container!.clientWidth - box.offsetWidth * .65) / 2) : 0;
       const idle = idleMotion(time, { energy: (quiet ? .2 : .55) * (1 - fallingAsleep), sleepiness: Math.max(quiet ? .75 : .1, fallingAsleep), stress: 0 }, Math.max(mouth.weight, claim?.why === 'talking' && time < claimUntil ? .8 : 0));
       idle.breath = glow.breath;
-      box.style.transform = `translate(calc(${flightX}px + var(--avatar-size) * ${hover.x * roaming}), calc(${flightY}px + var(--avatar-size) * ${flightPose[2] * roaming})) rotate(${flightPose[3] * roaming}deg) translate(calc(var(--idle-bob) * ${(idle.driftX * 65).toFixed(4)}), calc(var(--idle-bob) * ${(-idle.breath).toFixed(4)})) rotate(calc(var(--idle-sway) * ${(idle.headZ * .4 + idle.bodyZ * .2).toFixed(4)})) scaleY(calc(1 + (var(--idle-breath) - 1) * ${idle.breath.toFixed(4)}))`;
+      box.style.transform = `translateX(${flightX}px) translate(calc(var(--idle-bob) * ${(idle.driftX * 30).toFixed(4)}), calc(var(--idle-bob) * ${(-idle.breath).toFixed(4)})) scaleY(calc(1 + (var(--idle-breath) - 1) * ${idle.breath.toFixed(4)}))`;
       const decay = dragPoint ? Math.exp(-Math.max(0, time - dragPoint.at - 40) / 85) : 0;
       const deformation = dragMotionTarget(dragVelocity.x * decay, dragVelocity.y * decay, box.offsetWidth, !!dragPoint);
       for (let i = 0; i < dragShape.length; i++) {
@@ -370,7 +360,7 @@ export function SvgAvatarCanvas({ className = '', roam = false, onFloat, onError
       dragEl.style.transform = `matrix(${dragShape[0]},${dragShape[1]},${dragShape[1]},${dragShape[2]},0,0) rotate(${dragShape[3]}deg)`;
       const gaze = target(time, reading);
       const depthTarget = depthMotionTarget(time, gaze.x, gaze.y, !!claim && time < claimUntil, quiet);
-      depthTarget[0] += reading?.peek ? .18 : hover.z * roaming;
+      depthTarget[0] += reading?.peek ? .18 : reading?.attachment ? .06 : 0;
       depthTarget[0] += dragPoint ? Math.min(.15, Math.hypot(dragVelocity.x, dragVelocity.y) * decay / Math.max(1, box.offsetWidth) * .02) : 0;
       for (let i = 0; i < depthPose.length; i++) {
         [depthPose[i], depthSpeed[i]] = settleSpring(depthPose[i], depthSpeed[i], depthTarget[i], 85, 11, dt);
@@ -379,6 +369,8 @@ export function SvgAvatarCanvas({ className = '', roam = false, onFloat, onError
       depthEl.style.setProperty('--view-pitch', String(depthPose[1]));
       depthEl.style.setProperty('--total-depth', `clamp(-.95, calc(${depthPose[0]} + var(--depth-z)), .82)`);
       depthEl.style.transform = `translateY(calc(var(--avatar-size) * var(--total-depth) * .08)) perspective(calc(var(--avatar-size) * 2.8)) translateZ(calc(var(--avatar-size) * var(--total-depth))) rotateX(calc((${depthPose[1]} + var(--depth-pitch)) * 1deg)) rotateY(calc((${depthPose[2]} + var(--depth-yaw)) * 1deg))`;
+      constrainPanel();
+      maskDesktop(time, reading);
       // Read parent matrices before writing strand transforms, avoiding repeated layout work.
       const matrices = new Map<SVGGraphicsElement, DOMMatrix | null>();
       for (const states of hairLayers.values()) for (const strand of states) {
@@ -408,6 +400,33 @@ export function SvgAvatarCanvas({ className = '', roam = false, onFloat, onError
       }
       hairFrame = requestAnimationFrame(followHair);
     }
+    function constrainPanel() {
+      if (!callbacks.current.roam) return;
+      const svg = faces[front].querySelector('svg'), matrix = svg?.getScreenCTM();
+      if (!svg || !matrix) return;
+      const b = svg.getBBox(), panel = container!.getBoundingClientRect();
+      const points = [[b.x,b.y],[b.x+b.width,b.y],[b.x,b.y+b.height],[b.x+b.width,b.y+b.height]].map(([x,y]) => new DOMPoint(x,y).matrixTransform(matrix));
+      const xs = points.map(p => p.x / p.w - correction.x), ys = points.map(p => p.y / p.w - correction.y);
+      const contact = panelContact({x:Math.min(...xs),y:Math.min(...ys),width:Math.max(...xs)-Math.min(...xs),height:Math.max(...ys)-Math.min(...ys)}, panel);
+      correction = contact; boundary.style.translate = `${contact.x}px ${contact.y}px`;
+      if (contact.wall && contact.wall !== contactWall && clock() >= contactUntil && !reduced) {
+        const top = contact.wall === 'top';
+        animate(body, [{scale:'1 1'},{scale:top?'1.10 .86':'.84 1.10',offset:.18},{scale:top?'.98 1.03':'1.04 .98',offset:.58},{scale:'1 1'}],310);
+        contactUntil = clock() + 400;
+      }
+      if (contact.wall || clock() >= contactUntil) contactWall = contact.wall;
+    }
+    function maskDesktop(t: number, reading = callbacks.current.read?.()) {
+      const active = dragPoint || reading?.engaged || (reading?.mouth.weight ?? 0) > .05 || (claim && t < claimUntil);
+      maskedWindows = active ? [] : reading?.desktop?.windows ?? [];
+      const r = container!.getBoundingClientRect(), x = window.screenX + r.x, y = window.screenY + r.y;
+      const key = JSON.stringify([x,y,r.width,r.height,maskedWindows]);
+      if (key === maskKey) return; maskKey = key;
+      // Black rectangles form a union, so overlapping windows never reveal her accidentally.
+      const rects = maskedWindows.map(w => `<rect x="${w.x-x}" y="${w.y-y}" width="${w.width}" height="${w.height}" fill="black"/>`).join('');
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${r.width}" height="${r.height}"><mask id="m"><rect width="100%" height="100%" fill="white"/>${rects}</mask><rect width="100%" height="100%" fill="white" mask="url(#m)"/></svg>`;
+      container!.style.maskImage = rects ? `url("data:image/svg+xml,${encodeURIComponent(svg)}")` : '';
+    }
     function idleFor(name: string) {
       const m = IDLE[name] || IDLE.neutral;
       box.style.setProperty('--idle-bob', m.bobPx * .4 + 'px'); box.style.setProperty('--idle-sway', m.swayDeg * .6 + 'deg'); box.style.setProperty('--idle-breath', String(1 + m.breath * .25));
@@ -428,7 +447,7 @@ export function SvgAvatarCanvas({ className = '', roam = false, onFloat, onError
       const frame = engine.sample(t);
       if (reduced) {
         box.setAttribute('data-rest', frame.emotion === 'sleepy' ? 'asleep' : frame.emotion === 'drowsy' ? 'tired' : 'awake');
-        box.style.setProperty('--fairy-glow', frame.emotion === 'sleepy' ? '.02' : '.12');
+        box.style.setProperty('--fairy-glow', frame.emotion === 'sleepy' ? '.01' : '.04');
       }
       const mine = ++request;
       box.setAttribute('aria-label', LABELS[frame.emotion] || ('Haru feeling ' + frame.emotion));
@@ -479,6 +498,7 @@ export function SvgAvatarCanvas({ className = '', roam = false, onFloat, onError
       return engineTarget(t);
     }
     function look() {
+      maskDesktop(clock());
       if (frozenAt !== null || reduced) {
         box.style.setProperty('--gaze-x', '0px'); box.style.setProperty('--gaze-y', '0px');
         const still = frozenAt === null ? { tilt: 0, dx: 0, dy: 0 } : engine.pose(frozenAt);
@@ -689,8 +709,9 @@ export function SvgAvatarCanvas({ className = '', roam = false, onFloat, onError
         for (const animation of animations.values()) animation.cancel(); animations.clear();
         cancelAnimationFrame(hairFrame); hairFrame = 0;
         box.style.transform = ''; jaw = 0; restAmount = restSpeed = 0; restEl.style.transform = '';
+        boundary.style.translate = ''; correction = { x: 0, y: 0 }; contactWall = ''; contactUntil = 0;
         box.style.setProperty('--rest-lid', '1'); box.setAttribute('data-rest', engine.emotion() === 'sleepy' ? 'asleep' : 'awake');
-        box.style.setProperty('--jaw-open', '0'); box.style.setProperty('--fairy-glow', engine.emotion() === 'sleepy' ? '.02' : '.12');
+        box.style.setProperty('--jaw-open', '0'); box.style.setProperty('--fairy-glow', engine.emotion() === 'sleepy' ? '.01' : '.04');
         box.style.setProperty('--glow-voice', '0'); glowPrevious = null;
         drag(null); dragEl.style.transform = '';
         depthEl.style.transform = ''; depthEl.style.setProperty('--view-yaw', '0'); depthEl.style.setProperty('--view-pitch', '0');
@@ -710,7 +731,7 @@ export function SvgAvatarCanvas({ className = '', roam = false, onFloat, onError
       expression,
       play, tap, drag,
       symbol: showSymbol,
-      hitTest: (x, y) => { const r = box.getBoundingClientRect(); return r.width > 0 && x >= r.left && x <= r.right && y >= r.top && y <= r.bottom; },
+      hitTest: (x, y) => { const r = box.getBoundingClientRect(); return !maskedWindows.some(w => x+window.screenX>=w.x && x+window.screenX<=w.x+w.width && y+window.screenY>=w.y && y+window.screenY<=w.y+w.height) && r.width > 0 && x >= r.left && x <= r.right && y >= r.top && y <= r.bottom; },
       notify,
       attend,
     };

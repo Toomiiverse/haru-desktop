@@ -61,6 +61,7 @@ function drive() {
     ANIMATION_SYMBOLS, showSymbol(name: string, options: any) { symbols.push({ name, options }); }, clearSymbol() { symbols.push(null); },
     faces: [{ querySelector: (selector: string) => parts[selector.match(/"(.*?)"/)![1]] }], front: 0,
     reactionName: '', reactionStart: 0, reactionUntil: 0, lastMotion: 0, nextEarTwitch: 0,
+    boundary: element(), correction: {x:0,y:0}, contactWall:'', contactUntil:0,
     motionPreference: { matches: false }, reduced: false, frozenAt: null, hairFrame: 0, hairLayers: new Map(),
     engine: { emotion: () => 'neutral' }, LABELS: { neutral: 'Haru feeling neutral' },
     clock: () => 1000, target: () => ({ x: 0 }), scheduleBlink() {}, look() {}, followHair() {},

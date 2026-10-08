@@ -42,6 +42,7 @@
   transform:translate(calc(var(--avatar-size) * var(--drift-x)), calc(var(--avatar-size) * var(--drift-y))) rotate(var(--tilt));
   transition:--tilt 1.1s cubic-bezier(0.4, 0, 0.2, 1), --drift-x 1.4s cubic-bezier(0.4, 0, 0.2, 1), --drift-y 1.4s cubic-bezier(0.4, 0, 0.2, 1); }
 .svg-avatar-canvas #avatar-body{position:absolute;inset:0;transform-origin:50% 60%;}
+.svg-avatar-canvas .avatar-boundary{position:absolute;inset:0;}
 .svg-avatar-canvas .avatar-depth{position:absolute;inset:0;transform-origin:50% 50%;--depth-z:0;--depth-pitch:0;--depth-yaw:0;}
 .svg-avatar-canvas .avatar-drag{position:absolute;inset:0;transform-origin:50% 58%;}
 .svg-avatar-canvas .avatar-gesture{position:absolute;inset:0;transform-origin:50% 68%;}

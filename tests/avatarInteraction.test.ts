@@ -8,7 +8,7 @@ test('desktop routes taps once, tracks screen movement, and releases cancelled d
   const source=readFileSync('src/CompanionWindow.tsx','utf8');
   const code=source.slice(source.indexOf('  function onPointerDown('),source.indexOf('  function onContextMenu('));
   const calls: unknown[][]=[];
-  const context:any={dragging:{current:false},movedByHand:{current:false},press:{current:null},asking:true,
+  const context:any={dragging:{current:false},movedByHand:{current:false},press:{current:null},home:{current:null},asking:true,
     svgHandle:{current:{tap:()=>calls.push(['tap']),drag:(p:any)=>calls.push(['drag',p])}},performance:{now:()=>100},
     window:{haru:{companion:{dragging:(...args:any[])=>calls.push(['held',...args]),moveBy:(...args:any[])=>calls.push(['move',...args]),poke:()=>assert.fail('visual tap must not be replaced by a backend poke')}}}};
   vm.runInNewContext(stripTypeScriptTypes(code)+';globalThis.input={onPointerDown,onPointerMove,onPointerUp,cancelDrag}',context);

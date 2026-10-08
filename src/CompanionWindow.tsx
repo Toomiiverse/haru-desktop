@@ -9,6 +9,7 @@ import { POSES, POSE_TIMING, poseStrength } from './companion/pose';
 import { attachParameterLayer } from './companion/parameters';
 import { createVoicePlayer, type MouthReading, type VoicePlayer } from './companion/mouth';
 import { idleMotion } from './companion/idle';
+import { desktopAnchor } from './companion/placement';
 import { referenceClip } from './companion/referenceClips';
 import { randomWait } from './retorts';
 import type { Emotion, Vitals, VoiceConfig } from './types';
@@ -115,6 +116,8 @@ export function CompanionWindow() {
   const dragging = useRef(false);
   const flightSample = useRef<{ x: number; y: number; at: number } | null>(null);
   const flightPending = useRef(false);
+  const home = useRef<{ x: number; y: number } | null>(null);
+  const engaged = useRef(false);
   const modelHandle = useRef<Live2DModelHandle | null>(null);
   const vrmHandle = useRef<VRMHandle | null>(null);
   const svgHandle = useRef<SvgAvatarHandle | null>(null);
@@ -157,7 +160,14 @@ export function CompanionWindow() {
     svgHandle.current = handle;lastPointerOver.current=null;
     expressions.current = [];
   }, []);
-  const readVRM = useCallback(() => ({ mouth: voice.current?.read() ?? SILENT, gaze: vrmGaze.current, wardrobe: wardrobe.current, ears: earFeeling.current, seated:perch.current.seated, jump:perch.current.jump, fall:perch.current.fall, walking:walking.current, walkingSpeed:speedFor(life.current.vitals.energy), desktop:perch.current.desktop }), []);
+  const readVRM = useCallback(() => ({ mouth: voice.current?.read() ?? SILENT, gaze: vrmGaze.current, wardrobe: wardrobe.current, ears: earFeeling.current, seated:perch.current.seated, jump:perch.current.jump, fall:perch.current.fall, walking:walking.current, walkingSpeed:speedFor(life.current.vitals.energy), desktop:perch.current.desktop, engaged:engaged.current }), []);
+  const readSvg = () => {
+    const reading = readVRM(), focus = reading.desktop?.focus, body = reading.desktop?.avatar;
+    const gaze = focus && body && life.current.idleSeconds > 8 && !engaged.current
+      ? { x: (focus.x - body.x - body.width / 2) / body.width, y: (focus.y - body.y - body.height / 2) / body.height }
+      : { x: reading.gaze.x, y: -reading.gaze.y };
+    return { ...reading, gaze };
+  };
 
   const handleReady = useCallback((handle: Live2DModelHandle | null) => {
     modelHandle.current = handle;
@@ -502,6 +512,7 @@ export function CompanionWindow() {
   // means the question has gone and the answer has not come back yet, which on
   // a local model is two to six seconds and needs to look like something.
   const [asking, setAsking] = useState(false);
+  engaged.current = asking || !!caption;
   const [draft, setDraft] = useState('');
   const [waiting, setWaiting] = useState(false);
   // Picked once when the question goes out rather than per render, so it does not
@@ -598,8 +609,12 @@ export function CompanionWindow() {
     if (!previous || at - previous.at > 150) { flightSample.current = { x, y, at }; return; }
     if (flightPending.current || at - previous.at < 32) return;
     flightSample.current = { x, y, at };
-    const clamp = (n: number) => Math.max(-80, Math.min(80, n));
-    const request = window.haru?.companion.floatBy?.(clamp((x - previous.x) * screen.availWidth * .35), clamp((y - previous.y) * screen.availHeight * .3));
+    const scene = perch.current.desktop, destination = scene && desktopAnchor(scene, home.current);
+    if (!scene || !destination) return;
+    const dx = destination.x - window.screenX, dy = destination.y - window.screenY;
+    if (Math.hypot(dx, dy) < 2) return;
+    const step = Math.min(1, (at - previous.at) / 180, 80 / Math.max(1, Math.hypot(dx, dy)));
+    const request = window.haru?.companion.floatBy?.(dx * step, dy * step);
     if (request) { flightPending.current = true; void request.catch(() => {}).finally(() => { flightPending.current = false; }); }
   }
   function onPointerDown(event: React.PointerEvent) {
@@ -626,7 +641,7 @@ export function CompanionWindow() {
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
     const started = press.current;
     press.current = null;
-    if(movedByHand.current){movedByHand.current=false;void window.haru?.companion.dragging(false,true);return;}
+    if(movedByHand.current){home.current={x:window.screenX,y:window.screenY};movedByHand.current=false;void window.haru?.companion.dragging(false,true);return;}
     if (!started) return;
     // Generous on distance and time: dragging a small window by hand always
     // wobbles a few pixels, and treating that as a poke would have her complain
@@ -662,7 +677,7 @@ export function CompanionWindow() {
   return (
     <div className="companion-stage">
       {avatarKind === 'svg'
-        ? <SvgAvatarCanvas onFloat={floatAcrossDesktop} onError={setError} onReady={handleSvgReady} onFit={onFit} read={readVRM} />
+        ? <SvgAvatarCanvas onFloat={floatAcrossDesktop} onError={setError} onReady={handleSvgReady} onFit={onFit} read={readSvg} />
         : <StageFailureBoundary key={model!.url} onError={setError}>
         <Suspense fallback={null}>
           {model!.path.toLowerCase().endsWith('.vrm')

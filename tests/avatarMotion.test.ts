@@ -94,7 +94,7 @@ test('drag deformation follows speed and direction, stays bounded and springs ba
 });
 
 
-test('depth drifts, looks toward gaze and leans forward with attention without camera flips', () => {
+test('depth holds its size, looks toward gaze and leans forward only with attention', () => {
   const atRest=depthMotionTarget(0,0,0,false,false), near=depthMotionTarget(0,0,0,true,false), far=depthMotionTarget(0,0,0,false,true);
   assert.ok(near[0]>atRest[0] && far[0]<atRest[0]);
   assert.ok(depthMotionTarget(0,1,-1,false,false)[2]>0 && depthMotionTarget(0,-1,1,false,false)[1]<0);
@@ -102,7 +102,7 @@ test('depth drifts, looks toward gaze and leans forward with attention without c
     const pose=depthMotionTarget(t,10,-10,true,false);
     assert.ok(Math.abs(pose[0])<.15 && Math.abs(pose[1])<=8.5 && Math.abs(pose[2])<=12);
   }
-  assert.notDeepEqual(depthMotionTarget(3000,0,0,false,false),atRest);
+  assert.deepEqual(depthMotionTarget(3000,0,0,false,false),atRest);
   assert.deepEqual(depthMotionTarget(NaN,0,0,false,false),[0,0,0]);
   // Same perspective ratio on desktop and phone: forward enlarges, retreat shrinks.
   for(const size of [128,250,600]) {
