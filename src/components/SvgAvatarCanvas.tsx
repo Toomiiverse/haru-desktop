@@ -9,7 +9,7 @@ import {
 } from '../../electron/emotions';
 import type { MouthReading } from '../companion/mouth';
 import type { Gaze } from '../companion/behaviour';
-import { idleMotion, settleSpring, hairMotionTarget, dragMotionTarget, depthMotionTarget, fairyMotion, speechJaw, sleepMotion } from '../companion/idle';
+import { idleMotion, settleSpring, hairMotionTarget, dragMotionTarget, depthMotionTarget, fairyMotion, speechJaw, sleepMotion, glowMotion } from '../companion/idle';
 import { EXPRESSION_REACTIONS, SVG_REACTIONS, TAP_REACTIONS } from '../companion/svgReactions';
 import { ANIMATION_SYMBOLS, EXPRESSION_SYMBOLS, HAIR_SYMBOLS, REACTION_SYMBOLS, hairSymbolFrames, symbolFrames } from '../companion/svgSymbols';
 
@@ -228,6 +228,8 @@ export function SvgAvatarCanvas({ className = '', roam = false, onFloat, onError
     let reactionName = '', reactionStart = 0, reactionUntil = 0;
     const hairLayers = new Map<HTMLElement, HairState[]>();
     let hairFrame = 0, hairTime = 0, jaw = 0;
+    let glow = { phase: 0, energy: 0, voice: 0, intensity: .12, breath: 0 };
+    let glowPrevious: number[] | null = null;
     let lastMotion = -Infinity;
     const faces = Array.from(container.querySelectorAll<HTMLElement>('.face'));
     const engine = createEmotionEngine(() => (reduced ? 0 : DEFAULT_TRANSITION_MS));
@@ -330,7 +332,16 @@ export function SvgAvatarCanvas({ className = '', roam = false, onFloat, onError
         || (time < reactionUntil && !['sleep-transition', 'sleepy-nod'].includes(reactionName));
       const wantedRest = disturbed ? 0 : reactionName === 'sleep-transition' ? fallingAsleep : engine.emotion() === 'sleepy' ? 1 : engine.emotion() === 'drowsy' ? .55 : 0;
       [restAmount, restSpeed] = settleSpring(restAmount, restSpeed, wantedRest, 18, 9, dt);
-      const rest = sleepMotion(time, restAmount);
+      // Sample rendered bounds, including native-window travel, taps and depth changes.
+      const bounds = body.getBoundingClientRect();
+      const sample = [bounds.x + bounds.width / 2 + window.screenX, bounds.y + bounds.height / 2 + window.screenY, bounds.width, bounds.height];
+      const speed = glowPrevious && elapsed > 0 && elapsed <= .1
+        ? Math.hypot(...sample.map((value, i) => value - glowPrevious![i])) / elapsed / Math.max(1, box.offsetWidth) : 0;
+      glowPrevious = sample;
+      glow = glowMotion(glow, elapsed, engine.emotion(), speed, mouth.open * mouth.weight, restAmount);
+      box.style.setProperty('--fairy-glow', glow.intensity.toFixed(4));
+      box.style.setProperty('--glow-voice', glow.voice.toFixed(4));
+      const rest = sleepMotion(time, restAmount, glow.breath);
       const restMode = wantedRest >= .8 ? 'asleep' : wantedRest > .05 ? 'tired' : 'awake';
       if (box.getAttribute('data-rest') !== restMode) box.setAttribute('data-rest', restMode);
       restEl.style.transform = `translateY(calc(var(--avatar-size) * ${rest.lift})) rotate(${rest.roll}deg) scale(${1 / rest.stretch},${rest.stretch})`;
@@ -348,8 +359,8 @@ export function SvgAvatarCanvas({ className = '', roam = false, onFloat, onError
       const flightX = callbacks.current.roam ? flightPose[0] * Math.max(0, (container!.clientWidth - box.offsetWidth) / 2) : 0;
       const flightY = callbacks.current.roam ? flightPose[1] * Math.max(0, (container!.clientHeight - box.offsetHeight) / 2) : 0;
       const roaming = dragPoint || time < reactionUntil ? .35 : 1;
-      box.style.setProperty('--fairy-glow', (hover.glow * (1 - restAmount) + rest.glow * restAmount).toFixed(3));
       const idle = idleMotion(time, { energy: (quiet ? .2 : .55) * (1 - fallingAsleep), sleepiness: Math.max(quiet ? .75 : .1, fallingAsleep), stress: 0 }, Math.max(mouth.weight, claim?.why === 'talking' && time < claimUntil ? .8 : 0));
+      idle.breath = glow.breath;
       box.style.transform = `translate(calc(${flightX}px + var(--avatar-size) * ${hover.x * roaming}), calc(${flightY}px + var(--avatar-size) * ${flightPose[2] * roaming})) rotate(${flightPose[3] * roaming}deg) translate(calc(var(--idle-bob) * ${(idle.driftX * 65).toFixed(4)}), calc(var(--idle-bob) * ${(-idle.breath).toFixed(4)})) rotate(calc(var(--idle-sway) * ${(idle.headZ * .4 + idle.bodyZ * .2).toFixed(4)})) scaleY(calc(1 + (var(--idle-breath) - 1) * ${idle.breath.toFixed(4)}))`;
       const decay = dragPoint ? Math.exp(-Math.max(0, time - dragPoint.at - 40) / 85) : 0;
       const deformation = dragMotionTarget(dragVelocity.x * decay, dragVelocity.y * decay, box.offsetWidth, !!dragPoint);
@@ -415,7 +426,10 @@ export function SvgAvatarCanvas({ className = '', roam = false, onFloat, onError
       if (!changed && mounted) return;
       stopReaction(true);
       const frame = engine.sample(t);
-      if (reduced) box.setAttribute('data-rest', frame.emotion === 'sleepy' ? 'asleep' : frame.emotion === 'drowsy' ? 'tired' : 'awake');
+      if (reduced) {
+        box.setAttribute('data-rest', frame.emotion === 'sleepy' ? 'asleep' : frame.emotion === 'drowsy' ? 'tired' : 'awake');
+        box.style.setProperty('--fairy-glow', frame.emotion === 'sleepy' ? '.02' : '.12');
+      }
       const mine = ++request;
       box.setAttribute('aria-label', LABELS[frame.emotion] || ('Haru feeling ' + frame.emotion));
       const incoming = faces[1 - front];
@@ -676,7 +690,8 @@ export function SvgAvatarCanvas({ className = '', roam = false, onFloat, onError
         cancelAnimationFrame(hairFrame); hairFrame = 0;
         box.style.transform = ''; jaw = 0; restAmount = restSpeed = 0; restEl.style.transform = '';
         box.style.setProperty('--rest-lid', '1'); box.setAttribute('data-rest', engine.emotion() === 'sleepy' ? 'asleep' : 'awake');
-        box.style.setProperty('--jaw-open', '0'); box.style.setProperty('--fairy-glow', '.18');
+        box.style.setProperty('--jaw-open', '0'); box.style.setProperty('--fairy-glow', engine.emotion() === 'sleepy' ? '.02' : '.12');
+        box.style.setProperty('--glow-voice', '0'); glowPrevious = null;
         drag(null); dragEl.style.transform = '';
         depthEl.style.transform = ''; depthEl.style.setProperty('--view-yaw', '0'); depthEl.style.setProperty('--view-pitch', '0');
         depthPose.fill(0); depthSpeed.fill(0); flightPose.fill(0); flightSpeed.fill(0);

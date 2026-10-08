@@ -3,7 +3,34 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { stripTypeScriptTypes } from 'node:module';
 import vm from 'node:vm';
-import { fairyMotion, speechJaw, sleepMotion } from '../src/companion/idle';
+import { fairyMotion, speechJaw, sleepMotion, glowMotion } from '../src/companion/idle';
+
+test('glow follows measured motion and syllables, breathes faster with anger, and dims during sleep', () => {
+  const run = (fps: number, speed = 0, audio = 0, rest = 0, emotion = 'neutral') => {
+    let state = { phase: 0, energy: 0, voice: 0, intensity: .12, breath: 0 };
+    let total = 0, cycles = 0;
+    for (let i = 0; i < fps * 30; i++) {
+      const next = glowMotion(state, 1 / fps, emotion, speed, audio, rest);
+      if (next.phase < state.phase) cycles++;
+      assert.ok(Object.values(next).every(Number.isFinite));
+      assert.ok(next.intensity >= .012 && next.intensity <= .92);
+      state = next; if (i >= fps * 5) total += state.intensity / (fps * 25);
+    }
+    return { state, total, cycles };
+  };
+  const calm = run(60), moving = run(60, 2), talking = run(60, 0, .8), asleep = run(60, 2, 1, 1);
+  assert.ok(moving.total > calm.total * 3);
+  assert.ok(talking.total > calm.total * 2);
+  assert.ok(asleep.total < .04 && asleep.total < calm.total / 3);
+  assert.ok(run(60, 0, 0, 0, 'angry').cycles > calm.cycles * 2);
+  assert.ok(Math.abs(run(30, 1, .7).state.intensity - run(144, 1, .7).state.intensity) < .008);
+  let fading = moving.state;
+  for (let i = 0; i < 120; i++) fading = glowMotion(fading, 1 / 60, 'neutral', 0, 0, 0);
+  assert.ok(fading.energy < .01 && fading.intensity < .2);
+  const paused = glowMotion(fading, 20, 'angry', Infinity, NaN, NaN);
+  assert.equal(paused.intensity, fading.intensity);
+  assert.equal(paused.phase, fading.phase);
+});
 
 test('moods change flight speed, happy hops, depth and glow; speech settles the flight', () => {
   const distance = (mood: string, talk = 0) => {
@@ -92,3 +119,4 @@ test('sleep breathing, tired nods and dream twitches stay small and vanish when 
   assert.ok(max-min>.012);assert.ok(nods>0);assert.ok(ears.size>10);
   assert.ok(Object.values(sleepMotion(NaN,Infinity)).every(Number.isFinite));
 });
+

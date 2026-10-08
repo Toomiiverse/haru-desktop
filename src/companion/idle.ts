@@ -107,11 +107,31 @@ export function speechJaw(open: number, weight: number, previous: number, dt: nu
   return previous + (target - previous) * (1 - Math.exp(-Math.min(dt, .1) / (target > previous ? .035 : .085)));
 }
 
+/** Actual travel/deformation and audio feed a fast attack, soft release envelope. */
+export function glowMotion(previous: { phase: number; energy: number; voice: number; intensity: number }, dt: number,
+  emotion: string, speed: number, audio: number, rest: number) {
+  const unit = (n: number) => Number.isFinite(n) ? Math.max(0, Math.min(1, n)) : 0;
+  const step = Number.isFinite(dt) && dt > 0 && dt <= .1 ? dt : 0;
+  const asleep = unit(rest);
+  const follow = (value: number, target: number, attack: number, release: number) =>
+    value + (target - value) * (1 - Math.exp(-step / (target > value ? attack : release)));
+  const energy = follow(previous.energy, unit(speed / 1.8), .07, .42);
+  const voice = follow(previous.voice, unit(audio), .028, .14);
+  const angry = ['angry', 'rage', 'annoyed', 'irritated'].includes(emotion);
+  const lively = ['happy', 'excited', 'playful', 'triumph', 'laughing'].includes(emotion);
+  const hz = ((angry ? .52 : lively ? .30 : .22) + energy * .14) * (1 - asleep) + asleep / 5.4;
+  const phase = (previous.phase + step * hz * TAU) % TAU;
+  const breath = (1 - Math.cos(phase)) / 2;
+  const awake = .07 + breath * (angry ? .22 : .11) + energy * .43 + voice * (angry ? .36 : .30);
+  const intensity = follow(previous.intensity, Math.min(.92, awake * (1 - asleep) + (.012 + breath * .023) * asleep), .045, .18);
+  return { phase, energy, voice, intensity, breath };
+}
+
 /** Presentation only: breathing, fighting a nod, and an occasional dream twitch. */
-export function sleepMotion(time: number, level: number) {
+export function sleepMotion(time: number, level: number, breathing?: number) {
   const t = Number.isFinite(time) ? time / 1000 : 0;
   const amount = Number.isFinite(level) ? Math.max(0, Math.min(1, level)) : 0;
-  const breath = (1 - Math.cos(t * Math.PI * 2 / 5.4)) / 2;
+  const breath = breathing ?? (1 - Math.cos(t * Math.PI * 2 / 5.4)) / 2;
   const nod = Math.pow(Math.max(0, Math.sin(t * Math.PI * 2 / 13)), 10);
   const dream = Math.pow(Math.max(0, Math.sin(t * Math.PI * 2 / 19)), 32) * Math.sin(t * 17);
   const tired = Math.max(0, 1 - Math.max(0, amount - .55) / .45);
