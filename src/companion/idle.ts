@@ -78,7 +78,7 @@ export function depthMotionTarget(time: number, x: number, y: number, attentive:
     Math.max(-1, Math.min(1, x)) * 10];
 }
 
-/** Mood changes the visual flight pace; all paths stay bounded and pause between bursts. */
+/** Buoyant local hover; mood changes the pace without choosing a new destination. */
 export function fairyMotion(time: number, emotion: string, speaking: number) {
   const t = Number.isFinite(time) ? time / 1000 : 0;
   const talk = Number.isFinite(speaking) ? Math.max(0, Math.min(1, speaking)) : 0;
@@ -90,11 +90,12 @@ export function fairyMotion(time: number, emotion: string, speaking: number) {
   const amount = (quiet ? .38 : happy || angry ? 1 : .7) * (1 - talk * .8);
   const burst = .3 + .7 * Math.pow(Math.max(0, Math.sin(t * .32)), 2);
   const phase = t * pace;
-  const hop = happy ? -Math.pow(Math.abs(Math.sin(phase * 2.2)), 1.5) * .065 : Math.sin(phase * .93) * .023;
+  const lift = Math.sin(phase * 1.65) * .075 + Math.sin(phase * 3.3 + .65) * .009;
+  const hop = happy ? -Math.pow(Math.abs(Math.sin(phase * 2.2)), 1.5) * .09 : lift;
   const dart = angry ? Math.tanh(Math.sin(phase * .55) * 2.5) : Math.sin(phase * .47);
   const breath = (Math.sin(t * 1.3) + 1) / 2;
-  return { x: Math.sin(phase * .71) * .027 * amount, y: hop * amount,
-    z: Math.sin(phase * .53) * .12 * amount, bank: Math.cos(phase * .71) * (angry ? 9 : happy ? 5 : 2.8) * amount,
+  return { x: (Math.sin(phase * .825 + .7) * .035 + Math.sin(phase * 1.65) * .009) * amount, y: hop * amount,
+    z: Math.sin(phase * .53) * .12 * amount, bank: Math.cos(phase * .825 + .7) * (angry ? 7 : happy ? 4.5 : 3) * amount,
     flightX: dart * amount * burst, flightY: Math.sin(phase * (curious ? .47 : .31) + 1) * amount * burst,
     glow: .12 + breath * .13 + burst * amount * .11 + talk * .04 };
 }

@@ -3,27 +3,36 @@ import assert from 'node:assert/strict';
 import { stripTypeScriptTypes } from 'node:module';
 import vm from 'node:vm';
 import { readFileSync } from 'node:fs';
-import { idleMotion, settleSpring, hairMotionTarget, dragMotionTarget, depthMotionTarget } from '../src/companion/idle';
+import { idleMotion, fairyMotion, settleSpring, hairMotionTarget, dragMotionTarget, depthMotionTarget } from '../src/companion/idle';
 
-test('a resting avatar shifts weight and sways locally without leaving her anchor, then quiets for sleep', () => {
+test('fairy hover stays local and fluid, yields to typing, and becomes faint during sleep', () => {
   const source=readFileSync('src/components/SvgAvatarCanvas.tsx','utf8');
   const code=source.slice(source.indexOf('      const idle = idleMotion('),source.indexOf('      const decay = dragPoint'));
   const sample=new vm.Script('(function(){'+stripTypeScriptTypes(code)+'})()');
-  const c:any={idleMotion,time:0,quiet:false,fallingAsleep:0,mouth:{weight:0},claim:null,claimUntil:0,glow:{breath:.5},restAmount:0,dragPoint:null,reactionUntil:0,flightX:0,box:{style:{}}};
-  const context=vm.createContext(c),awake:number[]=[],asleep:number[]=[],angles:number[]=[];
-  for(let time=0;time<60000;time+=100){
-    c.time=time;c.restAmount=0;sample.runInContext(context);
-    const shape=c.box.style.transform;
-    assert.ok(shape.startsWith('translateX(0px)'),'home stays fixed');
-    awake.push(Number(shape.match(/translate\(calc\(var\(--avatar-size\) \* ([-.\d]+)/)[1])*300);
-    angles.push(Number(shape.match(/rotate\(([-.\d]+)deg/)[1]));
-    c.restAmount=1;sample.runInContext(context);
-    asleep.push(Number(c.box.style.transform.match(/translate\(calc\(var\(--avatar-size\) \* ([-.\d]+)/)[1])*300);
-  }
   const range=(a:number[])=>Math.max(...a)-Math.min(...a);
-  assert.ok(range(awake)>3 && range(awake)<12,'visible weight shift, confined to a few pixels');
-  assert.ok(range(angles)>1 && angles.every(a=>Math.abs(a)<3),'head sway stays gentle');
-  assert.ok(range(asleep)<range(awake)*.2);
+  const run=(fps:number, rest=0, peek=false)=>{
+    const c:any={idleMotion,fairyMotion,settleSpring,time:0,dt:1/fps,quiet:false,fallingAsleep:0,mouth:{weight:0},claim:null,claimUntil:0,
+      glow:{breath:.5},restAmount:rest,dragPoint:null,reactionUntil:0,flightX:0,box:{style:{}},reading:{peek},engine:{emotion:()=> 'neutral'},hoverPose:[0,0,0],hoverSpeed:[0,0,0]};
+    const context=vm.createContext(c),x:number[]=[],y:number[]=[],angles:number[]=[];
+    for(let i=0;i<fps*30;i++){
+      c.time=i*1000/fps;sample.runInContext(context);
+      const shape=c.box.style.transform;
+      assert.ok(shape.startsWith('translateX(0px)'),'chosen destination stays fixed');
+      x.push(Number(shape.match(/translate\(calc\(var\(--avatar-size\) \* ([-.\d]+)/)[1])*300);
+      y.push(Number(shape.match(/\+ var\(--avatar-size\) \* ([-.\d]+)/)[1])*300);
+      angles.push(Number(shape.match(/rotate\(([-.\d]+)deg/)[1]));
+      if(i) assert.ok(Math.abs(y[i]-y[i-1])<40/fps,'smooth travel, without a frame jump');
+    }
+    return {x,y,angles};
+  };
+  const awake=run(60),sleep=run(60,1),typing=run(60,0,true);
+  assert.ok(range(awake.x)>12 && range(awake.x)<28,'small side arcs around home');
+  assert.ok(range(awake.y)>25 && range(awake.y)<40,'a visible buoyant rise and dip');
+  assert.ok(awake.angles.every(a=>Math.abs(a)<4.5),'gentle banking, never spinning');
+  assert.ok(range(sleep.y)<range(awake.y)*.08,'sleep keeps only a faint hover');
+  assert.ok(range(typing.y)<range(awake.y)*.3,'typing keeps her peek stable');
+  for(const fps of [30,144]) assert.ok(Math.abs(range(run(fps).y)-range(awake.y))<.5,'consistent at different refresh rates');
+
 });
 
 test('hair follows a moving head, then settles consistently at different frame rates', () => {

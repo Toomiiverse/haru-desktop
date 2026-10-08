@@ -9,7 +9,7 @@ import {
 } from '../../electron/emotions';
 import type { MouthReading } from '../companion/mouth';
 import type { Gaze } from '../companion/behaviour';
-import { idleMotion, settleSpring, hairMotionTarget, dragMotionTarget, depthMotionTarget, speechJaw, sleepMotion, glowMotion } from '../companion/idle';
+import { idleMotion, fairyMotion, settleSpring, hairMotionTarget, dragMotionTarget, depthMotionTarget, speechJaw, sleepMotion, glowMotion } from '../companion/idle';
 import { panelContact } from '../companion/placement';
 import type { DesktopScene } from '../../electron/desktopAwareness';
 import { EXPRESSION_REACTIONS, SVG_REACTIONS, TAP_REACTIONS } from '../companion/svgReactions';
@@ -206,6 +206,7 @@ export function SvgAvatarCanvas({ className = '', roam = false, onFloat, onError
     const gestureEl = container.querySelector('.avatar-gesture') as HTMLElement;
     const depthEl = container.querySelector('.avatar-depth') as HTMLElement;
     const depthPose = [0, 0, 0], depthSpeed = [0, 0, 0];
+    const hoverPose = [0, 0, 0], hoverSpeed = [0, 0, 0];
     const flightPose = [0,0,0,0], flightSpeed = [0,0,0,0];
     const restEl = container.querySelector('.avatar-rest') as HTMLElement;
     const sleepLayer = container.querySelector('.avatar-sleep-layer') as SVGSVGElement;
@@ -352,7 +353,14 @@ export function SvgAvatarCanvas({ className = '', roam = false, onFloat, onError
       const idle = idleMotion(time, { energy: (quiet ? .2 : .55) * (1 - fallingAsleep), sleepiness: Math.max(quiet ? .75 : .1, fallingAsleep), stress: 0 }, Math.max(mouth.weight, claim?.why === 'talking' && time < claimUntil ? .8 : 0));
       idle.breath = glow.breath;
       const idleAmount = (1 - restAmount * .85) * (dragPoint || time < reactionUntil ? .3 : 1);
-      box.style.transform = `translateX(${flightX}px) translate(calc(var(--avatar-size) * ${(idle.driftX * 2.2 * idleAmount).toFixed(4)}), calc(var(--idle-bob) * ${(-idle.breath).toFixed(4)} + var(--avatar-size) * ${(idle.bounceY * idleAmount).toFixed(4)})) rotate(${((idle.headZ * .9 + idle.bodyZ * .35) * idleAmount).toFixed(3)}deg) scaleY(calc(1 + (var(--idle-breath) - 1) * ${idle.breath.toFixed(4)}))`;
+      const hover = fairyMotion(time, engine.emotion(), mouth.weight);
+      const hoverAmount = (1 - restAmount * .96) * (dragPoint ? .08 : reading?.peek || reading?.attachment || (claim && time < claimUntil) ? .25 : time < reactionUntil ? .2 : 1);
+      const hoverTarget = [hover.x, hover.y, hover.bank];
+      for (let i = 0; i < hoverPose.length; i++) {
+        [hoverPose[i], hoverSpeed[i]] = settleSpring(hoverPose[i], hoverSpeed[i], hoverTarget[i] * hoverAmount, 65, 14, dt);
+      }
+      // Hover around the chosen anchor; the existing strand springs observe this motion.
+      box.style.transform = `translateX(${flightX}px) translate(calc(var(--avatar-size) * ${(hoverPose[0] + idle.driftX * 2.2 * idleAmount).toFixed(4)}), calc(var(--idle-bob) * ${(-idle.breath).toFixed(4)} + var(--avatar-size) * ${(hoverPose[1] + idle.bounceY * idleAmount).toFixed(4)})) rotate(${(hoverPose[2] + (idle.headZ * .9 + idle.bodyZ * .35) * idleAmount).toFixed(3)}deg) scaleY(calc(1 + (var(--idle-breath) - 1) * ${idle.breath.toFixed(4)}))`;
       const decay = dragPoint ? Math.exp(-Math.max(0, time - dragPoint.at - 40) / 85) : 0;
       const deformation = dragMotionTarget(dragVelocity.x * decay, dragVelocity.y * decay, box.offsetWidth, !!dragPoint);
       for (let i = 0; i < dragShape.length; i++) {
@@ -361,6 +369,8 @@ export function SvgAvatarCanvas({ className = '', roam = false, onFloat, onError
       dragEl.style.transform = `matrix(${dragShape[0]},${dragShape[1]},${dragShape[1]},${dragShape[2]},0,0) rotate(${dragShape[3]}deg)`;
       const gaze = target(time, reading);
       const depthTarget = depthMotionTarget(time, gaze.x, gaze.y, !!claim && time < claimUntil, quiet);
+      depthTarget[1] += clamp(hoverSpeed[1] * 18, -2.5, 2.5);
+      depthTarget[2] += clamp(hoverSpeed[0] * 25, -2.5, 2.5);
       depthTarget[0] += reading?.peek ? .18 : reading?.attachment ? .06 : 0;
       depthTarget[0] += dragPoint ? Math.min(.15, Math.hypot(dragVelocity.x, dragVelocity.y) * decay / Math.max(1, box.offsetWidth) * .02) : 0;
       for (let i = 0; i < depthPose.length; i++) {
@@ -717,6 +727,7 @@ export function SvgAvatarCanvas({ className = '', roam = false, onFloat, onError
         drag(null); dragEl.style.transform = '';
         depthEl.style.transform = ''; depthEl.style.setProperty('--view-yaw', '0'); depthEl.style.setProperty('--view-pitch', '0');
         depthPose.fill(0); depthSpeed.fill(0); flightPose.fill(0); flightSpeed.fill(0);
+        hoverPose.fill(0); hoverSpeed.fill(0);
         callbacks.current.onFloat?.(0, 0, false);
         dragShape.splice(0, 4, 1, 0, 1, 0); dragSpeed.fill(0);
         for (const states of hairLayers.values()) for (const strand of states) {

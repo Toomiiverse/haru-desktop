@@ -61,7 +61,7 @@ function drive() {
     ANIMATION_SYMBOLS, showSymbol(name: string, options: any) { symbols.push({ name, options }); }, clearSymbol() { symbols.push(null); },
     faces: [{ querySelector: (selector: string) => parts[selector.match(/"(.*?)"/)![1]] }], front: 0,
     reactionName: '', reactionStart: 0, reactionUntil: 0, lastMotion: 0, nextEarTwitch: 0,
-    boundary: element(), correction: {x:0,y:0}, contactWall:'', contactUntil:0,
+    boundary: element(), correction: {x:0,y:0}, contactWall:'', contactUntil:0, hoverPose:[.03,.06,2], hoverSpeed:[.1,.2,1],
     motionPreference: { matches: false }, reduced: false, frozenAt: null, hairFrame: 0, hairLayers: new Map(),
     engine: { emotion: () => 'neutral' }, LABELS: { neutral: 'Haru feeling neutral' },
     clock: () => 1000, target: () => ({ x: 0 }), scheduleBlink() {}, look() {}, followHair() {},
@@ -86,6 +86,7 @@ test('reduced motion cancels held reactions and prevents new ones; unknown names
   d.play('toString'); assert.equal(d.created.length, count); assert.equal(d.context.reactionUntil, Infinity);
   d.context.motionPreference.matches = true; d.onMotionPreference();
   assert.ok(d.created.every((a: any) => a.cancelled)); assert.equal(d.animations.size, 0);
+  assert.ok([...d.context.hoverPose,...d.context.hoverSpeed].every(value=>value===0),'reduced motion stops the hover and clears its momentum');
   d.play('curiosity'); assert.equal(d.created.length, count);
   d.context.motionPreference.matches = false; d.onMotionPreference(); d.play('curiosity');
   assert.equal(d.created.length, count + SVG_REACTIONS.curiosity.tracks.length);
