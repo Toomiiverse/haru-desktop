@@ -67,15 +67,16 @@
   .svg-avatar-canvas #avatar .face{transition:none !important;}
 }
 
-.companion-hitbox{touch-action:none;}
-.companion-hitbox:focus-visible{outline:2px solid #fec4cc;outline-offset:3px;border-radius:35%;}
+.companion-hitbox{touch-action:none;outline:none;}
+.companion-stage[data-keyboard-navigation] .companion-hitbox:focus-visible{outline:2px solid #fec4cc;outline-offset:3px;border-radius:35%;}
 
 /* Small layer offsets suggest volume while keeping the original vector silhouette. */
 .svg-avatar-canvas .face [data-hair]{translate:calc((var(--view-yaw, 0) + var(--depth-yaw)) * var(--layer-depth, 0) * 1px) calc((var(--view-pitch, 0) + var(--depth-pitch)) * var(--layer-depth, 0) * -.7px);}
 
 /* A breathing halo and tiny lower-face stretch keep her mouthless silhouette. */
-.svg-avatar-canvas #avatar-body{filter:drop-shadow(0 0 calc(var(--avatar-size) * (.006 + var(--fairy-glow, .12) * .022)) rgb(254 196 204 / var(--fairy-glow, .12))) drop-shadow(0 0 calc(var(--avatar-size) * (.018 + var(--fairy-glow, .12) * .065)) rgb(222 170 255 / var(--fairy-glow, .12)));}
-.svg-avatar-canvas .avatar-rest::before{content:'';position:absolute;inset:14% 7% 5%;border-radius:50%;pointer-events:none;background:radial-gradient(ellipse at 50% 57%,#ffaccd99 0%,#ef94cf70 36%,#b99aff40 54%,transparent 73%);opacity:var(--fairy-glow,.12);transform:scale(calc(.88 + var(--fairy-glow,.12) * .4 + var(--glow-voice,0) * .05),calc(.92 + var(--fairy-glow,.12) * .26));will-change:transform,opacity;}
+.svg-avatar-canvas #avatar-body{filter:drop-shadow(0 0 calc(var(--avatar-size) * (.014 + var(--fairy-glow, .04) * .045)) rgb(254 196 204 / var(--fairy-glow, .04))) drop-shadow(0 0 calc(var(--avatar-size) * (.045 + var(--fairy-glow, .04) * .11)) rgb(222 170 255 / var(--fairy-glow, .04)));}
+/* Fade to transparent before the layer edge; blur must never reveal a rounded plate. */
+.svg-avatar-canvas .avatar-rest::before{content:'';position:absolute;inset:4% -4% -2%;pointer-events:none;background:radial-gradient(ellipse closest-side at 50% 56%,rgb(255 172 205 / .48) 0%,rgb(239 148 207 / .30) 30%,rgb(185 154 255 / .10) 55%,rgb(185 154 255 / 0) 78%);filter:blur(calc(var(--avatar-size) * .055));opacity:var(--fairy-glow,.04);transform:scale(calc(.88 + var(--fairy-glow,.04) * .4 + var(--glow-voice,0) * .05),calc(.92 + var(--fairy-glow,.04) * .26));will-change:transform,opacity;}
 .svg-avatar-canvas .face [data-part="face"]{transform-origin:50% 62%;transform:scaleY(calc(1 + var(--jaw-open, 0) * .035));}
 
 /* Sleep keeps its own layer so breathing and Zs survive a held reaction. */

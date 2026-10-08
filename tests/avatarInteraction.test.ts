@@ -4,6 +4,22 @@ import { readFileSync } from 'node:fs';
 import { stripTypeScriptTypes } from 'node:module';
 import vm from 'node:vm';
 
+test('the avatar focus cue requires keyboard navigation, clears on pointer or window blur, and cleans up listeners', () => {
+  const source=readFileSync('src/CompanionWindow.tsx','utf8');
+  const start=source.indexOf('  const [keyboardNavigation,');
+  const code=source.slice(start,source.indexOf('  const [model,',start));
+  const events=new Map<string,Function>();let keyboard=false,dispose:Function|undefined;
+  const c={useState:()=>[false,(value:boolean)=>keyboard=value],useEffect:(fn:Function)=>dispose=fn(),
+    window:{addEventListener:(name:string,fn:Function)=>events.set(name,fn),removeEventListener:(name:string)=>events.delete(name)}};
+  vm.runInNewContext(stripTypeScriptTypes(code),c);
+  assert.equal(keyboard,false,'native/programmatic focus alone never draws a box');
+  events.get('keydown')!({key:'a'});assert.equal(keyboard,false);
+  events.get('keydown')!({key:'Tab'});assert.equal(keyboard,true,'keyboard focus remains visible');
+  events.get('pointerdown')!();assert.equal(keyboard,false);
+  events.get('keydown')!({key:'Tab'});events.get('blur')!();assert.equal(keyboard,false);
+  dispose!();assert.equal(events.size,0);
+});
+
 test('desktop routes taps once, tracks screen movement, and releases cancelled drags without a tap', () => {
   const source=readFileSync('src/CompanionWindow.tsx','utf8');
   const code=source.slice(source.indexOf('  function onPointerDown('),source.indexOf('  function onContextMenu('));

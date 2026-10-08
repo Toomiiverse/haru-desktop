@@ -111,6 +111,20 @@ const Live2DCanvas = lazy(() => import('./components/Live2DCanvas').then(module 
 const DIALOGUE_MIN_HARU_WIDTH = 120;
 
 export function CompanionWindow() {
+  const [keyboardNavigation, setKeyboardNavigation] = useState(false);
+  useEffect(() => {
+    // Native window focus is not evidence that the user is navigating with a keyboard.
+    const keyboard = (event: KeyboardEvent) => { if (event.key === 'Tab') setKeyboardNavigation(true); };
+    const pointer = () => setKeyboardNavigation(false);
+    window.addEventListener('keydown', keyboard, true);
+    window.addEventListener('pointerdown', pointer, true);
+    window.addEventListener('blur', pointer);
+    return () => {
+      window.removeEventListener('keydown', keyboard, true);
+      window.removeEventListener('pointerdown', pointer, true);
+      window.removeEventListener('blur', pointer);
+    };
+  }, []);
   const [model, setModel] = useState<Live2DModel | null>(null);
   const [error, setError] = useState<string | null>(null);
   const dragging = useRef(false);
@@ -675,7 +689,7 @@ export function CompanionWindow() {
 
   if (avatarKind === 'model' && !model) return null;
   return (
-    <div className="companion-stage">
+    <div className="companion-stage" data-keyboard-navigation={keyboardNavigation || undefined}>
       {avatarKind === 'svg'
         ? <SvgAvatarCanvas onFloat={floatAcrossDesktop} onError={setError} onReady={handleSvgReady} onFit={onFit} read={readSvg} />
         : <StageFailureBoundary key={model!.url} onError={setError}>

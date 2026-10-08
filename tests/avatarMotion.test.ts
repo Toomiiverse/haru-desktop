@@ -1,6 +1,30 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { stripTypeScriptTypes } from 'node:module';
+import vm from 'node:vm';
+import { readFileSync } from 'node:fs';
 import { idleMotion, settleSpring, hairMotionTarget, dragMotionTarget, depthMotionTarget } from '../src/companion/idle';
+
+test('a resting avatar shifts weight and sways locally without leaving her anchor, then quiets for sleep', () => {
+  const source=readFileSync('src/components/SvgAvatarCanvas.tsx','utf8');
+  const code=source.slice(source.indexOf('      const idle = idleMotion('),source.indexOf('      const decay = dragPoint'));
+  const sample=new vm.Script('(function(){'+stripTypeScriptTypes(code)+'})()');
+  const c:any={idleMotion,time:0,quiet:false,fallingAsleep:0,mouth:{weight:0},claim:null,claimUntil:0,glow:{breath:.5},restAmount:0,dragPoint:null,reactionUntil:0,flightX:0,box:{style:{}}};
+  const context=vm.createContext(c),awake:number[]=[],asleep:number[]=[],angles:number[]=[];
+  for(let time=0;time<60000;time+=100){
+    c.time=time;c.restAmount=0;sample.runInContext(context);
+    const shape=c.box.style.transform;
+    assert.ok(shape.startsWith('translateX(0px)'),'home stays fixed');
+    awake.push(Number(shape.match(/translate\(calc\(var\(--avatar-size\) \* ([-.\d]+)/)[1])*300);
+    angles.push(Number(shape.match(/rotate\(([-.\d]+)deg/)[1]));
+    c.restAmount=1;sample.runInContext(context);
+    asleep.push(Number(c.box.style.transform.match(/translate\(calc\(var\(--avatar-size\) \* ([-.\d]+)/)[1])*300);
+  }
+  const range=(a:number[])=>Math.max(...a)-Math.min(...a);
+  assert.ok(range(awake)>3 && range(awake)<12,'visible weight shift, confined to a few pixels');
+  assert.ok(range(angles)>1 && angles.every(a=>Math.abs(a)<3),'head sway stays gentle');
+  assert.ok(range(asleep)<range(awake)*.2);
+});
 
 test('hair follows a moving head, then settles consistently at different frame rates', () => {
   const trajectories = [30, 60, 144].map(fps => {

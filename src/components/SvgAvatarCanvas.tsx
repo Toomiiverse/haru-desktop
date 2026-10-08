@@ -351,7 +351,8 @@ export function SvgAvatarCanvas({ className = '', roam = false, onFloat, onError
       const flightX = callbacks.current.roam ? flightPose[0] * Math.max(0, (container!.clientWidth - box.offsetWidth * .65) / 2) : 0;
       const idle = idleMotion(time, { energy: (quiet ? .2 : .55) * (1 - fallingAsleep), sleepiness: Math.max(quiet ? .75 : .1, fallingAsleep), stress: 0 }, Math.max(mouth.weight, claim?.why === 'talking' && time < claimUntil ? .8 : 0));
       idle.breath = glow.breath;
-      box.style.transform = `translateX(${flightX}px) translate(calc(var(--idle-bob) * ${(idle.driftX * 30).toFixed(4)}), calc(var(--idle-bob) * ${(-idle.breath).toFixed(4)})) scaleY(calc(1 + (var(--idle-breath) - 1) * ${idle.breath.toFixed(4)}))`;
+      const idleAmount = (1 - restAmount * .85) * (dragPoint || time < reactionUntil ? .3 : 1);
+      box.style.transform = `translateX(${flightX}px) translate(calc(var(--avatar-size) * ${(idle.driftX * 2.2 * idleAmount).toFixed(4)}), calc(var(--idle-bob) * ${(-idle.breath).toFixed(4)} + var(--avatar-size) * ${(idle.bounceY * idleAmount).toFixed(4)})) rotate(${((idle.headZ * .9 + idle.bodyZ * .35) * idleAmount).toFixed(3)}deg) scaleY(calc(1 + (var(--idle-breath) - 1) * ${idle.breath.toFixed(4)}))`;
       const decay = dragPoint ? Math.exp(-Math.max(0, time - dragPoint.at - 40) / 85) : 0;
       const deformation = dragMotionTarget(dragVelocity.x * decay, dragVelocity.y * decay, box.offsetWidth, !!dragPoint);
       for (let i = 0; i < dragShape.length; i++) {
@@ -429,7 +430,7 @@ export function SvgAvatarCanvas({ className = '', roam = false, onFloat, onError
     }
     function idleFor(name: string) {
       const m = IDLE[name] || IDLE.neutral;
-      box.style.setProperty('--idle-bob', m.bobPx * .4 + 'px'); box.style.setProperty('--idle-sway', m.swayDeg * .6 + 'deg'); box.style.setProperty('--idle-breath', String(1 + m.breath * .25));
+      box.style.setProperty('--idle-bob', m.bobPx * .8 + 'px'); box.style.setProperty('--idle-sway', m.swayDeg * .6 + 'deg'); box.style.setProperty('--idle-breath', String(1 + m.breath * .6));
     }
     function paint(frame: EngineSample, animate: boolean) {
       const fore = faces[front], back = faces[1 - front];
