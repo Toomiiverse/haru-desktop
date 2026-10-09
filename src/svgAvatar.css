@@ -54,6 +54,17 @@
 .svg-avatar-canvas #avatar .face .eye{transform:translate(calc(var(--gaze-x) + (var(--view-yaw, 0) + var(--depth-yaw)) * .9px), calc(var(--gaze-y) - (var(--view-pitch, 0) + var(--depth-pitch)) * .6px)) scaleY(calc(var(--lid) * var(--eye-lid) * var(--rest-lid, 1)));transform-box:fill-box;transform-origin:center;}
 .svg-avatar-canvas #avatar .face .eye.closed-eye{transform:translate(calc(var(--gaze-x) + (var(--view-yaw, 0) + var(--depth-yaw)) * .9px), calc(var(--gaze-y) - (var(--view-pitch, 0) + var(--depth-pitch)) * .6px));}
 .svg-avatar-canvas #avatar .face.missing{visibility:hidden;}
+.svg-avatar-canvas .avatar-floating{position:absolute;width:var(--avatar-size);height:var(--avatar-size);pointer-events:none;}
+.svg-avatar-canvas .floating-face{position:absolute;inset:0;opacity:0;}
+.svg-avatar-canvas .floating-face svg{display:block;width:100%;height:100%;overflow:visible;}
+.svg-avatar-canvas [data-reaction-mark]{transform-box:fill-box;transform-origin:center;animation:haru-mark-float 2.2s ease-in-out infinite;animation-delay:var(--mark-delay,0s);}
+.svg-avatar-canvas [data-reaction-mark="dot"]{animation-name:haru-mark-dot;animation-duration:1.3s;}
+.svg-avatar-canvas [data-reaction-mark="ray"]{animation-name:haru-mark-ray;animation-duration:1.7s;}
+.svg-avatar-canvas .avatar-floating.frozen [data-reaction-mark]{animation-play-state:paused;}
+@keyframes haru-mark-float{0%,100%{transform:translateY(4px) rotate(-3deg);}50%{transform:translateY(-17px) rotate(5deg);}}
+@keyframes haru-mark-dot{0%,100%{transform:translateY(0) scale(.9);opacity:.65;}40%{transform:translateY(-22px) scale(1.12);opacity:1;}}
+@keyframes haru-mark-ray{0%,100%{transform:translateY(4px) scale(.85);opacity:.7;}35%{transform:translateY(-12px) scale(1.12);opacity:1;}65%{transform:translateY(-3px) scale(.98);}}
+@media(prefers-reduced-motion:reduce){.svg-avatar-canvas [data-reaction-mark]{animation:none!important;}}
 .svg-avatar-canvas .avatar-symbol-layer{position:absolute;inset:0;width:100%;height:100%;overflow:visible;pointer-events:none;}
 .svg-avatar-canvas .avatar-symbol-layer [data-symbol-part]{transform-box:fill-box;transform-origin:center;}
 .svg-avatar-canvas #avatar[data-symbol-eyes] .face .eye{opacity:0;}
@@ -81,18 +92,18 @@
 
 /* Sleep keeps its own layer so breathing and Zs survive a held reaction. */
 .svg-avatar-canvas .avatar-rest{position:absolute;inset:0;transform-origin:50% 68%;}
-.svg-avatar-canvas .avatar-sleep-layer{position:absolute;inset:0;width:100%;height:100%;overflow:visible;pointer-events:none;opacity:0;transition:opacity .45s;}
-.svg-avatar-canvas #avatar[data-rest="asleep"] .avatar-sleep-layer{opacity:1;}
-.svg-avatar-canvas #avatar[data-rest="tired"] .avatar-sleep-layer{opacity:.45;}
+.svg-avatar-canvas .avatar-sleep-layer,.svg-avatar-canvas .avatar-sleep-bubble-layer{position:absolute;inset:0;width:100%;height:100%;overflow:visible;pointer-events:none;opacity:0;transition:opacity .45s;}
+.svg-avatar-canvas [data-rest="asleep"] :is(.avatar-sleep-layer,.avatar-sleep-bubble-layer){opacity:1;}
+.svg-avatar-canvas [data-rest="tired"] :is(.avatar-sleep-layer,.avatar-sleep-bubble-layer){opacity:.45;}
 .svg-avatar-canvas .avatar-sleep-layer [data-symbol-part]{transform-box:fill-box;transform-origin:center;animation:haru-sleep-z 5.4s ease-in-out infinite;}
 .svg-avatar-canvas .avatar-sleep-layer > g:nth-child(2) [data-symbol-part]{animation-delay:-1.8s;}
 .svg-avatar-canvas .avatar-sleep-layer > g:nth-child(3) [data-symbol-part]{animation-delay:-3.6s;}
-.svg-avatar-canvas #avatar[data-rest="tired"] .avatar-sleep-layer > g:not(:first-child){visibility:hidden;}
+.svg-avatar-canvas [data-rest="tired"] .avatar-sleep-layer > g:not(:first-child){visibility:hidden;}
 .svg-avatar-canvas .sleep-bubble{transform-box:fill-box;transform-origin:center;scale:.6;animation:haru-sleep-bubble 5.4s ease-in-out infinite;}
-.svg-avatar-canvas #avatar.frozen .avatar-sleep-layer *{animation-play-state:paused;}
+.svg-avatar-canvas .frozen :is(.avatar-sleep-layer,.avatar-sleep-bubble-layer) *{animation-play-state:paused;}
 @keyframes haru-sleep-z{0%{opacity:0;translate:-10px 28px;scale:.6;rotate:-12deg;}25%{opacity:.9;}75%{opacity:.7;}100%{opacity:0;translate:35px -55px;scale:1.16;rotate:8deg;}}
 @keyframes haru-sleep-bubble{0%,100%{scale:.6;opacity:.3;}50%{scale:1;opacity:.75;}}
-@media(prefers-reduced-motion:reduce){.svg-avatar-canvas .avatar-sleep-layer{transition:none;}.svg-avatar-canvas .avatar-sleep-layer *{animation:none!important;}}
+@media(prefers-reduced-motion:reduce){.svg-avatar-canvas :is(.avatar-sleep-layer,.avatar-sleep-bubble-layer){transition:none;}.svg-avatar-canvas :is(.avatar-sleep-layer,.avatar-sleep-bubble-layer) *{animation:none!important;}}
 
 /* Centre the flight space so downward swoops have the same room as upward ones. */
 .svg-avatar-canvas.avatar-roaming{align-items:center;padding-bottom:0;}

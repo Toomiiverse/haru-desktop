@@ -14,6 +14,7 @@ import { panelContact } from '../companion/placement';
 import type { DesktopScene } from '../../electron/desktopAwareness';
 import { EXPRESSION_REACTIONS, SVG_REACTIONS, TAP_REACTIONS } from '../companion/svgReactions';
 import { ANIMATION_SYMBOLS, EXPRESSION_SYMBOLS, HAIR_SYMBOLS, REACTION_SYMBOLS, hairSymbolFrames, symbolFrames } from '../companion/svgSymbols';
+import { detachReactionMarks } from '../companion/floatingSymbols';
 
 /**
  * Her face, on the desk.
@@ -198,6 +199,15 @@ export function SvgAvatarCanvas({ className = '', roam = false, onFloat, onError
     container.innerHTML = '<div id="avatar" role="img" aria-label="' + LABELS.neutral + '"><div id="avatar-pose"><div class="avatar-depth"><div class="avatar-gesture"><div class="avatar-drag"><div class="avatar-rest"><div id="avatar-body"><div class="face"></div><div class="face"></div><svg class="avatar-symbol-layer" viewBox="0 0 1254 1254" aria-hidden="true"></svg><svg class="avatar-sleep-layer" viewBox="0 0 1254 1254" aria-hidden="true"></svg></div></div></div></div></div></div></div>';
     const box = container.querySelector('#avatar') as HTMLElement;
     const body = container.querySelector('#avatar-body') as HTMLElement;
+    // A sibling of the rig: marks follow position with a spring, never her head's deformation.
+    const floating = document.createElement('div'); floating.className = 'avatar-floating';
+    floating.innerHTML = '<div class="floating-face"></div><div class="floating-face"></div>';
+    container.appendChild(floating);
+    const floatingFaces = Array.from(floating.querySelectorAll<HTMLElement>('.floating-face'));
+    const floatingSymbolLayer = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    floatingSymbolLayer.setAttribute('viewBox', '0 0 1254 1254'); floatingSymbolLayer.setAttribute('aria-hidden', 'true');
+    floatingSymbolLayer.classList.add('avatar-symbol-layer'); floating.appendChild(floatingSymbolLayer);
+    const floatPosition = [0, 0], floatSpeed = [0, 0];
     const boundary = document.createElement('div'); boundary.className = 'avatar-boundary';
     box.prepend(boundary); boundary.appendChild(container.querySelector('#avatar-pose')!);
     let correction = { x: 0, y: 0 }, contactWall = '', contactUntil = 0;
@@ -210,7 +220,12 @@ export function SvgAvatarCanvas({ className = '', roam = false, onFloat, onError
     const flightPose = [0,0,0,0], flightSpeed = [0,0,0,0];
     const restEl = container.querySelector('.avatar-rest') as HTMLElement;
     const sleepLayer = container.querySelector('.avatar-sleep-layer') as SVGSVGElement;
-    sleepLayer.innerHTML = REACTION_SYMBOLS.sleep.markup + '<g class="sleep-bubble" transform="translate(830 900)"><ellipse rx="49" ry="39" fill="#dcd8f5" fill-opacity=".13" stroke="#dcd8f5" stroke-opacity=".6" stroke-width="5"/><path d="M -25 -17 Q -14 -29 3 -27" fill="none" stroke="#fff0f4" stroke-width="5" stroke-linecap="round"/></g>';
+    sleepLayer.classList.replace('avatar-sleep-layer', 'avatar-sleep-bubble-layer');
+    const floatingSleep = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    floatingSleep.setAttribute('viewBox', '0 0 1254 1254'); floatingSleep.setAttribute('aria-hidden', 'true');
+    floatingSleep.classList.add('avatar-sleep-layer'); floatingSleep.innerHTML = REACTION_SYMBOLS.sleep.markup;
+    floating.appendChild(floatingSleep);
+    sleepLayer.innerHTML = '<g class="sleep-bubble" transform="translate(830 900)"><ellipse rx="49" ry="39" fill="#dcd8f5" fill-opacity=".13" stroke="#dcd8f5" stroke-opacity=".6" stroke-width="5"/><path d="M -25 -17 Q -14 -29 3 -27" fill="none" stroke="#fff0f4" stroke-width="5" stroke-linecap="round"/></g>';
     let restAmount = 0, restSpeed = 0;
     const dragEl = container.querySelector('.avatar-drag') as HTMLElement;
     let dragPoint: { x: number; y: number; at: number } | null = null;
@@ -246,6 +261,10 @@ export function SvgAvatarCanvas({ className = '', roam = false, onFloat, onError
       if (!svg || svg.nodeName.toLowerCase() !== 'svg') throw new Error('not a face');
       svg.removeAttribute('width'); svg.removeAttribute('height');
       svg.setAttribute('preserveAspectRatio', 'xMidYMid meet'); svg.setAttribute('aria-hidden', 'true'); svg.setAttribute('focusable', 'false');
+      floatingFaces[faces.indexOf(layer)].replaceChildren(detachReactionMarks(svg as unknown as SVGElement));
+      floatingFaces[faces.indexOf(layer)].querySelectorAll<SVGElement>('[data-reaction-mark]').forEach((mark, index) => {
+        mark.style.setProperty('--mark-delay', `${index * -0.18}s`);
+      });
       const vb = (svg.getAttribute('viewBox') || '').trim().split(/[\s,]+/).map(Number);
       let found: FoundEyes = null;
       if (vb.length === 4) {
@@ -331,6 +350,15 @@ export function SvgAvatarCanvas({ className = '', roam = false, onFloat, onError
       [restAmount, restSpeed] = settleSpring(restAmount, restSpeed, wantedRest, 18, 9, dt);
       // Sample rendered bounds, including native-window travel, taps and depth changes.
       const bounds = body.getBoundingClientRect();
+      const panelBounds = container!.getBoundingClientRect();
+      const targetFloat = [
+        (bounds.x + bounds.width / 2 - panelBounds.x) / (panelBounds.width / container!.clientWidth) - box.offsetWidth / 2,
+        (bounds.y + bounds.height / 2 - panelBounds.y) / (panelBounds.height / container!.clientHeight) - box.offsetHeight / 2,
+      ];
+      for (let i = 0; i < 2; i++) {
+        if (Number.isFinite(targetFloat[i])) [floatPosition[i], floatSpeed[i]] = settleSpring(floatPosition[i], floatSpeed[i], targetFloat[i], 90, 16, dt);
+      }
+      floating.style.left = `${floatPosition[0]}px`; floating.style.top = `${floatPosition[1]}px`;
       const sample = [bounds.x + bounds.width / 2 + window.screenX, bounds.y + bounds.height / 2 + window.screenY, bounds.width, bounds.height];
       const speed = glowPrevious && elapsed > 0 && elapsed <= .1
         ? Math.hypot(...sample.map((value, i) => value - glowPrevious![i])) / elapsed / Math.max(1, box.offsetWidth) : 0;
@@ -341,6 +369,7 @@ export function SvgAvatarCanvas({ className = '', roam = false, onFloat, onError
       const rest = sleepMotion(time, restAmount, glow.breath);
       const restMode = wantedRest >= .8 ? 'asleep' : wantedRest > .05 ? 'tired' : 'awake';
       if (box.getAttribute('data-rest') !== restMode) box.setAttribute('data-rest', restMode);
+      floating.setAttribute('data-rest', restMode);
       restEl.style.transform = `translateY(calc(var(--avatar-size) * ${rest.lift})) rotate(${rest.roll}deg) scale(${1 / rest.stretch},${rest.stretch})`;
       box.style.setProperty('--rest-lid', String(rest.lid));
       const flight = [reading?.attachment ? .9 : 0, 0, 0, 0];
@@ -449,6 +478,11 @@ export function SvgAvatarCanvas({ className = '', roam = false, onFloat, onError
       fore.style.opacity = animate ? '1' : String(frame.opacity);
       back.style.opacity = animate ? '0' : String(frame.previousOpacity);
       fore.classList.add('on'); back.classList.remove('on');
+      for (let i = 0; i < faces.length; i++) {
+        floatingFaces[i].style.transition = ease; floatingFaces[i].style.opacity = faces[i].style.opacity;
+      }
+      floating.classList.toggle('frozen', frozenAt !== null);
+      floating.setAttribute('data-rest', box.getAttribute('data-rest') ?? 'awake');
     }
     function replay(el: HTMLElement, cls: string) { el.classList.remove(cls); void el.offsetWidth; el.classList.add(cls); }
     function show(name: string, t: number) {
@@ -563,6 +597,8 @@ export function SvgAvatarCanvas({ className = '', roam = false, onFloat, onError
       const w = Math.max(1, el.clientWidth), h = Math.max(1, el.clientHeight);
       const side = Math.max(48, Math.round(Math.min(w, h) * (callbacks.current.roam ? .72 : .94)));
       el.style.setProperty('--avatar-size', side + 'px');
+      floatPosition[0] = box.offsetLeft; floatPosition[1] = box.offsetTop;
+      floatSpeed.fill(0); floating.style.left = `${floatPosition[0]}px`; floating.style.top = `${floatPosition[1]}px`;
       document.documentElement.style.setProperty('--haru-width', side + 'px');
       callbacks.current.onFit(side);
     }
@@ -584,7 +620,7 @@ export function SvgAvatarCanvas({ className = '', roam = false, onFloat, onError
     function clearSymbol() {
       if (symbolTimer) clearTimeout(symbolTimer); symbolTimer = null;
       for (const animation of symbolAnimations) animation.cancel();
-      symbolAnimations.clear(); symbolLayer.replaceChildren();
+      symbolAnimations.clear(); symbolLayer.replaceChildren(); floatingSymbolLayer.replaceChildren();
       box.removeAttribute('data-symbol'); box.removeAttribute('data-symbol-eyes');
     }
     function showSymbol(name: string | null, options: { duration?: number; rise?: number; hold?: boolean; source?: SVGPathElement } = {}) {
@@ -620,10 +656,12 @@ export function SvgAvatarCanvas({ className = '', roam = false, onFloat, onError
       }
       clearSymbol();
       const mark = REACTION_SYMBOLS[name!];
-      symbolLayer.innerHTML = mark.markup;
+      const layer = mark.eyeOverlay || name === 'blush' || name === 'nosebleed' ? symbolLayer : floatingSymbolLayer;
+      layer.innerHTML = mark.markup;
+      if (mark.floatingMarkup) floatingSymbolLayer.innerHTML = mark.floatingMarkup;
       box.setAttribute('data-symbol', name!);
       if (mark.eyeOverlay) box.setAttribute('data-symbol-eyes', 'true');
-      const parts = symbolLayer.querySelectorAll<SVGGraphicsElement>('[data-symbol-part]');
+      const parts = [...symbolLayer.querySelectorAll<SVGGraphicsElement>('[data-symbol-part]'), ...floatingSymbolLayer.querySelectorAll<SVGGraphicsElement>('[data-symbol-part]')];
       if (!motionPreference.matches) parts.forEach((part, index) => {
         symbolAnimations.add(part.animate(symbolFrames(mark.motion), { duration: mark.duration, delay: index * 80, fill: 'both' }));
       });
@@ -720,6 +758,7 @@ export function SvgAvatarCanvas({ className = '', roam = false, onFloat, onError
         for (const animation of animations.values()) animation.cancel(); animations.clear();
         cancelAnimationFrame(hairFrame); hairFrame = 0;
         box.style.transform = ''; jaw = 0; restAmount = restSpeed = 0; restEl.style.transform = '';
+        fit();
         boundary.style.translate = ''; correction = { x: 0, y: 0 }; contactWall = ''; contactUntil = 0;
         box.style.setProperty('--rest-lid', '1'); box.setAttribute('data-rest', engine.emotion() === 'sleepy' ? 'asleep' : 'awake');
         box.style.setProperty('--jaw-open', '0'); box.style.setProperty('--fairy-glow', engine.emotion() === 'sleepy' ? '.01' : '.04');

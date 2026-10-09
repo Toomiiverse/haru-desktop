@@ -6,12 +6,12 @@ const ink = (d: string, colour = pink, width = 13) => `<path d="${d}" fill="none
 const question = 'M -24 -31 C -24 -67 33 -67 33 -31 C 33 -8 4 -7 4 16 M 4 43 L 4 45';
 const bang = 'M 0 -55 L 0 12 M 0 40 L 0 43';
 const star = '<path d="M 0 -37 Q 7 -7 28 0 Q 7 7 0 37 Q -7 7 -28 0 Q -7 -7 0 -37 Z" fill="#ffdeb0" stroke="#24212a" stroke-width="6"/>';
-type SymbolMark = { label: string; markup: string; motion: 'drop' | 'pulse' | 'float' | 'shake' | 'fade' | 'spin'; duration: number; eyeOverlay?: boolean };
+type SymbolMark = { label: string; markup: string; floatingMarkup?: string; motion: 'drop' | 'pulse' | 'float' | 'shake' | 'fade' | 'spin'; duration: number; eyeOverlay?: boolean };
 export const REACTION_SYMBOLS: Record<string, SymbolMark> = {
   sweatdrop: { label: 'Sweat drop', motion: 'drop', duration: 2600, markup: group('<path d="M 0 -55 C -8 -31 -36 -5 -36 20 A 36 36 0 0 0 36 20 C 36 -5 8 -31 0 -55 Z" fill="#a7d8f0" stroke="#24212a" stroke-width="8"/><path d="M -20 10 Q -28 32 -10 40" fill="none" stroke="#effaff" stroke-width="7"/>', 'translate(1000 480)') },
   anger: { label: 'Anger mark', motion: 'pulse', duration: 2300, markup: group(ink('M -40 -10 Q -9 -9 -10 -40 M 10 -40 Q 9 -9 40 -10 M 40 10 Q 9 9 10 40 M -10 40 Q -9 9 -40 10', '#ff9cae', 17), 'translate(950 495)') },
   blush: { label: 'Blush', motion: 'fade', duration: 3200, markup: [425, 810].map(x => group('<ellipse rx="47" ry="23" fill="#fec4cc" opacity=".18"/>' + '<path d="M -30 9 L -17 -10 M -10 12 L 3 -9 M 10 12 L 23 -9" fill="none" stroke="#fec4cc" stroke-width="7"/>', `translate(${x} 906)`)).join('') },
-  'sparkle-eyes': { label: 'Sparkle eyes', motion: 'pulse', duration: 2200, eyeOverlay: true, markup: [484, 755].map(x => group(star, `translate(${x} 851)`)).join('') + group(star, 'translate(1080 690) scale(.55)') },
+  'sparkle-eyes': { label: 'Sparkle eyes', motion: 'pulse', duration: 2200, eyeOverlay: true, markup: [484, 755].map(x => group(star, `translate(${x} 851)`)).join(''), floatingMarkup: group(star, 'translate(1080 690) scale(.55)') },
   question: { label: 'Curious ?', motion: 'float', duration: 2700, markup: group(ink(question), 'translate(1090 285) rotate(12)') },
   surprise: { label: 'Surprise !', motion: 'pulse', duration: 1700, markup: group(ink(bang, '#ffdeb0', 17), 'translate(1080 280) rotate(9)') + group(ink('M -20 -16 L -34 -30 M -28 4 L -49 2', '#ffdeb0', 9), 'translate(1080 280)') },
   disbelief: { label: 'Disbelief ?!', motion: 'shake', duration: 2700, markup: group(ink(question), 'translate(1060 272) rotate(-9) scale(.85)') + group(ink(bang, '#ffdeb0'), 'translate(1150 300) rotate(13) scale(.85)') },
@@ -48,7 +48,7 @@ export const ANIMATION_SYMBOLS: Record<string, string> = {
 };
 
 export function symbolSvg(name: string): string {
-  return Object.hasOwn(REACTION_SYMBOLS, name) ? `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1254 1254">${REACTION_SYMBOLS[name].markup}</svg>` : '';
+  return Object.hasOwn(REACTION_SYMBOLS, name) ? `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1254 1254">${REACTION_SYMBOLS[name].markup}${REACTION_SYMBOLS[name].floatingMarkup ?? ''}</svg>` : '';
 }
 
 export function symbolFrames(motion: SymbolMark['motion']): Keyframe[] {
