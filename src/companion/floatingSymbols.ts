@@ -3,7 +3,7 @@ export function detachReactionMarks(svg: SVGElement): SVGElement {
   const floating = svg.cloneNode(true) as SVGElement;
   floating.querySelectorAll('defs').forEach(node => node.remove());
   floating.querySelectorAll('path,rect,circle,ellipse,line,polyline,polygon,text,use').forEach(node => {
-    if (!node.hasAttribute('data-reaction-mark')) node.remove();
+    if (!node.closest('[data-reaction-mark]')) node.remove();
   });
   floating.querySelectorAll('[data-reaction-mark]').forEach(node => {
     const wrapper = node.ownerDocument.createElementNS('http://www.w3.org/2000/svg', 'g');

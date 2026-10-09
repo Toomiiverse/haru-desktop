@@ -28,10 +28,12 @@ app.whenReady().then(async () => {
     assert.ok(result.running,face+' marks animate'); assert.ok(result.placed,face+' retains artwork coordinates');
     if (shape==='rect') result.transforms.forEach(t=>assert.match(t,/translate\(1[01]\d\d/));
   }
+  await run('window.haruAvatar.express("confused")'); await pause(950);
+  assert.equal(await run('document.querySelector(".floating-face[style*=\\"opacity: 1\\"] [data-reaction-mark=question]").querySelectorAll("path,circle").length'),2,'question stroke and punctuation dot stay together');
   await run('window.haruAvatar.express("neutral")'); await pause(650);
   await run('window.haruAvatar.symbol("hearts")'); await pause(100);
   assert.ok(await run('!!document.querySelector(".avatar-floating > .avatar-symbol-layer [data-symbol-part]")'));
-  assert.equal(await run('document.querySelectorAll(".floating-face [data-reaction-mark]").length'),3,'old authored marks persist only in the fading buffer');
+  assert.equal(await run('document.querySelectorAll(".floating-face [data-reaction-mark]").length'),1,'old authored marks persist only in the fading buffer');
   await run('window.haruAvatar.symbol("sparkle-eyes")');
   assert.equal(await run('document.querySelectorAll("#avatar .avatar-symbol-layer [data-symbol-part]").length'),2);
   assert.equal(await run('document.querySelectorAll(".avatar-floating > .avatar-symbol-layer [data-symbol-part]").length'),1);
