@@ -171,6 +171,11 @@ export function moodLine(emotion: EmotionName, irritation: number, grudge: numbe
     embarrassed: 'Would rather you did not bring it up.',
     determined: 'Set on something.',
     worried: 'Wound up about something.',
+    shy: 'Quiet, and pretending she is not.',
+    seductive: 'Close, and in no hurry.',
+    teasing: 'Enjoying this more than she should.',
+    sexy: 'Fully aware of herself.',
+    direct: 'Not in the mood to go round it.',
   };
   return lines[emotion];
 }

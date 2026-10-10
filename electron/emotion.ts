@@ -16,7 +16,11 @@ import { IRRITATION, EGO } from './mood';
 // and "neutral, worried" — none of which had anywhere to go. Those are not
 // exotic states for her: driving somebody at a task and being anxious about
 // them are most of what she does, and neither was expressible.
-export const EMOTIONS = ['neutral', 'happy', 'curious', 'smug', 'annoyed', 'bored', 'sleepy', 'surprised', 'affectionate', 'embarrassed', 'determined', 'worried'] as const;
+export const CORE_EMOTIONS = ['neutral', 'happy', 'curious', 'smug', 'annoyed', 'bored', 'sleepy', 'surprised', 'affectionate', 'embarrassed', 'determined', 'worried'] as const;
+// Voice styles: labels she can put on a sentence that the voice performs in their own way. They sit beside the
+// twelve rather than replacing any of them, and the classifier below never produces one.
+export const STYLES = ['shy', 'seductive', 'teasing', 'sexy', 'direct'] as const;
+export const EMOTIONS = [...CORE_EMOTIONS, ...STYLES] as const;
 export const INTENTS = ['listen', 'explain', 'tease', 'dismiss', 'celebrate', 'soothe'] as const;
 export const FOCUSES = ['user', 'self', 'task', 'away'] as const;
 
@@ -108,7 +112,7 @@ export function localEmotion(text: string): EmotionName {
 export const EMOTION_SCHEMA = {
   type: 'object',
   properties: {
-    emotion: { type: 'string', enum: [...EMOTIONS] },
+    emotion: { type: 'string', enum: [...CORE_EMOTIONS] },
     confidence: { type: 'number' },
     energy: { type: 'number' },
     intent: { type: 'string', enum: [...INTENTS] },
@@ -134,7 +138,7 @@ export function parseEmotion(raw: unknown): Emotion | null {
   }
   if (!value || typeof value !== 'object') return null;
   const record = value as Record<string, unknown>;
-  const emotion = EMOTIONS.includes(record.emotion as EmotionName) ? record.emotion as EmotionName : null;
+  const emotion = (CORE_EMOTIONS as readonly string[]).includes(record.emotion as string) ? record.emotion as EmotionName : null;
   if (!emotion) return null;
   return {
     emotion,

@@ -4,6 +4,7 @@ import {
   localEmotion,
   parseEmotion,
   faceForEmotion,
+  CORE_EMOTIONS,
   EMOTIONS,
   NEUTRAL_EMOTION,
 } from '../electron/emotion';
@@ -47,8 +48,8 @@ test('parseEmotion parses a JSON string payload the same as an object', () => {
   assert.equal(parsed!.emotion, 'smug');
 });
 
-test('every EMOTIONS value round-trips through parseEmotion', () => {
-  for (const emotion of EMOTIONS) {
+test('every core emotion round-trips through parseEmotion', () => {
+  for (const emotion of CORE_EMOTIONS) {
     const parsed = parseEmotion({ emotion, confidence: 0.5, energy: 0.5, intent: 'listen', focus: 'user' });
     assert.equal(parsed?.emotion, emotion);
   }

@@ -1,7 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { cleaningChunks, deliveryReminder, deliveryRule, hasDeliveryLabel, splitDelivery, stripDelivery } from '../electron/delivery';
-import { EMOTIONS } from '../electron/emotion';
+import { CORE_EMOTIONS, EMOTIONS, EMOTION_SCHEMA, STYLES, parseEmotion } from '../electron/emotion';
+import { MOOD_TO_EMOTION, isHaruEmotion } from '../electron/emotions';
+import { BREEZE_DESCRIPTIONS, HUME_DESCRIPTIONS } from '../electron/voice';
 
 test('a mood off the list is read as the one it means, and never reaches him', () => {
   // Kimi K3, 2026-09-14: "[concerned] Stop." — the stripper left it in.
@@ -86,6 +88,28 @@ test('the rule names every mood she has, so an invented one is detectable', () =
   const rule = deliveryRule();
   for (const mood of EMOTIONS) assert.ok(rule.includes(mood), `${mood} missing from the rule`);
   assert.match(rule, /stripped before he sees them/);
+});
+
+test('the five voice styles are labels she can use, on top of the twelve', () => {
+  assert.deepEqual([...STYLES], ['shy', 'seductive', 'teasing', 'sexy', 'direct']);
+  assert.deepEqual([...EMOTIONS], [...CORE_EMOTIONS, ...STYLES]);
+  const said = splitDelivery('[shy] I was not looking. [seductive] Come here. [teasing] Cute. [sexy] You know. [direct] Do it now. [love] Fine.');
+  assert.deepEqual(said.map(part => part.mood), ['shy', 'seductive', 'teasing', 'sexy', 'direct', 'affectionate']);
+  assert.equal(stripDelivery('[shy] I was not looking. [direct] Do it now.'), 'I was not looking. Do it now.');
+  assert.match(deliveryRule(), /shy, seductive, teasing, sexy, direct/);
+});
+
+test('the face classifier still only knows the twelve core emotions', () => {
+  assert.deepEqual((EMOTION_SCHEMA.properties.emotion as { enum: string[] }).enum, [...CORE_EMOTIONS]);
+  assert.equal(parseEmotion({ emotion: 'shy', confidence: 1, energy: 1, intent: 'listen', focus: 'user' }), null);
+  assert.equal(parseEmotion({ emotion: 'smug', confidence: 1, energy: 1, intent: 'listen', focus: 'user' })?.emotion, 'smug');
+});
+
+test('every style has an avatar face and a voice direction', () => {
+  for (const style of STYLES) {
+    assert.ok(isHaruEmotion(MOOD_TO_EMOTION[style]), `${style} has no avatar face`);
+    assert.ok(BREEZE_DESCRIPTIONS[style].length > 10 && HUME_DESCRIPTIONS[style].length > 10, `${style} has no voice direction`);
+  }
 });
 
 test('the voice keeps a spoken sound that the page never shows', () => {

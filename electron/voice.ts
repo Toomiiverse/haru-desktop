@@ -101,6 +101,11 @@ export const HUME_DESCRIPTIONS: Record<EmotionName, string> = {
   embarrassed: 'embarrassed, sheepish, deflecting',
   determined: 'determined, firm, pushing',
   worried: 'worried, soft, uncertain',
+  shy: 'shy, flustered, hesitant, quiet',
+  seductive: 'seductive, low, slow, husky',
+  teasing: 'teasing, playful, smirking, sing-song',
+  sexy: 'sultry, breathy, confident, warm',
+  direct: 'direct, firm, blunt, no nonsense',
 };
 
 /** Breeze TTS 2 steers delivery with a natural-language `instruction`, so the
@@ -120,10 +125,15 @@ export const BREEZE_DESCRIPTIONS: Record<EmotionName, string> = {
   bored: 'bored, flat, unimpressed, drawn out',
   sleepy: 'sleepy, slow, soft and low, drowsy, a little annoyed',
   surprised: 'surprised, sharp, quick',
-  affectionate: 'warm, fond, soft, gentle',
+  affectionate: 'Warm and fond, soft and gentle, a little shy about it.',
   embarrassed: 'embarrassed, sheepish, deflecting, hesitant',
   determined: 'determined, firm, pushing, deliberate',
   worried: 'worried, soft, uncertain, strained',
+  shy: 'Shy and flustered, hesitant and quiet, her voice dropping as she tries to hide it.',
+  seductive: 'seductive, low, slow, husky',
+  teasing: 'teasing, playful, smirking, sing-song',
+  sexy: 'sultry, breathy, confident, warm',
+  direct: 'Direct and firm, blunt and no-nonsense, short clipped words, completely sure.',
 };
 
 export const DEFAULT_VOICE: VoiceConfig = {
