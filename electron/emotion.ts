@@ -19,7 +19,7 @@ import { IRRITATION, EGO } from './mood';
 export const CORE_EMOTIONS = ['neutral', 'happy', 'curious', 'smug', 'annoyed', 'bored', 'sleepy', 'surprised', 'affectionate', 'embarrassed', 'determined', 'worried'] as const;
 // Voice styles: labels she can put on a sentence that the voice performs in their own way. They sit beside the
 // twelve rather than replacing any of them, and the classifier below never produces one.
-export const STYLES = ['shy', 'seductive', 'teasing', 'sexy', 'direct', 'whispering', 'breathless', 'challenging', 'coy', 'knowing', 'commanding', 'possessive'] as const;
+export const STYLES = ['shy', 'teasing', 'direct', 'whispering', 'breathless', 'challenging', 'coy', 'knowing', 'commanding', 'possessive'] as const;
 export const EMOTIONS = [...CORE_EMOTIONS, ...STYLES] as const;
 export const INTENTS = ['listen', 'explain', 'tease', 'dismiss', 'celebrate', 'soothe'] as const;
 export const FOCUSES = ['user', 'self', 'task', 'away'] as const;

@@ -27,7 +27,7 @@ import { EMOTIONS, type EmotionName } from './emotion';
 
 /** What the brain is asked. Named moods only, so an invented one is detectable. */
 export function deliveryRule(): string {
-  return `Before each sentence of your reply, put how that sentence should sound in square brackets, chosen from exactly this list: ${EMOTIONS.join(', ')}. The last twelve (shy, seductive, teasing, sexy, direct, whispering, breathless, challenging, coy, knowing, commanding, possessive) are for when the moment really calls for them; most sentences are one of the first twelve. Like this: [annoyed] Do not touch that. [curious] What did you even try? Every sentence gets one, they are stripped before he sees them, and nothing else about how you write changes. A sentence may also open, straight after its label, with (sigh) or (laugh) when you really would; that is spoken as a sound, and no other sound in brackets is allowed. Like this: [sleepy] (sigh) It's late. Go to bed.`;
+  return `Before each sentence of your reply, put how that sentence should sound in square brackets, chosen from exactly this list: ${EMOTIONS.join(', ')}. The last ten (shy, teasing, direct, whispering, breathless, challenging, coy, knowing, commanding, possessive) are for when the moment really calls for them; most sentences are one of the first twelve. Like this: [annoyed] Do not touch that. [curious] What did you even try? Every sentence gets one, they are stripped before he sees them, and nothing else about how you write changes. A sentence may also open, straight after its label, with (sigh) or (laugh) when you really would; that is spoken as a sound, and no other sound in brackets is allowed. Like this: [sleepy] (sigh) It's late. Go to bed.`;
 }
 
 /**
@@ -44,7 +44,7 @@ export const MOOD_ALIASES: Readonly<Record<string, EmotionName>> = {
   angry: 'annoyed', irritated: 'annoyed', frustrated: 'annoyed', exasperated: 'annoyed', impatient: 'annoyed', mad: 'annoyed', grumpy: 'annoyed',
   amused: 'smug', playful: 'smug', sarcastic: 'smug', proud: 'smug', mocking: 'smug', cocky: 'smug',
   excited: 'happy', pleased: 'happy', cheerful: 'happy', delighted: 'happy',
-  warm: 'affectionate', fond: 'affectionate', tender: 'affectionate', gentle: 'affectionate', soft: 'affectionate', caring: 'affectionate', love: 'affectionate',
+  warm: 'affectionate', fond: 'affectionate', tender: 'affectionate', gentle: 'affectionate', soft: 'affectionate', caring: 'affectionate', love: 'affectionate', seductive: 'affectionate', sexy: 'affectionate',
   flustered: 'embarrassed', sheepish: 'embarrassed',
   confused: 'curious', puzzled: 'curious', intrigued: 'curious', interested: 'curious',
   serious: 'determined', stern: 'determined', firm: 'determined', resolute: 'determined',
