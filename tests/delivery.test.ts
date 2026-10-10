@@ -91,12 +91,12 @@ test('the rule names every mood she has, so an invented one is detectable', () =
 });
 
 test('the five voice styles are labels she can use, on top of the twelve', () => {
-  assert.deepEqual([...STYLES], ['shy', 'seductive', 'teasing', 'sexy', 'direct']);
+  assert.deepEqual([...STYLES], ['shy', 'seductive', 'teasing', 'sexy', 'direct', 'whispering', 'breathless', 'challenging', 'coy', 'knowing', 'commanding', 'possessive']);
   assert.deepEqual([...EMOTIONS], [...CORE_EMOTIONS, ...STYLES]);
-  const said = splitDelivery('[shy] I was not looking. [seductive] Come here. [teasing] Cute. [sexy] You know. [direct] Do it now. [love] Fine.');
-  assert.deepEqual(said.map(part => part.mood), ['shy', 'seductive', 'teasing', 'sexy', 'direct', 'affectionate']);
+  const said = splitDelivery('[shy] I was not looking. [coy] Maybe. [teasing] Cute. [knowing] Obviously. [direct] Do it now. [commanding] Sit. [possessive] Mine. [love] Fine.');
+  assert.deepEqual(said.map(part => part.mood), ['shy', 'coy', 'teasing', 'knowing', 'direct', 'commanding', 'possessive', 'affectionate']);
   assert.equal(stripDelivery('[shy] I was not looking. [direct] Do it now.'), 'I was not looking. Do it now.');
-  assert.match(deliveryRule(), /shy, seductive, teasing, sexy, direct/);
+  assert.match(deliveryRule(), /shy, seductive, teasing, sexy, direct, whispering, breathless, challenging, coy, knowing, commanding, possessive/);
 });
 
 test('the face classifier still only knows the twelve core emotions', () => {

@@ -444,6 +444,13 @@ test('breeze carries a tempo cue in every mood, because it has no speed paramete
     teasing: /sing-song|playful/i,
     sexy: /breathy|sultry/i,
     direct: /clipped|firm/i,
+    whispering: /whispering|soft/i,
+    breathless: /quick|panting/i,
+    challenging: /daring|confident/i,
+    coy: /hesitant|playful/i,
+    knowing: /low|amused/i,
+    commanding: /brisk|bossy/i,
+    possessive: /steady|low/i,
   };
   for (const emotion of EMOTIONS) {
     const direction = BREEZE_DESCRIPTIONS[emotion];

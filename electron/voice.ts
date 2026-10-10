@@ -106,6 +106,13 @@ export const HUME_DESCRIPTIONS: Record<EmotionName, string> = {
   teasing: 'teasing, playful, smirking, sing-song',
   sexy: 'sultry, breathy, confident, warm',
   direct: 'direct, firm, blunt, no nonsense',
+  whispering: 'whispering, soft, close, intimate',
+  breathless: 'breathless, excited, quick, panting',
+  challenging: 'challenging, daring, confident',
+  coy: 'coy, playful, hesitant, teasing',
+  knowing: 'knowing, amused, low, smug',
+  commanding: 'commanding, bossy, brisk, in charge',
+  possessive: 'possessive, protective, steady, low',
 };
 
 /** Breeze TTS 2 steers delivery with a natural-language `instruction`, so the
@@ -134,6 +141,13 @@ export const BREEZE_DESCRIPTIONS: Record<EmotionName, string> = {
   teasing: 'teasing, playful, smirking, sing-song',
   sexy: 'sultry, breathy, confident, warm',
   direct: 'Direct and firm, blunt and no-nonsense, short clipped words, completely sure.',
+  whispering: 'whispering, soft, close, intimate',
+  breathless: 'breathless, excited, quick, panting',
+  challenging: 'Daring and flirty, chin up, confident, challenging them to make a move.',
+  coy: 'coy, playful, hesitant, teasing',
+  knowing: 'knowing, amused, low, smug',
+  commanding: 'Bright and bossy, brisk and full of energy, a club president rallying her troops.',
+  possessive: 'Fiercely protective, steady and low, ready to defend him.',
 };
 
 export const DEFAULT_VOICE: VoiceConfig = {

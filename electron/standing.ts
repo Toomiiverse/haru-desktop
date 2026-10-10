@@ -176,6 +176,13 @@ export function moodLine(emotion: EmotionName, irritation: number, grudge: numbe
     teasing: 'Enjoying this more than she should.',
     sexy: 'Fully aware of herself.',
     direct: 'Not in the mood to go round it.',
+    whispering: 'Keeping her voice down, for you.',
+    breathless: 'Running on excitement.',
+    challenging: 'Daring you to try something.',
+    coy: 'Holding back on purpose.',
+    knowing: 'Already ahead of you.',
+    commanding: 'Running the room, and you.',
+    possessive: 'Keeping you close.',
   };
   return lines[emotion];
 }

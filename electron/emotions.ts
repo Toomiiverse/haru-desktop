@@ -134,6 +134,13 @@ export const MOOD_TO_EMOTION: Record<EmotionName, HaruEmotion> = {
   teasing: 'playful',
   sexy: 'flirty',
   direct: 'serious',
+  whispering: 'attentive',
+  breathless: 'excited',
+  challenging: 'confident',
+  coy: 'shy',
+  knowing: 'smug',
+  commanding: 'serious',
+  possessive: 'determined',
 };
 
 export function isHaruEmotion(name: string): name is HaruEmotion {
