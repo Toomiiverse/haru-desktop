@@ -580,8 +580,8 @@ async function postBreeze(config: VoiceConfig, reference: VoiceReference, text: 
   form.append('text', text);
   form.append('instruction', config.deliveryInstruction || breezeInstruction(text, emotion));
   const guidance = process.env.HARU_CORE_BREEZE_GUIDANCE === 'on'
-    ? corePolicySync<number>('breeze.guidance', [emotion ?? null]) : 4;
-  if (guidance !== 2 && guidance !== 4) throw new Error('invalid_core_breeze_guidance');
+    ? corePolicySync<number>('breeze.guidance', [emotion ?? null, text]) : 4;
+  if (guidance !== 2 && guidance !== 3 && guidance !== 4) throw new Error('invalid_core_breeze_guidance');
   signal?.throwIfAborted();
   form.append('cfg_scale', String(guidance));
   form.append('ref_text', reference.text || '');

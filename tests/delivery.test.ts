@@ -88,6 +88,13 @@ test('the rule names every mood she has, so an invented one is detectable', () =
   assert.match(rule, /stripped before he sees them/);
 });
 
+test('the rule allows exactly two spoken sounds, (sigh) and (laugh), and nothing else in brackets', () => {
+  const rule = deliveryRule();
+  assert.match(rule, /\(sigh\) or \(laugh\)/);
+  assert.match(rule, /no other sound in brackets is allowed/);
+  assert.doesNotMatch(rule, /\((yawn|gasp|cough|clears throat)\)/);
+});
+
 // ---- the stream, which is what he actually watches ----
 
 test('a label never reaches the screen, even split across chunks', () => {
