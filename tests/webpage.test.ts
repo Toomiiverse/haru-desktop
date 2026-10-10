@@ -16,9 +16,61 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
+import { webcrypto } from 'node:crypto';
 import { appPage, loginPage } from '../electron/webpage';
 
 const PAGES: [string, string][] = [['the login page', loginPage()], ['the app page', appPage()]];
+
+test('input reporter ignores page visibility and synthetic events, throttles real input, and never retries', async () => {
+  const html = appPage();
+  const source = html.slice(html.indexOf('// ---- Shadow input evidence'), html.indexOf('// ---- End shadow input evidence'));
+  const listeners = new Map<string, (event: object) => Promise<void>>();
+  const timers = new Map<number, () => void>();
+  const sent: { url: string; options: RequestInit }[] = [];
+  let now = 0, timerId = 0, offline = false, hold = false;
+  const document = { visibilityState: 'visible', addEventListener(type: string, fn: (event: object) => Promise<void>, options: { passive: boolean }) {
+    assert.equal(options.passive, true); listeners.set(type, fn);
+  } };
+  vm.runInNewContext(source, { document, crypto: webcrypto, performance: { now: () => now }, AbortController,
+    setTimeout(fn: () => void, ms: number) { assert.equal(ms, 5000); timers.set(++timerId, fn); return timerId; },
+    clearTimeout(id: number) { timers.delete(id); },
+    fetch(url: string, options: RequestInit) {
+      sent.push({ url, options });
+      if (offline) return Promise.reject(Error('offline'));
+      if (hold) return new Promise((_resolve, reject) => options.signal!.addEventListener('abort', () => reject(Error('timeout'))));
+      return Promise.resolve({ ok: true });
+    },
+  });
+  assert.deepEqual([...listeners.keys()], ['pointerdown', 'keydown', 'input', 'wheel']);
+  assert.equal(sent.length, 0, 'loading the page must not report input');
+  const fire = (type: string, isTrusted = true) => listeners.get(type)!({ isTrusted, key: 'private', data: 'private' });
+  await fire('keydown', false);
+  document.visibilityState = 'hidden'; await fire('input');
+  assert.equal(sent.length, 0);
+  document.visibilityState = 'visible'; await fire('pointerdown');
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].url, '/api/attention/input');
+  const first = JSON.parse(String(sent[0].options.body));
+  assert.deepEqual(Object.keys(first).sort(), ['client', 'kind', 'sequence']);
+  assert.equal(first.kind, 'input');
+  assert.match(first.client, /^[a-f0-9]{32}$/);
+  assert.equal(first.sequence, 1);
+  assert.equal(timers.size, 0);
+  now = 29_999; await fire('wheel'); assert.equal(sent.length, 1);
+  now = 30_000; offline = true; await fire('input');
+  assert.equal(sent.length, 2); assert.equal(timers.size, 0);
+  now = 90_000; assert.equal(sent.length, 2, 'time passing after failure does not retry');
+  offline = false; hold = true;
+  const pending = fire('keydown');
+  now = 150_000; await fire('wheel'); assert.equal(sent.length, 3, 'one request at a time');
+  for (const fn of timers.values()) fn();
+  await pending;
+  assert.equal(sent[2].options.signal!.aborted, true);
+  assert.equal(timers.size, 0);
+  hold = false; await fire('wheel'); assert.equal(sent.length, 4);
+  assert.deepEqual(JSON.parse(String(sent[3].options.body)), { ...first, sequence: 4 });
+  assert.doesNotThrow(() => vm.runInNewContext(source, {}), 'missing crypto should leave the page usable');
+});
 
 for (const [name, html] of PAGES) {
   test(`${name} reaches outside for nothing`, () => {
@@ -646,7 +698,7 @@ test('the worker tells the page when a push lands and when a notification is tap
   const app = appPage();
   assert.ok(app.includes("e.data.type==='said'||e.data.type==='opened')) refreshIfIdle()"), 'the page does not listen');
   assert.ok(app.includes("if(!document.hidden){ refreshIfIdle(true);"), 'coming back does not re-read the day');
-  assert.ok(app.includes("function refreshIfIdle(opened){ if($('cb').disabled) return;"), 'a re-read would clobber a reply in flight');
+  assert.ok(app.includes("function refreshIfIdle(opened){ if($('cb').disabled){ void recoverPending(); return; }"), 'resume must recover the receipt rather than clobber an active stream');
   // A page checking on its own is not the page being opened: the morning waits
   // for a real opening, and a tab left on the nightstand polled it into "up".
   assert.ok(app.includes("get(poll?'/api/chat?poll=1':'/api/chat')"), 'a poll is not told apart from an opening');

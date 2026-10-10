@@ -39,7 +39,7 @@
 
 import Store from 'electron-store';
 import { execFile } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { constants, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { emptyKnowledge, loadKnowledge, saveKnowledge, type KnowledgeStore } from './knowledge';
@@ -189,12 +189,41 @@ export type HaruStoreOptions = {
   scheduleFile?: string;
   /** Where thoughts.json lives — her thoughts between messages (thoughts.ts). Beside config.json too. */
   thoughtsFile?: string;
-  /** Only used in tests — overrides where the config file lives. */
-  cwd?: string;
+  /** The user-data directory. Required so opening and recovery use the same
+   *  paths even when Electron starts from a different working directory. */
+  cwd: string;
   configName?: string;
   /** How many backups to keep per reason before the oldest are removed. */
   maxBackups?: number;
 };
+
+/** Resolve once by the same rules, including before electron-store can open. */
+function storePaths(options: HaruStoreOptions) {
+  const cwd = path.resolve(options.cwd);
+  const config = path.resolve(cwd, `${options.configName || 'config'}.json`);
+  const besideConfig = path.dirname(config);
+  return {
+    config,
+    knowledge: path.resolve(options.knowledgeFile),
+    archive: path.resolve(options.archiveFile ?? path.join(besideConfig, 'archive.json')),
+    memories: path.resolve(options.memoriesFile ?? path.join(besideConfig, 'memories.json')),
+    activity: path.resolve(options.activityFile ?? path.join(besideConfig, 'activity.json')),
+    graph: path.resolve(options.graphFile ?? path.join(besideConfig, 'graph.json')),
+    schedule: path.resolve(options.scheduleFile ?? path.join(besideConfig, 'schedule.json')),
+    thoughts: path.resolve(options.thoughtsFile ?? path.join(besideConfig, 'thoughts.json')),
+  };
+}
+
+/** All eight stores have an object at the root. Valid JSON alone would also
+ *  accept null or an array, which cannot serve as the configuration store. */
+function validStoreJson(contents: string): boolean {
+  try {
+    const value: unknown = JSON.parse(contents);
+    return value !== null && typeof value === 'object' && !Array.isArray(value);
+  } catch {
+    return false;
+  }
+}
 
 // The counter is what makes two backups in the same millisecond two files.
 // Found by the server: its disk is fast enough that back-to-back backups landed
@@ -238,18 +267,18 @@ export class HaruStore {
   private thoughtsCache: ThoughtState | null = null;
 
   constructor(options: HaruStoreOptions) {
-    this.knowledgeFile = options.knowledgeFile;
+    const files = storePaths(options);
+    this.knowledgeFile = files.knowledge;
     this.maxBackups = options.maxBackups ?? 10;
-    const storeOptions: Record<string, unknown> = {};
-    if (options.cwd) storeOptions.cwd = options.cwd;
+    const storeOptions: Record<string, unknown> = { cwd: path.resolve(options.cwd) };
     if (options.configName) storeOptions.name = options.configName;
     this.electron = new Store<Record<string, unknown>>(storeOptions);
-    this.archiveFile = options.archiveFile ?? path.join(path.dirname(this.electron.path), 'archive.json');
-    this.memoriesFile = options.memoriesFile ?? path.join(path.dirname(this.electron.path), 'memories.json');
-    this.activityFile = options.activityFile ?? path.join(path.dirname(this.electron.path), 'activity.json');
-    this.graphFile = options.graphFile ?? path.join(path.dirname(this.electron.path), 'graph.json');
-    this.scheduleFile = options.scheduleFile ?? path.join(path.dirname(this.electron.path), 'schedule.json');
-    this.thoughtsFile = options.thoughtsFile ?? path.join(path.dirname(this.electron.path), 'thoughts.json');
+    this.archiveFile = files.archive;
+    this.memoriesFile = files.memories;
+    this.activityFile = files.activity;
+    this.graphFile = files.graph;
+    this.scheduleFile = files.schedule;
+    this.thoughtsFile = files.thoughts;
   }
 
   // -- generic access. Same surface as electron-store so existing callers and
@@ -624,25 +653,49 @@ export class HaruStore {
   }
 
   /**
-   * Restore the newest backup of each store file over the live file. Used when
-   * the store fails to open — the electron-store constructor itself parses the
-   * file, so this must run before constructing the facade, hence static.
+   * Restore only damaged files, using the newest valid backup of each. Healthy
+   * files may be newer than their backups and must not be rolled back. The
+   * electron-store constructor parses config itself, so recovery is static.
+   * Returns true only if something was restored and config can now be opened:
+   * config is the one file the store cannot start without. Every other file
+   * has a reader that warns and starts empty, so one of them damaged with no
+   * backup is logged and left for salvage rather than allowed to keep her
+   * from booting.
    */
   static recoverBackups(options: HaruStoreOptions): boolean {
+    const files = storePaths(options);
     let restored = false;
-    for (const file of [path.join(options.cwd ?? '', options.configName ? `${options.configName}.json` : 'config.json'), options.knowledgeFile, options.archiveFile ?? path.join(options.cwd ?? '', 'archive.json'), options.memoriesFile ?? path.join(options.cwd ?? '', 'memories.json'), options.activityFile ?? path.join(options.cwd ?? '', 'activity.json'), options.graphFile ?? path.join(options.cwd ?? '', 'graph.json'), options.scheduleFile ?? path.join(options.cwd ?? '', 'schedule.json'), options.thoughtsFile ?? path.join(options.cwd ?? '', 'thoughts.json')]) {
+    for (const file of new Set(Object.values(files))) {
       if (!existsSync(file)) continue;
-      const newest = this.newestBackup(file);
-      if (!newest) continue;
       try {
-        copyFileSync(newest, file);
-        console.warn(`[store] recovered ${file} from ${newest}`);
+        if (validStoreJson(readFileSync(file, 'utf8'))) continue;
+        const newest = this.newestBackup(file);
+        if (!newest) {
+          console.warn(`[store] no valid backup for ${file}; leaving the damaged file in place`);
+          continue;
+        }
+        const stamp = backupStamp();
+        const damaged = `${file}.corrupt-${stamp}`;
+        const temporary = `${file}.recovering-${stamp}`;
+        // Keep the damaged bytes for manual salvage. Neither a failed write nor
+        // a failed rename may destroy the only live copy.
+        copyFileSync(file, damaged, constants.COPYFILE_EXCL);
+        try {
+          writeFileSync(temporary, newest.contents, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
+          renameSync(temporary, file);
+        } finally {
+          try { rmSync(temporary, { force: true }); } catch { /* best effort after a failed restore */ }
+        }
+        console.warn(`[store] recovered ${file} from ${newest.file}; damaged copy kept at ${damaged}`);
         restored = true;
       } catch (error) {
         console.warn(`[store] could not recover ${file}:`, error instanceof Error ? error.message : error);
       }
     }
-    return restored;
+    const configOpens = (): boolean => {
+      try { return validStoreJson(readFileSync(files.config, 'utf8')); } catch { return false; }
+    };
+    return restored && (!existsSync(files.config) || configOpens());
   }
 
   /**
@@ -684,13 +737,25 @@ export class HaruStore {
     }
   }
 
-  private static newestBackup(file: string): string | null {
+  private static newestBackup(file: string): { file: string; contents: string } | null {
     const dir = path.dirname(file);
     const base = path.basename(file);
     const matches = readdirSync(dir)
       .filter(name => name.startsWith(`${base}.before-`))
-      .map(name => ({ name, mtime: statSync(path.join(dir, name)).mtimeMs }))
-      .sort((a, b) => b.mtime - a.mtime);
-    return matches.length ? path.join(dir, matches[0].name) : null;
+      .flatMap(name => {
+        try {
+          const stat = statSync(path.join(dir, name));
+          return stat.isFile() ? [{ name, mtime: stat.mtimeMs }] : [];
+        } catch { return []; }
+      })
+      .sort((a, b) => b.mtime - a.mtime || b.name.localeCompare(a.name));
+    for (const match of matches) {
+      const backup = path.join(dir, match.name);
+      try {
+        const contents = readFileSync(backup, 'utf8');
+        if (validStoreJson(contents)) return { file: backup, contents };
+      } catch { /* an unreadable backup must not hide an older usable one */ }
+    }
+    return null;
   }
 }

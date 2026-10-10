@@ -260,11 +260,11 @@ export function standingFrom(input: StandingInput): Standing {
       { key: 'sleepiness', label: 'Sleepiness', value: pct(vitals.sleepiness), note: 'Follows the clock more than anything you do.' },
       ...(input.feelings ? [
         { key: 'playful', label: 'Playfulness', value: Math.round(input.feelings.playful), note: 'Thumbs up and laughing along feed it. High means she teases for fun.' },
-        { key: 'missing', label: 'Left alone', value: Math.round(input.feelings.missing), note: 'Builds over hours of your waking day with nothing said. Talking to her clears it.' },
+        { key: 'missing', label: 'Left alone', value: Math.round(input.feelings.missing), note: 'Builds over hours of your waking day with nothing said. Conversation eases it gradually.' },
         { key: 'boredom', label: 'Boredom', value: Math.round(input.feelings.boredom), note: 'A quiet room. High means she starts things.' },
         { key: 'jealousy', label: 'Jealousy', value: Math.round(input.feelings.jealousy), note: 'Time for other people while something of hers sat unanswered.' },
         { key: 'hurt', label: 'Hurt', value: Math.round(input.feelings.hurt), note: 'Thumbs down, shouting, being shushed. Fades slowly; an apology is quicker.' },
-        { key: 'hemmed', label: 'Hemmed in', value: Math.round(input.feelings.hemmed), note: 'Being told what to do empties it; her own hours put it back.' },
+        { key: 'hemmed', label: 'Hemmed in', value: Math.round(input.feelings.hemmed), note: 'Being shushed or told to drop a subject raises it; time and her own activities ease it.' },
         { key: 'frustration', label: 'Frustration', value: Math.round(input.feelings.frustration), note: 'Things of hers that will not work. At the thing, not at you.' },
         { key: 'fear', label: 'Worry', value: Math.round(input.feelings.fear), note: 'For you, when something has actually happened. Goes in hours.' },
       ] : []),

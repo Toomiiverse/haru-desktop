@@ -162,6 +162,28 @@ export function describedShots(log: Record<string, { shot?: string; description?
 }
 
 /** The next few with nothing said about them, by either machine. */
+/**
+ * The days of pictures that are hers to look at, which is the days she was there for.
+ *
+ * Her captions go with a reset — they were hers — but that ledger is also the only
+ * record that a picture has been seen, so on the first tick after a wipe every shot
+ * ever held reads as new. She spent the morning of 2026-09-21 describing his August
+ * back to herself, oldest first, 115 of 461 before it was noticed: hours of the
+ * vision model, and worse, re-learning through the picture door exactly what the
+ * reset had just taken out of her memory. The pictures are his and they stay. Looking
+ * at them is not hers.
+ */
+export function shotsSince(held: Record<string, string[]>, since: string | null | undefined): Record<string, string[]> {
+  if (!since || !/^\d{4}-\d{2}-\d{2}$/.test(since)) return held;
+  return Object.fromEntries(Object.entries(held).filter(([day]) => day >= since));
+}
+
+/** And any caption she has already written for one of those days, which is the same thing in words. */
+export function captionsSince(captions: Caption[], since: string | null | undefined): Caption[] {
+  if (!since || !/^\d{4}-\d{2}-\d{2}$/.test(since)) return captions;
+  return captions.filter(caption => caption.day >= since);
+}
+
 export function shotsNeedingALook(
   held: Record<string, string[]>,
   captions: Caption[],

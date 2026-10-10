@@ -1,0 +1,886 @@
+{
+  "metadata": {
+    "kind": "metadata",
+    "model": "hf.co/DavidAU/Qwen3.5-9B-The-Defiant-Fable-Uncensored-Heretic-NEO-IMATRIX-MAX-MTP-GGUF:Qwen3.5-9B-The-Defiant-Fable-Uncnr-Heretic-NEO-MAX-MTP-Q4_K_M.gguf",
+    "digest": "7b8191c4609b9ccfd69b7d11fb9afb73e1d64202047b3496509341c74e3282ac",
+    "temperature": 0.1,
+    "num_ctx": 8192,
+    "createdAt": "2026-09-15T20:25:55.280Z"
+  },
+  "distinctLines": 84,
+  "calls": 672,
+  "summary": {
+    "baseline": {
+      "calls": 336,
+      "matches": 86,
+      "agreement": 0.25595238095238093,
+      "unparseable": 0,
+      "byMood": {
+        "calm": {
+          "calls": 168,
+          "matches": 64,
+          "agreement": 0.38095238095238093,
+          "unparseable": 0
+        },
+        "irritated": {
+          "calls": 168,
+          "matches": 22,
+          "agreement": 0.13095238095238096,
+          "unparseable": 0
+        }
+      },
+      "byLabel": {
+        "neutral": {
+          "calls": 48,
+          "matches": 12,
+          "agreement": 0.25,
+          "unparseable": 0
+        },
+        "happy": {
+          "calls": 48,
+          "matches": 14,
+          "agreement": 0.2916666666666667,
+          "unparseable": 0
+        },
+        "curious": {
+          "calls": 48,
+          "matches": 36,
+          "agreement": 0.75,
+          "unparseable": 0
+        },
+        "annoyed": {
+          "calls": 48,
+          "matches": 14,
+          "agreement": 0.2916666666666667,
+          "unparseable": 0
+        },
+        "embarrassed": {
+          "calls": 48,
+          "matches": 2,
+          "agreement": 0.041666666666666664,
+          "unparseable": 0
+        },
+        "worried": {
+          "calls": 48,
+          "matches": 2,
+          "agreement": 0.041666666666666664,
+          "unparseable": 0
+        },
+        "surprised": {
+          "calls": 48,
+          "matches": 6,
+          "agreement": 0.125,
+          "unparseable": 0
+        }
+      }
+    },
+    "complete": {
+      "calls": 336,
+      "matches": 106,
+      "agreement": 0.31547619047619047,
+      "unparseable": 0,
+      "byMood": {
+        "calm": {
+          "calls": 168,
+          "matches": 74,
+          "agreement": 0.44047619047619047,
+          "unparseable": 0
+        },
+        "irritated": {
+          "calls": 168,
+          "matches": 32,
+          "agreement": 0.19047619047619047,
+          "unparseable": 0
+        }
+      },
+      "byLabel": {
+        "neutral": {
+          "calls": 48,
+          "matches": 13,
+          "agreement": 0.2708333333333333,
+          "unparseable": 0
+        },
+        "happy": {
+          "calls": 48,
+          "matches": 13,
+          "agreement": 0.2708333333333333,
+          "unparseable": 0
+        },
+        "curious": {
+          "calls": 48,
+          "matches": 32,
+          "agreement": 0.6666666666666666,
+          "unparseable": 0
+        },
+        "annoyed": {
+          "calls": 48,
+          "matches": 16,
+          "agreement": 0.3333333333333333,
+          "unparseable": 0
+        },
+        "embarrassed": {
+          "calls": 48,
+          "matches": 0,
+          "agreement": 0,
+          "unparseable": 0
+        },
+        "worried": {
+          "calls": 48,
+          "matches": 28,
+          "agreement": 0.5833333333333334,
+          "unparseable": 0
+        },
+        "surprised": {
+          "calls": 48,
+          "matches": 4,
+          "agreement": 0.08333333333333333,
+          "unparseable": 0
+        }
+      }
+    }
+  },
+  "becameCorrect": 32,
+  "becameIncorrect": 12,
+  "changes": [
+    {
+      "id": "ee43x8n",
+      "expected": "neutral",
+      "mood": "calm",
+      "seed": 17,
+      "delta": 1,
+      "before": "annoyed",
+      "after": "neutral"
+    },
+    {
+      "id": "ee43x8n",
+      "expected": "neutral",
+      "mood": "calm",
+      "seed": 43,
+      "delta": 1,
+      "before": "annoyed",
+      "after": "neutral"
+    },
+    {
+      "id": "edtjpv6",
+      "expected": "neutral",
+      "mood": "calm",
+      "seed": 43,
+      "delta": 1,
+      "before": "curious",
+      "after": "neutral"
+    },
+    {
+      "id": "eeyg6h4",
+      "expected": "neutral",
+      "mood": "calm",
+      "seed": 17,
+      "delta": -1,
+      "before": "neutral",
+      "after": "determined"
+    },
+    {
+      "id": "eeyg6h4",
+      "expected": "neutral",
+      "mood": "calm",
+      "seed": 43,
+      "delta": -1,
+      "before": "neutral",
+      "after": "determined"
+    },
+    {
+      "id": "eenni73",
+      "expected": "happy",
+      "mood": "calm",
+      "seed": 43,
+      "delta": 1,
+      "before": "curious",
+      "after": "happy"
+    },
+    {
+      "id": "efh6oic",
+      "expected": "happy",
+      "mood": "irritated",
+      "seed": 17,
+      "delta": -1,
+      "before": "happy",
+      "after": "smug"
+    },
+    {
+      "id": "efh6oic",
+      "expected": "happy",
+      "mood": "irritated",
+      "seed": 43,
+      "delta": -1,
+      "before": "happy",
+      "after": "smug"
+    },
+    {
+      "id": "ee595r5",
+      "expected": "curious",
+      "mood": "calm",
+      "seed": 17,
+      "delta": -1,
+      "before": "curious",
+      "after": "worried"
+    },
+    {
+      "id": "ee595r5",
+      "expected": "curious",
+      "mood": "calm",
+      "seed": 43,
+      "delta": -1,
+      "before": "curious",
+      "after": "worried"
+    },
+    {
+      "id": "eenz3h9",
+      "expected": "curious",
+      "mood": "calm",
+      "seed": 17,
+      "delta": -1,
+      "before": "curious",
+      "after": "worried"
+    },
+    {
+      "id": "eenz3h9",
+      "expected": "curious",
+      "mood": "calm",
+      "seed": 43,
+      "delta": -1,
+      "before": "curious",
+      "after": "worried"
+    },
+    {
+      "id": "edxzmzw",
+      "expected": "annoyed",
+      "mood": "irritated",
+      "seed": 17,
+      "delta": 1,
+      "before": "smug",
+      "after": "annoyed"
+    },
+    {
+      "id": "edxzmzw",
+      "expected": "annoyed",
+      "mood": "irritated",
+      "seed": 43,
+      "delta": 1,
+      "before": "smug",
+      "after": "annoyed"
+    },
+    {
+      "id": "edt1jzo",
+      "expected": "embarrassed",
+      "mood": "calm",
+      "seed": 17,
+      "delta": -1,
+      "before": "embarrassed",
+      "after": "worried"
+    },
+    {
+      "id": "edt1jzo",
+      "expected": "embarrassed",
+      "mood": "calm",
+      "seed": 43,
+      "delta": -1,
+      "before": "embarrassed",
+      "after": "worried"
+    },
+    {
+      "id": "ef3w6ic",
+      "expected": "worried",
+      "mood": "calm",
+      "seed": 17,
+      "delta": 1,
+      "before": "curious",
+      "after": "worried"
+    },
+    {
+      "id": "ef3w6ic",
+      "expected": "worried",
+      "mood": "calm",
+      "seed": 43,
+      "delta": 1,
+      "before": "curious",
+      "after": "worried"
+    },
+    {
+      "id": "ef3w6ic",
+      "expected": "worried",
+      "mood": "irritated",
+      "seed": 17,
+      "delta": 1,
+      "before": "smug",
+      "after": "worried"
+    },
+    {
+      "id": "ef3w6ic",
+      "expected": "worried",
+      "mood": "irritated",
+      "seed": 43,
+      "delta": 1,
+      "before": "smug",
+      "after": "worried"
+    },
+    {
+      "id": "eesfw7d",
+      "expected": "worried",
+      "mood": "irritated",
+      "seed": 17,
+      "delta": 1,
+      "before": "smug",
+      "after": "worried"
+    },
+    {
+      "id": "eesfw7d",
+      "expected": "worried",
+      "mood": "irritated",
+      "seed": 43,
+      "delta": 1,
+      "before": "smug",
+      "after": "worried"
+    },
+    {
+      "id": "edoglhv",
+      "expected": "worried",
+      "mood": "calm",
+      "seed": 17,
+      "delta": 1,
+      "before": "curious",
+      "after": "worried"
+    },
+    {
+      "id": "edoglhv",
+      "expected": "worried",
+      "mood": "calm",
+      "seed": 43,
+      "delta": 1,
+      "before": "annoyed",
+      "after": "worried"
+    },
+    {
+      "id": "eentnff",
+      "expected": "worried",
+      "mood": "calm",
+      "seed": 17,
+      "delta": 1,
+      "before": "affectionate",
+      "after": "worried"
+    },
+    {
+      "id": "eentnff",
+      "expected": "worried",
+      "mood": "calm",
+      "seed": 43,
+      "delta": 1,
+      "before": "affectionate",
+      "after": "worried"
+    },
+    {
+      "id": "eeb9saw",
+      "expected": "worried",
+      "mood": "calm",
+      "seed": 17,
+      "delta": 1,
+      "before": "annoyed",
+      "after": "worried"
+    },
+    {
+      "id": "eeb9saw",
+      "expected": "worried",
+      "mood": "calm",
+      "seed": 43,
+      "delta": 1,
+      "before": "annoyed",
+      "after": "worried"
+    },
+    {
+      "id": "eeb9saw",
+      "expected": "worried",
+      "mood": "irritated",
+      "seed": 17,
+      "delta": 1,
+      "before": "smug",
+      "after": "worried"
+    },
+    {
+      "id": "eeb9saw",
+      "expected": "worried",
+      "mood": "irritated",
+      "seed": 43,
+      "delta": 1,
+      "before": "smug",
+      "after": "worried"
+    },
+    {
+      "id": "ed157d1",
+      "expected": "worried",
+      "mood": "calm",
+      "seed": 17,
+      "delta": 1,
+      "before": "curious",
+      "after": "worried"
+    },
+    {
+      "id": "ed157d1",
+      "expected": "worried",
+      "mood": "calm",
+      "seed": 43,
+      "delta": 1,
+      "before": "curious",
+      "after": "worried"
+    },
+    {
+      "id": "ed157d1",
+      "expected": "worried",
+      "mood": "irritated",
+      "seed": 17,
+      "delta": 1,
+      "before": "curious",
+      "after": "worried"
+    },
+    {
+      "id": "ed157d1",
+      "expected": "worried",
+      "mood": "irritated",
+      "seed": 43,
+      "delta": 1,
+      "before": "smug",
+      "after": "worried"
+    },
+    {
+      "id": "eef48yd",
+      "expected": "worried",
+      "mood": "calm",
+      "seed": 17,
+      "delta": 1,
+      "before": "curious",
+      "after": "worried"
+    },
+    {
+      "id": "eef48yd",
+      "expected": "worried",
+      "mood": "calm",
+      "seed": 43,
+      "delta": 1,
+      "before": "curious",
+      "after": "worried"
+    },
+    {
+      "id": "eef48yd",
+      "expected": "worried",
+      "mood": "irritated",
+      "seed": 17,
+      "delta": 1,
+      "before": "curious",
+      "after": "worried"
+    },
+    {
+      "id": "eef48yd",
+      "expected": "worried",
+      "mood": "irritated",
+      "seed": 43,
+      "delta": 1,
+      "before": "curious",
+      "after": "worried"
+    },
+    {
+      "id": "ef14jkh",
+      "expected": "worried",
+      "mood": "calm",
+      "seed": 17,
+      "delta": 1,
+      "before": "annoyed",
+      "after": "worried"
+    },
+    {
+      "id": "ef14jkh",
+      "expected": "worried",
+      "mood": "calm",
+      "seed": 43,
+      "delta": 1,
+      "before": "annoyed",
+      "after": "worried"
+    },
+    {
+      "id": "ee9uyrp",
+      "expected": "worried",
+      "mood": "calm",
+      "seed": 17,
+      "delta": 1,
+      "before": "affectionate",
+      "after": "worried"
+    },
+    {
+      "id": "ee9uyrp",
+      "expected": "worried",
+      "mood": "calm",
+      "seed": 43,
+      "delta": 1,
+      "before": "affectionate",
+      "after": "worried"
+    },
+    {
+      "id": "eekp5gi",
+      "expected": "surprised",
+      "mood": "calm",
+      "seed": 17,
+      "delta": -1,
+      "before": "surprised",
+      "after": "determined"
+    },
+    {
+      "id": "eekp5gi",
+      "expected": "surprised",
+      "mood": "calm",
+      "seed": 43,
+      "delta": -1,
+      "before": "surprised",
+      "after": "determined"
+    }
+  ],
+  "lineDeltas": [
+    {
+      "id": "ee8e6n1",
+      "meanDifference": 0
+    },
+    {
+      "id": "ee0e4rq",
+      "meanDifference": 0
+    },
+    {
+      "id": "edlko45",
+      "meanDifference": 0
+    },
+    {
+      "id": "ee43x8n",
+      "meanDifference": 0.5
+    },
+    {
+      "id": "eebu17b",
+      "meanDifference": 0
+    },
+    {
+      "id": "ee6b97a",
+      "meanDifference": 0
+    },
+    {
+      "id": "edtlhba",
+      "meanDifference": 0
+    },
+    {
+      "id": "edtjpv6",
+      "meanDifference": 0.25
+    },
+    {
+      "id": "edvqpif",
+      "meanDifference": 0
+    },
+    {
+      "id": "eevfjuy",
+      "meanDifference": 0
+    },
+    {
+      "id": "ee6mwmq",
+      "meanDifference": 0
+    },
+    {
+      "id": "eeyg6h4",
+      "meanDifference": -0.5
+    },
+    {
+      "id": "eeu0cdq",
+      "meanDifference": 0
+    },
+    {
+      "id": "ed2h0l8",
+      "meanDifference": 0
+    },
+    {
+      "id": "edkdcgk",
+      "meanDifference": 0
+    },
+    {
+      "id": "eenni73",
+      "meanDifference": 0.25
+    },
+    {
+      "id": "efgqmll",
+      "meanDifference": 0
+    },
+    {
+      "id": "ed3hg8c",
+      "meanDifference": 0
+    },
+    {
+      "id": "eeah80k",
+      "meanDifference": 0
+    },
+    {
+      "id": "edhzgg4",
+      "meanDifference": 0
+    },
+    {
+      "id": "eec8s5u",
+      "meanDifference": 0
+    },
+    {
+      "id": "edpg57t",
+      "meanDifference": 0
+    },
+    {
+      "id": "efh6oic",
+      "meanDifference": -0.5
+    },
+    {
+      "id": "edlzkq1",
+      "meanDifference": 0
+    },
+    {
+      "id": "edjzhjd",
+      "meanDifference": 0
+    },
+    {
+      "id": "ednif10",
+      "meanDifference": 0
+    },
+    {
+      "id": "ed5rlwn",
+      "meanDifference": 0
+    },
+    {
+      "id": "ee595r5",
+      "meanDifference": -0.5
+    },
+    {
+      "id": "edlm4i4",
+      "meanDifference": 0
+    },
+    {
+      "id": "edk5zy9",
+      "meanDifference": 0
+    },
+    {
+      "id": "ed47xou",
+      "meanDifference": 0
+    },
+    {
+      "id": "eelsqcs",
+      "meanDifference": 0
+    },
+    {
+      "id": "edz1wjs",
+      "meanDifference": 0
+    },
+    {
+      "id": "eev7uaa",
+      "meanDifference": 0
+    },
+    {
+      "id": "eenz3h9",
+      "meanDifference": -0.5
+    },
+    {
+      "id": "efha0zn",
+      "meanDifference": 0
+    },
+    {
+      "id": "edxzmzw",
+      "meanDifference": 0.5
+    },
+    {
+      "id": "ee5ne6r",
+      "meanDifference": 0
+    },
+    {
+      "id": "ed22fxd",
+      "meanDifference": 0
+    },
+    {
+      "id": "ee00nbw",
+      "meanDifference": 0
+    },
+    {
+      "id": "eeayeuu",
+      "meanDifference": 0
+    },
+    {
+      "id": "ede4o2v",
+      "meanDifference": 0
+    },
+    {
+      "id": "ed936ao",
+      "meanDifference": 0
+    },
+    {
+      "id": "ef30dyy",
+      "meanDifference": 0
+    },
+    {
+      "id": "ed0oz6z",
+      "meanDifference": 0
+    },
+    {
+      "id": "eeudvxm",
+      "meanDifference": 0
+    },
+    {
+      "id": "eczfs6b",
+      "meanDifference": 0
+    },
+    {
+      "id": "eddyedw",
+      "meanDifference": 0
+    },
+    {
+      "id": "edt1jzo",
+      "meanDifference": -0.5
+    },
+    {
+      "id": "ed8un4o",
+      "meanDifference": 0
+    },
+    {
+      "id": "ed0jr9i",
+      "meanDifference": 0
+    },
+    {
+      "id": "efh8gxu",
+      "meanDifference": 0
+    },
+    {
+      "id": "edjcva3",
+      "meanDifference": 0
+    },
+    {
+      "id": "ef54otk",
+      "meanDifference": 0
+    },
+    {
+      "id": "eekiyhy",
+      "meanDifference": 0
+    },
+    {
+      "id": "edma0sp",
+      "meanDifference": 0
+    },
+    {
+      "id": "ef1xbnb",
+      "meanDifference": 0
+    },
+    {
+      "id": "edpvd21",
+      "meanDifference": 0
+    },
+    {
+      "id": "eenvcj6",
+      "meanDifference": 0
+    },
+    {
+      "id": "eete10e",
+      "meanDifference": 0
+    },
+    {
+      "id": "ef3w6ic",
+      "meanDifference": 1
+    },
+    {
+      "id": "eesfw7d",
+      "meanDifference": 0.5
+    },
+    {
+      "id": "ef16sde",
+      "meanDifference": 0
+    },
+    {
+      "id": "edoglhv",
+      "meanDifference": 0.5
+    },
+    {
+      "id": "eentnff",
+      "meanDifference": 0.5
+    },
+    {
+      "id": "eeb9saw",
+      "meanDifference": 1
+    },
+    {
+      "id": "ed157d1",
+      "meanDifference": 1
+    },
+    {
+      "id": "eevpwe1",
+      "meanDifference": 0
+    },
+    {
+      "id": "eef48yd",
+      "meanDifference": 1
+    },
+    {
+      "id": "edvnv86",
+      "meanDifference": 0
+    },
+    {
+      "id": "ef14jkh",
+      "meanDifference": 0.5
+    },
+    {
+      "id": "ee9uyrp",
+      "meanDifference": 0.5
+    },
+    {
+      "id": "eesno19",
+      "meanDifference": 0
+    },
+    {
+      "id": "ef7odkl",
+      "meanDifference": 0
+    },
+    {
+      "id": "eczxpjy",
+      "meanDifference": 0
+    },
+    {
+      "id": "eekp5gi",
+      "meanDifference": -0.5
+    },
+    {
+      "id": "eetrfd1",
+      "meanDifference": 0
+    },
+    {
+      "id": "eeu4qki",
+      "meanDifference": 0
+    },
+    {
+      "id": "ee2hrev",
+      "meanDifference": 0
+    },
+    {
+      "id": "edph4ed",
+      "meanDifference": 0
+    },
+    {
+      "id": "ee7hgcm",
+      "meanDifference": 0
+    },
+    {
+      "id": "edx945w",
+      "meanDifference": 0
+    },
+    {
+      "id": "edirhr2",
+      "meanDifference": 0
+    },
+    {
+      "id": "ee1rkwi",
+      "meanDifference": 0
+    }
+  ],
+  "limitations": [
+    "Reddit labels and companion delivery have different context and scope",
+    "No determined, smug, bored, sleepy or affectionate coverage",
+    "Balanced subset; not a representative estimate of overall dataset performance",
+    "Seed and mood repetitions are not independent texts"
+  ]
+}

@@ -163,11 +163,25 @@ export function describeTold(told: Told | null | undefined, nowMs: number, clock
   return `${bits.join(' ')}. That is where they are unless they have said otherwise since; do not ask where they are or what they are doing there, and do not tell them to be somewhere else. Refer to the place by name rather than as "here" or "there" — you are not with them — and do not open by asking whether they are still there: they told you, and asking again is not a conversation.`;
 }
 
+// The word they actually use for the place, not the word the gate was written
+// with. "Sorry Haru, yes I'm at the shop, I'll text you when I finish work
+// around 4:30" parsed to where="shop" — and "shop" was not on the list, so the
+// gate never fired once all Sunday and she chased him at work three times
+// (2026-09-20). "work" was in that sentence; it went into the errand, not the
+// place. Shops, shifts, stores and sites are where people are when they cannot
+// answer, and the shops are as good a reason not to chase as a shift is.
+const BUSY_PLACE = /\b(work|working|shift|shop|shops|store|office|warehouse|site|gym|hospital|doctor|dentist|appointment|meeting|uni|university|class|lecture|school|college|training|practice|rehearsal|driving)\b/i;
+
 /** Busy, as in not to be chased for going quiet: at work, driving, in a place that is not a chat. */
 export function toldTheyAreBusy(told: Told | null | undefined, nowMs: number): boolean {
   if (!toldStillStands(told, nowMs)) return false;
   if (told.enRoute) return true;
-  return /\b(work|gym|hospital|doctor|dentist|meeting|uni|class|driving)\b/i.test(told.where + ' ' + (told.doing ?? ''));
+  // Naming the hour they are free is itself the answer: nobody says "until
+  // 4:30" about sitting at home with their phone. The clock was already parsed
+  // and sitting in `until` unused while she chased him through the shift it
+  // described. Home is the exception — "home until 4:30" is not a commitment.
+  if (told.until && !/^home$/i.test(told.where)) return true;
+  return BUSY_PLACE.test(told.where + ' ' + (told.doing ?? ''));
 }
 
 /** Something they said they were about to do — "eat dinner", "have a shower" — and when they said it. */
@@ -209,10 +223,45 @@ export function errandsToldFrom(text: string, nowIso: string): Errand[] {
 }
 
 /** The one worth asking after: the most recent that is still fresh. */
+/**
+ * The hour an errand names for itself, if it names one.
+ *
+ * "text you when I finish work around 4:30" is not a thing to ask after an hour
+ * later. She did exactly that at 1:51 PM — "You told me you'd text when you
+ * finished your shift around 4:30. It's 1:50 PM on a Sunday, you're still at
+ * Happytel" — asking how it went and saying in the same breath that it had not
+ * happened (2026-09-20). The clock is read off the errand's own words, against
+ * the day it was said; a time already past when they said it belongs to
+ * tomorrow, because "text you at 8" said at nine at night is the morning.
+ */
+export function errandDueAt(errand: Errand): number | null {
+  const said = Date.parse(errand.at);
+  if (!Number.isFinite(said)) return null;
+  const match = /\b(?:at|around|about|by|after)\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\b/i.exec(errand.what ?? '');
+  if (!match || !TIME.test(match[1])) return null;
+  const when = clock(match[1]);
+  if (!when) return null;
+  const parts = /^(\d{1,2}):(\d{2})\s*(AM|PM)$/.exec(when);
+  if (!parts) return null;
+  let hour = Number(parts[1]) % 12;
+  if (parts[3] === 'PM') hour += 12;
+  const due = new Date(said);
+  due.setHours(hour, Number(parts[2]), 0, 0);
+  if (due.getTime() < said) due.setDate(due.getDate() + 1);
+  return due.getTime();
+}
+
 export function errandToAskAfter(errands: Errand[], nowMs: number): Errand | null {
   for (let i = errands.length - 1; i >= 0; i--) {
     const at = Date.parse(errands[i].at);
-    if (Number.isFinite(at) && nowMs - at >= 0 && nowMs - at <= ERRAND_FRESH_MS) return errands[i];
+    if (!Number.isFinite(at)) continue;
+    // An errand with an hour on it is asked after from that hour, not from when
+    // they said it — measured from the saying, "text you around 4:30" said at
+    // 12:54 would have gone stale at 3:54 and she could never have asked at all.
+    const due = errandDueAt(errands[i]);
+    const from = due ?? at;
+    if (nowMs < from || nowMs - from > ERRAND_FRESH_MS) continue;
+    return errands[i];
   }
   return null;
 }

@@ -16,7 +16,7 @@
 // message are specific enough to be worth a guess at all (rareTerms).
 
 import { cosine, type Exchange } from './recall';
-import { withRelativeDates } from './dates';
+import { isDay, withRelativeDates } from './dates';
 
 /** Words that say nothing about what was talked about. */
 const STOP = new Set(`a an the and or but if of to in on at for with from by is are was were be been being am
@@ -160,12 +160,8 @@ export const SEARCH_LIMIT = 5;
 
 export type ChatHit = { exchange: Exchange; score: number; before?: Exchange; after?: Exchange };
 
-/** A real calendar day: "2026-13-01" has the shape and would have thrown in shiftDay, failing the whole reply. */
-export function isDay(value: unknown): value is string {
-  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
-  const at = Date.parse(`${value}T00:00:00Z`);
-  return Number.isFinite(at) && new Date(at).toISOString().slice(0, 10) === value;
-}
+/** A real calendar day (dates.ts): "2026-13-01" has the shape and would have thrown in shiftDay, failing the whole reply. */
+export { isDay };
 const shiftDay = (day: string, by: number) => new Date(Date.parse(`${day}T00:00:00Z`) + by * 86_400_000).toISOString().slice(0, 10);
 /** Words only — no vectors to go on — a name he uses often is still a find: "Emma" is in 28 of 1,187 exchanges. */
 const WORD_SHARE_WITHOUT_MEANING = 0.05;

@@ -18,6 +18,10 @@
 // and a record it cannot place would be read as a fact.
 
 import type { MemoryKind, MemoryRecord } from './memory';
+import { isDay } from './dates';
+
+/** The one day check (dates.ts), re-exported for the memory and block code that reads it from here. */
+export { isDay };
 
 export const CATEGORIES = ['identity', 'person', 'preference', 'instruction', 'plan', 'event', 'ongoing', 'shared', 'knowledge', 'passing'] as const;
 export type Category = typeof CATEGORIES[number];
@@ -62,10 +66,6 @@ export function isCategory(value: unknown): value is Category {
   return typeof value === 'string' && (CATEGORIES as readonly string[]).includes(value);
 }
 
-/** A calendar day as written on a record: YYYY-MM-DD and nothing else. */
-export function isDay(value: unknown): value is string {
-  return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(Date.parse(`${value}T00:00:00Z`));
-}
 
 // Wording that says which way a record points when nothing sorted it. Only a
 // fallback: these are the easy cases, and the model does the rest.

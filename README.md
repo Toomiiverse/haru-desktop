@@ -380,6 +380,26 @@ window on the server — over remote desktop, or at the machine itself.
   still see, and how a file that is not a picture becomes words.
 - `electron/asides.ts`: everything she says without being spoken to — kept in its own
   log rather than the transcript, and fed back to her as a short-lived note.
+- `electron/minecraft.ts`: her body in Minecraft — the client to a Mineflayer worker
+  that runs as a separate process on loopback. Carries events up and named skills down,
+  and decides nothing: what she makes of a Minecraft event belongs with the rest of her
+  judgement, not in a transport. Off unless `minecraft.enabled` is set.
+- `electron/minecraftplan.ts`: what her body should do next, decided by the same brain
+  and the same identity block as everything else about her. The model *chooses* one
+  name from a fixed list or waits; it never composes an action, and anything that is
+  not a name from the list is read as a wait. Also the two chat tools (`minecraft_status`,
+  `minecraft_do`) she reaches for when asked about the game.
+- `electron/minecraftlife.ts`: when she plays on her own and when she stops. A session
+  starts only when he has been quiet a while, she is awake, and a dice roll lands — a
+  chance, not a rota, like her nights — and ends the moment he speaks to her, when she has
+  nothing left to decide, or when it has gone on long enough. Pure; `main.ts` holds the
+  clock. Off until `minecraft.play.enabled` is set.
+- `electron/minecraftchat.ts`: him in her world — turning up, talking to her there, and
+  leaving. His chat reaches her one brain framed as speech in a game, never as an
+  instruction, and her answer goes back into the game. "haru follow" and its handful of
+  mechanical cousins are read without a model; anything with a shade of meaning is a turn
+  in her conversation. Also the bookkeeping for "was he there", which is what lets a
+  stretch with him — and only with him — become a memory.
 - `electron/voice.ts`: text-to-speech boundary — prepares the text and adapts to each engine's HTTP contract.
 - `electron/listen.ts`: speech-to-text boundary — the mirror of `voice.ts`, same HTTP contract in reverse.
 - `electron/asr-server.py`: the local Whisper server behind it, run by `start-haru-asr.cmd`.

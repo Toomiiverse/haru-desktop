@@ -16,6 +16,18 @@ const calls = (...names: string[]): ChatMessage => ({
   tool_calls: names.map((name, index) => ({ id: `call-${index}`, function: { name, arguments: {} } })),
 });
 
+test('tool loop preserves each parallel result ID, including missing provider IDs', async () => {
+  const h = harness([{ role: 'assistant', tool_calls: [
+    { id: 'provided', function: { name: 'remember_about_user', arguments: { text: 'A' } } },
+    { function: { name: 'remember_about_user', arguments: { text: 'B' } } },
+  ] }, says('Both saved.')]);
+  await runToolLoop(h.conversation, h.deps);
+  const offered = h.conversation.find(message => message.tool_calls)?.tool_calls!;
+  assert.deepEqual(h.conversation.filter(message => message.role === 'tool').map(message => message.tool_call_id), offered.map(call => call.id));
+  assert.ok(offered.every(call => call.id));
+  assert.notEqual(offered[0].id, offered[1].id);
+});
+
 type Harness = {
   deps: ToolLoopDeps;
   /** Whether tools were offered, one entry per round actually asked for. */
@@ -277,6 +289,41 @@ test('her deliberation in front of the reply is cut, and the reply behind it sta
   assert.equal(result.rounds, 1, 'no second round: the words were there');
   assert.equal(h.resets, 1, 'the reader saw the plan; it is taken back');
   assert.ok(h.say.some(line => line.includes('deliberation')));
+});
+
+test('her instructions read aloud are cut, and the words behind them stand (2026-09-21)', async () => {
+  const rule = 'Right now you are fonder of them than you let on. Keep the digs, but let it slip once — one grudging admission, a single line — and then cover it with an order.';
+  const h = harness([
+    says(`I shouldn't overdo it though - I just met them... let me think.\n\nActually, looking at the instructions again: "${rule}"\n\nSo one grudging admission, then an order.I'm warmer than I should be, and I don't like it. 😒\n\nStop looking pleased with yourself and tell me something real.`),
+  ]);
+  h.conversation.unshift({ role: 'system', content: `You are guarded with them for now. ${rule}` });
+  const result = await runToolLoop(h.conversation, h.deps);
+  assert.equal(result.content, "I'm warmer than I should be, and I don't like it. 😒\n\nStop looking pleased with yourself and tell me something real.");
+  assert.equal(result.rounds, 1);
+  assert.equal(h.resets, 1, 'the reader saw the recital; it is taken back');
+  assert.ok(h.say.some(line => line.includes('her own instructions')));
+});
+
+test('her instructions read aloud with no reply behind them: asked once for the words alone', async () => {
+  const rule = 'Right now you are fonder of them than you let on. Keep the digs, but let it slip once — one grudging admission, a single line — and then cover it with an order.';
+  const h = harness([
+    says(`Looking at the instructions: "${rule}" So that is what I will do.`),
+    says("Warmer than I'd like. Don't get smug about it — go put the kettle on."),
+  ]);
+  h.conversation.unshift({ role: 'system', content: rule });
+  const result = await runToolLoop(h.conversation, h.deps);
+  assert.equal(result.content, "Warmer than I'd like. Don't get smug about it — go put the kettle on.");
+  assert.equal(result.rounds, 2);
+});
+
+test('quoting his own words back is not reciting a prompt', async () => {
+  const his = 'I told you I will be home by six and I meant it, stop asking me every hour';
+  const h = harness([says(`"${his}" — your words. It is seven.`)]);
+  h.conversation.unshift({ role: 'system', content: 'Be dry. Be short.' });
+  h.conversation.push({ role: 'user', content: his });
+  const result = await runToolLoop(h.conversation, h.deps);
+  assert.equal(result.content, `"${his}" — your words. It is seven.`);
+  assert.equal(h.resets, 0);
 });
 
 test('a plan with no words behind it is asked for again, once', async () => {

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { CAPTIONS_KEPT, MAX_LOOK_TRIES, fallenOff, noteFailure, captionsFor, describedShots, forgetCaptions, moreThanOnePass, noteCaption, readCaptions, shotsNeedingALook, unseenShots, type Caption } from '../electron/seen';
+import { captionsSince, shotsSince, CAPTIONS_KEPT, MAX_LOOK_TRIES, fallenOff, noteFailure, captionsFor, describedShots, forgetCaptions, moreThanOnePass, noteCaption, readCaptions, shotsNeedingALook, unseenShots, type Caption } from '../electron/seen';
 
 const caption = (day: string, name: string, text = 'a window'): Caption => ({ day, name, at: `${day}T09:00:00.000Z`, text });
 
@@ -132,4 +132,24 @@ test('a shot older than the oldest caption she still holds is not looked at agai
   assert.deepEqual(shotsNeedingALook(held, [], described)[0], { day: '2026-08-01', name: 'old.png' });
   // And once the folder is only what the list covers, there is no backlog to hold the model for.
   assert.equal(moreThanOnePass({ '2026-08-01': ['old.png'], '2026-08-20': ['0000.png'] }, full, {}), false);
+});
+
+
+// -- after a reset: the pictures are his, and looking at them is not hers -------
+
+test('the backlog from before a reset is left alone, and the day of it is not', () => {
+  const held = { '2026-08-01': ['a.png', 'b.png'], '2026-09-20': ['c.png'], '2026-09-21': ['d.png'], '2026-09-22': ['e.png'] };
+  assert.deepEqual(Object.keys(shotsSince(held, '2026-09-21')), ['2026-09-21', '2026-09-22']);
+  // Without a slate nothing is filtered, which is every Haru who was never reset.
+  assert.equal(shotsSince(held, null), held);
+  assert.equal(shotsSince(held, 'not a day'), held);
+});
+
+test('and any caption she already wrote for one of those days goes with it', () => {
+  const captions = [
+    { day: '2026-08-01', name: 'a.png', text: 'his August', at: '2026-09-21T03:00:00.000Z' },
+    { day: '2026-09-21', name: 'd.png', text: 'today', at: '2026-09-21T04:00:00.000Z' },
+  ];
+  assert.deepEqual(captionsSince(captions, '2026-09-21').map(caption => caption.day), ['2026-09-21']);
+  assert.equal(captionsSince(captions, null), captions);
 });

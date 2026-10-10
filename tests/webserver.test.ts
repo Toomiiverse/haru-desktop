@@ -28,10 +28,42 @@ import { mergeMemories } from '../electron/memorysync';
 import { mergeActivity, type ActivityLog } from '../electron/activitylog';
 import { heldShots, keepShot } from '../electron/shotstore';
 import type { MemoryRecord } from '../electron/memory';
+import { ActivityObservations } from '../electron/activity-observation';
+import { ActivityReporter } from '../electron/activity-reporter';
 
 const USERNAME = 'tom';
 const PASSWORD = 'a-long-enough-password';
 const SECRET = setPassword(PASSWORD);
+
+test('a disconnected phone recovers a receipt without repeating the model; receipts require login and current slate', async () => {
+  let finish!: (value: { reply: string }) => void;
+  const answer = new Promise<{ reply: string }>(resolve => { finish = resolve; });
+  let calls = 0, slate = 'first-slate';
+  const web = await door({ slate: () => ({ at: slate }), sayStream: async () => { calls++; return answer; } });
+  try {
+    assert.equal((await web.call('/api/chat/receipt?id=request-123456789', { anonymous: true })).status, 401);
+    await web.signIn();
+    const payload = { text: 'Hello', requestId: 'request-123456789' };
+    const stream = await web.call('/api/chat/stream', { method: 'POST', body: JSON.stringify(payload) });
+    assert.equal(stream.status, 200);
+    await stream.body!.cancel();
+    const pending = await web.call('/api/chat/receipt?id=request-123456789');
+    assert.equal((await pending.json() as any).state, 'pending');
+    const duplicate = await web.call('/api/chat/stream', { method: 'POST', body: JSON.stringify(payload) });
+    assert.match(await duplicate.text(), /pending/);
+    assert.equal(calls, 1);
+    const changed = await web.call('/api/chat/stream', { method: 'POST', body: JSON.stringify({ ...payload, text: 'Different' }) });
+    assert.equal(changed.status, 409);
+    finish({ reply: 'Hello back' });
+    await new Promise(resolve => setImmediate(resolve));
+    const done = await web.call('/api/chat/receipt?id=request-123456789');
+    assert.deepEqual(await done.json(), { state: 'done', reply: 'Hello back', ignored: false });
+    const replay = await web.call('/api/chat/stream', { method: 'POST', body: JSON.stringify(payload) });
+    assert.match(await replay.text(), /Hello back/); assert.equal(calls, 1);
+    slate = 'new-slate';
+    assert.equal((await web.call('/api/chat/receipt?id=request-123456789')).status, 404);
+  } finally { finish({ reply: 'Finished' }); await web.stop(); }
+});
 
 function access(overrides: Partial<WebAccess> = {}): WebAccess {
   return { enabled: true, username: USERNAME, salt: SECRET.salt, hash: SECRET.hash, devices: [], ...overrides };
@@ -54,6 +86,7 @@ function deps(overrides: Partial<WebDeps> = {}): WebDeps {
     sayStream: async (_text, onChunk) => { onChunk('Fine.'); return { reply: 'Fine.' }; },
     retryStream: async (onChunk) => { onChunk('Again.'); return { reply: 'Again.' }; },
     rate: async (id) => (id === 'hers' ? { line: 'Finally, some taste.' } : null),
+    tune: (id, wrong, rather) => id === 'hers' && Boolean(wrong?.trim() || rather?.trim()),
     expression: async () => ({ emotion: null, expression: null }),
     history: () => [],
     agenda: () => [],
@@ -184,10 +217,85 @@ test('a stranger gets the sign-in page and nothing else', async () => {
     assert.equal(front.status, 200);
     assert.ok((await front.text()).includes('Sign in to reach her'));
 
-    for (const path of ['/api/chat', '/api/agenda', '/api/status', '/api/diary', '/api/her', '/api/memory', '/api/memory/records', '/api/activity', '/api/activity/shots', '/api/journal', '/api/checkins', '/api/knowledge/stats', '/api/model', '/api/push', '/api/attach', '/api/where', '/api/evi/status']) {
+    for (const path of ['/api/chat', '/api/attention/input', '/api/agenda', '/api/status', '/api/diary', '/api/her', '/api/memory', '/api/memory/records', '/api/activity', '/api/activity/shots', '/api/journal', '/api/checkins', '/api/knowledge/stats', '/api/model', '/api/push', '/api/attach', '/api/where', '/api/evi/status']) {
       const refused = await web.call(path);
       assert.equal(refused.status, 401, `${path} answered a stranger`);
     }
+  } finally { await web.stop(); }
+});
+
+test('shadow input requires authentication and its exact content-free payload; page reads are not input', async () => {
+  let inputs = 0;
+  const web = await door({ attentionInput: () => { inputs++; } });
+  try {
+    const signal = { method: 'POST', body: JSON.stringify({ kind: 'input' }) };
+    assert.equal((await web.call('/api/attention/input', signal)).status, 401);
+    await web.signIn();
+    await web.call('/');
+    await web.call('/api/chat');
+    assert.equal(inputs, 0);
+    assert.equal((await web.call('/api/attention/input', { ...signal, headers: { 'content-type': 'text/plain' } })).status, 415);
+    for (const body of [null, [], {}, { kind: 'visible' }, { kind: 'input', key: 'private' }, { kind: 'input', at: 1 }]) {
+      assert.equal((await web.call('/api/attention/input', { method: 'POST', body: JSON.stringify(body) })).status, 400);
+    }
+    assert.equal(inputs, 0);
+    assert.equal((await web.call('/api/attention/input', signal)).status, 200);
+    assert.equal(inputs, 1);
+  } finally { await web.stop(); }
+});
+
+test('authenticated clients retain separate input sequences and cannot submit future clocks or window titles', async () => {
+  const observations = new ActivityObservations();
+  let now = 1000;
+  const web = await door({ attentionInput: (source, report) => { observations.note(source, report, now); } });
+  try {
+    await web.signIn();
+    const signal = { kind: 'input', client: 'same-client-id-0001', sequence: 10 };
+    const post = (body: unknown) => web.call('/api/attention/input', { method: 'POST', body: JSON.stringify(body) });
+    assert.equal((await post(signal)).status, 200);
+    now = 2000;
+    await post({ ...signal, sequence: 9 });
+    assert.equal(observations.read(now).idleSeconds, 1, 'out-of-order packet did not refresh receipt time');
+    const native = { kind: 'desktop', client: 'desktop-client-0001', sequence: 1, sampleAgeMs: 0,
+      idleSeconds: 1000, windowFocused: true, onBattery: false };
+    assert.equal((await post(native)).status, 200);
+    assert.equal(observations.read(now).source, 'browser');
+    assert.equal(observations.read(now).windowFocused, null);
+    for (const body of [{ ...native, title: 'private' }, { ...native, at: now + 999999 }, { ...native, sampleAgeMs: 6000 }]) {
+      assert.equal((await post(body)).status, 400);
+    }
+    // A second login on this same server is an independent authenticated source.
+    const login = await web.call('/api/login', { anonymous: true, method: 'POST',
+      body: JSON.stringify({ username: USERNAME, password: PASSWORD, remember: false }) });
+    const cookie = login.headers.getSetCookie().map(value => value.split(';')[0]).join('; ');
+    now = 3000;
+    assert.equal((await web.call('/api/attention/input', { anonymous: true, method: 'POST',
+      headers: { cookie }, body: JSON.stringify({ ...signal, sequence: 1 }) })).status, 200);
+    assert.equal(observations.read(now).idleSeconds, 0);
+    assert.equal(observations.read(now).freshSources, 3);
+  } finally { await web.stop(); }
+});
+
+test('native OS-shaped sample reaches the authenticated observation route without extra fields', async () => {
+  const observations = new ActivityObservations();
+  const web = await door({ attentionInput: (source, report) => { observations.note(source, report, 1000); } });
+  try {
+    await web.signIn();
+    const source = { url: 'http://100.100.10.1:8787', username: USERNAME };
+    let responseStatus = 0;
+    // Only transport is redirected to our local test server; the real sender,
+    // cookie authentication, payload validation and receiver all run.
+    const reporter = new ActivityReporter(async (_url, options) => {
+      const response = await fetch('http://127.0.0.1:' + web.port + '/api/attention/input', options);
+      responseStatus = response.status;
+      return response;
+    });
+    reporter.connected(source, web.cookie());
+    await reporter.report(source, () => ({ hour: 12, idleSeconds: 8, windowFocused: false,
+      onBattery: true, title: 'never transmit this' }), 0);
+    assert.equal(responseStatus, 200);
+    assert.deepEqual(observations.read(1000), { availability: 'recent-input', source: 'desktop',
+      idleSeconds: 8, windowFocused: false, onBattery: true, receivedAgeMs: 0, freshSources: 1 });
   } finally { await web.stop(); }
 });
 
@@ -600,6 +708,25 @@ test('a reply of hers can be rated, and the page gets her comeback', async () =>
     assert.equal((await web.call('/api/chat/rate', { method: 'POST', body: JSON.stringify({ reaction: 'down' }) })).status, 400);
     assert.equal((await web.call('/api/chat/rate', { method: 'POST', body: JSON.stringify({ id: 'hers' }) })).status, 400);
     assert.equal((await web.call('/api/chat/rate', { method: 'POST', body: JSON.stringify({ id: 'hers', reaction: 'meh' }) })).status, 400);
+  } finally { await web.stop(); }
+});
+
+test('what was wrong with a reply is logged, and never answered back', async () => {
+  const asked: { id: string; wrong?: string; rather?: string }[] = [];
+  const web = await door({ tune: (id, wrong, rather) => { asked.push({ id, wrong, rather }); return id === 'hers' && Boolean(wrong?.trim() || rather?.trim()); } });
+  try {
+    assert.equal((await web.call('/api/chat/tune', { method: 'POST', body: JSON.stringify({ id: 'hers', wrong: 'too clipped' }), anonymous: true })).status, 401);
+    await web.signIn();
+    const logged = await web.call('/api/chat/tune', { method: 'POST', body: JSON.stringify({ id: 'hers', wrong: 'too clipped', rather: 'Long day.' }) });
+    assert.equal(logged.status, 200);
+    // No comeback of hers in the answer: this one is not for her to hear.
+    assert.deepEqual(await logged.json(), { ok: true });
+    assert.deepEqual(asked.at(-1), { id: 'hers', wrong: 'too clipped', rather: 'Long day.' });
+    assert.equal((await web.call('/api/chat/tune', { method: 'POST', body: JSON.stringify({ id: 'hers', rather: 'Long day.' }) })).status, 200, 'the rewrite alone is enough');
+    assert.equal((await web.call('/api/chat/tune', { method: 'POST', body: JSON.stringify({ id: 'theirs', wrong: 'x' }) })).status, 404);
+    assert.equal((await web.call('/api/chat/tune', { method: 'POST', body: JSON.stringify({ id: 'hers', wrong: '  ' }) })).status, 404, 'a mis-tap is not a note');
+    assert.equal((await web.call('/api/chat/tune', { method: 'POST', body: JSON.stringify({ wrong: 'x' }) })).status, 400);
+    assert.equal((await web.call('/api/chat/tune', { method: 'POST', body: JSON.stringify({ id: 'hers' }) })).status, 400);
   } finally { await web.stop(); }
 });
 

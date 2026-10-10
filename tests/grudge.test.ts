@@ -167,3 +167,20 @@ test('on the days he actually had, it comes back down instead of pinning', () =>
   assert.ok(ratchets > 90, `charging for every one of them pins her at the top (${ratchets})`);
   assert.ok(fair < 60 && fair > 0, `and counting only the bad days lets it travel (${fair})`);
 });
+
+
+test('a line he replied to by name is answered, however late the reply came', () => {
+  const now = Date.parse('2026-09-21T12:00:00.000Z');
+  const pushed = new Set(['nudge']);
+  const line = { id: 'aside-1', at: '2026-09-21T06:00:00.000Z', source: 'nudge', text: '103 minutes. That is what you owe me.' };
+  // Six hours on, nothing said inside the window: ignored, as it always was.
+  assert.equal(unanswered([line], [{ role: 'user', at: '2026-09-21T11:00:00.000Z' }], pushed, now).length, 1);
+  // The same late message, naming the line: he went back and answered it.
+  assert.equal(unanswered([line], [{ role: 'user', at: '2026-09-21T11:00:00.000Z', replyTo: 'aside-1' }], pushed, now).length, 0);
+  // Naming a different line of hers answers that one, not this one.
+  assert.equal(unanswered([line], [{ role: 'user', at: '2026-09-21T11:00:00.000Z', replyTo: 'aside-2' }], pushed, now).length, 1);
+  // Stored the way the desk stores it, as an object, it answers the same.
+  assert.equal(unanswered([line], [{ role: 'user', at: '2026-09-21T11:00:00.000Z', replyTo: { id: 'aside-1' } }], pushed, now).length, 0);
+  // And her own lines never answer anything, named or not.
+  assert.equal(unanswered([line], [{ role: 'assistant', at: '2026-09-21T11:00:00.000Z', replyTo: 'aside-1' }], pushed, now).length, 1);
+});

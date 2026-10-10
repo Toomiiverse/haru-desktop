@@ -1,0 +1,70 @@
+{
+  "resampling_seed": 20260916,
+  "bootstrap_repeats": 10000,
+  "banking": {
+    "actual_binary_raw_minus_rewired_binary_raw": {
+      "mean_difference_pp": -0.2532467532467534,
+      "bootstrap_95_percentile_pp": [
+        -1.2272727272727273,
+        0.6363636363636362
+      ],
+      "algorithm_seeds": 5,
+      "intent_groups": 77
+    },
+    "actual_binary_raw_minus_exact_cosine_768": {
+      "mean_difference_pp": -6.941558441558442,
+      "bootstrap_95_percentile_pp": [
+        -8.389610389610388,
+        -5.662337662337662
+      ],
+      "algorithm_seeds": 5,
+      "intent_groups": 77
+    },
+    "flyhash_direct_minus_exact_cosine_768": {
+      "mean_difference_pp": -1.2987012987012987,
+      "bootstrap_95_percentile_pp": [
+        -1.8246753246753238,
+        -0.7532467532467534
+      ],
+      "algorithm_seeds": 5,
+      "intent_groups": 77
+    },
+    "simhash_equal_bits_minus_exact_cosine_768": {
+      "mean_difference_pp": -0.1948051948051951,
+      "bootstrap_95_percentile_pp": [
+        -0.5974025974025974,
+        0.2662337662337661
+      ],
+      "algorithm_seeds": 5,
+      "intent_groups": 77
+    }
+  },
+  "invented_emotion": {
+    "distinct_lines": 24,
+    "paired_calls": 96,
+    "mean_difference_pp": 14.583333333333334,
+    "line_cluster_bootstrap_95_percentile_pp": [
+      0.0,
+      31.25
+    ],
+    "became_correct": 16,
+    "became_incorrect": 2,
+    "unchanged": 78
+  },
+  "limitations": [
+    "Descriptive percentile bootstrap on the tested datasets only",
+    "Five algorithm seeds give limited estimates of mapping variability",
+    "Emotion calls are clustered by line; repeated moods/seeds are not independent texts",
+    "No correction for multiple exploratory comparisons; not a population or human-preference claim"
+  ],
+  "public_emotion": {
+    "distinct_lines": 84,
+    "mean_difference_pp": 5.952380952380952,
+    "line_cluster_bootstrap_95_percentile_pp": [
+      0.0,
+      12.5
+    ],
+    "became_correct": 32,
+    "became_incorrect": 12
+  }
+}

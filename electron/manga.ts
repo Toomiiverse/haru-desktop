@@ -116,6 +116,53 @@ export function readReading(saved: unknown): Reading | null {
   };
 }
 
+/**
+ * Whether she has read it to the end: the last page of a chapter with nothing
+ * after it, which is where afterReading leaves her when the feed ran out.
+ *
+ * Odd Taxi has one readable chapter on MangaDex (35.5; the rest is licensed
+ * away), and she finished it on 2026-09-24. For three days after, every read
+ * computed an empty sitting and came back as "the pages did not come back" —
+ * false, and enough to spend her own time on retries: the tool said the pages
+ * had failed, so she asked again, and again, until the rounds ran out (38
+ * calls, 20 turns thrown away, 2026-09-25 to 27). Finished is a state of its
+ * own, told apart here and answered as such.
+ */
+export function readToTheEnd(reading: Reading): boolean {
+  return reading.pages > 0 && reading.page >= reading.pages;
+}
+
+/** A series she read to the end, kept so she does not take it up again from the start. */
+export type Finished = { seriesId: string; title: string; chapters: number; at: string };
+
+export const FINISHED_KEPT = 50;
+
+export function readFinished(saved: unknown): Finished[] {
+  if (!Array.isArray(saved)) return [];
+  return saved
+    .filter((entry): entry is Finished => Boolean(entry) && typeof entry === 'object'
+      && typeof (entry as Finished).seriesId === 'string' && !!(entry as Finished).seriesId
+      && typeof (entry as Finished).title === 'string' && !!(entry as Finished).title)
+    .map(entry => ({
+      seriesId: entry.seriesId, title: entry.title,
+      chapters: typeof entry.chapters === 'number' && entry.chapters >= 0 ? Math.floor(entry.chapters) : 0,
+      at: typeof entry.at === 'string' ? entry.at : '',
+    }))
+    .slice(-FINISHED_KEPT);
+}
+
+/** The list with this reading on it, once: finishing the same series again replaces the first entry. */
+export function withFinished(list: Finished[], reading: Reading, nowIso: string): Finished[] {
+  const entry: Finished = { seriesId: reading.seriesId, title: reading.title, chapters: reading.finished, at: nowIso };
+  return [...list.filter(item => item.seriesId !== reading.seriesId), entry].slice(-FINISHED_KEPT);
+}
+
+/** Whether a title — or the series it was found to be — is one she has already read to the end. */
+export function alreadyFinished(list: Finished[], title: string, seriesId?: string): boolean {
+  const want = title.trim().toLowerCase();
+  return list.some(item => item.title.trim().toLowerCase() === want || (!!seriesId && item.seriesId === seriesId));
+}
+
 /** Where tonight's sitting starts and stops. */
 export function tonightsPages(reading: Reading, budget = PAGES_A_NIGHT): { from: number; to: number } {
   const left = Math.max(0, reading.pages - reading.page);
@@ -185,6 +232,12 @@ export function readingInstruction(reading: Reading, from: number, to: number, p
  */
 export function readingNote(reading: Reading | null): string {
   if (!reading?.title) return '';
+  // "60 of 60 pages into chapter 35.5" read as a place to carry on from, and
+  // she tried to, nightly, for three days (2026-09-24). The end is the end.
+  if (readToTheEnd(reading)) {
+    const chapters = reading.finished > 0 ? `${reading.finished} chapter${reading.finished === 1 ? '' : 's'} of it, finishing on chapter ${reading.chapter}` : `chapter ${reading.chapter}, which is all there is`;
+    return `- Your manga, which you read page by page on MangaDex, a dozen pages a night in the small hours: ${reading.title} — read to the end: ${chapters}. Asked where you are up to, that is the answer: you finished it, and there is nothing after it to read. You have read those pages yourself, not a summary of them. Reading again means something else, by name.`;
+  }
   const where = reading.page > 0
     ? `${reading.page} of ${reading.pages || '?'} pages into chapter ${reading.chapter}`
     : `about to start chapter ${reading.chapter}${reading.pages ? ` (${reading.pages} pages)` : ''}`;

@@ -7,7 +7,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { CATEGORIES, CATEGORY_MEANING, categoryOf, guessCategory, isCategory, LEGACY_KIND, namesSomeoneElse, readSorting, sortInput, sortPrompt, UNDATED_PLAN_DAYS, type SortNote } from '../electron/categories';
+import { CATEGORIES, CATEGORY_MEANING, categoryOf, guessCategory, isCategory, isDay, LEGACY_KIND, namesSomeoneElse, readSorting, sortInput, sortPrompt, UNDATED_PLAN_DAYS, type SortNote } from '../electron/categories';
 import { formationPrompt, formationWindows, importanceOf, MEMORIES_PER_DAY, migrateMemories, pruneMemories, readFormation, rememberInto, retrieveMemories, tidyEvidence, type MemoryRecord } from '../electron/memory';
 import { defaultMemoryBlocks, formatMemoryBlocks, withoutRestatements } from '../electron/blocks';
 import { mergeMemories } from '../electron/memorysync';
@@ -306,4 +306,15 @@ test('with many people on record, the ones the message is about are shown', asyn
   const section = text.match(/<relationship>[\s\S]*?<\/relationship>/)?.[0] ?? '';
   assert.match(section, /Logan is a customer/);
   assert.equal(section.split('\n').filter(line => line.startsWith('- ')).length, PEOPLE_LIMIT);
+});
+
+test('the sorter cannot put a day on a record that search_chats would refuse', () => {
+  // One isDay for both: V8 reads "2026-02-30" as 2 March, and the lenient
+  // check this file used to carry would have stored and rendered it as such.
+  assert.ok(isDay('2026-09-10'));
+  for (const bad of ['2026-02-30', '2026-13-01', '2026-09-00', 'yesterday', 20260910, null]) assert.ok(!isDay(bad), String(bad));
+  const notes: SortNote[] = [{ id: 'a', text: 'Dentist on the 30th', kind: 'event', createdAt: '2026-02-20T00:00:00.000Z' }];
+  const sorted = readSorting('1 | plan | 2026-02-30', notes);
+  assert.equal(sorted.get('a')?.category, 'plan');
+  assert.equal(sorted.get('a')?.when, undefined, 'an impossible day is dropped rather than rolled into March');
 });

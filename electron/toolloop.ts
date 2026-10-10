@@ -24,7 +24,7 @@
 // reported rather than looped on.
 
 import type { ChatMessage, ToolCall } from './provider';
-import { claimsDesktopAction, claimsTickOff, readsLikeAssistant, deniesItExists, thinksAloud, dropThinkingAloud, claimsChecked, asksToLookUp } from './reply';
+import { claimsDesktopAction, claimsTickOff, readsLikeAssistant, deniesItExists, thinksAloud, dropThinkingAloud, recitedSpan, dropRecitedPrompt, claimsChecked, asksToLookUp } from './reply';
 import { stripDelivery } from './delivery';
 
 /** How many rounds a single reply may spend before it has to settle. */
@@ -199,12 +199,13 @@ export async function runToolLoop(conversation: ChatMessage[], deps: ToolLoopDep
       log(`[ai] round ${round + 1} took ${Date.now() - roundStarted}ms — tool calls: ${message.tool_calls.map(call => call.function?.name ?? '?').join(', ')}${trace}`);
       for (const call of message.tool_calls) if (call.function?.name) ran.add(call.function.name);
       resetStream();
+      message.tool_calls = message.tool_calls.map((call, index) => ({ ...call, id: call.id ?? `call_${conversation.length}_${index}` }));
       conversation.push(message);
       // The calls in one round run together rather than one after another — a
       // search and a page read have nothing to wait for. Order is kept: each
       // result answers the call it was born from, whichever finished first.
       const results = await Promise.all(message.tool_calls.map(async call => ({ call, content: await deps.runTool(call) })));
-      for (const { call, content } of results) conversation.push({ role: 'tool', tool_name: call.function?.name, content });
+      for (const { call, content } of results) conversation.push({ role: 'tool', tool_name: call.function?.name, tool_call_id: call.id, content });
       if (deps.pageWasRead()) log('[search] page read — tools withdrawn for the rest of this reply');
       continue;
     }
@@ -341,6 +342,29 @@ export async function runToolLoop(conversation: ChatMessage[], deps: ToolLoopDep
         voiceRetried = true;
         resetStream();
         warn('[ai] replied with her deliberation instead of the words — asking once for the words alone');
+        conversation.push(message);
+        conversation.push({
+          role: 'user',
+          content: 'That reply was your reasoning about what to say, not the thing said. Reply again with only what you would say to them — no analysis of them, no plan, no notes to yourself, and no mention of this note.',
+        });
+        continue;
+      }
+    }
+
+    // Her own instructions read out loud — the part thinksAloud's word lists
+    // cannot see (reply.ts recitedSpan). Checked on what survived that first
+    // pass, against only what she was told this turn: the system side.
+    const instructions = conversation.filter(turn => turn.role === 'system').map(turn => String(turn.content ?? '')).join('\n');
+    if (recitedSpan(message.content, instructions)) {
+      const { text, dropped } = dropRecitedPrompt(message.content, instructions);
+      if (text.length >= 20 && !thinksAloud(text) && !recitedSpan(text, instructions)) {
+        resetStream();
+        warn(`[ai] dropped ${dropped} chars of her reading her own instructions aloud`);
+        message.content = text;
+      } else if (!voiceRetried) {
+        voiceRetried = true;
+        resetStream();
+        warn('[ai] she read her own instructions aloud and no clean reply followed — asking once for the words alone');
         conversation.push(message);
         conversation.push({
           role: 'user',

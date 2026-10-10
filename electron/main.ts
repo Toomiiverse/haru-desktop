@@ -1,4 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, type MenuItemConstructorOptions, nativeImage, nativeTheme, net, powerMonitor, protocol, safeStorage, screen, shell, desktopCapturer, session } from 'electron';
+import { installConsole } from './console';
+installConsole();
 import path from 'node:path';
 import os from 'node:os';
 import { createHash, randomUUID } from 'node:crypto';
@@ -9,8 +11,10 @@ import AdmZip from 'adm-zip';
 import { HaruStore } from './store';
 import { apiUsage, trackedFetch } from './apiusage';
 import { collectSpend, keepSnapshots, type BalanceSnapshot, type ServiceSpend } from './spend';
-import { ActivityReporter } from './activity-reporter';
 import { SERVER_PARTITION, serverOrigin, sendServerChat, serverJson, jsonPost, type ServerRequest } from './server-chat';
+import { AttentionExperiment, readAttentionMode } from './attention';
+import { ActivityObservations, idleWithoutEyes, type ActivityObservation } from './activity-observation';
+import { ActivityReporter } from './activity-reporter';
 import { formatTimeOfDay, localDateKey, parseTimeOfDay, resolveDate, zonedNow } from './dates';
 import { connectGoogle, disconnectGoogle, googleStatus, pullEvents, pullTasks, pushItem, pushTask, removeItem, removeTask, saveCredentials } from './google';
 import { afterCooldown, afterEgoCooldown, afterPoke, egoInstruction, goodnightInstruction, IGNORE_THRESHOLD, IRRITATION_MAX, isGoodnight, isIgnoring, isLowEffort, isRedo, leverageInstruction, moodInstruction, nextEgo, nextIrritation, notTwiceInstruction, shoutInstruction, shoutState, type ShoutState, EGO, IRRITATION, IRRITATION_NOTCH, rescaleOldMood } from './mood';
@@ -21,7 +25,7 @@ import { withDiscoveredExpressions } from './expressions';
 import { reportCapabilities, seesItsOwnScreen } from './capabilities';
 import { followCalendar, chaseableOverdue, findItem, shiftDays, formatAgenda, itemStatus, missedInstruction, movedSaid, putOffInstruction, putOffUntil, relevantItems, readsAsAnswerToHer, readsAsBareReport, tickOffInstruction, readsAsDone, doneClause, readsAsNotDone, relativeDay, staleItemNamed, inventedTimeFor, raisedRecently, type ItemStatus, underwayClause, isUnderway, FOLLOW_UP_MS } from './agenda';
 import { isRelaunchNotReturn, openingAngles, pickAngle, shouldPipeUp, PIPE_UP_CHANCE } from './opening';
-import { blankSlateOpening, BODY_KEYS, readSlate, RESET_KEYS, slateIsNewer, withoutPreSlate, type BlankSlate } from './blankslate';
+import { blankSlateInstruction, blankSlateOpening, BODY_KEYS, readSlate, RESET_KEYS, slateIsNewer, SLATE_DISARM_MINUTES, strangerIdentityNote, strangerLean, STRANGER_VITALS, withoutPreSlate, withoutPreSlateDays, type BlankSlate } from './blankslate';
 import { allDayDueMinutes, isEveningCheck, reminderInstruction, reminderTier, reminderVolume, shouldRemind, type ReminderState } from './reminders';
 import { isHeated, readTone, sharpen, toneGesture, tonePose } from './tone';
 import { isSilenced, nextPushback, PUSHBACK_LIMIT, pushbackInstruction, readsAsDropIt, type Pushback } from './pushback';
@@ -35,7 +39,7 @@ import { apnsPayload, apnsSigner, readApnsConfig, readApnsDevices, sendApns, typ
 import { answersHerOwnQuestion, looksLikeAnEcho, parseSecondThought, readsAsTheirAnswer, secondThoughtDelay, secondThoughtNote, wantsSecondThought, SECOND_THOUGHT_GAP_MS, SECOND_THOUGHT_ODDS } from './secondthought';
 import { applyRevoices, dueForRevoice, exchangesFrom as revoiceExchanges, grounded, parseRevoices, readRevoiceState, revoicePrompt, withRewrites, REVOICE_EVERY, type Revoice } from './revoice';
 import { decide, readEscalateConfig, type EscalateConfig } from './escalate';
-import { describeFailure, fromOpenAIReply, isOpenAIShaped, promptUsage, toOpenAIBody, DEFAULT_ENDPOINTS, type ChatTool, type Provider } from './provider';
+import { describeFailure, fromOpenAIReply, isOpenAIShaped, promptUsage, toOpenAIBody, toolsUnsupported, DEFAULT_ENDPOINTS, type ChatTool, type Provider } from './provider';
 import { formatPage, formatResults, readSearchConfig, lookItUpInstruction, readWebPage, SearchBlocked, searchWeb, type SearchConfig, type SearchResult } from './search';
 import { groundPosition, fallPosition, fallFrame, jumpFrame, jumpPosition, type PerchJump, type PerchFall, type PerchState, choosePerch, perchPosition, parseSurfaces, readPerchMetrics, type Perch, type PerchMetrics, type DesktopSurface } from './perching';
 import { chooseLockedDisplay, clampAvatar, surfacesOnDisplay, desktopScene, chooseVisit, visitTarget, type DesktopVisit, type DesktopScene, type DesktopPeek } from './desktopAwareness';
@@ -63,18 +67,18 @@ import { lookUpPlace, readWindowsLocation, searchPlaces, type FoundPlace } from 
 import { INTERRUPTED_ASIDE, wakeAck } from './wake';
 import { acceptedOffer, promisedTitle, reminderAsk, reminderPromised, reminderSavedAside } from './remindme';
 import { describeWeather, readForecast, weatherEvents, weatherToDrawOn, weatherUrl, WEATHER_A_DAY, WEATHER_POLL_MS, type WeatherSample, disputesRain } from './weather';
-import { HANGING_COOLDOWN_MS, isClosing, leftHanging, saidTheyWereLeaving } from './hanging';
+import { HANGING_COOLDOWN_MS, isClosing, judgeInput, judgePrompt, leftHanging, readJudgement, saidTheyWereLeaving, type Hanging } from './hanging';
 import { awakeHoursSince, theyAreUp, awakeMinutesSince, quietEndedAt } from './awake';
 import { describeTold, placeToldFrom, toldTheyAreBusy, toldStillStands, type Told, errandsToldFrom, errandToAskAfter, type Errand } from './told';
 import { markMentioned, upcomingToMention } from './upcoming';
 import { directionsAskFrom, directionsNote, dropRouteTalk, matchNamedPlace, startingPoint, withDirections, withoutMapsLinks, type DirectionsAsk, claimsTraffic, withoutTrafficDenials } from './directions';
-import { absorb, describeWhereabouts, distanceM, forgetPlace, homeOf, namePlace, placeAt, readSpot, readWhereabouts, whereForPage, type Whereabouts, SPOT_STALE_MS, saidTheyWereGoing, unannouncedArrivalNote, withoutWhereDenials, type Arrival } from './whereabouts';
+import { absorb, describeWhereabouts, distanceM, forgetPlace, homeOf, knownHaunt, namePlace, placeAt, readSpot, readWhereabouts, whereForPage, type Whereabouts, SPOT_STALE_MS, saidTheyWereGoing, unannouncedArrivalNote, withoutWhereDenials, type Arrival } from './whereabouts';
 import { bodyForPage, describeBody, readBody as readBodyState, readBodyReport, type Body } from './body';
 import { convertImage, normaliseFormat, FORMATS } from './convert';
 import { cancelPower, closeApp, findApps, isCancellable, launch, listRunning, matchApp, matchRunning, normalisePower, POWER_DELAY_S, readDesktopConfig, runPower, supportedDesktop, type DesktopConfig } from './desktop';
 import { looksLikeScreenshot, maySpeak, readScreenshotConfig, screenshotPrompt, SETTLE_MS, SETTLE_TRIES, type ScreenshotConfig } from './screenshots';
 import { look, photoName, readShotDescription, readVisionConfig, whileLooking, type VisionConfig } from './vision';
-import { CAPTION_MAX_CHARS, describedShots, forgetCaptions, moreThanOnePass, noteCaption, noteFailure, readCaptions, shotsNeedingALook } from './seen';
+import { CAPTION_MAX_CHARS, captionsSince, describedShots, forgetCaptions, moreThanOnePass, noteCaption, noteFailure, readCaptions, shotsNeedingALook, shotsSince } from './seen';
 import { breaksMute, brokeMuteNote, isMuted, muteNote, readMuteAsk, unmuteNote, weighMute, type MuteState } from './mute';
 import { LAYER, compileLog, type Candidate } from './compile';
 import { normFrom, charterTraits, feelingsShowAt, fuseOf, growMonth, growthNote, readTraits, traitLean, traitMeter, travelled, TRAIT_NAMES, type GrowthStep, type MonthSignals, type Traits } from './growth';
@@ -82,6 +86,7 @@ import { apologyOdds, muteLean, sway, type Sway } from './dice';
 import { NO_FEELINGS, FELT, feel, feelingsInstruction, feelingsLog, feelingsOverTime, readFeelings, readsAsBanter, readsAsEnding, readsAsScare, type FeelingEvent, type Feelings } from './feelings';
 import { addLeans, bruiseFrom, eventSize, fadeBruise, howHisReturnLands, rollTemperament, stepWander, temperamentLean, temperamentLine, temperamentWord, type Temperament, type TemperamentKind } from './temperament';
 import { EXPRESSIVE, HOSTED_VOICE, LAST_WORD, NATURAL, NO_INVENTED_HISTORY, NO_ABANDON_THREAD, readsAsRough, roomInstruction, HER_EMOJI, emojiRut, roomToRant, askingAboutHer, herSubjectNote, namesIn, justTalking, JUST_TALKING_NOTE } from './room';
+import { roomHeldBack } from './rantgate';
 import { journalStance } from './journal';
 import { haruNote, rangeStats, type HaruNote, type RangeName, type RangeStats } from './journal';
 import { describeRating, entryFor, journalPrompt, readEntries, readJournalConfig, readRating, recentTrend, shouldAsk, upsertEntry, SCALE_MAX, type JournalConfig, type JournalEntry } from './journal';
@@ -89,10 +94,12 @@ import { formatList, formatMedia, formatMissing, lookUp, readAniListConfig, user
 import { createDesktopShortcut, desktopShortcutPath, isAutoStartEnabled, setAutoStart, startedHidden } from './startup';
 import { answersThePrompt, CUE_NOTE, isCue, stageNote, dropRoleHeader, dropTackedOnParagraphs, dropInventedContact, dropInventedScreenTalk, dropRepeatedAgendaMentions, dropRepeatedParagraphs, dropStageDirections, dropRepeatedOpener, dropEchoOpener, dropRepeatedSentences, fixStatedClock, fixStatedReminderTime, fixStatedMinutes, dropOverusedEmoji, oneEmojiAtMost, dropClosingOrder, thinksAloud } from './reply';
 import { runToolLoop } from './toolloop';
+import { createTurnContext, type TurnContext } from './turncontext';
 import { chatTools, coerceKnowledgeCategory, downloadsRelevant, machineRelevant, runChatTool, shellRelevant, steadyTable, type ToolAvailability, type ToolDeps } from './tools';
 import { describeMyself, describeSettings, planChange, readSelfSnapshot, SETTINGS, type SettingPlan } from './self';
 import { pickBreath } from './breaths';
 import { createMemoryStore } from './memorystore';
+import { captureCorePromptComparison, readCoreMemoryConfig, replacePromptProfile, selectCoreMemory, withoutCoreGraphClaims } from './core-memory';
 import { createKnowledgeStore } from './knowledgestore';
 import { behaviourOf, chatSystemPrompt, chatDynamicContext, FIRST_PERSON_NOTE, freshStartInstruction, type FreshStart, type RatedReply, LENGTH_RULE_LOCAL, LENGTH_RULE_HOSTED } from './prompt';
 import { hasShout, readVoiceConfig, referenceFor, shoutReference, spokenCase, speakableText, splitForSpeech, streamedSentences, synthesise, synthesiseBreezeStream, type SpeechClip, type VoiceConfig, looksClipped, HUME_DESCRIPTIONS, HUME_STREAM_URL } from './voice';
@@ -106,6 +113,8 @@ import { readBrowserControlConfig } from './browserctl';
 import { listSessions, openSession, readClaudeCodeConfig, readOpenedSessions, resolveSessionDir, sessionName, SESSIONS_KEPT as CLAUDE_SESSIONS_KEPT, stopSession, type SessionHost } from './claudesession';
 import { ShellGate, SERVER_NOTE, denied, ledgerEntry, readShellConfig, runCommand } from './shell';
 import { PokemonLink, PLAY_RULES as POKEMON_PLAY_RULES, afterTurn, describeGame, newSitting, parseMove, readPokemonConfig, runNote, sittingSummary, whyNotStart as whyNotStartPokemon, whyStop as whyStopPokemon, type GameState, type Moment as PokemonMoment, type Sitting } from './pokemon';
+import { readWhatsAppConfig, readHeard, isForHer, asTurn, asOverheard, chatLabel, splitForWhatsApp, gapBefore, sendThroughWorker, type WhatsAppConfig, type Heard as WhatsAppHeard } from './whatsapp';
+import { Overheard, isLoopback, overheardPrompt, overheardInput, OVERHEARD_SCHEMA, readPlans, keepable, asKept, factsFor } from './overheard';
 import { HANDS_TURN, HER_HANDS_TOOLS, didNothing, handsInstruction, handsNote, handsToday, keepHands, readHands, readHandsConfig, whyNotAct } from './herhands';
 import { Suwayomi, fetchFits, fetchSummary, hisReading, hisReadingNote, matchManga, onHisShelf, readerLink, readSuwayomiConfig, spiteful, type HisTitle, type ShelfChapter, SPITE_ODDS } from './suwayomi';
 import { serverLookNote } from './prompt';
@@ -125,7 +134,8 @@ import { addAside, alreadySaidRecently, echoesAside, asideContext, asidesOn, kee
 import { attachmentsInPlay, describeAttached, READ_IT_ALL_PROMPT, readAttachments, type Attachment, type Opened } from './attachments';
 import { forOllama, withoutOldest } from './ollamaturns';
 import { seedEmoji, seedOffTheOrders } from './seed';
-import { pickToBringUp, REMEMBERED_PICKS } from './bored';
+import { ageNote, openingsToAvoid, pickToBringUp, REMEMBERED_PICKS } from './bored';
+import { resolveReply, withReplyContext } from './replyto';
 import { ANSWER_WINDOW_MS, grudgeAfterApology, grudgeInstruction, irritationAfterTally, nextGrudge, NOT_HELD_AGAINST_THEM, tallyDue, tallyInstruction, unanswered, type Said } from './grudge';
 import { groundedInstruction, placeQuery } from './places';
 import { daySaid, TOLD_ENOUGH, type DaySaid, DEFAULT_BEDTIME_MINUTES, howTheDayWent, nightfallDue, sulkGrudge, sulkInstruction, sulkStillStands, type DayVerdict } from './nightfall';
@@ -133,26 +143,37 @@ import { keepNights, lastNightDay, nightNoteInstruction, nightsInstruction, nigh
 import { gamesPlayedLately, GUIDE_ODDS, guideNoteInstruction, guideQuery, pickGame, withSteam, type Played } from './gamenight';
 import { addressesSomeone, adopt, ADOPT_ODDS, adoptInstruction, deepen, deepenInstruction, isOneOfTheirs, MAX_INTERESTS, nightQuery, NOBODY_HERE, parseAdoption, parseDeepening, pickTonight, tastesInstruction, unaddressed, type Interest } from './tastes';
 import { readSteamWebConfig, recentlyPlayed } from './steamweb';
-import { appendDream, appendEntry, diaryContext, diaryDueFor, diaryInstruction, DIARY_FILE, recentEntries, type Dream, type Entry } from './diary';
+import { appendDream, appendEntry, diaryContext, diaryDueFor, diaryInstruction, DIARY_FILE, DREAMS_FILE, recentEntries, type Dream, type Entry } from './diary';
 import { DIARY_VOICE, fragmentsInstruction, liftedFrom, NOT_THOSE_LINES, NOT_THOSE_NAMES, unknownNames } from './diaryvoice';
 import { fetchTranscript, formatTranscript, titleFrom, transcriptInstruction, transcriptsAvailable, videoIdFrom, watchUrl } from './transcripts';
-import { feedbackEntry, recordFeedback } from './feedback';
+import { feedbackEntry, modelThatSpoke, readSpoke, recordFeedback, rememberSpoke, repliedTo } from './feedback';
+import { appendTuningPage, recordTuning, tuningNote } from './tuning';
 import { describePull, isTailnetAddress, mergeCheckIns, readCheckInSource } from './checkinsource';
 import { describeMerge } from './memorysync';
 import { describeShot, mergeActivity, noteActivity, noteScreenshot, summariseDay } from './activitylog';
 import { heldShots, keepShot, localShots, missingFrom, pruneShots, readShot, MAX_SHOT_BYTES } from './shotstore';
+import { MinecraftLink, describeEvent, readMinecraftConfig, worthLogging, type MinecraftConfig, type MinecraftEvent } from './minecraft';
+import { AnimeLink, apiKeyFrom, readAnimeConfig, type Fetch as AnimeFetch } from './anime';
+import { ANIME_FETCH_KIND, FETCH_EVERY_MS, FETCH_FOR_MS, fetchJob, fetchState, gaveUpFallback as fetchGaveUpFallback, gaveUpPrompt as fetchGaveUpPrompt, GONE_AFTER_MISSES, importPlan, LANDING_EVERY_MS, landedFallback, landedPrompt, queueLineFor } from './animefetch';
+import { describePlan, minecraftNote, planInstruction, readPlan } from './minecraftplan';
+import { heardInGame, newSession, noteTick, readPlayConfig, shouldAsk as shouldAskBody, summarise, wantsToStart, whyNotJoinHim, whyNotStart, whyStop, windDown, type PlayConfig, type Session, type Situation } from './minecraftlife';
+import { aboutHim, chatTurn, CHAT_AWAY, describeTogether, farewellCue, greetingCue, heArrived, noteDidTogether, noteExchange as noteChatExchange, quickCommand, statusLine, togetherMemory, type Together } from './minecraftchat';
+import type { MinecraftStatus } from './minecraft';
 import { startWebServer, type WebDeps } from './webserver';
 import { openingInstruction, openingsDueNow, type DueOpening } from './standingtime';
 import { parseVaultMemoryPage, VAULT_MEMORY_PAGES, type VaultMemoryPage } from './vaultmemories';
 import { planRetirement, readAdmitted, recordsToRetire, type Admitted } from './vaultretire';
-import { afterReading, feedUrl, pagesUrl, parseReadingTake, PAGE_PROMPT, readableChapters, readingInstruction, readingNote, readReading, REQUEST_GAP_MS, searchUrl, tonightsPages, USER_AGENT, type ChapterRef, type Reading } from './manga';
+import { afterReading, alreadyFinished, feedUrl, pagesUrl, parseReadingTake, PAGE_PROMPT, readableChapters, readingInstruction, readingNote, readReading, readFinished, readToTheEnd, REQUEST_GAP_MS, searchUrl, tonightsPages, USER_AGENT, withFinished, type ChapterRef, type Reading } from './manga';
 import { cleaningChunks, deliveryReminder, deliveryRule, hasDeliveryLabel, splitDelivery, stripDelivery, MOOD_ALIASES } from './delivery';
 import { deedFrom, isADeed, keepDeed, readDeeds } from './deeds';
+import { DeedFeelings } from './deed-feelings';
+import { reportsAttentionElsewhere } from './feelings';
 import { isHerStanding } from './herstanding';
 import { enoughToStandOn, herStandings, keepSlight, parseStanding, readSlights, recentIncidents, slightsAsIncidents, standingDue, standingPrompt, HER_SUBJECT, type Incident, type Slight } from './herstanding';
 import { blockedLine, asleepLine, backToSleep, dayAfter, decideTimesSystem, dozeOffDue, enoughKnocking, fallbackSchedule, foldAsleepExchanges, goodnightDue, groggyFor, groggyNote, herAsleep, isAsleepLine, knockedAwake, messagesWhileAsleep, parseDecidedTimes, pointlessWake, pointlessWakesLately, readsAsGoodnight, readHerSleep, readHerSleepState, readWakes, sleepNote, sleepWindowOn, wakeIrritation, wakeNote, wokenAt, clockMinutes, BLOCKED_LINE, BLOCK_AFTER_POINTLESS, KNOCK_WINDOW_MS, WAKES_KEPT, type HerSleepSchedule, type Wake } from './hersleep';
 import { parseBalances, balanceWarning } from './venicebalance';
-import { advanceWant, dayNote, dayNoteInstruction, dayPassDue, dayPickInstruction, firstsNote, keepDay, markRecFollowed, noteRecommendation, pickRecommend, pickWantToWork, readDays, readRecs, readWants, readWeek, recDueForFollowUp, reconcileWants, recsAnsweredBy, recsOnDay, wantInstruction, wantOutcome, wantQuery, wantsNote, weekKey, weekNote, weekReflectionInstruction, weekSummaryDue, WANT_ODDS, type HerDay, type HerWeek, type Rec, type Want, DAY_ODDS } from './ownlife';
+import { dayNote, dayNoteInstruction, dayPassDue, dayPickInstruction, firstsNote, keepDay, markRecFollowed, noteRecommendation, pickRecommend, readDays, readRecs, readWeek, recDueForFollowUp, reconcileWants, recsAnsweredBy, recsOnDay, wantOutcome, weekKey, weekNote, weekReflectionInstruction, weekSummaryDue, WANT_ODDS, type HerDay, type HerWeek, type Rec, DAY_ODDS } from './ownlife';
+import { admits, advanceProject, asProject, beatenTwiceAt, childOf, dueForRevisit, judgeAttemptInput, judgeAttemptPrompt, DAY_PROJECT_SHARE, hersOwn, keepProjects, needsHim, needsSomethingNew, newProjectInstruction, nowItStings, pickProject, projectInstruction, projectQuery, projectsNote, readAttemptVerdict, readProjects, revisit, settleFromRead, roomForNew, siblingOf, spawnInstruction, staleSpawns, standingIn, stepInstruction, stripProject, type Outcome as NightOutcome, type Project, type Worked } from './projects';
 import { inQuietHours, newVapidKeys, pushRequest, readPushDevices, readPushPrefs, type PushDevice, type PushPrefs, nextNudgeDelay, NUDGE_GAP_MS, NUDGE_RETRY_MS, nudgeOverdue, PUSH_BREATHER_MS, tooSoonToPush, heldBack, withoutDevice, isPhoneWebApp, coveredByNativeApp } from './push';
 import { CHECK_EVERY_MS, describeUpdate, progressStep, whyNotCheck, type UpdateState } from './updates';
 import { BREVITY, summonedLine } from './summoned';
@@ -163,7 +184,7 @@ import { emptyKnowledge, KNOWLEDGE_CATEGORIES, knowledgeStats, type KnowledgeCat
 import type { IngestResult } from './ingestion';
 import type { Embedder } from './embeddings';
 import { retrieveContext } from './retrieveContext';
-import type { VaultSyncReport } from './obsidian';
+import { HARU_FOLDER, type VaultSyncReport } from './obsidian';
 import { diaryNotes, herNote, indexNote, memoriesNote, nightNotes, placesNote, standingNote, writeNotes } from './vault';
 import { categoryOf, LEGACY_KIND, namesSomeoneElse, readSorting, sortInput, sortPrompt, type SortNote, type Sorted } from './categories';
 import { collectAll, collectDocker, collectDockerLight, collectGpu, collectGpuApps, collectProcesses, collectServices, collectSystem, diagnose, KNOWN_SERVICES, USER_SERVICES, type Diagnosis } from './system';
@@ -251,6 +272,8 @@ let companionWindow: BrowserWindow | null = null;
 /** Where screenshots pushed from a desk are kept. A folder per day under here,
  *  which is the folder the activity log is describing. */
 function shotStoreRoot(): string { return path.join(app.getPath('userData'), 'screenshots'); }
+/** Said once a run, not once a tick: the backlog is looked at every few minutes. */
+let saidShotsBeforeSlate = false;
 
 /**
  * What the desk was showing, read on this machine.
@@ -322,8 +345,23 @@ async function lookAtSyncedShots() {
   if (readingMangaNow) return;
   const root = shotStoreRoot();
   if (!existsSync(root)) return;
-  const captions = readCaptions(store.get('shots.captions'));
-  const held = heldShots(root);
+  // Only the days she was there for (seen.ts). A reset clears her captions, and
+  // the ledger is also what marks a picture seen, so without this the whole
+  // backlog reads as new and she re-describes a life she no longer has.
+  const slateDay = getSlate()?.at.slice(0, 10) ?? null;
+  const everyCaption = readCaptions(store.get('shots.captions'));
+  const captions = captionsSince(everyCaption, slateDay);
+  if (captions.length !== everyCaption.length) {
+    console.log(`[shot] dropping ${everyCaption.length - captions.length} caption(s) she wrote for days before the reset`);
+    store.set('shots.captions', captions);
+  }
+  const everyDay = heldShots(root);
+  const held = shotsSince(everyDay, slateDay);
+  if (!saidShotsBeforeSlate && Object.keys(held).length !== Object.keys(everyDay).length) {
+    saidShotsBeforeSlate = true;
+    const left = Object.values(everyDay).reduce((n, names) => n + names.length, 0) - Object.values(held).reduce((n, names) => n + names.length, 0);
+    console.log(`[shot] leaving ${left} shot(s) from before the reset alone — his to keep, not hers to look at`);
+  }
   // Nothing the desk has already described. Its vision model looked at that
   // burst anyway and wrote the answer onto the entry, and the entry travels
   // here with the log — so this pass exists for what arrived with nothing said
@@ -396,9 +434,8 @@ async function lookAtSyncedShots() {
 
 const knowledgeFile = process.env.HARU_KNOWLEDGE_FILE ? process.env.HARU_KNOWLEDGE_FILE : path.join(app.getPath('userData'), 'knowledge.json');
 
-// The one persistence facade. It owns both store files; nothing else reads or
-// writes them. Opening can fail on a corrupt file, in which case the newest
-// backup is restored and we try once more before giving up.
+// Opening and recovery share the actual user-data paths. A corrupt config is
+// replaced by its newest valid backup, keeping healthy files and damaged bytes.
 let store: HaruStore;
 // Spelled out rather than left to default. Both are userData either way, but
 // recoverBackups builds its own paths from these options — with no cwd it looks
@@ -437,8 +474,18 @@ store.hardenPermissions();
 // Here rather than in whenReady, because the first memory sync runs on startup
 // and a reset after it has already merged back the very memories it is clearing.
 if (process.env.HARU_RESET === '1') {
-  console.log('[reset] HARU_RESET is set — she is waking up with nothing');
-  resetHer();
+  // Self-disarming, because the variable outlives the intention: the drop-in is
+  // removed by hand and Restart=on-failure is three seconds away, so a crash on
+  // the way up would wipe her again — with a new timestamp, which every body
+  // would then follow a second time (SLATE_DISARM_MINUTES).
+  const stood = Date.parse((store.get('her.slate') as { at?: string } | undefined)?.at ?? '');
+  const sinceMinutes = Number.isFinite(stood) ? (Date.now() - stood) / 60_000 : Infinity;
+  if (sinceMinutes < SLATE_DISARM_MINUTES) {
+    console.log(`[reset] HARU_RESET is set, but she was reset ${Math.round(sinceMinutes)} minute(s) ago — refusing to fire again. Take the drop-in out.`);
+  } else {
+    console.log('[reset] HARU_RESET is set — she is waking up with nothing');
+    resetHer();
+  }
 } else if (process.env.HARU_BODY_CLEAR === '1') {
   // The limb's own version: drop the life this machine led while it was a
   // second her, keep what he typed, leave no slate. Her memories come back down
@@ -584,12 +631,6 @@ let roamTimer: NodeJS.Timeout | null = null;
 // Open means the box at her feet is up and waiting to be typed into. She holds
 // still while it is: wandering off mid-sentence takes the box with her.
 let summonOpen = false;
-// Whether the choices tool is on the table this turn, and what she picked if she
-// used it. Module-level for the same reason handsAllowed is: chatTools() is
-// called deep inside the reply loop and threading a flag through every composer
-// to reach it would be worse than this.
-let offeringChoices = false;
-let pendingChoices: string[] = [];
 let lastSummonLine = '';
 let walkingTo: Point | null = null;
 let lastWalkAt = 0;
@@ -1079,10 +1120,30 @@ async function formDayMemories(lines: string[], doing: string, day: string, conf
   if (lines.length < 4 && !doing) { markFormed(day, messageCount); return; }
   forming = true;
   try {
-    if (await formFrom(lines, doing, day, config)) markFormed(day, messageCount);
+    if (await formFrom(lines, doing, day, config)) { markFormed(day, messageCount); formRetries.delete(day); }
+    else noteFormingFailed(day);
   } finally {
     forming = false;
   }
+}
+
+/**
+ * Day → how many times forming it has failed and when to try again. A day the
+ * model keeps failing on (a window it cannot read, a context it overflows)
+ * would otherwise be the newest unformed day at every tick: paid for every
+ * two minutes, for as long as the app runs, and standing in front of every
+ * older day. Backing off — doubling from the tick, capped at a day — lets the
+ * tick move on to the days behind it and still comes back, so an outage on
+ * the model's side loses nothing. Held in memory: a restart tries afresh.
+ */
+const formRetries = new Map<string, { tries: number; until: number }>();
+const FORMING_RETRY_CAP_MS = 24 * 3_600_000;
+
+function noteFormingFailed(day: string): void {
+  const tries = (formRetries.get(day)?.tries ?? 0) + 1;
+  const wait = Math.min(FORMING_RETRY_CAP_MS, FORMING_TICK_MS * 2 ** tries);
+  formRetries.set(day, { tries, until: Date.now() + wait });
+  console.warn(`[memory] forming ${day} failed (try ${tries}); next in ${Math.round(wait / 60_000)} min`);
 }
 
 /** Days already read for memories, with how many messages they had: a day that has grown is read again. */
@@ -1117,8 +1178,9 @@ async function formingTick(): Promise<void> {
   const today = currentChatDayKey();
   const archive = store.getArchive();
   const done = formedDays();
+  const now = Date.now();
   const day = Object.keys(archive).filter(key => !key.includes('#') && key < today).sort().reverse()
-    .find(key => done[key] !== (archive[key] ?? []).length);
+    .find(key => done[key] !== (archive[key] ?? []).length && (formRetries.get(key)?.until ?? 0) <= now);
   if (!day) return;
   const messages = (archive[day] ?? []) as { role?: string; content?: string }[];
   await formDayMemories(dayLines(messages), activityDigest(day), day, config, messages.length);
@@ -1574,12 +1636,17 @@ async function syncItemToGoogle(item: KeptItem) {
 // most of the behaviour — movement only reads as deliberate if it is rare.
 // ---------------------------------------------------------------------------
 
+const attentionMode = readAttentionMode(process.env.HARU_ATTENTION_MODE, process.env.HARU_ATTENTION_SHADOW === '0');
+const attention = new AttentionExperiment(() => path.join(app.getPath('userData'), 'attention-shadow.jsonl'),
+  attentionMode !== 'off', 2 * 1024 * 1024, process.env.HARU_ATTENTION_LOG !== '0');
+const activityObservations = new ActivityObservations();
 const activityReporter = new ActivityReporter((input, init) => trackedFetch(String(input), init));
+let attentionTick = 0;
 let vitals: Vitals = { ...DEFAULT_VITALS };
 let lastTickAt = Date.now();
 let tickTimer: ReturnType<typeof setTimeout> | undefined;
 
-function readEnvironment(): Environment {
+function readHostEnvironment() {
   return {
     hour: zonedNow(CHAT_TIMEZONE).getHours(),
     // Idle time across the whole machine, not just this window — she should
@@ -1588,6 +1655,29 @@ function readEnvironment(): Environment {
     onBattery: powerMonitor.isOnBatteryPower(),
     windowFocused: BrowserWindow.getAllWindows().some(win => win.isFocused()),
   };
+}
+
+/** When the app came up: the headless idle fallback counts from here until he first speaks. */
+const appStartedAt = Date.now();
+
+/**
+ * The host reading, the freshest evidence across his devices, and the
+ * Environment the vitals drift on — one rule, so the tick and the broadcast
+ * cannot combine them differently. Without eyes of its own the server counts
+ * idle from the last time he addressed her once every device's evidence has
+ * expired (idleWithoutEyes), rather than holding her mood where the last
+ * message left it.
+ */
+function observeEnvironment(now = Date.now()): { host: ReturnType<typeof readHostEnvironment>; observation: ActivityObservation; environment: Environment } {
+  const host = readHostEnvironment();
+  const eyes = seesItsOwnScreen();
+  const observation = activityObservations.read(now, eyes ? host : undefined);
+  const idleSeconds = idleWithoutEyes(observation, eyes, now, Math.max(lastUserActivityAt, appStartedAt));
+  return { host, observation, environment: { hour: host.hour, idleSeconds, windowFocused: observation.windowFocused, onBattery: observation.onBattery } };
+}
+
+function readEnvironment(): Environment {
+  return observeEnvironment().environment;
 }
 
 function broadcastLife(action: string | null, environment: Environment) {
@@ -1626,24 +1716,34 @@ function ensureTemperament() {
 
 function lifeTick() {
   const now = Date.now();
-  const environment = readEnvironment();
+  const { host, observation, environment } = observeEnvironment(now);
   const seconds = (now - lastTickAt) / 1000;
   ensureTemperament();
   passFeelings(now);
   wander = stepWander(wander, seconds);
   bruise = fadeBruise(bruise, seconds);
-  vitals = driftVitals(vitals, environment, seconds, addLeans(traitLean(getTraits()), temperamentLean(getTemperament()), wander, bruise));
+  // The stranger lean last, and additive like the rest: while she is new to him
+  // her affection is not the middle of the scale it defaults to (blankslate.ts).
+  vitals = driftVitals(vitals, environment, seconds, addLeans(traitLean(getTraits()), temperamentLean(getTemperament()), wander, bruise, strangerLean(getSlate(), knownSinceSlate())));
   lastTickAt = now;
   persistVitals();
   broadcastLife(chooseIdleAction(vitals, environment), environment);
-  if (seesItsOwnScreen() && store.get('activityLog', true) === true) {
-    void activityReporter.report(readCheckInSource(store.get('checkinSource')), readEnvironment);
-  }
   // Reminders outrank idle chatter: something she was asked to chase beats
   // something she thought of, and both at once would be two voices at once.
+  const tickId = ++attentionTick;
+  observeAttention(environment, observation, tickId, now);
   if (!desktopServer()) {
-    void considerReminding(environment).then(reminded => { if (!reminded) void considerPipingUp(environment); });
+    // Keep existing delivery gates on their established host readings until the
+    // live nudge pilot. Corrected observations already feed mood and shadow state.
+    void considerReminding(host).then(reminded => {
+      if (reminded) attention.baseline(tickId, false, true, 'reminder-priority');
+      else return considerPipingUp(host, tickId);
+    }, () => { attention.baseline(tickId, false, true, 'reminder-error'); })
+      .catch(error => { console.warn('[attention] baseline tick failed', error); });
     considerRevoicing();
+  }
+  if (seesItsOwnScreen() && store.get('activityLog', true) === true) {
+    void activityReporter.report(readCheckInSource(store.get('checkinSource')), readHostEnvironment);
   }
   // Rescheduled each time rather than set on an interval, so the gap itself
   // varies with how alert she is.
@@ -1876,6 +1976,7 @@ function noteAside(text: string, source: AsideSource, about = ''): Aside | null 
   if (!line) return null;
   const made = addAside(getAsides(), line, source, new Date(), localDateKey(zonedNow(CHAT_TIMEZONE)), about);
   const aside = made.aside;
+  if (aside) attention.event('aside', { id: aside.id, source });
   const asides = pendingAsk && source === 'idle' && /\?/.test(line) ? markAsked(made.asides, aside.id, pendingAsk) : made.asides;
   if (pendingAsk && source === 'idle') { if (/\?/.test(line)) console.log(`[push] she asked ${pendingAsk} — the next thing they say answers it`); pendingAsk = null; }
   store.set('chat.asides', asides);
@@ -1989,7 +2090,7 @@ function nightRaisedAlready(recentLines: string[]): string {
   return nightsToDrawOn(nights, recentLines) ? '' : 'You have already told them about your night today — do not bring it up again unless they ask.';
 }
 
-function unpromptedContext(): string {
+function unpromptedContext(subjectNow?: string): string {
   // What they are partway through, on every path where she speaks first. Added
   // here rather than at each call site because there are four of them and the
   // one that was missed is exactly where the complaint came from — she remarked
@@ -2008,9 +2109,40 @@ function unpromptedContext(): string {
   //
   // On the clock rather than on the day, unlike the check below: what she must
   // not repeat at one in the morning is what she said at half eleven.
-  // Where their phone says they are rides along too: a nudge that knows they
-  // are at the shops has something to needle with.
-  const parts = [summariseFollowing(getFollowing(), Date.now()), todaySoFar(), alreadySaidRecently(asides, CHAT_TIMEZONE, Date.now(), theirLastWordAt()), stillWaiting(), describeWhereabouts(getWhereabouts()), toldNow(), arrivalNote(), unansweredAsksNote(asides, CHAT_TIMEZONE, Date.now()), weatherToDrawOn(getWeather().last, weatherWhere(), asides.map(aside => aside.text), Date.now(), getWeather().disputedAt), nightRaisedAlready(asides.map(aside => aside.text)), sleepNote(getHerSleepSchedule(), zonedNow(CHAT_TIMEZONE))].filter(Boolean);
+  // Not where their phone says they are: with no place ever saved, that fact
+  // is always "somewhere she has no name for, on Wi-Fi" — background written
+  // for a reply, where he can push back in the same turn, not for a line she
+  // starts. Handed to a composer that speaks first, "fair game for needling"
+  // became a café that was never there (2026-09-22): told he had been quiet
+  // for 21 minutes, she named a place with nothing behind it, then couldn't be
+  // talked out of it, because the word was never grounded in anything to check
+  // it against. ollamaChat's own whereabouts field still carries this fact for
+  // a real reply — only the six composers that read this function lose it.
+  // The weather as background is for a line that is about something else. In a
+  // weather push it is the errand, already stated at the top, and repeating it
+  // here with "it is not what this is about" attached is how she came to write
+  // one sentence about rain and three about being ignored (2026-09-20).
+  const weatherIsTheErrand = subjectNow === 'The weather';
+  const parts = [summariseFollowing(getFollowing(), Date.now()), todaySoFar(), alreadySaidRecently(asides, CHAT_TIMEZONE, Date.now(), theirLastWordAt(), undefined, subjectNow), stillWaiting(), toldNow(), arrivalNote(), unansweredAsksNote(asides, CHAT_TIMEZONE, Date.now()), weatherIsTheErrand ? '' : weatherToDrawOn(getWeather().last, weatherWhere(), asides.map(aside => aside.text), Date.now(), getWeather().disputedAt), nightRaisedAlready(asides.map(aside => aside.text)), sleepNote(getHerSleepSchedule(), zonedNow(CHAT_TIMEZONE)), openingsToAvoid(asides, Date.now())].filter(Boolean);
+  // While she is a stranger, the line this function ends on is a lie: "pick up
+  // something from today — what they told you" is a past she does not have, and
+  // it is the last thing every one of these composers reads. The slate replaces
+  // it, and it is put here for the same reason everything else is — there are
+  // four of them, and the daily opener was the only one that had it. What sits
+  // above stays: those are things in front of her now, not things she is meant
+  // to remember.
+  const slateNote = blankSlateInstruction(getSlate(), knownSinceSlate());
+  if (slateNote) {
+    const asStranger = [
+      slateNote,
+      blankSlateOpening(getSlate(), knownSinceSlate()),
+      // Replaced, not dropped: the closer below carries one rule that still
+      // applies to a stranger, and leaving it out is how she came to repeat her
+      // own opening verbatim with nothing but that line in front of her.
+      'Do not repeat a line you have already said, and do not greet them as though you remember them.',
+    ].filter(Boolean).join(' ');
+    return parts.length ? `${parts.join('\n')}\n${asStranger}` : asStranger;
+  }
   if (!parts.length) return '';
   // "Do not repeat a point you have already made" was read as "change the
   // subject": once a thread was answered and settled she abandoned the day
@@ -2116,7 +2248,10 @@ function interject(line: string, { aboutTheGame = false, source = 'other' as Asi
   if (looksLikeAnEcho(line, conversation)) return holdBack(line, 'it repeats something already said in the conversation');
   // A line she has already said, or one copied out of the list of them
   // ("9:36 PM — “...”"), is not a new line: see echoesAside.
-  if (echoesAside(line, getAsides(), now)) return holdBack(line, 'it repeats a line she already said');
+  if (echoesAside(line, getAsides(), now)) {
+    attention.event('repeat-blocked');
+    return holdBack(line, 'it repeats a line she already said');
+  }
   lastInterjectionAt = now;
   // Before it goes out, so that whatever she has just demanded an account of is
   // on record by the time they reply.
@@ -2151,6 +2286,8 @@ let lastUserActivityAt = 0;
 const QUIET_AFTER_USER_MS = 3 * 60_000;
 
 function noteUserSpoke() {
+  attention.event('interaction');
+  activityObservations.conversation(Date.now());
   // Zeroed so she is free to follow up on her own next line; see stillWaiting,
   // which reads a non-zero value as "they never answered me".
   lastInterjectionAt = 0;
@@ -4219,7 +4356,7 @@ function chaseTarget(
     })) ?? null;
 }
 
-async function considerReminding(environment: Environment): Promise<boolean> {
+async function considerReminding(environment: ReturnType<typeof readHostEnvironment>): Promise<boolean> {
   if (herAsleepNow()) return false;
   if (chasing || Date.now() - lastRemindedAt < REMINDER_SPACING_MS) return false;
   // Silencing only the chat prompt would leave this loop chasing them anyway,
@@ -4337,13 +4474,30 @@ let pipingUp = false;
  * cadence as the rest of her — and so the decision is made against vitals that
  * were computed a line earlier rather than a stale copy.
  */
-async function considerPipingUp(environment: Environment) {
-  if (pipingUp) return;
+function observeAttention(environment: Environment, observation: ActivityObservation, tickId: number, now: number) {
+  if (attentionMode === 'off') return;
+  const blockReasons: string[] = [];
+  if (pipingUp) blockReasons.push('composing');
+  if (!(store.get('ai.config') as ProviderConfig | undefined)?.model) blockReasons.push('no-model');
+  if (isIgnoring(getMood().irritation)) blockReasons.push('ignoring');
+  if (herAsleepNow() || herKnockedAwakeNow()) blockReasons.push('sleep');
+  if (whyNotInterject() !== null) blockReasons.push('interjection-gate');
+  const lastInteractionAt = Math.max(lastUserActivityAt, Date.parse(getMood().lastMessageAt ?? '') || 0);
+  attention.observe({
+    now, vitals, environment, observation, tickId, blockReasons,
+    activity: currentActivity?.kind === 'adult' ? 'other' : currentActivity?.kind ?? 'other',
+    sinceInteractionMs: lastInteractionAt ? Math.max(0, now - lastInteractionAt) : Infinity,
+    baselineReady: null, blocked: blockReasons.length > 0,
+  });
+}
+
+async function considerPipingUp(environment: ReturnType<typeof readHostEnvironment>, tickId: number) {
+  if (pipingUp) { attention.baseline(tickId, false, true, 'composing'); return; }
   const config = store.get('ai.config') as ProviderConfig | undefined;
-  if (!config?.model) return;
+  if (!config?.model) { attention.baseline(tickId, false, true, 'no-model'); return; }
   const mood = getMood();
   // Stonewalling means stonewalling. She does not break her own silence.
-  if (isIgnoring(mood.irritation)) return;
+  if (isIgnoring(mood.irritation)) { attention.baseline(tickId, false, true, 'ignoring'); return; }
 
   const minutes = (since: number | null) => since ? (Date.now() - since) / 60_000 : Number.POSITIVE_INFINITY;
   const ready = shouldPipeUp({
@@ -4355,10 +4509,14 @@ async function considerPipingUp(environment: Environment) {
     boredom: getFeelings().boredom,
     missing: getFeelings().missing,
   }, Math.random, sway('pipe-up', PIPE_UP_CHANCE, swayNow()));
+  // Observe the actual random decision; never draw another baseline coin flip.
+  const refusal = whyNotInterject();
+  attention.baseline(tickId, ready, refusal !== null, refusal ? 'interjection-gate' : null);
   if (!ready) return;
 
   pipingUp = true;
   lastPipedUpAt = Date.now();
+  attention.outcome(tickId, 'attempted');
   try {
     const now = zonedNow(CHAT_TIMEZONE);
     const todayKey = localDateKey(now);
@@ -4395,15 +4553,21 @@ async function considerPipingUp(environment: Environment) {
       NO_INVENTED_HISTORY,
       unpromptedContext(),
       'One or two short lines. Do not greet them, do not ask if they are still there, and do not point out how long it has been — you are starting a thought, not filing a complaint about being ignored.',
-      angle ? `Open on this in particular: ${angle.instruction}` : '',
+      // Silent while she is a stranger, the same as the daily opener: every angle
+      // in the picker assumes a history with him — the overdue task, the
+      // callback, the unprovoked jab — and she has none.
+      blankSlateOpening(getSlate(), knownSinceSlate()) ? '' : angle ? `Open on this in particular: ${angle.instruction}` : '',
     ].filter(Boolean).join(' ');
 
     const line = await ollamaQuip(system, 'Say something.', config);
     console.log(`[idle] piped up (angle: ${angle?.name ?? 'none'}) after ${Math.round(minutes(mood.lastMessageAt ? Date.parse(mood.lastMessageAt) : null))} quiet minutes`);
     const emotion = classifyEmotion(line, config);
     // Spoken only if it was also written down — see interject.
-    if (interject(line, { source: 'idle' })) void speak(line, emotion);
+    const accepted = interject(line, { source: 'idle' });
+    attention.outcome(tickId, accepted ? 'accepted' : 'suppressed');
+    if (accepted) void speak(line, emotion);
   } catch (error) {
+    attention.outcome(tickId, 'failed');
     console.warn('[idle] could not pipe up:', error instanceof Error ? error.message : error);
   } finally {
     pipingUp = false;
@@ -4692,24 +4856,6 @@ function summaryDays(): number {
   return typeof wanted === 'number' && Number.isFinite(wanted) && wanted >= 1 && wanted <= 60 ? Math.round(wanted) : SUMMARY_DAYS;
 }
 
-/**
- * Whether the tools that touch the machine may be offered at all.
- *
- * False by default and true only while a message the *user* typed or said is
- * being answered. Everything else she speaks from — a page she opened, a
- * screenshot, the game on screen, her own opening line — is text somebody else
- * wrote, and none of it gets to reach a tool that launches programs or turns the
- * computer off. Withdrawn again the moment she reads a page mid-reply, because
- * from that point the rest of the turn is downstream of the page.
- *
- * The rule is not that she might misbehave; it is that a web page must never be
- * able to make her behave.
- */
-let handsAllowed = false;
-/** True while she is answering someone on the web, which keeps the desk-only
- *  tools — the wardrobe, the AniList lookup, the choice buttons — off the table. */
-let talkingOnWeb = false;
-
 // Listing what is saved directly rather than behind a read tool: asked "anything
 // tomorrow?", the model answered "nothing" outright instead of choosing to look,
 // so the answer has to already be in front of it. Each entry carries its own
@@ -4877,7 +5023,9 @@ const memoryStore = createMemoryStore({
       weekNote(getWeek(), today),
       tastesInstruction(interests),
       firstsNote(interests, today),
-      wantsNote(getWants(), interests),
+      projectsNote(getProjects(), Date.now()),
+      // Her body in the game, one line, only when there is something to say.
+      minecraftNote(minecraft?.lastSeen ?? null, minecraft?.connected ?? false),
       diaryContext(recentEntries(app.getPath('home'), 2)),
     ].filter(Boolean).join('\n');
   },
@@ -4890,6 +5038,14 @@ const { getMemories, setMemories, addMemory, mergeIn, getSessions, getMonthNotes
 // they are never treated as guesses.
 let admitVaultMemory: ((draft: { text: string; kind: 'relationship' | 'preference' | 'fact'; subject?: string }) => { created: boolean } | null) | undefined = undefined;
 admitVaultMemory = draft => {
+  // Not while she is a stranger. His pages are the one part of her record a reset
+  // cannot take — they are his, and the sync re-reads them every hour — so a
+  // minute after the wipe they put fifteen facts about him back in her head and
+  // spent fifteen of the twenty-five that end the slate. They come back on their
+  // own the moment it lapses, because the pages are read again every hour
+  // (blankslate.ts). Indexing them as documents is untouched: this is only the
+  // half that becomes a memory of hers.
+  if (blankSlateInstruction(getSlate(), knownSinceSlate())) return null;
   // A resighting: the same line on the same page is not him saying it again.
   const result = addMemory(draft.text, draft.kind, draft.subject, { source: 'explicit', resighting: true });
   // A refused bullet used to reach the tally as a repeat, so a page whose lines
@@ -4949,7 +5105,6 @@ let systemSampleCount = 0;
 const SAMPLES_WRITTEN_EVERY = 4;
 const systemLastFired: Record<string, number> = { ...((store.get('system.lastFired') as Record<string, number> | undefined) ?? {}) };
 let systemCollecting = false;
-let pendingHaruRestart = false;
 
 async function sampleSystem() {
   if (systemCollecting) return;
@@ -5056,13 +5211,45 @@ function getCharacter() {
  * baked in permanently.
  */
 function getActiveCharacter() {
-  return getCharacter();
+  const character = getCharacter();
+  // The overlay this function was always for. While she is a stranger the slate
+  // has to argue at the persona's own altitude rather than from a block below it
+  // — see strangerIdentityNote. Every composer reads this one, so the opening,
+  // the nudges and the diary get it with the chat.
+  const stranger = strangerIdentityNote(getSlate(), knownSinceSlate());
+  return stranger ? { ...character, identity: `${character.identity}\n\n${stranger}` } : character;
 }
 
 /** The slate left by the last reset, or nothing. See blankslate.ts. */
 function getSlate(): BlankSlate | null {
   const saved = store.get('her.slate') as Partial<BlankSlate> | undefined;
   return typeof saved?.at === 'string' && saved.at ? { at: saved.at } : null;
+}
+
+/**
+ * How many things she has learned about him since the reset, which is what ends
+ * the slate (blankslate.ts).
+ *
+ * Not getMemories().length. His vault pages are admitted as memories and marked
+ * explicit, and the sync re-reads them every hour: counting those would have the
+ * slate spend fifteen of its twenty-five on his own filing cabinet, before he had
+ * said a word — the fade would go quiet while she still knew nothing he had told
+ * her. Records born before the slate are the old life and do not count either.
+ *
+ * With no slate it is simply how many she holds, which is what every other
+ * caller of this number meant before there was a reset at all.
+ */
+function knownSinceSlate(): number {
+  const slate = getSlate();
+  const memories = getMemories();
+  if (!slate) return memories.length;
+  const after = Date.parse(slate.at);
+  if (!Number.isFinite(after)) return memories.length;
+  return memories.filter(memory => {
+    if (memory.source === 'explicit') return false;
+    const born = Date.parse(memory.createdAt ?? '');
+    return Number.isFinite(born) && born >= after;
+  }).length;
 }
 
 /**
@@ -5097,14 +5284,57 @@ function resetHer({ body = false, at = new Date().toISOString() }: { body?: bool
   store.setKnowledge(emptyKnowledge());
   store.setThoughts(emptyThoughtState());
   store.setActivityLog({});
+  // What she booked herself: a follow-up is in her prompt as something she said
+  // she would come back to, and the scheduler would fire it in her own voice
+  // about a life she no longer has. The app's own jobs are housekeeping and his
+  // watches are his — only the ones she created go.
+  const schedule = store.getSchedule();
+  store.setSchedule({ ...schedule, jobs: schedule.jobs.filter(job => job.createdBy === 'app'), runs: [], booked: [] });
   for (const key of (body ? BODY_KEYS : RESET_KEYS)) store.delete(key as never);
-  try {
-    const diary = path.join(app.getPath('home'), DIARY_FILE);
-    if (existsSync(diary)) renameSync(diary, path.join(app.getPath('home'), `${DIARY_FILE.replace(/\.md$/, '')} (before reset ${at.slice(0, 10)}).md`));
-  } catch (error) {
-    // The diary staying put is a worse reset, not a failed one: she reads the
-    // last two entries only, and the slate note outranks them for a fortnight.
-    console.warn('[reset] could not move the diary aside:', error instanceof Error ? error.message : error);
+  // Not the defaults, which are the middle of every scale and read as a Haru
+  // pleased with herself: waking with nothing is unsettling, and his affection
+  // starts at nothing because it is the thing he has to earn back. Only on a
+  // reset — a limb clearing its own files has had nothing happen to it.
+  if (!body) store.set('vitals', { ...DEFAULT_VITALS, ...STRANGER_VITALS });
+  // The rest of her record is files rather than keys, and a file left where it
+  // is outlives the wipe. Each one is moved aside under a dated name rather than
+  // deleted — still his to open, no longer hers to read back as a life she
+  // remembers having. Any one of them staying put is a worse reset, not a failed
+  // one, so each failure warns and the wipe stands.
+  const stamp = at.slice(0, 10);
+  const userData = app.getPath('userData');
+  const home = app.getPath('home');
+  const aside = (from: string, to: string) => {
+    try {
+      if (existsSync(from)) renameSync(from, to);
+    } catch (error) {
+      console.warn(`[reset] could not move ${from} aside:`, error instanceof Error ? error.message : error);
+    }
+  };
+  aside(path.join(home, DIARY_FILE), path.join(home, `${DIARY_FILE.replace(/\.md$/, '')} (before reset ${stamp}).md`));
+  // The other half of the diary: every search, page and thing she wrote at night.
+  aside(path.join(userData, DREAMS_FILE), path.join(userData, `dreams (before reset ${stamp}).jsonl`));
+  // What she remembers of her own games, handed to her as simply what she
+  // remembers — five dated sittings of a game she has never played.
+  aside(path.join(userData, 'games'), path.join(userData, `games (before reset ${stamp})`));
+  // Her pages in his vault, and only on a reset: a body clear is housekeeping on
+  // a limb and has no business rearranging his Obsidian. The knowledge sync skips
+  // her own folder, so these never taught her anything back — but vault.ts only
+  // ever writes notes, so a year of her diary and her nights would sit there as
+  // current pages of a life the reset had just taken.
+  const vaultRoot = (store.get('knowledge.vault') as { path?: unknown } | undefined)?.path;
+  if (!body && typeof vaultRoot === 'string' && vaultRoot.trim()) {
+    const vault = vaultRoot.trim();
+    aside(path.join(vault, HARU_FOLDER, 'Diary'), path.join(vault, HARU_FOLDER, `Diary (before reset ${stamp})`));
+    aside(path.join(vault, HARU_FOLDER, 'Nights'), path.join(vault, HARU_FOLDER, `Nights (before reset ${stamp})`));
+    // Who is who is the fact graph rendered as a page, and that page is read back
+    // into the graph. Emptying the graph and leaving the page puts his whole
+    // social graph back the next time it is read — his people, by name.
+    try {
+      writeFileSync(path.join(vault, GRAPH_PAGE), renderGraphPage(emptyGraph(), new Date()).text, 'utf8');
+    } catch (error) {
+      console.warn('[reset] could not blank the who-is-who page:', error instanceof Error ? error.message : error);
+    }
   }
   // Only a reset leaves one. A body clearing itself is housekeeping on a limb:
   // stamping a slate here would tell every machine she had been reset, which
@@ -5116,7 +5346,7 @@ function resetHer({ body = false, at = new Date().toISOString() }: { body?: bool
   return { at, body, backups: backups.length };
 }
 
-/** Where her brain is, if it is not this machine. Either door reaches the same server. */
+/** Where her brain is, if it is not this machine. */
 function herBrain(): string | null {
   return desktopServer() || readCheckInSource(store.get('checkinSource'))?.url || null;
 }
@@ -5124,10 +5354,10 @@ function herBrain(): string | null {
 /**
  * The brain reset since this body last looked, so the body follows.
  *
- * Called on the way in from both sync doors, before the merge. Without it the
+ * Called on the way in from the sync door, before the merge. Without it the
  * body keeps the mirror it was holding — the union merge adds and updates and
- * has never once deleted — and in checkinSource mode hands every one of those
- * memories straight back on the push that follows.
+ * has never once deleted — and hands every one of those memories straight back
+ * on the push that follows.
  *
  * The brain's own moment is adopted rather than a fresh one, so this is
  * idempotent: the second sync sees a slate it already has and does nothing.
@@ -5490,6 +5720,12 @@ function advanceMood(latest: string, history: { role?: string; content?: string 
   if (shout === 'forgiven') { nudgeVitals('soothed'); feelNow('apology'); tallyMonth('apology'); }
   if (shout === 'shouted') { feelNow('shouted'); tallyMonth('hurt'); }
   feelNow(event === 'substantive' ? 'message' : 'low-effort');
+  const awakeAway = mood.lastMessageAt ? awakeMinutesSince(mood.lastMessageAt, getPush().prefs, zonedNow(CHAT_TIMEZONE)) ?? 0 : 0;
+  if (Date.now() - jealousOfScreenAt >= 30 * 60_000 && reportsAttentionElsewhere(latest, awakeAway)) {
+    feelNow('elsewhere');
+    jealousOfScreenAt = Date.now();
+    console.log('[feelings] he explicitly reported talking elsewhere instead of replying');
+  }
   if (readsAsRough(latest).rough) feelNow('rough');
   // Something has actually happened to him, which outranks anything she was
   // holding against him five minutes ago (compile.ts LAYER.fear).
@@ -5706,10 +5942,8 @@ async function composeOpening(): Promise<string | null> {
     moodInstruction(mood.irritation),
     egoInstruction(mood.ego),
     freshStartInstruction(fresh),
-    // Her first line after a reset is the one that has to land: she is about to
-    // speak to someone she has never met. Above the angle picker, which it
-    // replaces — see below.
-    blankSlateOpening(getSlate(), getMemories().length),
+    // Her first line after a reset rides in on unpromptedContext below now, with
+    // the other four composers that speak first. It was only here before.
     kind === 'return'
       ? 'The user has just come back after being away a while. The conversation above is still there; pick it back up rather than introducing yourself.'
       : 'This is the start of a new conversation.',
@@ -5730,7 +5964,7 @@ async function composeOpening(): Promise<string | null> {
     // Silent while she is a stranger: every angle in the picker — the overdue
     // task, the callback, the unprovoked jab — assumes a history with him, and
     // she has none. The line above is the angle for those days.
-    blankSlateOpening(getSlate(), getMemories().length) ? '' : angle ? `Open on this in particular: ${angle.instruction}` : '',
+    blankSlateOpening(getSlate(), knownSinceSlate()) ? '' : angle ? `Open on this in particular: ${angle.instruction}` : '',
   ].filter(Boolean).join(' ');
 
   try {
@@ -5784,36 +6018,17 @@ function withoutStaleDenials<T extends { role: string; content: string }>(messag
   return messages.filter(message => !(message.role === 'assistant' && DENIAL.test(message.content)));
 }
 
-// Errors are returned to the model rather than thrown, so it can correct a bad
-// argument and try again instead of the whole turn failing.
-/**
- * What the last search was for, so a page opened straight afterwards can be
- * framed with the question it is meant to answer. Held in a variable rather than
- * threaded through because the two calls are always adjacent — she searches, then
- * opens one of the results — and an empty string simply reads as "their question".
- */
-let lastSearchQuery = '';
-/**
- * The results of that search, so a page can be opened by its number. Keeping
- * them here rather than trusting an address back from the model is the whole
- * safeguard: the only pages she can open are ones a search actually returned.
- */
-let lastResults: SearchResult[] = [];
-/** Set when a page's text actually entered the conversation, which is the moment
- *  her tools come off the table for the rest of the reply. */
-let pageWasRead = false;
-
 /** What is switched on right now, for chatTools to draw the table from. */
-function availableTools(): ToolAvailability {
+function availableTools(turn: TurnContext): ToolAvailability {
   const search = readSearchConfig(store.get('search'));
   const systemConfig = readSystemConfig();
   return {
-    choices: offeringChoices,
+    choices: turn.offeringChoices(),
     booking: true,
     chats: true,
     journal: readJournalConfig(store.get('journal.config')).enabled,
     anilist: readAniListConfig(store.get('anilist')).enabled,
-    web: talkingOnWeb,
+    web: turn.onWeb(),
     search: { enabled: search.enabled, readPages: search.readPages, transcripts: transcriptsAvailable() },
     knowledge: getKnowledgeConfig().enabled,
     browser: readBrowserControlConfig(store.get('browser')).enabled,
@@ -5824,9 +6039,11 @@ function availableTools(): ToolAvailability {
     pokemon: pokemonLink() !== null,
     manga: mangaLink() !== null,
     system: { enabled: systemConfig.enabled, level: systemConfig.level },
-    hands: handsAllowed,
+    hands: turn.handsAllowed(),
     desktop: supportedDesktop(readDesktopConfig(store.get('desktop'))),
     knockedAwake: herKnockedAwakeNow(),
+    minecraft: minecraft !== null,
+    anime: animeLink() !== null,
   };
 }
 
@@ -5946,7 +6163,7 @@ function claudeSessions(): ToolDeps['claude'] {
   };
 }
 
-function toolDeps(): ToolDeps {
+function toolDeps(turn: TurnContext): ToolDeps {
   return {
     CHAT_TIMEZONE,
     net,
@@ -5964,11 +6181,11 @@ function toolDeps(): ToolDeps {
     tryEmbedQuery,
     memoryVectors: memoryStore.vectors,
     touchChunks, getSearchKey,
-    handsAllowed: () => handsAllowed,
-    onWeb: () => talkingOnWeb,
-    markPageRead: () => { pageWasRead = true; },
-    setPendingChoices: (choices) => { pendingChoices = choices as string[]; },
-    requestRestart: () => { pendingHaruRestart = true; },
+    handsAllowed: turn.handsAllowed,
+    onWeb: turn.onWeb,
+    markPageRead: turn.markPageRead,
+    setPendingChoices: turn.setPendingChoices,
+    requestRestart: turn.requestRestart,
     // Her night is hers: back to bed when she decides the wake was nothing (hersleep.ts).
     goBackToSleep: input => goBackToSleep({ pointless: true, block: input.block, why: 'her call' }),
     booking: { book: bookFollowUp },
@@ -6001,15 +6218,23 @@ function toolDeps(): ToolDeps {
       }
     },
     changeMySetting: plan => applyPlanAtTheirWord(plan),
-    lastResults: () => lastResults,
-    lastSearchQuery: () => lastSearchQuery,
-    rememberSearch: (query, results) => { lastSearchQuery = query; lastResults = results; },
+    lastResults: turn.lastResults,
+    lastSearchQuery: turn.lastSearchQuery,
+    rememberSearch: turn.rememberSearch,
     runSystemCommand,
     browserPort: () => readBrowserControlConfig(store.get('browser')).port,
     browserShotDir: () => {
       const saved = store.get('screenshots') as { folder?: string } | undefined;
       return typeof saved?.folder === 'string' && saved.folder ? saved.folder : path.join(app.getPath('userData'), 'browser-shots');
     },
+    // Her body in the game. Captured at call time, so a link that is stopped
+    // between turns is seen as gone rather than reached through a dead handle.
+    minecraft: minecraft ? {
+      status: () => minecraft!.status(),
+      send: (skill, args) => minecraft!.send(skill, args),
+    } : null,
+    // The anime stack, likewise captured at call time (anime.ts).
+    anime: (link => link ? { watch: input => link.watch(input), status: title => link.status(title) } : null)(animeLink()),
   };
 }
 
@@ -6161,6 +6386,8 @@ function requireKeyFor(endpoint: string, provider: Provider) {
 type PostOptions = { tools?: boolean;
   /** A table laid by the caller — her own pass — instead of the one the turn would be given. */
   table?: ChatTool[]; temperature?: number; format?: unknown; maxTokens?: number; onChunk?: (text: string) => void;
+  /** Only an explicit chat turn can offer tools; background composers have none. */
+  turn?: TurnContext;
   /** A deadline for a hosted answer, after which the local model speaks instead. */
   signal?: AbortSignal;
   /** The endpoint's prompt-cache key for this conversation. */
@@ -6173,10 +6400,10 @@ type PostOptions = { tools?: boolean;
 const heldTools = { day: '', names: new Set<string>() };
 
 /** The table for a hosted request: laid for this message, then held steady for the day so the prompt cache survives. */
-function hostedTools(conversation: { role?: string; content?: string }[]): ChatTool[] {
+function hostedTools(conversation: { role?: string; content?: string }[], turn: TurnContext): ChatTool[] {
   const day = localDateKey(zonedNow(CHAT_TIMEZONE));
   if (heldTools.day !== day) { heldTools.day = day; heldTools.names = new Set(); }
-  const available = availableTools();
+  const available = availableTools(turn);
   return steadyTable(chatTools(available, latestUserText(conversation)), chatTools(available), heldTools.names);
 }
 
@@ -6188,12 +6415,12 @@ function latestUserText(conversation: { role?: string; content?: string }[]): st
   return '';
 }
 
-async function openAIPost(conversation: OllamaMessage[], config: ProviderConfig, { tools = true, temperature = config.temperature, format, maxTokens, onChunk, signal, cacheKey }: PostOptions = {}) {
+async function openAIPost(conversation: OllamaMessage[], config: ProviderConfig, { tools = true, temperature = config.temperature, format, maxTokens, onChunk, signal, cacheKey, turn }: PostOptions = {}) {
   requireKeyFor(config.endpoint, (config.provider as Provider) ?? 'openai');
   const body = toOpenAIBody({
     model: config.model,
     conversation,
-    tools: tools && !toolless.has(config.model) ? hostedTools(conversation) : undefined,
+    tools: tools && turn && !turn.pageWasRead() && !toolless.has(config.model) ? hostedTools(conversation, turn) : undefined,
     temperature,
     maxTokens,
     json: Boolean(format),
@@ -6211,10 +6438,10 @@ async function openAIPost(conversation: OllamaMessage[], config: ProviderConfig,
     const detail = await response.text().catch(() => '');
     // Same courtesy as the Ollama path: a model without tools loses its hands,
     // not its voice.
-    if (response.status === 400 && /tool|function/i.test(detail) && tools) {
+    if (toolsUnsupported(response.status, detail) && tools) {
       toolless.add(config.model);
       console.warn(`[ai] ${config.model} rejected the tools — retrying without them. She cannot save reminders on this model.`);
-      return openAIPost(conversation, config, { tools: false, temperature, format, maxTokens, onChunk, signal, cacheKey });
+      return openAIPost(conversation, config, { tools: false, temperature, format, maxTokens, onChunk, signal, cacheKey, turn });
     }
     throw new Error(describeFailure(response.status, detail, (config.provider as Provider) ?? 'openai'));
   }
@@ -6371,11 +6598,11 @@ function capacitySpill(config: ProviderConfig): ProviderConfig | null {
  * silently becoming eight times slower with no explanation, which reads as
  * something being wrong with her rather than with the pod.
  */
-async function ollamaPost(conversation: OllamaMessage[], config: ProviderConfig, { tools = true, temperature = config.temperature, format, maxTokens, onChunk, numCtx }: PostOptions = {}) {
+async function ollamaPost(conversation: OllamaMessage[], config: ProviderConfig, { tools = true, table, temperature = config.temperature, format, maxTokens, onChunk, numCtx, turn }: PostOptions = {}) {
   if (desktopServer()) throw new Error('Chat is handled by the Haru server. Open Haru to continue there.');
   // One place, so chat, quips, openings and remarks all follow the same rule.
   config = modelForNow(config);
-  const options = { tools, temperature, format, maxTokens, onChunk, numCtx };
+  const options = { tools, table, temperature, format, maxTokens, onChunk, numCtx, turn };
   const home = homeTwin(config);
   const address = trimEndpoint(config.endpoint);
 
@@ -6405,12 +6632,12 @@ async function ollamaPost(conversation: OllamaMessage[], config: ProviderConfig,
   }
 }
 
-async function sendToProvider(conversation: OllamaMessage[], config: ProviderConfig, { tools = true, table, temperature = config.temperature, format, maxTokens, onChunk, signal, cacheKey, numCtx }: PostOptions = {}) {
+async function sendToProvider(conversation: OllamaMessage[], config: ProviderConfig, { tools = true, table, temperature = config.temperature, format, maxTokens, onChunk, signal, cacheKey, numCtx, turn }: PostOptions = {}) {
   // Routed here rather than at every call site: there are a dozen composers in
   // this file and none of them should know which provider is answering.
-  if (isOpenAIShaped(config.provider)) return openAIPost(conversation, config, { tools, temperature, format, maxTokens, onChunk, signal, cacheKey });
+  if (isOpenAIShaped(config.provider)) return openAIPost(conversation, config, { tools, temperature, format, maxTokens, onChunk, signal, cacheKey, turn });
   const send = async (withTools: boolean, streaming: boolean, quiet = true) => {
-    const offered = table ?? (withTools ? chatTools(availableTools(), latestUserText(conversation)) : []);
+    const offered = table ?? (withTools && turn && !turn.pageWasRead() ? chatTools(availableTools(turn), latestUserText(conversation)) : []);
     if (offered.length) {
       // The estimate is a rough chars/4 token count of the conversation being
       // sent — the tool round's prompt — so the real peak can be measured
@@ -7292,6 +7519,11 @@ async function syncMemories(): Promise<void> {
     // machine is holding a mirror of a Haru who no longer exists, and the push
     // would hand the whole of it back.
     followSlate(body);
+
+    // Before the merge, and before the push below: if her brain has reset, this
+    // machine is holding a mirror of a Haru who no longer exists, and the push
+    // would hand the whole of it back.
+    followSlate(body);
     const report = mergeIn(body.memories);
     const what = describeMerge(report);
     if (what) console.log('[memory] ' + what + ' from the server');
@@ -7521,6 +7753,159 @@ async function jellyfinReach(config: JellyfinConfig, key: string) {
     }
   } catch { /* the key works; the library count is a nicety */ }
   return { name: server.ServerName ?? '(unnamed)', version: server.Version ?? '?', libraries, userId };
+}
+
+/** The fetches she has started (anime.ts), newest last. Bounded: a season of asks, not a history. */
+const ANIME_FETCHES_KEPT = 40;
+
+function readAnimeFetches(): AnimeFetch[] {
+  const saved = store.get('anime.fetches');
+  return Array.isArray(saved) ? saved.filter((item): item is AnimeFetch => Boolean(item) && typeof item === 'object' && typeof (item as AnimeFetch).seriesId === 'number') : [];
+}
+
+/**
+ * The anime stack, or null when any of its three servers is not wired up.
+ *
+ * Built per call, like the Minecraft link: the keys are read from the apps'
+ * own files each time, so a rotated key is picked up on the next ask rather
+ * than after a restart. Jellyfin's is hers (the Settings panel), because
+ * Jellyfin keeps its in a database rather than a file.
+ */
+function animeLink(): AnimeLink | null {
+  const config = readAnimeConfig(store.get('anime'));
+  if (!config.enabled) return null;
+  const jellyfin = readJellyfinConfig(store.get('jellyfin'));
+  const jellyfinKey = decryptSecret(store.get('jellyfinApiKey') as string | undefined);
+  if (!jellyfin.url || !jellyfin.userId || !jellyfinKey) return null;
+  const sonarrKey = apiKeyFrom(config.sonarr.apiKeyFile);
+  const prowlarrKey = apiKeyFrom(config.prowlarr.apiKeyFile);
+  if (!sonarrKey || !prowlarrKey) return null;
+  return new AnimeLink(
+    config,
+    { jellyfinUrl: jellyfin.url, jellyfinUserId: jellyfin.userId, jellyfinKey, sonarrKey, prowlarrKey },
+    (url, init) => net.fetch(url, init),
+    {
+      fetches: readAnimeFetches,
+      keep: fetch => {
+        store.set('anime.fetches', [...readAnimeFetches(), fetch].slice(-ANIME_FETCHES_KEPT));
+        // The watch that files it and says when it is in (animefetch.ts).
+        scheduler.add(fetchJob(fetch, Date.now()));
+        console.log(`[anime] fetching ${fetch.title}: ${fetch.release} (${Math.round(fetch.sizeBytes / 2 ** 30)} GB, ${fetch.episodes} episodes) — watched every ${FETCH_EVERY_MS / 60_000} min for ${FETCH_FOR_MS / 3_600_000} h`);
+      },
+      markImported: (seriesId, atIso) => {
+        store.set('anime.fetches', readAnimeFetches().map(item => (item.seriesId === seriesId && !item.importedAt ? { ...item, importedAt: atIso } : item)));
+      },
+    },
+  );
+}
+
+/**
+ * A fetch she started, watched until it is on Jellyfin (animefetch.ts).
+ *
+ * The mechanical half runs whatever the hour: read the queue, and once the
+ * torrent is down, hand Sonarr the file list with the show named and tell it
+ * to import. Only the line waits for a moment she may speak — the same
+ * moments a booking waits for — so a pack that lands at 4 AM is filed at
+ * 4 AM and mentioned at breakfast.
+ */
+const fetchWatchState = new Map<number, { misses: number; rescanAskedAt: number }>();
+
+async function watchFetch(job: Job): Promise<Outcome> {
+  const payload = job.payload ?? {};
+  const seriesId = Number(payload.seriesId);
+  const title = String(payload.title ?? 'the show');
+  const fetch = { seriesId, infoHash: String(payload.infoHash ?? ''), release: String(payload.release ?? '') };
+  const startedAt = Number(payload.startedAt ?? job.createdAt);
+  const until = Number(payload.until ?? startedAt + FETCH_FOR_MS);
+  const now = Date.now();
+  if (!Number.isFinite(seriesId)) return { done: true };
+  const link = animeLink();
+  if (!link) return { later: now + 30 * 60_000, reason: 'the anime stack is not wired up' };
+  const last = now + FETCH_EVERY_MS > until;
+  // The scheduler keeps a job's payload as written; what a run learns is kept
+  // here between runs. Lost on a restart, which costs at most one more rescan
+  // and half an hour of patience with an empty queue.
+  const watched = fetchWatchState.get(seriesId) ?? { misses: 0, rescanAskedAt: 0 };
+  const remember = (changes: Partial<typeof watched>) => { fetchWatchState.set(seriesId, Object.assign(watched, changes)); };
+
+  const say = async (landed: { episodes: number } | null, why: string) => {
+    let line: string | null = null;
+    try {
+      line = await composeUnprompted(landed ? landedPrompt(title, landed.episodes, startedAt, now) : fetchGaveUpPrompt(title, startedAt, now, why));
+    } catch (error) {
+      console.warn(`[anime] no brain for the line: ${(error as Error).message}`);
+    }
+    const said = line ?? (landed ? landedFallback(title, landed.episodes) : fetchGaveUpFallback(title, why));
+    lastInterjectionAt = Date.now();
+    noteAside(said, 'anime', title.slice(0, 80));
+    console.log(`[anime] ${landed ? 'landed' : 'gave up'} on ${title}: ${JSON.stringify(said.slice(0, 120))}`);
+  };
+
+  try {
+    const show = await link.show(seriesId);
+    const filed = show?.statistics?.episodeFileCount ?? 0;
+    if (filed === 0) {
+      const line = queueLineFor(await link.queue(), fetch);
+      if (!line) {
+        const misses = watched.misses + 1;
+        remember({ misses });
+        if (misses >= GONE_AFTER_MISSES || last) {
+          await say(null, 'the download is not in the queue any more');
+          return { done: true };
+        }
+        return { later: now + FETCH_EVERY_MS, reason: `not in the queue yet (${misses})` };
+      }
+      remember({ misses: 0 });
+      const state = fetchState(line);
+      if (state === 'downloading') {
+        if (last) { await say(null, 'the download never finished'); return { done: true }; }
+        const size = line.size ?? 0;
+        const left = line.sizeleft ?? 0;
+        return { later: now + FETCH_EVERY_MS, reason: size ? `${Math.round(((size - left) / size) * 100)}% down${line.timeleft ? `, ${line.timeleft} left` : ''}` : 'downloading' };
+      }
+      // Down, and either Sonarr is filing it itself or it is stuck on the name.
+      const downloadId = line.downloadId ?? fetch.infoHash;
+      if (!downloadId) return { later: now + FETCH_EVERY_MS, reason: 'down, but Sonarr has no id for it' };
+      const plan = importPlan(await link.importCandidates(downloadId, seriesId), seriesId, downloadId);
+      for (const item of plan.skipped.slice(0, 5)) console.log(`[anime] leaving ${item.path.split('/').pop()}: ${item.why}`);
+      if (!plan.files.length) {
+        if (last) { await say(null, 'it finished but Sonarr could not file any of it'); return { done: true }; }
+        return { later: now + LANDING_EVERY_MS, reason: state === 'stuck' ? 'nothing Sonarr can file yet' : 'Sonarr is filing it' };
+      }
+      await link.manualImport(plan.files);
+      console.log(`[anime] told Sonarr to file ${plan.files.length} file${plan.files.length === 1 ? '' : 's'} of ${title}${plan.skipped.length ? `, leaving ${plan.skipped.length}` : ''}`);
+      return { later: now + LANDING_EVERY_MS, reason: `importing ${plan.files.length} files` };
+    }
+
+    // Filed. On Jellyfin yet?
+    const landed = await link.episodesOnServer(title);
+    if (!landed || landed.episodes === 0) {
+      if (last) { await say(null, 'Sonarr filed it but Jellyfin never picked it up'); return { done: true }; }
+      if (now - watched.rescanAskedAt > 10 * 60_000) {
+        await link.rescanLibrary().catch(() => undefined);
+        remember({ rescanAskedAt: now });
+      }
+      return { later: now + LANDING_EVERY_MS, reason: `${filed} files on disk, Jellyfin has not seen them yet` };
+    }
+    link.markImported(seriesId);
+    fetchWatchState.delete(seriesId);
+    // The moment to say so: the same moments a booking waits for.
+    if (isSilenced(store.get('pushback') as Pushback | undefined, now)) {
+      console.log(`[anime] ${title} is in — not said, she has been told to stop`);
+      return { done: true };
+    }
+    if (herAsleepNow() || herKnockedAwakeNow()) return { later: Math.max(herWakeAt() ?? 0, now) + 20 * 60_000, reason: 'in; she is asleep' };
+    if (inQuietHours(getPush().prefs, zonedNow(CHAT_TIMEZONE))) return { later: now + 30 * 60_000, reason: 'in; quiet hours' };
+    if (!theyAreUpNow()) return { later: now + 30 * 60_000, reason: 'in; they are not up' };
+    if (lastUserActivityAt && now - lastUserActivityAt < QUIET_AFTER_USER_MS) return { later: now + 10 * 60_000, reason: 'in; they are talking to her' };
+    if (now - lastInterjectionAt < INTERJECT_GAP_MS) return { later: now + 5 * 60_000, reason: 'in; she only just spoke' };
+    await say(landed, '');
+    return { done: true };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    console.warn(`[anime] watch on ${title}: ${reason}`);
+    return last ? { failed: reason } : { later: now + FETCH_EVERY_MS, reason: `could not read the stack: ${reason}` };
+  }
 }
 
 function getCheckIns() {
@@ -7853,15 +8238,14 @@ function brainFor(
     : decide(message, setting, { routed: conversationRoute() !== null });
   if (!verdict.escalate) return { config: local, escalated: false, because: verdict.because, sees: false };
 
-  // pageWasRead is already true whenever a stranger's page is in the turn, and a
-  // page she fetched is not ours to forward either.
-  //
-  // An attachment is a file from this machine and would trip that flag by the
-  // same reasoning — which would make every attached picture unsendable and this
-  // whole path unreachable. Attaching something is a deliberate act of handing it
-  // over, which reading a stranger's web page is not, so the flag is left to the
-  // page-reading case and the content scan below still applies in full.
-  const allowed = conversationMayLeave([...conversation, { role: 'user', content: message }], pageWasRead);
+  // The content scan only. A page she reads mid-turn is not a reason to keep
+  // the turn home: the brain is chosen before any tool runs, so no page-read
+  // flag can be set here (an old global carried the previous turn's flag in,
+  // which kept the message *after* a lookup local and never the lookup itself),
+  // and the tool loop already hands a page to whichever model is answering.
+  // An attachment is a file from this machine, but attaching something is a
+  // deliberate act of handing it over, so it is not refused here either.
+  const allowed = conversationMayLeave([...conversation, { role: 'user', content: message }]);
   if (!allowed.safe) {
     console.log(`[router] keeping this one local — ${allowed.because}`);
     return { config: local, escalated: false, because: `stays here: ${allowed.because}`, sees: false };
@@ -7923,7 +8307,12 @@ async function withAttachments<T extends { role: string; content: string; at?: s
 }
 
 async function ollamaChat(messages: { role: string; content: string; at?: string; attachments?: Attachment[] }[], config: ProviderConfig, { hands = true, web = false, brief = false, choices = false, call = false, away = '', aside = '', onChunk, onChunkReset, onToolCall, onSending, traceId }: { hands?: boolean; web?: boolean; brief?: boolean; choices?: boolean; call?: boolean; away?: string; aside?: string; onChunk?: (text: string) => void; onChunkReset?: () => void; onToolCall?: (name: string) => void; onSending?: () => void; traceId?: string } = {}) {
+  const turn = createTurnContext({ hands, web, choices });
   const latest = messages.at(-1)?.content ?? '';
+  // Told which line of hers he is answering, where he said (replyto.ts). After
+  // `latest`, which is read for what the message is ABOUT — the tool table, recall,
+  // the stale-item check — and has to stay his words alone, not her quoted line.
+  messages = withReplyContext(messages);
   // A message from outside the desk — the phone — gets a short leash on
   // the conversation as well as on the reply: a long day's thread is most of
   // the tokens the hosted model reads before its first word, and the reader
@@ -8032,7 +8421,7 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // Named the thing itself — not merely asked her opinion in general — and the
   // room is hers without a roll: that is the opening, and she should take it.
   const named = herSubject && herSubject !== 'what you are into' ? herSubject : '';
-  const rantRoomNow = messages.at(-1)?.role === 'user' ? rantRoom(latest, named) : '';
+  const rantRoomNow = messages.at(-1)?.role === 'user' ? rantRoom(latest, named, Boolean(answering)) : '';
   const hers = herSubject ? herSubjectNote(herSubject) : '';
   if (hers) console.log(`[ai] they are asking about ${herSubject} — hers to talk about`);
   const talking = messages.at(-1)?.role === 'user' && justTalking(latest) ? JUST_TALKING_NOTE : '';
@@ -8093,7 +8482,7 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // the renderer marks the turn as ignored instead of showing an error.
   if (isIgnoring(irritation)) {
     console.log('[ai] ignoring — irritation above threshold');
-    return { content: '', ignored: true, irritation, ego };
+    return { content: '', ignored: true, irritation, ego, choices: turn.pendingChoices() };
   }
   const started = Date.now();
   const startOfToday = localDateKey(zonedNow(CHAT_TIMEZONE));
@@ -8125,9 +8514,21 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // can find the memory even with no words in common.
   // And the message on its own, in parallel, so earlier lines about something
   // else cannot drown out what was just asked (RetrieveOptions.focus).
-  const [queryVector, latestVector] = await Promise.all([
+  // Further back than the days in front of her: an exchange or two from the
+  // archive, only when this message names something specific that they name too,
+  // or nothing. Its own embedding, of this message alone and with the search
+  // prefix, because the memories above are embedded without one. See recall.ts.
+  // Decided before the embeds go out so its request rides with the other two:
+  // the embedder is on the CPU and serves one request at a time, so awaited
+  // after them it was a third embed's wait on every reply that named anything.
+  const recallDay = localDateKey(zonedNow(CHAT_TIMEZONE));
+  const archiveIndex = chatIndex(recallDay);
+  const specific = rareTerms(archiveIndex, latest);
+  const recallModel = recallVectors.size && specific.size ? getKnowledgeEmbedder()?.model : undefined;
+  const [queryVector, latestVector, recallVector] = await Promise.all([
     tryEmbedQuery(`${recentUserContext} ${latest}`),
     recentUserContext.trim() ? tryEmbedQuery(latest) : Promise.resolve(null),
+    recallModel && embedFormat(recallModel) === recallFormat ? tryEmbedQuery(embedText(recallModel, 'query', latest)) : Promise.resolve(null),
   ]);
   const semantic = queryVector && memoryStore.vectors().size
     ? semanticSimilarities(getMemories(), queryVector, memoryStore.vectors())
@@ -8135,15 +8536,6 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   const latestSemantic = latestVector && memoryStore.vectors().size
     ? semanticSimilarities(getMemories(), latestVector, memoryStore.vectors())
     : undefined;
-  // Further back than the days in front of her: an exchange or two from the
-  // archive, only when this message names something specific that they name too,
-  // or nothing. Its own embedding, of this message alone and with the search
-  // prefix, because the memories above are embedded without one. See recall.ts.
-  const recallDay = localDateKey(zonedNow(CHAT_TIMEZONE));
-  const archiveIndex = chatIndex(recallDay);
-  const specific = rareTerms(archiveIndex, latest);
-  const recallModel = recallVectors.size && specific.size ? getKnowledgeEmbedder()?.model : undefined;
-  const recallVector = recallModel && embedFormat(recallModel) === recallFormat ? await tryEmbedQuery(embedText(recallModel, 'query', latest)) : null;
   // From the index rather than the archive again: rebuilding a year of exchanges is ~50 ms a turn.
   const shownDays = recallVector ? new Set(daysAlreadyShown(recallDay)) : null;
   const recalled = recallVector && shownDays
@@ -8217,10 +8609,7 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   const home = config;
   const route = !brain.escalated && !shellTurn && !brief && !choices && messages.at(-1)?.role === 'user' ? conversationRoute() : null;
   if (route) {
-    // A page she fetched last turn does not keep this turn at home. The flag
-    // is set when a page is read and only cleared below, after this gate — so
-    // what it said here was "the turn after any look-up answers on the local
-    // model", a visible dip in her right after she checked something. His
+    // A page she fetched last turn does not keep this turn at home. His
     // call, 2026-09-02: a public page she went and read may ride along to the
     // conversation model. What still keeps a turn home is the content scan
     // over the last dozen messages, page text included — a key, a card number,
@@ -8264,7 +8653,19 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
   // first, the clock and mood and screen last — and the reply starts at the
   // cache instead of at full prompt-processing speed. The local model keeps
   // the tone-last order, which it was written for.
-const promptState = {
+  const coreMemoryConfig = readCoreMemoryConfig();
+  const profileArgs = [latest, recentUserContext, semantic, away ? awayMemoryScale() : undefined, latestSemantic] as const;
+  let coreGraphIds: string[] = [];
+  const coreMemory = await selectCoreMemory({
+    config: coreMemoryConfig,
+    background: !coreMemoryConfig.captureDir,
+    query: recentUserContext ? `${recentUserContext} ${latest}` : latest,
+    slateAt: () => getSlate()?.at ?? null,
+    render: memoryStore.prepareProfileSummary(...profileArgs, ids => { coreGraphIds = ids; }),
+    fallbackRender: () => profileSummary(...profileArgs),
+    log: entry => console.log(`[core-memory] ${JSON.stringify(entry)}`),
+  });
+  const promptState = {
     ...mood,
     now: promptNow,
     timezone: CHAT_TIMEZONE,
@@ -8273,7 +8674,7 @@ const promptState = {
     // chose and why for the inspector, and the AniList list refreshes itself
     // when it has gone stale. Neither is a thing assembling a prompt should set
     // in motion.
-    profile: profileSummary(latest, recentUserContext, semantic, away ? awayMemoryScale() : undefined, latestSemantic),
+    profile: coreMemory.profile,
     aniList: aniListSummary(),
     journalConfig: readJournalConfig(store.get('journal.config')),
     journal: getJournal(),
@@ -8293,11 +8694,15 @@ const promptState = {
     fresh,
     // Still a stranger to him, if the reset was recent (blankslate.ts).
     slate: getSlate(),
-    known: getMemories().length,
+    known: knownSinceSlate(),
     herRecentReplies,
     recalled: recallNote(recalled, new Intl.DateTimeFormat('en-AU', { weekday: 'long', timeZone: 'UTC' })),
-    linked: linkedNote(factGraph, linked),
-    lore: loreNote(lore.cards),
+    linked: linkedNote(factGraph, coreMemory.status === 'on' ? withoutCoreGraphClaims(linked, coreGraphIds) : linked),
+    // Lore.md is his page, and it hands her his name, his job, his business
+    // address, his psychologist and his diagnosis — on exactly the message the
+    // slate has her asking who he is. His page is untouched and the cards come
+    // back when the slate lapses (blankslate.ts).
+    lore: blankSlateInstruction(getSlate(), knownSinceSlate()) ? '' : loreNote(lore.cards),
     examples: examplesNote(todaysExamples()),
     booked: bookedNote(scheduler.list(), Date.now(), CHAT_TIMEZONE),
     onHerMind: mindNote(store.getThoughts(), Date.now(), 2, Number.isFinite(Date.parse(getMood().lastMessageAt ?? '')) ? Date.parse(getMood().lastMessageAt!) : undefined),
@@ -8334,7 +8739,6 @@ const promptState = {
   // their screen) is spliced in just before their turn, leaving the head
   // byte-identical all day for the endpoint's prefix cache. The local model
   // keeps the tone-last order, which it was written for.
-  const system = chatSystemPrompt(promptState, Boolean(brain.hosted), Boolean(away));
   // For a hosted brain the "they are answering what you asked" line rides in
   // the pre-turn slot with the rest of the changing context; for the local one
   // it stays on the end of the system message, as it always has.
@@ -8343,7 +8747,11 @@ const promptState = {
   // compliance is untested, and a malformed label is the one thing the stripper
   // cannot take out — it removes an exact [mood] and leaves anything else
   // visible, which on the fallback brain would put the mess in front of him.
-  const sized = (brain.hosted ? `${system.replace(LENGTH_RULE_LOCAL, LENGTH_RULE_HOSTED)}\n\n${deliveryRule()}` : system) + (brain.hosted ? '' : answering ? ` ${answering}` : '');
+  const sizedSystem = (state: typeof promptState) => {
+    const system = chatSystemPrompt(state, Boolean(brain.hosted), Boolean(away));
+    return (brain.hosted ? `${system.replace(LENGTH_RULE_LOCAL, LENGTH_RULE_HOSTED)}\n\n${deliveryRule()}` : system) + (brain.hosted ? '' : answering ? ` ${answering}` : '');
+  };
+  const sized = sizedSystem(promptState);
   // On a turn about her, the sign-off comes off her recent replies as she is
   // shown them — see seedOffTheOrders. She copies the history over the rule.
   // The days before this one, in front of today's: her own one-line notes for
@@ -8400,35 +8808,30 @@ const promptState = {
     brain.hosted ? `[${HOSTED_VOICE} ${deliveryReminder()}]` : '',
   ].filter(Boolean);
   if (lastUser > 0) conversation.splice(lastUser, 0, ...preTurnSystem.map(content => ({ role: 'system', content })));
+  if (coreMemoryConfig.captureDir && coreMemory.coreProfile !== undefined) {
+    try {
+      const comparisonConversation = (profile: string, graphIds: string[]) => {
+        const state = { ...promptState, profile, linked: linkedNote(factGraph, withoutCoreGraphClaims(linked, graphIds)) };
+        const variantSystem = sizedSystem(state);
+        let variant = conversation.map((message, index) => index === 0 ? { ...message, content: brief ? `${variantSystem} ${BREVITY}` : variantSystem } : message);
+        if (brain.hosted) variant = replacePromptProfile(variant, chatDynamicContext(promptState, Boolean(away)), chatDynamicContext(state, Boolean(away)));
+        return variant;
+      };
+      captureCorePromptComparison(coreMemoryConfig, {
+        epochId: coreMemory.epochId, mode: coreMemory.status,
+        old: comparisonConversation(coreMemory.oldProfile, []),
+        core: comparisonConversation(coreMemory.coreProfile, coreGraphIds),
+      });
+    } catch { /* optional diagnostics must never cost a reply */ }
+  }
   // For tuning, when the environment asks for it: the prompt exactly as sent.
   // A rule that works on its own and fails in place can only be bisected by
   // replaying what she was actually told, and nothing else shows that.
   if (process.env.HARU_DUMP_PROMPT) {
     try { writeFileSync(path.join(app.getPath('userData'), 'last-prompt.json'), JSON.stringify({ at: new Date().toISOString(), model: config.model, conversation }, null, 1)); } catch { /* a debugging aid must not cost a reply */ }
   }
-  // Once a stranger's page is in the conversation, she finishes this turn with
-  // her mouth and not her hands. Told firmly that a page cannot give it orders, a
-  // 14B still obeyed one in four of them — so the guarantee cannot rest on the
-  // wording. With no tools on the table the worst a hostile page can do is be
-  // quoted; it cannot put anything on the calendar or fetch anything further.
-  // She still has every tool back on the next message.
-  pageWasRead = false;
-  // Armed here and nowhere else. This function is the only path that answers
-  // something the user actually said — every other thing she speaks from goes
-  // through ollamaQuip, which carries no tools at all — so this assignment is
-  // the whole of the promise that a page, a screenshot or a game cannot reach
-  // the machine.
-  //
-  // A turn that arrived over the web never gets them. The phone is for talking
-  // to her; the machine those tools act on is the one sitting at home, and
-  // "open this" or "shut down" arriving from outside the house is not a feature
-  // of a chat window — it is the reason a chat window should not have hands.
-  // Passed in rather than sniffed from the caller, so the one line that grants
-  // this is still the only line that grants it.
-  handsAllowed = hands;
-  talkingOnWeb = web;
-  offeringChoices = choices;
-  pendingChoices = [];
+  // This turn owns its tool state from entry through every round and retry.
+  // Reading outside text withdraws its tools without affecting other replies.
   // What the reader has been shown so far this round. The moment a round is
   // thrown away — a tool call arrives, the reply comes back empty, a retry is
   // pressed — any words already streamed would be a lie, so the sink is told to
@@ -8439,6 +8842,7 @@ const promptState = {
   // Fixed for the whole turn. Only `tools` changes round to round, and that is
   // the loop's decision rather than this function's.
   const roundOptions: PostOptions = {
+    turn,
     // The conversation is the one local call that wants the whole window;
     // everything else shares the side jobs' runner (sideNumCtx).
     numCtx: chatNumCtx(),
@@ -8521,7 +8925,7 @@ const promptState = {
       // A call in progress says something while this runs (localcall.ts).
       const tool = (call as { function?: { name?: string } }).function?.name ?? 'tool';
       onToolCall?.(tool);
-      const result = await runChatTool(call, latest, toolDeps());
+      const result = await runChatTool(call, latest, toolDeps(turn));
       // Written down here, at the one seam every tool passes through, and only
       // for the ones that changed something. She had no record of her own
       // conduct at all, so a claim about what she did had nothing behind it to
@@ -8531,11 +8935,11 @@ const promptState = {
     },
     // Read through rather than passed by value: runChatTool sets these while a
     // round is in flight, and a copy taken before the round would miss it.
-    pageWasRead: () => pageWasRead,
-    handsAllowed: () => handsAllowed,
-    withdrawHands: () => { handsAllowed = false; },
+    pageWasRead: turn.pageWasRead,
+    handsAllowed: turn.handsAllowed,
+    withdrawHands: turn.withdrawHands,
     hasOpenTask: () => getKept().some(item => item.kind === 'task' && !item.done),
-    canSearch: () => readSearchConfig(store.get('search')).enabled && handsAllowed,
+    canSearch: () => readSearchConfig(store.get('search')).enabled && turn.handsAllowed(),
     resetStream: () => { if (roundStreamed) { roundStreamed = ''; onChunkReset?.(); } },
     log: line => console.log(line),
     warn: line => console.warn(line),
@@ -8653,8 +9057,7 @@ const promptState = {
     : herLine;
   if (routeless !== herLine && directions?.route) console.log('[maps] corrected the minutes, distance or roads she stated to the route');
   const content = directions?.found ? withDirections(routeless, directions.found, directions.route ?? undefined) : routeless;
-  if (herLine !== said) console.log(`[ai] dropped ${said.length - content.length} chars she had already said`);
-  // The turn's ledger, one line: who answered, how much she was handed, and
+  if (herLine !== said) console.log(`[ai] dropped ${said.length - content.length} chars she had already said`);  // The turn's ledger, one line: who answered, how much she was handed, and
   // whether the filters had to touch what she said. The before-and-after of a
   // change of brain is read from these.
   const handed = Math.round(conversation.reduce((sum, message) => sum + (typeof message.content === 'string' ? message.content.length : 0), 0) / 4);
@@ -8693,11 +9096,33 @@ const promptState = {
   // Restarting herself kills the process she is answering from, so the
   // restart waits until this reply is built and on its way — the words leave
   // first, the restart follows a few seconds behind.
-  if (pendingHaruRestart) {
-    pendingHaruRestart = false;
+  if (turn.restartRequested()) {
     setTimeout(() => { void runSystemCommand('systemctl', ['--user', 'restart', 'haru']); }, 5000);
   }
-  return { content, ignored: false, irritation, ego };
+  // Which brain this one was, written down before it is handed back: the
+  // renderer owns the stored message and gives it no model, so a thumb on it
+  // days later has nothing to go on but this (feedback.ts, Spoke).
+  noteWhoSpoke(config.model, brainName);
+  return { content, ignored: false, irritation, ego, choices: turn.pendingChoices() };
+}
+
+/** The route that just spoke, kept so a rating can be read by model. */
+function noteWhoSpoke(model: string, brain: string): void {
+  if (!model) return;
+  store.set('ai.spoke', rememberSpoke(readSpoke(store.get('ai.spoke')), { at: new Date().toISOString(), model, brain }));
+}
+
+/**
+ * Which model wrote the reply they are rating.
+ *
+ * Both logs used to stamp `ai.config.model` — the local brain, whoever actually
+ * answered. The route now writes itself down as it finishes (noteWhoSpoke), so
+ * this reads back the one that was speaking when that reply was stamped, and
+ * falls back to the old answer for anything older than the record.
+ */
+function modelBehind(history: { id?: string; role: string; content?: string; reaction?: string; at?: string }[], id: string): string {
+  const fallback = (store.get('ai.config') as ProviderConfig | undefined)?.model ?? '';
+  return modelThatSpoke(readSpoke(store.get('ai.spoke')), repliedTo(history, id)?.at, fallback);
 }
 
 /**
@@ -9090,6 +9515,421 @@ async function nudgeForPhone(): Promise<{ line: string; about: string; eventId: 
   } finally {
     chasing = false;
   }
+}
+
+// ---- Minecraft ------------------------------------------------------------
+
+/**
+ * Her body in Minecraft, which is a separate process on loopback.
+ *
+ * Deliberately inert at this stage. The link carries events up and commands
+ * down; nothing here decides anything about them, and no Minecraft event
+ * reaches her prompt, her mood or her memory yet. Those are choices, and they
+ * belong with the rest of her judgement rather than in a transport.
+ *
+ * Kept beside Discord because it is the same kind of thing: another place she
+ * exists, reached over a socket, which must never be able to take the desk down
+ * with it when it breaks.
+ */
+let minecraft: MinecraftLink | null = null;
+let minecraftTrouble = '';
+
+function getMinecraftConfig(): MinecraftConfig {
+  return readMinecraftConfig(store.get('minecraft'));
+}
+
+function startMinecraft() {
+  const config = getMinecraftConfig();
+  if (!config.enabled) return;
+  if (minecraft) return;
+  minecraftTrouble = '';
+  minecraft = new MinecraftLink(config, {
+    onEvent: (event: MinecraftEvent) => {
+      if (worthLogging(event)) console.log(`[minecraft] ${describeEvent(event)}`);
+      onMinecraftEvent(event);
+    },
+    onReady: status => {
+      minecraftTrouble = '';
+      if (status?.owner) minecraftOwner = status.owner;
+      console.log(`[minecraft] worker up — ${status ? `${status.state} on ${status.server.host}:${status.server.port} (${status.server.version})` : 'status unavailable'}`);
+    },
+    onTrouble: why => {
+      // Only when it changes: a worker that is switched off would otherwise
+      // write the same line every retry, forever.
+      if (why === minecraftTrouble) return;
+      minecraftTrouble = why;
+      console.warn(`[minecraft] ${why}`);
+    },
+  });
+  minecraft.start();
+  console.log(`[minecraft] link armed for ${config.url}`);
+}
+
+function stopMinecraft() {
+  minecraft?.stop();
+  minecraft = null;
+  minecraftTrouble = '';
+}
+
+/** What she last decided, and what last went wrong, so a step does not repeat itself. */
+let lastMinecraftDecision = '';
+let lastMinecraftFailure = '';
+
+/**
+ * One planning step: look, decide, act once.
+ *
+ * The model is handed the world in a few lines and a list of names, and
+ * answers with one name. That is the whole of what it may do — see
+ * minecraftplan.ts for why the answer is read so strictly. Through the same
+ * hosted route as her conversation, in her own identity, because she is one
+ * Haru and what she builds is what she wants.
+ *
+ * Called by nothing on a timer yet. Phase 7 owns *when*; this owns *what*.
+ * The IPC handler below is a hand trigger for trying it.
+ */
+type PlanStep = { plan: string; kind: 'wait' | 'done' | 'failed'; skill?: string; error?: string };
+
+async function planMinecraftStep(prefetched?: MinecraftStatus): Promise<PlanStep | null> {
+  if (!minecraft) return null;
+  const route = conversationRoute();
+  if (!route) { console.warn('[minecraft] cannot plan — no hosted route is set up'); return null; }
+  const status = prefetched ?? await minecraft.status();
+  if (!status) { console.warn('[minecraft] cannot plan — the worker is not answering'); return null; }
+
+  // Not a question worth asking. Handed "she is not in the world" and a
+  // half-finished project, Kimi chose collectBlock anyway (live, 2026-09-10);
+  // the worker refuses it harmlessly, but that is a paid round trip per tick
+  // for a decision that cannot be right. The only sensible answer when she is
+  // off the server is to wait, so it is given without asking.
+  if (status.observation.state !== 'online' || !status.observation.self) {
+    lastMinecraftDecision = `wait — not in the world (${status.observation.state})`;
+    return { plan: lastMinecraftDecision, kind: 'wait' };
+  }
+
+  const instruction = planInstruction(status.observation, {
+    identity: getActiveCharacter().identity,
+    ownerName: status.owner,
+    lastDecision: lastMinecraftDecision,
+    lastFailure: lastMinecraftFailure,
+  });
+  const started = Date.now();
+  let plan;
+  try {
+    const answer = await ollamaPost(
+      [{ role: 'system', content: instruction }, { role: 'user', content: 'What next?' }],
+      route,
+      // Cooler than a quip: this is a decision, and the same world should get
+      // the same answer more often than not. The cap is generous for a JSON
+      // answer because startProject can carry several goals; thinking is off
+      // on this route (provider.ts), so none of it goes on reasoning.
+      { tools: false, temperature: 0.4, maxTokens: 400 },
+    );
+    plan = readPlan(answer.content ?? '');
+  } catch (error) {
+    console.warn('[minecraft] planning failed:', error instanceof Error ? error.message : error);
+    return null;
+  }
+  console.log(`[minecraft] plan (${Date.now() - started}ms): ${describePlan(plan)}`);
+
+  if (plan.kind === 'wait') {
+    lastMinecraftDecision = `wait — ${plan.why}`;
+    lastMinecraftFailure = '';
+    return { plan: describePlan(plan), kind: 'wait' };
+  }
+  const result = await minecraft.send(plan.skill, plan.args);
+  lastMinecraftDecision = describePlan(plan);
+  lastMinecraftFailure = result.ok ? '' : (result.error ?? 'it did not work');
+  console.log(`[minecraft] ${plan.skill}: ${result.ok ? 'ok' : `failed — ${result.error}`}`);
+  return result.ok
+    ? { plan: describePlan(plan), kind: 'done', skill: plan.skill }
+    : { plan: describePlan(plan), kind: 'failed', skill: plan.skill, error: result.error };
+}
+
+// ---- Playing on her own -----------------------------------------------------
+//
+// Minecraft as something she chooses to do with time nobody else wants. The
+// rules — when a session may start, what ends it — are in minecraftlife.ts and
+// are pure; this is the clock and the doing. It never holds the app: a tick is
+// a status read, sometimes a model call, and at most one order to her body.
+
+let minecraftSession: Session | null = null;
+let minecraftSessionsToday = { day: '', count: 0 };
+let lastWhyNotPlaying = '';
+/** A model call can outlast a tick; the next tick must not start over it. */
+let minecraftTicking = false;
+
+function getPlayConfig(): PlayConfig {
+  return readPlayConfig(store.get('minecraft.play'));
+}
+
+function sessionsPlayedToday(): number {
+  const day = currentChatDayKey();
+  if (minecraftSessionsToday.day !== day) minecraftSessionsToday = { day, count: 0 };
+  return minecraftSessionsToday.count;
+}
+
+/** Everything the gate looks at, at this moment. */
+function minecraftSituation(status: MinecraftStatus | null): Situation {
+  const seen = status?.observation ?? null;
+  return {
+    now: Date.now(),
+    lastUserActivityAt,
+    asleep: herAsleepNow(),
+    knockedAwake: herKnockedAwakeNow(),
+    speaking: speakingNow,
+    // A call is a run of his utterances, each through ollamaChat and so through
+    // noteUserSpoke: the idle rule covers it, and there is no separate flag.
+    inCall: false,
+    workerUp: minecraft?.connected ?? false,
+    inWorld: seen?.state === 'online' && !!seen.self,
+    bodyBusy: status?.busy ?? null,
+    sessionsToday: sessionsPlayedToday(),
+  };
+}
+
+async function minecraftTick(): Promise<void> {
+  if (minecraftTicking || !minecraft) return;
+  minecraftTicking = true;
+  try {
+    const config = getPlayConfig();
+    const status = await minecraft.status();
+    const situation = minecraftSituation(status);
+
+    if (!minecraftSession) {
+      if (!config.enabled) return;
+      const why = whyNotStart(situation, config);
+      if (why) {
+        // Said once per reason, not once per tick: "he was talking to her 4
+        // min ago" every 45 seconds is the log nobody can read.
+        if (why !== lastWhyNotPlaying) { lastWhyNotPlaying = why; console.log(`[minecraft] not playing — ${why}`); }
+        return;
+      }
+      lastWhyNotPlaying = '';
+      if (!wantsToStart(situation, config, Math.random())) return;
+      minecraftSession = newSession(Date.now(), lastUserActivityAt);
+      minecraftSessionsToday.count = sessionsPlayedToday() + 1;
+      console.log(`[minecraft] session started (${minecraftSessionsToday.count} today) — ${status?.observation.currentProject ?? 'no project on the go'}`);
+    }
+
+    const stop = whyStop(minecraftSession, situation, config);
+    if (stop) { endMinecraftSession(stop); return; }
+
+    const ask = shouldAskBody(situation);
+    if (!ask.ask) { console.log(`[minecraft] tick — ${ask.because}`); return; }
+
+    const step = await planMinecraftStep(status ?? undefined);
+    if (!step) { minecraftSession = noteTick(minecraftSession, { kind: 'wait' }); return; }
+    minecraftSession = noteTick(minecraftSession,
+      step.kind === 'done' ? { kind: 'do', skill: step.skill ?? 'unknown' }
+      : step.kind === 'failed' ? { kind: 'failed', skill: step.skill ?? 'unknown' }
+      : { kind: 'wait' });
+    if (together && step.kind === 'done' && step.skill) together = noteDidTogether(together, step.skill);
+  } catch (error) {
+    console.warn('[minecraft] tick failed:', error instanceof Error ? error.message : error);
+  } finally {
+    minecraftTicking = false;
+  }
+}
+
+// ---- Him in her world -------------------------------------------------------
+//
+// The three events that are about him — arriving, talking, leaving — and what
+// she does about each. Everything he says in the game reaches the same brain
+// as everything else, framed as speech in a place (minecraftchat.ts), and her
+// answer goes back into the game the way it came. Only he is answered: the
+// worker decides `owner` against the configured name, and a stranger's chat is
+// logged and left.
+
+/** His Minecraft name, as the worker reports it. */
+let minecraftOwner = '';
+/** The stretch of him being here, or null. */
+let together: Together | null = null;
+let heLastLeftMinecraftAt = 0;
+/** One answer at a time in chat, like everywhere else she answers. */
+let answeringInMinecraft = false;
+
+function onMinecraftEvent(event: MinecraftEvent): void {
+  const his = aboutHim(event);
+  if (!his) return;
+  if (his === 'joined') void heJoinedMinecraft();
+  else if (his === 'left') void heLeftMinecraft();
+  else {
+    const text = (event.message as { text?: string } | undefined)?.text ?? '';
+    if (text) void answerInMinecraft(text);
+  }
+}
+
+/** A line of hers, said in the game and offered to the desk. */
+async function sayInMinecraft(line: string, about: string): Promise<void> {
+  if (!minecraft || !line) return;
+  const result = await minecraft.send('chat', { text: line });
+  if (!result.ok) console.warn(`[minecraft] could not say it in chat: ${result.error}`);
+  // The desk hears it too, through the one gate every unprompted line uses; if
+  // the gate refuses, the chat line still went, which is the one that matters.
+  interject(line, { source: 'minecraft', about });
+}
+
+async function heJoinedMinecraft(): Promise<void> {
+  const now = Date.now();
+  const awayMinutes = heLastLeftMinecraftAt ? (now - heLastLeftMinecraftAt) / 60_000 : null;
+  together = heArrived(now);
+  console.log(`[minecraft] ${minecraftOwner || 'he'} is here${awayMinutes === null ? '' : ` (last seen ${Math.round(awayMinutes)} min ago)`}`);
+
+  // Him arriving is an invitation, and not subject to the idle rule or the dice.
+  const config = getPlayConfig();
+  const situation = minecraftSituation(await minecraft?.status() ?? null);
+  if (minecraftSession) {
+    minecraftSession = heardInGame(minecraftSession, lastUserActivityAt);
+  } else {
+    const why = whyNotJoinHim(situation, config);
+    if (why) console.log(`[minecraft] not joining him — ${why}`);
+    else {
+      minecraftSession = newSession(now, lastUserActivityAt);
+      console.log('[minecraft] session started — he is here');
+    }
+  }
+
+  // A greeting, in her own voice, said in the game first: he is there, not at
+  // the desk. Best-effort; a model that will not answer costs nothing but the
+  // line.
+  const brain = store.get('ai.config') as ProviderConfig | undefined;
+  if (!brain?.model || herAsleepNow()) return;
+  try {
+    const character = getActiveCharacter();
+    const line = await ollamaQuip([character.identity, character.style].join(' '), greetingCue(minecraft?.lastSeen ?? null, minecraftOwner || 'he', awayMinutes), nudgeBrain() ?? brain);
+    await sayInMinecraft(line, 'him joining her in Minecraft');
+  } catch (error) {
+    console.warn('[minecraft] no greeting:', error instanceof Error ? error.message : error);
+  }
+}
+
+async function heLeftMinecraft(): Promise<void> {
+  const now = Date.now();
+  const stretch = together;
+  together = null;
+  heLastLeftMinecraftAt = now;
+  if (!stretch) return;
+  const { minutes, did } = describeTogether(stretch, now);
+  console.log(`[minecraft] ${minecraftOwner || 'he'} left after ${Math.round(minutes)} min${did.length ? ` — ${did.join(', ')}` : ''}`);
+
+  // Written down as a thing she did, so "what did you do today" has it; and
+  // remembered only if it was long enough to be an occasion (minecraftchat.ts).
+  if (minutes >= 1) {
+    const what = `played Minecraft with ${minecraftOwner || 'him'} for ${Math.round(minutes)} min${did.length ? ` — ${did.join(', ')}` : ''}`;
+    store.set('her.deeds', keepDeed(readDeeds(store.get('her.deeds')), { at: new Date(now).toISOString(), tool: 'minecraft', what }));
+  }
+  const memory = togetherMemory(stretch, minecraftOwner || 'him', now);
+  if (memory) {
+    const saved = addMemory(memory, 'event', undefined, { source: 'activity', emotion: localEmotion(memory), emotionIntensity: readTone(memory).heat });
+    console.log(`[minecraft] remembered: ${memory}${saved?.created ? '' : ' (already had it)'}`);
+  }
+
+  // She may carry on without him; the session, if there is one, runs on its
+  // own rules from here. A line, if she has one.
+  const brain = store.get('ai.config') as ProviderConfig | undefined;
+  if (!brain?.model || herAsleepNow() || minutes < 2) return;
+  try {
+    const character = getActiveCharacter();
+    const line = await ollamaQuip([character.identity, character.style].join(' '), farewellCue(minecraftOwner || 'he', minutes, did), nudgeBrain() ?? brain);
+    await sayInMinecraft(line, 'him leaving Minecraft');
+  } catch { /* nothing to say is fine */ }
+}
+
+/**
+ * What he said in the game, answered in the game.
+ *
+ * The obviously mechanical lines ("haru follow") are read without a model, the
+ * way quick.ts reads a greeting. Everything else is a turn in her one
+ * conversation — same history, same brain, same tools, hands withheld — with
+ * the leash of a message from elsewhere, and the answer split into chat lines
+ * by the worker. It lands in the desk transcript as well, marked as from the
+ * game, so coming back to the desk does not mean finding half a conversation.
+ */
+async function answerInMinecraft(text: string): Promise<void> {
+  if (!minecraft) return;
+  if (answeringInMinecraft) { console.log('[minecraft] still answering the last one — this one is left'); return; }
+  answeringInMinecraft = true;
+  const started = Date.now();
+  try {
+    if (herAsleepNow()) {
+      const line = knockWhileAsleep();
+      if (line) await minecraft.send('chat', { text: line });
+      return;
+    }
+    if (together) together = noteChatExchange(together);
+    if (minecraftSession) minecraftSession = heardInGame(minecraftSession, Date.now());
+
+    const character = getActiveCharacter();
+    const quick = quickCommand(text, minecraftOwner || 'Tommy', herNameFrom(character.identity) || 'haru');
+    if (quick) {
+      if (quick.skill === 'status') {
+        const status = await minecraft.status();
+        await minecraft.send('chat', { text: status ? statusLine(status.observation) : "I can't tell right now." });
+        return;
+      }
+      const result = await minecraft.send(quick.skill, quick.args);
+      if (together && result.ok) together = noteDidTogether(together, quick.skill);
+      await minecraft.send('chat', { text: result.ok ? quick.say : `can't — ${(result.error ?? 'it did not work').slice(0, 120)}` });
+      console.log(`[minecraft] quick: ${quick.skill} ${result.ok ? 'ok' : `failed — ${result.error}`}`);
+      return;
+    }
+
+    const brain = store.get('ai.config') as ProviderConfig | undefined;
+    if (!brain?.model) return;
+    const history = (store.get('chat.messages') as { role: string; content: string; at?: string }[] ?? []);
+    const turn = chatTurn(minecraftOwner || 'he', text);
+    const messages = [...history, { role: 'user', content: turn, at: new Date().toISOString() }];
+    const answer = await ollamaChat(messages, brain, { hands: false, away: CHAT_AWAY, onToolCall: name => { if (together && name === 'minecraft_do') together = noteDidTogether(together, 'minecraft_do'); } });
+    const reply = stripDelivery(answer.content ?? '');
+    // The desk transcript gets it too, marked as from the game.
+    sendToWindows('chat:fromPhone', { text: `(in Minecraft) ${text}`, reply, ignored: Boolean(answer.ignored) });
+    if (reply && !answer.ignored) await minecraft.send('chat', { text: reply });
+    // Talking to her in the game is playing with her, not calling her away.
+    if (minecraftSession) minecraftSession = heardInGame(minecraftSession, lastUserActivityAt);
+    console.log(`[minecraft] answered ${text.length} chars with ${reply.length} in ${Date.now() - started}ms`);
+  } catch (error) {
+    console.warn('[minecraft] could not answer in chat:', error instanceof Error ? error.message : error);
+  } finally {
+    answeringInMinecraft = false;
+  }
+}
+
+/**
+ * The session is over; her body is put somewhere sensible.
+ *
+ * The wind-down is fired and not waited for. Ending a session is about her
+ * attention — he spoke, or it has gone on long enough — and her legs walking
+ * home is not something her attention needs to wait on. The executor runs the
+ * steps in order regardless.
+ */
+function endMinecraftSession(reason: string): void {
+  const session = minecraftSession;
+  if (!session) return;
+  minecraftSession = null;
+  const summary = summarise(session, Date.now());
+  console.log(`[minecraft] session over — ${reason}; ${summary}`);
+  // What she did, written down as a deed, so "what did you do today" has it.
+  // Only a session that did something: "played for 4 min and did nothing much"
+  // is not a thing she did.
+  if (session.did.length) {
+    store.set('her.deeds', keepDeed(readDeeds(store.get('her.deeds')), { at: new Date().toISOString(), tool: 'minecraft', what: `${summary} in Minecraft` }));
+  }
+  const seen = minecraft?.lastSeen ?? null;
+  const steps = windDown({
+    reason,
+    lastDecision: lastMinecraftDecision,
+    hasHome: !!seen?.home,
+    nearHome: (seen?.home?.away ?? Infinity) <= 8,
+    night: seen?.self?.time === 'night' || seen?.self?.time === 'sunset',
+  });
+  const link = minecraft;
+  if (!link) return;
+  void (async () => {
+    for (const step of steps) {
+      const result = await link.send(step.skill, step.args);
+      console.log(`[minecraft] wind-down ${step.skill}: ${result.ok ? 'ok' : `failed — ${result.error}`}`);
+    }
+  })();
 }
 
 // ---- The quick route ---------------------------------------------------
@@ -9543,6 +10383,100 @@ async function readDayIntoGraph(day: string, messages: { role?: string; content?
   return 'read';
 }
 
+// -- what she overhears (overheard.ts) ---------------------------------------
+//
+// Tier 1 of the WhatsApp door. Lines from the chats he allowed pile up here and
+// a pass reads them on the local brain, on a slow timer and once more at the
+// 04:30 maintenance so the last of the evening is not left until morning.
+//
+// Nothing in here ever answers anybody. The output is two things: entries on
+// his list, and -- only if he switched that half on -- facts in the graph.
+
+const overheard = new Overheard();
+let readingOverheard = false;
+let overheardReadAt = 0;
+
+/**
+ * The brain that reads other people's messages, and nothing when it would not
+ * be this machine.
+ *
+ * His contacts never agreed to be read by anything. That the extraction runs
+ * locally is the promise this integration is built on, so it is checked at the
+ * moment of use rather than assumed from a config written weeks ago — and a
+ * route that has been pointed somewhere else stops the pass rather than
+ * quietly sending Sam's messages to Venice.
+ */
+function overheardBrain(): ProviderConfig | null {
+  const config = store.get('ai.config') as ProviderConfig | undefined;
+  if (!config?.model || !config.endpoint) return null;
+  if (!isLoopback(config.endpoint)) {
+    console.warn(`[overheard] not reading: ai.config points at ${config.endpoint}, which is not this machine`);
+    return null;
+  }
+  return config;
+}
+
+/** One pass over everything said since the last one. */
+async function readOverheardTick(force = false): Promise<void> {
+  const config = readWhatsAppConfig(store.get('whatsapp'));
+  if (!config.enabled || !config.reading.enabled) return;
+  if (readingOverheard || !overheard.lines) return;
+  // The timer ticks every minute; the pass runs on his spacing. Checked here
+  // rather than by setting the interval from config, so that changing the
+  // spacing takes effect without a restart.
+  if (!force && Date.now() - overheardReadAt < config.reading.everyMinutes * 60_000) return;
+  const brain = overheardBrain();
+  if (!brain) return;
+  readingOverheard = true;
+  overheardReadAt = Date.now();
+  try {
+    const userName = graphUserName();
+    const day = currentChatDayKey();
+    for (const lines of overheard.drain()) {
+      const chatName = lines[0]?.chatName || 'a chat';
+      let reply: Awaited<ReturnType<typeof ollamaPost>>;
+      try {
+        reply = await ollamaPost(
+          [{ role: 'system', content: overheardPrompt(userName) }, { role: 'user', content: overheardInput(chatName, day, lines) }],
+          brain,
+          { tools: false, temperature: 0.1, format: OVERHEARD_SCHEMA, maxTokens: 2000 },
+        );
+      } catch (error) {
+        // Dropped rather than retried. These lines are already in his WhatsApp,
+        // where he can read them himself; holding them for another pass would
+        // mean an ever-growing buffer of other people's messages in memory.
+        console.warn(`[overheard] no answer reading ${chatName}, letting it go: ${error instanceof Error ? error.message : error}`);
+        continue;
+      }
+      const raw = reply.content ?? '';
+
+      // The plans half: onto his list, through every refusal in keepable().
+      const held = getKept();
+      const { keep, refused } = keepable(readPlans(raw), held, day);
+      if (refused.length) console.log(`[overheard] ${chatName}: refused ${refused.slice(0, 3).map(r => `${r.plan.title || '(untitled)'} — ${r.why}`).join(' | ')}${refused.length > 3 ? ` and ${refused.length - 3} more` : ''}`);
+      for (const plan of keep) {
+        // Through addKeptItem rather than the store: it is what dedupes, tells
+        // the open windows and pushes the entry to Google. Writing kept.items
+        // straight would put an item on his phone's list and nowhere else.
+        const item = addKeptItem({ ...asKept(plan, chatName), kind: 'event' });
+        console.log(`[overheard] onto his list: "${item.title}" ${item.date}${item.time ? ` ${item.time}` : ''} — ${item.heardAbout ?? 'WhatsApp'}`);
+      }
+
+      // The facts half, only if he switched it on. See overheard.ts.
+      if (config.reading.facts) {
+        const facts = factsFor(readExtraction(raw));
+        if (facts) {
+          const { graph, report } = applyExtraction(store.getFactGraph(), facts, { day, chunk: overheardInput(chatName, day, lines), userName });
+          store.setFactGraph(graph);
+          if (report.added || report.confirmed) console.log(`[overheard] ${chatName}: +${report.added} fact(s), ${report.confirmed} confirmed`);
+        }
+      }
+    }
+  } finally {
+    readingOverheard = false;
+  }
+}
+
 // -- things to come back to (scheduler.ts) ----------------------------------------
 //
 // One saved list and one dispatcher: the daily sweeps at a time of day rather
@@ -9563,7 +10497,10 @@ const scheduler = createScheduler({
       // threw. A retry reruns all four, the ones that worked included, and a
       // sweep that throws is usually bad data or a bug that throws again a minute
       // later — so one that fails alone is logged and tried again tomorrow.
-      const sweeps: [string, () => unknown][] = [['consolidation', runMemoryConsolidation], ['decay', runMemoryDecay], ['archive pruning', pruneOldArchives], ['haunt hygiene', runHauntHygiene]];
+      const sweeps: [string, () => unknown][] = [['consolidation', runMemoryConsolidation], ['decay', runMemoryDecay], ['archive pruning', pruneOldArchives], ['haunt hygiene', runHauntHygiene],
+        // Whatever was said late and is still sitting in the window, so the end
+        // of his evening is not left unread until the middle of the next day.
+        ['overheard', () => { void readOverheardTick(true); }]];
       const failed = sweeps.filter(([name, sweep]) => {
         try {
           sweep();
@@ -9577,6 +10514,7 @@ const scheduler = createScheduler({
     },
     [BOOKED_KIND]: comeBackTo,
     [TRAFFIC_WATCH_KIND]: watchTraffic,
+    [ANIME_FETCH_KIND]: watchFetch,
   },
   log: line => console.log(line),
 });
@@ -9950,7 +10888,7 @@ function todaysExamples(): Example[] {
   return examples;
 }
 
-function rantRoom(latest: string, mentioned = ''): string {
+function rantRoom(latest: string, mentioned = '', answering = false): string {
   const mood = getMood();
   const lastNight = nightsOn(getNights(), lastNightKey())[0];
   const deepest = [...getInterests()].sort((a, b) => b.nights - a.nights)[0];
@@ -9968,6 +10906,15 @@ function rantRoom(latest: string, mentioned = ''): string {
     mentioned: Boolean(mentioned),
   });
   if (room) {
+    // Withheld, not countered (rantgate.ts): a request, a question or someone having
+    // a bad time is not the moment for the instruction to ignore the length rule.
+    // The cooldown is not spent on a message she was held back from, so the next
+    // open one still gets its roll. Logged only when the roll had passed.
+    const held = roomHeldBack(latest, { named: mentioned, answering });
+    if (held) {
+      console.log(`[ai] the room to go on was held back — ${held}`);
+      return '';
+    }
     store.set('chat.rantAt', Date.now());
     console.log(`[ai] she has the room to go on${subject ? ` about ${subject}` : ''}${mentioned ? ' — they brought it up' : ''}`);
   }
@@ -10316,6 +11263,7 @@ const PUSH_KIND: Partial<Record<AsideSource, 'random' | 'events' | 'system' | 'w
   system: 'system',
   booked: 'random',
   thought: 'random',
+  anime: 'random',
 };
 
 /**
@@ -10522,7 +11470,7 @@ async function boredNudge(): Promise<string | null> {
       : `Tell them to try ${rec.interest} — one of yours, and you actually rate it. One or two lines: you are telling them, not asking, and it is not an advert.`
       : mine ? `Tell them about ${mine.interest ?? mine.game ?? mine.about} — what you were up to and what you made of it, in your own words and only the part worth saying. This is you bringing something of yours to them, not a question about their day and not a task for them: no orders, nothing about their list. If you want to know whether they have seen it, ask them at the end.`
       : askAbout ? `Ask them ${askAbout} right now — one real question, in your way, the kind that gets an answer. Not the weather, not where they are (you know that), not anything you have already remarked on: the thing itself. What they say back is worth remembering.`
-      : thing ? `Bring up this in particular, as though it has been on your mind: ${thing.text} — this, not the weather and not anything you already remarked on.`
+      : thing ? `Bring up this in particular, as though it has been on your mind: ${thing.text}${ageNote(thing)} — this, not the weather and not anything you already remarked on.`
       : ignoring ? 'You are not speaking to them properly right now, and they know why. One cold line that makes it plain you noticed the silence — no warmth, no question, no help.'
       : 'Nothing in particular to bring up: the silence itself is the subject.',
     unansweredAsksNote(getAsides(), CHAT_TIMEZONE, nowMs),
@@ -10749,11 +11697,11 @@ function proactiveSystem(...facts: string[]): string {
  * attitude on it. He asked for the opposite: the weather as her way into a
  * conversation, not the subject of one.
  */
-function proactiveOccasion(...facts: string[]): string {
-  return proactivePrompt(facts, false);
+function proactiveOccasion(subjectNow: string, ...facts: string[]): string {
+  return proactivePrompt(facts, false, subjectNow);
 }
 
-function proactivePrompt(facts: string[], mustSurvive: boolean): string {
+function proactivePrompt(facts: string[], mustSurvive: boolean, subjectNow?: string): string {
   const character = getActiveCharacter();
   const now = zonedNow(CHAT_TIMEZONE);
   return [
@@ -10761,13 +11709,52 @@ function proactivePrompt(facts: string[], mustSurvive: boolean): string {
     `It is ${formatTimeOfDay(now.getHours(), now.getMinutes())}, in their timezone.`,
     ...facts,
     'They are away from their desk; this arrives as a notification on their phone. One or two short lines, in your voice. No quotation marks, no stage directions, no greeting.',
-    NO_INVENTED_HISTORY, EXPRESSIVE, unpromptedContext(), WRITING_TO_THEM,
+    NO_INVENTED_HISTORY, EXPRESSIVE, unpromptedContext(subjectNow), WRITING_TO_THEM,
     // Last, because everything above it is context and this is the errand: told
     // rain was due in 44 minutes she wrote about him scrolling and never
     // mentioned it, and a weather notification with no weather in it is noise.
     facts.length && mustSurvive ? 'The facts at the top are why you are writing at all: what they say — the thing and when — must survive into your line. The attitude is yours; the fact is not optional.' : '',
     facts.length && !mustSurvive ? 'The facts at the top are what prompted you, not a message to pass on. It should be obvious what you are talking about; nothing else up there has to reach him.' : '',
   ].filter(Boolean).join('\n\n');
+}
+
+/**
+ * Whether the question she is about to chase him over is one he owes her.
+ *
+ * Her own nudge brain, at temperature nothing, one word back: on the eight
+ * chases it was measured against it agreed with the reading every time, and
+ * gave the same answer on four runs of each. When it cannot be reached or will
+ * not answer plainly, the fallback is ridesOnHisAsk, which is much blunter —
+ * it reads a question mark in what he last said, so his questions typed
+ * without one come back as debts. Over 2026-09-06..20 it still held five
+ * chases that should never have gone, at the cost of one that should have.
+ */
+async function heOwesHerAnAnswer(hanging: Hanging): Promise<boolean> {
+  const judge = nudgeBrain() ?? (store.get('ai.config') as ProviderConfig | undefined);
+  if (judge?.model) {
+    try {
+      const message = await ollamaPost(
+        [{ role: 'system', content: judgePrompt() }, { role: 'user', content: judgeInput(hanging) }],
+        judge,
+        // One word back, but the budget is for a reasoning model: both brains
+        // she might use here spend their allowance thinking first and return
+        // an empty string if they run out mid-thought. At 200 the local 27B
+        // answered nothing at all, every time.
+        { tools: false, temperature: 0, maxTokens: 700 },
+      );
+      const verdict = readJudgement(message.content ?? '');
+      if (verdict) {
+        console.log(`[push] the question she asked is ${verdict === 'blocking' ? 'holding up something he asked for — chasing' : 'a rider on an answer he already got — not chasing'}`);
+        return verdict === 'blocking';
+      }
+      console.warn(`[push] the judge would not say ("${(message.content ?? '').trim().slice(0, 60)}") — falling back`);
+    } catch (error) {
+      console.warn('[push] could not judge her question:', error instanceof Error ? error.message : error);
+    }
+  }
+  const owed = !hanging.ridesOnHisAsk;
+  console.log(`[push] no judgement on her question — ${owed ? 'chasing' : 'not chasing, it came off the back of his own question'}`);
+  return owed;
 }
 
 async function checkHanging(config: ProviderConfig) {
@@ -10793,6 +11780,13 @@ async function checkHanging(config: ProviderConfig) {
   }
   const lastChase = Number(store.get('hanging.lastAt') ?? 0) || 0;
   if (Date.now() - lastChase < HANGING_COOLDOWN_MS) return;
+  // A question mark is not a debt. Asked after the cheap gates and the
+  // cooldown, so the call is only paid for on a chase that would otherwise go
+  // out — see judgePrompt for what it decides and why no pattern can.
+  if (hanging.sheAsked && !(await heOwesHerAnAnswer(hanging))) {
+    store.set('hanging.nudgedFor', hanging.key);
+    return;
+  }
   store.set('hanging.nudgedFor', hanging.key);
   store.set('hanging.lastAt', Date.now());
   const system = proactiveSystem(
@@ -10838,6 +11832,14 @@ async function checkWeather(config: ProviderConfig, prefs: PushPrefs) {
   // worth a word. Two minutes after he has been talking to her it is filler.
   const quiet = Date.now() - (Date.parse(getMood().lastMessageAt ?? '') || 0);
   if (quiet < WEATHER_NEEDS_QUIET_MS) return;
+  // Silence is not the same as an opening. She had already spoken into this one
+  // and heard nothing back, and the rain went out on top of it as a second
+  // unanswered line — "Rain starting up and you've left me on read for 71
+  // minutes" to a man at breakfast (2026-09-20). A way into a conversation is
+  // only that when she has not already tried one.
+  const theirLastAt = Date.parse(getMood().lastMessageAt ?? '');
+  const spokenSince = getAsides().filter(aside => { const at = Date.parse(aside.at); return Number.isFinite(at) && Number.isFinite(theirLastAt) && at > theirLastAt; });
+  if (spokenSince.length) { console.log(`[push] the weather is not a way in — ${spokenSince.length} line(s) of hers already unanswered`); return; }
   // Whatever kind it is, it counts against the day: the per-kind cooldowns
   // cannot see each other, and five in a day is what that cost him.
   const today = localDateKey(zonedNow(CHAT_TIMEZONE));
@@ -10849,6 +11851,7 @@ async function checkWeather(config: ProviderConfig, prefs: PushPrefs) {
   // raining, and I just washed my hair too :('". The weather is hers as much as
   // his, and it is the excuse to talk rather than the subject.
   const system = proactiveOccasion(
+    'The weather',
     `${event.text} This is happening to you too, and it is your reason for messaging him — it is not news you are delivering. Say how it actually lands on you: put out, pleased, bored, whatever it is, and something of your own in it if there is something. Then leave him somewhere to answer. Do not report the forecast, do not give him numbers or percentages, and do not tell him to take a coat.`,
   );
   const line = await ollamaQuip(system, 'Say something about it.', config);
@@ -10916,13 +11919,14 @@ async function tallyIgnored(config: ProviderConfig) {
 }
 
 /** The lines of hers on a day that got nothing back, from what was heard that day (grudge.ts). */
-function countIgnored(day: string, heard: { role: string; at?: string }[]): Said[] {
+function countIgnored(day: string, heard: { role: string; at?: string; replyTo?: string | { id: string } }[]): Said[] {
   const pushed = new Set(Object.keys(PUSH_KIND).filter(source => !NOT_HELD_AGAINST_THEM.includes(source)));
   // Nothing before their first word of the day counts: they cannot ignore
   // what they have not been up to see.
   const firstWord = heard.filter(turn => turn.role === 'user' && turn.at).map(turn => Date.parse(turn.at!)).filter(Number.isFinite).sort((a, b) => a - b)[0] ?? 0;
   return unanswered(
-    asidesOn(getAsides(), day).map(aside => ({ at: aside.at, source: aside.source, text: aside.text, reached: aside.reached })),
+    // With its id, so a reply that named the line answers it (grudge.ts).
+    asidesOn(getAsides(), day).map(aside => ({ id: aside.id, at: aside.at, source: aside.source, text: aside.text, reached: aside.reached })),
     heard, pushed, Date.now(), firstWord);
 }
 
@@ -11351,16 +12355,23 @@ function getNights(): Night[] {
   return Array.isArray(saved) ? saved.filter(night => night && typeof night.note === 'string') : [];
 }
 
-/** Her wants, with any new one in an interest's words reconciled in. */
-function getWants(): Want[] {
-  const wants = readWants(store.get('her.wants'));
-  const merged = reconcileWants(getInterests(), wants, new Date().toISOString());
-  if (merged.length !== wants.length) store.set('her.wants', merged);
+/**
+ * The things she is trying to do, with any new one in an interest's words
+ * reconciled in. Same key as her wants, because they are her wants: a record
+ * written before projects.ts existed is read forward and gains nothing until
+ * the night she actually works on it.
+ */
+function getProjects(): Project[] {
+  const projects = readProjects(store.get('her.wants'));
+  const merged = reconcileWants(getInterests(), projects, new Date().toISOString());
+  // Length alone no longer says whether anything moved: a rewording clears one
+  // leaving and adds one record, which comes back the same size.
+  if (merged.length !== projects.length || merged.some((want, index) => want.id !== projects[index]?.id)) store.set('her.wants', merged);
   return merged;
 }
 
-function setWants(wants: Want[]) {
-  store.set('her.wants', wants);
+function setProjects(projects: Project[]) {
+  store.set('her.wants', keepProjects(projects));
 }
 
 function getDays(): HerDay[] {
@@ -11450,24 +12461,25 @@ let readingMangaNow = false;
  * confirms, so the first call of a confirm pair changes nothing. Writing either
  * one down as done would make the ledger lie in the one direction it must not.
  */
+const deedFeelings = new DeedFeelings();
 function noteDeed(tool: string, call: { function?: { arguments?: unknown } }, result: string): void {
   if (!isADeed(tool)) return;
-  // Something of her own to do is the cure for a quiet room (feelings.ts).
-  herOwnTimeAt = Date.now();
-  feelNow('own-time');
   let failed = false;
   try {
     const parsed = JSON.parse(result) as Record<string, unknown>;
-    failed = typeof parsed.error === 'string' || parsed.confirm === false || parsed.ok === false || parsed.created === false;
+    failed = typeof parsed.error === 'string' || parsed.confirm === false || parsed.ok === false || parsed.created === false
+      // Nothing done either: a read that found the series finished, a game that was not started (deed-feelings.ts reads these the same way).
+      || parsed.started === false || parsed.read === false;
   } catch { failed = false; }
-  // Something of hers that would not work. Short with the thing, not with him
-  // — which is what makes it a different counter from her patience.
-  feelNow(failed ? 'broke' : 'worked');
   let args: Record<string, unknown> = {};
   try {
     const raw = call.function?.arguments;
     args = typeof raw === 'string' ? JSON.parse(raw) : (raw && typeof raw === 'object' ? raw as Record<string, unknown> : {});
   } catch { args = {}; }
+  for (const event of deedFeelings.events(tool, args, result, Date.now())) {
+    if (event === 'own-time') herOwnTimeAt = Date.now();
+    feelNow(event);
+  }
   const deed = deedFrom(tool, args, failed, new Date().toISOString());
   if (!deed) return;
   store.set('her.deeds', keepDeed(readDeeds(store.get('her.deeds')), deed));
@@ -11608,15 +12620,9 @@ async function herHandsTick(): Promise<void> {
   if (!config?.model) return;
   herHandsBusy = true;
   const startedAt = Date.now();
-  // Her hands are granted for this run the way a user's turn grants them, and
-  // handed back when it ends. Upstream reached for a createTurnContext({ hands:
-  // true }) that exists nowhere in the tree (3605a32); the state it would have
-  // wrapped is module-level, and availableTools() below reads it.
-  const handsWere = handsAllowed;
-  handsAllowed = true;
-  pageWasRead = false;
   try {
-    const menu = chatTools(availableTools(), '').filter(tool => (HER_HANDS_TOOLS as readonly string[]).includes(tool.function.name));
+    const turn = createTurnContext({ hands: true });
+    const menu = chatTools(availableTools(turn), '').filter(tool => (HER_HANDS_TOOLS as readonly string[]).includes(tool.function.name));
     if (!menu.length) { console.log('[hands] nothing of hers is switched on to reach for'); return; }
     const character = getActiveCharacter();
     const interests = getInterests();
@@ -11624,7 +12630,7 @@ async function herHandsTick(): Promise<void> {
       readingNote(readReading(store.get('her.reading'))),
       runNote((store.get('her.pokemon.lastState') as GameState | undefined) ?? null, String(store.get('her.pokemon.lastSummary') ?? ''), false),
       tastesInstruction(interests),
-      wantsNote(getWants(), interests),
+      projectsNote(getProjects(), Date.now()),
       handsNote(ledger, Date.now(), dayOf, today),
     ].filter(Boolean).join('\n');
     const conversation = [
@@ -11632,11 +12638,11 @@ async function herHandsTick(): Promise<void> {
       { role: 'user', content: HANDS_TURN },
     ];
     // In her own time a read runs to its end, and a game she starts is hers, not his idea.
-    const base = toolDeps();
+    const base = toolDeps(turn);
     const pokemon = pokemonDeps();
     const deps: ToolDeps = { ...base, pokemon: pokemon ? { ...pokemon, start: () => startPokemon('her') } : null };
     const { content, ran } = await runToolLoop(conversation as Parameters<typeof runToolLoop>[0], {
-      ask: (sending, { tools }) => ollamaPost(sending as Parameters<typeof ollamaPost>[0], config, { tools, table: menu }),
+      ask: (sending, { tools }) => ollamaPost(sending as Parameters<typeof ollamaPost>[0], config, { tools, turn, table: menu }),
       runTool: async call => {
         const fn = (call as { function?: { name?: string; arguments?: unknown } }).function ?? {};
         const tool = fn.name ?? 'tool';
@@ -11650,7 +12656,7 @@ async function herHandsTick(): Promise<void> {
         noteDeed(tool, call, result);
         return result;
       },
-      pageWasRead: () => pageWasRead, handsAllowed: () => handsAllowed, withdrawHands: () => { handsAllowed = false; },
+      pageWasRead: turn.pageWasRead, handsAllowed: turn.handsAllowed, withdrawHands: turn.withdrawHands,
       hasOpenTask: () => false, canSearch: () => false,
       log: line => console.log(line), warn: line => console.warn(line), maxRounds: 3,
     });
@@ -11668,7 +12674,6 @@ async function herHandsTick(): Promise<void> {
     console.warn('[hands] her own time came to nothing:', error instanceof Error ? error.message : error);
   } finally {
     herHandsBusy = false;
-    handsAllowed = handsWere;
   }
 }
 
@@ -11686,13 +12691,30 @@ function mangaLink(): ToolDeps['manga'] {
   return {
     read: async ({ title, wait }) => {
       if (readingMangaNow) return { error: 'You are already partway through a stretch of reading. Say so.' };
+      // The one she is on, read to the end (manga.ts readToTheEnd), asked for
+      // by name or on a chat turn: answered before anything starts, so she is
+      // not sent off to read pages that are not there. In her own time with
+      // no title the pass itself takes up something else of hers. A chapter
+      // out since is read as usual.
+      const current = readReading(store.get('her.reading'));
+      const same = !!title && !!current && title.toLowerCase() === current.title.toLowerCase();
+      if (current && readToTheEnd(current) && (same || (!title && !wait))) {
+        const next = await chapterAfter(suwayomiLink(), current).catch(error => { console.warn('[manga] could not look for a chapter after hers:', error instanceof Error ? error.message : error); return null; });
+        if (!next) {
+          rememberFinished(current);
+          console.log(`[manga] read_manga: ${current.title} is read to the end — nothing after chapter ${current.chapter}`);
+          return finishedResult(current.title, current.chapter, false);
+        }
+      }
       const run = readSomeManga(config, { force: true, title, pages: wait ? HANDS_PAGES : undefined });
       if (!wait) {
         void run.then(got => { if (!got) console.log('[manga] the read she started came to nothing'); }).catch(error => console.warn('[manga] the read she started failed:', error instanceof Error ? error.message : error));
         return { started: true, title: title || readReading(store.get('her.reading'))?.title || 'your manga', note: 'It has started and takes a few minutes. Say you are off to read — do not describe pages you have not read yet.' };
       }
       const got = await run;
-      return got ? { read: true, ...got } : { error: 'Nothing came of it — the pages did not come back, or that title matched nothing. Say so plainly.' };
+      if (!got) return { error: 'Nothing came of it — the pages did not come back, or that title matched nothing. Say so plainly.' };
+      if ('finished' in got) return finishedResult(got.title, got.chapter, got.nothingElse);
+      return { read: true, ...got };
     },
   };
 }
@@ -11836,6 +12858,36 @@ function suwayomiLink(): Suwayomi | null {
 /** A Suwayomi chapter as the bookmark's ChapterRef. */
 const shelfChapterRef = (chapter: ShelfChapter): ChapterRef => ({ id: String(chapter.id), chapter: String(chapter.number), title: chapter.name, pages: chapter.pages > 0 ? chapter.pages : 0 });
 
+/**
+ * The chapter after hers — from her shelf, or the feed — or null at the end
+ * of what there is. A chapter of hers that the list no longer has is the end
+ * too: the old arithmetic (index -1, plus one) made it the first chapter, and
+ * a finished series would have started over.
+ */
+async function chapterAfter(link: Suwayomi | null, reading: Reading): Promise<ChapterRef | null> {
+  if (link && reading.source === 'suwayomi' && typeof reading.mangaId === 'number') {
+    const chapters = await link.chapters(reading.mangaId);
+    const index = chapters.findIndex(c => String(c.id) === reading.chapterId);
+    return index >= 0 && chapters[index + 1] ? shelfChapterRef(chapters[index + 1]) : null;
+  }
+  const chapters = await chaptersOf(reading.seriesId);
+  const index = chapters.findIndex(c => c.id === reading.chapterId);
+  return index >= 0 ? chapters[index + 1] ?? null : null;
+}
+
+/** A series read to the end, written down (her.finished) so the picker does not take it up again from the start. */
+function rememberFinished(reading: Reading): void {
+  store.set('her.finished', withFinished(readFinished(store.get('her.finished')), reading, new Date().toISOString()));
+}
+
+/** What the tool says of a series read to the end. `read: false`: not a deed and not a failure (deeds.ts, deed-feelings.ts). */
+function finishedResult(title: string, chapter: string, nothingElse: boolean): Record<string, unknown> {
+  return {
+    read: false, finished: true, title, chapter,
+    note: `You have read ${title} to the end — there is nothing after chapter ${chapter}, so there was nothing to read. Do not ask for it again.${nothingElse ? ' Nothing else of yours is a manga you could take up.' : ' If you want to read, it is something else, by name — or leave it.'}`,
+  };
+}
+
 /** A title taken up on her shelf: searched, put in her category, chapters fetched, bookmark at the first. */
 async function startReadingOnShelf(link: Suwayomi, title: string): Promise<Reading | null> {
   const found = await link.search(title);
@@ -11893,8 +12945,10 @@ async function startReading(title: string): Promise<Reading | null> {
 }
 
 type MangaRead = { title: string; chapter: string; pages: [number, number]; note: string; stands: string };
+/** Read to the end with nothing after it: not a failed read. `nothingElse`: no other title of hers to take up either. */
+type MangaFinished = { finished: true; title: string; chapter: string; chapters: number; nothingElse: boolean };
 
-async function readSomeManga(config: ProviderConfig, options: { force?: boolean; title?: string; pages?: number } = {}): Promise<MangaRead | null> {
+async function readSomeManga(config: ProviderConfig, options: { force?: boolean; title?: string; pages?: number } = {}): Promise<MangaRead | MangaFinished | null> {
   const now = zonedNow(CHAT_TIMEZONE);
   const { prefs } = getPush();
   if (!options.force && !inQuietHours(prefs, now)) return null;
@@ -11909,6 +12963,27 @@ async function readSomeManga(config: ProviderConfig, options: { force?: boolean;
   try {
     const link = suwayomiLink();
     if (options.title && (!reading || reading.title.toLowerCase() !== options.title.toLowerCase())) reading = await startReading(options.title);
+    // Read to the end (manga.ts readToTheEnd). A chapter may have come out
+    // since, and she goes on with it; otherwise the series is finished, which
+    // is not a failed read. Asked for it by name she is told so; in her own
+    // time and the small hours she takes up something else of hers.
+    if (reading && readToTheEnd(reading)) {
+      const next = await chapterAfter(link, reading);
+      if (next) {
+        reading = { ...reading, chapter: next.chapter, chapterId: next.id, page: 0, pages: next.pages, lastAt: new Date().toISOString() };
+        store.set('her.reading', reading);
+        console.log(`[manga] a chapter of ${reading.title} came out since — on to chapter ${next.chapter}`);
+      } else {
+        const done = reading;
+        rememberFinished(done);
+        reading = options.title ? null : await pickSomethingToRead();
+        if (!reading) {
+          console.log(`[manga] ${done.title} is read to the end — nothing after chapter ${done.chapter}${options.title ? '' : ', and nothing else of hers to take up'}`);
+          return { finished: true, title: done.title, chapter: done.chapter, chapters: done.finished, nothingElse: !options.title };
+        }
+        console.log(`[manga] ${done.title} is read to the end — taking up ${reading.title}`);
+      }
+    }
     if (!reading) reading = await pickSomethingToRead();
     if (!reading) return null;
     // A bookmark from before the shelf: carried over once, to the same chapter.
@@ -11925,8 +13000,9 @@ async function readSomeManga(config: ProviderConfig, options: { force?: boolean;
       files = at?.baseUrl && at.chapter?.hash ? (at.chapter.data ?? []).map(file => `${at.baseUrl}/data/${at.chapter!.hash}/${file}`) : [];
     }
     const { from, to } = tonightsPages(reading, options.pages);
-    if (to <= from) return null;
     if (!files.length) { console.warn(`[manga] no pages came back for ${reading.title} ch ${reading.chapter}`); return null; }
+    // Not reachable from the end of a chapter any more (above), and said if another way in turns up: this returned in silence for three days.
+    if (to <= from) { console.warn(`[manga] nothing to read: ${reading.title} ch ${reading.chapter} is at page ${reading.page} of ${reading.pages}`); return null; }
     const endpoint = visionEndpoint(store.get('ai.config') as ProviderConfig | undefined, vision);
     const read: string[] = [];
     for (let page = from; page < Math.min(to, files.length); page++) {
@@ -11954,15 +13030,7 @@ async function readSomeManga(config: ProviderConfig, options: { force?: boolean;
     const take = parseReadingTake(raw);
     // The bookmark moves whether or not she had anything to say: the pages were
     // read either way, and re-reading them tomorrow is the one outcome to avoid.
-    let next: ChapterRef | null = null;
-    if (onShelf) {
-      const chapters = await link!.chapters(reading.mangaId!);
-      const index = chapters.findIndex(c => String(c.id) === reading!.chapterId);
-      next = index >= 0 && chapters[index + 1] ? shelfChapterRef(chapters[index + 1]) : null;
-    } else {
-      const chapters = await chaptersOf(reading.seriesId);
-      next = chapters[chapters.findIndex(c => c.id === reading!.chapterId) + 1] ?? null;
-    }
+    const next = await chapterAfter(link, reading);
     const moved = afterReading(reading, readTo, next, new Date().toISOString());
     store.set('her.reading', moved);
     store.set('her.readingOn', today);
@@ -12027,7 +13095,12 @@ async function chaptersOf(seriesId: string): Promise<ChapterRef[]> {
  */
 async function pickSomethingToRead(): Promise<Reading | null> {
   const link = suwayomiLink();
+  // Not one she has read to the end. This only ever ran with no bookmark at
+  // all, so it never had to know; now it runs when the bookmark is a finished
+  // series, and the first interest on the list is usually that very series.
+  const finished = readFinished(store.get('her.finished'));
   for (const interest of getInterests()) {
+    if (alreadyFinished(finished, interest.name)) continue;
     if (link) {
       try {
         const taken = await startReadingOnShelf(link, interest.name);
@@ -12039,7 +13112,7 @@ async function pickSomethingToRead(): Promise<Reading | null> {
     }
     const found = await mangaGet(searchUrl(interest.name)) as { data?: { id: string; attributes?: { title?: Record<string, string> } }[] } | null;
     const hit = found?.data?.[0];
-    if (!hit) continue;
+    if (!hit || alreadyFinished(finished, interest.name, hit.id)) continue;
     const chapters = await chaptersOf(hit.id);
     if (!chapters.length) continue;
     const first = chapters[0];
@@ -12050,6 +13123,189 @@ async function pickSomethingToRead(): Promise<Reading | null> {
     };
   }
   return null;
+}
+
+/**
+ * Housekeeping on her projects, before she picks one.
+ *
+ * Two things that only happen with time: something she thought of and never
+ * once went near is let go after a month — it was a note, not a project — and
+ * something that beat her long enough ago that she has since got better comes
+ * back. The second one is the whole reason the ladder is worth having.
+ */
+function tendProjects(): void {
+  const all = getProjects();
+  const nowMs = Date.now();
+  let next = all;
+  let changed = false;
+  const stale = staleSpawns(next, nowMs);
+  if (stale.length) {
+    const ids = new Set(stale.map(project => project.id));
+    next = next.map(project => ids.has(project.id) ? { ...project, status: 'dropped' as const, note: project.note ?? 'you never went back to it' } : project);
+    changed = true;
+    console.log(`[project] let go of ${stale.length} she thought of and never went near`);
+  }
+  const back = dueForRevisit(next, nowMs);
+  if (back && roomForNew(next)) {
+    next = next.map(project => project.id === back.id ? revisit(project, new Date().toISOString()) : project);
+    changed = true;
+    console.log(`[project] back to "${back.text.slice(0, 50)}" — it beat her ${back.nights} nights in, and she has got better since`);
+  }
+  if (changed) setProjects(next);
+}
+
+/**
+ * When she is at nothing, she is asked for something of her own to try.
+ *
+ * Every project used to come from somewhere else — her tastes declaring one, or
+ * the last one she finished or gave up on. A simulated year of that runs out:
+ * the chain ends the first time a candidate is refused, and she spends the rest
+ * of it with nothing to work at. So the one case the ladder cannot cover is
+ * covered here, and the thing she names is hers.
+ */
+async function askForSomethingToTry(interest: { name: string; stance: string } | null, config: ProviderConfig): Promise<void> {
+  const all = getProjects();
+  if (!interest || !needsSomethingNew(all)) return;
+  const standing = standingIn(all, interest.name);
+  try {
+    const said = tidyPick(await ollamaQuip([getActiveCharacter().identity, newProjectInstruction(interest.name, interest.stance, all.map(project => project.text))].join(' '), 'What are you going to try?', nudgeBrain() ?? config));
+    if (!said) { console.log('[project] she could not think of anything she wanted to do'); return; }
+    const born = hersOwn(interest.name, said, new Date().toISOString(), standing);
+    const verdict = admits({ text: born.text, hardness: born.hardness ?? 1, substrate: born.substrate, interest: born.interest }, all, standing);
+    if (!verdict.ok) { console.log(`[project] "${said.slice(0, 50)}" refused — ${verdict.why}`); return; }
+    setProjects([...all, born]);
+    console.log(`[project] she has taken something on herself: "${born.text.slice(0, 50)}" at rung ${born.hardness}`);
+  } catch (error) {
+    console.warn('[project] could not ask her what she wanted to try:', error instanceof Error ? error.message : error);
+  }
+}
+
+/**
+ * What she is actually trying tonight.
+ *
+ * The step she is part-way through is kept; a new one is named when she has
+ * none, or when the last night got nowhere and going back at it the same way
+ * would be the third identical night. It has to be hers to do alone (his call),
+ * so a step that waits on him is asked for once more and then done without.
+ */
+async function stepFor(project: Project, config: ProviderConfig): Promise<Worked> {
+  const had = asProject(project);
+  const last = had.attempts.at(-1);
+  if (had.step && last?.outcome !== 'no') return had;
+  const brain = nudgeBrain() ?? config;
+  for (const alone of ['', ' It is yours to do by yourself. Do not mention him, or anyone else, or waiting for anybody.']) {
+    try {
+      const said = tidyPick(await ollamaQuip([getActiveCharacter().identity, stepInstruction(had, had.attempts) + alone].join(' '), 'What are you trying?', brain));
+      if (said && !needsHim(said)) return { ...had, step: toLength(said, 140) };
+      if (said) console.log(`[project] "${said.slice(0, 50)}" waits on him — that is not a step of hers`);
+    } catch (error) {
+      console.warn('[project] could not settle on a step:', error instanceof Error ? error.message : error);
+      break;
+    }
+  }
+  // No step is not a failed night: the search falls back to the want itself,
+  // which is exactly what it always was.
+  return { ...had, step: undefined };
+}
+
+/** The coin, still here, for the nights nothing can judge. */
+const FROM_THE_COIN: Record<'slog' | 'clicked' | 'gave_up' | 'nothing', NightOutcome> = { slog: 'no', clicked: 'did', gave_up: 'no', nothing: 'nothing' };
+
+/**
+ * Whether what she read actually let her do the step.
+ *
+ * Her own nudge brain, at temperature nothing, one word back — the same shape
+ * as heOwesHerAnAnswer, including the 700-token allowance, because both brains
+ * that might answer this spend theirs thinking first and come back empty at
+ * 200. When it will not answer, the old coin decides and the log says so: a
+ * judge that shrugs must not be read as a judge that said the night was wasted.
+ */
+async function whatCameOfIt(project: Worked, reading: string): Promise<NightOutcome> {
+  const fallback = FROM_THE_COIN[wantOutcome(Math.random(), project.nights).kind];
+  const judge = nudgeBrain() ?? (store.get('ai.config') as ProviderConfig | undefined);
+  if (judge?.model) {
+    try {
+      const message = await ollamaPost(
+        [{ role: 'system', content: judgeAttemptPrompt() }, { role: 'user', content: judgeAttemptInput(project, reading) }],
+        judge,
+        { tools: false, temperature: 0, maxTokens: 700 },
+      );
+      const verdict = readAttemptVerdict(message.content ?? '');
+      if (verdict) {
+        console.log(`[project] the reading ${verdict === 'DID' ? 'answered the step' : verdict === 'PART' ? 'got part of the way' : 'got nowhere'}`);
+        return settleFromRead(verdict, fallback);
+      }
+      console.warn(`[project] the judge would not say ("${(message.content ?? '').trim().slice(0, 60)}") — rolling for it`);
+    } catch (error) {
+      console.warn('[project] could not judge the night:', error instanceof Error ? error.message : error);
+    }
+  }
+  return fallback;
+}
+
+/**
+ * What a night of it does to her.
+ *
+ * Something of her own to do is the cure for a quiet room, whatever came of it.
+ * A step that lands is a thing of hers that worked; the third night running
+ * that goes nowhere is a thing of hers that broke, which her ego amplifies —
+ * a woman who has spent the afternoon being right takes it worse. Once a day at
+ * most: two stuck projects across three passes would otherwise put sixty of
+ * frustration into an afternoon and leave her short with the world for good.
+ */
+function feelAboutIt(before: Project, after: Project): void {
+  herOwnTimeAt = Date.now();
+  feelNow('own-time');
+  if (after.status === 'done') { feelNow('worked'); return; }
+  if (!nowItStings(before, after)) return;
+  const today = localDateKey(zonedNow(CHAT_TIMEZONE));
+  if (store.get('her.stungOn') === today) { console.log('[project] it beat her again, but she has already had one of those today'); return; }
+  store.set('her.stungOn', today);
+  feelNow('broke');
+}
+
+/** A night on one of hers, written up and written down. Null when nothing came of it. */
+async function settleTheNight(project: Worked, reading: string, config: ProviderConfig, stamp: string): Promise<Worked | null> {
+  const outcome = await whatCameOfIt(project, reading);
+  let raw = await ollamaQuipLong([getActiveCharacter().identity, projectInstruction(project, outcome, reading)].join(' '), 'Write it.', config);
+  if (addressesSomeone(raw)) raw = await ollamaQuipLong([getActiveCharacter().identity, projectInstruction(project, outcome, reading), NOBODY_HERE].join(' '), 'Write it.', config);
+  const note = toLength(unaddressed(raw), 200);
+  if (!note) { console.log(`[project] nothing came of "${project.text.slice(0, 40)}" tonight`); return null; }
+  const next = advanceProject(project, { at: stamp, step: project.step ?? stripProject(project.text), outcome, by: 'read', measured: false, note }, stamp);
+  setProjects(getProjects().map(entry => entry.id === next.id ? next : entry));
+  feelAboutIt(project, next);
+  console.log(`[project] ${next.interest ?? 'something'} — ${outcome} on night ${next.nights} at rung ${next.hardness}: "${note.slice(0, 60)}"`);
+  return next;
+}
+
+/**
+ * And what comes of it, which is where the curriculum generates itself.
+ *
+ * One she has finished seeds the harder version; one that has beaten her twice
+ * at the same rung seeds the smaller way in she should have started with. Both
+ * go through the minimal criterion before they are kept — new, doable, one rung
+ * either side of where she stands, and hers to do alone — and a candidate that
+ * fails it is thrown away rather than attempted, which is the only reason a
+ * generated curriculum stays a curriculum instead of becoming a pile.
+ */
+async function growFromIt(project: Worked, config: ProviderConfig): Promise<void> {
+  const all = getProjects();
+  if (!roomForNew(all)) return;
+  const kind = project.status === 'done' ? 'child'
+    : project.status === 'shelved' && beatenTwiceAt(all, project) ? 'sibling'
+    : null;
+  if (!kind) return;
+  try {
+    const said = tidyPick(await ollamaQuip([getActiveCharacter().identity, spawnInstruction(project, kind)].join(' '), 'What next?', nudgeBrain() ?? config));
+    if (!said) { console.log('[project] she could not say what came next'); return; }
+    const born = kind === 'child' ? childOf(project, said, new Date().toISOString()) : siblingOf(project, said, new Date().toISOString());
+    const verdict = admits({ text: born.text, hardness: born.hardness ?? 1, substrate: born.substrate, interest: born.interest }, all, standingIn(all, project.interest));
+    if (!verdict.ok) { console.log(`[project] "${said.slice(0, 50)}" refused — ${verdict.why}`); return; }
+    setProjects([...all, born]);
+    console.log(`[project] out of ${kind === 'child' ? 'finishing' : 'giving up on'} "${project.text.slice(0, 40)}" came "${born.text.slice(0, 50)}" at rung ${born.hardness}`);
+  } catch (error) {
+    console.warn('[project] nothing came of it:', error instanceof Error ? error.message : error);
+  }
 }
 
 async function haveANight(config: ProviderConfig) {
@@ -12097,12 +13353,18 @@ async function haveANight(config: ProviderConfig) {
     // spent the night trying to do the thing she said she wanted rather than
     // deepening the interest that made her want it. Only when the interest
     // being deepened actually carries a want she is still at.
-    const want = !adopting && interest && Math.random() < WANT_ODDS ? pickWantToWork(getWants(), interest.name, Math.random) : null;
+    tendProjects();
+    if (!adopting && interest) await askForSomethingToTry(interest, config);
+    const picked = !adopting && interest && Math.random() < WANT_ODDS ? pickProject(getProjects(), interest.name, Math.random) : null;
+    // The step is named before she goes looking, because the search is the step
+    // and not the whole ambition: "how to learn piano" comes back with the same
+    // beginner's page every night, which is how two years of that would read.
+    const want = picked ? await stepFor(picked, config) : null;
     if (!adopting && !interest && played.length && Math.random() < GUIDE_ODDS) game = pickGame(played, getNights(), nightKey(now));
 
     const before = getNights().map(night => night.about);
     const about = adopting ? `${adopting.name} review`
-      : want ? wantQuery(want)
+      : want ? projectQuery(want)
       : interest ? nightQuery(interest)
       : game ? guideQuery(game, getNights())
       : tidyPick(await ollamaQuip([getActiveCharacter().identity, pickInstruction(theirs, before)].join(' '), 'What are you looking up?', config));
@@ -12137,20 +13399,16 @@ async function haveANight(config: ProviderConfig) {
         }
       } catch { /* the blurbs are enough; a page that will not open is not a failure */ }
     }
-    // One of hers: the view is rewritten from the reading, not a note about it.
+    // One of hers: what she was trying tonight, and whether the reading let her
+    // do it. The outcome comes from what came back, not from a coin.
     if (want) {
       const day = nightKey(now);
       const stamp = new Date().toISOString();
-      const outcome = wantOutcome(Math.random(), want.nights);
-      let raw = await ollamaQuipLong([getActiveCharacter().identity, wantInstruction(want, outcome, reading)].join(' '), 'Write it.', config);
-      if (addressesSomeone(raw)) raw = await ollamaQuipLong([getActiveCharacter().identity, wantInstruction(want, outcome, reading), NOBODY_HERE].join(' '), 'Write it.', config);
-      const note = toLength(unaddressed(raw), 200);
-      if (!note) { console.log(`[want] nothing came of "${want.text.slice(0, 40)}" tonight`); return; }
-      const next = advanceWant(want, outcome, note);
-      setWants(getWants().map(entry => entry.id === next.id ? next : entry));
+      const next = await settleTheNight(want, reading, config, stamp);
+      if (!next) return;
       store.set('nights', keepNights(getNights(), { day, at: stamp, about, note: next.note ?? next.text, sources: found.slice(0, 3).map(result => result.url).filter(Boolean), interest: next.interest }));
-      appendDream(app.getPath('userData'), dream({ kind: 'want', interest: next.interest, reading, wrote: raw }));
-      console.log(`[want] ${next.interest ?? 'something'} — ${outcome.kind} on night ${next.nights}: "${note.slice(0, 60)}"`);
+      appendDream(app.getPath('userData'), dream({ kind: 'want', interest: next.interest, reading, wrote: next.note ?? '' }));
+      await growFromIt(next, config);
       return;
     }
     if (adopting || interest) {
@@ -12226,7 +13484,14 @@ async function haveADay(config: ProviderConfig) {
   try {
     const theirs = getMemories().map(memory => memory.text);
     const before = getNights().map(night => night.about);
-    const about = tidyPick(await ollamaQuip([getActiveCharacter().identity, dayPickInstruction(theirs, before)].join(' '), 'What are you looking up?', config));
+    // Some of her days go on something she is actually trying to do, rather
+    // than on something she read about once and never returned to. Her nights
+    // alone gave her eight attempts in three weeks, which is not an arc.
+    tendProjects();
+    const picked = Math.random() < DAY_PROJECT_SHARE ? pickProject(getProjects(), undefined, Math.random) : null;
+    const working = picked ? await stepFor(picked, config) : null;
+    const about = working ? projectQuery(working)
+      : tidyPick(await ollamaQuip([getActiveCharacter().identity, dayPickInstruction(theirs, before)].join(' '), 'What are you looking up?', config));
     if (!about) { console.log('[day] she could not settle on anything'); return; }
     const found = await searchWeb(about, { ...searchConfig, limit: Math.max(searchConfig.limit, 4) }, net.fetch, getSearchKey());
     if (!found.length) { console.log(`[day] "${about}" turned nothing up`); return; }
@@ -12237,9 +13502,17 @@ async function haveADay(config: ProviderConfig) {
         if (page.text.trim()) reading = `${reading}\n\n${formatPage(page, about)}`;
       } catch { /* the blurbs are enough; a page that will not open is not a failure */ }
     }
+    const at = new Date().toISOString();
+    if (working) {
+      const next = await settleTheNight(working, reading, config, at);
+      if (!next) return;
+      setDays(keepDay(getDays(), { day: today, at, about, note: next.note ?? next.text, sources: found.slice(0, 3).map(result => result.url).filter(Boolean) }));
+      appendDream(app.getPath('userData'), { at, day: today, kind: 'day', about, sources: found.slice(0, 3).map(result => ({ title: result.title ?? '', url: result.url })), reading, wrote: next.note ?? '' });
+      await growFromIt(next, config);
+      return;
+    }
     const note = toLength(await ollamaQuipLong([getActiveCharacter().identity, dayNoteInstruction(about, reading)].join(' '), 'Write it.', config), 220);
     if (!note) { console.log('[day] nothing came of it'); return; }
-    const at = new Date().toISOString();
     setDays(keepDay(getDays(), { day: today, at, about, note, sources: found.slice(0, 3).map(result => result.url).filter(Boolean) }));
     appendDream(app.getPath('userData'), { at, day: today, kind: 'day', about, sources: found.slice(0, 3).map(result => ({ title: result.title ?? '', url: result.url })), reading, wrote: note });
     console.log(`[day] ${today}: read about "${about}" — ${note.length} chars`);
@@ -12265,7 +13538,7 @@ async function reflectOnHerWeek(config: ProviderConfig) {
   const material = [
     getDays().filter(day => inWeek(day.day)).map(day => `Read: ${day.about} — ${day.note}`),
     getNights().filter(night => inWeek(night.day)).map(night => `Night: ${night.interest ?? night.game ?? night.about} — ${night.note}`),
-    wantsNote(getWants()),
+    projectsNote(getProjects(), Date.now()),
     firstsNote(getInterests(), today),
   ].flat().filter(Boolean).join('\n');
   if (!material.trim()) { console.log('[week] nothing happened to sum up — skipping'); return; }
@@ -12343,6 +13616,17 @@ async function writeDiary(config: ProviderConfig) {
   const due = diaryDueFor(now, prefs, at => nightKey(at));
   const mood = getMood();
   if (!due || mood.diaryDay === due) return;
+  // Not for a day that ended before she existed. The wipe takes the marker that
+  // says last night's entry was written, so the catch-up found yesterday still
+  // due and she wrote a whole entry about a day she has no memory of — "Tommy
+  // didn't say a word to me all day", composed out of nothing, an hour after the
+  // reset (2026-09-21). Marked as done rather than left to come round again.
+  const slate = getSlate();
+  if (slate && due < slate.at.slice(0, 10)) {
+    console.log(`[diary] nothing for ${due} — she did not exist for it`);
+    setMood({ ...getMood(), diaryDay: due });
+    return;
+  }
   // The day's transcript, wherever the roll has left it. With the quiet ending
   // at six the entry is due after five, and the day rolls at five: the live
   // list was already empty every night, so every entry opened on "he said
@@ -12355,6 +13639,9 @@ async function writeDiary(config: ProviderConfig) {
   const tonight = nightsOn(getNights(), due);
   const material = diaryInstruction({
     day: due,
+    // Page one, rather than "the day of the reset": if she is down for the night
+    // the reset happened in, the first entry she does write is still her first.
+    firstAfterReset: Boolean(slate) && !recentEntries(app.getPath('home'), 60).some(entry => entry.day >= slate!.at.slice(0, 10)),
     theySaid, theirMessages: theirs.length,
     herUnprompted: asidesOn(getAsides(), due).length,
     irritation: mood.irritation, grudge: mood.grudge ?? 0, ignoredToday: mood.talliedDay === due ? mood.ignoredToday ?? 0 : 0, counted: mood.talliedDay === due,
@@ -12375,10 +13662,12 @@ async function writeDiary(config: ProviderConfig) {
     })(),
   });
   try {
-    // Her identity and what she knows of them, but not her style: the style is
-    // how she talks *to* them, and a diary is the one place she is not. The
-    // diary has a voice of its own (diaryvoice.ts), from the examples.
-    const system = [getActiveCharacter().identity, profileSummary(''), DIARY_VOICE, fragmentsInstruction(), material].join(' ');
+    // Her identity and what she knows of them, and nothing about how to write.
+    // The diary used to carry a voice of its own (diaryvoice.ts: open on a hook,
+    // absurd comparisons, end on a concession) and example fragments to reuse.
+    // Both are gone at his word — the entry is a window onto her day, so its
+    // shape is hers, and the only rules left are the ones that keep it true.
+    const system = [getActiveCharacter().identity, profileSummary(''), material].join(' ');
     let entry = await ollamaQuipLong(system, 'Write tonight\'s entry.', config);
     // The example entries are kept on disk for exactly this check, and never
     // shown to her: a sentence lifted from one is an event from one.
@@ -12641,6 +13930,13 @@ function noteArrival(place: string): void {
     console.log(`[where] they turned up at ${place}, and they had said so`);
     return;
   }
+  // Nobody announces their own shift every week. What she already knows counts
+  // as having been told — see knownHaunt.
+  const weekday = new Intl.DateTimeFormat('en-US', { weekday: 'long' }).format(zonedNow(CHAT_TIMEZONE)).toLowerCase();
+  if (knownHaunt(place, getMemories().filter(memory => memory.status !== 'archived').map(memory => memory.text), weekday)) {
+    console.log(`[where] they turned up at ${place}, which is where they are on a ${weekday}`);
+    return;
+  }
   store.set('where.arrival', { place, at: new Date().toISOString() });
   noteSlight('unannounced', `They turned up at ${place} without telling you they were going.`);
   const mood = getMood();
@@ -12754,7 +14050,7 @@ function modelExpressions(): string[] {
  * Chat goes through the same ollamaChat the desktop uses, so what answers is
  * genuinely her — the same system prompt, the same memory, the same mood — and
  * not a second, thinner Haru that would drift from the first. The one thing
- * withheld is her hands: see the comment on handsAllowed.
+ * withheld is her hands: see turncontext.ts.
  *
  * Her reply is handed to the window rather than written to the store here. The
  * renderer owns chat.messages and persists the whole list; writing underneath it
@@ -12818,8 +14114,14 @@ function sentenceStreamer(onSentence?: (sentence: string, emotion: string) => vo
   };
 }
 
+const refusedShotDays = new Set<string>();
+
 function webDeps(): WebDeps {
   const deps: WebDeps = {
+    attentionInput: (source, report) => {
+      const now = Date.now();
+      if (activityObservations.note(source, report, now) && report.kind === 'input') attention.webInput(now);
+    },
     readAccess: getWebAccess,
     saveAccess: saveWebAccess,
     history: (poll = false) => {
@@ -12871,6 +14173,9 @@ function webDeps(): WebDeps {
         console.warn('[web] could not answer a rating back:', error instanceof Error ? error.message : error);
         return { line: null };
       }
+    },
+    tune(id, wrong, rather) {
+      return appendTuning({ id, wrong, rather, source: 'phone' });
     },
     async say(text, attachments) {
       const config = store.get('ai.config') as ProviderConfig | undefined;
@@ -12960,7 +14265,20 @@ function webDeps(): WebDeps {
         trace.done('web', { tier: quick.tier, chars: quick.reply.length });
         return { reply: quick.reply, ignored: false };
       }
-      const messages = [...history, { role: 'user', content: text, at: new Date().toISOString(), ...(files.length ? { attachments: files } : {}) }];
+      // Which line of hers this answers, when the phone said (replyto.ts). Checked
+      // against her replies in the conversation and the lines she pushed today,
+      // which the phone shows beside them under their own ids — a reply to "103
+      // minutes, that's what you owe me" is a reply to an aside.
+      const replyDay = (store.get('chat.dayKey') as string | undefined) ?? localDateKey(zonedNow(CHAT_TIMEZONE));
+      const named = options?.replyTo || options?.quoted;
+      const answering = named
+        ? resolveReply(
+          { replyTo: options?.replyTo, quoted: options?.quoted },
+          [...(history as { id?: string; role: string; content: string }[]), ...asidesOn(getAsides(), replyDay).map(aside => ({ id: aside.id, role: 'assistant', content: aside.text }))],
+        )
+        : null;
+      if (named && !answering) console.log('[web] a reply named a line of hers that could not be found — sent as an ordinary message');
+      const messages = [...history, { role: 'user', content: text, at: new Date().toISOString(), ...(answering ? { replyTo: answering } : {}), ...(files.length ? { attachments: files } : {}) }];
       const started = Date.now();
       // Stopped mid-sentence, by a tap on her or by being talked over.
       if (options?.interrupted) { nudgeVitals('cut-off'); feelNow('cut-off'); }
@@ -12986,7 +14304,7 @@ function webDeps(): WebDeps {
       // this is the reply's end, so what is left is hers to say.
       voice.flush();
       trace.mark('reply');
-      sendToWindows('chat:fromPhone', { text, reply, ignored: Boolean(answer.ignored), ...(files.length ? { attachments: files } : {}) });
+      sendToWindows('chat:fromPhone', { text, reply, ignored: Boolean(answer.ignored), ...(answering ? { replyTo: answering } : {}), ...(files.length ? { attachments: files } : {}) });
       console.log(`[web] streamed ${text.length} chars in ${Date.now() - started}ms, ${reply.length} chars (${messages.length} messages of history${files.length ? `, ${files.length} file(s)` : ''})`);
       trace.done('web', { tier: 'llm', chars: reply.length });
       return { reply, ignored: answer.ignored };
@@ -13458,13 +14776,30 @@ function webDeps(): WebDeps {
     shots: {
       held: () => heldShots(shotStoreRoot()),
       keep: (day, name, bytes) => {
+        // A picture of a day she no longer remembers is not hers to hold, and her
+        // captions went with the wipe — so an old shot arriving here would only be
+        // described again from scratch. Said once per day rather than once per
+        // picture: the desk pushes hundreds.
+        const slate = getSlate();
+        // `day` is the sender's claim and typed unknown on purpose: anything that
+        // is not a date string falls through to keepShot, whose job is refusing it.
+        if (slate && typeof day === 'string' && day < slate.at.slice(0, 10)) {
+          if (!refusedShotDays.has(day)) {
+            refusedShotDays.add(day);
+            console.log(`[activity] refusing the desk's shots from ${day} — before the reset`);
+          }
+          return;
+        }
         const written = keepShot(shotStoreRoot(), day, name, bytes);
         console.log(`[activity] kept ${path.basename(written)} (${(bytes.length / 1024 | 0)}KB) from the desk`);
       },
     },
     mergeActivity(theirs) {
       const before = store.getActivityLog();
-      const merged = mergeActivity(before, theirs);
+      // The same filter memories get, for the log: the desk pushes its whole
+      // thing and the merge only ever adds, so without this the reset is undone
+      // for everything he was doing before it (blankslate.ts).
+      const merged = mergeActivity(before, withoutPreSlateDays(theirs, getSlate()));
       store.setActivityLog(merged);
       const days = Object.keys(merged).length;
       const entries = Object.values(merged).reduce((total, list) => total + list.length, 0);
@@ -13677,6 +15012,74 @@ function webDeps(): WebDeps {
       return deps.sayStream(fixed.text, onChunk, [], { interrupted, call: true }, () => {});
     },
   };
+
+  // -- WhatsApp -------------------------------------------------------------
+  //
+  // The socket is in ~/haru-whatsapp; this is only what happens when it hands
+  // over a message. Two things it must do and one it must not:
+  //
+  //   - answer in his own chat, through the same say() the phone uses, so a
+  //     WhatsApp turn is a turn and not a second kind of conversation;
+  //   - take one message at a time, because two of his messages arriving
+  //     together would otherwise be two turns of her brain at once;
+  //   - never answer anything that is not his own chat. A message from a chat
+  //     he allowed is something she comes to know, not something to reply to.
+  //     She is reading over his shoulder, not sitting in Sam's conversation.
+  const whatsAppConfig = (): WhatsAppConfig => readWhatsAppConfig(store.get('whatsapp'));
+  // One turn at a time, in the order they arrived. A promise chain rather than
+  // a queue object: nothing here needs draining, cancelling or inspecting, and
+  // a rejected link must not stop the next message being answered.
+  let whatsAppTurn: Promise<void> = Promise.resolve();
+
+  async function answerOnWhatsApp(message: WhatsAppHeard): Promise<void> {
+    const config = whatsAppConfig();
+    const door = { url: config.url, token: config.token };
+    const turn = asTurn(message);
+    console.log(`[whatsapp] him: "${turn.slice(0, 60)}"`);
+    const answer = await deps.say(turn);
+    if (answer.ignored || !answer.reply.trim()) {
+      console.log('[whatsapp] she is not answering that');
+      return;
+    }
+    const bubbles = splitForWhatsApp(answer.reply);
+    for (const [index, bubble] of bubbles.entries()) {
+      // Paced, but never with a typing indicator: announcing presence from a
+      // companion device is what stops his phone showing notifications at all.
+      if (index > 0) await new Promise(resolve => setTimeout(resolve, gapBefore(bubble)));
+      const sent = await sendThroughWorker(door, message.chat, bubble);
+      if (!sent.ok) {
+        // Said once, with the reason, and the rest of the reply abandoned:
+        // bubbles two and three of an answer whose first never arrived would
+        // read as her starting mid-sentence.
+        console.warn(`[whatsapp] could not send — ${sent.why}`);
+        return;
+      }
+    }
+    console.log(`[whatsapp] she answered in ${bubbles.length} message${bubbles.length === 1 ? '' : 's'}`);
+  }
+
+  deps.whatsapp = {
+    secret: () => whatsAppConfig().token,
+    heard: body => {
+      if (!whatsAppConfig().enabled) return;
+      const message = readHeard(body);
+      if (!message) return;
+      if (!isForHer(message)) {
+        // Not a turn: she is reading over his shoulder, not sitting in Sam's
+        // conversation. It goes into the window a Tier 1 pass reads later.
+        const line = asOverheard(message);
+        if (readWhatsAppConfig(store.get('whatsapp')).reading.enabled) {
+          overheard.note({ chat: message.chat, chatName: chatLabel(message), who: message.mine ? graphUserName() : message.from, text: message.text, at: message.at });
+        }
+        console.log(`[whatsapp] overheard in an allowed chat — ${line.slice(0, 80)}`);
+        return;
+      }
+      whatsAppTurn = whatsAppTurn
+        .then(() => answerOnWhatsApp(message))
+        .catch(error => console.error('[whatsapp] a turn failed: ' + (error instanceof Error ? error.message : String(error))));
+    },
+  };
+
   return deps;
 }
 
@@ -13740,9 +15143,47 @@ function feedbackFile(): string {
  */
 function appendFeedback(about: { id: string; reaction?: 'up' | 'down' | null; note?: unknown; source: 'phone' | 'desktop' }): void {
   const history = (store.get('chat.messages') as { id?: string; role: string; content?: string; reaction?: string }[] | undefined) ?? [];
-  const entry = feedbackEntry(history, { ...about, model: (store.get('ai.config') as ProviderConfig | undefined)?.model ?? '', at: new Date().toISOString() });
+  const entry = feedbackEntry(history, { ...about, model: modelBehind(history, about.id), at: new Date().toISOString() });
   if (!entry) return;
+  attention.event('feedback', { id: entry.id, reaction: entry.reaction, source: entry.source });
   try { recordFeedback(feedbackFile(), entry); } catch (error) { console.warn('[feedback] could not write it down:', error instanceof Error ? error.message : error); }
+}
+
+/** Where the tuning notes go: a log of their own, beside the ratings but never mixed with them. */
+function tuningFile(): string {
+  return path.join(app.getPath('userData'), 'tuning.jsonl');
+}
+
+/** And a page a day of the same notes, for the reader who is a person. */
+function tuningDir(): string {
+  return path.join(app.getPath('userData'), 'tuning');
+}
+
+/**
+ * What was wrong with a reply, written down for him and for nobody else.
+ *
+ * Deliberately not appendFeedback: nothing here touches the stored message, her
+ * mood or her prompt. True when it landed. Never throws — a full disk must not
+ * cost him the note, only the record of it.
+ */
+function appendTuning(about: { id: string; wrong?: unknown; rather?: unknown; source: 'phone' | 'desktop' }): boolean {
+  const history = (store.get('chat.messages') as { id?: string; role: string; content?: string; reaction?: string }[] | undefined) ?? [];
+  const now = new Date();
+  const note = tuningNote(history, {
+    ...about,
+    model: modelBehind(history, about.id),
+    at: now.toISOString(),
+    day: localDateKey(zonedNow(CHAT_TIMEZONE, now)),
+  });
+  if (!note) return false;
+  try {
+    recordTuning(tuningFile(), note);
+    appendTuningPage(tuningDir(), note);
+    console.log(`[tuning] noted on ${note.id}${note.wrong ? ` — ${note.wrong.slice(0, 60)}` : ''}${note.rather ? ' (+ a rewrite)' : ''}`);
+  } catch (error) {
+    console.warn('[tuning] could not write it down:', error instanceof Error ? error.message : error);
+  }
+  return true;
 }
 
 async function startWebDoor() {
@@ -13926,6 +15367,8 @@ app.whenReady().then(() => {
   setInterval(() => { void refreshRecallVectors(); }, 15 * 60_000);
   // Who is who: the finished days not yet read, a day a minute until caught up.
   setInterval(() => { void readGraphTick(); }, GRAPH_TICK_MS);
+  // Slow on purpose: a pass is a call to the same card her replies come off.
+  setInterval(() => { void readOverheardTick(); }, 60_000);
   setInterval(() => { void formingTick(); }, FORMING_TICK_MS);
   // His page of what the graph believes: written at start, corrections read back hourly with the vault.
   setTimeout(() => syncGraphPage('startup'), 100_000);
@@ -13943,6 +15386,11 @@ app.whenReady().then(() => {
   console.log(`[system] sampler armed (every ${systemEvents.sampleSeconds}s, level ${readSystemConfig().level})`);
   setTimeout(() => { void sampleSystem(); }, 10_000);
   setInterval(() => { void sampleSystem(); }, systemEvents.sampleSeconds * 1000);
+  // Her Minecraft life, on a clock. Every tick is cheap unless a session is on;
+  // the cadence is read at boot, so a change to it wants a restart.
+  const play = getPlayConfig();
+  console.log(`[minecraft] play tick armed (every ${play.tickSeconds}s, ${play.enabled ? 'on' : 'off'})`);
+  setInterval(() => { void minecraftTick(); }, play.tickSeconds * 1000);
   }
   protocol.handle('haru-model', async request => {
     const url = new URL(request.url);
@@ -14291,6 +15739,20 @@ app.whenReady().then(() => {
 
   // The web door. The password only ever travels inwards: it is hashed here and
   // the renderer is told nothing but whether one exists.
+  // A hand trigger for one planning step, until Phase 7 puts it on a clock.
+  ipcMain.handle('minecraft:plan', () => planMinecraftStep());
+  ipcMain.handle('minecraft:status', async () => ({
+    enabled: getMinecraftConfig().enabled,
+    linked: minecraft !== null,
+    workerUp: minecraft?.connected ?? false,
+    trouble: minecraftTrouble,
+    seen: minecraft?.lastSeen ?? null,
+    play: getPlayConfig(),
+    session: minecraftSession ? { since: new Date(minecraftSession.startedAt).toISOString(), summary: summarise(minecraftSession, Date.now()) } : null,
+    notPlayingBecause: lastWhyNotPlaying || null,
+  }));
+  // Ending a session by hand, and starting one regardless of the dice.
+  ipcMain.handle('minecraft:stop-playing', () => { endMinecraftSession('asked to stop'); return true; });
   ipcMain.handle('web:status', () => {
     const access = getWebAccess();
     return {
@@ -14731,7 +16193,7 @@ app.whenReady().then(() => {
     // the same desk. brief, because it has to fit in a caption.
     const answer = await ollamaChat(messages, config, { brief: true, choices: true });
     const reply = stripDelivery(answer.content ?? '');
-    const choices = [...pendingChoices];
+    const choices = answer.choices;
     // The same channel the phone uses, so the desk transcript picks
     // it up and coming back to the window does not mean finding half a
     // conversation missing. ollamaChat has already spoken it and pushed the
@@ -14827,6 +16289,7 @@ app.whenReady().then(() => {
   for (const key of ['discord', 'discordToken']) {
     if (store.get(key) !== undefined) { store.delete(key as never); console.log(`[startup] removed the old ${key} setting`); }
   }
+  startMinecraft();
   // Her voice is a separate program, and opening Haru is the moment to notice it
   // is not running.
   void reviveVoiceServer();
@@ -14923,6 +16386,7 @@ app.on('before-quit', () => {
   try { releaseDuck(); } catch (error) { noteCrash('releasing the duck', error); }
   try { helper?.stdin?.write('quit\n'); } catch (error) { noteCrash('telling the helper to quit', error); }
   try { helper?.kill(); } catch (error) { noteCrash('killing the helper', error); }
+  try { stopMinecraft(); } catch (error) { noteCrash('closing the Minecraft link', error); }
   void stopWebDoor().catch(error => noteCrash('closing the web door', error));
 });
 

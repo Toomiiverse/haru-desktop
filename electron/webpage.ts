@@ -821,6 +821,7 @@ export function appPage(): string {
   .acts button { background:none; border:1px solid var(--edge); color:var(--ink-dim); border-radius:999px; padding:.15rem .55rem; font-size:.85rem; line-height:1.4; font-weight:500; }
   .acts button.on { background:var(--accent); color:var(--accent-ink); border-color:var(--accent); }
   .acts input { flex:1 1 10rem; font-size:.82rem; padding:.3rem .7rem; border-radius:999px; }
+  .acts .tune { display:contents; }
   .acts .said { font-size:.8rem; color:var(--ink-dim); font-style:italic; overflow-wrap:anywhere; }
   .acts .reacted { font-size:.95rem; line-height:1.4; }
   .acts .reacted { border:1px solid var(--edge); border-radius:999px; padding:.05rem .45rem; }
@@ -934,6 +935,31 @@ ${VOICE}
 const get=u=>window.haruNet.fetch(u).then(r=>r.ok?r.json():Promise.reject(r));
 const post=(u,b)=>window.haruNet.fetch(u,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(b||{})}).then(r=>r.ok?r.json():Promise.reject(r));
 
+// ---- Shadow input evidence -------------------------------------------------
+// Report only actual page input, never opening, visibility or a timer. Native
+// fetch deliberately bypasses the network helper's retry path: stale input
+// must not be queued and delivered as fresh evidence after reconnecting.
+(()=>{
+  let last=-Infinity, busy=false;
+  if(typeof crypto==='undefined'||!crypto.getRandomValues) return;
+  const client=Array.from(crypto.getRandomValues(new Uint8Array(16)),n=>n.toString(16).padStart(2,'0')).join('');
+  let sequence=0;
+  const report=async event=>{
+    if(event.isTrusted!==true||document.visibilityState!=='visible'||busy) return;
+    const now=performance.now();
+    if(now-last<30_000) return;
+    last=now; busy=true;
+    const controller=new AbortController();
+    const timeout=setTimeout(()=>controller.abort(),5000);
+    try{
+      await fetch('/api/attention/input',{method:'POST',headers:{'content-type':'application/json'},
+        body:JSON.stringify({kind:'input',client,sequence:++sequence}),signal:controller.signal});
+    }catch{}finally{ clearTimeout(timeout); busy=false; }
+  };
+  for(const type of ['pointerdown','keydown','input','wheel']) document.addEventListener(type,report,{passive:true});
+})();
+// ---- End shadow input evidence ---------------------------------------------
+
 $('out').onclick=()=>post('/api/logout').then(()=>location.reload());
 
 // Installed on an iPhone, the reported viewport stops short of the screen: the
@@ -958,6 +984,9 @@ function bubbles(list){
     if(m.role==='assistant'&&m.id&&!m.aside) html+=acts(m,m===last);
     return html;
   }).join('') || '<p class=quiet>Nothing yet today.</p>';
+  if(pendingSend){
+    $('chat').insertAdjacentHTML('beforeend','<div class="msg me">'+esc(pendingSend.text||'📎 Attachment')+'</div><div class="msg sys" id="delivery-status">Checking the message already sent…</div>');
+  }else if(deliveryNotice) deliveryStatus(deliveryNotice);
   $('chat').scrollTop = $('chat').scrollHeight;
 }
 // What they thought of a reply, and asking again — the latter only under the
@@ -976,15 +1005,20 @@ function acts(m,isLast){
     +'<button type=button data-act=down'+on('down')+' title="Poor">👎</button>'
     +(m.note?'<span class=said>'+esc(m.note)+'</span>':'<button type=button data-act=note title="Tell her why">✎</button>')
     +(isLast?'<button type=button data-act=again title="Ask her again">↻</button>':'')
+    // Not shown as given, the way a note is: a tuning note is never put on the
+    // message, so the page has nothing to show back and the pen stays out.
+    +'<button type=button data-act=tune title="Log what was wrong — she never sees it">✍</button>'
     +'</span></div>';
 }
 
 async function load(poll){
   try{
     const {messages}=await get(poll?'/api/chat?poll=1':'/api/chat');
+    if(activeDelivery&&!activeDelivery.settled) return;
     bubbles(messages); showingSaved=false;
     // Today, as last seen: painted at once next time, and read when she is out of reach.
     window.haruKeep.set('today',{savedAt:Date.now(),messages});
+    return messages;
   }catch(r){
     if(r&&r.status===401){ location.reload(); return; }
     // Nothing live on screen yet: the saved day, with a note saying so. What is
@@ -1225,6 +1259,58 @@ ci.addEventListener('input',()=>{ci.style.height='auto';ci.style.height=Math.min
 ci.addEventListener('focus',()=>{ if(window.haruAvatar) window.haruAvatar.attend('typing',1800); });
 // Counts sends, only so each waiting bubble can be told from the last one.
 let waiting=0;
+let activeDelivery=null, recoveryBusy=false, deliveryNotice='';
+let pendingSend=window.haruKeep.get('pendingSend',null);
+if(pendingSend&&(!/^[a-zA-Z0-9-]{16,80}$/.test(pendingSend.id)||typeof pendingSend.text!=='string'||!Array.isArray(pendingSend.files))){
+  pendingSend=null; window.haruKeep.drop('pendingSend');
+}
+function deliveryStatus(text){
+  deliveryNotice=text;
+  let el=$('delivery-status');
+  if(!el){ el=document.createElement('div'); el.id='delivery-status'; el.className='msg sys'; $('chat').appendChild(el); }
+  el.textContent=text;
+}
+// Status reads never re-send the message or repeat its tools. Kept across an
+// iOS tab suspension/reload, independently of the original streaming socket.
+async function recoverPending(){
+  if(!pendingSend||recoveryBusy||document.hidden) return;
+  const pending=pendingSend;
+  recoveryBusy=true;
+  const controller=new AbortController(), timer=setTimeout(()=>controller.abort(),5000);
+  try{
+    const response=await window.haruNet.fetch('/api/chat/receipt?id='+encodeURIComponent(pending.id),{signal:controller.signal});
+    if(response.status===401){ location.reload(); return; }
+    if(!response.ok&&response.status!==404) throw new Error('receipt unavailable');
+    const receipt=await response.json();
+    if(pendingSend!==pending) return;
+    if(receipt.state==='pending'){
+      $('cb').disabled=true;
+      deliveryStatus('She received your message and is still replying.');
+      return;
+    }
+    if(activeDelivery&&activeDelivery.id===pending.id){ activeDelivery.settled=true; activeDelivery.controller.abort(); }
+    stopVoice(); cancelBreath();
+    pendingSend=null; deliveryNotice=''; window.haruKeep.drop('pendingSend'); $('cb').disabled=false;
+    const messages=await load(true);
+    if(pendingSend) return; // a new turn started while history was loading
+    if(receipt.state==='done'){
+      if(receipt.ignored) deliveryStatus('She is not answering that.');
+      else if(receipt.reply&&(!messages||!messages.some(m=>m.role==='assistant'&&m.content===receipt.reply))){
+        $('chat').insertAdjacentHTML('beforeend','<div class="msg them">'+esc(receipt.reply)+'</div>');
+      }
+    }else{
+      // A restart or expired receipt cannot prove a send failed. Do not retry
+      // automatically; preserve the words and make the uncertainty explicit.
+      window.haruKeep.set('unconfirmedSend',pending);
+      if(!ci.value&&pending.text){ ci.value=pending.text; window.haruKeep.set('draft',pending.text); }
+      if(pending.files&&pending.files.length){ staged=pending.files.concat(staged); drawChips(); }
+      deliveryStatus(receipt.state==='error'?'Her reply failed. Check the conversation before sending again.':'Delivery could not be confirmed. Check the conversation before sending again; your message has been kept.');
+    }
+  }catch{
+    if(pendingSend===pending) deliveryStatus('Connection interrupted. Your message is kept; checking its delivery when reachable.');
+  }finally{ clearTimeout(timer); recoveryBusy=false; }
+}
+setInterval(()=>{ if(pendingSend) void recoverPending(); },5000);
 // One reader for both ways a reply arrives — a send and a retry. Words land
 // through show() as the stream delivers them; a U+FFFD means the round was
 // thrown away and the bubble goes back to waiting.
@@ -1248,7 +1334,7 @@ function paint(id,t){
 }
 async function readStream(r,show){
   const reader=r.body.getReader(); const dec=new TextDecoder();
-  let buf='',said='',reply=null,ignored=false,error=null;
+  let buf='',said='',reply=null,ignored=false,error=null,completed=false;
   while(true){
     const {done,value}=await reader.read();
     if(done)break;
@@ -1262,9 +1348,11 @@ async function readStream(r,show){
       else if(ev.text==='\uFFFD'){ said=''; show('…'); stopVoice(); cancelBreath(); }
       else if(ev.sentence){ voiceFeed(ev.sentence,ev.emotion); }
       else if(ev.text){ said+=ev.text; show(said); }
-      else if(ev.done){ reply=ev.reply; ignored=Boolean(ev.ignored); }
+      else if(ev.done){ reply=ev.reply; ignored=Boolean(ev.ignored); completed=true; }
     }
+    if(completed||error){ void reader.cancel().catch(()=>{}); break; }
   }
+  if(!completed&&!error) throw new Error('The reply stream was interrupted before completion.');
   return {reply,ignored,error,said};
 }
 
@@ -1272,6 +1360,18 @@ async function readStream(r,show){
 // bubbles, the stream, her face, her voice, and the conversation told where
 // things stand. "interrupted" says they spoke over her to say it.
 async function deliver(text,sent,{interrupted=false}={}){
+  if(pendingSend){
+    if(text&&!ci.value){ ci.value=text; window.haruKeep.set('draft',text); }
+    if(sent.length){ staged=sent.concat(staged); drawChips(); }
+    deliveryStatus('Still checking the previous message; your next message is kept in the box.'); return;
+  }
+  const requestId=crypto.randomUUID();
+  deliveryNotice='';
+  const operation={id:requestId,controller:new AbortController(),settled:false};
+  activeDelivery=operation;
+  pendingSend={id:requestId,text,files:sent,at:Date.now()};
+  window.haruKeep.set('pendingSend',pendingSend);
+  const streamTimer=setTimeout(()=>operation.controller.abort(),120000);
   // The waiting bubble used to be id="wait", a fixed string, and was taken back
   // out with a bare document.getElementById('wait').remove().
   //
@@ -1303,10 +1403,13 @@ async function deliver(text,sent,{interrupted=false}={}){
   // markup, and the model is not a source we escape from, it is the source.
   const show=t=>paint(id,t);
   try{
-    const r=await window.haruNet.fetch('/api/chat/stream',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(Object.assign(sent.length?{text,attachments:sent}:{text},interrupted?{interrupted:true}:{}))});
+    const r=await window.haruNet.fetch('/api/chat/stream',{method:'POST',signal:operation.controller.signal,headers:{'content-type':'application/json'},body:JSON.stringify(Object.assign(sent.length?{text,attachments:sent}:{text},{requestId},interrupted?{interrupted:true}:{}))});
     if(!r.ok) throw r;
     const {reply,ignored,error,said}=await readStream(r,show);
+    if(operation.settled) return;
     if(error) throw new Error(error);
+    operation.settled=true;
+    pendingSend=null; deliveryNotice=''; window.haruKeep.drop('pendingSend');
     if(ignored){
       // Whatever she was about to say does not exist: the bubble goes, the note
       // takes its place, and nothing is spoken.
@@ -1335,18 +1438,18 @@ async function deliver(text,sent,{interrupted=false}={}){
       }
     }
   }catch(r){
+    if(operation.settled) return;
     stopVoice();
     cancelBreath();
     stopWaiting();
     if(talk) act(talk.replied(now(),false));
     if(r&&r.status===401){location.reload();return;}
-    // The files never left: back on the shelf so pressing Send again works.
-    if(sent.length){ staged=sent.concat(staged); drawChips(); }
-    // Nor did the words, when it was the network: back in the box, and kept.
-    if(!(r&&r.status)&&text&&!ci.value){ ci.value=text; window.haruKeep.set('draft',text); }
-    $('chat').insertAdjacentHTML('beforeend','<div class="msg sys">'+(window.haruNet.online()?'That did not get through.':'She is out of reach. Your words are back in the box.')+'</div>');
+    deliveryStatus('The reply connection stopped. Checking whether she received your message…');
+    await recoverPending();
   }finally{
-    $('cb').disabled=false; $('chat').scrollTop=$('chat').scrollHeight;
+    clearTimeout(streamTimer);
+    if(activeDelivery===operation) activeDelivery=null;
+    $('cb').disabled=Boolean(pendingSend); $('chat').scrollTop=$('chat').scrollHeight;
     // The desk files the reply and hands it an id a moment later; re-read so
     // the bubble gets its row.
     setTimeout(load,1000);
@@ -1360,6 +1463,7 @@ async function deliver(text,sent,{interrupted=false}={}){
 
 $('cf').addEventListener('submit',async ev=>{
   ev.preventDefault();
+  if(pendingSend||$('cb').disabled) return;
   const text=ci.value.trim(); if(!text&&!staged.length)return;
   // Nothing leaves an offline phone; the words stay in the box (and in the
   // draft) rather than turning into a bubble that then fails.
@@ -1377,6 +1481,7 @@ $('cf').addEventListener('submit',async ev=>{
 // The saved day first, so the page is never blank while the real one loads.
 showSaved(false);
 load();
+if(pendingSend){ $('cb').disabled=true; void recoverPending(); }
 
 // ---- Under her bubbles: thumbs, a note, and asking again --------------------
 //
@@ -1449,6 +1554,33 @@ $('chat').addEventListener('click',async ev=>{
       try{ await post('/api/chat/rate',{id,note}); const said=document.createElement('span'); said.className='said'; said.textContent=note; input.replaceWith(said); }
       catch(r){ if(r&&r.status===401){location.reload();return;} input.disabled=false; }
     });
+    return;
+  }
+  // What was wrong with it, and what it should have been. This one is not for
+  // her — it goes to the tuning log on the desk and nothing else — so it says
+  // so on the tin and she never answers it.
+  if(act==='tune'){
+    const box=document.createElement('span'); box.className='tune';
+    const wrong=document.createElement('input'); wrong.placeholder='What was wrong…'; wrong.maxLength=1000;
+    const rather=document.createElement('input'); rather.placeholder='What she should have said (optional)…'; rather.maxLength=4000;
+    const save=document.createElement('button'); save.type='button'; save.textContent='log';
+    box.append(wrong,rather,save);
+    b.replaceWith(box); wrong.focus();
+    const log=async()=>{
+      const w=wrong.value.trim(), r=rather.value.trim();
+      if(!w&&!r) return;
+      save.disabled=wrong.disabled=rather.disabled=true;
+      try{
+        await post('/api/chat/tune',{id,wrong:w,rather:r});
+        const said=document.createElement('span'); said.className='said'; said.textContent='logged'+(w?': '+w:'')+(r?' (+ a rewrite)':'');
+        box.replaceWith(said);
+      }catch(r2){
+        if(r2&&r2.status===401){location.reload();return;}
+        save.disabled=wrong.disabled=rather.disabled=false;
+      }
+    };
+    save.addEventListener('click',log);
+    for(const field of [wrong,rather]) field.addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); void log(); } });
     return;
   }
   if(act==='up'||act==='down'){
@@ -1556,7 +1688,7 @@ window.addEventListener('pageshow',e=>{ if(e.persisted) refreshIfIdle(true); });
 // Re-read the day unless she is mid-answer, when the stream on screen is newer
 // than anything the server would hand back.
 // opened: the page came back in front of them; anything else is the page checking on its own.
-function refreshIfIdle(opened){ if($('cb').disabled) return; void load(!opened); }
+function refreshIfIdle(opened){ if($('cb').disabled){ void recoverPending(); return; } void load(!opened); }
 // Four minutes: she is being carried around, not watched. Anything faster reads
 // as pestering, and the spacing on her side would refuse it anyway.
 setInterval(askIfSheHasSomethingToSay,4*60_000);

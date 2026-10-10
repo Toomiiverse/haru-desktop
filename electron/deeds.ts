@@ -84,6 +84,8 @@ const DEEDS: Record<string, (args: Record<string, unknown>) => string> = {
   play_pokemon: a => (a.action === 'start' ? 'sat down to play your Pokémon Red' : a.action === 'stop' ? 'put the Game Boy down' : ''),
   read_manga: a => `sat down to read your manga${text(a.title) ? ` — ${text(a.title)}` : ''}`,
   convert_picture: a => `converted a picture to ${text(a.format, 'another format')}`,
+  // Asking how it is going is looking; putting it on or fetching it is the deed.
+  watch_anime: a => (a.action === 'status' ? '' : `saw to "${text(a.title, 'a show')}" for them — put it on, or started fetching it`),
 };
 
 export function isADeed(tool: string): boolean {

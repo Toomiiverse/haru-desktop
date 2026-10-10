@@ -36,10 +36,12 @@ export type AsideSource =
   | 'hanging'     // being left mid-conversation
   | 'weather'     // the weather turning where they are
   | 'upcoming'    // something on the calendar, an hour or a quarter of an hour out
+  | 'minecraft'   // him turning up in her world, or leaving it
   | 'followup'    // a beat after her own reply, the thing she left out
   | 'booked'      // something she set herself to come back to (scheduler.ts)
   | 'thought'     // something on her mind she decided to say (thoughts.ts)
   | 'goodnight'   // turning in for the night, at her own hour (hersleep.ts)
+  | 'anime'       // a show she fetched for them has landed, or never came (animefetch.ts)
   | 'other';
 
 export type Aside = {
@@ -124,7 +126,7 @@ export const ASIDE_DAYS = 7;
 // and 'upcoming' were missing, which is three of the seven sources that reach
 // the phone — the evening tally counted none of them, so being left on read
 // after "you left me hanging" cost them nothing.
-const SOURCES: AsideSource[] = ['screen', 'screenshot', 'activity', 'fullscreen', 'reminder', 'idle', 'journal', 'page', 'poke', 'kept', 'system', 'hanging', 'weather', 'upcoming', 'other', 'followup', 'goodnight', 'booked', 'thought'];
+const SOURCES: AsideSource[] = ['screen', 'screenshot', 'activity', 'fullscreen', 'reminder', 'idle', 'journal', 'page', 'poke', 'kept', 'system', 'hanging', 'weather', 'upcoming', 'other', 'followup', 'goodnight', 'booked', 'thought', 'minecraft', 'anime'];
 
 export function readAsides(saved: unknown): Aside[] {
   if (!Array.isArray(saved)) return [];
@@ -253,7 +255,7 @@ const CLOCK_STAMP_OPENING = /^\s*\d{1,2}(?::\d{2})?\s*(?:am|pm)?\s*[—–-]/i;
 
 const bare = (text: string) => text.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ').replace(/\s+/g, ' ').trim();
 
-export function alreadySaidRecently(asides: Aside[], timeZone: string, now: number, theirLastAt?: number, limit = ALREADY_SAID_LIMIT): string {
+export function alreadySaidRecently(asides: Aside[], timeZone: string, now: number, theirLastAt?: number, limit = ALREADY_SAID_LIMIT, subjectNow?: string): string {
   const said = asides
     .filter(aside => {
       const at = Date.parse(aside.at);
@@ -281,7 +283,15 @@ export function alreadySaidRecently(asides: Aside[], timeZone: string, now: numb
       'You have already said these, off your own back, since they last spoke. They are not in the conversation because nobody said them to you — they were remarks, and they went unanswered:',
       hanging.map(line).join('\n'),
     ].join('\n') : '',
-    'Do not make any of these points again, and do not open on a subject you have already remarked on. The subjects of those remarks — the weather, the time, whatever they were about — are closed: do not raise them again in any form, however fresh they look in the conversation.',
+    // "The weather" is named here as an example of a closed subject, which is
+    // true of a remark she already made and false of the one thing she has been
+    // woken up to say. In a weather push both fired at once — "rain is your
+    // reason for writing" at the top, "the weather is closed" at the bottom —
+    // and what came out was 20% rain and 80% another jab about being left on
+    // read (2026-09-20). Whatever she is writing about now is not closed.
+    subjectNow
+      ? `Do not make any of these points again, and do not open on a subject you have already remarked on. The subjects of those remarks — the time, whatever they were about — are closed: do not raise them again in any form, however fresh they look in the conversation. ${subjectNow} is the exception: it is what you have been prompted to write about this time, and it is not on that list.`
+      : 'Do not make any of these points again, and do not open on a subject you have already remarked on. The subjects of those remarks — the weather, the time, whatever they were about — are closed: do not raise them again in any form, however fresh they look in the conversation.',
   ].filter(Boolean).join('\n');
 }
 

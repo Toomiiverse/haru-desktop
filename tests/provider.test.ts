@@ -9,7 +9,30 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { openAIQuirks, promptUsage, toOpenAIBody } from '../electron/provider';
+import { openAIQuirks, promptUsage, toOpenAIBody, toOpenAIMessages, toolsUnsupported } from '../electron/provider';
+
+test('parallel same-name tool results keep distinct IDs, including legacy and synthetic calls', () => {
+  for (const withIds of [false, true]) {
+    const calls = ['A', 'B'].map((text, i) => ({ ...(withIds ? { id: `id-${i}` } : {}), function: { name: 'remember_about_user', arguments: { text } } }));
+    const out = toOpenAIMessages([{ role: 'assistant', tool_calls: calls },
+      { role: 'tool', tool_name: 'remember_about_user', content: 'A' },
+      { role: 'tool', tool_name: 'remember_about_user', content: 'B' }]);
+    assert.deepEqual(out.slice(1).map(row => row.tool_call_id), out[0].tool_calls!.map(call => call.id));
+    assert.notEqual(out[1].tool_call_id, out[2].tool_call_id);
+  }
+  const out = toOpenAIMessages([{ role: 'assistant', tool_calls: [{ id: 'A', function: { name: 'save' } }, { id: 'B', function: { name: 'save' } }] },
+    { role: 'tool', tool_name: 'save', tool_call_id: 'B', content: 'B' },
+    { role: 'tool', tool_name: 'save', tool_call_id: 'A', content: 'A' }]);
+  assert.deepEqual(out.slice(1).map(row => row.tool_call_id), ['B', 'A']);
+});
+
+test('malformed tool history never disables a models tools', () => {
+  assert.equal(toolsUnsupported(400, 'messages[30].tool_call_id does not match any earlier assistant tool_call'), false);
+  assert.equal(toolsUnsupported(400, 'Invalid function arguments'), false);
+  assert.equal(toolsUnsupported(400, 'This model does not support tools'), true);
+  assert.equal(toolsUnsupported(400, 'Tool use is not supported'), true);
+  assert.equal(toolsUnsupported(500, 'tools not supported'), false);
+});
 
 const conversation = [{ role: 'user', content: 'hi' }];
 const tools = [{ type: 'function', function: { name: 'noop', description: '', parameters: { type: 'object', properties: {}, required: [] } } }];

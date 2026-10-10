@@ -29,7 +29,7 @@ import { convertImage, FORMATS, normaliseFormat } from './convert';
 import { cancelPower, closeApp, desktopSupported, findApps, isCancellable, launch, listRunning, matchApp, matchRunning, normalisePower, POWER_DELAY_S, readDesktopConfig, runPower } from './desktop';
 import { formatPage, formatResults, readSearchConfig, readWebPage, SearchBlocked, searchWeb, type SearchConfig, type SearchResult } from './search';
 import { fetchTranscript, formatTranscript, titleFrom, transcriptInstruction, videoIdFrom, watchUrl } from './transcripts';
-import { findSuperseded, semanticSimilarities, supersede, MEMORY_KINDS, type MemoryKind, type MemoryRecord } from './memory';
+import { findSuperseded, isInTheirWords, semanticSimilarities, supersede, MEMORY_KINDS, type MemoryKind, type MemoryRecord } from './memory';
 import { appendToBlockValue, canEditBlock, findBlock, replaceInBlockValue, resolveBlockValue, withEditedValue, type BlockSources, type MemoryBlock } from './blocks';
 import { adopt } from './tastes';
 import { activateTab, closeTab, listTargets, navigate, openTab, pageText, screenshot } from './browserctl';
@@ -42,6 +42,9 @@ import { isDay } from './chatsearch';
 import { KNOWLEDGE_CATEGORIES, type KnowledgeCategory, type KnowledgeStore } from './knowledge';
 import { localEmotion } from './emotion';
 import { readTone } from './tone';
+import type { MinecraftStatus } from './minecraft';
+import { isSkillName, SKILL_NAMES, SKILLS } from './minecraftplan';
+import type { WatchInput } from './anime';
 
 /**
  * The shape every module that fetches asks for. Each declares its own private
@@ -110,6 +113,40 @@ export const WARDROBE_TOOL: ChatTool = {
     name: 'show_wardrobe',
     description: 'Open the wardrobe panel so the user can see and change how you look — colours, hair, accessories. Call it whenever they ask you to change how you look. It only shows the options; nothing changes until they pick.',
     parameters: { type: 'object', properties: {}, required: [] },
+  },
+};
+
+/**
+ * Her body in Minecraft, from a conversation.
+ *
+ * Two tools, not twenty-odd: one to look and one to act, with the skill named
+ * as an argument. The skill list is in the description, which is how the model
+ * learns what her body can do; the name is checked against the same list when
+ * the call arrives, and again at the worker's door. Nothing here composes an
+ * action — the model picks a name.
+ */
+export const MINECRAFT_STATUS_TOOL: ChatTool = {
+  type: 'function',
+  function: {
+    name: 'minecraft_status',
+    description: 'What your body in Minecraft is doing right now — where you are, how you are, who is on the server with you, what you are carrying, and the project you are in the middle of. Call it whenever they ask what you are up to in Minecraft, or before deciding what to tell your body to do.',
+    parameters: { type: 'object', properties: {}, required: [] },
+  },
+};
+
+export const MINECRAFT_DO_TOOL: ChatTool = {
+  type: 'function',
+  function: {
+    name: 'minecraft_do',
+    description: `Tell your body in Minecraft to do one thing, by name. It can only do these: ${SKILL_NAMES.map(name => `${name} (${SKILLS[name]})`).join('; ')}. Call it when they ask you to do something in the game — follow them, come to them, stop, go home, get something, put something away. Pick the one skill that fits and pass its arguments.`,
+    parameters: {
+      type: 'object',
+      properties: {
+        skill: { type: 'string', enum: SKILL_NAMES, description: 'Which of the skills above.' },
+        args: { type: 'object', description: 'The arguments that skill takes, as named in the list — e.g. {"name": "Tommy"} for followPlayer, {"type": "spruce_log", "amount": 16} for collectBlock.' },
+      },
+      required: ['skill'],
+    },
   },
 };
 
@@ -708,6 +745,32 @@ export const ANILIST_TOOL: ChatTool = {
   },
 };
 
+/**
+ * Watching with her (anime.ts). One tool for the whole ask: on the server it
+ * plays, off the server it fetches, and "how's it going" is the same tool
+ * asked for status. Described plainly, as the hands-on tools are: the guards —
+ * their word before a fetch that squeezes the disk, no guessing between two
+ * shows — are in code, where a model cannot talk its way past them.
+ */
+export const WATCH_TOOL: ChatTool = {
+  type: 'function',
+  function: {
+    name: 'watch_anime',
+    description: 'Put an anime on for them, or fetch it when it is not on the server yet. Call this whenever they want to watch something — "let\'s watch Naruto", "put the next episode on", "get Made in Abyss for me". It plays their next unwatched episode on whichever Jellyfin player they have open, or starts the download and tells you what it found. With action "status" it says how a download is going. You really can — never merely say you will.',
+    parameters: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'The show, as they said it — "Naruto", not the whole sentence.' },
+        action: { type: 'string', enum: ['watch', 'status'], description: '"watch" to put it on or fetch it (the default); "status" when they ask how a download is going.' },
+        where: { type: 'string', description: 'Where to play it, when they say: "phone", "desk" (their PC), "tv", or the name of a device. Leave it out when they do not say and it goes to whatever Jellyfin player they used last.' },
+        tvdbId: { type: 'number', description: 'Only after this tool listed choices and they picked one: that choice\'s tvdbId.' },
+        confirm: { type: 'boolean', description: 'Only after this tool asked for their word on the size and they gave it: true.' },
+      },
+      required: ['title'],
+    },
+  },
+};
+
 export const CONVERT_TOOL: ChatTool = {
   type: 'function',
   function: {
@@ -883,7 +946,9 @@ export const SHELL_TOOL: ChatTool = {
 const SHELL_TALK = /`[^`]+`|^\s*\$\s|\b(?:run|execute|command|terminal|shell|bash|script|reboot|update|upgrade|install|apt|git|docker|systemctl|journalctl|df|du|ls|cat|grep|tail|ps|top|kill|ping|curl|wget|chmod|chown|mkdir|mv|cp|rm|nvidia-smi|uptime|free|whoami|folder|directory|disk|space|the server|the system|the box|the machine|the pc)\b/i;
 
 export function shellRelevant(message: string): boolean {
-  return SHELL_TALK.test(message ?? '');
+  // A business name is not a request to access the computer. Strip only the
+  // proper name; explicit commands elsewhere in the sentence still match.
+  return SHELL_TALK.test((message ?? '').replace(/\b(?:the\s+)?pc\s+project\b/gi, ''));
 }
 
 /**
@@ -952,7 +1017,7 @@ export const READ_MANGA_TOOL: ChatTool = {
   type: 'function',
   function: {
     name: 'read_manga',
-    description: 'Read the next stretch of your own manga now — the series you are partway through, or a new one by name, which goes on your shelf. Use it when they tell you to go and read, or when it is your own time and you feel like it. It takes a few minutes of actually reading pages; you are told when it has started and, when it ran to the end, what you read. Fetching a manga for THEM is get_manga, not this.',
+    description: 'Read the next stretch of your own manga now — the series you are partway through, or a new one by name, which goes on your shelf. Use it when they tell you to go and read, or when it is your own time and you feel like it. It takes a few minutes of actually reading pages; you are told when it has started and, when it ran to the end, what you read. Fetching a manga for THEM is get_manga, not this. One you have read to the end comes back as finished, not read again: then it is something else by name, or nothing.',
     parameters: {
       type: 'object',
       properties: {
@@ -1003,7 +1068,26 @@ export type ToolAvailability = {
   desktop: { launch: boolean; power: boolean };
   /** Up because they knocked her awake (hersleep.ts): the one time going back to sleep is on the table. */
   knockedAwake: boolean;
+  /**
+   * Her Minecraft body is switched on (minecraft.enabled and the link exists).
+   *
+   * Not gated on the worker actually answering: offered while the link exists,
+   * so that when it is down she can say so rather than having no tool and
+   * inventing what she is up to in a world she cannot see.
+   */
+  minecraft: boolean;
+  /** The anime stack is wired up (anime.ts): Jellyfin, Sonarr and Prowlarr reachable in config. Optional so fixtures need not name it. */
+  anime?: boolean;
 };
+
+/** Whether the message could be about watching something. Broad, like the
+ *  machine gate: a stray match is one tool on the table, a miss is her saying
+ *  she cannot put a show on. */
+const WATCH_TALK = /\b(?:watch\w*|episodes?|eps?|anime|series|seasons?|shows?|put (?:\w+ ){0,2}on|open (?:\w+ ){0,2}on|(?:on|to) (?:my |the )?(?:phone|tv|telly|laptop|pc|desktop|computer)|downloads?\w*|fetch\w*|grab\w*|torrents?|jellyfin|sonarr|next one|play(?:ing)?|binge\w*|rewatch\w*)\b/i;
+
+export function watchRelevant(message: string): boolean {
+  return WATCH_TALK.test(message ?? '');
+}
 
 /** Whether the message is about the machine or the apps on it. The gate that
  *  keeps the heavy system/desktop tools off turns that have nothing to do with
@@ -1077,6 +1161,13 @@ export function chatTools(available: ToolAvailability, latest = ''): ChatTool[] 
   if (available.hands && available.desktop.power && machine) tools.push(POWER_TOOL);
   if (available.browser && available.hands) tools.push(BROWSER_TOOL);
   if (available.knockedAwake) tools.push(SLEEP_TOOL);
+  // Her body in the game. Not gated on hands: the worker is her, not the
+  // machine, and the worst a skill can do is walk somewhere in a game.
+  if (available.minecraft) tools.push(MINECRAFT_STATUS_TOOL, MINECRAFT_DO_TOOL);
+  // Watching with her. Not gated on hands, like the Claude sessions: the point
+  // is "let's watch Naruto" from the phone too, and the worst a page could
+  // start is a subtitled anime he is then told about by name and size.
+  if (available.anime && (!latest || watchRelevant(latest))) tools.push(WATCH_TOOL);
   return tools;
 }
 
@@ -1187,6 +1278,16 @@ export type ToolDeps = {
   browserPort(): number;
   /** Where a browser screenshot lands — the screenshots folder or a fallback. */
   browserShotDir(): string;
+  /** Her body in Minecraft (minecraft.ts), or null when switched off. */
+  minecraft: {
+    status(): Promise<MinecraftStatus | null>;
+    send(skill: string, args: Record<string, unknown>): Promise<{ ok: boolean; error?: string; observation?: Record<string, unknown> }>;
+  } | null;
+  /** The anime stack (anime.ts), or null when it is not wired up. Optional so fixtures need not name it. */
+  anime?: {
+    watch(input: WatchInput): Promise<Record<string, unknown>>;
+    status(title: string): Promise<Record<string, unknown>>;
+  } | null;
 };
 
 
@@ -1597,6 +1698,11 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
         const id = await currentTab();
         if (!id) return JSON.stringify({ error: 'no tab to read.' });
         const text = await pageText(port, id, fetchImpl);
+        // A stranger's page is in the conversation now, exactly as after
+        // read_web_page: her tools go for the rest of this reply, so nothing on the
+        // page can talk her into writing a memory or touching the machine. Only
+        // when there is text — a tab still loading reads empty and can be read again.
+        if (text) markPageRead();
         return JSON.stringify({ text: text.slice(0, 3000), note: 'This is what is on the page right now — answer from it, not from memory.' });
       }
       if (action === 'screenshot') {
@@ -1654,8 +1760,14 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
     // the fact. Their own words carry it; the fact text stands in when there is
     // nothing of theirs to read.
     const told = latestUserMessage || fact;
+    // 'explicit' is the top of the trust ladder and skips the nagging test, so it
+    // is for what they said. A fact that shares nothing with their message came
+    // from somewhere else — a page she read, or her own guess — and is filed as
+    // inferred: kept, but believed less (memory.ts isInTheirWords).
+    const theirs = isInTheirWords(fact, latestUserMessage);
+    if (!theirs) console.log(`[memory] "${fact.slice(0, 60)}" is not in their words — filed as inferred, not explicit`);
     const saved = addMemory(fact, kind, subject, {
-      source: 'explicit', predicate, object,
+      source: theirs ? 'explicit' : 'inferred', predicate, object,
       emotion: localEmotion(told),
       emotionIntensity: readTone(told).heat,
     });
@@ -1881,6 +1993,59 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
     return JSON.stringify({ restarting: true, note: 'Tell them you are restarting and will be right back.' });
   }
 
+  if (name === 'minecraft_status' || name === 'minecraft_do') {
+    // Re-checked here: a model can name a tool it was never offered.
+    if (!deps.minecraft) return JSON.stringify({ error: 'Minecraft is switched off — say so plainly, in your own words.' });
+    if (name === 'minecraft_status') {
+      const status = await deps.minecraft.status();
+      if (!status) return JSON.stringify({ error: 'Your Minecraft body is not answering — the worker is not running. Say so plainly.' });
+      const seen = status.observation;
+      return JSON.stringify({
+        inTheWorld: seen.state === 'online',
+        state: seen.state,
+        where: seen.where ?? (seen.self ? `${seen.self.position.x}, ${seen.self.position.y}, ${seen.self.position.z}` : null),
+        dimension: seen.self?.dimension ?? null,
+        health: seen.self?.health ?? null,
+        food: seen.self?.food ?? null,
+        time: seen.self?.time ?? null,
+        doing: seen.intent.kind,
+        playersHere: seen.nearby.players,
+        carrying: seen.inventory,
+        project: seen.currentProject,
+        knownNearby: seen.knownNearby,
+        note: 'Say it as yourself in a sentence or two — where you are, what you are doing, who is there. Never read this back as a list.',
+      });
+    }
+    const skill = args.skill;
+    if (!isSkillName(skill)) {
+      return JSON.stringify({ error: `"${String(skill).slice(0, 40)}" is not something your body can do. It can: ${SKILL_NAMES.join(', ')}. Pick one of those, or say you cannot.` });
+    }
+    const skillArgs = args.args && typeof args.args === 'object' && !Array.isArray(args.args) ? args.args as Record<string, unknown> : {};
+    const result = await deps.minecraft.send(skill, skillArgs);
+    console.log(`[minecraft] told to ${skill}${Object.keys(skillArgs).length ? ` ${JSON.stringify(skillArgs).slice(0, 120)}` : ''}: ${result.ok ? 'ok' : `failed — ${result.error}`}`);
+    if (!result.ok) {
+      return JSON.stringify({ done: false, skill, because: result.error ?? 'it did not work', note: 'Say what went wrong in your own words, briefly. Never read the reason back verbatim.' });
+    }
+    return JSON.stringify({ done: true, skill, result: result.observation ?? {}, note: 'Say what your body is now doing, briefly and as yourself. Do not list the result.' });
+  }
+  if (name === 'watch_anime') {
+    // Re-checked here: a model can name a tool it was never offered.
+    if (!deps.anime) return JSON.stringify({ error: 'The anime server is not wired up to you — say so plainly, in your own words.' });
+    const title = typeof args.title === 'string' ? args.title.trim() : '';
+    if (!title) return JSON.stringify({ error: 'title is required — the show they named.' });
+    const action = args.action === 'status' ? 'status' : 'watch';
+    try {
+      const result = action === 'status'
+        ? await deps.anime.status(title)
+        : await deps.anime.watch({ title, tvdbId: typeof args.tvdbId === 'number' ? args.tvdbId : undefined, confirm: args.confirm === true, where: typeof args.where === 'string' ? args.where.trim() : undefined });
+      console.log(`[anime] ${action} "${title}" -> ${String(result.outcome ?? '?')}${result.show ? ` (${String(result.show)})` : ''}`);
+      return JSON.stringify(result);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      console.warn(`[anime] ${action} "${title}" failed: ${reason}`);
+      return JSON.stringify({ error: `The anime server could not be reached (${reason}). Say you could not check or start it; do not say it is on or on its way.` });
+    }
+  }
   if (name === 'go_back_to_sleep') {
     const done = deps.goBackToSleep({ block: args.block === true });
     if (!done) return JSON.stringify({ error: 'You are not up because of them right now — nothing to go back to.' });

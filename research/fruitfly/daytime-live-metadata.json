@@ -1,0 +1,31 @@
+{
+  "at": "2026-09-16T14:27:34.227Z",
+  "service": {
+    "ActiveState": "active",
+    "MainPID": "2794",
+    "NRestarts": "0",
+    "ExecMainStartTimestamp": "Wed 2026-09-16 13:29:01 AWST"
+  },
+  "httpStatus": 200,
+  "knowledge": {
+    "bytes": 60232696,
+    "documents": 19,
+    "chunks": 5570,
+    "activeChunks": 99
+  },
+  "feedback": {
+    "rows": 63,
+    "distinctReplyIds": 54,
+    "latestValidRatings": 53,
+    "latestUp": 47,
+    "latestDown": 6,
+    "modelConfigurationsInLog": 3
+  },
+  "provider": "ollama",
+  "modelMatchesEmotionExperiment": false,
+  "limitations": [
+    "Counts only; no private text leaves this process",
+    "Feedback concerns existing chat replies, not shadow proposals",
+    "Service health and data inventory are a point-in-time snapshot"
+  ]
+}

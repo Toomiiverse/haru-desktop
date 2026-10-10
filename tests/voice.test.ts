@@ -37,6 +37,15 @@ test('an initialism is left to be spelled out, because that is how it is said', 
   }
 });
 
+test('her hardware talk and the units she quotes are spelled, not said as words', () => {
+  // HDMI and MIA appeared as capitals in her history; GB/TB/MB/LLM are the
+  // units and jargon she reaches for talking about this machine. Left all-caps
+  // so the engine spells them, the same way it spells CPU.
+  for (const said of ['HDMI', 'MIA', 'XAI', 'GB', 'TB', 'MB', 'LLM']) {
+    assert.equal(spokenCase(`the ${said} thing`), `the ${said} thing`, `${said} was mangled`);
+  }
+});
+
 test('two letters stay as they are, where a shout and an abbreviation are least distinguishable', () => {
   assert.equal(spokenCase('OK then'), 'OK then');
   assert.equal(spokenCase('MY word'), 'MY word');
@@ -410,6 +419,30 @@ test('breeze is a recognised engine and speaks the same acting directions', () =
   // The mood is an instruction to a cloned voice, the same direction Hume gets.
   for (const emotion of EMOTIONS) {
     assert.ok(BREEZE_DESCRIPTIONS[emotion]?.trim(), `no acting direction for ${emotion}`);
+  }
+});
+
+test('breeze carries a tempo cue in every mood, because it has no speed parameter', () => {
+  // Breeze's API has no speed field — delivery pace rides in the instruction
+  // (its own docs demonstrate "Speak slowly with a restrained, serious tone").
+  // Every mood must ask for its own pace or the delivery defaults to one speed.
+  const tempoByEmotion: Record<string, RegExp> = {
+    sleepy: /slow|drowsy/i,
+    bored: /drawn out|flat/i,
+    worried: /soft|strained/i,
+    determined: /deliberate|firm/i,
+    embarrassed: /hesitant|sheepish/i,
+    affectionate: /gentle|soft/i,
+    happy: /quicker|bright/i,
+    curious: /light|wondering/i,
+    smug: /unhurried|teasing/i,
+    surprised: /quick|sharp/i,
+    annoyed: /sharp|clipped/i,
+    neutral: /flat|dry/i,
+  };
+  for (const emotion of EMOTIONS) {
+    const direction = BREEZE_DESCRIPTIONS[emotion];
+    assert.match(direction, tempoByEmotion[emotion], `no tempo cue for ${emotion}`);
   }
 });
 
