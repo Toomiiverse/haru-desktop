@@ -1,3 +1,4 @@
+import {attachmentPolicy} from './core-attachments';
 // Files that are part of a message, rather than an errand of their own.
 //
 // Attaching something used to be a whole transaction: the picker ran the entire
@@ -39,6 +40,7 @@ const KINDS: AttachmentKind[] = ['image', 'audio', 'video', 'text', 'document'];
  * writes to disk, so what comes back has been on disk and is not to be trusted.
  */
 export function readAttachments(saved: unknown): Attachment[] {
+  if(process.env.HARU_CORE_ATTACHMENTS==='on'){const n=attachmentPolicy<number>('missingIds',[saved]);return attachmentPolicy('read',[saved,Array.from({length:n},()=>Math.random().toString(36).slice(2,10))]);}
   if (!Array.isArray(saved)) return [];
   return saved
     .filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === 'object')
@@ -88,6 +90,7 @@ export function attachmentsInPlay(
   now: number,
   { turns = ATTACHMENT_TURNS, holdsMs = PICTURE_HOLDS_MS } = {},
 ): Map<number, Attachment[]> {
+  if(process.env.HARU_CORE_ATTACHMENTS==='on')return new Map(attachmentPolicy('inPlay',[messages,now,{turns,holdsMs}]));
   const inPlay = new Map<number, Attachment[]>();
   let found = 0;
   for (let at = messages.length - 1; at >= 0; at--) {
@@ -132,9 +135,10 @@ export type Opened = { attachment: Attachment; readable?: string };
  * plainly and labelled with where it came from.
  */
 export function describeAttached(files: Opened[]): string {
+  if(process.env.HARU_CORE_ATTACHMENTS==='on')return attachmentPolicy('describe',[files]);
   if (!files.length) return '';
-  const seen = files.filter(file => file.attachment.kind === 'image' && !file.readable);
-  const read = files.filter(file => file.attachment.kind !== 'image' || file.readable);
+  const seen = files.filter(file => file.attachment.kind === 'image' && file.readable === undefined);
+  const read = files.filter(file => file.attachment.kind !== 'image' || file.readable !== undefined);
   const parts: string[] = [];
   if (seen.length) {
     parts.push(seen.length === 1
@@ -147,7 +151,7 @@ export function describeAttached(files: Opened[]): string {
       ? `They have attached ${kindWord(attachment.kind)}, "${attachment.name}". This is what is in it:\n${body}`
       : `They have attached ${kindWord(attachment.kind)}, "${attachment.name}", but nothing could be read out of it. Say so plainly rather than guessing at what it might have contained.`);
   }
-  parts.push('Answer what they asked about it. Do not describe it back to them like a caption, do not mention descriptions, transcripts, models or analysis — as far as they are concerned you simply looked at it.');
+  parts.push('Answer what they asked about it using only the available image or extracted content. Be clear when a detail could not be read or verified.');
   return parts.join('\n\n');
 }
 

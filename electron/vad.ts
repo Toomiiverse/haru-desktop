@@ -28,15 +28,18 @@ export const DEFAULT_VAD: VadOptions = { startAfterMs: 90, endAfterMs: 700, minM
 
 export type VadEvent =
   | { type: 'start'; t: number }
-  | { type: 'end'; from: number; to: number; ms: number }
+  | { type: 'end'; from: number; to: number; ms: number; speechEnd: number }
   | { type: 'drop' };
 
 export type Vad = {
   /** One level reading (RMS, 0..1) at time t (ms). `ratio` overrides the option for this reading. */
   feed(level: number, t: number, ratio?: number): VadEvent | null;
   speaking(): boolean;
+  possibleSpeech(): boolean;
   floor(): number;
   threshold(ratio?: number): number;
+  /** Read-only tentative cut, identical to a later quiet endpoint if speech does not resume. */
+  preview(t: number, quietMs: number): {from:number;to:number;speechEnd:number} | null;
   reset(): void;
 };
 
@@ -67,13 +70,18 @@ export function makeVad(options: Partial<VadOptions> = {}): Vad {
         state = 'quiet';
         const to = over ? t : lastLoud;
         if (to - startedAt < o.minMs) return { type: 'drop' };
-        return { type: 'end', from: Math.max(0, startedAt - o.prerollMs), to: to + 100, ms: to - startedAt };
+        return { type: 'end', from: Math.max(0, startedAt - o.prerollMs), to: to + 100, ms: to - startedAt, speechEnd: to };
       }
       return null;
     },
     speaking: () => state === 'speech',
+    possibleSpeech: () => state !== 'quiet',
     floor: () => floor,
     threshold,
+    preview(t, quietMs) {
+      return state === 'speech' && t - lastLoud >= Math.max(100, quietMs) && lastLoud - startedAt >= o.minMs
+        ? {from:Math.max(0,startedAt-o.prerollMs),to:lastLoud+100,speechEnd:lastLoud} : null;
+    },
     reset() { state = 'quiet'; },
   };
 }

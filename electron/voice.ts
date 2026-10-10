@@ -12,7 +12,11 @@
 import { net } from 'electron';
 import { readFile } from 'node:fs/promises';
 import { basename } from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import { EMOTIONS, type EmotionName } from './emotion';
+import { voiceSense, type DeliveryPlan } from './voice-sense';
+import { coreIdentity } from './core-identity';
+import { corePolicySync } from './core-policy-sync';
 
 // 'windows' has no adapter here — it is spoken by the renderer through the
 // built-in SAPI voices, which are reachable from a window and nowhere else.
@@ -30,6 +34,8 @@ export type VoiceSampling = { topK: number; topP: number; temperature: number; r
 export const DEFAULT_SAMPLING: VoiceSampling = { topK: 15, topP: 1, temperature: 1, repetitionPenalty: 1.35, fragmentInterval: 0.45 };
 
 export type VoiceConfig = {
+  /** Per-utterance direction, never saved by readVoiceConfig. */
+  deliveryInstruction?: string;
   engine: VoiceEngine;
   endpoint: string;
   /** OpenAI-compatible: the voice name. GPT-SoVITS: path to the reference clip. */
@@ -140,6 +146,7 @@ export const DEFAULT_VOICE: VoiceConfig = {
  * empty path the server will reject.
  */
 export function referenceFor(config: VoiceConfig, emotion?: EmotionName | null): VoiceReference {
+  if(process.env.HARU_CORE_SPEECH_BOUNDARY==='on')return corePolicySync<any>('speech-boundary.reference',[config,emotion??null]);
   const mapped = emotion ? config.emotionVoices[emotion] : undefined;
   if (mapped?.clip) return mapped;
   return { clip: config.voice, text: config.referenceText };
@@ -207,6 +214,7 @@ const SHOUTED = new Set(['NO', 'GO', 'OI', 'HEY', 'NOW', 'STOP', 'WHAT', 'WHY', 
  * a word is a worse failure than "STOP" spelled out.
  */
 export function spokenCase(text: string): string {
+  if(process.env.HARU_CORE_SPEECH_BOUNDARY==='on')return corePolicySync<any>('speech-boundary.spokenCase',[text]);
   return text.replace(/\b[A-Z][A-Z'’]{1,}\b/g, token => {
     const letters = token.replace(/['’]/g, '');
     if (SHOUTED.has(letters)) return token.toLowerCase();
@@ -229,6 +237,7 @@ export function spokenCase(text: string): string {
  * capitals also survive into the subtitle, where seeing STOP is the point.
  */
 export function hasShout(text: string): boolean {
+  if(process.env.HARU_CORE_SPEECH_BOUNDARY==='on')return corePolicySync<any>('speech-boundary.hasShout',[text]);
   for (const token of text.match(/\b[A-Z][A-Z'’]{1,}\b/g) ?? []) {
     const letters = token.replace(/['’]/g, '');
     if (SHOUTED.has(letters)) return true;
@@ -245,6 +254,7 @@ export function hasShout(text: string): boolean {
  * shoutVoice is there for anyone who wants to record one properly.
  */
 export function shoutReference(config: VoiceConfig, fallback: VoiceReference): VoiceReference {
+  if(process.env.HARU_CORE_SPEECH_BOUNDARY==='on')return corePolicySync<any>('speech-boundary.shoutReference',[config,fallback]);
   if (config.shoutVoice?.clip) return config.shoutVoice;
   const angry = config.emotionVoices.annoyed;
   if (angry?.clip) return angry;
@@ -252,6 +262,7 @@ export function shoutReference(config: VoiceConfig, fallback: VoiceReference): V
 }
 
 export function speakableText(reply: string): string {
+  if(process.env.HARU_CORE_SPEECH_BOUNDARY==='on')return corePolicySync<any>('speech-boundary.speakableText',[reply]);
   return reply
     .replace(/```[\s\S]*?```/g, ' ')
     .replace(/`([^`]+)`/g, '$1')
@@ -290,6 +301,7 @@ export function speakableText(reply: string): string {
  * flat moods; anything else takes whichever comes. `files` is voice.sighs.
  */
 export function pickSigh(files: readonly string[], emotion: string | null | undefined, random: () => number = Math.random): string | null {
+  if(process.env.HARU_CORE_SPEECH_BOUNDARY==='on'){const p=corePolicySync<any>('speech-boundary.pickSigh',[files,emotion??null]);return p?.needsRandom?corePolicySync<any>('speech-boundary.pickSigh',[files,emotion??null,random()]):p;}
   const all = files.filter(Boolean);
   if (!all.length) return null;
   const grunts = all.filter(file => /grunt|hmph|loud/i.test(file));
@@ -301,6 +313,7 @@ export function pickSigh(files: readonly string[], emotion: string | null | unde
 }
 
 export function splitForSpeech(text: string, maxChars = MAX_CHUNK_CHARS): string[] {
+  if(process.env.HARU_CORE_SPEECH_BOUNDARY==='on')return corePolicySync<any>('speech-boundary.splitForSpeech',[text,maxChars]);
   const sentences = text.split(/(?<=[.!?…])\s+/).filter(part => part.trim().length);
   const chunks: string[] = [];
   let current = '';
@@ -327,6 +340,7 @@ export function splitForSpeech(text: string, maxChars = MAX_CHUNK_CHARS): string
  * sentence raw, and speakableText strips them at /api/speak.
  */
 export function streamedSentences(buffer: string): { sentences: string[]; rest: string } {
+  if(process.env.HARU_CORE_SPEECH_BOUNDARY==='on')return corePolicySync<any>('speech-boundary.streamedSentences',[buffer]);
   const sentences: string[] = [];
   let rest = buffer ?? '';
   // /s: a paragraph break must not freeze the cut — a sentence ending in the
@@ -404,7 +418,24 @@ export function isSilent(bytes: Uint8Array): boolean {
  * what the clip-based engines select on and what Hume steers delivery with;
  * the other engines ignore it.
  */
+export function planVoice(config: VoiceConfig, reference: VoiceReference, emotion?: EmotionName | null): { config: VoiceConfig; reference: VoiceReference; plan: DeliveryPlan } {
+  if(process.env.HARU_CORE_SPEECH_BOUNDARY==='on')return corePolicySync<any>('speech-boundary.planVoice',[config,reference,emotion??null,voiceSense.plan(emotion??'neutral')]);
+  const plan = voiceSense.plan(emotion ?? 'neutral');
+  const expressive = config.engine === 'breeze' || config.engine === 'hume';
+  const directions = config.engine === 'breeze' ? BREEZE_DESCRIPTIONS : HUME_DESCRIPTIONS;
+  const chosen = plan.emotion !== (emotion ?? 'neutral') ? referenceFor(config, plan.emotion) : reference;
+  const applied = { ...config, speed: Math.max(0.5, Math.min(2, config.speed * plan.speedScale)), ...(expressive && plan.instruction ? { deliveryInstruction: plan.instruction } : {}) };
+  return { config: applied, reference: chosen, plan: { ...plan, instruction: expressive ? plan.instruction || directions[plan.emotion] : 'reference voice and playback speed; free-form acting directions are unsupported by this engine' } };
+}
+
 export async function synthesise(text: string, config: VoiceConfig, reference: VoiceReference = referenceFor(config), auth: Record<string, string> = {}, emotion?: EmotionName | null): Promise<{ audio: Uint8Array; mime: string } | null> {
+  const planned = planVoice(config, reference, emotion);
+  const clip = await synthesisePlanned(text, planned.config, planned.reference, auth, planned.plan.emotion);
+  if (clip) voiceSense.generated(text, planned.plan, config.engine, clip.audio, clip.mime);
+  return clip;
+}
+
+async function synthesisePlanned(text: string, config: VoiceConfig, reference: VoiceReference, auth: Record<string, string>, emotion?: EmotionName | null): Promise<{ audio: Uint8Array; mime: string } | null> {
   const endpoint = trimEndpoint(config.endpoint);
   switch (config.engine) {
     case 'off':
@@ -432,7 +463,7 @@ export async function synthesise(text: string, config: VoiceConfig, reference: V
       const key = auth['X-Hume-Api-Key'];
       if (!key) throw new Error('Hume is selected but no Hume API key is saved.');
       if (!config.voice) throw new Error('Hume is selected but no Hume voice is saved.');
-      const directions = [emotion ? HUME_DESCRIPTIONS[emotion] : '', hasShout(text) ? 'loud, shouting' : ''].filter(Boolean).join(', ');
+      const directions = config.deliveryInstruction || [emotion ? HUME_DESCRIPTIONS[emotion] : '', hasShout(text) ? 'loud, shouting' : ''].filter(Boolean).join(', ');
       const response = await net.fetch(HUME_TTS_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Hume-Api-Key': key },
@@ -482,7 +513,8 @@ export async function synthesise(text: string, config: VoiceConfig, reference: V
  *  shout where the text is one. Shared by the buffered and streaming paths so
  *  the phone and the desk ask for the same delivery. */
 function breezeInstruction(text: string, emotion?: EmotionName | null): string {
-  return [emotion ? BREEZE_DESCRIPTIONS[emotion] : '', hasShout(text) ? 'loud, shouting' : ''].filter(Boolean).join(', ') || 'Speak clearly and naturally.';
+  const acting = coreIdentity()?.breezeActing ?? BREEZE_DESCRIPTIONS;
+  return [emotion ? acting[emotion] : '', hasShout(text) ? 'loud, shouting' : ''].filter(Boolean).join(', ') || 'Speak clearly and naturally.';
 }
 
 /** Builds and sends the multipart clone-and-direction request Breeze's API
@@ -499,13 +531,23 @@ function breezeInstruction(text: string, emotion?: EmotionName | null): string {
  * as the stream runs. Resolves to the release.
  */
 let breezeTurn: Promise<void> = Promise.resolve();
-export function breezeSlot(): Promise<() => void> {
+export function breezeSlot(signal?: AbortSignal): Promise<() => void> {
+  signal?.throwIfAborted();
   let release: () => void = () => {};
   let released = false;
   const mine = new Promise<void>(resolve => { release = () => { if (!released) { released = true; resolve(); } }; });
   const before = breezeTurn;
   breezeTurn = before.then(() => mine);
-  return before.then(() => release);
+  if (!signal) return before.then(() => release);
+  return new Promise((resolve, reject) => {
+    const abort = () => { release(); reject(signal.reason); };
+    signal.addEventListener('abort', abort, { once: true });
+    before.then(() => {
+      signal.removeEventListener('abort', abort);
+      if (signal.aborted) { release(); reject(signal.reason); }
+      else resolve(release);
+    });
+  });
 }
 
 /** The stream as it is, and the slot given back when it ends, is cancelled,
@@ -532,11 +574,16 @@ function releasingWhenDone(source: ReadableStream<Uint8Array>, release: () => vo
   });
 }
 
-async function postBreeze(config: VoiceConfig, reference: VoiceReference, text: string, emotion?: EmotionName | null, seed?: number): Promise<Response> {
+async function postBreeze(config: VoiceConfig, reference: VoiceReference, text: string, emotion?: EmotionName | null, seed?: number, signal?: AbortSignal): Promise<Response> {
+  signal?.throwIfAborted();
   const form = new FormData();
   form.append('text', text);
-  form.append('instruction', breezeInstruction(text, emotion));
-  form.append('cfg_scale', '4');
+  form.append('instruction', config.deliveryInstruction || breezeInstruction(text, emotion));
+  const guidance = process.env.HARU_CORE_BREEZE_GUIDANCE === 'on'
+    ? corePolicySync<number>('breeze.guidance', [emotion ?? null]) : 4;
+  if (guidance !== 2 && guidance !== 4) throw new Error('invalid_core_breeze_guidance');
+  signal?.throwIfAborted();
+  form.append('cfg_scale', String(guidance));
   form.append('ref_text', reference.text || '');
   // Random per line, not the server's fixed 42: a fixed seed gives the same
   // delivery for the same text every time, which is how a voice starts to
@@ -560,7 +607,7 @@ async function postBreeze(config: VoiceConfig, reference: VoiceReference, text: 
     const response = await net.fetch(`${trimEndpoint(config.endpoint)}${BREEZE_SPEECH_URL}`, {
       method: 'POST',
       body: form,
-      signal: AbortSignal.timeout(BREEZE_TIMEOUT_MS),
+      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(BREEZE_TIMEOUT_MS)]) : AbortSignal.timeout(BREEZE_TIMEOUT_MS),
     });
     if (response.ok) {
       if (attempt) console.log(`[voice] breeze was busy — waited ${Date.now() - started}ms`);
@@ -568,7 +615,7 @@ async function postBreeze(config: VoiceConfig, reference: VoiceReference, text: 
     }
     const detail = await response.text().catch(() => '');
     if (response.status === 409 && attempt < BREEZE_BUSY_TRIES) {
-      await new Promise(resolve => setTimeout(resolve, BREEZE_BUSY_WAIT_MS));
+      await delay(BREEZE_BUSY_WAIT_MS, undefined, { signal });
       continue;
     }
     throw new Error(`${response.status}${detail ? `: ${detail.slice(0, 300)}` : ''}`);
@@ -623,14 +670,18 @@ export function wrapPcmAsWav(body: ReadableStream<Uint8Array>): ReadableStream<U
 
 /** The streaming half of the Breeze door, for the phone's GET /api/speak: the
  *  PCM arrives progressively, and the WAV wrapper keeps the first byte fast. */
-export async function synthesiseBreezeStream(config: VoiceConfig, reference: VoiceReference, text: string, emotion?: EmotionName | null, seed?: number): Promise<{ mime: string; body: ReadableStream<Uint8Array> } | null> {
-  const release = await breezeSlot();
+export async function synthesiseBreezeStream(config: VoiceConfig, reference: VoiceReference, text: string, emotion?: EmotionName | null, seed?: number, rawPCM = false, signal?: AbortSignal): Promise<{ mime: string; body: ReadableStream<Uint8Array>; sampleRate?: number } | null> {
+  const planned = planVoice(config, reference, emotion);
+  const release = await breezeSlot(signal);
   try {
-    const response = await postBreeze(config, reference, text, emotion, seed);
+    const response = await postBreeze(planned.config, planned.reference, text, planned.plan.emotion, seed, signal);
     if (!response.body) { release(); return null; }
-    return { mime: 'audio/wav', body: wrapPcmAsWav(releasingWhenDone(response.body, release)) };
+    const observed = voiceSense.stream(text, planned.plan, config.engine, releasingWhenDone(response.body, release), 'audio/wav', pcmToWav);
+    return rawPCM ? { mime: 'audio/pcm', sampleRate: 24000, body: observed }
+      : { mime: 'audio/wav', body: wrapPcmAsWav(observed) };
   } catch {
     release();
+    signal?.throwIfAborted();
     return null;
   }
 }
@@ -697,6 +748,7 @@ export function sovitsRequest(config: VoiceConfig, reference: VoiceReference, te
 
 /** Reads a stored config forward, so a partial or older record still starts up. */
 export function readVoiceConfig(saved: unknown): VoiceConfig {
+  if(process.env.HARU_CORE_SPEECH_BOUNDARY==='on')return corePolicySync<any>('speech-boundary.readVoiceConfig',[saved??null]);
   if (!saved || typeof saved !== 'object') return DEFAULT_VOICE;
   const record = saved as Partial<VoiceConfig>;
   const engines: VoiceEngine[] = ['off', 'windows', 'openai', 'gpt-sovits', 'hume', 'breeze'];
@@ -769,6 +821,7 @@ function readEmotionVoices(saved: unknown): Partial<Record<EmotionName, VoiceRef
  */
 export const SPOKEN_CHARS_PER_SECOND = 15;
 export function looksClipped(audio: Uint8Array, text: string, rate = 32000, bytesPerSample = 2): boolean {
+  if(process.env.HARU_CORE_SPEECH_BOUNDARY==='on')return corePolicySync<any>('speech-boundary.clipped',[{length:audio.length,rate:wavSampleRate(audio)},text,rate,bytesPerSample]);
   const said = (text ?? '').replace(/\s+/g, ' ').trim();
   // Too short to judge: a two-word answer has no reliable length.
   if (said.length < 40 || audio.length <= 44) return false;
@@ -786,4 +839,3 @@ function wavSampleRate(audio: Uint8Array): number {
   if (riff !== 0x52494646) return 0; // 'RIFF'
   return view.getUint32(24, true);
 }
-

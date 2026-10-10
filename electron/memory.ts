@@ -1,3 +1,4 @@
+import {corePolicySync} from './core-policy-sync';
 // Haru's memory. Pure logic — the store and the model calls live in main.ts, so
 // what gets remembered, what surfaces and what is forgotten can all be exercised
 // without either.
@@ -70,6 +71,8 @@ export type MemoryRecord = {
    * surfacing in selectMemories but survives a prune the same as anything else.
    */
   supersededBy?: string;
+  /** Last substantive edit; sightings do not change this revision. */
+  updatedAt?: string;
   // v2 — filled by migrateMemories for legacy records; optional so old data
   // stays valid without a rewrite.
   /** How much evidence this memory has behind it, 0..1. */
@@ -141,12 +144,14 @@ export const RECURRING_THRESHOLD = 3;
  * ones, and fixtures — fall back to mentions, which is all they have.
  */
 export function daysRaised(memory: MemoryRecord): number {
+  if (process.env.HARU_CORE_DESKTOP_MEMORY === 'on') return corePolicySync<ReturnType<typeof daysRaised>>('memory-policy.daysRaised', [memory]);
   const evidence = memory.evidence ?? [];
   if (!evidence.length) return memory.mentions;
   return new Set(evidence.map(entry => entry.at.slice(0, 10))).size;
 }
 
 export function isRecurring(memory: MemoryRecord): boolean {
+  if (process.env.HARU_CORE_DESKTOP_MEMORY === 'on') return corePolicySync<ReturnType<typeof isRecurring>>('memory-policy.isRecurring', [memory]);
   return daysRaised(memory) >= RECURRING_THRESHOLD;
 }
 
@@ -156,6 +161,7 @@ const EXPLICIT_RECALL = /\b(do you remember|d'?you remember|remember when|rememb
 
 /** Asking her to reach back rather than just answer from what's in front of her — worth a wider search than the usual per-message budget. */
 export function isExplicitRecall(text: string): boolean {
+  if (process.env.HARU_CORE_DESKTOP_MEMORY === 'on') return corePolicySync<ReturnType<typeof isExplicitRecall>>('memory-policy.isExplicitRecall', [text]);
   return EXPLICIT_RECALL.test(text);
 }
 
@@ -179,6 +185,7 @@ const ALWAYS_INCLUDED: Category[] = ['instruction', 'preference', 'person'];
  * Derived rather than written back, so sorting a record never has to win a sync.
  */
 export function importanceOf(memory: MemoryRecord, now?: Date): number {
+  if (process.env.HARU_CORE_DESKTOP_MEMORY === 'on') return corePolicySync<ReturnType<typeof importanceOf>>('memory-policy.importanceOf', [memory, now]);
   const stored = memory.importance ?? 0.4;
   if (!isCategory(memory.category)) return stored;
   switch (categoryOf(memory, now)) {
@@ -198,61 +205,65 @@ export function importanceOf(memory: MemoryRecord, now?: Date): number {
 export const STOP_WORDS = new Set(['the', 'a', 'an', 'and', 'or', 'but', 'is', 'are', 'was', 'were', 'be', 'been', 'to', 'of', 'in', 'on', 'at', 'for', 'with', 'about', 'my', 'me', 'i', 'you', 'your', 'it', 'that', 'this', 'they', 'them', 'has', 'have', 'had', 'do', 'does', 'did', 'so', 'if', 'as', 'by', 'from', 'up', 'out', 'not', 'can', 'will', 'just', 'what', 'when', 'how', 'who']);
 
 export function keywords(text: string): Set<string> {
+  if (process.env.HARU_CORE_DESKTOP_MEMORY === 'on') return new Set(corePolicySync<string[]>('memory-policy.keywords', [text]));
   return new Set(
     text.toLowerCase().replace(/[^a-z0-9\s']/g, ' ').split(/\s+/)
       .filter(word => word.length > 2 && !STOP_WORDS.has(word)),
   );
 }
 
-// Compared on content words so "Has a dog called Rex" and "has a dog named Rex"
-// count as the same thing rather than accumulating as two. The bar sits at 0.6
-// because that pair shares two words of three — a stricter 0.7 split them, while
-// genuinely different facts ("a dog called Rex" against "a cat called Mabel")
-// only reach 0.33 and stay apart.
-const SAME_MEMORY_OVERLAP = 0.6;
-
-export function isSameMemory(a: string, b: string) {
-  const left = keywords(a);
-  const right = keywords(b);
-  if (!left.size || !right.size) return a.trim().toLowerCase() === b.trim().toLowerCase();
-  const shared = [...left].filter(word => right.has(word)).length;
-  return shared / Math.max(left.size, right.size) >= SAME_MEMORY_OVERLAP;
+/** Conservative identity: keep names, numbers and polarity. Similar topics are
+ * not identical claims. Only a trailing explanatory clause may add detail. */
+function claimWords(text: string): string[] {
+  return text.toLowerCase().replace(/[’]/g, "'")
+    .replace(/\b(?:doesn't|don't|isn't|aren't|can't|cannot)\b/g, ' not ')
+    .replace(/\b(?:called|named)\b/g, 'name')
+    .match(/[\p{L}\p{N}']+/gu)?.filter(word => word === 'not' || !STOP_WORDS.has(word))
+    .filter(word => !['user', 'they', 'their'].includes(word)) ?? [];
 }
 
-/** A third of a fact's content words, heard in their message, is enough to say it came from there. */
-const IN_THEIR_WORDS = 0.3;
-
-/** "works", "worked" and "working" are one word; anything short is left alone. */
-function stemOf(word: string): string {
-  return word.length > 4 ? word.replace(/(ing|ed|es|s)$/, '') : word;
+export function isSameMemory(a: string, b: string): boolean {
+  if (process.env.HARU_CORE_DESKTOP_MEMORY === 'on') return corePolicySync<ReturnType<typeof isSameMemory>>('memory-policy.isSameMemory', [a, b]);
+  const canonical = (s: string) => claimWords(s).join(' ');
+  if (canonical(a) === canonical(b)) return true;
+  if (claimWords(a).includes('not') !== claimWords(b).includes('not')) return false;
+  // Appositive detail is allowed only after an identical main claim.
+  const left = a.split(',')[0], right = b.split(',')[0];
+  return canonical(left) === canonical(right) && canonical(left).length > 0
+    && (a === left || b === right);
 }
 
-/**
- * Whether a fact she is writing down came from what they just said.
- *
- * `remember_about_user` files what it is handed as `explicit`: the most trusted
- * a record can be, and exempt from the nagging test. That was safe while the
- * only thing that could put a line in front of her was him. It is not once she
- * reads pages: a line off a stranger's page that she files as a fact about him
- * would carry the same stamp as something he said to her face. A fact that
- * shares nothing with his latest message did not come from it, so the caller
- * files it as inferred instead — kept, at a lower confidence, and open to the
- * nagging test. Never refused: what she chooses to save stays hers to choose.
- *
- * Deliberately loose, because she paraphrases ("works nights" for "I'm on
- * nights at the warehouse"): a word matches when either stem begins the other,
- * and a third of the fact's content words is enough. What it screens out is a
- * fact with no connection to his message at all, which is what an instruction
- * carried in on a page looks like. With no message to compare against
- * (an unprompted turn) nothing is in his words.
- */
+function assertionWords(text: string): string[] {
+  // A named relative can be expressed in either direction without changing
+  // who the name belongs to. Keep this rewrite limited to explicit copulas.
+  text = text.replace(/^\s*([\p{L}][\p{L}'-]*(?: [\p{L}][\p{L}'-]*){0,2}) is (?:my|their|the user's) (brother|sister|mother|father|girlfriend|boyfriend|partner|wife|husband|friend)\b/iu, 'My $2 is $1');
+  return claimWords(text.replace(/\b(?:I'm|I am)\b/gi, 'I').replace(/\b(?:actually|correction|update|remember|in real life)\b/gi, ' ').replace(/\b(?:prefers?|wants?)\b/gi, 'prefer').replace(/\b(?:does not like|do not like|dislikes?|hate[sd]?)\b/gi, 'not like')
+    .replace(/\b(?:please stop|stop) (?:calling|being called)\b/gi, 'not like name')
+    .replace(/\b(?:goes by|call me)\b/gi, 'name')
+    .replace(/\b(?:calling)\b/gi, 'name')
+    .replace(/\b(?:real|please|being|shifts?|name)\b/gi, ' '))
+    .filter(word => word !== 'name')
+    .map(word => word.length > 3 ? word.replace(/(?:ing|ed|s)$/, '') : word);
+}
+
+/** Only attributable assertions can become personal facts. This deliberately
+ * refuses uncertain paraphrases rather than treating lexical overlap as proof. */
 export function isInTheirWords(fact: string, said: string): boolean {
-  const wanted = [...keywords(fact ?? '')].map(stemOf);
-  const heard = [...keywords(said ?? '')].map(stemOf);
-  if (!wanted.length || !heard.length) return false;
-  const found = wanted.filter(word => heard.some(other => other === word
-    || (Math.min(word.length, other.length) >= 4 && (word.startsWith(other) || other.startsWith(word))))).length;
-  return found / wanted.length >= IN_THEIR_WORDS;
+  if (process.env.HARU_CORE_DESKTOP_MEMORY === 'on') return corePolicySync<ReturnType<typeof isInTheirWords>>('memory-policy.isInTheirWords', [fact, said]);
+  const wanted = assertionWords(fact ?? '');
+  if (!wanted.length || !said?.trim()) return false;
+  let fictional = false;
+  const spans = said.split(/(?<=[.!?])\s+|(?=\b(?:but my real|in real life|outside (?:the|my) (?:story|play|novel))\b)/i);
+  return spans.some(span => {
+    if (/\b(?:my real|in real life|outside (?:the|my) (?:story|play|novel))\b/i.test(span)) fictional = false;
+    if (/\b(?:story|novel|screenplay|script|character|narrator|fictional|hypothetical|pretend|imagine|role.?play)\b/i.test(span)) fictional = true;
+    if (fictional || /["“”`]|^\s*>|\?|\b(?:if|maybe|perhaps|might|suppose|joking|joke|example)\b/i.test(span)) return false;
+    const heard = assertionWords(span);
+    if (wanted.includes('not') !== heard.includes('not')) return false;
+    // Subject and object must stay together, in order. A friend's claim or
+    // another pet's name cannot be borrowed from elsewhere in the sentence.
+    return wanted.every((word, index) => heard[index] === word);
+  });
 }
 
 /**
@@ -348,6 +359,7 @@ const ABOUT_THE_CONVERSATION = new RegExp([
 ].join('|'), 'i');
 
 export function isAboutTheConversation(text: string): boolean {
+  if (process.env.HARU_CORE_DESKTOP_MEMORY === 'on') return corePolicySync<ReturnType<typeof isAboutTheConversation>>('memory-policy.isAboutTheConversation', [text]);
   return ABOUT_THE_CONVERSATION.test((text ?? '').trim());
 }
 
@@ -370,6 +382,7 @@ export function isAboutTheConversation(text: string): boolean {
 const HER_OWN_NAGGING = /^\s*(don['’]?t|do not|never|remember to|make sure|be sure|hurry|get on with|go and|pick up|call|buy|finish)\b/i;
 
 export function readsAsHerNagging(text: string): boolean {
+  if (process.env.HARU_CORE_DESKTOP_MEMORY === 'on') return corePolicySync<ReturnType<typeof readsAsHerNagging>>('memory-policy.readsAsHerNagging', [text]);
   return HER_OWN_NAGGING.test((text ?? '').trim());
 }
 
@@ -399,6 +412,7 @@ function namesSomething(text: string): boolean {
 const A_BAN = /^\s*(do ?n'?t|do not|never|stop|no more|quit|avoid)\b.{0,14}?\b(mention\w*|talk\w*\s+about|bring\w*\s+up|say\w*|discuss\w*|rais\w+|refer\w*\s+to|go(ing)?\s+on\s+about)\b/i;
 
 export function bansATopic(text: string): boolean {
+  if (process.env.HARU_CORE_DESKTOP_MEMORY === 'on') return corePolicySync<ReturnType<typeof bansATopic>>('memory-policy.bansATopic', [text]);
   return A_BAN.test((text ?? '').trim());
 }
 
@@ -408,6 +422,7 @@ export function bansATopic(text: string): boolean {
  *  her own standings about how she is treated. All of those are imperative by
  *  nature, which is the one shape the nagging test refuses. */
 export function isWorthRemembering(text: string, options: { meantAsARule?: boolean } = {}): boolean {
+  if (process.env.HARU_CORE_DESKTOP_MEMORY === 'on') return corePolicySync<ReturnType<typeof isWorthRemembering>>('memory-policy.isWorthRemembering', [text, options]);
   const clean = (text ?? '').trim();
   if (!clean) return false;
   if (!options.meantAsARule && readsAsHerNagging(clean)) return false;
@@ -433,8 +448,9 @@ export function rememberInto(
   memories: MemoryRecord[],
   incoming: { text: string; kind: MemoryKind; subject?: string; id: string; now: string; source?: MemorySource; predicate?: string; object?: string; evidenceDetail?: string; emotion?: EmotionName; emotionIntensity?: number; resighting?: boolean; category?: Category; when?: string },
 ): { memories: MemoryRecord[]; created: boolean; record: MemoryRecord } {
+  if (process.env.HARU_CORE_DESKTOP_MEMORY === 'on') return corePolicySync<ReturnType<typeof rememberInto>>('memory-policy.rememberInto', [memories, incoming]);
   const text = incoming.text.trim();
-  const existing = memories.find(memory => isSameMemory(memory.text, text));
+  const existing = memories.find(memory => !memory.supersededBy && memory.status !== 'archived' && isSameMemory(memory.text, text));
   // The same line read off the same page again. The vault sync does that every
   // hour, and each pass used to count as him saying it again: "Haru, with one r"
   // reached 354 mentions and 354 evidence entries, most of memories.json by
@@ -444,10 +460,20 @@ export function rememberInto(
     const seen: MemoryRecord = { ...existing, lastSeenAt: incoming.now };
     return { memories: memories.map(memory => memory.id === existing.id ? seen : memory), created: false, record: seen };
   }
+  const source = incoming.source ?? 'conversation';
+  // A model repeating a guess is not independent evidence. Replaying the same
+  // attributed source is likewise idempotent, including across a restart.
+  if (existing && (source === 'inferred' || source === 'activity'
+    || incoming.evidenceDetail && existing.evidence?.some(e => e.source === source && e.detail === incoming.evidenceDetail))) {
+    return { memories, created: false, record: existing };
+  }
   if (existing) {
-    const base = baseConfidence(existing.source ?? 'conversation');
+    const promoted = source === 'explicit' && existing.source !== 'explicit';
+    const base = baseConfidence(promoted ? source : existing.source ?? 'conversation');
     const updated: MemoryRecord = {
       ...existing,
+      source: promoted ? source : existing.source,
+      updatedAt: incoming.now,
       // The newer phrasing wins when it carries more detail.
       text: text.length > existing.text.length ? text : existing.text,
       subject: existing.subject ?? incoming.subject,
@@ -460,10 +486,10 @@ export function rememberInto(
       lastSeenAt: incoming.now,
       mentions: existing.mentions + 1,
       // A consistent repeat is fresh evidence for the same claim.
-      confidence: mentionConfidence(existing.mentions + 1, base),
+      confidence: promoted ? base : Math.max(existing.confidence ?? base, base),
       evidence: [...(existing.evidence ?? []), incoming.evidenceDetail
-        ? { at: incoming.now, kind: 'repeat', source: existing.source ?? 'conversation', detail: incoming.evidenceDetail }
-        : { at: incoming.now, kind: 'repeat', source: existing.source ?? 'conversation' }],
+        ? { at: incoming.now, kind: 'repeat', source, detail: incoming.evidenceDetail }
+        : { at: incoming.now, kind: 'repeat', source }],
       importance: Math.max(existing.importance ?? 0, scoreImportance(existing.kind, existing.text)),
       // Said again, so it is current again: a dormant record that came back up
       // stayed dormant for good before, since decay only ever moves one way.
@@ -478,7 +504,6 @@ export function rememberInto(
     };
     return { memories: memories.map(memory => memory.id === existing.id ? updated : memory), created: false, record: updated };
   }
-  const source = incoming.source ?? 'conversation';
   const record: MemoryRecord = {
     id: incoming.id,
     text,
@@ -489,6 +514,7 @@ export function rememberInto(
     emotion: incoming.emotion,
     emotionIntensity: incoming.emotionIntensity,
     createdAt: incoming.now,
+    updatedAt: incoming.now,
     lastSeenAt: incoming.now,
     mentions: 1,
     confidence: baseConfidence(source),
@@ -499,8 +525,8 @@ export function rememberInto(
     ...(isCategory(incoming.category) ? { category: incoming.category } : {}),
     ...(isCategory(incoming.category) && isDay(incoming.when) ? { when: incoming.when } : {}),
     evidence: [incoming.evidenceDetail
-      ? { at: incoming.now, kind: 'statement', source, detail: incoming.evidenceDetail }
-      : { at: incoming.now, kind: 'statement', source }],
+      ? { at: incoming.now, kind: source === 'inferred' ? 'inference' : 'statement', source, detail: incoming.evidenceDetail }
+      : { at: incoming.now, kind: source === 'inferred' ? 'inference' : 'statement', source }],
   };
   return { memories: [...memories, record], created: true, record };
 }
@@ -520,6 +546,7 @@ export type PruneResult = {
 };
 
 export function pruneMemories(memories: MemoryRecord[], limit: number): PruneResult {
+  if (process.env.HARU_CORE_DESKTOP_MEMORY === 'on') return corePolicySync<PruneResult>('memory-policy.pruneMemories', [memories, limit, new Date()]);
   if (memories.length <= limit) return { memories, evicted: [] };
   const archived = memories.filter(memory => memory.status === 'archived');
   const rest = memories.filter(memory => memory.status !== 'archived');
@@ -593,6 +620,7 @@ export type DecayResult = {
  * their own; superseded and archived records are history and are left alone.
  */
 export function applyDecay(memories: MemoryRecord[], now: Date): DecayResult {
+  if (process.env.HARU_CORE_DESKTOP_MEMORY === 'on') return corePolicySync<ReturnType<typeof applyDecay>>('memory-policy.applyDecay', [memories, now]);
   const transitions: DecayTransition[] = [];
   const forgotten: ForgettingEntry[] = [];
   const out: MemoryRecord[] = [];
@@ -628,6 +656,7 @@ export function applyDecay(memories: MemoryRecord[], now: Date): DecayResult {
 }
 
 export function recurringMemories(memories: MemoryRecord[]) {
+  if (process.env.HARU_CORE_DESKTOP_MEMORY === 'on') return corePolicySync<MemoryRecord[]>('memory-policy.recurringMemories', [memories]);
   return memories.filter(isRecurring)
     .sort((a, b) => daysRaised(b) - daysRaised(a));
 }
@@ -646,23 +675,31 @@ export function recurringMemories(memories: MemoryRecord[]) {
  * fewest words left over wins — the more specific match.
  */
 export function findSuperseded(memories: MemoryRecord[], hint: string): MemoryRecord | null {
-  const asked = keywords(hint);
-  if (!asked.size) return null;
-  let best: MemoryRecord | null = null;
-  let bestExtra = Infinity;
-  for (const memory of memories) {
-    if (memory.supersededBy) continue; // already replaced — nothing left here to supersede again
-    const held = keywords(memory.text);
-    if (![...asked].every(word => held.has(word))) continue;
-    const extra = held.size - asked.size;
-    if (extra < bestExtra) { bestExtra = extra; best = memory; }
-  }
-  return best;
+  if (process.env.HARU_CORE_DESKTOP_MEMORY === 'on') return corePolicySync<ReturnType<typeof findSuperseded>>('memory-policy.findSuperseded', [memories, hint]);
+  const active = memories.filter(memory => !memory.supersededBy && memory.status !== 'archived');
+  const exact = active.filter(memory => isSameMemory(memory.text, hint));
+  if (exact.length === 1) return exact[0];
+  const asked = claimWords(hint);
+  if (!asked.length) return null;
+  const matches = active.filter(memory => {
+    const held = claimWords(memory.text);
+    return asked.includes('not') === held.includes('not') && asked.every(word => held.includes(word));
+  });
+  return matches.length === 1 ? matches[0] : null;
 }
 
-/** Marks one memory as replaced by another. Both records stay in the list. */
-export function supersede(memories: MemoryRecord[], oldId: string, newId: string): MemoryRecord[] {
-  return memories.map(memory => memory.id === oldId ? { ...memory, supersededBy: newId } : memory);
+/** Preserve history; never turn a record into its own replacement or a cycle. */
+export function supersede(memories: MemoryRecord[], oldId: string, newId: string, now = new Date().toISOString()): MemoryRecord[] {
+  if (process.env.HARU_CORE_DESKTOP_MEMORY === 'on') return corePolicySync<ReturnType<typeof supersede>>('memory-policy.supersede', [memories, oldId, newId, now]);
+  if (oldId === newId || !memories.some(m => m.id === newId)) return memories;
+  const seen = new Set([oldId]);
+  let cursor: string | undefined = newId;
+  while (cursor) {
+    if (seen.has(cursor)) return memories;
+    seen.add(cursor);
+    cursor = memories.find(m => m.id === cursor)?.supersededBy;
+  }
+  return memories.map(memory => memory.id === oldId ? { ...memory, supersededBy: newId, updatedAt: now } : memory);
 }
 
 /**
@@ -672,6 +709,7 @@ export function supersede(memories: MemoryRecord[], oldId: string, newId: string
  * long memory does not crowd out the conversation.
  */
 export function selectMemories(memories: MemoryRecord[], message: string, limit = 14): MemoryRecord[] {
+  if (process.env.HARU_CORE_DESKTOP_MEMORY === 'on') return corePolicySync<ReturnType<typeof selectMemories>>('memory-policy.selectMemories', [memories, message, limit]);
   // Superseded records are history, not current knowledge — they stay in the
   // store for findSuperseded to search, but never surface in a prompt.
   const active = memories.filter(memory => !memory.supersededBy && categoryOf(memory) !== 'passing');
@@ -725,12 +763,14 @@ function keywordSimilarity(query: string, text: string): number {
 
 /** How long a memory of this importance stays vivid. */
 export function memoryHalfLifeDays(importance: number): number {
+  if (process.env.HARU_CORE_DESKTOP_MEMORY === 'on') return corePolicySync<ReturnType<typeof memoryHalfLifeDays>>('memory-policy.memoryHalfLifeDays', [importance]);
   if (importance >= 0.8) return 10 * 365;
   if (importance >= 0.5) return 180;
   return 45;
 }
 
 export function memoryRecency(lastSeenAt: string, now: Date, halfLifeDays: number): number {
+  if (process.env.HARU_CORE_DESKTOP_MEMORY === 'on') return corePolicySync<ReturnType<typeof memoryRecency>>('memory-policy.memoryRecency', [lastSeenAt, now, halfLifeDays]);
   const seen = Date.parse(lastSeenAt);
   if (!Number.isFinite(seen)) return 0;
   const days = Math.max(0, (now.getTime() - seen) / 86_400_000);
@@ -778,6 +818,7 @@ const DORMANT_ADMISSION = 0.25;
  * every time, is.
  */
 export function entityTerms(text: string): Set<string> {
+  if (process.env.HARU_CORE_DESKTOP_MEMORY === 'on') return new Set(corePolicySync<string[]>('memory-policy.entityTerms', [text]));
   const words = String(text ?? '').split(/\s+/)
     .map(word => word.replace(/[^a-zA-Z'’]/g, ''))
     .filter(word => word.length >= 3);
@@ -802,6 +843,7 @@ export function entityTerms(text: string): Set<string> {
 
 /** Everything a memory can be named by: its proper nouns plus its triple's words. */
 export function memoryEntities(memory: MemoryRecord): Set<string> {
+  if (process.env.HARU_CORE_DESKTOP_MEMORY === 'on') return new Set(corePolicySync<string[]>('memory-policy.memoryEntities', [memory]));
   const out = entityTerms(memory.text);
   for (const part of [memory.subject, memory.object, memory.predicate]) {
     if (!part) continue;
@@ -813,6 +855,7 @@ export function memoryEntities(memory: MemoryRecord): Set<string> {
 /** How much of what the query names this memory is named by, 0..1. Nothing on
  *  either side to compare means no signal at all. */
 export function entityScore(query: string, memory: MemoryRecord): number {
+  if (process.env.HARU_CORE_DESKTOP_MEMORY === 'on') return corePolicySync<ReturnType<typeof entityScore>>('memory-policy.entityScore', [query, memory]);
   const asked = entityTerms(query);
   const held = memoryEntities(memory);
   if (!asked.size || !held.size) return 0;
@@ -864,6 +907,7 @@ export type ScoredMemory = {
 };
 
 export function retrieveMemories(memories: MemoryRecord[], message: string, options: RetrieveOptions = {}): ScoredMemory[] {
+  if (process.env.HARU_CORE_DESKTOP_MEMORY === 'on') return corePolicySync<ScoredMemory[]>('memory-policy.retrieveMemories', [memories, message, {...options, now:options.now ?? new Date(), semantic:options.semantic ? [...options.semantic] : undefined, focus:options.focus ? {...options.focus, semantic:options.focus.semantic ? [...options.focus.semantic] : undefined} : undefined}]);
   const now = options.now ?? new Date();
   // Fourteen was the budget when an eight-thousand-token local model answered
   // every turn. She holds fifty-odd records and the window is a million.
@@ -961,12 +1005,14 @@ export function retrieveMemories(memories: MemoryRecord[], message: string, opti
 export const SEMANTIC_FLOOR = 0.45;
 
 export function calibrateSimilarity(cosine: number): number {
+  if (process.env.HARU_CORE_DESKTOP_MEMORY === 'on') return corePolicySync<ReturnType<typeof calibrateSimilarity>>('memory-policy.calibrateSimilarity', [cosine]);
   return Math.max(0, Math.min(1, (cosine - SEMANTIC_FLOOR) / (1 - SEMANTIC_FLOOR)));
 }
 
 /** Precompute id → semantic similarity for every memory that has a vector:
  *  the cosine to the query's own embedding, calibrated so unrelated is zero. */
 export function semanticSimilarities(memories: MemoryRecord[], queryVector: number[], vectors: Map<string, number[]>): Map<string, number> {
+  if (process.env.HARU_CORE_DESKTOP_MEMORY === 'on') return new Map(corePolicySync<[string, number][]>('memory-policy.semanticSimilarities', [memories, queryVector, [...vectors]]));
   const out = new Map<string, number>();
   for (const memory of memories) {
     const vector = vectors.get(memory.id);
@@ -978,6 +1024,7 @@ export function semanticSimilarities(memories: MemoryRecord[], queryVector: numb
 /** Cosine similarity between two memory vectors; undefined when either side
  *  has none, so callers can fall back to keyword scoring. */
 export function vectorSimilarity(a: number[] | undefined, b: number[] | undefined): number | undefined {
+  if (process.env.HARU_CORE_DESKTOP_MEMORY === 'on') return corePolicySync<number | null>('memory-policy.vectorSimilarity', [a, b]) ?? undefined;
   if (!a || !b) return undefined;
   return cosineSimilarity(a, b);
 }
@@ -1007,6 +1054,7 @@ function dayDistance(a: string, b: string): number {
 }
 
 export function formatMemoryPrompt(memories: MemoryRecord[], sessions: SessionSummary[]): string {
+  if (process.env.HARU_CORE_DESKTOP_MEMORY === 'on') return corePolicySync<ReturnType<typeof formatMemoryPrompt>>('memory-policy.formatMemoryPrompt', [memories, sessions]);
   const newestDay = sessions.map(session => session.day).filter(Boolean).sort().at(-1);
   const parts: string[] = [];
   const byKind = (kind: MemoryKind) => memories.filter(memory => memory.kind === kind);
@@ -1052,6 +1100,7 @@ export function formatMemoryPrompt(memories: MemoryRecord[], sessions: SessionSu
  * reason, so the word the note should use is the word the input already uses.
  */
 export function summaryPrompt() {
+  if (process.env.HARU_CORE_DESKTOP_MEMORY === 'on') return corePolicySync<string>('memory-policy.summaryPrompt', []);
   return [
     'Summarise this conversation in one sentence, under 25 words, as a note to your future self.',
     'The note is about the user. Call them "they" — never "you" or "your", which in your own notes mean you, Haru.',
@@ -1069,6 +1118,7 @@ export function summaryPrompt() {
  * passed, and must not invent a name or number the days never carried.
  */
 export function monthFoldPrompt(month: string) {
+  if (process.env.HARU_CORE_DESKTOP_MEMORY === 'on') return corePolicySync<string>('memory-policy.monthFoldPrompt', [month]);
   return [
     `These are her own one-line notes on the days of ${month}.`,
     'Fold them into one sentence, under 30 words, as a note to her future self: what happened that held, what is still open, and nothing invented — every name, place, number and outcome must already be in the notes.',
@@ -1085,10 +1135,12 @@ export const THIRD_PERSON_AGAIN = 'That was addressed to a person. Write it agai
  * an instruction, because the instruction demonstrably was not enough.
  */
 export function readsAsSecondPerson(text: string): boolean {
+  if (process.env.HARU_CORE_DESKTOP_MEMORY === 'on') return corePolicySync<ReturnType<typeof readsAsSecondPerson>>('memory-policy.readsAsSecondPerson', [text]);
   return /\b(you|your|yours|yourself|you're|you've|you'll|you'd)\b/i.test(text);
 }
 
 export function isWorthKeeping(summary: string) {
+  if (process.env.HARU_CORE_DESKTOP_MEMORY === 'on') return corePolicySync<boolean>('memory-policy.isWorthKeeping', [summary]);
   const clean = summary.trim().toLowerCase().replace(/[.!]+$/, '');
   return clean.length > 0 && clean !== 'nothing notable' && clean.length < 300;
 }
@@ -1100,6 +1152,7 @@ export function isWorthKeeping(summary: string) {
  * while this feeds the memory engine.
  */
 export function eventsPrompt() {
+  if (process.env.HARU_CORE_DESKTOP_MEMORY === 'on') return corePolicySync<string>('memory-policy.eventsPrompt', []);
   return [
     'List the events from this conversation worth remembering, one per line, under 15 words each, as a note to your future self.',
     // Her own life was being filed as his. On 2026-09-15 she said "I finally
@@ -1121,6 +1174,7 @@ export function eventsPrompt() {
 
 /** One extracted event line, cleaned for the memory gate. */
 export function eventCandidates(reply: string): string[] {
+  if (process.env.HARU_CORE_DESKTOP_MEMORY === 'on') return corePolicySync<ReturnType<typeof eventCandidates>>('memory-policy.eventCandidates', [reply]);
   return reply
     .split('\n')
     .map(line => line.replace(/^[-*\d.)\s]+/, '').trim())
@@ -1153,6 +1207,7 @@ export const MEMORIES_PER_DAY = 10;
  * written down again.
  */
 export function formationPrompt(day: string, known: string[], userName = ''): string {
+  if (process.env.HARU_CORE_DESKTOP_MEMORY === 'on') return corePolicySync<ReturnType<typeof formationPrompt>>('memory-policy.formationPrompt', [day, known, userName]);
   const weekday = isDay(day) ? new Date(`${day}T00:00:00Z`).toLocaleDateString('en-AU', { weekday: 'long', timeZone: 'UTC' }) : '';
   const name = userName.trim();
   return [
@@ -1179,6 +1234,7 @@ export type FormedNote = { category: Category; when?: string; note: string };
 
 /** The day's notes, read strictly: a line not in the shape, or in a category a day cannot form, is left out. */
 export function readFormation(answer: string): FormedNote[] {
+  if (process.env.HARU_CORE_DESKTOP_MEMORY === 'on') return corePolicySync<ReturnType<typeof readFormation>>('memory-policy.readFormation', [answer]);
   const out: FormedNote[] = [];
   for (const raw of String(answer ?? '').split('\n')) {
     const match = raw.trim().replace(/^[-*\d.)\s]+(?=[a-z])/i, '').match(/^([a-z]+)\s*\|\s*(\S+)\s*\|\s*(.+)$/i);
@@ -1193,6 +1249,7 @@ export function readFormation(answer: string): FormedNote[] {
 
 /** A day's labelled lines in windows of at most `size` characters, whole lines only. */
 export function formationWindows(lines: string[], size = FORMATION_WINDOW): string[] {
+  if (process.env.HARU_CORE_DESKTOP_MEMORY === 'on') return corePolicySync<ReturnType<typeof formationWindows>>('memory-policy.formationWindows', [lines, size]);
   const windows: string[] = [];
   let current: string[] = [];
   let length = 0;
@@ -1221,6 +1278,7 @@ export function formationWindows(lines: string[], size = FORMATION_WINDOW): stri
 const GENERIC_MOMENT = /\b(procrastinat\w*|feel\w*|struggl\w*|annoyed|bored|tired|cleaned?|dodged?|avoided?|monitor\w*|remind\w*)\b/i;
 
 export function isWorthAnEvent(text: string): boolean {
+  if (process.env.HARU_CORE_DESKTOP_MEMORY === 'on') return corePolicySync<ReturnType<typeof isWorthAnEvent>>('memory-policy.isWorthAnEvent', [text]);
   const clean = (text ?? '').trim();
   if (!isWorthRemembering(clean)) return false;
   // A sentence addressed to Haru is material for the preference/task systems,
@@ -1258,6 +1316,7 @@ const TASK_VERBS = new Set(['get', 'got', 'getting', 'done', 'doing', 'finish', 
  * the wrong one takes something true out of her prompt.
  */
 export function closesEvent(title: string, text: string): boolean {
+  if (process.env.HARU_CORE_DESKTOP_MEMORY === 'on') return corePolicySync<ReturnType<typeof closesEvent>>('memory-policy.closesEvent', [title, text]);
   const wanted = [...keywords(title)].filter(word => !TASK_VERBS.has(word));
   if (!wanted.length) return false;
   const has = keywords(text);
@@ -1279,6 +1338,10 @@ export function closesEvent(title: string, text: string): boolean {
  * undone and then it was never finished at all.
  */
 export function closeEvents(memories: MemoryRecord[], title: string, now: string, done = true): { memories: MemoryRecord[]; changed: MemoryRecord[] } {
+  if (process.env.HARU_CORE_DESKTOP_MEMORY === 'on') {
+    const result = corePolicySync<ReturnType<typeof closeEvents>>('memory-policy.closeEvents', [memories, title, now, done]);
+    return {...result, memories:result.changed.length ? result.memories : memories};
+  }
   const from: MemoryStatus = done ? 'active' : 'dormant';
   const to: MemoryStatus = done ? 'dormant' : 'active';
   const changed: MemoryRecord[] = [];
@@ -1302,6 +1365,7 @@ export function closeEvents(memories: MemoryRecord[], title: string, now: string
 // Old flat records predate kinds and counters; they are read forward rather than
 // dropped, since they are the only history an existing user has.
 export function migrateMemories(saved: unknown, now: string): MemoryRecord[] {
+  if (process.env.HARU_CORE_DESKTOP_MEMORY === 'on') return corePolicySync<MemoryRecord[]>('memory-policy.migrateMemories', [saved, now, Array.isArray(saved) ? saved.map(() => `${Date.now()}-${Math.random().toString(36).slice(2)}`) : []]);
   if (!Array.isArray(saved)) return [];
   return saved.flatMap(entry => {
     if (!entry || typeof entry !== 'object') return [];
@@ -1317,6 +1381,7 @@ export function migrateMemories(saved: unknown, now: string): MemoryRecord[] {
       kind,
       subject: typeof record.subject === 'string' ? record.subject : undefined,
       createdAt,
+      ...(typeof record.updatedAt === 'string' && Number.isFinite(Date.parse(record.updatedAt)) ? { updatedAt: record.updatedAt } : {}),
       lastSeenAt: typeof record.lastSeenAt === 'string' ? record.lastSeenAt : (typeof record.createdAt === 'string' ? record.createdAt : now),
       mentions,
       // v2 fields. Legacy records have none of them; they are derived here so
@@ -1340,7 +1405,7 @@ export function migrateMemories(saved: unknown, now: string): MemoryRecord[] {
         : undefined,
       evidence: Array.isArray(record.evidence)
         ? tidyEvidence(record.evidence.filter(entry => entry && typeof entry.at === 'string' && EVIDENCE_KINDS.includes(entry.kind)))
-        : [{ at: createdAt, kind: 'statement', source: 'conversation' }],
+        : [{ at: createdAt, kind: record.source === 'inferred' ? 'inference' : 'statement', source: record.source ?? 'conversation' }],
       mergedFrom: Array.isArray(record.mergedFrom) ? record.mergedFrom.filter(id => typeof id === 'string') : undefined,
       conflictsWith: Array.isArray(record.conflictsWith) ? record.conflictsWith.filter(id => typeof id === 'string') : undefined,
       // Carried like the two above it. Left out, every read quietly revived what
@@ -1366,6 +1431,7 @@ export function migrateMemories(saved: unknown, now: string): MemoryRecord[] {
  * the way in, every time.
  */
 export function tidyEvidence(entries: EvidenceEntry[]): EvidenceEntry[] {
+  if (process.env.HARU_CORE_DESKTOP_MEMORY === 'on') return corePolicySync<ReturnType<typeof tidyEvidence>>('memory-policy.tidyEvidence', [entries]);
   const days = new Set<string>();
   const kept: EvidenceEntry[] = [];
   for (const entry of entries) {
@@ -1394,6 +1460,7 @@ export const CONFIDENCE = {
 
 /** How believable a brand-new memory is, from where it came. */
 export function baseConfidence(source: MemorySource): number {
+  if (process.env.HARU_CORE_DESKTOP_MEMORY === 'on') return corePolicySync<ReturnType<typeof baseConfidence>>('memory-policy.baseConfidence', [source]);
   switch (source) {
     case 'explicit': return CONFIDENCE.explicitBase;
     case 'inferred': return CONFIDENCE.inferredBase;
@@ -1408,15 +1475,18 @@ const round2 = (value: number) => Math.round(value * 100) / 100;
 /** Confidence grows with every consistent repeat, capped so no memory is ever
  *  held as certain beyond reasonable doubt. */
 export function mentionConfidence(mentions: number, base: number): number {
+  if (process.env.HARU_CORE_DESKTOP_MEMORY === 'on') return corePolicySync<ReturnType<typeof mentionConfidence>>('memory-policy.mentionConfidence', [mentions, base]);
   const gained = Math.max(0, (mentions - 1)) * CONFIDENCE.repeatedStep;
   return round2(Math.min(CONFIDENCE.max, Math.max(CONFIDENCE.min, base + gained)));
 }
 
 export function withConfirmation(confidence: number): number {
+  if (process.env.HARU_CORE_DESKTOP_MEMORY === 'on') return corePolicySync<ReturnType<typeof withConfirmation>>('memory-policy.withConfirmation', [confidence]);
   return round2(Math.min(CONFIDENCE.max, confidence + CONFIDENCE.confirmationStep));
 }
 
 export function withContradiction(confidence: number): number {
+  if (process.env.HARU_CORE_DESKTOP_MEMORY === 'on') return corePolicySync<ReturnType<typeof withContradiction>>('memory-policy.withContradiction', [confidence]);
   return round2(Math.max(CONFIDENCE.min, confidence - CONFIDENCE.contradictionPenalty));
 }
 
@@ -1457,6 +1527,7 @@ const IMPORTANT_TOPICS = new RegExp(`${LASTING_TOPICS.source}|${LIVING_TOPICS.so
 const TRIVIAL_TOPICS = /\b(youtube|video\b|clip\b|stream\b|episode\b|manga\b|anime\b|game\b|steam\b|browser\b|tab\b|window\b|download\w*|watched\b|played\b)\b/i;
 
 export function scoreImportance(kind: MemoryKind, text: string): number {
+  if (process.env.HARU_CORE_DESKTOP_MEMORY === 'on') return corePolicySync<ReturnType<typeof scoreImportance>>('memory-policy.scoreImportance', [kind, text]);
   const said = text ?? '';
   switch (kind) {
     // These shape how she talks to him — always in the prompt, so they are
@@ -1481,6 +1552,7 @@ export function scoreImportance(kind: MemoryKind, text: string): number {
 
 /** How a memory behaves, derived from its kind and wording. */
 export function guessMemoryType(kind: MemoryKind, text: string): MemoryType {
+  if (process.env.HARU_CORE_DESKTOP_MEMORY === 'on') return corePolicySync<ReturnType<typeof guessMemoryType>>('memory-policy.guessMemoryType', [kind, text]);
   switch (kind) {
     case 'relationship': return 'relational';
     case 'event': return 'episodic';
@@ -1493,3 +1565,6 @@ export function guessMemoryType(kind: MemoryKind, text: string): MemoryType {
 // how the user goes about things; "does not like to X" is a preference about
 // how Haru behaves, not a pattern of the user's own doing.
 const PROCEDURAL_WORDING = /\b(often|usually|commonly|always|tends? to|prefers? to|typically)\b/i;
+
+/** Shared write-path retention limit. Protected records may exceed it. */
+export const MEMORY_CAP = 400;

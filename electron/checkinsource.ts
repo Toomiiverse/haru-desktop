@@ -1,3 +1,4 @@
+import {corePolicySync} from './core-policy-sync';
 // Reading her check-ins off another machine.
 //
 // The phone talks to the server, so a note jotted on it lands in the
@@ -59,6 +60,7 @@ export function readCheckInSource(saved: unknown): CheckInSource | null {
  * because the pull ran afterwards.
  */
 export function mergeCheckIns(mine: CheckInStore, theirs: CheckIn[]): CheckInStore {
+  if(process.env.HARU_CORE_USER_RECORDS==='on')return corePolicySync<CheckInStore>('user-records.mergeCheckins',[mine,theirs]);
   const byId = new Map<string, CheckIn>();
   for (const entry of mine.entries) byId.set(entry.id, entry);
   for (const entry of theirs) {

@@ -1,3 +1,5 @@
+import { withProviderUsage } from './provider-usage';
+import { stripThinkingMarkers } from './reply';
 // Speaking to something that is not Ollama.
 //
 // Everything upstream is written against Ollama's /api/chat shape, and that is
@@ -20,7 +22,8 @@ export type ChatTool = {
   function: { name: string; description: string; parameters: { type: string; properties: Record<string, unknown>; required: string[] } };
 };
 
-export type Provider = 'ollama' | 'openai' | 'xai' | 'venice';
+import { receivedProviderMessage } from './provider-state';
+export type Provider = 'ollama' | 'openai' | 'xai' | 'venice' | 'anthropic';
 
 /**
  * What a bare base64 picture is, read off its first bytes. Everything used to go
@@ -37,7 +40,8 @@ export function sniffImageType(base64: string): string {
 
 /** Everything that is not Ollama speaks OpenAI's dialect, including xAI and Venice. */
 export function isOpenAIShaped(provider: string | undefined): boolean {
-  return provider === 'openai' || provider === 'xai' || provider === 'venice';
+  // Anthropic uses the hosted tool/message path; its transport is adapted separately.
+  return provider === 'openai' || provider === 'xai' || provider === 'venice' || provider === 'anthropic';
 }
 
 /** Where a provider lives, when the user has not typed something themselves. */
@@ -46,6 +50,7 @@ export const DEFAULT_ENDPOINTS: Record<Provider, string> = {
   openai: 'https://api.openai.com/v1',
   xai: 'https://api.x.ai/v1',
   venice: 'https://api.venice.ai/api/v1',
+  anthropic: 'https://api.anthropic.com/v1',
 };
 
 export type ToolCall = { id?: string; function?: { name?: string; arguments?: unknown } };
@@ -53,6 +58,10 @@ export type ChatMessage = {
   role: string; content?: string; tool_calls?: ToolCall[]; tool_name?: string; tool_call_id?: string;
   /** Base64 pictures travelling with this message, in Ollama's shape. See toOpenAIMessages. */
   images?: string[];
+  /** Provider-only continuity. Never stream or display private reasoning. */
+  reasoning_content?: string;
+  reasoning_model?: string;
+  provider_state?: { model: string; content: Record<string, unknown>[] };
 };
 
 /** A picture, in the shape OpenAI's chat endpoint wants it. */
@@ -64,6 +73,7 @@ type OpenAIMessage = {
   content?: string | null | (TextPart | ImagePart)[];
   tool_calls?: { id: string; type: 'function'; function: { name: string; arguments: string } }[];
   tool_call_id?: string;
+  reasoning_content?: string;
 };
 
 /**
@@ -75,9 +85,11 @@ type OpenAIMessage = {
  * by name — which is exactly the information Ollama's shape keeps and OpenAI's
  * discards.
  */
-export function toOpenAIMessages(conversation: ChatMessage[]): OpenAIMessage[] {
+export function toOpenAIMessages(conversation: ChatMessage[], model?: string): OpenAIMessage[] {
   const out: OpenAIMessage[] = [];
   for (const [index, message] of conversation.entries()) {
+    const reasoning = message.role === 'assistant' && message.reasoning_content !== undefined && (!model || message.reasoning_model === model)
+      ? { reasoning_content: message.reasoning_content } : {};
     if (message.role === 'tool') {
       out.push({
         role: 'tool',
@@ -103,6 +115,7 @@ export function toOpenAIMessages(conversation: ChatMessage[]): OpenAIMessage[] {
               : JSON.stringify(call.function?.arguments ?? {}),
           },
         })),
+        ...reasoning,
       });
       continue;
     }
@@ -127,7 +140,7 @@ export function toOpenAIMessages(conversation: ChatMessage[]): OpenAIMessage[] {
       });
       continue;
     }
-    out.push({ role: message.role, content: message.content ?? '' });
+    out.push({ role: message.role, content: message.content ?? '', ...reasoning });
   }
   return out;
 }
@@ -173,10 +186,16 @@ export function toolsUnsupported(status: number, detail: string): boolean {
  */
 export function openAIQuirks(model: string): {
   maxTokensKey: 'max_tokens' | 'max_completion_tokens';
-  reasoningEffort: 'none' | 'minimal' | null;
+  reasoningEffort: 'none' | 'minimal' | 'low' | null;
   honoursTemperature: boolean;
 } {
   const name = model.trim().toLowerCase();
+  // GLM-5.3 via NanoGPT always thinks; its default (max) effort blows past her
+  // 15s hosted first-word deadline, so ask for low and keep the chat speed.
+  if (/^z-ai\/glm-5\.3/.test(name)) return { maxTokensKey: 'max_tokens', reasoningEffort: 'low', honoursTemperature: true };
+  if (name === 'abliterated-model-large-v2') return { maxTokensKey: 'max_tokens', reasoningEffort: 'low', honoursTemperature: true };
+  if (name === 'kimi-k3' || name === 'gpt-6-astra') return { maxTokensKey: 'max_completion_tokens', reasoningEffort: 'low', honoursTemperature: false };
+  if (/^mimo-v2\.6-/.test(name)) return { maxTokensKey: 'max_completion_tokens', reasoningEffort: null, honoursTemperature: true };
   if (/^gpt-5\.[1-9]/.test(name)) return { maxTokensKey: 'max_completion_tokens', reasoningEffort: 'none', honoursTemperature: true };
   if (/^gpt-5(-|$)/.test(name)) return { maxTokensKey: 'max_completion_tokens', reasoningEffort: 'minimal', honoursTemperature: false };
   if (/^o[1-9](-|$)/.test(name)) return { maxTokensKey: 'max_completion_tokens', reasoningEffort: null, honoursTemperature: false };
@@ -200,12 +219,15 @@ export function toOpenAIBody(options: {
   const quirks = openAIQuirks(options.model);
   return {
     model: options.model,
-    messages: toOpenAIMessages(options.conversation),
+    messages: toOpenAIMessages(options.conversation, options.model),
     // Venice puts its own system prompt in front of everyone's by default —
     // that would sit on top of hers and argue with it every turn. Off. And a
     // thinking model left to itself spends its time before it speaks; off too,
     // and the thinking stripped from what comes back, as on the Ollama path.
     ...(options.provider === 'venice' ? { venice_parameters: { include_venice_system_prompt: false, disable_thinking: true, strip_thinking_response: true } } : {}),
+    // Xiaomi requires its own switch; chat and streamed tool turns use non-thinking mode.
+    ...(/^mimo-v2\.6-/.test(options.model) ? { thinking: { type: 'disabled' } } : {}),
+    ...(options.model === 'deepseek-flash' ? { thinking: { type: 'disabled' } } : {}),
     ...(options.cacheKey ? { prompt_cache_key: options.cacheKey } : {}),
     ...(options.tools?.length ? { tools: options.tools, tool_choice: 'auto' } : {}),
     ...(quirks.reasoningEffort ? { reasoning_effort: quirks.reasoningEffort } : {}),
@@ -242,6 +264,7 @@ export function promptUsage(usage: unknown): { prompt: number; cached: number } 
 type OpenAIReplyMessage = Omit<OpenAIMessage, 'content'> & { content?: string | null };
 
 type OpenAIReply = {
+  usage?: unknown;
   choices?: { message?: OpenAIReplyMessage; finish_reason?: string }[];
   error?: { message?: string; code?: string } | string;
 };
@@ -254,18 +277,19 @@ type OpenAIReply = {
  * parsing twice is how a malformed argument becomes a silent empty object
  * instead of a visible error.
  */
-export function fromOpenAIReply(payload: OpenAIReply): ChatMessage {
+export function fromOpenAIReply(payload: OpenAIReply, model?: string): ChatMessage {
   const complaint = typeof payload.error === 'string' ? payload.error : payload.error?.message;
   if (complaint) throw new Error(complaint);
   const message = payload.choices?.[0]?.message;
   if (!message) throw new Error('The provider returned no choices.');
-  return {
+  return withProviderUsage(receivedProviderMessage({
     role: message.role ?? 'assistant',
-    content: message.content ?? '',
+    content: stripThinkingMarkers(message.content ?? ''),
+    ...(typeof message.reasoning_content === 'string' ? { reasoning_content: message.reasoning_content, reasoning_model: model } : {}),
     ...(message.tool_calls?.length
-      ? { tool_calls: message.tool_calls.map(call => ({ id: call.id, function: { name: call.function?.name, arguments: call.function?.arguments } })) }
+      ? { tool_calls: message.tool_calls.map(call => ({ id: call.id, function: { name: call.function?.name, arguments: model === 'claude-sonnet-5-5' && call.function?.arguments === '' ? '{}' : call.function?.arguments } })) }
       : {}),
-  };
+  }), payload.usage);
 }
 
 /**
@@ -276,7 +300,7 @@ export function fromOpenAIReply(payload: OpenAIReply): ChatMessage {
 export function describeFailure(status: number, body: string, provider: Provider): string {
   let message = '';
   try { const parsed = JSON.parse(body) as OpenAIReply; message = (typeof parsed.error === 'string' ? parsed.error : parsed.error?.message) ?? ''; } catch { /* not JSON */ }
-  const name = provider === 'xai' ? 'xAI' : provider === 'venice' ? 'Venice' : 'The provider';
+  const name = provider === 'anthropic' ? 'Anthropic' : provider === 'xai' ? 'xAI' : provider === 'venice' ? 'Venice' : 'The provider';
   if (status === 401 || status === 403) return `${name} rejected the API key.`;
   if (status === 404) return `${name} has no model by that name, or the endpoint is wrong.`;
   if (status === 429) return `${name} is rate-limiting, or the account is out of credit.`;

@@ -1,3 +1,4 @@
+import {corePolicySync} from './core-policy-sync';
 // The live memory layer: the engine in memory.ts, wired to the running app.
 //
 // Three files carry the word "memory" and they are different things.
@@ -20,15 +21,16 @@
 import { randomUUID } from 'node:crypto';
 import { isHerStanding } from './herstanding';
 import {
-  applyDecay, DEEP_RECALL_LIMIT, isExplicitRecall, isRecurring, isWorthRemembering, migrateMemories,
+  applyDecay, MEMORY_CAP, DEEP_RECALL_LIMIT, isExplicitRecall, isRecurring, isWorthRemembering, migrateMemories,
   pruneMemories, rememberInto, retrieveMemories, vectorSimilarity,
   type ForgettingEntry, type MemoryKind, type MemoryRecord, type MemorySource, type MonthNote,
   type RetrievalFactors, type SessionSummary,
 } from './memory';
 import { consolidateMemories, type ConsolidationChange } from './consolidation';
-import { mergeMemories, type MergeReport } from './memorysync';
+import { mergeMemories, mergeDeletions, type MemoryDeletion, type MergeReport } from './memorysync';
 import { formatMemoryBlocks, type BlockSources, type MemoryBlock, type DerivedMemoryBlocks } from './blocks';
 import type { Embedder } from './embeddings';
+import { abortable } from './embedding-queue';
 import { guessCategory, namesSomeoneElse, SORT_BATCH, type Category, type SortNote, type Sorted } from './categories';
 import type { EmotionName } from './emotion';
 
@@ -43,13 +45,14 @@ import type { EmotionName } from './emotion';
  * (2026-09-17). Four hundred is about a year of what the extractor keeps, and
  * sorting (categories.ts) lets the cap take what is passing before anything else.
  */
-export const MAX_MEMORIES = 400;
+export const MAX_MEMORIES = MEMORY_CAP;
 
 /** How long after a change the unsorted records are sent to be sorted, so a burst of writes is one call. */
 export const SORT_DELAY_MS = 10_000;
 
 /** How many query embeddings are kept before the oldest is dropped. */
 export const QUERY_CACHE_MAX = 100;
+export const QUERY_EMBED_TIMEOUT_MS = 1500;
 
 /** How long a change waits before the vectors are rebuilt, so a burst of
  *  writes costs one re-embed rather than one each. */
@@ -60,6 +63,8 @@ export type Profile = { nickname: string; occupation: string; about: string };
 export type MemoryStoreDeps = {
   store: {
     getMemories(): MemoryRecord[];
+    getMemoryDeletions?(): MemoryDeletion[];
+    setMemoryState?(records: MemoryRecord[], deletions: MemoryDeletion[]): void;
     setMemories(records: MemoryRecord[]): void;
     getSessions(): SessionSummary[];
     getMonthNotes(): MonthNote[];
@@ -73,6 +78,8 @@ export type MemoryStoreDeps = {
   broadcast(channel: string, payload: unknown): void;
   /** Null when nothing is reachable, which is what makes the layer optional. */
   embedder(): Embedder | null;
+  queryTimeoutMs?: number;
+  embeddingTiming?(event: { elapsedMs: number; outcome: 'semantic' | 'timeout' | 'unavailable' }): void;
   /** What the block layer may draw on beyond the memories themselves. */
   character(): { identity: string; style: string };
   profile(): Profile;
@@ -98,19 +105,40 @@ export type LastRetrieval = {
 
 export function createMemoryStore(deps: MemoryStoreDeps) {
   const { store, broadcast, embedder } = deps;
+  const owned = process.env.HARU_CORE_MEMORY_MAINTENANCE === 'on';
+  const semantic = owned ? corePolicySync<{refreshDelayMs:number;sortDelayMs:number;cacheMax:number;queryTimeoutMs:number}>('memory-maintenance.semanticConfig', []) : {refreshDelayMs:VECTOR_REFRESH_MS,sortDelayMs:SORT_DELAY_MS,cacheMax:QUERY_CACHE_MAX,queryTimeoutMs:QUERY_EMBED_TIMEOUT_MS};
+  function applyState(state: {memories:MemoryRecord[];deletions:MemoryDeletion[]}) {
+    if (store.setMemoryState) store.setMemoryState(state.memories,state.deletions);
+    else {store.setMemories(state.memories);fallbackDeletions=state.deletions;}
+    scheduleVectorRefresh();scheduleSort();broadcast('memory:changed',state.memories);
+  }
 
   /** id → embedding of that memory's text. */
   let vectors = new Map<string, number[]>();
   let vectorTimer: ReturnType<typeof setTimeout> | null = null;
   const queryCache = new Map<string, number[]>();
+  const queryPending = new Map<string, Promise<number[] | null>>();
+  let refreshing: Promise<void> | null = null;
+  let refreshAgain = false;
   let lastRetrieval: LastRetrieval | null = null;
 
   function getMemories(): MemoryRecord[] {
     return migrateMemories(store.getMemories(), new Date().toISOString());
   }
 
-  function setMemories(items: MemoryRecord[]): void {
-    store.setMemories(items);
+  let fallbackDeletions: MemoryDeletion[] = [];
+  const getDeletions = () => mergeDeletions(store.getMemoryDeletions?.(), fallbackDeletions);
+
+  function setMemories(items: MemoryRecord[], incoming: MemoryDeletion[] = []): void {
+    if (owned) {applyState(corePolicySync('memory-maintenance.setPlan',[getMemories(),items,getDeletions(),incoming,new Date().toISOString()]));return;}
+    const kept = new Set(items.map(m => m.id));
+    const at = new Date().toISOString();
+    const removed = getMemories().filter(m => !kept.has(m.id)).map(m => ({ id: m.id, at }));
+    const deletions = mergeDeletions(getDeletions(), incoming, removed);
+    const deleted = new Set(deletions.map(d => d.id));
+    items = items.filter(m => !deleted.has(m.id));
+    if (store.setMemoryState) store.setMemoryState(items, deletions);
+    else { store.setMemories(items); fallbackDeletions = deletions; }
     scheduleVectorRefresh();
     scheduleSort();
     broadcast('memory:changed', items);
@@ -133,10 +161,18 @@ export function createMemoryStore(deps: MemoryStoreDeps) {
     text: string,
     kind: MemoryKind = 'fact',
     subject?: string,
-    extra: { source?: MemorySource; predicate?: string; object?: string; evidenceDetail?: string; emotion?: EmotionName; emotionIntensity?: number; resighting?: boolean; category?: Category; when?: string } = {},
+    extra: { id?: string; source?: MemorySource; predicate?: string; object?: string; evidenceDetail?: string; emotion?: EmotionName; emotionIntensity?: number; resighting?: boolean; category?: Category; when?: string } = {},
   ) {
+    if (owned) {
+      const plan=corePolicySync<{write:boolean;result:{created:boolean;record:MemoryRecord|null}|null;state:{memories:MemoryRecord[];deletions:MemoryDeletion[]};forgetting:ForgettingEntry[]}>('memory-maintenance.addPlan',[getMemories(),getDeletions(),{...extra,text,kind,subject,id:extra.id ?? randomUUID(),stableId:extra.id},new Date().toISOString()]);
+      if (plan.write) {if(plan.forgetting.length)store.appendForgettingLog(plan.forgetting);applyState(plan.state);}
+      return plan.result;
+    }
     const fact = text.trim();
     if (!fact) return null;
+    // A stable source (vault bullet) must not re-create an explicitly removed
+    // or retired record at every scan. A genuinely edited bullet has a new ID.
+    if (extra.id && (getDeletions().some(d => d.id === extra.id) || getMemories().some(m => m.id === extra.id && (m.supersededBy || m.status === 'archived')))) return null;
     // Turned away here rather than in the tool handler, so that nothing which can
     // write a memory can skip the check. Six of her first eleven memories said
     // nothing — that they exist, that they live in a city — and each one held a
@@ -152,7 +188,7 @@ export function createMemoryStore(deps: MemoryStoreDeps) {
       return { created: false, record: null };
     }
     const { memories, created, record } = rememberInto(getMemories(), {
-      text: fact, kind, subject, id: randomUUID(), now: new Date().toISOString(),
+      text: fact, kind, subject, id: extra.id ?? randomUUID(), now: new Date().toISOString(),
       source: extra.source, predicate: extra.predicate, object: extra.object, evidenceDetail: extra.evidenceDetail,
       emotion: extra.emotion, emotionIntensity: extra.emotionIntensity, resighting: extra.resighting,
       category: extra.category, when: extra.when,
@@ -181,26 +217,31 @@ export function createMemoryStore(deps: MemoryStoreDeps) {
    * dropped.
    */
   function mergeIn(theirs: unknown): MergeReport {
-    const mine = getMemories();
-    const held = new Set(mine.map(memory => memory.id));
-    const forgotten = new Set(
-      store.getForgettingLog().map(entry => entry.id).filter(id => !held.has(id)),
-    );
-    const report = mergeMemories(mine, theirs, new Date().toISOString());
-    const kept = forgotten.size
-      ? report.memories.filter(memory => !forgotten.has(memory.id))
-      : report.memories;
-    const added = report.added - (report.memories.length - kept.length);
-    if (!added && !report.updated) return { memories: mine, added: 0, updated: 0 };
-    const pruned = pruneMemories(kept, MAX_MEMORIES);
-    if (pruned.evicted.length) {
-      store.appendForgettingLog(pruned.evicted.map(memory => ({
-        id: memory.id, text: memory.text, at: new Date().toISOString(), reason: 'prune' as const,
-        detail: `evicted at the ${MAX_MEMORIES}-memory cap`,
-      })));
+    if (owned) {
+      const raw=theirs as {memories?:unknown;deletions?:unknown}|null;
+      const incoming=Array.isArray(theirs)?theirs:raw?.memories;
+      const markers=raw?.deletions;
+      const plan=corePolicySync<{write:boolean;state:{memories:MemoryRecord[];deletions:MemoryDeletion[]};forgetting:ForgettingEntry[];report:MergeReport}>('memory-maintenance.mergePlan',[getMemories(),getDeletions(),store.getForgettingLog(),theirs,new Date().toISOString(),Array.isArray(incoming)?incoming.map(()=>`${Date.now()}-${Math.random().toString(36).slice(2)}`):[],Array.isArray(markers)?markers.map(item=>typeof item?.at==='string'?Date.parse(item.at):null):[]]);
+      if(plan.write){if(plan.forgetting.length)store.appendForgettingLog(plan.forgetting);applyState(plan.state);}
+      return {...plan.report,memories:getMemories()};
     }
-    setMemories(pruned.memories);
-    return { memories: pruned.memories, added, updated: report.updated };
+    const mine = getMemories();
+    const envelope = theirs && typeof theirs === 'object' && !Array.isArray(theirs)
+      ? theirs as { memories?: unknown; deletions?: unknown } : { memories: theirs };
+    const held = new Set(mine.map(m => m.id));
+    const historical = store.getForgettingLog().filter(e => !held.has(e.id)).map(e => ({ id: e.id, at: e.at }));
+    const deletions = mergeDeletions(getDeletions(), historical, envelope.deletions);
+    const deleted = new Set(deletions.map(d => d.id));
+    const report = mergeMemories(mine.filter(m => !deleted.has(m.id)),
+      migrateMemories(envelope.memories, new Date().toISOString()).filter(m => !deleted.has(m.id)), new Date().toISOString());
+    const pruned = pruneMemories(report.memories, MAX_MEMORIES);
+    const removed = mine.filter(m => !pruned.memories.some(n => n.id === m.id)).length;
+    if (report.added || report.updated || removed || JSON.stringify(deletions) !== JSON.stringify(getDeletions())) {
+      if (pruned.evicted.length) store.appendForgettingLog(pruned.evicted.map(m => ({ id: m.id, text: m.text,
+        at: new Date().toISOString(), reason: 'prune' as const, detail: `evicted at the ${MAX_MEMORIES}-memory cap` })));
+      setMemories(pruned.memories, deletions);
+    }
+    return { memories: getMemories(), added: report.added, updated: report.updated, deleted: removed };
   }
 
   // -- sorting -----------------------------------------------------------------
@@ -215,6 +256,7 @@ export function createMemoryStore(deps: MemoryStoreDeps) {
   const unanswered = new Set<string>();
 
   function unsorted(): MemoryRecord[] {
+    if(owned)return corePolicySync<MemoryRecord[]>('memory-maintenance.sortBatch',[getMemories(),[...unanswered]]);
     return getMemories().filter(memory => !memory.category
       && !memory.supersededBy
       && memory.status !== 'archived'
@@ -231,6 +273,12 @@ export function createMemoryStore(deps: MemoryStoreDeps) {
     try {
       const notes: SortNote[] = batch.map(memory => ({ id: memory.id, text: memory.text, kind: memory.kind, subject: memory.subject, createdAt: memory.createdAt }));
       const answers = await deps.sort(notes);
+      if(owned){
+        const plan=corePolicySync<{memories:MemoryRecord[];sorted:number;unanswered:string[]}>('memory-maintenance.sortApply',[getMemories(),batch,answers?[...answers]:null,deps.profile().nickname]);
+        for(const id of plan.unanswered)unanswered.add(id);
+        if(plan.sorted){store.setMemories(plan.memories);broadcast('memory:changed',plan.memories);}
+        return plan.sorted;
+      }
       const asked = new Map(batch.map(memory => [memory.id, memory.text]));
       for (const memory of batch) if (!answers?.has(memory.id)) unanswered.add(memory.id);
       if (!answers?.size) return 0;
@@ -266,7 +314,8 @@ export function createMemoryStore(deps: MemoryStoreDeps) {
     }
   }
 
-  function scheduleSort(delay = SORT_DELAY_MS): void {
+  function scheduleSort(delay = semantic.sortDelayMs): void {
+    if (process.env.HARU_CORE_BRAIN_WORKER === 'on' && process.env.HARU_CORE_PERIODIC === 'on') return;
     if (!deps.sort || sortTimer) return;
     sortTimer = setTimeout(() => {
       sortTimer = null;
@@ -283,15 +332,28 @@ export function createMemoryStore(deps: MemoryStoreDeps) {
   // latest query is embedded once per turn, so retrieval can weight semantic
   // similarity alongside the keyword score.
 
-  async function refreshVectors(): Promise<void> {
+  function refreshVectors(): Promise<void> {
+    if (refreshing) { refreshAgain = true; return refreshing; }
+    refreshing = rebuildVectors().finally(() => {
+      refreshing = null;
+      if (refreshAgain) { refreshAgain = false; scheduleVectorRefresh(); }
+    });
+    return refreshing;
+  }
+
+  async function rebuildVectors(): Promise<void> {
     const model = embedder();
     if (!model) return;
-    const memories = getMemories().filter(memory => !memory.supersededBy);
+    const currentRecords=getMemories();
+    const memories = owned ? corePolicySync<MemoryRecord[]>('memory-maintenance.embeddingPlan',[currentRecords]) : currentRecords.filter(memory => !memory.supersededBy);
     if (!memories.length) { vectors = new Map(); return; }
     try {
       const embedded = await model.embedBatch(memories.map(memory => memory.text));
+      const currentModel = embedder();
+      if ((currentModel?.cacheKey ?? currentModel?.model) !== (model.cacheKey ?? model.model)) return;
+      const current = new Map(getMemories().filter(memory => !memory.supersededBy).map(memory => [memory.id, memory.text]));
       const next = new Map<string, number[]>();
-      memories.forEach((memory, index) => next.set(memory.id, embedded[index]));
+      memories.forEach((memory, index) => { if (current.get(memory.id) === memory.text) next.set(memory.id, embedded[index]); });
       vectors = next;
     } catch (error) {
       // Kept, not cleared: yesterday's vectors still score better than none.
@@ -304,7 +366,7 @@ export function createMemoryStore(deps: MemoryStoreDeps) {
     vectorTimer = setTimeout(() => {
       vectorTimer = null;
       void refreshVectors();
-    }, VECTOR_REFRESH_MS);
+    }, semantic.refreshDelayMs);
   }
 
   /** Embed the query if the embedder is up; cached so repeated phrasing pays
@@ -312,19 +374,32 @@ export function createMemoryStore(deps: MemoryStoreDeps) {
   async function embedQuery(text: string): Promise<number[] | null> {
     const trimmed = text.trim();
     if (!trimmed) return null;
-    const cached = queryCache.get(trimmed);
-    if (cached) return cached;
     const model = embedder();
     if (!model) return null;
-    try {
-      const vector = await model.embed(trimmed);
+    const key = `${model.cacheKey ?? model.model}\u0000${trimmed}`;
+    const cached = queryCache.get(key);
+    if (cached) return cached;
+    if (queryPending.has(key)) return queryPending.get(key)!;
+    const started = performance.now();
+    const abort = new AbortController();
+    const timer = setTimeout(() => abort.abort(new Error('embedding_timeout')), deps.queryTimeoutMs ?? semantic.queryTimeoutMs);
+    const mark = (outcome: 'semantic' | 'timeout' | 'unavailable') => {
+      try { deps.embeddingTiming?.({ elapsedMs: performance.now() - started, outcome }); } catch { /* optional diagnostics */ }
+    };
+    const pending = abortable(() => model.embed(trimmed, { signal: abort.signal }), abort.signal).then(vector => {
+      const current = embedder();
+      if ((current?.cacheKey ?? current?.model) !== (model.cacheKey ?? model.model)) return null;
       const oldest = queryCache.keys().next().value;
-      if (queryCache.size >= QUERY_CACHE_MAX && oldest !== undefined) queryCache.delete(oldest);
-      queryCache.set(trimmed, vector);
+      if (queryCache.size >= semantic.cacheMax && oldest !== undefined) queryCache.delete(oldest);
+      queryCache.set(key, vector);
+      mark('semantic');
       return vector;
-    } catch {
-      return null;
-    }
+    }, () => { mark(abort.signal.aborted ? 'timeout' : 'unavailable'); return null; }).finally(() => {
+      clearTimeout(timer);
+      queryPending.delete(key);
+    });
+    queryPending.set(key, pending);
+    return pending;
   }
 
   /**
@@ -335,7 +410,7 @@ export function createMemoryStore(deps: MemoryStoreDeps) {
    */
   function consolidate(): ConsolidationChange[] {
     const { memories, changes } = consolidateMemories(getMemories(), {
-      similarity: (a, b) => vectorSimilarity(vectors.get(a.id), vectors.get(b.id)),
+      ...(owned ? {vectors} : {similarity: (a:MemoryRecord, b:MemoryRecord) => vectorSimilarity(vectors.get(a.id), vectors.get(b.id))}),
     });
     if (changes.length) {
       setMemories(memories);
@@ -411,6 +486,13 @@ export function createMemoryStore(deps: MemoryStoreDeps) {
     const sources = blockSources(query, semantic, latest);
     const hasSessions = getSessions().length > 0;
     return (derived?: DerivedMemoryBlocks): string => {
+      if(process.env.HARU_CORE_BLOCK_GOVERNANCE==='on'){
+        const plan=corePolicySync<{formatted:{text:string;cut:{label:string;before:number;after:number}[];coreGraphIds:string[]};summary:string}|{error:string}>('block-governance.prepareSummary',[configured,{...sources,semantic:sources.semantic?[...sources.semantic]:undefined,latestSemantic:sources.latestSemantic?[...sources.latestSemantic]:undefined},{omit:['persona'],compact:true,...(scale!==undefined?{scale}:{}),...(derived?{derived}:{})},hasSessions]);
+        if('error' in plan)throw Error(plan.error);
+        onCoreGraphClaims?.(plan.formatted.coreGraphIds);
+        for(const entry of plan.formatted.cut)console.warn(`[blocks] ${entry.label} cut from ${entry.before} to ${entry.after} chars`);
+        return plan.summary;
+      }
       const blocks = formatMemoryBlocks(configured, sources, { omit: ['persona'], compact: true, ...(scale !== undefined ? { scale } : {}), ...(derived ? { derived } : {}) });
       onCoreGraphClaims?.(blocks.coreGraphIds);
       for (const entry of blocks.cut) {
@@ -429,8 +511,16 @@ export function createMemoryStore(deps: MemoryStoreDeps) {
     return prepareProfileSummary(message, recentContext, semantic, scale, latestSemantic)();
   }
 
+  function notifyCommitted(events:string[]){
+    for(const event of events){
+      if(event==='memories'){scheduleVectorRefresh();scheduleSort();broadcast('memory:changed',store.getMemories());}
+      else if(event==='blocks')broadcast('blocks:changed',store.getBlocks());
+      else throw Error('core_memory_notification_protocol');
+    }
+  }
   return {
-    getMemories, setMemories, addMemory, mergeIn, getSessions, getMonthNotes, setMonthNotes,
+    notifyCommitted,
+    getMemories, getDeletions, setMemories, addMemory, mergeIn, getSessions, getMonthNotes, setMonthNotes,
     refreshVectors, scheduleVectorRefresh, embedQuery,
     sortPending, scheduleSort,
     /** The vectors as they stand. A function because they are replaced wholesale. */

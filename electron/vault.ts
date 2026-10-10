@@ -8,8 +8,8 @@
 // view draws it.
 //
 // Everything here is regenerated from the app's own state, so nothing in the
-// folder is the source of anything: the diary file in his home folder, the
-// store's nights and memories are. A note is rewritten only when its text
+// folder is the source of anything: Haru's persistent diary, nights and
+// memories are held by the selected storage backend. A note is rewritten only when its text
 // changed, atomically, so Obsidian sees a quiet folder rather than a churning
 // one. The knowledge sync skips the folder — she must not read her own diary
 // back as a fact about his world.
@@ -155,7 +155,7 @@ export function placesNote(where: Whereabouts, told: string): Note {
 export function indexNote(input: { latestDiary?: Entry; latestNight?: string; standing: Standing; her: Her; memories: number; places: number }): Note {
   const lines = [
     '---', 'tags: [haru]', '---', '', '# Haru', '',
-    'Her side of the vault, written by the app from what she keeps. Nothing here is edited by hand — it is regenerated, and the diary in the home folder and her store are the originals.', '',
+    'Her diary, memories, interests and recent experiences, kept up to date by the app. These pages are regenerated from her saved state.', '',
     `- ${link(standingPath, 'Standing')} — ${input.standing.mood}`,
     `- ${link(herPath, 'Her')} — ${input.her.things.length} thing${input.her.things.length === 1 ? '' : 's'}, ${input.her.nightsOut.count} night${input.her.nightsOut.count === 1 ? '' : 's'} out`,
     `- ${link(memoriesPath, 'Memories')} — ${input.memories} current`,

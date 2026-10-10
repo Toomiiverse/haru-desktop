@@ -1,3 +1,4 @@
+import {corePolicySync} from './core-policy-sync';
 // Which line of hers a message of his is answering.
 //
 // A phone conversation is one long line, so everything he sends reads as a
@@ -25,6 +26,8 @@ export const QUOTE_CHARS = 140;
 
 /** The part of a line of hers worth quoting back: its first sentence, or a clean cut. */
 export function quoteOf(text: string): string {
+  if(process.env.HARU_CORE_STARTUP_CONTEXT==='on')return corePolicySync('conversation-inputs.quote',[text]);
+
   const flat = text.replace(/\s+/g, ' ').trim();
   if (flat.length <= QUOTE_CHARS) return flat;
   // A whole first sentence reads as her; half of one reads as a glitch.
@@ -47,6 +50,8 @@ const flat = (text: string) => text.replace(/\s+/g, ' ').trim();
  * quoted to her is always the server's copy of the line, never the page's text.
  */
 export function resolveReply(ask: { replyTo?: unknown; quoted?: unknown }, lines: Line[]): ReplyRef | null {
+  if(process.env.HARU_CORE_STARTUP_CONTEXT==='on')return corePolicySync('conversation-inputs.resolveReply',[ask,lines]);
+
   const hers = lines.filter(line => line.role === 'assistant' && typeof line.content === 'string' && line.content.trim() && line.id);
   if (typeof ask.replyTo === 'string' && ask.replyTo) {
     const named = hers.find(line => line.id === ask.replyTo);
@@ -72,6 +77,8 @@ export function resolveReply(ask: { replyTo?: unknown; quoted?: unknown }, lines
  * fact graph refuses ("something new has to be in his words").
  */
 export function withReplyContext<T extends { role: string; content: string; replyTo?: { excerpt?: string } }>(messages: T[]): T[] {
+  if(process.env.HARU_CORE_STARTUP_CONTEXT==='on')return corePolicySync('conversation-inputs.replyContext',[messages]);
+
   const quoted = (message: T) => (message.role === 'user' ? message.replyTo?.excerpt?.trim() : '') || '';
   if (!messages.some(quoted)) return messages;
   return messages.map(message => {

@@ -1,3 +1,5 @@
+import {corePolicySync} from './core-policy-sync';
+import {agendaClock} from './core-agenda-lifecycle';
 // Something on the calendar, an hour out and then a quarter of an hour out.
 //
 // The task chaser (reminders.ts) deals in what is due and overdue and how
@@ -23,6 +25,7 @@ function parseTime(time: string): number | null {
 }
 
 export function upcomingToMention(items: Dated[], now: Date, todayKey: string, marked: Record<string, number[]>): Upcoming | null {
+  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on')return corePolicySync<any>('agenda-life.upcoming',[items,agendaClock(now),todayKey,marked]);
   const intoDay = now.getHours() * 60 + now.getMinutes();
   let best: Upcoming | null = null;
   for (const item of items) {
@@ -40,6 +43,7 @@ export function upcomingToMention(items: Dated[], now: Date, todayKey: string, m
 }
 
 export function markMentioned(marked: Record<string, number[]>, id: string, lead: number, keep: string[]): Record<string, number[]> {
+  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on')return corePolicySync<any>('agenda-life.markUpcoming',[marked,id,lead,keep]);
   const next: Record<string, number[]> = {};
   for (const key of keep) if (marked[key]) next[key] = marked[key];
   next[id] = [...new Set([...(marked[id] ?? []), lead])];

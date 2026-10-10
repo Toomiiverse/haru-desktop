@@ -1,3 +1,4 @@
+import {corePolicySync} from './core-policy-sync';
 import { readTone, isHeated } from './tone';
 import { IRRITATION, EGO } from './mood';
 
@@ -52,6 +53,8 @@ const FACES: Partial<Record<EmotionName, RegExp[]>> = {
  * with five expressions and one with fifty.
  */
 export function faceForEmotion(emotion: EmotionName, available: string[]): string | null {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.faceForEmotion',[emotion,available]);
+
   for (const test of FACES[emotion] ?? []) {
     const found = available.find(name => test.test(name));
     if (found) return found;
@@ -83,6 +86,8 @@ export const NEUTRAL_EMOTION: Emotion = { emotion: 'neutral', confidence: 0.5, e
  * which every voice and face can fall back to.
  */
 export function localEmotion(text: string): EmotionName {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.localEmotion',[text]);
+
   const line = (text ?? '').trim();
   if (!line) return 'neutral';
   const tone = readTone(line);
@@ -121,6 +126,8 @@ const clamp01 = (value: unknown, fallback: number) => {
 // Anything unrecognised falls back to the neutral reading rather than throwing.
 // A bad classification should cost her an expression, never a reply.
 export function parseEmotion(raw: unknown): Emotion | null {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.parseEmotion',[raw]);
+
   let value = raw;
   if (typeof value === 'string') {
     try { value = JSON.parse(value); } catch { return null; }
@@ -166,6 +173,8 @@ const EMOTION_GLOSSES = [
 ].join('; ');
 
 export function classificationPrompt(mood: { irritation: number; ego: number }) {
+  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.classificationPrompt',[mood]);
+
   return [
     'You label the emotional state behind a line of dialogue for an animated character.',
     'Read the line and report what the speaker felt as they said it, not what the listener would feel.',

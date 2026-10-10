@@ -19,7 +19,7 @@ type Message = { id: string; role: 'user' | 'assistant'; content: string; time: 
 // Something she said off her own back. Deliberately not a Message: it never
 // belonged to the conversation, and giving it that shape is what let it be
 // appended to one. See electron/asides.ts.
-type Aside = { id: string; at: string; day: string; source: string; text: string };
+type Aside = { id: string; at: string; day: string; source: string; text: string; nudgeTopic?: string; nudgeFeedback?: 'more' | 'less' | 'discussed' };
 // A file that came with a message. A path rather than bytes — see electron/attachments.ts.
 type Attachment = { id: string; kind: string; name: string; saved: string; url: string; bytes: number };
 // What the app knows about its own next version. See electron/updates.ts.
@@ -59,7 +59,9 @@ type VoiceConfig = { engine: string; voice: string; referenceText: string; endpo
 type SpeechClip = { turn: number; text: string; audio?: Uint8Array; mime?: string };
 
 contextBridge.exposeInMainWorld('haru', {
+  world: { get: () => ipcRenderer.invoke('world:get'), detail: (id: string, before?: number) => ipcRenderer.invoke('world:detail', id, before), assets: () => ipcRenderer.invoke('world:assets') },
   settings: { get: (key: string) => ipcRenderer.invoke('settings:get', key), set: (key: string, value: unknown) => ipcRenderer.invoke('settings:set', key, value) },
+  affect: { status: () => ipcRenderer.invoke('affect:status'), save: (change: unknown) => ipcRenderer.invoke('affect:settings', change) },
   listen: {
     correct: (heard: string, meant: string) => ipcRenderer.invoke('listen:correct', heard, meant) as Promise<number>,
     corrections: () => ipcRenderer.invoke('listen:corrections') as Promise<{ heard: string; meant: string; used: number }[]>,
@@ -224,6 +226,13 @@ contextBridge.exposeInMainWorld('haru', {
     },
     // Said on a call, and cut off: what she actually got out replaces the
     // reply her brain wrote, or the reply goes when none of it was said.
+    // A picture she made. Handed here for the same reason a phone turn is: the
+    // renderer owns the conversation and writes it to disk.
+    onPicture: (callback: (picture: { id: string; name: string; saved: string; url: string; bytes: number; private: boolean }) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, picture: { id: string; name: string; saved: string; url: string; bytes: number; private: boolean }) => callback(picture);
+      ipcRenderer.on('chat:picture', listener);
+      return () => ipcRenderer.removeListener('chat:picture', listener);
+    },
     onSaidFromPhone: (callback: (turn: { reply: string; said: string }) => void) => {
       const listener = (_event: Electron.IpcRendererEvent, turn: { reply: string; said: string }) => callback(turn);
       ipcRenderer.on('chat:saidFromPhone', listener);
@@ -246,6 +255,12 @@ contextBridge.exposeInMainWorld('haru', {
     // Main owns the list, so the window asks for it and is told about additions
     // rather than holding a copy it has to save.
     getAsides: () => ipcRenderer.invoke('chat:getAsides') as Promise<Aside[]>,
+    nudgeFeedback: (id: string, choice: 'more' | 'less' | 'discussed' | null) => ipcRenderer.invoke('chat:nudgeFeedback', id, choice) as Promise<Aside>,
+    onAsidesChanged: (callback: (asides: Aside[]) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, asides: Aside[]) => callback(asides);
+      ipcRenderer.on('chat:asidesChanged', listener);
+      return () => ipcRenderer.removeListener('chat:asidesChanged', listener);
+    },
     clearAsides: () => ipcRenderer.invoke('chat:clearAsides') as Promise<Aside[]>,
     onAside: (callback: (aside: Aside) => void) => {
       const listener = (_event: Electron.IpcRendererEvent, aside: Aside) => callback(aside);
@@ -329,6 +344,7 @@ contextBridge.exposeInMainWorld('haru', {
       return () => ipcRenderer.removeListener('wardrobe:open', listener);
     },
   },
+  gmail: { status: () => ipcRenderer.invoke('gmail:status'), open: () => ipcRenderer.invoke('gmail:open') },
   google: {
     status: () => ipcRenderer.invoke('google:status') as Promise<GoogleStatus>,
     saveCredentials: (clientId: string, clientSecret: string) => ipcRenderer.invoke('google:saveCredentials', clientId, clientSecret) as Promise<GoogleStatus>,

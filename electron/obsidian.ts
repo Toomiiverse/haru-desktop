@@ -1,3 +1,5 @@
+import {walkCoreVault,runCoreVaultSync} from './core-knowledge';
+import {corePolicySync} from './core-policy-sync';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { KNOWLEDGE_CATEGORIES, type KnowledgeCategory, type KnowledgeStore } from './knowledge';
@@ -27,6 +29,7 @@ export const HER_OWN_READABLE = ['Configuration.md'];
 export const DEFAULT_VAULT_SKIP = ['.obsidian', '.trash', '.git', 'templates', '_templates', 'attachments', '_attachments', 'node_modules', HARU_FOLDER];
 
 export function walkVault(root: string, skip: string[] = DEFAULT_VAULT_SKIP): VaultFile[] {
+ if(process.env.HARU_CORE_KNOWLEDGE==='on')return walkCoreVault(root,skip).files;
   const out: VaultFile[] = [];
   const visit = (dir: string, relative: string) => {
     let entries;
@@ -56,6 +59,7 @@ export function walkVault(root: string, skip: string[] = DEFAULT_VAULT_SKIP): Va
 }
 
 export function splitFrontmatter(text: string): { frontmatter: string; body: string } {
+  if(process.env.HARU_CORE_KNOWLEDGE==='on')return corePolicySync('knowledge-vault.split',[text]); 
   const match = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(text);
   if (!match) return { frontmatter: '', body: text };
   return { frontmatter: match[1], body: text.slice(match[0].length) };
@@ -76,6 +80,7 @@ function scalar(value: string): unknown {
 }
 
 export function parseFrontmatter(frontmatter: string): Record<string, unknown> {
+  if(process.env.HARU_CORE_KNOWLEDGE==='on')return corePolicySync('knowledge-vault.parse',[frontmatter]); 
   const out: Record<string, unknown> = {};
   const lines = frontmatter.split(/\r?\n/);
   let index = 0;
@@ -102,6 +107,7 @@ export function parseFrontmatter(frontmatter: string): Record<string, unknown> {
 }
 
 export function cleanWikilinks(text: string): string {
+  if(process.env.HARU_CORE_KNOWLEDGE==='on')return corePolicySync('knowledge-vault.wikilinks',[text]); 
   return text.replace(/\[\[([^\]|]+?)(?:\|([^\]]*?))?\]\]/g, (whole, name, alias) => {
     const shown = alias && alias.trim() ? alias.trim() : name.trim();
     return shown;
@@ -127,11 +133,13 @@ function isCategory(value: string): value is KnowledgeCategory {
 }
 
 export function categoryForFolder(relative: string, map: Record<string, KnowledgeCategory> = FOLDER_CATEGORIES): KnowledgeCategory {
+  if(process.env.HARU_CORE_KNOWLEDGE==='on')return corePolicySync('knowledge-vault.folder',[relative,map]); 
   const top = relative.split(/[\\/]/)[0].toLowerCase();
   return map[top] ?? 'general';
 }
 
 export function categoryForNote(relative: string, frontmatter: Record<string, unknown>, map: Record<string, KnowledgeCategory> = FOLDER_CATEGORIES): KnowledgeCategory {
+  if(process.env.HARU_CORE_KNOWLEDGE==='on')return corePolicySync('knowledge-vault.note',[relative,frontmatter,map]); 
   for (const key of ['category', 'type', 'folder']) {
     const value = frontmatter[key];
     if (typeof value === 'string' && isCategory(value.toLowerCase())) return value.toLowerCase() as KnowledgeCategory;
@@ -140,6 +148,7 @@ export function categoryForNote(relative: string, frontmatter: Record<string, un
 }
 
 export function removedNotes(store: KnowledgeStore, relativePaths: string[], vault: string): string[] {
+  if(process.env.HARU_CORE_KNOWLEDGE==='on')return corePolicySync('knowledge-vault.removed',[store,relativePaths,vault]); 
   const seen = new Set(relativePaths);
   return store.documents
     .filter(document => document.metadata.vault === vault && document.status === 'active' && !seen.has(document.source))
@@ -153,6 +162,7 @@ export type VaultSyncDeps = {
 };
 
 export async function syncVaultFiles(vault: string, deps: VaultSyncDeps): Promise<VaultSyncReport> {
+ if(process.env.HARU_CORE_KNOWLEDGE==='on')return runCoreVaultSync(vault,deps);
   const started = Date.now();
   const files = walkVault(vault);
   const report: VaultSyncReport = { added: 0, updated: 0, unchanged: 0, removed: 0, files: files.length, ms: 0 };

@@ -1,3 +1,4 @@
+import {supplement,supplementOwned} from './core-context-supplement';
 // What she comes to know from the chats he let her read (2026-09-19).
 //
 // Tier 1 of the WhatsApp door. The messages themselves are never a turn — she
@@ -34,6 +35,8 @@ export type Line = { chat: string; chatName: string; who: string; text: string; 
  * code refuses to break.
  */
 export function isLoopback(endpoint: string): boolean {
+  if(supplementOwned())return supplement('isLoopback',[endpoint]);
+
   let host = '';
   try {
     host = new URL(endpoint).hostname.toLowerCase();
@@ -50,9 +53,11 @@ export function isLoopback(endpoint: string): boolean {
 /** A rolling window of what was said, bounded per chat so one busy group cannot crowd out the rest. */
 export class Overheard {
   private readonly byChat = new Map<string, Line[]>();
-  constructor(private readonly perChat = 60, private readonly chats = 20) {}
+  private readonly coreLimits:Record<string,number>;
+  constructor(private readonly perChat = 60, private readonly chats = 20) {this.coreLimits={...(arguments[0]===undefined?{}:{perChat:arguments[0]}),...(arguments[1]===undefined?{}:{chats:arguments[1]})};}
 
   note(line: Line): void {
+    if(supplementOwned()){const p=supplement<any>('bufferNote',[[...this.byChat.keys()],this.byChat.get(line.chat)??[],line,this.coreLimits]);if(p.write){this.byChat.delete(p.chat);this.byChat.set(p.chat,p.rows);for(const key of p.remove)this.byChat.delete(key);}return;}
     if (!line.chat || !line.text.trim()) return;
     const held = this.byChat.get(line.chat) ?? [];
     held.push(line);
@@ -68,6 +73,7 @@ export class Overheard {
 
   /** Everything held, oldest chat first, and emptied -- a pass reads each line once. */
   drain(): Line[][] {
+    if(supplementOwned()){const p=supplement<any>('bufferDrain',[[...this.byChat].map(([key,rows])=>({key,length:rows.length}))]);const values=p.take.map((key:string)=>this.byChat.get(key)!);if(p.clear)this.byChat.clear();return values;}
     const all = [...this.byChat.values()];
     this.byChat.clear();
     return all.filter(lines => lines.length > 0);
@@ -82,6 +88,8 @@ export class Overheard {
 export type Plan = { title: string; date: string; time?: string; who?: string; said?: string };
 
 export function overheardPrompt(userName: string): string {
+  if(supplementOwned())return supplement('overheardPrompt',[userName]);
+
   const user = userName.trim() || 'the user';
   return `You are reading part of a WhatsApp conversation ${user} is in, so that his assistant knows what he has been told. You are not in the conversation and you never reply to it.
 
@@ -111,6 +119,8 @@ What is not a plan and not a fact: chat, jokes, opinions, how somebody feels, wh
 }
 
 export function overheardInput(chatName: string, day: string, lines: Line[]): string {
+  if(supplementOwned())return supplement('overheardInput',[chatName,day,lines]);
+
   const said = lines.map(line => `${line.who}: ${line.text.replace(/\s+/g, ' ').trim().slice(0, 400)}`).join('\n');
   return `Conversation: ${chatName}\nDate of this conversation: ${day}\n\n${said}`;
 }
@@ -131,6 +141,8 @@ const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
 
 /** The plans out of whatever came back. Tolerant of prose around the object, like readExtraction. */
 export function readPlans(raw: string): Plan[] {
+  if(supplementOwned())return supplement('readPlans',[raw]);
+
   const text = String(raw ?? '');
   const start = text.indexOf('{');
   const end = text.lastIndexOf('}');
@@ -175,6 +187,8 @@ export type PlanRefusal = { plan: Plan; why: string };
  * reminder filed years out, the same thing arriving twice under two wordings.
  */
 export function keepable(plans: Plan[], existing: Kept[], todayKey: string, { horizonDays = 400, most = 5 } = {}): { keep: Plan[]; refused: PlanRefusal[] } {
+  if(supplementOwned())return supplement('keepable',[plans,existing,todayKey,arguments[3]??{}]);
+
   const keep: Plan[] = [];
   const refused: PlanRefusal[] = [];
   const open = existing.filter(item => !item.done);
@@ -209,6 +223,8 @@ export function keepable(plans: Plan[], existing: Kept[], todayKey: string, { ho
  * from nowhere would be the opposite one.
  */
 export function asKept(plan: Plan, chatName: string): Omit<Kept, 'id' | 'done'> {
+  if(supplementOwned())return supplement('asKept',[plan,chatName]);
+
   const from = plan.who ? `${plan.who} on WhatsApp` : `WhatsApp (${chatName})`;
   return {
     title: plan.title.slice(0, 120),
@@ -221,6 +237,8 @@ export function asKept(plan: Plan, chatName: string): Omit<Kept, 'id' | 'done'> 
 
 /** The facts half, as the graph's own reader wants it, with every claim attributed. */
 export function factsFor(extraction: Extraction | null): Extraction | null {
+  if(supplementOwned())return supplement('factsFor',[extraction]);
+
   if (!extraction) return null;
   // Nothing overheard ends a fact. Somebody saying "Ryan doesn't work there any
   // more" in a chat she is reading is hearsay, and the graph's `ended` list is

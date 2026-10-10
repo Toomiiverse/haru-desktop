@@ -19,6 +19,7 @@
 
 import { DEFAULT_TRANSITION_MS, EASE_OUT_CSS, emotionConfig, HARU_EMOTIONS, MOOD_TO_EMOTION } from './emotions';
 import { WAKE_PATTERN } from './wake';
+import { AVATAR_CLIENT_VERSION } from './avatarClient';
 
 /** One number to move the whole palette. 350 is Haru's pink; 150 would be AIRI's green. */
 const HUE = 350;
@@ -721,6 +722,8 @@ export function appPage(): string {
   .prow input[type=time] { width:auto; padding:.3rem .5rem; }
 
   #chat { flex:1; overflow-y:auto; padding:1rem .9rem 1.2rem; -webkit-overflow-scrolling:touch; }
+  #credit-status { margin:0 .9rem .4rem; padding:.65rem .75rem; border:1px solid var(--ink-dim); border-radius:.5rem; color:var(--ink); font-size:.85rem; line-height:1.4; }
+  #credit-status[hidden] { display:none; }
 
   /* Two views, one column. The face sits above the switch and belongs to both:
      it is the whole point of the second tab, and moving it on every switch
@@ -811,6 +814,10 @@ export function appPage(): string {
      of the reply and asking again. Folded by default — a row of buttons under
      every message was a dock, not a conversation. */
   .acts { display:flex; flex-wrap:wrap; align-items:center; gap:.35rem; margin:-.3rem 0 .6rem .25rem; max-width:82%; }
+  .nudge-feedback { max-width:100%; }
+  .nudge-feedback button { font-size:.72rem; min-height:36px; padding:.3rem .55rem; }
+  .nudge-feedback button[aria-pressed="true"] { border-color:var(--accent); color:var(--accent); }
+  .nudge-feedback .feedback-error { flex-basis:100%; font-size:.75rem; color:var(--ink-dim); }
   .acts .dock { display:contents; }
   .acts .dock[hidden] { display:none; }
   .acts .more { padding:.05rem .5rem; font-size:.8rem; opacity:.7; }
@@ -902,7 +909,8 @@ export function appPage(): string {
 <div class=topbar><span class=dot></span><span class=name>Haru</span><span id=net hidden>Offline</span><span id=talk hidden></span><button id=bell title="Notifications">🔔</button><button id=out>Sign out</button></div>
 <div id=psheet hidden><div id=pushpart></div><div id=wherepart></div></div>
 <section id=stage></section>
-<div class=tabs role=tablist><button id=tab-chat role=tab aria-selected=true aria-controls=chat>Chat</button><button id=tab-her role=tab aria-selected=false aria-controls=status>Her</button><button id=tab-diary role=tab aria-selected=false aria-controls=diary>Diary</button></div>
+<nav aria-label="Conversation mode" style="display:flex;gap:12px;padding:8px 16px"><span aria-current="page">AI</span><button id="refresh-chat" type="button" aria-label="Refresh chat">Refresh chat</button><a href="/gmail" style="color:inherit">Gmail</a><a href="/mail" style="color:inherit">Mail</a><a href="/characters" style="color:inherit">Character</a><a href="/voice-identity" style="color:inherit">My voice</a><a href="/emotion-settings" style="color:inherit">Feelings</a></nav><div class=tabs role=tablist><button id=tab-chat role=tab aria-selected=true aria-controls=chat>Chat</button><button id=tab-her role=tab aria-selected=false aria-controls=status>Her</button><button id=tab-diary role=tab aria-selected=false aria-controls=diary>Diary</button><a href="/world" style="align-self:center;padding:8px 14px;color:inherit;text-decoration:none;font-size:13px">World ↗</a></div>
+<div id=credit-status role=status aria-live=polite hidden></div>
 <section id=chat></section>
 <section id=status hidden aria-labelledby=tab-her></section>
 <section id=diary hidden aria-labelledby=tab-diary></section>
@@ -930,6 +938,17 @@ ${PHONE}
 ${VOICE}
 const get=u=>window.haruNet.fetch(u).then(r=>r.ok?r.json():Promise.reject(r));
 const post=(u,b)=>window.haruNet.fetch(u,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(b||{})}).then(r=>r.ok?r.json():Promise.reject(r));
+// Render Core's status without deriving a threshold or selecting a model here.
+async function refreshCreditStatus(){
+  try{
+    const status=await get('/api/funding'), el=$('credit-status');
+    if(typeof status.notice!=='string'||status.notice.length>2048) return;
+    el.textContent=status.notice; el.hidden=!status.notice;
+  }catch{ /* Keep the last observed status through a temporary transport loss. */ }
+}
+void refreshCreditStatus();
+setInterval(refreshCreditStatus,30000);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)void refreshCreditStatus();});
 
 // ---- Shadow input evidence -------------------------------------------------
 // Report only actual page input, never opening, visibility or a timer. Native
@@ -978,6 +997,7 @@ function bubbles(list){
     let html=(parts.length?parts:[m.content]).map(p=>'<div class="msg '+cls+'">'+md(esc(p))+'</div>').join('');
     // A line she said on her own is not a reply: nothing to rate or ask again.
     if(m.role==='assistant'&&m.id&&!m.aside) html+=acts(m,m===last);
+    if(m.role==='assistant'&&m.id&&m.aside&&(m.nudge||['idle','thought','hanging'].includes(m.aside))) html+=nudgeFeedbackButtons(m);
     return html;
   }).join('') || '<p class=quiet>Nothing yet today.</p>';
   if(pendingSend){
@@ -989,6 +1009,11 @@ function bubbles(list){
 // last one, because only the last one can be done again. The id is the stored
 // message's, handed out by the desk, so a rating names a reply rather than
 // quoting it. A note already given is shown; otherwise there is a pen.
+function nudgeFeedbackButtons(m){
+  return '<div class="acts nudge-feedback" role="group" aria-label="Feedback on this nudge" data-id="'+esc(m.id)+'">'
+    +[['more','More like this'],['less','Less like this'],['discussed','Already discussed']].map(([choice,label])=>
+      '<button type="button" data-act="nudge-'+choice+'" aria-pressed="'+(m.nudgeFeedback===choice)+'">'+label+'</button>').join('')+'</div>';
+}
 function acts(m,isLast){
   const on=r=>m.reaction===r?' class=on':'';
   // What is already on the reply stays in view beside the arrow — a thumb, an
@@ -1284,6 +1309,7 @@ async function recoverPending(){
       deliveryStatus('She received your message and is still replying.');
       return;
     }
+    const recovering=activeDelivery&&activeDelivery.id===pending.id?activeDelivery:null;
     if(activeDelivery&&activeDelivery.id===pending.id){ activeDelivery.settled=true; activeDelivery.controller.abort(); }
     stopVoice(); cancelBreath();
     pendingSend=null; deliveryNotice=''; window.haruKeep.drop('pendingSend'); $('cb').disabled=false;
@@ -1294,7 +1320,9 @@ async function recoverPending(){
       else if(receipt.reply&&(!messages||!messages.some(m=>m.role==='assistant'&&m.content===receipt.reply))){
         $('chat').insertAdjacentHTML('beforeend','<div class="msg them">'+esc(receipt.reply)+'</div>');
       }
+      if(recovering){if(receipt.ignored) recovering.observe('ignored'); else recovering.rendered(receipt.reply);}
     }else{
+      if(recovering) recovering.observe('failed');
       // A restart or expired receipt cannot prove a send failed. Do not retry
       // automatically; preserve the words and make the uncertainty explicit.
       window.haruKeep.set('unconfirmedSend',pending);
@@ -1362,8 +1390,25 @@ async function deliver(text,sent,{interrupted=false}={}){
     deliveryStatus('Still checking the previous message; your next message is kept in the box.'); return;
   }
   const requestId=crypto.randomUUID();
+  const submittedAt=performance.now();
+  let firstTextMs=null,foreground=!document.hidden,observed=false;
+  const visibility=()=>{if(document.hidden) foreground=false;};
+  document.addEventListener('visibilitychange',visibility);
+  const observe=(outcome,chars=0,frames=0)=>{
+    if(observed) return; observed=true;
+    document.removeEventListener('visibilitychange',visibility);
+    const elapsedMs=performance.now()-submittedAt;
+    post('/api/chat/observe',{requestId,observation:{surface:'web',outcome,elapsedMs,firstTextMs,
+      completeRenderMs:outcome==='rendered'?elapsedMs:null,foreground,renderedChars:chars,frames}}).catch(()=>{});
+  };
+  const rendered=reply=>requestAnimationFrame(()=>requestAnimationFrame(()=>{
+    const children=Array.from($('chat').children),lastMe=children.map(e=>e.classList.contains('me')).lastIndexOf(true);
+    const shown=children.slice(lastMe+1).filter(e=>e.classList.contains('them')).map(e=>e.textContent).join(' ');
+    const normal=t=>String(t||'').replace(/\\s+/g,' ').trim();
+    observe(normal(shown)===normal(reply)&&normal(reply)?'rendered':'failed',String(reply||'').length,2);
+  }));
   deliveryNotice='';
-  const operation={id:requestId,controller:new AbortController(),settled:false};
+  const operation={id:requestId,controller:new AbortController(),settled:false,observe,rendered};
   activeDelivery=operation;
   pendingSend={id:requestId,text,files:sent,at:Date.now()};
   window.haruKeep.set('pendingSend',pendingSend);
@@ -1397,7 +1442,7 @@ async function deliver(text,sent,{interrupted=false}={}){
   // stream delivers them, and the final processed reply replaces them when the
   // stream ends. textContent rather than innerHTML — her words are text, not
   // markup, and the model is not a source we escape from, it is the source.
-  const show=t=>paint(id,t);
+  const show=t=>{paint(id,t);if(t&&firstTextMs===null) requestAnimationFrame(()=>{if(firstTextMs===null) firstTextMs=performance.now()-submittedAt;});};
   try{
     const r=await window.haruNet.fetch('/api/chat/stream',{method:'POST',signal:operation.controller.signal,headers:{'content-type':'application/json'},body:JSON.stringify(Object.assign(sent.length?{text,attachments:sent}:{text},{requestId},interrupted?{interrupted:true}:{}))});
     if(!r.ok) throw r;
@@ -1407,6 +1452,7 @@ async function deliver(text,sent,{interrupted=false}={}){
     operation.settled=true;
     pendingSend=null; deliveryNotice=''; window.haruKeep.drop('pendingSend');
     if(ignored){
+      observe('ignored');
       // Whatever she was about to say does not exist: the bubble goes, the note
       // takes its place, and nothing is spoken.
       stopVoice();
@@ -1418,6 +1464,7 @@ async function deliver(text,sent,{interrupted=false}={}){
       // The processed reply is the one that counts — the stream can carry words
       // she later trims as repetition — so it replaces what was shown.
       if(reply!==null) show(reply);
+      rendered(reply);
       if(reply){
         // Her voice started with the stream, sentence by sentence; only the
         // face waits for a classifier now, and the words are already on screen.
@@ -1435,6 +1482,7 @@ async function deliver(text,sent,{interrupted=false}={}){
     }
   }catch(r){
     if(operation.settled) return;
+    observe(operation.controller.signal.aborted?'cancelled':'failed');
     stopVoice();
     cancelBreath();
     stopWaiting();
@@ -1532,6 +1580,21 @@ async function askAgain(){
 $('chat').addEventListener('click',async ev=>{
   const b=ev.target.closest('button[data-act]'); if(!b) return;
   const row=b.closest('.acts'); const id=row.dataset.id; const act=b.dataset.act;
+  if(act.startsWith('nudge-')){
+    const choice=b.getAttribute('aria-pressed')==='true'?null:act.slice(6);
+    const buttons=[...row.querySelectorAll('button')];
+    for(const button of buttons) button.disabled=true;
+    row.querySelector('.feedback-error')?.remove();
+    try{
+      const result=await post('/api/chat/nudge-feedback',{id,choice});
+      for(const button of buttons) button.setAttribute('aria-pressed',String(button.dataset.act==='nudge-'+result.choice));
+    }catch(error){
+      if(error&&error.status===401){location.reload();return;}
+      const note=document.createElement('span'); note.className='feedback-error'; note.setAttribute('role','alert');
+      note.textContent='Could not save feedback. Try again.'; row.appendChild(note);
+    }finally{ for(const button of buttons) button.disabled=false; }
+    return;
+  }
   if(act==='more'){
     // One open at a time: the arrow is a drawer, not a setting.
     const dock=row.querySelector('.dock'); const opening=dock.hidden;
@@ -1565,6 +1628,7 @@ $('chat').addEventListener('click',async ev=>{
     const log=async()=>{
       const w=wrong.value.trim(), r=rather.value.trim();
       if(!w&&!r) return;
+      box.querySelector('.tuning-error')?.remove();
       save.disabled=wrong.disabled=rather.disabled=true;
       try{
         await post('/api/chat/tune',{id,wrong:w,rather:r});
@@ -1573,6 +1637,8 @@ $('chat').addEventListener('click',async ev=>{
       }catch(r2){
         if(r2&&r2.status===401){location.reload();return;}
         save.disabled=wrong.disabled=rather.disabled=false;
+        const error=document.createElement('span'); error.className='tuning-error'; error.setAttribute('role','alert');
+        error.textContent='Could not confirm the save. Your text is still here. Check saved notes before trying again.'; box.appendChild(error);
       }
     };
     save.addEventListener('click',log);
@@ -1684,6 +1750,11 @@ window.addEventListener('pageshow',e=>{ if(e.persisted) refreshIfIdle(true); });
 // Re-read the day unless she is mid-answer, when the stream on screen is newer
 // than anything the server would hand back.
 // opened: the page came back in front of them; anything else is the page checking on its own.
+$('refresh-chat').onclick=async()=>{
+  const button=$('refresh-chat');button.disabled=true;button.textContent='Refreshing…';
+  try{await recoverPending();await load(true);}
+  finally{button.disabled=false;button.textContent='Refresh chat';}
+};
 function refreshIfIdle(opened){ if($('cb').disabled){ void recoverPending(); return; } void load(!opened); }
 // Four minutes: she is being carried around, not watched. Anything faster reads
 // as pestering, and the spacing on her side would refuse it anyway.
@@ -1917,6 +1988,7 @@ async function drawBell(){
 // The pill in the top bar says which. Opened inside the tap, as iOS insists
 // for both microphone and audio.
 const mic=$('mic'), talkPill=$('talk');
+let speakerGuard=false;
 let vad=null, talk=null, ctx=null, earStream=null, earNode=null, ring=[], ringMs=0, ticker=null;
 const now=()=>performance.now();
 function showTalk(){
@@ -1925,6 +1997,7 @@ function showTalk(){
   talkPill.textContent=s==='asleep'?'Say “Hey Haru”':s==='awake'?'Listening…':s==='thinking'?'Thinking…':s==='speaking'?'Speaking…':'';
 }
 async function openEar(){
+  const identity=await window.haruNet.fetch('/api/speaker/status');if(!identity.ok)throw Error('Voice recognition is unavailable.');speakerGuard=(await identity.json()).deferVoiceStart===true;
   earStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}});
   ctx=new (window.AudioContext||window.webkitAudioContext)();
   await ctx.resume();
@@ -1953,7 +2026,7 @@ function closeEar(){
 function onVad(ev,t){
   if(!ev||!talk) return;
   if(ev.type==='start'){
-    act(talk.voiceStarted(t));
+    if(!speakerGuard)act(talk.voiceStarted(t));
     if(window.haruAvatar&&talk.state()!=='asleep') window.haruAvatar.attend('typing',1500);
   } else if(ev.type==='end'){
     void hearFrames(ring.filter(f=>f.t>=ev.from&&f.t<=ev.to).map(f=>f.data));
@@ -1963,10 +2036,11 @@ async function hearFrames(frames){
   if(!frames.length||!ctx||!talk) return;
   const wav=window.haruWav(frames,ctx.sampleRate,16000);
   try{
-    const r=await window.haruNet.fetch('/api/listen',{method:'POST',headers:{'content-type':'audio/wav'},body:wav});
+    const r=await window.haruNet.fetch('/api/listen',{method:'POST',headers:{'content-type':'audio/wav','x-haru-speaking':String(!player.paused&&!player.ended)},body:wav});
     if(!r.ok) return;
-    const {text}=await r.json();
-    if(text&&talk) act(talk.heard(text,now()));
+    const {text,notice}=await r.json();
+    if(notice){await speak(notice,'neutral');}
+    if(text&&talk){if(speakerGuard)act(talk.voiceStarted(now()));act(talk.heard(text,now()));}
   }catch(e){ console.warn('[ears] '+(e&&e.message||e)); }
 }
 function act(actions){
@@ -2070,6 +2144,9 @@ if(whereOn()) startWhere();
 // Back on screen after a while away: the next fix goes through whatever it says.
 document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible'&&whereOn()) lastSent=null; });
 ${AVATAR}
+const avatarClient = document.createElement('script');
+avatarClient.src = '/lib/haru-avatar.js?v=${AVATAR_CLIENT_VERSION}';
+document.head.appendChild(avatarClient);
 </script>`;
 }
 

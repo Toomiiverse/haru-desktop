@@ -1,3 +1,4 @@
+import {corePolicySync} from './core-policy-sync';
 // Memory blocks: a Letta-inspired working-memory and context layer on top of
 // Haru's existing deterministic memory engine.
 //
@@ -79,21 +80,25 @@ export type BlockSources = {
 const LABEL_RE = /^[a-z][a-z0-9_]*$/;
 
 export function blockLabelValid(label: string): boolean {
+  if(process.env.HARU_CORE_BLOCK_GOVERNANCE==='on') return corePolicySync<boolean>('block-governance.blockLabelValid',[label]);
   return LABEL_RE.test(label);
 }
 
 /** The label's stable block id. */
 export function blockIdFor(label: string): string {
+  if(process.env.HARU_CORE_BLOCK_GOVERNANCE==='on') return corePolicySync<string>('block-governance.blockIdFor',[label]);
   return `block-${label}`;
 }
 
 export function findBlock(blocks: MemoryBlock[], label: string): MemoryBlock | undefined {
+  if(process.env.HARU_CORE_BLOCK_GOVERNANCE==='on') return corePolicySync<MemoryBlock | null>('block-governance.findBlock',[blocks,label]) ?? undefined;
   return blocks.find(block => block.label === label);
 }
 
 /** Whether the model-facing memory tools may touch this block. Read-only is
  *  enforced here, at the layer the tools call — never only in a prompt. */
 export function canEditBlock(blocks: MemoryBlock[], label: string): boolean {
+  if(process.env.HARU_CORE_BLOCK_GOVERNANCE==='on') return corePolicySync<boolean>('block-governance.canEditBlock',[blocks,label]);
   const block = findBlock(blocks, label);
   return Boolean(block && !block.read_only);
 }
@@ -104,6 +109,7 @@ export function canEditBlock(blocks: MemoryBlock[], label: string): boolean {
  * editable views over the deterministic memory records.
  */
 export function defaultMemoryBlocks(): MemoryBlock[] {
+  if(process.env.HARU_CORE_BLOCK_GOVERNANCE==='on') return corePolicySync<MemoryBlock[]>('block-governance.defaultMemoryBlocks',[]);
   return [
     {
       id: blockIdFor('persona'),
@@ -209,6 +215,7 @@ function asBlock(saved: unknown): MemoryBlock | null {
  * gets the standard set without losing custom ones.
  */
 export function mergeBlockDefaults(saved: unknown): MemoryBlock[] {
+  if(process.env.HARU_CORE_BLOCK_GOVERNANCE==='on') return corePolicySync<MemoryBlock[]>('block-governance.mergeBlockDefaults',[saved]);
   const parsed = Array.isArray(saved) ? saved.map(asBlock).filter((block): block is MemoryBlock => block !== null) : [];
   const seen = new Set(parsed.map(block => block.label));
   const out = [...parsed];
@@ -248,6 +255,7 @@ function wrap(text: string, width: number): string {
 
 /** Line-wraps a list of record texts under a fixed per-item width. */
 export function linesFromRecords(records: MemoryRecord[], width = 160): string {
+  if(process.env.HARU_CORE_BLOCK_GOVERNANCE==='on') return corePolicySync<string>('block-governance.linesFromRecords',[records,width]);
   return records.map(record => `- ${wrap(record.text, width)}`).join('\n');
 }
 
@@ -315,6 +323,7 @@ const RESTATED = 0.75;
  * line stays; one whose words the other already carries goes.
  */
 export function withoutRestatements(records: MemoryRecord[]): MemoryRecord[] {
+  if(process.env.HARU_CORE_BLOCK_GOVERNANCE==='on') return corePolicySync<MemoryRecord[]>('block-governance.withoutRestatements',[records]);
   const words = records.map(record => keywords(record.text));
   return records.filter((record, index) => {
     const mine = words[index];
@@ -373,6 +382,7 @@ const PROFILE_COVERAGE = 0.8;
  * tomorrow. They are only not rendered while the profile covers them.
  */
 export function coveredByProfile(record: MemoryRecord, profile: BlockSources['profile']): boolean {
+  if(process.env.HARU_CORE_BLOCK_GOVERNANCE==='on') return corePolicySync<boolean>('block-governance.coveredByProfile',[record,profile]);
   const said = keywords(`${profile.about} ${profile.occupation} ${profile.nickname}`);
   if (!said.size) return false;
   const words = keywords(record.text);
@@ -403,6 +413,11 @@ function fresh(records: MemoryRecord[], sources: BlockSources, shown: Set<string
  * and see the block whole.
  */
 export function resolveBlockValue(block: MemoryBlock, sources: BlockSources, shown: Set<string> = new Set()): string {
+  if (process.env.HARU_CORE_DESKTOP_MEMORY === 'on') {
+    const result = corePolicySync<{value:string;shown:string[]}>('memory-block.resolveBlockValue', [block, {...sources, now:sources.now ?? new Date(), semantic:sources.semantic ? [...sources.semantic] : undefined, latestSemantic:sources.latestSemantic ? [...sources.latestSemantic] : undefined}, [...shown]]);
+    for (const id of result.shown) shown.add(id);
+    return result.value;
+  }
   if (block.edited && typeof block.value === 'string') return block.value;
   switch (block.label) {
     case 'persona': {
@@ -502,6 +517,7 @@ export function resolveBlockValue(block: MemoryBlock, sources: BlockSources, sho
 
 /** The rendered metadata line for a block. */
 export function blockMetadata(value: string, block: MemoryBlock): string {
+  if(process.env.HARU_CORE_BLOCK_GOVERNANCE==='on') return corePolicySync<string>('block-governance.blockMetadata',[value,block]);
   return `- chars_current=${value.length}\n- chars_limit=${block.limit}`;
 }
 
@@ -512,6 +528,7 @@ export function blockMetadata(value: string, block: MemoryBlock): string {
  * it was cut.
  */
 export function fitToLimit(value: string, block: MemoryBlock, scale = 1): { value: string; cut: boolean } {
+  if(process.env.HARU_CORE_BLOCK_GOVERNANCE==='on') return corePolicySync<{value:string;cut:boolean}>('block-governance.fitToLimit',[value,block,scale]);
   const limit = Math.floor(block.limit * scale);
   if (value.length <= limit) return { value, cut: false };
   const lines = value.split('\n');
@@ -545,6 +562,7 @@ export type BlockEditResult = { ok: boolean; reason?: string };
  * duplication of an existing line is refused, and the limit is enforced.
  */
 export function appendToBlockValue(current: string, content: string, block: MemoryBlock): { ok: boolean; value?: string; reason?: string } {
+  if(process.env.HARU_CORE_BLOCK_GOVERNANCE==='on') return corePolicySync<{ok:boolean;value?:string;reason?:string}>('block-governance.appendToBlockValue',[current,content,block]);
   const trimmed = content.trim();
   if (!trimmed) return { ok: false, reason: 'content is empty' };
   const normalise = (line: string) => line.replace(/^-\s*/, '').trim().toLowerCase().replace(/[.!]+$/, '');
@@ -561,6 +579,7 @@ export function appendToBlockValue(current: string, content: string, block: Memo
  * wrong content gets changed.
  */
 export function replaceInBlockValue(current: string, oldSubstring: string, newSubstring: string, block: MemoryBlock): { ok: boolean; value?: string; reason?: string } {
+  if(process.env.HARU_CORE_BLOCK_GOVERNANCE==='on') return corePolicySync<{ok:boolean;value?:string;reason?:string}>('block-governance.replaceInBlockValue',[current,oldSubstring,newSubstring,block]);
   const old = oldSubstring.trim();
   const replacement = newSubstring.trim();
   if (!old) return { ok: false, reason: 'old substring is empty' };
@@ -574,11 +593,13 @@ export function replaceInBlockValue(current: string, oldSubstring: string, newSu
 
 /** Mark a block as carrying an explicit governed value. */
 export function withEditedValue(block: MemoryBlock, value: string): MemoryBlock {
+  if(process.env.HARU_CORE_BLOCK_GOVERNANCE==='on') return corePolicySync<MemoryBlock>('block-governance.withEditedValue',[block,value]);
   return { ...block, value, edited: true };
 }
 
 /** Drop the explicit value so the block derives from the engine again. */
 export function resetBlockToDerived(block: MemoryBlock): MemoryBlock {
+  if(process.env.HARU_CORE_BLOCK_GOVERNANCE==='on') return corePolicySync<MemoryBlock>('block-governance.resetBlockToDerived',[block]);
   const { value: _value, edited: _edited, ...rest } = block;
   return rest;
 }
@@ -594,6 +615,7 @@ export function resetBlockToDerived(block: MemoryBlock): MemoryBlock {
  * a single source of truth.
  */
 export function renderBlock(block: MemoryBlock, value: string): string {
+  if(process.env.HARU_CORE_BLOCK_GOVERNANCE==='on') return corePolicySync<string>('block-governance.renderBlock',[block,value]);
   return [
     `<${block.label}>`,
     '<description>',
@@ -649,6 +671,7 @@ export type DerivedMemoryBlocks = Record<CoreMemoryLabel, { value: string; memor
 
 /** The compact shape: the label as the tag, then the value. */
 export function renderBlockCompact(block: MemoryBlock, value: string): string {
+  if(process.env.HARU_CORE_BLOCK_GOVERNANCE==='on') return corePolicySync<string>('block-governance.renderBlockCompact',[block,value]);
   return [`<${block.label}>`, value, `</${block.label}>`].join('\n');
 }
 
@@ -675,6 +698,10 @@ const UNSCALED_BLOCKS = new Set(['her_own']);
 const CORE_DERIVED_BLOCKS = new Set(['human', 'preferences', 'relationship', 'shared_history']);
 
 export function formatMemoryBlocks(blocks: MemoryBlock[], sources: BlockSources, options: BlockRenderOptions = {}): BlockRenderResult {
+  if(process.env.HARU_CORE_BLOCK_GOVERNANCE==='on') {
+    const plan=corePolicySync<BlockRenderResult | {error:string}>('block-governance.formatMemoryBlocks',[blocks,{...sources,semantic:sources.semantic?[...sources.semantic]:undefined,latestSemantic:sources.latestSemantic?[...sources.latestSemantic]:undefined,now:sources.now??new Date()},options]);
+    if('error' in plan)throw Error(plan.error);return plan;
+  }
   const parts: string[] = [];
   const cut: BlockRenderResult['cut'] = [];
   const omitted = new Set(options.omit ?? []);

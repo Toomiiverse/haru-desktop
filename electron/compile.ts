@@ -1,3 +1,4 @@
+import {corePolicySync} from './core-policy-sync';
 // Deciding which of her feelings gets to speak, when several want to at once.
 //
 // Every layer rendered its own paragraph and they were concatenated in a fixed
@@ -92,6 +93,7 @@ export type Compiled = { text: string; spoke: string[]; dropped: { id: string; w
  * already had by hand.
  */
 export function compileBehaviour(candidates: Candidate[], cap = SPOKEN_AT_ONCE): Compiled {
+ if(process.env.HARU_CORE_SPEECH_CONTEXT==='on')return corePolicySync<Compiled>('prompt-context.compileBehaviour',[candidates,cap]);
   const live = candidates.filter(candidate => candidate.text.trim());
   const dropped: Compiled['dropped'] = [];
 

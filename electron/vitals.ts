@@ -1,3 +1,4 @@
+import {corePolicySync} from './core-policy-sync';
 // Haru's internal state. These drift on their own from the time of day and what
 // the machine is doing, so she has a mood before anyone speaks to her — the
 // point being that she is running whether or not she is being talked to.
@@ -72,6 +73,7 @@ const toward = (value: number, target: number, rate: number) => value + (target 
 // A day curve rather than a bedtime: she winds down through the evening, is
 // flattest around 4am, and picks up through the morning.
 export function sleepinessForHour(hour: number) {
+  if(process.env.HARU_CORE_LIFECYCLE_MOOD==='on') { return corePolicySync<any>('mood.sleepinessForHour',[hour]); }
   if (hour >= 23 || hour < 5) return 0.9;
   if (hour >= 21) return 0.6;
   if (hour >= 18) return 0.35;
@@ -81,6 +83,7 @@ export function sleepinessForHour(hour: number) {
 }
 
 export function isNight(hour: number) {
+  if(process.env.HARU_CORE_LIFECYCLE_MOOD==='on') { return corePolicySync<any>('mood.isNight',[hour]); }
   return hour >= 23 || hour < 6;
 }
 
@@ -88,6 +91,7 @@ export function isNight(hour: number) {
 // A single environment snapshot cannot reconstruct a long absence; one hour
 // already settles these rates and bounds work after a system-clock jump.
 export function driftVitals(current: Vitals, environment: Environment, seconds: number, lean: Lean = {}): Vitals {
+  if(process.env.HARU_CORE_LIFECYCLE_MOOD==='on') { return corePolicySync<any>('mood.driftVitals',[current,environment,seconds,lean]); }
   if (!Number.isFinite(seconds) || seconds <= 0) return { ...current };
   let next = current;
   for (let remaining = Math.min(seconds, 3600); remaining > 0; remaining -= 20) {
@@ -247,6 +251,7 @@ const ANNOYED_FROM = 33;
  * often each fires.
  */
 export function spokenCues(vitals: Vitals | undefined, irritation = 0): { cue: VitalCue; strength: number }[] {
+  if(process.env.HARU_CORE_LIFECYCLE_MOOD==='on') { return corePolicySync<any>('mood.spokenCues',[vitals,irritation]); }
   if (!vitals) return [];
   const annoyed = irritation >= ANNOYED_FROM;
   return VITAL_CUES
@@ -258,6 +263,7 @@ export function spokenCues(vitals: Vitals | undefined, irritation = 0): { cue: V
 }
 
 export function vitalsInstruction(vitals: Vitals | undefined, irritation = 0): string {
+  if(process.env.HARU_CORE_LIFECYCLE_MOOD==='on') { return corePolicySync<any>('mood.vitalsInstruction',[vitals,irritation]); }
   return spokenCues(vitals, irritation).map(entry => entry.cue.line).join(' ');
 }
 
@@ -265,6 +271,7 @@ export function vitalsInstruction(vitals: Vitals | undefined, irritation = 0): s
  *  them. Written per reply rather than per tick — what matters is what she was
  *  told, not what she was feeling between turns. */
 export function cueLog(vitals: Vitals | undefined, irritation = 0): string {
+  if(process.env.HARU_CORE_LIFECYCLE_MOOD==='on') { return corePolicySync<any>('mood.cueLog',[vitals,irritation]); }
   if (!vitals) return 'none — no vitals';
   const spoke = spokenCues(vitals, irritation);
   const state = (Object.keys(vitals) as (keyof Vitals)[])
@@ -283,6 +290,7 @@ export type VitalEvent = 'praised' | 'criticised' | 'spoken-to' | 'ignored-user'
  * were; the caller makes it bigger, by her temperament and a roll.
  */
 export function applyEvent(current: Vitals, event: VitalEvent, size = 1): Vitals {
+  if(process.env.HARU_CORE_LIFECYCLE_MOOD==='on') { return corePolicySync<any>('mood.applyEvent',[current,event,size]); }
   const next = { ...current };
   const by = (amount: number) => amount * Math.max(0, size);
   if (event === 'praised') { next.happiness = clamp(next.happiness + by(0.2)); next.affection = clamp(next.affection + by(0.15)); next.energy = clamp(next.energy + by(0.1)); }
@@ -335,6 +343,7 @@ const BASE_WEIGHTS: Record<IdleAction, number> = {
 // baseline rather than replacing it, so the character of the idle stays intact
 // while the emphasis shifts — sleepy means more yawning, not a different person.
 export function idleActionWeights(vitals: Vitals, environment: Environment): Record<IdleAction | 'nothing', number> {
+  if(process.env.HARU_CORE_LIFECYCLE_MOOD==='on') { return corePolicySync<any>('mood.idleActionWeights',[vitals,environment]); }
   const { sleepiness, energy, curiosity, focus, happiness } = vitals;
   const night = isNight(environment.hour);
   const alone = typeof environment.idleSeconds === 'number' && environment.idleSeconds > 300;
@@ -367,6 +376,7 @@ export function idleActionWeights(vitals: Vitals, environment: Environment): Rec
 }
 
 export function chooseIdleAction(vitals: Vitals, environment: Environment, random: () => number = Math.random): IdleAction | null {
+  if(process.env.HARU_CORE_LIFECYCLE_MOOD==='on') { return corePolicySync<any>('mood.chooseIdleAction',[vitals,environment,random()]); }
   const weights = idleActionWeights(vitals, environment);
   const total = Object.values(weights).reduce((sum, weight) => sum + weight, 0);
   if (total <= 0) return null;
@@ -381,6 +391,7 @@ export function chooseIdleAction(vitals: Vitals, environment: Environment, rando
 // How long to wait before looking again. She checks in more often when alert and
 // lets longer gaps pass when she is winding down.
 export function nextTickDelayMs(vitals: Vitals, random: () => number = Math.random) {
+  if(process.env.HARU_CORE_LIFECYCLE_MOOD==='on') { return corePolicySync<any>('mood.nextTickDelayMs',[vitals,random()]); }
   const alertness = 1 - vitals.sleepiness;
   const base = 30_000 - alertness * 18_000;
   return Math.round(base * (0.7 + random() * 0.6));
@@ -404,6 +415,7 @@ export const VITALS_SAVE_DELTA = 0.05;
 export const VITALS_SAVE_INTERVAL_MS = 5 * 60_000;
 
 export function shouldPersistVitals(current: Vitals, saved: Vitals | null, sinceSaveMs: number): boolean {
+  if(process.env.HARU_CORE_LIFECYCLE_MOOD==='on') { return corePolicySync<any>('mood.shouldPersistVitals',[current,saved,sinceSaveMs]); }
   if (!saved) return true;
   if (sinceSaveMs >= VITALS_SAVE_INTERVAL_MS) return true;
   return (Object.keys(current) as (keyof Vitals)[])

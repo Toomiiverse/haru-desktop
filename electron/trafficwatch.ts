@@ -1,3 +1,4 @@
+import {navigationPolicy} from './core-navigation-policy';
 // "Let me know when the traffic eases": a watch the app keeps, not a promise she makes.
 //
 // Asked exactly that at 5:44 PM on 2026-09-17, with the drive home at 24 minutes
@@ -25,6 +26,7 @@ const NAMED = /\b(?:to|towards?|into|for)\s+([A-Z][\w'&-]*(?:\s+[A-Z][\w'&-]*){0
 
 /** The ask, if the message is one: where the drive goes. Home unless a place is named. */
 export function trafficWatchAsk(text: string): { destination: string } | null {
+ if(process.env.HARU_CORE_NAVIGATION_POLICY==='on')return navigationPolicy('trafficWatchAsk',[text]);
   const line = (text ?? '').trim();
   if (!line || line.length > 300 || !WATCH_ASK.test(line)) return null;
   const named = NAMED.exec(line)?.[1]?.trim();
@@ -35,11 +37,13 @@ const STOP = /^(?:(?:hey |ok )?haru[,!.]?\s+)?(?:(?:never ?mind|forget (?:it|abo
 
 /** "Never mind", "I'm leaving now": the watch has nothing left to do. */
 export function stopsTrafficWatch(text: string): boolean {
+ if(process.env.HARU_CORE_NAVIGATION_POLICY==='on')return navigationPolicy('stopsTrafficWatch',[text]);
   return STOP.test((text ?? '').trim());
 }
 
 /** Back near a normal day: within three minutes of it, or fifteen per cent on a long drive. */
 export function easedEnough(route: Pick<Route, 'minutes' | 'typicalMinutes'>): boolean {
+ if(process.env.HARU_CORE_NAVIGATION_POLICY==='on')return navigationPolicy('easedEnough',[route]);
   if (!(route.typicalMinutes > 0) || !(route.minutes > 0)) return false;
   return route.minutes <= Math.max(route.typicalMinutes + 3, Math.round(route.typicalMinutes * 1.15));
 }
@@ -48,6 +52,7 @@ export type WatchTarget = { name: string; lat: number; lon: number };
 
 /** The scheduler job for a watch. One at a time: a new ask replaces the old one. */
 export function watchJob(destination: string, target: WatchTarget, nowMs: number): Job {
+ if(process.env.HARU_CORE_NAVIGATION_POLICY==='on')return navigationPolicy('watchJob',[destination,target,nowMs]);
   const until = nowMs + WATCH_FOR_MS;
   return {
     id: TRAFFIC_WATCH_KIND,
@@ -73,6 +78,7 @@ function way(destination: string): string {
 
 /** What she is told when the ask comes in, so what she says about it is true. */
 export function watchNote(destination: string, route: Pick<Route, 'minutes' | 'typicalMinutes'> | null, nowMs: number, timeZone: string, watching: boolean): string {
+ if(process.env.HARU_CORE_NAVIGATION_POLICY==='on')return navigationPolicy('watchNote',[destination,route,nowMs,timeZone,watching]);
   if (route && !watching) {
     return `They asked to be told when the traffic ${way(destination)} eases. It already has: ${route.minutes} minutes now, ${route.typicalMinutes} on a normal day, so no watch was needed. Tell them they can go now.`;
   }
@@ -84,21 +90,25 @@ export function watchNote(destination: string, route: Pick<Route, 'minutes' | 't
 
 /** Her note for the message that says it has eased. */
 export function easedPrompt(destination: string, route: Pick<Route, 'minutes' | 'typicalMinutes' | 'km' | 'via'>, startedAt: number, nowMs: number): string {
+ if(process.env.HARU_CORE_NAVIGATION_POLICY==='on')return navigationPolicy('easedPrompt',[destination,route,startedAt,nowMs]);
   const ago = Math.max(1, Math.round((nowMs - startedAt) / 60_000));
   return `${ago} minutes ago they asked you to tell them when the traffic ${way(destination)} eased. It has: by car it is ${route.minutes} minutes now (${route.typicalMinutes} on a normal day), ${route.km} km${route.via ? ` via ${route.via}` : ''}. Tell them, in one or two short lines in your own voice, that they can go now. Quote those numbers as they are; say nothing else about the roads.`;
 }
 
 /** Her note for the message that says the watch ran out and it never eased. */
 export function gaveUpPrompt(destination: string, route: Pick<Route, 'minutes' | 'typicalMinutes'> | null, startedAt: number, nowMs: number): string {
+ if(process.env.HARU_CORE_NAVIGATION_POLICY==='on')return navigationPolicy('gaveUpPrompt',[destination,route,startedAt,nowMs]);
   const hours = Math.round((nowMs - startedAt) / 360_000) / 10;
   return `${hours} hours ago they asked you to tell them when the traffic ${way(destination)} eased. It never did while it was watched${route ? `: it is still ${route.minutes} minutes, ${route.typicalMinutes} on a normal day` : ''}, and the watch has now stopped. Tell them that in one short line in your own voice. Quote any numbers as they are; do not guess when it will clear.`;
 }
 
 /** Said when her brain cannot be asked: the facts, plainly. */
 export function easedFallback(destination: string, route: Pick<Route, 'minutes' | 'typicalMinutes'>): string {
+ if(process.env.HARU_CORE_NAVIGATION_POLICY==='on')return navigationPolicy('easedFallback',[destination,route]);
   return `Traffic ${way(destination)} has eased — ${route.minutes} min now, ${route.typicalMinutes} on a normal day. Go.`;
 }
 
 export function gaveUpFallback(destination: string, route: Pick<Route, 'minutes' | 'typicalMinutes'> | null): string {
+ if(process.env.HARU_CORE_NAVIGATION_POLICY==='on')return navigationPolicy('gaveUpFallback',[destination,route]);
   return `Traffic ${way(destination)} never cleared${route ? ` — still ${route.minutes} min against ${route.typicalMinutes}` : ''}. I've stopped watching it.`;
 }

@@ -1,3 +1,4 @@
+import {locationPolicy,toldPolicy,locationClock} from './core-location-policy';
 // Where they said they are.
 //
 // Her phone-side sense of place is GPS matched to named spots: it knows they
@@ -66,6 +67,7 @@ function withoutQuestionOpener(sentence: string): string {
  * 4:30" — never a question or a mention of somewhere else.
  */
 export function placeToldFrom(text: string, nowIso: string): Told | null {
+ if(process.env.HARU_CORE_LOCATION_POLICY==='on')return toldPolicy('placeToldFrom',[text,nowIso,Intl.DateTimeFormat().resolvedOptions().timeZone]);
   // Sentence by sentence: "Leaving for the store now. How's the traffic?" is a
   // statement followed by a question, and the statement is the part that says
   // where they are. Only the questions are dropped.
@@ -143,6 +145,7 @@ function normalise(place: string): string {
 
 /** Whether what they said is still worth believing. */
 export function toldStillStands(told: Told | null | undefined, nowMs: number): told is Told {
+ if(process.env.HARU_CORE_LOCATION_POLICY==='on')return toldPolicy('toldStillStands',[told,nowMs]);
   if (!told) return false;
   const age = nowMs - Date.parse(told.at);
   return Number.isFinite(age) && age >= 0 && age < TOLD_STALE_MS;
@@ -150,6 +153,7 @@ export function toldStillStands(told: Told | null | undefined, nowMs: number): t
 
 /** In words, for any composer. */
 export function describeTold(told: Told | null | undefined, nowMs: number, clockNow: (ms: number) => string): string {
+ if(process.env.HARU_CORE_LOCATION_POLICY==='on')return toldPolicy('describeTold',[told,nowMs,locationClock(told,clockNow)]);
   if (!toldStillStands(told, nowMs)) return '';
   const minutes = Math.round((nowMs - Date.parse(told.at)) / 60_000);
   const when = minutes < 2 ? 'just now' : minutes < 60 ? `${minutes} minutes ago` : `at ${clockNow(Date.parse(told.at))}`;
@@ -174,6 +178,7 @@ const BUSY_PLACE = /\b(work|working|shift|shop|shops|store|office|warehouse|site
 
 /** Busy, as in not to be chased for going quiet: at work, driving, in a place that is not a chat. */
 export function toldTheyAreBusy(told: Told | null | undefined, nowMs: number): boolean {
+ if(process.env.HARU_CORE_LOCATION_POLICY==='on')return toldPolicy('toldTheyAreBusy',[told,nowMs]);
   if (!toldStillStands(told, nowMs)) return false;
   if (told.enRoute) return true;
   // Naming the hour they are free is itself the answer: nobody says "until
@@ -204,6 +209,7 @@ const NOT_A_DOING = /\b(?:be honest|say|tell you|guess|assume|admit|ask|let (?:y
  * had turned into a fact she could use.
  */
 export function errandsToldFrom(text: string, nowIso: string): Errand[] {
+ if(process.env.HARU_CORE_LOCATION_POLICY==='on')return toldPolicy('errandsToldFrom',[text,nowIso]);
   const said = (text ?? '').replace(/[‘’]/g, "'");
   if (!said.trim() || said.length > 300) return [];
   const out: Errand[] = [];
@@ -235,6 +241,7 @@ export function errandsToldFrom(text: string, nowIso: string): Errand[] {
  * tomorrow, because "text you at 8" said at nine at night is the morning.
  */
 export function errandDueAt(errand: Errand): number | null {
+ if(process.env.HARU_CORE_LOCATION_POLICY==='on')return toldPolicy('errandDueAt',[errand,Intl.DateTimeFormat().resolvedOptions().timeZone]);
   const said = Date.parse(errand.at);
   if (!Number.isFinite(said)) return null;
   const match = /\b(?:at|around|about|by|after)\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\b/i.exec(errand.what ?? '');
@@ -252,6 +259,7 @@ export function errandDueAt(errand: Errand): number | null {
 }
 
 export function errandToAskAfter(errands: Errand[], nowMs: number): Errand | null {
+ if(process.env.HARU_CORE_LOCATION_POLICY==='on')return toldPolicy('errandToAskAfter',[errands,nowMs,Intl.DateTimeFormat().resolvedOptions().timeZone]);
   for (let i = errands.length - 1; i >= 0; i--) {
     const at = Date.parse(errands[i].at);
     if (!Number.isFinite(at)) continue;

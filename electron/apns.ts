@@ -112,17 +112,23 @@ export function tokenIsGone(status: number, reason?: string): boolean {
 // typings just do not list it.)
 export const APNS_CONNECT_OPTIONS: http2.SecureClientSessionOptions & { autoSelectFamilyAttemptTimeout: number } = { autoSelectFamilyAttemptTimeout: 5_000 };
 
-export function sendApns(device: ApnsDevice, payload: string, config: ApnsConfig, jwt: string, collapseId?: string): Promise<ApnsResult> {
+/** Zero expires immediately if offline; reminders retain the carrier default. */
+export function apnsHeaders(token: string, config: ApnsConfig, jwt: string, collapseId?: string, expiresAt?: number): Record<string, string> {
+  return {
+    ':method': 'POST', ':path': `/3/device/${token}`,
+    authorization: `bearer ${jwt}`, 'apns-topic': config.bundleId, 'apns-push-type': 'alert', 'apns-priority': '10', 'content-type': 'application/json',
+    ...(collapseId ? { 'apns-collapse-id': collapseId.slice(0, 64) } : {}),
+    ...(expiresAt === undefined ? {} : { 'apns-expiration': String(Math.max(0, Math.floor(expiresAt))) }),
+  };
+}
+
+export function sendApns(device: ApnsDevice, payload: string, config: ApnsConfig, jwt: string, collapseId?: string, expiresAt?: number): Promise<ApnsResult> {
   return new Promise(resolve => {
     const host = device.sandbox ? APNS_SANDBOX_HOST : APNS_HOST;
     const client = http2.connect(host, APNS_CONNECT_OPTIONS);
     const finish = (result: ApnsResult) => { client.close(); resolve(result); };
     client.on('error', error => finish({ status: 0, reason: error.message, gone: false }));
-    const headers: Record<string, string> = {
-      ':method': 'POST', ':path': `/3/device/${device.token}`,
-      authorization: `bearer ${jwt}`, 'apns-topic': config.bundleId, 'apns-push-type': 'alert', 'apns-priority': '10', 'content-type': 'application/json',
-    };
-    if (collapseId) headers['apns-collapse-id'] = collapseId.slice(0, 64);
+    const headers = apnsHeaders(device.token, config, jwt, collapseId, expiresAt);
     const request = client.request(headers);
     let status = 0; let body = '';
     request.on('response', received => { status = Number(received[':status'] ?? 0); });

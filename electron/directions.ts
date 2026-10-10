@@ -1,3 +1,5 @@
+import {navigationPolicy} from './core-navigation-policy';
+import {locationPolicy,toldPolicy,locationClock} from './core-location-policy';
 // The way somewhere, asked of her and answered by the maps app.
 //
 // She is not a maps app and does not pretend to be: what she does is notice
@@ -45,11 +47,13 @@ const NOT_A_JOURNEY = /^(?:you|i|we|they|he|she|it|this|that|boil|cook|make|bake
 
 /** Tidied for a search: quotes, a leading article, a trailing "from here" gone; casing kept for names. */
 export function cleanDestination(raw: string): string {
+ if(process.env.HARU_CORE_NAVIGATION_POLICY==='on')return navigationPolicy('cleanDestination',[raw]);
   return raw.trim().replace(/^["'“”‘’]+|["'“”‘’]+$/g, '').replace(/^(?:the|a|my)\s+(?=\S)/i, m => (/^my/i.test(m) ? '' : m)).replace(/\s+/g, ' ').trim().slice(0, 80);
 }
 
 /** The ask in a message, if it is one: where to, and whether "the nearest" of something. */
 export function directionsAsk(text: string): DirectionsAsk | null {
+ if(process.env.HARU_CORE_NAVIGATION_POLICY==='on')return navigationPolicy('directionsAsk',[text]);
   const line = (text ?? '').trim();
   if (!line || line.length > 300) return null;
   for (const { pattern, nearest } of ASKS) {
@@ -80,6 +84,7 @@ export function directionsAsk(text: string): DirectionsAsk | null {
  */
 const ROUTE_TALK = /\b(?:via|hwy|highway|freeway|motorway|exit \d|turn (?:left|right)|(?:bus|train|tram|ferry|route)(?:es)? ?\d|(?:take|catch) the (?:bus|train|tram|ferry)|\d+\s*(?:-|–|to)?\s*\d*\s*(?:mins?|minutes|hrs?|hours)\b|parking|car ?park|campus lots?|head (?:north|south|east|west)|left onto|right onto|roundabout)/i;
 export function dropRouteTalk(reply: string): string {
+ if(process.env.HARU_CORE_NAVIGATION_POLICY==='on')return navigationPolicy('dropRouteTalk',[reply]);
   const paragraphs = reply.split(/\n\s*\n/);
   const kept = paragraphs.map(paragraph => {
     if (/^\s*(?:[-*•]|\d+[.)])\s/.test(paragraph)) return '';
@@ -103,6 +108,7 @@ const NOT_A_SUBURB = /^,?\s+(?:And|But|Then|Now|Today|Tomorrow|Please|Pls|Thanks
 
 /** The street address in the text, if there is one: number, street, and the suburb when it was given. */
 export function streetAddress(text: string): string | null {
+ if(process.env.HARU_CORE_NAVIGATION_POLICY==='on')return navigationPolicy('streetAddress',[text]);
   const m = ADDRESS.exec(text ?? '');
   if (!m) return null;
   let rest = m[2] ?? '';
@@ -120,6 +126,7 @@ const TRAFFIC_CLAIM = /\btraffic(?:'s| is| was)?\s*(?:already\s+|pretty\s+|a bit
 
 /** Whether her reply claims to know what the roads are doing. */
 export function claimsTraffic(reply: string): boolean {
+ if(process.env.HARU_CORE_NAVIGATION_POLICY==='on')return navigationPolicy('claimsTraffic',[reply]);
   return TRAFFIC_CLAIM.test(reply ?? '');
 }
 
@@ -132,6 +139,7 @@ export function claimsTraffic(reply: string): boolean {
 const BARE_JOURNEY = new RegExp(String.raw`^(?:.*\b)?(?:so\s+)?(?:how long (?:will|would|does|is) (?:that|it|this)(?: take| be)?|is (?:the )?traffic (?:bad|heavy|ok|okay|alright|any good)|how(?:'s|’s|s| is) (?:the )?traffic|what(?:'s|’s|s| is) (?:the )?traffic like|how bad is (?:the )?traffic|(?:is there )?(?:any|much) traffic|(?:(?:can|could|would|will) you\s+)?(?:please\s+)?(?:check|look up|look at|pull up|get)(?: me)?\s+(?:the |on (?:the )?)?(?:traffic|travel time|drive time|eta)(?: (?:report|update))?)` + TAIL, 'i');
 /** Where they said they were off to, in their own words: "going to X", "stopping by X", "off to X". */
 export function destinationNamed(text: string): string | null {
+ if(process.env.HARU_CORE_NAVIGATION_POLICY==='on')return navigationPolicy('destinationNamed',[text]);
   const m = new RegExp(String.raw`\b(?:going|heading|off|driving|walking|nipping|popping|stopping(?: by| in| at)?|on my way)\s+(?:to|by|at|into|over to|down to|round to)?\s*([A-Z][\w'&-]*(?:\s+(?:in|at|on)\s+[A-Z][\w'&-]*|\s+[A-Z][\w'&-]*){0,3})`, '').exec(text ?? '');
   const named = m?.[1]?.trim().replace(/\s+(?:then|and|so|but)$/i, '').trim();
   return named && named.length > 2 ? named.slice(0, 60) : null;
@@ -169,6 +177,7 @@ const BARE_ASK = /^(?:(?:can|could|would|will) you )?(?:(?:give|send|show|get|sh
  * directions", after a directions question, is that question answered.
  */
 export function directionsAskFrom(latest: string, recentUser: string[]): DirectionsAsk | null {
+ if(process.env.HARU_CORE_NAVIGATION_POLICY==='on')return navigationPolicy('directionsAskFrom',[latest,recentUser]);
   const remembered = () => {
     for (const earlier of [...recentUser].reverse()) { const found = streetAddress(earlier); if (found) return found; }
     return null;
@@ -219,6 +228,7 @@ export function directionsAskFrom(latest: string, recentUser: string[]): Directi
 
 /** A place she knows by that name — "home", "the store", "my place" for home. */
 export function matchNamedPlace(destination: string, places: Place[]): Place | null {
+ if(process.env.HARU_CORE_NAVIGATION_POLICY==='on')return navigationPolicy('matchNamedPlace',[destination,places]);
   const key = destination.toLowerCase().replace(/^(?:the|my)\s+/, '').trim();
   if (/^(?:place|house|home|flat|apartment)$/.test(key)) return homeOf(places);
   return places.find(p => p.name.toLowerCase().replace(/^the\s+/, '') === key) ?? null;
@@ -226,6 +236,7 @@ export function matchNamedPlace(destination: string, places: Place[]): Place | n
 
 /** Where they are for the purposes of "from here": a fresh fix, else home. */
 export function startingPoint(where: Whereabouts, nowMs = Date.now()): { lat: number; lon: number; known: 'here' | 'home' } | null {
+ if(process.env.HARU_CORE_LOCATION_POLICY==='on')return locationPolicy('startingPoint',[where,nowMs]);
   if (where.enabled && where.last && nowMs - Date.parse(where.last.at) <= SPOT_STALE_MS) return { lat: where.last.lat, lon: where.last.lon, known: 'here' };
   const home = homeOf(where.places);
   return home ? { lat: home.lat, lon: home.lon, known: 'home' } : null;
@@ -233,10 +244,12 @@ export function startingPoint(where: Whereabouts, nowMs = Date.now()): { lat: nu
 
 /** Apple Maps opens this on an iPhone with the route asked for; the page turns it into Google Maps on anything else. */
 export function mapsLink(found: Found): string {
+ if(process.env.HARU_CORE_NAVIGATION_POLICY==='on')return navigationPolicy('mapsLink',[found]);
   return `https://maps.apple.com/?daddr=${found.lat.toFixed(5)},${found.lon.toFixed(5)}&dirflg=d`;
 }
 
 export function googleMapsLink(found: Found): string {
+ if(process.env.HARU_CORE_NAVIGATION_POLICY==='on')return navigationPolicy('googleMapsLink',[found]);
   return `https://www.google.com/maps/dir/?api=1&destination=${found.lat.toFixed(5)},${found.lon.toFixed(5)}`;
 }
 
@@ -251,6 +264,7 @@ function km(m: number): string {
  * not told will invent a street.
  */
 export function directionsNote(ask: DirectionsAsk, found: Found | null, where: Whereabouts, nowMs = Date.now(), road?: string, facts?: string): string {
+ if(process.env.HARU_CORE_NAVIGATION_POLICY==='on')return navigationPolicy('directionsNote',[ask,found,where,nowMs,road,facts]);
   const from = startingPoint(where, nowMs);
   if (!found) {
     return `They asked the way to "${ask.destination}". The map was searched and nothing was found by that name${from ? '' : ', and she does not know where they are to search nearby'}. Say so in your own way; do not invent an address or a route, and do not offer a link — none will be attached.`;
@@ -279,11 +293,13 @@ const MAPS_LINK = /\s*\[[^\]\n]*\]\(\s*https?:\/\/(?:maps\.apple\.com|(?:www\.)?
 
 /** The text without any maps link in it: her history as she should see it, and her line as she may write it. */
 export function withoutMapsLinks(text: string): string {
+ if(process.env.HARU_CORE_NAVIGATION_POLICY==='on')return navigationPolicy('withoutMapsLinks',[text]);
   return (text ?? '').replace(MAPS_LINK, '').replace(/\n{3,}/g, '\n\n').trim();
 }
 
 /** Her words with the button's link under them, as a markdown link the page and the desktop both render. */
 export function withDirections(reply: string, found: Found, route?: { minutes: number; typicalMinutes: number; km: number; via: string }): string {
+ if(process.env.HARU_CORE_NAVIGATION_POLICY==='on')return navigationPolicy('withDirections',[reply,found,route]);
   // The numbers on the button, in the app's hand rather than hers: whatever
   // she says about the road, the live time and the roads are under it, right.
   const road = route
@@ -307,6 +323,7 @@ const CANT_SEE_THE_ROAD = /\b(?:can'?t|cannot|don'?t|do not|unable to|no way to)
 
 /** The history without her claims that she cannot see the road, once she can. */
 export function withoutTrafficDenials<T extends { role: string; content: string }>(messages: T[], hasRoute: boolean): T[] {
+ if(process.env.HARU_CORE_NAVIGATION_POLICY==='on')return navigationPolicy('withoutTrafficDenials',[messages,hasRoute]);
   if (!hasRoute) return messages;
   return messages.filter(message => !(message.role === 'assistant' && CANT_SEE_THE_ROAD.test(message.content.replace(/[‘’]/g, "'"))));
 }

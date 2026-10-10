@@ -1,3 +1,4 @@
+import {devicePolicy} from './core-device-activity';
 // The day at the desk, written down.
 //
 // Everything else in the activity path is built to forget. readActivity reduces
@@ -63,6 +64,7 @@ export const SAME_STRETCH_MS = 8 * 60_000;
  * titles like any other.
  */
 export function isRedacted(kind: ActivityKind): boolean {
+ if(globalThis.process.env.HARU_CORE_DEVICE_ACTIVITY==='on')return devicePolicy('isRedacted',[kind]);
   return kind === 'adult';
 }
 
@@ -83,6 +85,7 @@ export function noteActivity(
   seen: { kind: ActivityKind; label: string; process: string; title: string; url?: string },
   now: Date,
 ): ActivityLog {
+ if(globalThis.process.env.HARU_CORE_DEVICE_ACTIVITY==='on')return devicePolicy('noteActivity',[log,day,seen,now.toISOString()]);
   const at = now.toISOString();
   const redacted = isRedacted(seen.kind);
   const entry: ActivityEntry = {
@@ -120,6 +123,7 @@ export function noteScreenshot(
   shot: { name: string; doing?: { kind: ActivityKind; label: string } },
   now: Date,
 ): ActivityLog {
+ if(globalThis.process.env.HARU_CORE_DEVICE_ACTIVITY==='on')return devicePolicy('noteScreenshot',[log,day,shot,now.toISOString()]);
   const at = now.toISOString();
   const doing = shot.doing && !isRedacted(shot.doing.kind) ? shot.doing : null;
   const entry: ActivityEntry = {
@@ -139,6 +143,7 @@ export function noteScreenshot(
 export const SCREENSHOT_PROCESS = 'screenshot';
 
 export function isScreenshotEntry(entry: ActivityEntry): boolean {
+ if(globalThis.process.env.HARU_CORE_DEVICE_ACTIVITY==='on')return devicePolicy('isScreenshotEntry',[entry]);
   return entry.process === SCREENSHOT_PROCESS;
 }
 
@@ -151,6 +156,7 @@ export function isScreenshotEntry(entry: ActivityEntry): boolean {
  * it to, so a caller can avoid a pointless write.
  */
 export function describeShot(log: ActivityLog, day: string, name: string, description: string): ActivityLog {
+ if(globalThis.process.env.HARU_CORE_DEVICE_ACTIVITY==='on')return devicePolicy('describeShot',[log,day,name,description]);
   const today = log[day];
   const text = description.trim();
   if (!today || !text) return log;
@@ -166,6 +172,7 @@ export function describeShot(log: ActivityLog, day: string, name: string, descri
 
 /** Whole minutes at one window, rounded down; a stretch under a minute is 0. */
 export function minutesOf(entry: ActivityEntry): number {
+ if(globalThis.process.env.HARU_CORE_DEVICE_ACTIVITY==='on')return devicePolicy('minutesOf',[entry]);
   const span = new Date(entry.until).getTime() - new Date(entry.at).getTime();
   return Number.isFinite(span) && span > 0 ? Math.floor(span / 60_000) : 0;
 }
@@ -180,6 +187,7 @@ export function minutesOf(entry: ActivityEntry): number {
  * a window someone passed through is not something they did.
  */
 export function summariseDay(entries: ActivityEntry[], limit = 12): string {
+ if(globalThis.process.env.HARU_CORE_DEVICE_ACTIVITY==='on')return devicePolicy('summariseDay',[entries,limit]);
   const byLabel = new Map<string, { label: string; kind: ActivityKind; minutes: number }>();
   for (const entry of entries) {
     // Screenshots are counted below, not timed. They are taken at an instant,
@@ -206,6 +214,7 @@ export function summariseDay(entries: ActivityEntry[], limit = 12): string {
 export const SHOT_DESCRIPTIONS = 3;
 
 export function summariseShots(entries: ActivityEntry[]): string {
+ if(globalThis.process.env.HARU_CORE_DEVICE_ACTIVITY==='on')return devicePolicy('summariseShots',[entries]);
   const shots = entries.filter(isScreenshotEntry);
   if (!shots.length) return '';
   const count = `${shots.length} screenshot${shots.length === 1 ? '' : 's'}`;
@@ -263,6 +272,7 @@ function preferred(a: ActivityEntry, b: ActivityEntry): ActivityEntry {
  * front; which copy of it survives is preferred()'s business.
  */
 export function mergeActivity(mine: ActivityLog, theirs: unknown): ActivityLog {
+ if(globalThis.process.env.HARU_CORE_DEVICE_ACTIVITY==='on')return devicePolicy('mergeActivity',[mine,theirs]);
   const incoming = normalizeActivityLog(theirs);
   const merged: ActivityLog = { ...mine };
   for (const [day, entries] of Object.entries(incoming)) {
@@ -285,6 +295,7 @@ export function mergeActivity(mine: ActivityLog, theirs: unknown): ActivityLog {
  * on half-formed.
  */
 export function normalizeActivityLog(value: unknown): ActivityLog {
+ if(globalThis.process.env.HARU_CORE_DEVICE_ACTIVITY==='on')return devicePolicy('normalizeActivityLog',[value]);
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
   const out: ActivityLog = {};
   for (const [day, entries] of Object.entries(value as Record<string, unknown>)) {

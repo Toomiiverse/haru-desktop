@@ -27,6 +27,7 @@
 //
 // Pure: reading and writing the file is main.ts's.
 
+import {corePolicySync} from './core-policy-sync';
 import { isCurrent, pruneGraph, rejectionOf, USER_ENTITY, type EntityKind, type FactGraph, type GraphFact, type PageWritten } from './factgraph';
 
 export const GRAPH_PAGE = 'Who is who.md';
@@ -73,6 +74,7 @@ function sentenceOf(text: string): PageLine {
 }
 
 export function renderGraphPage(graph: FactGraph, now: Date): { text: string; written: PageWritten } {
+  if (process.env.HARU_CORE_GRAPH_MUTATION === 'on') return corePolicySync('graph-mutation.renderGraphPage', [graph, now]);
   const written: PageWritten = { at: now.toISOString(), facts: {}, entities: {} };
   const bySubject = new Map<string, GraphFact[]>();
   for (const fact of graph.facts) {
@@ -108,6 +110,10 @@ export function renderGraphPage(graph: FactGraph, now: Date): { text: string; wr
 }
 
 export function readGraphPage(text: string): ReadPage {
+  if (process.env.HARU_CORE_GRAPH_MUTATION === 'on') {
+    const held = corePolicySync<{facts:Record<string,PageLine>;headings:Record<string,string>;added:ReadPage['added']}>('graph-mutation.readGraphPage', [text]);
+    return {...held, facts:new Map(Object.entries(held.facts)), headings:new Map(Object.entries(held.headings))};
+  }
   const page: ReadPage = { facts: new Map(), headings: new Map(), added: [] };
   let context: { entity?: string; heading?: string } | null = null;
   for (const raw of String(text ?? '').split('\n')) {
@@ -154,6 +160,7 @@ export type PageReport = { forgot: string[]; ended: string[]; restored: string[]
  * is not on it yet and is left alone.
  */
 export function applyGraphPage(source: FactGraph, page: ReadPage, day: string, now: Date): { graph: FactGraph; report: PageReport } {
+  if (process.env.HARU_CORE_GRAPH_MUTATION === 'on') return corePolicySync('graph-mutation.applyGraphPage', [source, {...page, facts:Object.fromEntries(page.facts), headings:Object.fromEntries(page.headings)}, day, now]);
   const report: PageReport = { forgot: [], ended: [], restored: [], reworded: [], added: [], renamed: [] };
   const written = source.page;
   if (!written) return { graph: source, report };
@@ -224,6 +231,7 @@ export function applyGraphPage(source: FactGraph, page: ReadPage, day: string, n
 }
 
 export function pageReportLine(report: PageReport): string {
+  if (process.env.HARU_CORE_GRAPH_MUTATION === 'on') return corePolicySync('graph-mutation.pageReportLine', [report]);
   if (report.distrusted) return report.distrusted;
   const parts = [
     report.forgot.length ? `forgot ${report.forgot.length} (${report.forgot.map(text => JSON.stringify(text.slice(0, 60))).join(', ')})` : '',

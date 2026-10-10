@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import { readFileSync } from 'node:fs';
+import {corePolicySync} from './core-policy-sync';
 
 export type SystemInfo = { hostname: string; os: string; kernel: string; uptime: string; load: number[] };
 export type CpuInfo = { model: string; cores: number; usage_percent: number };
@@ -319,6 +320,15 @@ export async function collectDocker(): Promise<DockerStatus | null> {
 }
 
 export async function collectServices(wanted?: string): Promise<ServiceStatus[]> {
+  if(process.env.HARU_CORE_TOOL_RESULTS==='on'){
+    const commands=corePolicySync<{name:string;user:boolean}[]>('diagnostic.services',[wanted??null,process.env.HARU_CORE_BRAIN_WORKER==='on']);
+    const observed:ServiceStatus[]=[];
+    for(const command of commands){
+      if(!command||typeof command.name!=='string'||!command.name||command.name.startsWith('-')||typeof command.user!=='boolean')throw Error('core_diagnostic_service_protocol');
+      observed.push({name:command.name,state:parseSystemctlState(await runKeep('systemctl',command.user?['--user','is-active',command.name]:['is-active',command.name]))});
+    }
+    return observed;
+  }
   const names = wanted ? KNOWN_SERVICES.filter(name => name === wanted) : KNOWN_SERVICES;
   const statuses: ServiceStatus[] = [];
   for (const name of names) {
@@ -352,6 +362,7 @@ export async function collectAll(): Promise<SystemCollected> {
 // ---- Diagnostics -------------------------------------------------------------
 
 export function diagnose(target: string, collected: SystemCollected): Diagnosis {
+  if(process.env.HARU_CORE_TOOL_RESULTS==='on')return corePolicySync<Diagnosis>('diagnostic.diagnose',[target,collected,process.env.HARU_CORE_BRAIN_WORKER==='on']);
   const findings: string[] = [];
   let status: Diagnosis['status'] = 'ok';
   const note = (level: 'ok' | 'warning' | 'critical', message: string) => {

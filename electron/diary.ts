@@ -1,6 +1,9 @@
+import {corePolicySync} from './core-policy-sync';
+import { coreStoreFor } from './core-store';
 // Her life, written down.
 //
-// Two records, both kept on this machine and both true.
+// Two records, held in Core when primary storage is on and published to the
+// vault by the app. The legacy backend uses the paths described below.
 //
 // The first is everything she does while they sleep: every search, every link
 // it turned up, the page or transcript she actually read, and what she wrote
@@ -44,14 +47,17 @@ export type Dream = {
 };
 
 export function appendDream(root: string, dream: Dream): void {
+  const core = coreStoreFor(root);
+  if (core) { core.set('dreams', core.get('dreams', '') + JSON.stringify(dream) + '\n'); return; }
   mkdirSync(root, { recursive: true });
   appendFileSync(path.join(root, DREAMS_FILE), `${JSON.stringify(dream)}\n`, 'utf8');
 }
 
 export function readDreams(root: string, day?: string): Dream[] {
   const file = path.join(root, DREAMS_FILE);
-  if (!existsSync(file)) return [];
-  return readFileSync(file, 'utf8').split('\n').filter(Boolean).map(line => {
+  const core = coreStoreFor(root);
+  if (!core && !existsSync(file)) return [];
+  return (core ? core.get('dreams', '') as string : readFileSync(file, 'utf8')).split('\n').filter(Boolean).map(line => {
     try { return JSON.parse(line) as Dream; } catch { return null; }
   }).filter((dream): dream is Dream => Boolean(dream && dream.at && dream.about !== undefined))
     .filter(dream => !day || dream.day === day);
@@ -71,6 +77,7 @@ export const DIARY_BEFORE_WAKE_MINUTES = 45;
  * caller checks it against the last one written.
  */
 export function diaryDueFor(now: Date, prefs: Pick<PushPrefs, 'quietFrom' | 'quietTo'>, eveningKey: (at: Date) => string): string | null {
+  if(process.env.HARU_CORE_DAY_NIGHT==='on')return corePolicySync('diary.dueFor',[now,prefs]);
   if (inQuietHours(prefs, now)) {
     const [hour, minute] = prefs.quietTo.split(':').map(Number);
     const wake = new Date(now.getTime());
@@ -121,6 +128,7 @@ export type DayMaterial = {
  * else — the whole point of the file is that it is what happened.
  */
 export function diaryInstruction(m: DayMaterial): string {
+  if(process.env.HARU_CORE_DAY_NIGHT==='on')return corePolicySync('diary.instruction',[m]);
   const said = m.theySaid.length ? `WHAT HE SAID TO YOU today (${m.theirMessages} messages in all):\n${m.theySaid.map(text => `- "${text}"`).join('\n')}` : `He said nothing to you today.`;
   const feeling = [
     m.irritation >= IRRITATION.stonewall ? 'By tonight you were not speaking to them properly.' : m.irritation >= IRRITATION.short ? 'They got on your nerves today.' : m.irritation >= IRRITATION.stirred ? 'They tried your patience a little.' : '',
@@ -172,6 +180,7 @@ export type Entry = { day: string; title: string; text: string };
 
 /** A title she did not give: the first sentence, cut to fit a tab. */
 export function entryTitle(text: string, given?: string): string {
+  if(process.env.HARU_CORE_DAY_NIGHT==='on')return corePolicySync('diary.entryTitle',[text,given??null]);
   const title = (given ?? '').replace(/^["'“”]+|["'“”]+$/g, '').trim();
   if (title) return title.slice(0, 80);
   const first = (text ?? '').trim().split(/(?<=[.!?…])\s+/)[0] ?? '';
@@ -179,6 +188,7 @@ export function entryTitle(text: string, given?: string): string {
 }
 
 export function formatEntry(day: string, text: string, weekday: Intl.DateTimeFormat, title?: string): string {
+  if(process.env.HARU_CORE_DAY_NIGHT==='on')return corePolicySync('diary.formatEntry',[day,text,title??null]);
   const [y, m, d] = day.split('-').map(Number);
   const name = weekday.format(new Date(Date.UTC(y, (m ?? 1) - 1, d ?? 1)));
   const head = title ? `## ${day} — ${name} — ${title.replace(/\n/g, ' ').trim()}` : `## ${day} — ${name}`;
@@ -188,11 +198,14 @@ export function formatEntry(day: string, text: string, weekday: Intl.DateTimeFor
 export function appendEntry(root: string, day: string, text: string, weekday: Intl.DateTimeFormat, title?: string): void {
   mkdirSync(root, { recursive: true });
   const file = path.join(root, DIARY_FILE);
+  const core = coreStoreFor(root);
+  if (core) { core.set('diary', (core.get('diary', '') || "# Haru's Diary\n\n") + formatEntry(day, text, weekday, title)); return; }
   if (!existsSync(file)) appendFileSync(file, "# Haru's Diary\n\n", 'utf8');
   appendFileSync(file, formatEntry(day, text, weekday, title), 'utf8');
 }
 
 export function parseEntries(markdown: string): Entry[] {
+  if(process.env.HARU_CORE_DAY_NIGHT==='on')return corePolicySync('diary.parseEntries',[markdown]);
   const out: Entry[] = [];
   const parts = (markdown ?? '').split(/^## /m).slice(1);
   for (const part of parts) {
@@ -209,12 +222,15 @@ export function parseEntries(markdown: string): Entry[] {
 
 export function recentEntries(root: string, count: number): Entry[] {
   const file = path.join(root, DIARY_FILE);
+  const core = coreStoreFor(root);
+  if (core) return parseEntries(core.get('diary', '')).slice(-count);
   if (!existsSync(file)) return [];
   return parseEntries(readFileSync(file, 'utf8')).slice(-count);
 }
 
 /** The last couple of entries, for her prompt: what her days have been like lately. */
 export function diaryContext(entries: { day: string; text: string }[]): string {
+  if(process.env.HARU_CORE_DAY_NIGHT==='on')return corePolicySync('diary.context',[entries]);
   if (!entries.length) return '';
   return [
     'From your own diary, the last night or two — how things have been between you, in your words at the time:',

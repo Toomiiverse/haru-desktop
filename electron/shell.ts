@@ -1,3 +1,4 @@
+import {corePolicySync} from './core-policy-sync';
 // A terminal on the server, at his word.
 //
 // Level 3 of system.config: she runs commands on the box she lives on — the
@@ -44,6 +45,7 @@ export const DEFAULT_SHELL: ShellConfig = { enabled: true, timeoutSeconds: 60, m
 
 /** The `shell` block of system.config, read forward. */
 export function readShellConfig(systemConfig: unknown): ShellConfig {
+ if(process.env.HARU_CORE_FINAL_TOOLS==='on')return corePolicySync('final-shell.config',[systemConfig??null,homedir()]);
   const raw = ((systemConfig && typeof systemConfig === 'object' ? (systemConfig as Record<string, unknown>).shell : undefined) ?? {}) as Record<string, unknown>;
   const number = (value: unknown, fallback: number, min: number, max: number) =>
     typeof value === 'number' && Number.isFinite(value) ? Math.min(max, Math.max(min, Math.round(value))) : fallback;
@@ -58,6 +60,7 @@ export function readShellConfig(systemConfig: unknown): ShellConfig {
 
 /** Why a command is refused outright, or null. */
 export function denied(command: string, deny: string[] = DEFAULT_DENY): string | null {
+ if(process.env.HARU_CORE_FINAL_TOOLS==='on')return corePolicySync('final-shell.denied',[command,deny]);
   for (const source of deny) {
     try {
       if (new RegExp(source, 'i').test(command)) return `that command is on the refuse list (${source.slice(0, 40)})`;
@@ -70,6 +73,7 @@ export function denied(command: string, deny: string[] = DEFAULT_DENY): string |
 
 /** The command as it would be compared: no backticks, one space between words. */
 export function normalise(text: string): string {
+ if(process.env.HARU_CORE_FINAL_TOOLS==='on')return corePolicySync('final-shell.normalise',[text]);
   return text.replace(/`/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
 }
 
@@ -77,11 +81,28 @@ const YES = /^(?:yes|yeah|yep|yup|ye|y|ok|okay|sure|go|go ahead|go for it|do it|
 
 /** A plain yes: a short message that starts with one. */
 export function affirmative(said: string): boolean {
+ if(process.env.HARU_CORE_FINAL_TOOLS==='on')return corePolicySync('final-shell.affirmative',[said]);
   const words = said.trim().split(/\s+/).filter(Boolean);
   return words.length > 0 && words.length <= 6 && YES.test(said.trim());
 }
 
-export type Verdict = { run: true; because: 'they wrote it' | 'their word' } | { run: false; note: string };
+/** Exact commands only: never classify arbitrary shell text as read-only. */
+export const DIAGNOSTIC_COMMANDS = [
+  'uptime', 'df -h', 'free -h',
+  'systemctl --user --no-pager status haru.service haru-asr.service breeze-tts.service ollama-emotion.service',
+  'journalctl --user -u haru.service -u haru-asr.service -u breeze-tts.service --since "10 minutes ago" -n 100 --no-pager',
+  'tail -n 120 /home/toomii/haru.log',
+  'nvidia-smi --query-gpu=index,name,memory.total,memory.used,utilization.gpu --format=csv,noheader',
+] as const;
+
+export function isDiagnosticCommand(command: string): boolean {
+ if(process.env.HARU_CORE_FINAL_TOOLS==='on')return corePolicySync('final-shell.diagnostic',[command]);
+  return DIAGNOSTIC_COMMANDS.some(allowed => command.trim() === allowed);
+}
+
+export const DIAGNOSTIC_NOTE = `At machine level 4 these exact read-only diagnostics run immediately through run_command, without asking for command approval: ${DIAGNOSTIC_COMMANDS.map(command => '`' + command + '`').join('; ')}. For a live-test or troubleshooting request, call the appropriate diagnostic now and report its actual result. Service health is not an end-to-end voice test: distinguish what you tested from what remains unknown. Other commands still need exact-command approval. Never claim a check ran before receiving its result.`;
+
+export type Verdict = { run: true; because: 'they wrote it' | 'their word' | 'level 4 diagnostic' } | { run: false; note: string };
 
 /**
  * His word, checked in code. A command runs when his latest message contains
@@ -92,7 +113,12 @@ export class ShellGate {
   static readonly WORD_MS = 120_000;
   private readonly pending = new Map<string, { command: string; at: number }>();
 
-  consider(input: { command: string; said: string; door: string; now: number }): Verdict {
+  consider(input: { command: string; said: string; door: string; now: number; diagnostics?: boolean }): Verdict {
+    if(process.env.HARU_CORE_FINAL_TOOLS==='on'){const next=corePolicySync<any>('final-shell.consider',[Object.fromEntries(this.pending),input]);this.pending.clear();for(const [key,value] of Object.entries(next.pending))this.pending.set(key,value as {command:string;at:number});return next.verdict;}
+    if (input.diagnostics && isDiagnosticCommand(input.command)) {
+      this.pending.delete(input.door);
+      return { run: true, because: 'level 4 diagnostic' };
+    }
     const command = normalise(input.command);
     const said = normalise(input.said);
     if (command && said.includes(command)) { this.pending.delete(input.door); return { run: true, because: 'they wrote it' }; }
@@ -107,6 +133,7 @@ export class ShellGate {
 
   /** What is waiting on his word at this door, if anything. */
   proposed(door: string, now: number): string | null {
+    if(process.env.HARU_CORE_FINAL_TOOLS==='on')return corePolicySync('final-shell.proposed',[Object.fromEntries(this.pending),door,now]);
     const item = this.pending.get(door);
     return item && now - item.at <= ShellGate.WORD_MS ? item.command : null;
   }
@@ -121,12 +148,12 @@ export type Ran = { exit: number | null; signal: string | null; output: string; 
 export function runCommand(command: string, config: ShellConfig, spawnImpl: typeof spawn = spawn): Promise<Ran> {
   return new Promise(resolve => {
     const started = Date.now();
-    const env: NodeJS.ProcessEnv = { PATH: process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin', HOME: process.env.HOME ?? config.cwd, USER: process.env.USER ?? '', LANG: 'C.UTF-8', TERM: 'dumb' };
+    const env: NodeJS.ProcessEnv = { PATH: process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin', HOME: process.env.HOME ?? config.cwd, USER: process.env.USER ?? '', LANG: 'C.UTF-8', TERM: 'dumb', ...(process.env.XDG_RUNTIME_DIR ? { XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR } : {}), ...(process.env.DBUS_SESSION_BUS_ADDRESS ? { DBUS_SESSION_BUS_ADDRESS: process.env.DBUS_SESSION_BUS_ADDRESS } : {}) };
     let child: ReturnType<typeof spawn>;
     try {
       child = spawnImpl('/bin/bash', ['-c', command], { cwd: config.cwd, env, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
     } catch (error) {
-      resolve({ exit: null, signal: null, output: `could not start: ${error instanceof Error ? error.message : String(error)}`, truncated: false, ms: 0, timedOut: false });
+      resolve({ exit: null, signal: null, output: `could not start: ${error instanceof Error ? error.message : String(error)}`, truncated: false, ms: 0, timedOut: false, ...(process.env.HARU_CORE_FINAL_TOOLS==='on'?{notDispatched:true}:{}) });
       return;
     }
     const chunks: string[] = [];
@@ -148,6 +175,7 @@ export function runCommand(command: string, config: ShellConfig, spawnImpl: type
     const finish = (exit: number | null, signal: NodeJS.Signals | null) => {
       clearTimeout(timer);
       const whole = chunks.join('');
+      if(process.env.HARU_CORE_FINAL_TOOLS==='on'){const result=corePolicySync<{output:string;truncated:boolean}>('final-shell.output',[whole,config.maxOutputChars]);resolve({exit,signal,...result,ms:Date.now()-started,timedOut});return;}
       const truncated = whole.length > config.maxOutputChars;
       const half = Math.floor(config.maxOutputChars / 2);
       const output = truncated ? `${whole.slice(0, half)}\n…[${whole.length - config.maxOutputChars} characters left out]…\n${whole.slice(-half)}` : whole;
@@ -160,6 +188,7 @@ export function runCommand(command: string, config: ShellConfig, spawnImpl: type
 
 /** One entry for the ledger: what ran, from where, and what came back. */
 export function ledgerEntry(input: { at: string; door: string; command: string; ran: Ran }): string {
+ if(process.env.HARU_CORE_FINAL_TOOLS==='on')return corePolicySync('final-shell.ledger',[input]);
   const { at, door, command, ran } = input;
   return `${at} [${door}] $ ${command}\n${ran.output}${ran.output ? '\n' : ''}-- exit ${ran.exit ?? (ran.signal ?? 'none')}${ran.timedOut ? ' (timed out)' : ''} in ${ran.ms}ms\n\n`;
 }

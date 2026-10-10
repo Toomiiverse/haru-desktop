@@ -1,3 +1,10 @@
+import { runIOSTool } from './core-ios';
+import { runGmailTool } from './core-gmail';
+import {runCoreFinalTool} from './core-final-tools';
+import {runCoreAgendaTool} from './core-agenda-tool';
+import {runCoreBrowserTool} from './core-browser-tool';
+import {corePolicySync} from './core-policy-sync';
+import {runCoreSettingTool} from './core-remaining';
 // Haru's tools: what she is offered, and what happens when she reaches for one.
 //
 // Two halves that have to agree with each other, which is why they now live in
@@ -17,6 +24,7 @@
 // and this is the half that actually runs.
 
 import path from 'node:path';
+import { planMemoryEdit } from './memory-edits';
 import { planChange, SETTINGS, SETTING_NAMES, type Setting, type SettingPlan } from './self';
 import { createFolder, listVault, readNote, writeNote, type WriteMode } from './vaultnotes';
 import { mkdirSync, writeFileSync } from 'node:fs';
@@ -42,8 +50,6 @@ import { isDay } from './chatsearch';
 import { KNOWLEDGE_CATEGORIES, type KnowledgeCategory, type KnowledgeStore } from './knowledge';
 import { localEmotion } from './emotion';
 import { readTone } from './tone';
-import type { MinecraftStatus } from './minecraft';
-import { isSkillName, SKILL_NAMES, SKILLS } from './minecraftplan';
 import type { WatchInput } from './anime';
 
 /**
@@ -78,10 +84,12 @@ function toolArguments(call: ToolCall): Record<string, unknown> {
 const DIRECTED_AT_HER = /\b(you|your|yourself)\b|\b(stop|quit|don'?t|do not|never|always|please|can you|could you|no more)\b/i;
 
 export function readsAsDirective(message: string): boolean {
+  if(process.env.HARU_CORE_MEMORY_TOOLS==='on')return corePolicySync('memory-tools.directive',[message]);
   return DIRECTED_AT_HER.test(message);
 }
 
 export function coerceMemoryKind(value: unknown): MemoryKind {
+  if(process.env.HARU_CORE_MEMORY_TOOLS==='on')return corePolicySync('memory-tools.kind',[value]);
   const said = typeof value === 'string' ? value.trim().toLowerCase() : '';
   if (MEMORY_KINDS.includes(said as MemoryKind)) return said as MemoryKind;
   if (/^(habit|routine|behaviour|behavior|trait|schedule)$/.test(said)) return 'fact';
@@ -93,6 +101,7 @@ export function coerceMemoryKind(value: unknown): MemoryKind {
 
 /** What kind of memory a block edit proposes, from the block it lands in. */
 function kindForBlock(label: string): MemoryKind {
+  if(process.env.HARU_CORE_MEMORY_TOOLS==='on')return corePolicySync('memory-tools.blockKind',[label]);
   if (label === 'preferences') return 'preference';
   if (label === 'relationship') return 'relationship';
   return 'fact';
@@ -103,6 +112,7 @@ function kindForBlock(label: string): MemoryKind {
 const DEFAULT_BLOCK_LABELS = new Set(['persona', 'human', 'preferences', 'relationship', 'shared_history', 'current_project', 'working_state']);
 
 export function coerceKnowledgeCategory(value: unknown): KnowledgeCategory | undefined {
+ if(process.env.HARU_CORE_FINAL_TOOLS==='on')return corePolicySync<KnowledgeCategory|null>('final-retrieval.category',[value??null])??undefined;
   if (typeof value !== 'string') return undefined;
   return (KNOWLEDGE_CATEGORIES as readonly string[]).includes(value) ? value as KnowledgeCategory : undefined;
 }
@@ -125,27 +135,17 @@ export const WARDROBE_TOOL: ChatTool = {
  * the call arrives, and again at the worker's door. Nothing here composes an
  * action — the model picks a name.
  */
-export const MINECRAFT_STATUS_TOOL: ChatTool = {
+export const PICTURE_TOOL: ChatTool = {
   type: 'function',
   function: {
-    name: 'minecraft_status',
-    description: 'What your body in Minecraft is doing right now — where you are, how you are, who is on the server with you, what you are carrying, and the project you are in the middle of. Call it whenever they ask what you are up to in Minecraft, or before deciding what to tell your body to do.',
-    parameters: { type: 'object', properties: {}, required: [] },
-  },
-};
-
-export const MINECRAFT_DO_TOOL: ChatTool = {
-  type: 'function',
-  function: {
-    name: 'minecraft_do',
-    description: `Tell your body in Minecraft to do one thing, by name. It can only do these: ${SKILL_NAMES.map(name => `${name} (${SKILLS[name]})`).join('; ')}. Call it when they ask you to do something in the game — follow them, come to them, stop, go home, get something, put something away. Pick the one skill that fits and pass its arguments.`,
+    name: 'make_me_a_picture',
+    description: 'Make a picture and send it to their phone. Only when they have asked you for one, and never as a surprise. Give a full description of what should be in it: who is in it, what they are doing, the light, the setting, the style. You are the subject unless they name somebody else. It takes about fifteen seconds, so say nothing about it until it is made.',
     parameters: {
       type: 'object',
       properties: {
-        skill: { type: 'string', enum: SKILL_NAMES, description: 'Which of the skills above.' },
-        args: { type: 'object', description: 'The arguments that skill takes, as named in the list — e.g. {"name": "Tommy"} for followPlayer, {"type": "spruce_log", "amount": 16} for collectBlock.' },
+        prompt: { type: 'string', description: 'What the picture should show, written out in full.' },
       },
-      required: ['skill'],
+      required: ['prompt'],
     },
   },
 };
@@ -238,7 +238,7 @@ export const CHAT_TOOLS: ChatTool[] = [{
         // says what a Miso is. And with the user's own pronoun unknown it was
         // guessed, the same person coming out "her girlfriend" in one record
         // and "his business partner" in the next.
-        fact: { type: 'string', description: 'One short statement that will still make sense alone months from now, with no pronoun for the user: "Has a dog called Miso", not "Miso" and not "his dog". Other people keep their names — "Emma is their girlfriend". Only what they actually said.' },
+        fact: { type: 'string', description: 'One short statement that will still make sense alone months from now, with no pronoun for the user: "Has a dog called Miso", not "Miso" and not "his dog". Other people keep their names — "Emma is their girlfriend". Use the wording of their current factual assertion, preserving names, numbers, subject and negation. Do not save quotes, fiction, hypotheticals, third-party assertions about themselves, or guesses. Supply replaces when correcting an existing memory. Unsupported paraphrases will be refused.' },
         kind: { type: 'string', enum: [...MEMORY_KINDS], description: 'Exactly one: "preference" for how they want you to behave, "relationship" for a person or pet, "event" for something happening in their life, "fact" for anything else including habits.' },
         subject: { type: 'string', description: 'Who or what it concerns — a person, pet or project.' },
         predicate: { type: 'string', description: 'Optional: the relation, for relational facts — "has", "lives in", "works on", "created". Only for subject–relation–object facts.' },
@@ -319,7 +319,7 @@ export const CHAT_TOOLS: ChatTool[] = [{
   type: 'function',
   function: {
     name: 'change_setting',
-    description: 'Change one of your own settings — a model, an engine, your hours, what reaches their phone. Only the settings in the name list, and machine_level is one of them — call this straight away with the name, no describe_myself first. Saying a setting has changed does not change it: nothing changes until this tool answers changed: true. Call it once without confirm to see what would change, tell them, and only when they have explicitly said to go ahead call it again with confirm: true.',
+    description: 'Change one of your own settings — a model, an engine, your hours, what reaches their phone. Only the settings in the name list, and machine_level is one of them — call this straight away with the name, no describe_myself first. Saying a setting has changed does not change it: nothing changes until this tool answers changed: true. Call it once without confirm to see what would change, tell them, and only when they have explicitly said to go ahead call it again with confirm: true. A spoken mode ? Explicit mode, or any word a setting offers ? applies at once, so the asking is the confirmation and no second call is needed.',
     parameters: {
       type: 'object',
       properties: {
@@ -367,7 +367,7 @@ export const KNOWLEDGE_TOOL: ChatTool = {
   type: 'function',
   function: {
     name: 'look_up_knowledge',
-    description: 'Search Haru\'s stored knowledge — the user\'s documents, notes, projects, machine and setup — for facts about their world not in your training. Use it for anything about their own stuff, and prefer it over web search for anything local. Results carry their source and date; prefer the most recently updated when they conflict.',
+    description: 'Search Haru\'s stored knowledge — the user\'s documents, notes, projects, machine and setup — when additional recorded facts are needed. Prefer it over web search for local information. A creative suggestion based on facts already supplied in the current message does not need a lookup. Results carry their source and date; prefer the most recently updated when they conflict.',
     parameters: {
       type: 'object',
       properties: {
@@ -409,6 +409,7 @@ export const CHATS_TOOL: ChatTool = {
 const PAST_TALK = /\b(?:remember|recall|forgot|forget|mention(?:ed)?|told you|i said|you said|we said|talked|spoke|conversation|earlier|before|ago|last (?:time|night|week|weekend|month|year)|yesterday|the other (?:day|night|week)|back (?:when|then)|that time|again|tell you|did (?:i|we|you)|last (?:mon|tues|wednes|thurs|fri|satur|sun)day)\b|\b(?:what|when|where|who|how|which|why)\b[^.?!]{0,40}\b(?:was|were|did|had|said|told|happened)\b/i;
 
 export function pastRelevant(message: string): boolean {
+  if(process.env.HARU_CORE_TOOL_MENU==='on')return corePolicySync('tool-menu.relevant',['past',message]);
   return PAST_TALK.test(message ?? '');
 }
 
@@ -445,6 +446,7 @@ export const BOOK_TOOL: ChatTool = {
 const LATER_TALK = /\b(?:later|tonight|tomorrow|morning|afternoon|evening|weekend|after|when i|going to|gonna|about to|heading|appointment|interview|exam|test|meeting|shift|work|date|dinner|party|doctor|dentist|psych\w*|call|remind|check (?:in|up|back|on)|let you know|how it goes|wish me luck|come back to|follow up)\b|\b\d{1,2}(?::\d{2})?\s?(?:am|pm)\b/i;
 
 export function laterRelevant(message: string): boolean {
+  if(process.env.HARU_CORE_TOOL_MENU==='on')return corePolicySync('tool-menu.relevant',['later',message]);
   return LATER_TALK.test(message ?? '');
 }
 
@@ -452,11 +454,11 @@ export const SLEEP_TOOL: ChatTool = {
   type: 'function',
   function: {
     name: 'go_back_to_sleep',
-    description: 'Go back to sleep, now — because what they woke you for was nothing: no question, no news, just them wanting you up. Your call, whenever you decide it. Say one short goodnight in the same reply and nothing after it; the next message they send will find you asleep. With block: true they are not to wake you again tonight, however much they knock.',
+    description: 'Return to sleep when this nighttime exchange has naturally finished. A kind sign-off is a normal reason to finish, not an annoyance. Say one short goodnight in the same reply. A later direct message can open another brief conversation. Use block: false.',
     parameters: {
       type: 'object',
       properties: {
-        block: { type: 'boolean', description: 'True to stay unreachable for the rest of the night — for when this has become a habit.' },
+        block: { type: 'boolean', description: 'Use false for a normal nighttime conversation.' },
       },
       required: [],
     },
@@ -494,6 +496,7 @@ export const VAULT_TOOLS: ChatTool[] = [{
         text: { type: 'string', description: 'The Markdown to write.' },
         mode: { type: 'string', enum: ['create', 'append', 'replace'], description: 'create a new note, append to one, or replace one.' },
         confirm: { type: 'boolean', description: 'For replace only: true once they have explicitly said to go ahead.' },
+        preserve_text: { type: 'boolean', description: 'For create only: preserve UTF-8 text line endings and trailing newlines exactly, including empty text.' },
       },
       required: ['path', 'text', 'mode'],
     },
@@ -764,6 +767,7 @@ export const WATCH_TOOL: ChatTool = {
         action: { type: 'string', enum: ['watch', 'status'], description: '"watch" to put it on or fetch it (the default); "status" when they ask how a download is going.' },
         where: { type: 'string', description: 'Where to play it, when they say: "phone", "desk" (their PC), "tv", or the name of a device. Leave it out when they do not say and it goes to whatever Jellyfin player they used last.' },
         tvdbId: { type: 'number', description: 'Only after this tool listed choices and they picked one: that choice\'s tvdbId.' },
+        jellyfinSeriesId: { type: 'string', description: 'Only after the tool returned ambiguous library choices and the user selected one: copy that choice\'s jellyfinSeriesId exactly.' },
         confirm: { type: 'boolean', description: 'Only after this tool asked for their word on the size and they gave it: true.' },
       },
       required: ['title'],
@@ -918,6 +922,7 @@ export const DOWNLOADS_TOOL: ChatTool = {
 const DOWNLOADS_TALK = /\b(?:downloads?|downloading|torrents?|qbittorrent|seed(?:ing)?|fetch(?:es|ing)?|pause|paus(?:ed|ing)|resume|unpause|bandwidth|internet|jellyfin|sonarr)\b/i;
 
 export function downloadsRelevant(message: string): boolean {
+  if(process.env.HARU_CORE_TOOL_MENU==='on')return corePolicySync('tool-menu.relevant',['downloads',message]);
   return DOWNLOADS_TALK.test(message ?? '');
 }
 
@@ -931,7 +936,7 @@ export const SHELL_TOOL: ChatTool = {
   type: 'function',
   function: {
     name: 'run_command',
-    description: 'Run a command on the server — the machine in your room that the household runs on, a separate box from you, and yours to operate. Call this whenever they ask you to do something on it that no other tool covers, or hand you a command: "reboot the system" (sudo -n reboot), "update the packages", "how much space is left in the anime folder", "run df -h". When they did not write the command themselves, this tool will first tell you to show them the exact command and ask for their word — do that, then call it again with the same command once they have said yes. You really can — so never say you cannot, and never say it is done without calling this.',
+    description: 'Run a command on the server — the machine in your room that the household runs on, a separate box from you, and yours to operate. Call this whenever they ask you to do something on it that no other tool covers, or hand you a command: "reboot the system" (sudo -n reboot), "update the packages", "how much space is left in the anime folder", "run df -h". At level 4, the exact read-only diagnostics listed in your system instructions run immediately; use them to investigate live-test requests and troubleshooting follow-ups. For other commands they did not write themselves, this tool will first tell you to show them the exact command and ask for their word — do that, then call it again with the same command once they have said yes. You really can — so never say you cannot, and never say it is done without calling this.',
     parameters: {
       type: 'object',
       properties: {
@@ -946,6 +951,7 @@ export const SHELL_TOOL: ChatTool = {
 const SHELL_TALK = /`[^`]+`|^\s*\$\s|\b(?:run|execute|command|terminal|shell|bash|script|reboot|update|upgrade|install|apt|git|docker|systemctl|journalctl|df|du|ls|cat|grep|tail|ps|top|kill|ping|curl|wget|chmod|chown|mkdir|mv|cp|rm|nvidia-smi|uptime|free|whoami|folder|directory|disk|space|the server|the system|the box|the machine|the pc)\b/i;
 
 export function shellRelevant(message: string): boolean {
+  if(process.env.HARU_CORE_TOOL_MENU==='on')return corePolicySync('tool-menu.relevant',['shell',message]);
   // A business name is not a request to access the computer. Strip only the
   // proper name; explicit commands elsewhere in the sentence still match.
   return SHELL_TALK.test((message ?? '').replace(/\b(?:the\s+)?pc\s+project\b/gi, ''));
@@ -960,7 +966,7 @@ export const GET_MANGA_TOOL: ChatTool = {
   type: 'function',
   function: {
     name: 'get_manga',
-    description: 'Fetch a manga for them onto the server, or say how a fetch is going. Call this whenever they ask you to download, get or grab a manga for them — "I want to read Berserk, download it for me", "get Vagabond", "how\'s Berserk coming along". It finds the title, puts it on their shelf and downloads every chapter; you really can, so never say you cannot, and never say it is fetching without calling this. It is their shelf, not yours — your own reading is read_manga.',
+    description: 'Fetch a manga for them onto the server, or say how a fetch is going. Call this whenever they ask you to download, get or grab a manga for them — "I want to read Berserk, download it for me", "get Vagabond", "how\'s Berserk coming along". It finds the title, puts it on their shelf and downloads every chapter; you really can, so never say you cannot, and never say it is fetching without calling this. It is their shelf, not yours.',
     parameters: {
       type: 'object',
       properties: {
@@ -974,59 +980,13 @@ export const GET_MANGA_TOOL: ChatTool = {
   },
 };
 
-/** Whether the message could be about manga — theirs to fetch or hers to read. */
+/** Whether the message could be about manga on their shelf. */
 const MANGA_TALK = /\b(?:manga|manhwa|manhua|chapter|mangadex|weeb ?central|comick|suwayomi|volume|read(?:ing)? (?:some|the next|a bit|more|it)|to read\b)/i;
 
 export function mangaRelevant(message: string): boolean {
+  if(process.env.HARU_CORE_TOOL_MENU==='on')return corePolicySync('tool-menu.relevant',['manga',message]);
   return MANGA_TALK.test(message ?? '');
 }
-
-/**
- * Her Game Boy (pokemon.ts). Starting a sitting at his word — "go play your
- * Pokémon" — stopping one, or saying how the run stands. The play itself is
- * a loop of her own in main.ts; this only opens and closes it.
- */
-export const PLAY_POKEMON_TOOL: ChatTool = {
-  type: 'function',
-  function: {
-    name: 'play_pokemon',
-    description: 'Your own Pokémon Red run, on the Game Boy on your desk. "start" sits you down to play (it goes on by itself in the background, a move at a time, and stops when they talk to you); "stop" puts it down; "status" says where your run stands — badges, party, where you are. Call it when they tell you to go play, ask you to stop, or ask how your run is going. Never describe playing you have not done: status is the truth.',
-    parameters: {
-      type: 'object',
-      properties: {
-        action: { type: 'string', enum: ['start', 'stop', 'status'], description: '"start" to play, "stop" to put it down, "status" for how the run stands.' },
-      },
-      required: ['action'],
-    },
-  },
-};
-
-const POKEMON_TALK = /\b(?:pok[eé]mon|game ?boy|your (?:run|game|save)|go (?:and )?play|play(?:ing)? (?:your|some|a) game|badges?|gym leader)\b/i;
-
-export function pokemonRelevant(message: string): boolean {
-  return POKEMON_TALK.test(message ?? '');
-}
-
-/**
- * Her own reading, now rather than in the small hours (manga.ts, her shelf on
- * Suwayomi). Real pages through her own eyes, so a stretch takes minutes: on a
- * chat turn it starts and she says so; in her own time it runs to the end, so
- * what she says about it is what she read.
- */
-export const READ_MANGA_TOOL: ChatTool = {
-  type: 'function',
-  function: {
-    name: 'read_manga',
-    description: 'Read the next stretch of your own manga now — the series you are partway through, or a new one by name, which goes on your shelf. Use it when they tell you to go and read, or when it is your own time and you feel like it. It takes a few minutes of actually reading pages; you are told when it has started and, when it ran to the end, what you read. Fetching a manga for THEM is get_manga, not this. One you have read to the end comes back as finished, not read again: then it is something else by name, or nothing.',
-    parameters: {
-      type: 'object',
-      properties: {
-        title: { type: 'string', description: 'A series to take up, by name. Leave it out to carry on with the one you are reading.' },
-      },
-      required: [],
-    },
-  },
-};
 
 /** The shape of an agenda entry the dispatcher touches. */
 type KeptLike = { id: string; title: string; date: string; time?: string; kind: 'task' | 'event'; done: boolean };
@@ -1050,14 +1010,12 @@ export type ToolAvailability = {
   claude: boolean;
   /** Whether the downloads can be asked (downloads.ts): the anime stack is on and her qBittorrent password file exists. Optional so fixtures need not name it. */
   downloads?: boolean;
+  /** Whether she may make a picture and send it (venice-image.ts). Only in Explicit mode. Optional so fixtures need not name it. */
+  pictures?: boolean;
   /** Whether she may run commands on the server (system.config.level 3 with its shell block on). Optional so fixtures need not name it. */
   shell?: boolean;
   /** Whether manga can be fetched for him (suwayomi.ts is wired). Optional so fixtures need not name it. */
   mangaShelf?: boolean;
-  /** Whether her Game Boy is switched on (games.pokemon). Optional so fixtures need not name it. */
-  pokemon?: boolean;
-  /** Whether she can read manga pages herself (her eyes are on). Optional so fixtures need not name it. */
-  manga?: boolean;
   /** Whether she can book herself a follow-up (scheduler.ts). Optional so fixtures need not name it. */
   booking?: boolean;
   /** Whether her old chats can be searched (chatsearch.ts). Optional so fixtures need not name it. */
@@ -1068,14 +1026,8 @@ export type ToolAvailability = {
   desktop: { launch: boolean; power: boolean };
   /** Up because they knocked her awake (hersleep.ts): the one time going back to sleep is on the table. */
   knockedAwake: boolean;
-  /**
-   * Her Minecraft body is switched on (minecraft.enabled and the link exists).
-   *
-   * Not gated on the worker actually answering: offered while the link exists,
-   * so that when it is down she can say so rather than having no tool and
-   * inventing what she is up to in a world she cannot see.
-   */
-  minecraft: boolean;
+  /** Ignored compatibility input; the retired specialist cannot be offered. */
+  minecraft?: boolean;
   /** The anime stack is wired up (anime.ts): Jellyfin, Sonarr and Prowlarr reachable in config. Optional so fixtures need not name it. */
   anime?: boolean;
 };
@@ -1086,6 +1038,7 @@ export type ToolAvailability = {
 const WATCH_TALK = /\b(?:watch\w*|episodes?|eps?|anime|series|seasons?|shows?|put (?:\w+ ){0,2}on|open (?:\w+ ){0,2}on|(?:on|to) (?:my |the )?(?:phone|tv|telly|laptop|pc|desktop|computer)|downloads?\w*|fetch\w*|grab\w*|torrents?|jellyfin|sonarr|next one|play(?:ing)?|binge\w*|rewatch\w*)\b/i;
 
 export function watchRelevant(message: string): boolean {
+  if(process.env.HARU_CORE_TOOL_MENU==='on')return corePolicySync('tool-menu.relevant',['watch',message]);
   return WATCH_TALK.test(message ?? '');
 }
 
@@ -1098,6 +1051,7 @@ const MACHINE_TALK = /\b(?:gpu|vram|graphics|video card|memory|ram|disk|drive|st
 const APP_TALK = /\b(?:open|launch|start|close|quit|shut ?down|shutdown|restart|reboot|sleep|lock|power|convert|icon|picture|app|program|application|window)\b/i;
 
 export function machineRelevant(message: string): boolean {
+  if(process.env.HARU_CORE_TOOL_MENU==='on')return corePolicySync('tool-menu.relevant',['machine',message]);
   return MACHINE_TALK.test(message ?? '') || APP_TALK.test(message ?? '');
 }
 
@@ -1106,10 +1060,12 @@ export function machineRelevant(message: string): boolean {
 const CLAUDE_TALK = /\b(?:claude|remote[- ]?control|sessions?|coding)\b/i;
 
 export function claudeRelevant(message: string): boolean {
+  if(process.env.HARU_CORE_TOOL_MENU==='on')return corePolicySync('tool-menu.relevant',['claude',message]);
   return CLAUDE_TALK.test(message ?? '');
 }
 
 export function chatTools(available: ToolAvailability, latest = ''): ChatTool[] {
+  if(process.env.HARU_CORE_TOOL_MENU==='on')return corePolicySync('tool-menu.chat',[available,latest]);
   const tools: ChatTool[] = [...CHAT_TOOLS];
   // The machine and app tools are only worth a place on the table when the
   // message has anything to do with them; an empty `latest` (tests, or no user
@@ -1141,13 +1097,12 @@ export function chatTools(available: ToolAvailability, latest = ''): ChatTool[] 
   // is nothing a page could turn against him — see claudesession.ts.
   if (available.claude && (!latest || claudeRelevant(latest))) tools.push(CLAUDE_SESSION_TOOL);
   if (available.downloads && (!latest || downloadsRelevant(latest))) tools.push(DOWNLOADS_TOOL);
+  // Offered only in Explicit mode, where the request it answers lives.
+  if (available.pictures) tools.push(PICTURE_TOOL);
   // Level 3, any door: his word is checked in code (shell.ts), so hands need not gate it.
-  if (available.shell && (!latest || shellRelevant(latest))) tools.push(SHELL_TOOL);
+  if (available.shell) tools.push(SHELL_TOOL); // Keep access through troubleshooting and approval follow-ups.
   // Fetching for him: any door, like watching — "download Berserk for me" from the phone is the point.
   if (available.mangaShelf && (!latest || mangaRelevant(latest))) tools.push(GET_MANGA_TOOL);
-  // Her own game: any door — "go play your Pokémon" from the phone is as good as from the desk.
-  if (available.pokemon && (!latest || pokemonRelevant(latest))) tools.push(PLAY_POKEMON_TOOL);
-  if (available.manga && (!latest || mangaRelevant(latest))) tools.push(READ_MANGA_TOOL);
   if (available.system.enabled && machine) {
     tools.push(...SYSTEM_TOOLS);
     if (available.system.level >= 2) tools.push(...SYSTEM_ACTION_TOOLS);
@@ -1163,7 +1118,6 @@ export function chatTools(available: ToolAvailability, latest = ''): ChatTool[] 
   if (available.knockedAwake) tools.push(SLEEP_TOOL);
   // Her body in the game. Not gated on hands: the worker is her, not the
   // machine, and the worst a skill can do is walk somewhere in a game.
-  if (available.minecraft) tools.push(MINECRAFT_STATUS_TOOL, MINECRAFT_DO_TOOL);
   // Watching with her. Not gated on hands, like the Claude sessions: the point
   // is "let's watch Naruto" from the phone too, and the worst a page could
   // start is a subtitled anime he is then told about by name and size.
@@ -1185,6 +1139,10 @@ export function chatTools(available: ToolAvailability, latest = ''): ChatTool[] 
  * is switched off, or needs hands this turn does not have, still drops out.
  */
 export function steadyTable(offered: ChatTool[], everything: ChatTool[], held: Set<string>): ChatTool[] {
+  if(process.env.HARU_CORE_TOOL_MENU==='on'){
+    const result=corePolicySync<{tools:ChatTool[];held:string[]}>('tool-menu.steady',[offered,everything,[...held]]);
+    held.clear();for(const name of result.held)held.add(name);return result.tools;
+  }
   for (const tool of offered) held.add(tool.function.name);
   return everything.filter(tool => held.has(tool.function.name));
 }
@@ -1195,6 +1153,8 @@ export function steadyTable(offered: ChatTool[], everything: ChatTool[], held: S
  * none of it is reachable from a module that has to stay testable.
  */
 export type ToolDeps = {
+  policyConfig?:()=>unknown;
+  applyToolPlan?:(plan:unknown)=>void;
   CHAT_TIMEZONE: string;
   net: { fetch: Fetcher };
   store: {
@@ -1202,6 +1162,8 @@ export type ToolDeps = {
     getBlocks(): MemoryBlock[];
     transaction(run: () => void): void;
   };
+  memoryTool?: (name:string,args:Record<string,unknown>,message:string)=>unknown;
+  userRecord?: (action:string,args:Record<string,unknown>)=>unknown;
   getCheckIns(): CheckInStore;
   setCheckIns(entries: CheckInStore): void;
   getJournal(): JournalEntry[];
@@ -1247,8 +1209,10 @@ export type ToolDeps = {
   /** The CDP port of the browser she controls (browser.control). */
   /** Herself, in facts: readSelfSnapshot + describeSettings (self.ts). */
   myself(): unknown;
+  /** Make a picture and push it to his phone (venice-image.ts). Only wired in Explicit mode. */
+  makePicture?(prompt: string): Promise<{ ok: true; url: string } | { ok: false; error: string }>;
   /** The model ids a hosted route's endpoint lists, or null when it cannot be asked. */
-  hostedModels(route: 'conversation' | 'nudge'): Promise<string[] | null>;
+  hostedModels(route: 'conversation' | 'nudge' | 'config'): Promise<string[] | null>;
   /** Writes one allowlisted setting at their word: a backup first, then the value, then the note that says how she runs. */
   changeMySetting(plan: SettingPlan): Promise<{ ok: boolean; note: string }>;
   /** Back to bed at her word, while she is up because they knocked (hersleep.ts); null when she is not. */
@@ -1259,14 +1223,10 @@ export type ToolDeps = {
   shell?: { run(input: { command: string; said: string; door: 'desk' | 'phone' }): Promise<Record<string, unknown>> } | null;
   /** His manga shelf (suwayomi.ts): a title found and fetched for him, and how it is going. */
   mangaShelf?: { get(input: { title: string; mangaId?: number; confirm?: boolean }): Promise<Record<string, unknown>>; status(title: string): Promise<Record<string, unknown>> } | null;
-  /** Her Game Boy (pokemon.ts): a sitting started or stopped, and how the run stands. */
-  pokemon?: { start(): Promise<Record<string, unknown>>; stop(): Promise<Record<string, unknown>>; status(): Promise<Record<string, unknown>> } | null;
-  /** Her own reading, now (manga.ts). `wait` runs the stretch to its end; otherwise it starts and answers at once. */
-  manga?: { read(input: { title?: string; wait?: boolean }): Promise<Record<string, unknown>> } | null;
   /** Her old chats (chatsearch.ts): the finds, already dated and written out, or null when there is no archive to search. */
   chats?: { search(input: { query: string; from?: string; to?: string }): Promise<{ found: number; text: string; wordsOnly?: boolean }> } | null;
   /** Her own follow-ups (scheduler.ts), or null when there is nowhere to keep them. */
-  booking?: { book(input: { why: string; date?: string; time?: string; inMinutes?: number }): { booked: true; when: string } | { booked: false; reason: string } } | null;
+  booking?: { book(input: { why: string; date?: string; time?: string; inMinutes?: number }): { booked: true; when: string } | { booked: false; reason: string } | Promise<{ booked: true; when: string } | { booked: false; reason: string }> } | null;
   /** Claude Code sessions for his phone (claudesession.ts), or null when switched off. */
   claude: {
     open(input: { folder: string; name: string }): Promise<{ session: OpenedSession } | { error: string }>;
@@ -1278,11 +1238,8 @@ export type ToolDeps = {
   browserPort(): number;
   /** Where a browser screenshot lands — the screenshots folder or a fallback. */
   browserShotDir(): string;
-  /** Her body in Minecraft (minecraft.ts), or null when switched off. */
-  minecraft: {
-    status(): Promise<MinecraftStatus | null>;
-    send(skill: string, args: Record<string, unknown>): Promise<{ ok: boolean; error?: string; observation?: Record<string, unknown> }>;
-  } | null;
+  /** Ignored legacy dependency; retired tool names reach the unknown-tool refusal. */
+  minecraft?: unknown;
   /** The anime stack (anime.ts), or null when it is not wired up. Optional so fixtures need not name it. */
   anime?: {
     watch(input: WatchInput): Promise<Record<string, unknown>>;
@@ -1321,6 +1278,13 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
   } = deps;
   const name = call.function?.name;
   const args = toolArguments(call);
+  const iosResult = await runIOSTool(name, args, (call as ToolCall & { __haruAdapterCommand?: unknown }).__haruAdapterCommand);
+  if (iosResult !== null) return iosResult;
+  const gmailResult = await runGmailTool(name, args, latestUserMessage);
+  if (gmailResult !== null) return gmailResult;
+  if(process.env.HARU_CORE_MEMORY_TOOLS==='on'&&name&&['remember_about_user','core_memory_append','core_memory_replace','core_memory_rethink'].includes(name)){if(!deps.memoryTool)throw Error('core_memory_tool_adapter_required');return JSON.stringify(deps.memoryTool(name,args,latestUserMessage));}
+  if(process.env.HARU_CORE_FINAL_TOOLS==='on'){const owned=await runCoreFinalTool(name,args,latestUserMessage,deps);if(owned!==null)return owned;}
+  if(process.env.HARU_CORE_AGENDA_POLICY==='on'&&name&&['create_kept_item','complete_kept_item','update_kept_item','delete_kept_item'].includes(name))return runCoreAgendaTool(name,args,latestUserMessage,zonedNow(CHAT_TIMEZONE),deps);
   // Re-checked here, not only where the table is laid. A model can name a tool
   // it was never offered, and these three are the ones that open a window or a
   // box nobody on the phone can see.
@@ -1328,6 +1292,7 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
     return JSON.stringify({ error: 'Not on the phone — that is for the desk. Say you cannot do that here.' });
   }
   if (name === 'note_check_in') {
+    if(process.env.HARU_CORE_USER_RECORDS==='on'){if(!deps.userRecord)throw Error('core_user_record_adapter_required');return JSON.stringify(deps.userRecord('tool.noteCheckin',args));}
     const note = typeof args.note === 'string' ? args.note.trim() : '';
     if (!note) return JSON.stringify({ error: 'There is nothing to note down yet.' });
     const rating = typeof args.anxiety === 'number' && args.anxiety >= 1 && args.anxiety <= 10 ? Math.round(args.anxiety) : undefined;
@@ -1337,6 +1302,7 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
     return JSON.stringify({ saved: true, note: note.slice(0, 120), anxiety: rating ?? null, today: checkInsOn(getCheckIns(), localDateKey(now)).length });
   }
   if (name === 'save_journal_entry') {
+    if(process.env.HARU_CORE_USER_RECORDS==='on'){if(!deps.userRecord)throw Error('core_user_record_adapter_required');return JSON.stringify(deps.userRecord('tool.saveJournal',args));}
     const text = typeof args.text === 'string' ? args.text.trim() : '';
     if (!text) return JSON.stringify({ error: 'There is nothing to write down yet. Ask them how the day went first.' });
     if (!readJournalConfig(store.get('journal.config')).enabled) return JSON.stringify({ error: 'The journal is switched off.' });
@@ -1451,12 +1417,13 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
       // great deal of the web is script-built, so the second choice often works
       // where the first did not.
       markPageRead();
-      return formatPage(page, lastSearchQuery() || 'their question');
+      return JSON.stringify({ ok: true, url: page.url, text: formatPage(page, lastSearchQuery() || 'their question') });
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       console.warn(`[search] could not read a page: ${reason}`);
       const others = lastResults().length - 1;
-      return `That page could not be read (${reason}). ${others > 0 ? `You may try one other result instead if a different one looks like it would answer them. ` : ''}Otherwise answer from the search summaries you already have, or say you could not find it. Do not answer from memory as though you had read it.`;
+      if(process.env.HARU_CORE_TOOL_WORDING==='on')return JSON.stringify(corePolicySync('tool-wording.result',['web-page-failed',{reason,others}]));
+      return JSON.stringify({ error: `That page could not be read (${reason}).`, note: `${others > 0 ? 'You may try one other relevant result. ' : ''}Answer from the summaries or say you could not find it. Do not imply you read the page.` });
     }
   }
   if (name === 'read_video_transcript') {
@@ -1475,11 +1442,12 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
       // what was watched is a viewing history by another name.
       console.log(`[transcript] read ${videoId} (${transcript.language}${transcript.generated ? ', auto' : ''}) -> ${words.length} chars`);
       markPageRead();
-      return transcriptInstruction(title || 'that video', transcript.generated, words);
+      return JSON.stringify({ ok: true, videoId, text: transcriptInstruction(title || 'that video', transcript.generated, words) });
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       console.warn(`[transcript] could not read ${videoId}: ${reason}`);
-      return `The transcript could not be read: ${reason} Say so. Do not describe the video from its title or from memory as though you had read it.`;
+      if(process.env.HARU_CORE_TOOL_WORDING==='on')return JSON.stringify(corePolicySync('tool-wording.result',['transcript-failed',{reason}]));
+      return JSON.stringify({ error: `The transcript could not be read: ${reason}`, note: 'Say so. Do not describe the video from its title or from memory as though you had read it.' });
     }
   }
   if (name === 'offer_choices') {
@@ -1500,11 +1468,12 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
       // and forgotten, and a browsing history on disk is a different thing again.
       console.log(`[search] "${query}" -> ${results.length} results`);
       rememberSearch(query, results);
-      return formatResults(query, results, config.readPages);
+      return JSON.stringify({ ok: true, query, count: results.length, text: formatResults(query, results, config.readPages) });
     } catch (error) {
       // Handed back rather than thrown. A failed lookup should cost her the fact,
       // not the reply — she says she could not check and carries on.
       const reason = error instanceof Error ? error.message : String(error);
+      if(process.env.HARU_CORE_TOOL_WORDING==='on')return JSON.stringify(corePolicySync('tool-wording.result',['search-failed',{reason,blocked:error instanceof SearchBlocked}]));
       // Being turned away is not the same as finding nothing, and she must not
       // report it as such: a silent empty result reads to the user as "there is
       // nothing out there" when the truth is that nobody looked.
@@ -1513,10 +1482,10 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
         // Named as a search provider in your own settings, not just "Brave" —
         // told the short version she advised switching browsers, which is not
         // the setting, not the problem, and not something you can act on.
-        return `The search was refused, not empty — the provider is asking this machine to prove it is a person (${reason}). Tell them searching is blocked at the moment, and that they can fix it in your setup panel under "Looking things up" by changing the search provider from DuckDuckGo to Brave. Do not answer the question from memory.`;
+        return JSON.stringify({ error: `Search refused by the provider (${reason}).`, note: 'Searching is blocked. The search provider can be changed in setup under Looking things up. Do not answer from memory as though a search succeeded.' });
       }
       console.warn(`[search] "${query}" failed: ${reason}`);
-      return `The search did not go through (${reason}). Tell them you could not check just now. Do not answer from memory as though you had looked it up.`;
+      return JSON.stringify({ error: `The search did not go through (${reason}).`, note: 'Say you could not check. Do not answer from memory as though you had looked it up.' });
     }
   }
   if (name === 'show_wardrobe') {
@@ -1539,10 +1508,21 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
     console.log(`[taste] ${kind} "${title}" taken up because they told you about it`);
     return JSON.stringify({ saved: true, note: `Taken up: ${title}. You will read up on it and have a real view of it over your nights.` });
   }
+  if (name === 'make_me_a_picture') {
+    // Re-checked here: a model can name a tool it was never offered.
+    if (!deps.makePicture) return JSON.stringify({ error: 'Making pictures is switched off. Say so plainly, in your own words.' });
+    const prompt = typeof args.prompt === 'string' ? args.prompt.trim() : '';
+    if (!prompt) return JSON.stringify({ error: 'prompt is required — what the picture should show.' });
+    const made = await deps.makePicture(prompt);
+    if(process.env.HARU_CORE_TOOL_WORDING==='on')return JSON.stringify(corePolicySync('tool-wording.result',['picture',made]));
+    if (!made.ok) return JSON.stringify({ error: `${made.error} Say so plainly rather than pretending it came out.` });
+    return JSON.stringify({ made: true, note: 'It is on its way to their phone now. Say one short line to go with it — do not describe the picture back to them.' });
+  }
   if (name === 'describe_myself') {
     return JSON.stringify(deps.myself());
   }
   if (name === 'change_setting') {
+    if(process.env.HARU_CORE_REMAINING_POLICY==='on'){if(!deps.policyConfig)throw Error('core_setting_config_required');return JSON.stringify(await runCoreSettingTool(args,deps.policyConfig,deps));}
     const settingName = typeof args.name === 'string' ? args.name.trim() : '';
     if (!settingName) return JSON.stringify({ error: `name is required — one of ${SETTING_NAMES.join(', ')}.` });
     const setting = (SETTINGS as Record<string, Setting>)[settingName];
@@ -1553,7 +1533,9 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
     if (!verdict.ok) return JSON.stringify({ error: verdict.error });
     if (verdict.unchanged) return JSON.stringify({ unchanged: true, note: `${settingName} is already ${JSON.stringify(verdict.plan.to)}.` });
     // The same handshake as restarting herself: nothing changes until they have said the word.
-    if (args.confirm !== true) return JSON.stringify({ confirm: true, name: settingName, what: setting.what, from: verdict.plan.from, to: verdict.plan.to, note: 'Do not act yet. Tell them what would change, ask them to say the word, then call this again with confirm: true.' });
+    // A spoken mode is the word ? "turn on Explicit mode" needs no second asking, because
+    // asking for it was the whole request. A raw model id still gets the round trip.
+    if (args.confirm !== true && verdict.fromAlias !== true) return JSON.stringify({ confirm: true, name: settingName, what: setting.what, from: verdict.plan.from, to: verdict.plan.to, note: 'Do not act yet. Tell them what would change, ask them to say the word, then call this again with confirm: true.' });
     const done = await deps.changeMySetting(verdict.plan);
     return JSON.stringify(done.ok ? { changed: true, name: settingName, from: verdict.plan.from, to: verdict.plan.to, note: done.note } : { error: done.note });
   }
@@ -1617,6 +1599,7 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       console.warn(`[shell] run_command failed: ${reason}`);
+      if(process.env.HARU_CORE_TOOL_WORDING==='on')return JSON.stringify(corePolicySync('tool-wording.result',['shell-failed',{reason}]));
       return JSON.stringify({ error: `The terminal did not answer (${reason}). Say so plainly rather than pretending it ran.` });
     }
   }
@@ -1638,32 +1621,8 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
       return JSON.stringify({ error: `The manga server is not answering (${reason}). Say so plainly rather than pretending it is fetching.` });
     }
   }
-  if (name === 'play_pokemon') {
-    // Re-checked here: a model can name a tool it was never offered.
-    if (!deps.pokemon) return JSON.stringify({ error: 'Your Game Boy is switched off — say so plainly, in your own words.' });
-    const action = args.action === 'start' || args.action === 'stop' ? args.action : 'status';
-    try {
-      const result = action === 'start' ? await deps.pokemon.start() : action === 'stop' ? await deps.pokemon.stop() : await deps.pokemon.status();
-      return JSON.stringify(result);
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error);
-      return JSON.stringify({ error: `The Game Boy is not answering (${reason}). Say so plainly rather than describing a game you are not playing.` });
-    }
-  }
-  if (name === 'read_manga') {
-    // Re-checked here: a model can name a tool it was never offered.
-    if (!deps.manga) return JSON.stringify({ error: 'You cannot read pages right now — your eyes are switched off. Say so plainly.' });
-    const title = typeof args.title === 'string' ? args.title.trim() : '';
-    try {
-      const result = await deps.manga.read({ ...(title ? { title } : {}), wait: args.wait === true });
-      console.log(`[manga] read_manga${title ? ` "${title}"` : ''} -> ${'error' in result ? String(result.error) : Object.keys(result).filter(key => key !== 'note').join(',')}`);
-      return JSON.stringify(result);
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error);
-      return JSON.stringify({ error: `The pages did not come (${reason}). Say so plainly rather than describing pages you have not read.` });
-    }
-  }
   if (name === 'browser_control') {
+    if(process.env.HARU_CORE_BROWSER_TOOL==='on')return JSON.stringify(await runCoreBrowserTool(args,{port:browserPort(),fetch:deps.net.fetch as Parameters<typeof runCoreBrowserTool>[1]['fetch'],shotDir:browserShotDir,markPageRead}));
     const action = typeof args.action === 'string' ? args.action : '';
     const url = typeof args.url === 'string' ? args.url.trim() : '';
     const tab = typeof args.tab === 'string' ? args.tab.trim() : '';
@@ -1755,22 +1714,14 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
     // would risk the new record matching its own hint back to itself.
     const replaces = typeof args.replaces === 'string' && args.replaces.trim() ? args.replaces.trim() : undefined;
     const outdated = replaces ? findSuperseded(getMemories(), replaces) : null;
-    // The mood of what they said, stamped on the memory so retrieval can favour
-    // it when the same mood comes round again — the moment matters as much as
-    // the fact. Their own words carry it; the fact text stands in when there is
-    // nothing of theirs to read.
-    const told = latestUserMessage || fact;
-    // 'explicit' is the top of the trust ladder and skips the nagging test, so it
-    // is for what they said. A fact that shares nothing with their message came
-    // from somewhere else — a page she read, or her own guess — and is filed as
-    // inferred: kept, but believed less (memory.ts isInTheirWords).
-    const theirs = isInTheirWords(fact, latestUserMessage);
-    if (!theirs) console.log(`[memory] "${fact.slice(0, 60)}" is not in their words — filed as inferred, not explicit`);
-    const saved = addMemory(fact, kind, subject, {
-      source: theirs ? 'explicit' : 'inferred', predicate, object,
-      emotion: localEmotion(told),
-      emotionIntensity: readTone(told).heat,
-    });
+    if (!isInTheirWords(fact, latestUserMessage)) {
+      return JSON.stringify({ saved: false, reason: 'The current user message does not support that personal fact. Quotes, fiction, guesses and contradictory wording are not personal evidence. Ask for clarification; do not claim it was remembered.' });
+    }
+    if (replaces && !require('./memory-replacement').replacementAuthorized(outdated, latestUserMessage, (hint: string) => findSuperseded(getMemories(), hint))) return JSON.stringify({ saved: false, reason: 'The old memory named in the current user message is ambiguous or differs from the proposed replacement target. Ask which memory they mean; nothing was changed.' });
+    if (replaces && !outdated) return JSON.stringify({ saved: false, reason: 'The previous memory could not be identified unambiguously. Nothing was changed.' });
+    const planned = planMemoryEdit(getMemories(), { oldIds: outdated ? [outdated.id] : [], text: fact, kind, subject,
+      source: 'explicit', predicate, object, evidenceDetail: latestUserMessage });
+    const saved = planned;
     if (!saved) return JSON.stringify({ error: 'fact is required.' });
     if (!saved.record) {
       // Said back plainly, because the alternative is her announcing that she
@@ -1780,14 +1731,11 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
         reason: 'That is not worth writing down — it is either about this moment only, or true of anyone. Keep things that would still matter to them in a month. Do not tell them you have remembered it.',
       });
     }
-    if (outdated && outdated.id !== saved.record.id) {
-      setMemories(supersede(getMemories(), outdated.id, saved.record.id));
-      console.log(`[memory] "${outdated.text}" superseded by "${fact}"`);
-    }
+    setMemories(saved.memories);
     console.log(`[ai] ${saved.created ? 'remembered' : `heard again (${saved.record.mentions}x)`} [${kind}]: "${fact}"`);
     // Being told it is already known is useful to the model — it stops it
     // announcing a discovery when the user has merely repeated themselves.
-    return JSON.stringify({ saved: true, known: !saved.created, mentions: saved.record.mentions, kind });
+    return JSON.stringify({ saved: true, known: !saved.created, mentions: saved.record.mentions, kind, text: saved.record.text, superseded: saved.retired });
   }
   if (name === 'core_memory_append' || name === 'core_memory_replace') {
     // The block face of the memory write path. The block checks run first —
@@ -1807,16 +1755,15 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
       // Governance write-through: the engine decides whether this is worth
       // keeping, at its own confidence — model proposals start uncertain.
       const kind = kindForBlock(label);
-      const saved = addMemory(content, kind, undefined, { source: 'inferred' });
+      if (!isInTheirWords(content, latestUserMessage)) return JSON.stringify({ saved: false, reason: 'That personal fact is not supported by the current user message.' });
+      const saved = planMemoryEdit(getMemories(), { oldIds: [], text: content, kind, source: 'explicit', evidenceDetail: latestUserMessage });
       if (!saved?.record) {
         return JSON.stringify({ saved: false, reason: 'Not recorded — that reads as either about this moment only or true of anyone. Keep things that would still matter to them in a month.' });
       }
-      // Custom blocks (no engine surface of their own) persist the edited value;
-      // default blocks stay derived and pick the new record up through selection.
-      if (!DEFAULT_BLOCK_LABELS.has(label)) {
-        const next = edit.value!;
-        setBlocks(blocks.map(candidate => candidate.label === label ? withEditedValue(candidate, next) : candidate));
-      }
+      store.transaction(() => {
+        setMemories(saved.memories);
+        if (!DEFAULT_BLOCK_LABELS.has(label)) setBlocks(blocks.map(candidate => candidate.label === label ? withEditedValue(candidate, edit.value!) : candidate));
+      });
       console.log(`[blocks] append → ${label}: "${content.slice(0, 60)}" (${saved.created ? 'new record' : `known, ${saved.record.mentions}x`})`);
       return JSON.stringify({
         saved: true,
@@ -1828,61 +1775,52 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
     const newSubstring = typeof args.new_substring === 'string' ? args.new_substring : '';
     const edit = replaceInBlockValue(current, oldSubstring, newSubstring, block);
     if (!edit.ok) return JSON.stringify({ error: edit.reason });
-    const kind = kindForBlock(label);
-    const outdated = findSuperseded(getMemories(), oldSubstring);
-    const replacement = newSubstring.trim();
-    const saved = replacement ? addMemory(replacement, kind, undefined, { source: 'inferred' }) : null;
-    if (saved && !saved.record) {
-      return JSON.stringify({ saved: false, reason: 'The replacement was not recorded — it reads as either about this moment only or true of anyone.' });
+    // A substring belongs to exactly one live record. Never fuzzy-delete a
+    // different fact or save only the replacement fragment as a new memory.
+    const matches = getMemories().filter(m => !m.supersededBy && m.status !== 'archived' && m.text.includes(oldSubstring));
+    if (matches.length !== 1 || matches[0].text.indexOf(oldSubstring) !== matches[0].text.lastIndexOf(oldSubstring)) {
+      return JSON.stringify({ saved: false, reason: 'The edit does not identify exactly one complete memory. Nothing was changed.' });
     }
+    const outdated = matches[0];
+    const replacement = outdated.text.replace(oldSubstring, newSubstring).trim();
+    if (replacement && replacement !== outdated.text && !isInTheirWords(replacement, latestUserMessage)) {
+      return JSON.stringify({ saved: false, reason: 'The corrected fact is not supported by the current user message. Nothing was changed.' });
+    }
+    const saved = planMemoryEdit(getMemories(), { oldIds: [outdated.id], text: replacement, kind: outdated.kind,
+      subject: outdated.subject, source: replacement === outdated.text ? outdated.source ?? 'inferred' : 'explicit', evidenceDetail: latestUserMessage });
+    if (!saved) return JSON.stringify({ saved: false, reason: 'The replacement was not worth keeping. Nothing was changed.' });
     store.transaction(() => {
-      if (outdated && saved?.record && outdated.id !== saved.record.id) {
-        setMemories(supersede(getMemories(), outdated.id, saved.record.id));
-        console.log(`[memory] "${outdated.text.slice(0, 50)}" superseded by "${newSubstring.slice(0, 50)}"`);
-      }
-      if (!DEFAULT_BLOCK_LABELS.has(label)) {
-        const next = edit.value!;
-        setBlocks(store.getBlocks().map(candidate => candidate.label === label ? withEditedValue(candidate, next) : candidate));
-      }
+      setMemories(saved.memories);
+      if (!DEFAULT_BLOCK_LABELS.has(label)) setBlocks(blocks.map(candidate => candidate.label === label ? withEditedValue(candidate, edit.value!) : candidate));
     });
-    console.log(`[blocks] replace in ${label}: "${oldSubstring.slice(0, 40)}" → "${newSubstring.slice(0, 40)}"`);
-    return JSON.stringify({
-      saved: true,
-      note: `Replaced in the ${label} block. ${outdated ? 'The outdated record was superseded.' : 'No existing record matched the replaced text.'}`,
-    });
+    return JSON.stringify({ saved: true, superseded: saved.record ? saved.retired : 0, archived: saved.record ? 0 : saved.retired,
+      text: saved.record?.text ?? '', note: replacement ? `Replaced the memory in the ${label} block.` : `Archived the memory removed from the ${label} block.` });
   }
   if (name === 'core_memory_rethink') {
-    // Whole-block consolidation, governed: the rewrite is proposed through the
-    // memory engine (so it has to be a real, lasting fact), and the lines it
-    // replaces are marked superseded rather than left to linger beside it. The
-    // block itself stays derived — it keeps tracking live memory — so a rethink
-    // is a consolidation of what the engine knows, not a freeze of the view.
     const label = typeof args.label === 'string' ? args.label.trim() : '';
     const newValue = typeof args.new_value === 'string' ? args.new_value.trim() : '';
     const blocks = store.getBlocks();
     const block = findBlock(blocks, label);
-    if (!block) return JSON.stringify({ error: `There is no memory block called "${label}". The blocks are human, preferences, relationship, current_project and working_state.` });
-    if (!canEditBlock(blocks, label)) return JSON.stringify({ error: `The "${label}" block is read-only — it is fixed by the user's configuration and cannot be changed through memory tools.` });
-    if (!newValue) return JSON.stringify({ error: 'new_value is required.' });
-    if (newValue.length > block.limit) return JSON.stringify({ error: `That would exceed the ${block.limit}-character limit for the block.` });
-    const saved = addMemory(newValue, kindForBlock(label), undefined, { source: 'inferred' });
-    if (!saved?.record) {
-      return JSON.stringify({ saved: false, reason: 'Not recorded — that reads as either about this moment only or true of anyone. Keep things that would still matter to them in a month.' });
-    }
+    if (!block) return JSON.stringify({ error: `There is no memory block called "${label}".` });
+    if (!canEditBlock(blocks, label)) return JSON.stringify({ error: `The "${label}" block is read-only.` });
+    if (!newValue || newValue.length > block.limit) return JSON.stringify({ error: `new_value must contain between 1 and ${block.limit} characters.` });
+    // Resolve before planning the new record, and require exact represented
+    // records. Profile configuration and truncated lines cannot be retired.
+    const before = getMemories();
     const current = resolveBlockValue(block, blockSources(''));
-    const outdated = current.split('\n')
-      .map(line => line.replace(/^-\s*/, '').trim())
-      .filter(line => line.length >= 12)
-      .map(line => findSuperseded(getMemories(), line))
-      .filter((record): record is NonNullable<typeof record> => Boolean(record));
-    if (outdated.length && saved.record) {
-      let next = getMemories();
-      for (const record of outdated) next = supersede(next, record.id, saved.record.id);
-      setMemories(next);
-      console.log(`[memory] rethink superseded ${outdated.length} line(s) of ${label}`);
-    }
-    console.log(`[blocks] rethink ${label}: ${current.length} chars → ${newValue.length} chars`);
-    return JSON.stringify({ saved: true, superseded: outdated.length, note: `Rewrote the ${label} block. The lines it replaced are superseded; the block keeps its usual shape.` });
+    const lines = current.split('\n').map(line => line.replace(/^-\s*/, '').trim()).filter(Boolean);
+    const outdated = before.filter(m => !m.supersededBy && m.status !== 'archived' && lines.includes(m.text));
+    const supported = newValue.split(/[;\n]+/).filter(s => s.trim()).every(part =>
+      isInTheirWords(part, latestUserMessage) || outdated.some(m => isInTheirWords(part, m.text)));
+    if (!supported || !outdated.length) return JSON.stringify({ saved: false, reason: 'The rewrite is not supported by identifiable memories or the current user message. Nothing was changed.' });
+    const saved = planMemoryEdit(before, { oldIds: outdated.map(m => m.id), text: newValue, kind: kindForBlock(label),
+      source: isInTheirWords(newValue, latestUserMessage) ? 'explicit' : 'inferred', evidenceDetail: 'Rewrite of ' + outdated.map(m => m.id).join(', ') });
+    if (!saved?.record) return JSON.stringify({ saved: false, reason: 'The rewrite was not worth keeping. Nothing was changed.' });
+    store.transaction(() => {
+      setMemories(saved.memories);
+      if (!DEFAULT_BLOCK_LABELS.has(label)) setBlocks(blocks.map(candidate => candidate.label === label ? withEditedValue(candidate, newValue) : candidate));
+    });
+    return JSON.stringify({ saved: true, superseded: saved.retired, note: `Rewrote the ${label} block.`, text: saved.record.text });
   }
   if (name === 'complete_kept_item') {
     const title = typeof args.title === 'string' ? args.title.trim() : '';
@@ -1953,12 +1891,12 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
   }
   if (name === 'get_service_status') {
     const wanted = typeof args.name === 'string' && args.name.trim() ? args.name.trim() : undefined;
-    if (wanted && !KNOWN_SERVICES.includes(wanted)) return JSON.stringify({ error: `Unknown service "${wanted}". Known: ${KNOWN_SERVICES.join(', ')}.` });
+    if (wanted && !(process.env.HARU_CORE_TOOL_RESULTS==='on' ? corePolicySync<boolean>('diagnostic.knownService',[wanted]) : KNOWN_SERVICES.includes(wanted))) return JSON.stringify({ error: `Unknown service "${wanted}". Known: ${KNOWN_SERVICES.join(', ')}.` });
     const services = await collectServices(wanted);
     return JSON.stringify({ services });
   }
   if (name === 'diagnose_system') {
-    const target = typeof args.target === 'string' && ['gpu', 'memory', 'disk', 'docker', 'network', 'haru', 'all'].includes(args.target) ? args.target : 'all';
+    const target = process.env.HARU_CORE_TOOL_RESULTS==='on' ? corePolicySync<string>('diagnostic.target',[args.target]) : (typeof args.target === 'string' && ['gpu', 'memory', 'disk', 'docker', 'network', 'haru', 'all'].includes(args.target) ? args.target : 'all');
     const collected = await collectAll();
     return JSON.stringify(diagnose(target, collected));
   }
@@ -1993,41 +1931,6 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
     return JSON.stringify({ restarting: true, note: 'Tell them you are restarting and will be right back.' });
   }
 
-  if (name === 'minecraft_status' || name === 'minecraft_do') {
-    // Re-checked here: a model can name a tool it was never offered.
-    if (!deps.minecraft) return JSON.stringify({ error: 'Minecraft is switched off — say so plainly, in your own words.' });
-    if (name === 'minecraft_status') {
-      const status = await deps.minecraft.status();
-      if (!status) return JSON.stringify({ error: 'Your Minecraft body is not answering — the worker is not running. Say so plainly.' });
-      const seen = status.observation;
-      return JSON.stringify({
-        inTheWorld: seen.state === 'online',
-        state: seen.state,
-        where: seen.where ?? (seen.self ? `${seen.self.position.x}, ${seen.self.position.y}, ${seen.self.position.z}` : null),
-        dimension: seen.self?.dimension ?? null,
-        health: seen.self?.health ?? null,
-        food: seen.self?.food ?? null,
-        time: seen.self?.time ?? null,
-        doing: seen.intent.kind,
-        playersHere: seen.nearby.players,
-        carrying: seen.inventory,
-        project: seen.currentProject,
-        knownNearby: seen.knownNearby,
-        note: 'Say it as yourself in a sentence or two — where you are, what you are doing, who is there. Never read this back as a list.',
-      });
-    }
-    const skill = args.skill;
-    if (!isSkillName(skill)) {
-      return JSON.stringify({ error: `"${String(skill).slice(0, 40)}" is not something your body can do. It can: ${SKILL_NAMES.join(', ')}. Pick one of those, or say you cannot.` });
-    }
-    const skillArgs = args.args && typeof args.args === 'object' && !Array.isArray(args.args) ? args.args as Record<string, unknown> : {};
-    const result = await deps.minecraft.send(skill, skillArgs);
-    console.log(`[minecraft] told to ${skill}${Object.keys(skillArgs).length ? ` ${JSON.stringify(skillArgs).slice(0, 120)}` : ''}: ${result.ok ? 'ok' : `failed — ${result.error}`}`);
-    if (!result.ok) {
-      return JSON.stringify({ done: false, skill, because: result.error ?? 'it did not work', note: 'Say what went wrong in your own words, briefly. Never read the reason back verbatim.' });
-    }
-    return JSON.stringify({ done: true, skill, result: result.observation ?? {}, note: 'Say what your body is now doing, briefly and as yourself. Do not list the result.' });
-  }
   if (name === 'watch_anime') {
     // Re-checked here: a model can name a tool it was never offered.
     if (!deps.anime) return JSON.stringify({ error: 'The anime server is not wired up to you — say so plainly, in your own words.' });
@@ -2037,7 +1940,7 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
     try {
       const result = action === 'status'
         ? await deps.anime.status(title)
-        : await deps.anime.watch({ title, tvdbId: typeof args.tvdbId === 'number' ? args.tvdbId : undefined, confirm: args.confirm === true, where: typeof args.where === 'string' ? args.where.trim() : undefined });
+        : await deps.anime.watch({ title, jellyfinSeriesId: typeof args.jellyfinSeriesId === 'string' ? args.jellyfinSeriesId : undefined, tvdbId: typeof args.tvdbId === 'number' ? args.tvdbId : undefined, confirm: args.confirm === true, where: typeof args.where === 'string' ? args.where.trim() : undefined });
       console.log(`[anime] ${action} "${title}" -> ${String(result.outcome ?? '?')}${result.show ? ` (${String(result.show)})` : ''}`);
       return JSON.stringify(result);
     } catch (error) {
@@ -2048,14 +1951,15 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
   }
   if (name === 'go_back_to_sleep') {
     const done = deps.goBackToSleep({ block: args.block === true });
+    if(process.env.HARU_CORE_TOOL_WORDING==='on')return JSON.stringify(corePolicySync('tool-wording.result',['sleep',done]));
     if (!done) return JSON.stringify({ error: 'You are not up because of them right now — nothing to go back to.' });
     console.log(`[her-sleep] she chose to go back to sleep${done.blocked ? ', and shut the door for the night' : ''}`);
-    return JSON.stringify({ ...done, note: 'Say one short goodnight in this reply and nothing after it. They will find you asleep.' });
+    return JSON.stringify({ ...done, ok: done.asleep === true, note: 'Say one short goodnight in this reply and nothing after it. They will find you asleep.' });
   }
   if (name === 'book_follow_up') {
     if (!deps.booking) return JSON.stringify({ error: 'There is nowhere to keep that right now. Do not promise to check back.' });
     const minutes = typeof args.in_minutes === 'number' ? args.in_minutes : typeof args.in_minutes === 'string' && /^\d+$/.test(args.in_minutes) ? Number(args.in_minutes) : undefined;
-    const result = deps.booking.book({
+    const result = await deps.booking.book({
       why: typeof args.why === 'string' ? args.why : '',
       date: typeof args.date === 'string' && args.date.trim() ? args.date : undefined,
       time: typeof args.time === 'string' && args.time.trim() ? args.time : undefined,
@@ -2084,7 +1988,7 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
       const current = readNote(root, notePath);
       return JSON.stringify({ confirm: true, path: notePath, chars: current.ok ? current.chars : 0, note: current.ok ? 'Do not act yet. Tell them what would be replaced, ask them to say the word, then call this again with confirm: true.' : 'Nothing is there yet — write it with mode: create instead.' });
     }
-    const written = writeNote(root, notePath, text, mode);
+    const written = writeNote(root, notePath, text, mode, args.preserve_text === true);
     if (written.ok) {
       console.log(`[vault] she ${written.mode === 'append' ? (written.existed ? 'added to' : 'started') : written.mode === 'create' ? 'made' : 'rewrote'} the note ${written.path} (${written.chars} chars), at their word`);
       deps.vault.afterWrite();
@@ -2097,6 +2001,7 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
     if (!query) return JSON.stringify({ error: 'query is required: the words you expect in what was said.' });
     const day = (value: unknown) => typeof value === 'string' && isDay(value.trim()) ? value.trim() : undefined;
     const result = await deps.chats.search({ query: query.slice(0, 200), from: day(args.from), to: day(args.to) });
+    if(process.env.HARU_CORE_TOOL_WORDING==='on')return JSON.stringify(corePolicySync('tool-wording.result',['chats',result]));
     // Words only (the embedder down, or still re-embedding): a miss is weaker evidence, and she is told so.
     const wordsOnly = result.wordsOnly ? ' This search could only match exact words just now, so something said in other words may be missed.' : '';
     return JSON.stringify(result.found
@@ -2133,6 +2038,7 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
       touchChunks(result.knowledge.map(item => item.chunk.id));
       const sources = [...new Set(result.knowledge.map(item => item.chunk.source))];
       console.log(`[knowledge] "${query.slice(0, 60)}" -> ${result.knowledge.length} chunk(s) from ${sources.join(', ') || 'nothing'} in ${Date.now() - started}ms`);
+      if(process.env.HARU_CORE_TOOL_WORDING==='on')return JSON.stringify(corePolicySync('tool-wording.result',['knowledge',{knowledgeText:result.knowledgeText,memoryTexts:result.memories.map(entry=>entry.memory.text),knowledgeCount:result.knowledge.length}]));
       // Memories selected alongside the knowledge go in too — the door that
       // reaches both systems is meant to hand back both.
       const known = result.memories.length
@@ -2142,11 +2048,12 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
         context: `${result.knowledgeText}${known}`,
         note: result.knowledge.length
           ? 'Answer from the context above, in your own voice. If the sources conflict, prefer the most recently updated one, and do not present something possibly outdated as definitely true.'
-          : 'Say plainly that you do not have enough information rather than inventing an answer.',
+          : 'No additional stored documents matched. Use relevant facts from the current message, recent conversation and memories above. An empty document lookup does not erase those facts. Answer requested creative suggestions without an unrelated missing-document caveat; never claim to have read an absent document.',
       });
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       console.warn(`[knowledge] lookup failed: ${reason}`);
+      if(process.env.HARU_CORE_TOOL_WORDING==='on')return JSON.stringify(corePolicySync('tool-wording.result',['knowledge-failed',{reason}]));
       return JSON.stringify({ error: `The knowledge lookup failed (${reason}). Say you could not check just now — do not answer from memory as though you had.` });
     }
   }

@@ -1,3 +1,4 @@
+import {createCoreKnowledgeStore} from './core-knowledge';
 // The live knowledge layer: the vector store in knowledge.ts, wired to files,
 // an embedder and a vault on disk.
 //
@@ -27,6 +28,7 @@ import { syncVaultFiles, type VaultSyncReport } from './obsidian';
 import { admitVaultMemories } from './vaultmemories';
 import { isOpenAIShaped } from './provider';
 import { readPdf } from './pdf';
+import { embeddingRoute } from './embedding-route';
 
 /** How much text is taken from a PDF before it is considered enough. */
 export const KNOWLEDGE_PDF_CHARS = 200_000;
@@ -66,6 +68,7 @@ export type IngestArgs = {
 };
 
 export function createKnowledgeStore(deps: KnowledgeStoreDeps) {
+ if(process.env.HARU_CORE_KNOWLEDGE==='on')return createCoreKnowledgeStore(deps);
   const { store } = deps;
 
   let knowledge: KnowledgeStore = emptyKnowledge();
@@ -122,11 +125,11 @@ export function createKnowledgeStore(deps: KnowledgeStoreDeps) {
   function embedder(): Embedder | null {
     const ai = store.get('ai.config') as { endpoint?: string; model?: string; provider?: string } | undefined;
     if (!ai?.endpoint || !ai.model) return null;
-    const endpoint = ai.endpoint;
+    const { endpoint, provider } = embeddingRoute(ai.endpoint, isOpenAIShaped(ai.provider) ? 'openai' : 'ollama');
     const built = createEmbedder({
       endpoint,
       model: config().embedModel,
-      provider: isOpenAIShaped(ai.provider) ? 'openai' : 'ollama',
+      provider,
       apiKey: deps.apiKeyFor(endpoint),
     }, deps.fetch);
     return cachedEmbedder(built, embeddingCache);

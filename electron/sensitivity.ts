@@ -25,6 +25,11 @@ export type Verdict = {
 const SAFE: Verdict = { safe: true, because: '' };
 const refuse = (because: string): Verdict => ({ safe: false, because });
 
+/** An explicit processing preference applies even when the text has no secret. */
+export function explicitlyLocalOnly(text:string):boolean {
+  return /\b(?:keep|process|handle|answer)\s+(?:(?:this|our|my|the)\s+)?(?:(?:conversation|chat|request|message|answer|data|everything|it)\s+)?(?:strictly\s+)?(?:local(?:ly)?\b|on (?:this|my) (?:machine|server|device)\b)|\b(?:do not|don't|don’t) (?:send|share|upload|export)\b.{0,80}\b(?:cloud|external|third.party)|\blocal.only\s+(?:please|processing|inference|answer|mode)\b/i.test(text);
+}
+
 /**
  * Words that name a secret rather than being one.
  *
@@ -52,7 +57,10 @@ const LOOKS_LIKE_A_SECRET: [RegExp, string][] = [
   [/\bAKIA[0-9A-Z]{16}\b/, 'an AWS key id'],
   [/\bAIza[0-9A-Za-z_-]{30,}\b/, 'a Google API key'],
   [/\bxox[baprs]-[A-Za-z0-9-]{10,}\b/, 'a Slack token'],
-  [/\b[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\b/, 'a JSON web token'],
+  // A JWT's header is base64url of a JSON object, so it always starts "eyJ".
+  // Anchoring there is more accurate and, unlike three greedy runs with word
+  // boundaries, cannot backtrack for seconds over a long block of text.
+  [/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/, 'a JSON web token'],
   [/\b(?:postgres|postgresql|mysql|mongodb(?:\+srv)?|redis|amqp):\/\/[^\s:@]+:[^\s@]+@/i, 'a connection string with a password in it'],
   [/\bBearer\s+[A-Za-z0-9._~+/-]{20,}/, 'a bearer token'],
   // A .env line: a shouty key, an equals sign, and something long after it.
@@ -116,9 +124,53 @@ const NAMES_A_SECRET_WITH_VALUE = new RegExp(NAMES_A_SECRET.source + String.raw`
  * home — and not for what she said back: "you're using my name like a
  * password" kept the next six turns local for the word alone.
  */
+/**
+ * Names the app itself puts into the conversation ? its own model ids above all.
+ *
+ * They are long, mixed-case and separator-laden, which is exactly the shape the
+ * entropy rule below hunts for, and a model id is not a credential. Registered
+ * once by main.ts and read live, so a changed brain needs no re-registering.
+ */
+let outboundNames: () => readonly (string | undefined)[] = () => [];
+let namesCache: string[] = [];
+let namesReadAt = 0;
+
+export function outboundNamesFrom(read: () => readonly (string | undefined)[]): void {
+  outboundNames = read;
+  namesCache = [];
+  namesReadAt = 0;
+}
+
+/**
+ * The names, read at most once every few seconds.
+ *
+ * The reader is the store, and a store read clones the document behind the key ?
+ * so asking it once per scanned string, which is thousands a turn, cost four
+ * seconds of every reply. A short cache is enough: a changed brain is picked up
+ * on the next turn.
+ */
+function currentOutboundNames(): string[] {
+  const now = Date.now();
+  if (now - namesReadAt > 3_000) {
+    namesReadAt = now;
+    try { namesCache = outboundNames().filter((name): name is string => typeof name === 'string' && name.length >= 8); }
+    catch { namesCache = []; }
+  }
+  return namesCache;
+}
+
+/** The text with the app's own names cut out, so a model id cannot read as a key. */
+function withoutOutboundNames(text: string): string {
+  let out = text;
+  for (const name of currentOutboundNames()) {
+    if (out.includes(name)) out = out.split(name).join(' ');
+  }
+  return out;
+}
+
 export function mayLeaveTheMachine(text: string, readLocalContent = false, { namesAlone = true } = {}): Verdict {
   if (readLocalContent) return refuse('a file from this machine is in this conversation');
-  const said = text ?? '';
+  const said = withoutOutboundNames(text ?? '');
   if (!said.trim()) return SAFE;
 
   for (const [pattern, what] of LOOKS_LIKE_A_SECRET) {
@@ -146,6 +198,7 @@ export function conversationMayLeave(
 ): Verdict {
   if (readLocalContent) return refuse('a file from this machine is in this conversation');
   for (const message of messages.slice(-depth)) {
+    if(message.role==='user' && explicitlyLocalOnly(String(message.content??'')))return refuse('you asked to keep this local');
     const verdict = mayLeaveTheMachine(String(message.content ?? ''), false, { namesAlone: message.role === 'user' });
     if (!verdict.safe) {
       return refuse(message.role === 'user' ? verdict.because : `${verdict.because}, from earlier in this conversation`);

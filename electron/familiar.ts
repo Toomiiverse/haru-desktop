@@ -1,3 +1,4 @@
+import {devicePolicy} from './core-device-activity';
 // What she already knows about where they spend their time.
 //
 // Without this she reacts to a category — "they have something administrative
@@ -64,6 +65,7 @@ const NOISE = /^(\(\d+\)|\d+|new tab|untitled|home|dashboard)$/i;
  * none, because it has her greet an unfamiliar page like an old friend.
  */
 export function identify(activity: Activity): { key: string; label: string } | null {
+ if(globalThis.process.env.HARU_CORE_DEVICE_ACTIVITY==='on')return devicePolicy('identify',[activity]);
   const title = (activity.label ?? '').trim();
   if (!title) return null;
   const parts = title.split(SEPARATORS).map(part => part.trim()).filter(Boolean);
@@ -81,6 +83,7 @@ export function identify(activity: Activity): { key: string; label: string } | n
 }
 
 export function readHaunts(saved: unknown): Haunts {
+ if(globalThis.process.env.HARU_CORE_DEVICE_ACTIVITY==='on')return devicePolicy('readHaunts',[saved]);
   if (!saved || typeof saved !== 'object') return {};
   const record = saved as Haunts;
   const out: Haunts = {};
@@ -115,6 +118,7 @@ const JUNK_HAUNTS = [
 ];
 
 export function isJunkHaunt(key: string): boolean {
+ if(globalThis.process.env.HARU_CORE_DEVICE_ACTIVITY==='on')return devicePolicy('isJunkHaunt',[key]);
   return JUNK_HAUNTS.some(pattern => pattern.test(key));
 }
 
@@ -128,6 +132,7 @@ export const EMPTY_HAUNT_DAYS = 7;
  * record of a real place.
  */
 export function expireHaunts(haunts: Haunts, nowMs: number, emptyDays = EMPTY_HAUNT_DAYS): Haunts {
+ if(globalThis.process.env.HARU_CORE_DEVICE_ACTIVITY==='on')return devicePolicy('expireHaunts',[haunts,nowMs,emptyDays]);
   let changed = false;
   const out: Haunts = {};
   for (const [key, haunt] of Object.entries(haunts)) {
@@ -146,6 +151,7 @@ export function expireHaunts(haunts: Haunts, nowMs: number, emptyDays = EMPTY_HA
  * poll — and close enough for "you have been at this a while".
  */
 export function noteVisit(haunts: Haunts, activity: Activity, nowMs: number): { haunts: Haunts; haunt: Haunt } {
+ if(globalThis.process.env.HARU_CORE_DEVICE_ACTIVITY==='on')return devicePolicy('noteVisit',[haunts,activity,nowMs]);
   const found = identify(activity);
   const now = new Date(nowMs).toISOString();
   if (!found) {
@@ -171,6 +177,7 @@ export function noteVisit(haunts: Haunts, activity: Activity, nowMs: number): { 
 }
 
 export function rememberSaid(haunts: Haunts, key: string, line: string): Haunts {
+ if(globalThis.process.env.HARU_CORE_DEVICE_ACTIVITY==='on')return devicePolicy('rememberSaid',[haunts,key,line]);
   const existing = haunts[key];
   if (!existing) return haunts;
   return { ...haunts, [key]: { ...existing, lastSaid: line.slice(0, 300) } };
@@ -194,6 +201,7 @@ function tighten(text: string, limit: number) {
  * would render it as "discussed progress".
  */
 export function noteExchange(haunts: Haunts, key: string, said: string, replied: string): Haunts {
+ if(globalThis.process.env.HARU_CORE_DEVICE_ACTIVITY==='on')return devicePolicy('noteExchange',[haunts,key,said,replied]);
   const existing = haunts[key];
   if (!existing) return haunts;
   const note = `They said: "${tighten(said, NOTE_LENGTH)}" — you answered: "${tighten(replied, NOTE_LENGTH)}"`;
@@ -211,6 +219,7 @@ export function noteExchange(haunts: Haunts, key: string, said: string, replied:
  * named, or be an answer to her having just raised it.
  */
 export function belongsToPlace(haunt: Haunt, message: string, sheRaisedItMs: number | undefined, nowMs: number) {
+ if(globalThis.process.env.HARU_CORE_DEVICE_ACTIVITY==='on')return devicePolicy('belongsToPlace',[haunt,message,sheRaisedItMs,nowMs]);
   if (!haunt.key) return false;
   if (message.toLowerCase().includes(haunt.key)) return true;
   return sheRaisedItMs !== undefined && nowMs - sheRaisedItMs < 10 * 60_000;
@@ -223,6 +232,7 @@ export function belongsToPlace(haunt: Haunt, message: string, sheRaisedItMs: num
  * moment; returning to it across days is a fact about the person.
  */
 export function worthRemembering(haunt: Haunt) {
+ if(globalThis.process.env.HARU_CORE_DEVICE_ACTIVITY==='on')return devicePolicy('worthRemembering',[haunt]);
   if (haunt.remembered) return false;
   if ((haunt.notes?.length ?? 0) < 2 || haunt.minutes < 30) return false;
   const spreadDays = (Date.parse(haunt.lastSeen) - Date.parse(haunt.firstSeen)) / 86_400_000;
@@ -230,6 +240,7 @@ export function worthRemembering(haunt: Haunt) {
 }
 
 export function markRemembered(haunts: Haunts, key: string): Haunts {
+ if(globalThis.process.env.HARU_CORE_DEVICE_ACTIVITY==='on')return devicePolicy('markRemembered',[haunts,key]);
   const existing = haunts[key];
   if (!existing) return haunts;
   return { ...haunts, [key]: { ...existing, remembered: true } };
@@ -252,6 +263,7 @@ function ago(fromIso: string, nowMs: number) {
  * what the rest of the prompt asked for. It has to be told not to.
  */
 export function familiarity(haunt: Haunt, nowMs: number): string {
+ if(globalThis.process.env.HARU_CORE_DEVICE_ACTIVITY==='on')return devicePolicy('familiarity',[haunt,nowMs]);
   if (!haunt.key || haunt.visits <= 1 && haunt.minutes < 2) return '';
   const parts: string[] = [];
   const settled = haunt.minutes >= SETTLED_IN_MINUTES;
