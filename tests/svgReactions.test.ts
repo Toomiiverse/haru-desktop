@@ -64,7 +64,7 @@ function drive() {
     boundary: element(), correction: {x:0,y:0}, contactWall:'', contactUntil:0, hoverPose:[.03,.06,2], hoverSpeed:[.1,.2,1],
     motionPreference: { matches: false }, reduced: false, frozenAt: null, hairFrame: 0, hairLayers: new Map(),
     engine: { emotion: () => 'neutral' }, LABELS: { neutral: 'Haru feeling neutral' },
-    clock: () => 1000, target: () => ({ x: 0 }), scheduleBlink() {}, look() {}, followHair() {},
+    clock: () => 1000, target: () => ({ x: 0 }), scheduleBlink() {}, look() {}, followHair() {}, fit() {},
     cancelAnimationFrame() {}, requestAnimationFrame: () => 1, EASE_OUT_CSS: 'ease-out',
   };
   vm.runInNewContext(stripTypeScriptTypes(code) + '\nglobalThis.controls = { play, tap, drag, stopReaction, onMotionPreference };', context);

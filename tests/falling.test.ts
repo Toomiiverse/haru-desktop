@@ -45,7 +45,9 @@ test('one-foot balance recovery grows smoothly from small to high drops',()=>{
 function lifecycle() {
   const source=readFileSync(resolve(__dirname,'../../electron/main.ts'),'utf8').replaceAll('\r\n','\n');
   const part=(start:string,end:string)=>{const a=source.indexOf(start),b=source.indexOf(end,a+start.length);assert.ok(a>=0 && b>a,`main lifecycle section ${start}`);return source.slice(a,b);};
-  const handlers=new Map<string,(...args:any[])=>unknown>(),settings=new Map<string,unknown>([['roam',{enabled:true,restlessness:.8,avoidFullscreen:true}]]);
+  const handlers=new Map<string,(...args:any[])=>unknown>(),settings=new Map<string,unknown>([['roam',{enabled:true,restlessness:.8,avoidFullscreen:true}],
+    // The floor walker only runs for a model body; the SVG face settles beside windows instead (roamTick).
+    ['avatar.kind','model']]);
   let now=1000,body={x:200,y:200,width:300,height:400},pending:{x:number;y:number}|null=null,checks=0,random=.5;
   const work={x:0,y:0,width:1600,height:1000},metrics={head:.1,seat:.52,feet:.95,halfWidth:.19};
   let displays=[{id:1,bounds:work,workArea:work},{id:2,bounds:{x:1600,y:0,width:1200,height:1000},workArea:{x:1600,y:0,width:1200,height:1000}}];
