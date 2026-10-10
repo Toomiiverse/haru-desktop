@@ -88,6 +88,29 @@ test('the rule names every mood she has, so an invented one is detectable', () =
   assert.match(rule, /stripped before he sees them/);
 });
 
+test('the voice keeps a spoken sound that the page never shows', () => {
+  const reply = "[sleepy] (sigh) It's late. [annoyed] (laugh) Fine. Go to bed.";
+  assert.deepEqual(splitDelivery(reply).map(part => part.text), ["(sigh) It's late.", '(laugh) Fine. Go to bed.']);
+  assert.equal(stripDelivery(reply), "It's late. Fine. Go to bed.");
+  assert.equal(stripDelivery('(Sigh) No label at all.'), 'No label at all.');
+});
+
+test('other bracketed words are still hers', () => {
+  assert.equal(stripDelivery('[neutral] The file is (sighted) twice (laughter) here.'), 'The file is (sighted) twice (laughter) here.');
+});
+
+test('a sound split across stream chunks never reaches the page half written', () => {
+  const full = "[sleepy] (sigh) It's late. [smug] (laugh) Ha.";
+  for (let cut = 1; cut < full.length; cut++) {
+    const seen: string[] = [];
+    const sink = cleaningChunks(text => seen.push(text));
+    sink(full.slice(0, cut));
+    sink(full.slice(cut));
+    const shown = seen.join('');
+    assert.equal(shown, "It's late. Ha.", `cut ${cut}`);
+  }
+});
+
 test('the rule allows exactly two spoken sounds, (sigh) and (laugh), and nothing else in brackets', () => {
   const rule = deliveryRule();
   assert.match(rule, /\(sigh\) or \(laugh\)/);

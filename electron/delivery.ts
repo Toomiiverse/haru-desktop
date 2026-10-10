@@ -70,7 +70,10 @@ const LABEL = new RegExp(`^\\s*\\[(${LABEL_WORDS})\\]\\s*`, 'i');
 // The space after a label goes with it, or every removal leaves a double space
 // in the middle of her sentence. Removing more still only ever shortens the
 // text, so the streaming prefix stays monotonic.
-const withoutLabels = (text: string) => text.replace(new RegExp(`\\[(?:${LABEL_WORDS})\\][ \\t]?`, 'gi'), '');
+// The two spoken sounds she may open a sentence with are for the voice only: the voice gets the raw
+// stream, and the page must never show them, so they leave with the labels.
+const VOCAL_EVENT = '\\((?:sigh|laugh)\\)[ \\t]?';
+const withoutLabels = (text: string) => text.replace(new RegExp(`\\[(?:${LABEL_WORDS})\\][ \\t]?|${VOCAL_EVENT}`, 'gi'), '');
 
 /**
  * The reply, split into what to say and how to say it.
@@ -124,7 +127,8 @@ export function stripDelivery(reply: string): string {
  * prefix being compared against what has already been shown.
  */
 export function cleanSoFar(raw: string): string {
-  return withoutLabels((raw ?? '').replace(/\[[a-z]*$/i, ''));
+  // A trailing "[ann", "(si" or "(" might be the start of a label or a sound: hold it back until it is known.
+  return withoutLabels((raw ?? '').replace(/(?:\[[a-z]*|\((?:s(?:i(?:g(?:h)?)?)?|l(?:a(?:u(?:g(?:h)?)?)?)?)?)$/i, ''));
 }
 
 /** Wraps a chunk sink so only clean text, and only what is new, reaches it. */
