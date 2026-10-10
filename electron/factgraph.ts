@@ -336,7 +336,7 @@ export function findEntity(graph: FactGraph, name: string, userName = ''): Graph
 export function extractionPrompt(userName: string): string {
   if (process.env.HARU_CORE_GRAPH_MUTATION === 'on') return corePolicySync('graph-mutation.extractionPrompt', [userName]);
   const user = userName.trim() || 'the user';
-  return `You keep a map of the people, pets, places, organisations, projects, media, devices and things in ${user}'s own life, and how they connect. You are given part of one day of ${user}'s chat with Haru, his AI companion.
+  return `You keep a map of the people, pets, places, organisations, projects, media, devices and things in ${user}'s own life, and how they connect. You are given part of one day of ${user}'s chat with Haru, his companion.
 
 Lines starting "${user}:" are him. Lines starting "Haru:" are her. Take facts only from what ${user} said, or from something Haru said that ${user} clearly confirmed. Haru's guesses, jokes, teasing, opinions and suggestions are never facts.
 
