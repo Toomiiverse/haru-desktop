@@ -19,16 +19,21 @@ export async function coreTaskIntent(message:string,inputs:TaskInputs={}):Promis
   console.log('[core-router] '+JSON.stringify({event:'intent',role:result.role,reason:result.reason,totalMs:performance.now()-started}));
   return {role:result.role,reason:result.reason};
 }
+// Her sleep preference, schedule and the Perth clock, read from the store by main and
+// reported to Core with every conversation route: Core decides whether it is her night.
+let nightFacts:()=>unknown=()=>null;
+export function provideNightFacts(read:()=>unknown){nightFacts=read;}
 export function coreRouteCandidates(entries:readonly ModelEntry[],role:ModelRole,request:RouteRequest){
   let cloudAllowed=request.cloudAllowed;
   if(cloudAllowed){try{assertOutboundSafe(request.conversation??[],request.toolSchema);}catch{cloudAllowed=false;}}
   if(process.env.HARU_CORE_ROUTE_ADMISSION==='on'){
     // Core supplies the scope before adapters inspect credentials/cooldowns.
     // Indices refer to this exact snapshot; malformed references fail closed.
-    const indices=routePolicy<number[]>('candidateScope',[entries,role]);
+    const night=nightFacts();
+    const indices=routePolicy<number[]>('candidateScope',[entries,role,night]);
     if(!Array.isArray(indices)||indices.some((n,i)=>!Number.isInteger(n)||n<0||n>=entries.length||(i>0&&n<=indices[i-1])))throw Error('core_router_protocol_error');
     const scoped=indices.map(n=>entries[n]);
-    return routePolicy<{entry:ModelEntry;candidate:{id:string;role:ModelRole;cost_micros:number;tie_order:number;attempts?:number;successes?:number}}[]>('candidates',[scoped,role,observedRequest(scoped,{...request,cloudAllowed})]);
+    return routePolicy<{entry:ModelEntry;candidate:{id:string;role:ModelRole;cost_micros:number;tie_order:number;attempts?:number;successes?:number}}[]>('candidates',[scoped,role,observedRequest(scoped,{...request,cloudAllowed}),night]);
   }
   const permitted=entries.filter(entry=>(entry.local||isAllowedTaskProvider(entry.config))
     &&(entry.role===role||(role==='specialist'&&entry.role==='complex')));
@@ -53,7 +58,7 @@ export async function coreSelectTaskModel(entries:readonly ModelEntry[],role:Mod
 export async function coreFastConversationModel(entries:readonly ModelEntry[],setting:unknown,request:RouteRequest):Promise<ModelEntry|undefined>{
   if(process.env.HARU_CORE_ROUTER!=='on')return selectFastConversationModel(entries,setting,request);
   if(process.env.HARU_CORE_ROUTE_ADMISSION==='on'){
-    const selected=routePolicy<ModelEntry|null>('fast',[entries,setting]);
+    const selected=routePolicy<ModelEntry|null>('fast',[entries,setting,nightFacts()]);
     if(!selected)return;
     return coreSelectTaskModel([selected],'conversation',{...request,maxOutputTokens:request.maxOutputTokens??NATURAL_MAX_TOKENS,tools:false,toolSchema:[]});
   }

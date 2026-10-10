@@ -126,7 +126,7 @@ import {coreLocalBudget} from './core-local-budget';
 import {coreCloudFetch} from './core-cloud-provider';
 import {coreModelFetch,coreModelCapabilities} from './core-model-provider';
 import {coreHandsWhyNotAct,runCoreHands} from './core-hands';
-import {coreTaskIntent,coreSelectTaskModel,coreInputProfile,coreFastConversationModel,coreNextTaskRole} from './core-router';
+import {coreTaskIntent,coreSelectTaskModel,coreInputProfile,coreFastConversationModel,coreNextTaskRole,provideNightFacts} from './core-router';
 import { ReplyGate } from './reply-gate';
 import { readModelRegistry, readTaskPolicy, isLocalConfig, type ModelEntry, type ModelRole, type RouteRequest } from './model-registry';
 import {callRegistry,selectCallModel,CALL_ROUTE_ID} from './call-route';
@@ -626,6 +626,8 @@ try {
 store.migrate();
 store.hardenPermissions();
 console.log(`[memory-authority] ${store.memoryBackend()} storage ready`);
+// Her sleeping hours move the conversation route (route_admission.py). Facts only, read live.
+provideNightFacts(()=>({sleep:store.get('her.sleep'),sleepState:store.get('her.sleepState'),now:zonedNow(CHAT_TIMEZONE)}));
 
 // Her own model names are long, mixed-case and full of separators ? the exact
 // shape the outbound entropy rule hunts for. One of them sitting in a tool
