@@ -45,7 +45,7 @@ function iso(value: unknown): string | null {
 
 /** One report from the phone, or null when it is not one. At least one figure is needed. */
 export function readBodyReport(body: unknown, now = new Date()): BodyReport | null {
-  if(process.env.HARU_CORE_STARTUP_CONTEXT==='on')return corePolicySync('conversation-inputs.bodyReport',[body,now.toISOString(),bodyDateFacts(body)]);
+  if((true as boolean))return corePolicySync('conversation-inputs.bodyReport',[body,now.toISOString(),bodyDateFacts(body)]);
 
   if (!body || typeof body !== 'object') return null;
   const record = body as Record<string, unknown>;
@@ -64,7 +64,7 @@ export function readBodyReport(body: unknown, now = new Date()): BodyReport | nu
 }
 
 export function readBody(saved: unknown): Body {
-  if(process.env.HARU_CORE_STARTUP_CONTEXT==='on')return corePolicySync('conversation-inputs.bodyRead',[saved,bodyDateFacts((saved as any)?.last)]);
+  if((true as boolean))return corePolicySync('conversation-inputs.bodyRead',[saved,bodyDateFacts((saved as any)?.last)]);
 
   if (!saved || typeof saved !== 'object') return { ...DEFAULT_BODY };
   const record = saved as Record<string, unknown>;
@@ -84,7 +84,7 @@ export function readBody(saved: unknown): Body {
 
 /** What the phone page and the app show under the switch. */
 export function bodyForPage(state: Body, nowMs = Date.now()): { enabled: boolean; at: string | null; fresh: boolean; day: string | null; sleepMinutes: number | null; steps: number | null } {
-  if(process.env.HARU_CORE_STARTUP_CONTEXT==='on')return corePolicySync('conversation-inputs.bodyPage',[state,nowMs,dateFact(state.last?.at)]);
+  if((true as boolean))return corePolicySync('conversation-inputs.bodyPage',[state,nowMs,dateFact(state.last?.at)]);
 
   const last = state.last;
   const fresh = !!last && nowMs - Date.parse(last.at) <= BODY_STALE_MS;
@@ -93,7 +93,7 @@ export function bodyForPage(state: Body, nowMs = Date.now()): { enabled: boolean
 
 /** "5 h 40 m", "7 h", "45 m". */
 export function sleepLength(minutes: number): string {
-  if(process.env.HARU_CORE_STARTUP_CONTEXT==='on')return corePolicySync('conversation-inputs.sleepLength',[minutes]);
+  if((true as boolean))return corePolicySync('conversation-inputs.sleepLength',[minutes]);
 
   const h = Math.floor(minutes / 60), m = minutes % 60;
   if (h === 0) return `${m} m`;
@@ -106,7 +106,7 @@ export function sleepLength(minutes: number): string {
  * steps is not read as today's.
  */
 export function describeBody(state: Body, nowMs: number, clock: (ms: number) => string, todayKey: string): string {
-  if(process.env.HARU_CORE_STARTUP_CONTEXT==='on'){const p=corePolicySync<any>('conversation-inputs.bodyStart',[state,nowMs,todayKey,{at:dateFact(state.last?.at),sleepStart:dateFact(state.last?.sleepStart),sleepEnd:dateFact(state.last?.sleepEnd)}]);if('result' in p)return p.result;return corePolicySync('conversation-inputs.bodyFinish',[p,p.clock.map((ms:number|null)=>clock(ms===null?NaN:ms))]);}
+  if((true as boolean)){const p=corePolicySync<any>('conversation-inputs.bodyStart',[state,nowMs,todayKey,{at:dateFact(state.last?.at),sleepStart:dateFact(state.last?.sleepStart),sleepEnd:dateFact(state.last?.sleepEnd)}]);if('result' in p)return p.result;return corePolicySync('conversation-inputs.bodyFinish',[p,p.clock.map((ms:number|null)=>clock(ms===null?NaN:ms))]);}
 
   if (!state.enabled || !state.last) return '';
   const report = state.last;

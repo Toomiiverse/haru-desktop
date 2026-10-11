@@ -31,7 +31,7 @@ function count(text: string, pattern: RegExp): number {
 }
 
 export function readTone(line: string): Tone {
-  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.readTone',[line]);
+  if((true as boolean))return corePolicySync<any>('conversation-policy.readTone',[line]);
 
   if (!line.trim()) return { heat: 0 };
   const words = Math.max(1, line.split(/\s+/).length);
@@ -48,7 +48,7 @@ export function readTone(line: string): Tone {
 export const HEAT_FLOOR = 0.18;
 
 export function isHeated(tone: Tone): boolean {
-  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.isHeated',[tone]);
+  if((true as boolean))return corePolicySync<any>('conversation-policy.isHeated',[tone]);
 
   return tone.heat >= HEAT_FLOOR;
 }
@@ -58,7 +58,7 @@ export function isHeated(tone: Tone): boolean {
  * switch, so a muttered "bloody hell" is not the same face as being shouted at.
  */
 export function tonePose(tone: Tone): 'seething' | 'narrow' | null {
-  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.tonePose',[tone]);
+  if((true as boolean))return corePolicySync<any>('conversation-policy.tonePose',[tone]);
 
   if (!isHeated(tone)) return null;
   return tone.heat >= 0.55 ? 'seething' : 'narrow';
@@ -70,7 +70,7 @@ export function tonePose(tone: Tone): 'seething' | 'narrow' | null {
  * so the odds rise with heat but never reach certainty.
  */
 export function toneGesture(tone: Tone, random: () => number = Math.random): 'shake' | undefined {
-  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on'){const draw=corePolicySync<boolean>('conversation-policy.isHeated',[tone]);return corePolicySync<any>('conversation-policy.toneGesture',[tone,draw?random():null])??undefined;}
+  if((true as boolean)){const draw=corePolicySync<boolean>('conversation-policy.isHeated',[tone]);return corePolicySync<any>('conversation-policy.toneGesture',[tone,draw?random():null])??undefined;}
 
   if (!isHeated(tone)) return undefined;
   return random() < Math.min(0.55, tone.heat * 0.7) ? 'shake' : undefined;
@@ -82,7 +82,7 @@ export function toneGesture(tone: Tone, random: () => number = Math.random): 'sh
  * placid readings that a swearing line should never have got.
  */
 export function sharpen(reading: Emotion, tone: Tone): Emotion {
-  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.sharpen',[reading,tone]);
+  if((true as boolean))return corePolicySync<any>('conversation-policy.sharpen',[reading,tone]);
 
   if (!isHeated(tone)) return reading;
   const alreadyCross = reading.emotion === 'annoyed' || reading.emotion === 'smug';

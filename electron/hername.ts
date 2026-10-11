@@ -15,7 +15,7 @@ import {corePolicySync} from './core-policy-sync';
 export const DEFAULT_NAME = 'Haru';
 
 export function herNameFrom(identity: string): string {
- if(process.env.HARU_CORE_SPEECH_CONTEXT==='on')return corePolicySync('speech-context.herName',[identity]);
+ if((true as boolean))return corePolicySync('speech-context.herName',[identity]);
   const after = /\bYou are\s+(.+)/i.exec(identity ?? '')?.[1] ?? '';
   const words: string[] = [];
   for (const word of after.split(/\s+/)) {

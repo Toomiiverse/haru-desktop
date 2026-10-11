@@ -105,7 +105,7 @@ export type LastRetrieval = {
 
 export function createMemoryStore(deps: MemoryStoreDeps) {
   const { store, broadcast, embedder } = deps;
-  const owned = process.env.HARU_CORE_MEMORY_MAINTENANCE === 'on';
+  const owned = (true as boolean);
   const semantic = owned ? corePolicySync<{refreshDelayMs:number;sortDelayMs:number;cacheMax:number;queryTimeoutMs:number}>('memory-maintenance.semanticConfig', []) : {refreshDelayMs:VECTOR_REFRESH_MS,sortDelayMs:SORT_DELAY_MS,cacheMax:QUERY_CACHE_MAX,queryTimeoutMs:QUERY_EMBED_TIMEOUT_MS};
   function applyState(state: {memories:MemoryRecord[];deletions:MemoryDeletion[]}) {
     if (store.setMemoryState) store.setMemoryState(state.memories,state.deletions);
@@ -315,7 +315,7 @@ export function createMemoryStore(deps: MemoryStoreDeps) {
   }
 
   function scheduleSort(delay = semantic.sortDelayMs): void {
-    if (process.env.HARU_CORE_BRAIN_WORKER === 'on' && process.env.HARU_CORE_PERIODIC === 'on') return;
+    if ((true as boolean) && (true as boolean)) return;
     if (!deps.sort || sortTimer) return;
     sortTimer = setTimeout(() => {
       sortTimer = null;
@@ -486,7 +486,7 @@ export function createMemoryStore(deps: MemoryStoreDeps) {
     const sources = blockSources(query, semantic, latest);
     const hasSessions = getSessions().length > 0;
     return (derived?: DerivedMemoryBlocks): string => {
-      if(process.env.HARU_CORE_BLOCK_GOVERNANCE==='on'){
+      if((true as boolean)){
         const plan=corePolicySync<{formatted:{text:string;cut:{label:string;before:number;after:number}[];coreGraphIds:string[]};summary:string}|{error:string}>('block-governance.prepareSummary',[configured,{...sources,semantic:sources.semantic?[...sources.semantic]:undefined,latestSemantic:sources.latestSemantic?[...sources.latestSemantic]:undefined},{omit:['persona'],compact:true,...(scale!==undefined?{scale}:{}),...(derived?{derived}:{})},hasSessions]);
         if('error' in plan)throw Error(plan.error);
         onCoreGraphClaims?.(plan.formatted.coreGraphIds);

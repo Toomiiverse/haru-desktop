@@ -39,13 +39,13 @@ const count = (value: unknown, fallback: number): number => (typeof value === 'n
 
 /** The tail of a long model id — "hf.co/DavidAU/Qwen3.5-9B-…:Q4_K_M.gguf" is not a name anyone says. */
 export function shortModelName(model: string): string {
-  if(process.env.HARU_CORE_REMAINING_POLICY==='on'){return corePolicySync('self.shortModelName',[model]);}
+  if((true as boolean)){return corePolicySync('self.shortModelName',[model]);}
   const tail = model.split('/').pop() ?? model;
   return tail.length > 48 ? `${tail.slice(0, 45)}…` : tail;
 }
 
 export function readSelfSnapshot(get: Get): SelfSnapshot {
-  if(process.env.HARU_CORE_REMAINING_POLICY==='on'){const keys=corePolicySync<string[]>('self.keys',[]);return corePolicySync('self.readSelfSnapshot',[Object.fromEntries(keys.map(k=>[k,get(k)]))]);}
+  if((true as boolean)){const keys=corePolicySync<string[]>('self.keys',[]);return corePolicySync('self.readSelfSnapshot',[Object.fromEntries(keys.map(k=>[k,get(k)]))]);}
   const route = (key: string) => {
     const config = record(get(key));
     return typeof config.model === 'string' && config.model ? { provider: text(config.provider, 'unknown'), model: config.model } : null;
@@ -99,7 +99,7 @@ const onOff = (value: boolean) => (value ? 'on' : 'off');
 
 /** The snapshot as lines she can answer from — facts in her second person, no advice in them. */
 export function describeMyself(s: SelfSnapshot): string {
-  if(process.env.HARU_CORE_REMAINING_POLICY==='on'){return corePolicySync('self.describeMyself',[s]);}
+  if((true as boolean)){return corePolicySync('self.describeMyself',[s]);}
   const lines = [
     s.conversation
       ? `Every reply you give comes from ${s.conversation.model} (${s.conversation.provider}, hosted); the local model stands in only when it cannot answer.`
@@ -184,7 +184,7 @@ export const SETTINGS = {
  * fall out of step with what she is thinking with.
  */
 export function explicitModeOn(model: string | undefined): boolean {
-  if(process.env.HARU_CORE_REMAINING_POLICY==='on'){return corePolicySync('self.explicitModeOn',[model]);}
+  if((true as boolean)){return corePolicySync('self.explicitModeOn',[model]);}
   const explicit = (SETTINGS.brain_model as Setting).aliases?.explicit;
   return Boolean(explicit && model && model === explicit);
 }
@@ -202,7 +202,7 @@ export type ChangeVerdict =
 
 /** The settings and their current values, for describe_myself. */
 export function describeSettings(get: Get): { name: SettingName; what: string; current: unknown }[] {
-  if(process.env.HARU_CORE_REMAINING_POLICY==='on'){const settings=corePolicySync<Record<string,Setting>>('self.settings',[]);return corePolicySync('self.describeSettings',[Object.fromEntries(Object.values(settings).map(s=>[s.path,get(s.path)]))]);}
+  if((true as boolean)){const settings=corePolicySync<Record<string,Setting>>('self.settings',[]);return corePolicySync('self.describeSettings',[Object.fromEntries(Object.values(settings).map(s=>[s.path,get(s.path)]))]);}
   return SETTING_NAMES.map(name => ({ name, what: SETTINGS[name].what, current: get(SETTINGS[name].path) }));
 }
 
@@ -214,7 +214,7 @@ const TIME = /^([01]?\d|2[0-3]):([0-5]\d)$/;
  * Nothing here writes; the plan is handed back for the confirm handshake.
  */
 export function planChange(name: string, value: unknown, current: unknown, world: { models?: string[] | null } = {}): ChangeVerdict {
-  if(process.env.HARU_CORE_REMAINING_POLICY==='on'){return corePolicySync('self.planChangeWire',[name,value,{present:current!==undefined,value:current},world]);}
+  if((true as boolean)){return corePolicySync('self.planChangeWire',[name,value,{present:current!==undefined,value:current},world]);}
   const setting = (SETTINGS as Record<string, Setting>)[name];
   if (!setting) return { ok: false, error: `"${name}" is not a setting you can change. You can change: ${SETTING_NAMES.join(', ')}.` };
   const raw = typeof value === 'string' ? value.trim() : value;

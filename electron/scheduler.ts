@@ -366,7 +366,7 @@ const WEEKDAY_WORDS = /^(?:this |next |on |this coming )?(?:sunday|monday|tuesda
  * on, and anything else already gone is refused in words that say so.
  */
 export function resolveBookingTime(input: { date?: string; time?: string; inMinutes?: number }, nowMs: number, timeZone: string): number | { error: string } {
- if(process.env.HARU_CORE_FINAL_TOOLS==='on')return corePolicySync('final-booking.resolve',[input,nowMs,timeZone]);
+ if((true as boolean))return corePolicySync('final-booking.resolve',[input,nowMs,timeZone]);
   if (typeof input.inMinutes === 'number' && Number.isFinite(input.inMinutes) && input.inMinutes > 0) {
     return nowMs + Math.round(input.inMinutes) * 60_000;
   }
@@ -460,7 +460,7 @@ export function admitBooking(held: { jobs: Job[]; booked?: BookingRecord[] }, re
 
 /** "6:00 PM today", "9:30 AM tomorrow", "7:00 PM Friday". */
 export function describeWhen(at: number, nowMs: number, timeZone: string): string {
- if(process.env.HARU_CORE_FINAL_TOOLS==='on')return corePolicySync('final-booking.describe',[at,nowMs,timeZone]);
+ if((true as boolean))return corePolicySync('final-booking.describe',[at,nowMs,timeZone]);
   const local = zonedNow(timeZone, new Date(at));
   const today = localDateKey(zonedNow(timeZone, new Date(nowMs)));
   const day = localDateKey(local);
@@ -472,7 +472,7 @@ export function describeWhen(at: number, nowMs: number, timeZone: string): strin
 
 /** Her bookings, in front of her, so she neither books twice nor says early what is set for later. */
 export function bookedNote(jobs: Job[], nowMs: number, timeZone: string): string {
-  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.bookedNote',[jobs,nowMs,timeZone]);
+  if((true as boolean))return corePolicySync<any>('conversation-policy.bookedNote',[jobs,nowMs,timeZone]);
 
   const hers = jobs.filter(job => job.kind === BOOKED_KIND && job.createdBy === 'haru').sort((a, b) => a.dueAt - b.dueAt);
   if (!hers.length) return '';
@@ -481,7 +481,7 @@ export function bookedNote(jobs: Job[], nowMs: number, timeZone: string): string
 
 /** The instruction when a booking's time comes. */
 export function bookedPrompt(why: string, bookedAt: number, nowMs: number, timeZone: string): string {
-  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.bookedPrompt',[why,bookedAt,nowMs,timeZone]);
+  if((true as boolean))return corePolicySync<any>('conversation-policy.bookedPrompt',[why,bookedAt,nowMs,timeZone]);
 
   const local = zonedNow(timeZone, new Date(bookedAt));
   const clock = formatTimeOfDay(local.getHours(), local.getMinutes());

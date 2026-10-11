@@ -99,7 +99,7 @@ export type Carry = {
  * thing this exists to stop.
  */
 export function rollTemperament(day: string, carry: Carry, random: () => number = Math.random): Temperament {
-  if(process.env.HARU_CORE_LIFECYCLE_MOOD==='on') { return corePolicySync<any>('mood.rollTemperament',[day,carry,[random(),random()]]); }
+  if((true as boolean)) { return corePolicySync<any>('mood.rollTemperament',[day,carry,[random(),random()]]); }
   const weights = Object.fromEntries(Object.entries(TEMPERAMENTS).map(([kind, shape]) => [kind, shape.weight])) as Record<TemperamentKind, number>;
   const reasons: string[] = [];
   if (carry.went === 'silent') { weights.prickly *= 2; weights.flat *= 1.8; weights.clingy *= 1.5; weights.sunny *= 0.5; reasons.push('after a silent evening'); }
@@ -123,19 +123,19 @@ export function rollTemperament(day: string, carry: Carry, random: () => number 
 }
 
 export function temperamentLean(temperament: Temperament | null | undefined): Lean {
-  if(process.env.HARU_CORE_LIFECYCLE_MOOD==='on') { return corePolicySync<any>('mood.temperamentLean',[temperament]); }
+  if((true as boolean)) { return corePolicySync<any>('mood.temperamentLean',[temperament]); }
   if (!temperament) return {};
   const shape = TEMPERAMENTS[temperament.kind] ?? TEMPERAMENTS.ordinary;
   return Object.fromEntries(Object.entries(shape.lean).map(([vital, push]) => [vital, (push ?? 0) * temperament.intensity])) as Lean;
 }
 
 export function temperamentLine(temperament: Temperament | null | undefined): string {
-  if(process.env.HARU_CORE_LIFECYCLE_MOOD==='on') { return corePolicySync<any>('mood.temperamentLine',[temperament]); }
+  if((true as boolean)) { return corePolicySync<any>('mood.temperamentLine',[temperament]); }
   return temperament ? TEMPERAMENTS[temperament.kind]?.line ?? '' : '';
 }
 
 export function temperamentWord(temperament: Temperament | null | undefined): string {
-  if(process.env.HARU_CORE_LIFECYCLE_MOOD==='on') { return corePolicySync<any>('mood.temperamentWord',[temperament]); }
+  if((true as boolean)) { return corePolicySync<any>('mood.temperamentWord',[temperament]); }
   return temperament ? TEMPERAMENTS[temperament.kind]?.word ?? '' : '';
 }
 
@@ -147,7 +147,7 @@ const GOOD: readonly VitalEvent[] = ['praised', 'soothed', 'warmed', 'returned-g
  * bad news, ±30% on the roll.
  */
 export function eventSize(temperament: Temperament | null | undefined, event: VitalEvent, roll = Math.random()): number {
-  if(process.env.HARU_CORE_LIFECYCLE_MOOD==='on') { return corePolicySync<any>('mood.eventSize',[temperament,event,roll]); }
+  if((true as boolean)) { return corePolicySync<any>('mood.eventSize',[temperament,event,roll]); }
   const swing = temperament ? TEMPERAMENTS[temperament.kind]?.swing ?? { good: 1, bad: 1 } : { good: 1, bad: 1 };
   const taken = GOOD.includes(event) ? swing.good : swing.bad;
   const mine = temperament ? 1 + (taken - 1) * temperament.intensity : 1;
@@ -156,7 +156,7 @@ export function eventSize(temperament: Temperament | null | undefined, event: Vi
 
 /** Whether a long silence ending lands as relief or as a grievance, today. */
 export function howHisReturnLands(temperament: Temperament | null | undefined, grudge: number, roll = Math.random()): 'returned-glad' | 'returned-sore' {
-  if(process.env.HARU_CORE_LIFECYCLE_MOOD==='on') { return corePolicySync<any>('mood.howHisReturnLands',[temperament,grudge,roll]); }
+  if((true as boolean)) { return corePolicySync<any>('mood.howHisReturnLands',[temperament,grudge,roll]); }
   const kind = temperament?.kind ?? 'ordinary';
   const sore = (kind === 'prickly' || kind === 'stormy' ? 0.7 : kind === 'clingy' ? 0.5 : kind === 'sunny' || kind === 'tender' ? 0.15 : 0.35) + Math.min(0.25, grudge / 400);
   return roll < sore ? 'returned-sore' : 'returned-glad';
@@ -178,7 +178,7 @@ function gaussian(random: () => number): number {
 
 /** One step of the slow walk: pulled back toward nothing, pushed by noise. */
 export function stepWander(wander: Lean, seconds: number, random: () => number = Math.random): Lean {
-  if(process.env.HARU_CORE_LIFECYCLE_MOOD==='on') { return corePolicySync<any>('mood.stepWander',[wander,seconds,Array.from({length:10},()=>random())]); }
+  if((true as boolean)) { return corePolicySync<any>('mood.stepWander',[wander,seconds,Array.from({length:10},()=>random())]); }
   if (!Number.isFinite(seconds) || seconds <= 0) return { ...wander };
   const dt = Math.min(seconds, 3600) / WANDER_SECONDS;
   const next: Lean = {};
@@ -196,7 +196,7 @@ export const BRUISE_LIMIT = 0.25;
 const BRUISE_HALF_LIFE_SECONDS = 45 * 60;
 
 export function fadeBruise(bruise: Lean, seconds: number): Lean {
-  if(process.env.HARU_CORE_LIFECYCLE_MOOD==='on') { return corePolicySync<any>('mood.fadeBruise',[bruise,seconds]); }
+  if((true as boolean)) { return corePolicySync<any>('mood.fadeBruise',[bruise,seconds]); }
   if (!Number.isFinite(seconds) || seconds <= 0) return { ...bruise };
   const kept = Math.pow(0.5, seconds / BRUISE_HALF_LIFE_SECONDS);
   const next: Lean = {};
@@ -209,7 +209,7 @@ export function fadeBruise(bruise: Lean, seconds: number): Lean {
 
 /** Half of what an event just did to her stays as a push on where she settles. */
 export function bruiseFrom(bruise: Lean, before: Record<string, number>, after: Record<string, number>): Lean {
-  if(process.env.HARU_CORE_LIFECYCLE_MOOD==='on') { return corePolicySync<any>('mood.bruiseFrom',[bruise,before,after]); }
+  if((true as boolean)) { return corePolicySync<any>('mood.bruiseFrom',[bruise,before,after]); }
   const next: Lean = { ...bruise };
   for (const vital of WANDERS) {
     const moved = (after[vital] ?? 0) - (before[vital] ?? 0);
@@ -220,7 +220,7 @@ export function bruiseFrom(bruise: Lean, before: Record<string, number>, after: 
 }
 
 export function addLeans(...leans: Lean[]): Lean {
-  if(process.env.HARU_CORE_LIFECYCLE_MOOD==='on') { return corePolicySync<any>('mood.addLeans',leans); }
+  if((true as boolean)) { return corePolicySync<any>('mood.addLeans',leans); }
   const total: Lean = {};
   for (const lean of leans) for (const vital of WANDERS) if (lean[vital]) total[vital] = (total[vital] ?? 0) + (lean[vital] ?? 0);
   return total;

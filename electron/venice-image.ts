@@ -54,7 +54,7 @@ export async function makePicture(options: {
   seed?: number;
   safeMode?: boolean;
 }): Promise<MadePicture> {
-  if(process.env.HARU_CORE_FINAL_TOOLS==='on'){
+  if((true as boolean)){
     const {key,folder,...facts}=options;
     const prepared=corePolicySync<any>('final-picture.prepare',[facts,Boolean(key)]);
     if(prepared.error)throw new PictureRefused(prepared.error);

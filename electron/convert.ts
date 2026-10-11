@@ -26,7 +26,7 @@ export function canRead(file: string): boolean {
 }
 
 export function normaliseFormat(wanted: string): Format | null {
-  if(process.env.HARU_CORE_FINAL_TOOLS==='on')return corePolicySync('final-tool-values.normaliseFormat',[wanted]);
+  if((true as boolean))return corePolicySync('final-tool-values.normaliseFormat',[wanted]);
   const asked = (wanted ?? '').trim().toLowerCase().replace(/^\./, '');
   if (asked === 'jpeg') return 'jpg';
   if (asked === 'icon') return 'ico';
@@ -128,7 +128,7 @@ export function encodeIco(images: { size: number; png: Buffer }[]): Buffer {
  * overwritten for the same reason.
  */
 export function outputPath(source: string, format: Format, exists = fs.existsSync): string {
-  if(process.env.HARU_CORE_FINAL_TOOLS==='on'){
+  if((true as boolean)){
     const directory=path.dirname(source),base=path.basename(source,path.extname(source));
     let packet=corePolicySync<any>('final-tool-values.pathStart',[base,format]);
     for(let n=0;n<4096;n++){
@@ -194,7 +194,7 @@ export function convertImage(source: string, wanted: Format, quality = 92): Conv
       width: Math.min(width, height),
       height: Math.min(width, height),
     });
-    if (process.env.HARU_CORE_FINAL_TOOLS!=='on' && width !== height) note = `it was ${width}×${height}, so I took a square out of the middle`;
+    if ((false as boolean) && width !== height) note = `it was ${width}×${height}, so I took a square out of the middle`;
     // Never upscaled past what the source has: a 64px picture blown up to 256
     // adds no detail and triples the file.
     const largest = Math.min(square.getSize().width, 256);
@@ -202,7 +202,7 @@ export function convertImage(source: string, wanted: Format, quality = 92): Conv
     data = encodeIco(sizes.map(size => ({ size, png: iconImage(square, size) })));
   } else if (wanted === 'jpg') {
     data = image.toJPEG(Math.max(1, Math.min(100, Math.round(quality))));
-    if(process.env.HARU_CORE_FINAL_TOOLS!=='on')note = 'jpg has no transparency, so anything see-through is now black';
+    if((false as boolean))note = 'jpg has no transparency, so anything see-through is now black';
   } else if (wanted === 'bmp') {
     data = image.toBitmap();
   } else {
@@ -210,7 +210,7 @@ export function convertImage(source: string, wanted: Format, quality = 92): Conv
   }
 
   if (!data.length) throw new Error('the conversion produced an empty file');
-  if(process.env.HARU_CORE_FINAL_TOOLS==='on')fs.writeFileSync(destination,data,{flag:'wx'});else fs.writeFileSync(destination,data);
-  if(process.env.HARU_CORE_FINAL_TOOLS==='on'){const dimensions=image.getSize();note=corePolicySync<string|null>('final-tool-values.conversionNote',[wanted,dimensions.width,dimensions.height])??undefined;}
+  if((true as boolean))fs.writeFileSync(destination,data,{flag:'wx'});else fs.writeFileSync(destination,data);
+  if((true as boolean)){const dimensions=image.getSize();note=corePolicySync<string|null>('final-tool-values.conversionNote',[wanted,dimensions.width,dimensions.height])??undefined;}
   return { path: destination, format: wanted, bytes: data.length, note };
 }

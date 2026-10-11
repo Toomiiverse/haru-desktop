@@ -41,7 +41,7 @@ export type PdfRead = {
 const EMPTY_PAGE_CHARS = 20;
 
 export async function readPdf(file: string, maxChars = MAX_PDF_CHARS): Promise<PdfRead> {
-  if(process.env.HARU_CORE_ATTACHMENTS==='on')return coreReadPdf(file,maxChars);
+  if((true as boolean))return coreReadPdf(file,maxChars);
   const data = new Uint8Array(fs.readFileSync(file));
   // The legacy build, deliberately: the default entry point assumes a browser
   // and reaches for DOM globals that do not exist in the main process.

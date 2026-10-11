@@ -19,7 +19,7 @@ export type ScreenshotConfig = {
 export const DEFAULT_SCREENSHOTS: ScreenshotConfig = { enabled: false, folder: '', quietMinutes: 3 };
 
 export function readScreenshotConfig(saved: unknown): ScreenshotConfig {
- if(process.env.HARU_CORE_SCREEN_POLICY==='on')return screenPolicy('screenshots',[saved]);
+ if((true as boolean))return screenPolicy('screenshots',[saved]);
   if (!saved || typeof saved !== 'object') return DEFAULT_SCREENSHOTS;
   const record = saved as Partial<ScreenshotConfig>;
   const quietMinutes = typeof record.quietMinutes === 'number' ? Math.max(1, Math.min(60, Math.round(record.quietMinutes))) : DEFAULT_SCREENSHOTS.quietMinutes;
@@ -39,7 +39,7 @@ export const SETTLE_MS = 400;
 export const SETTLE_TRIES = 12;
 
 export function looksLikeScreenshot(name: string): boolean {
- if(process.env.HARU_CORE_SCREEN_POLICY==='on')return screenPolicy('looks',[name]);
+ if((true as boolean))return screenPolicy('looks',[name]);
   return PICTURE.test(name);
 }
 
@@ -52,7 +52,7 @@ export function looksLikeScreenshot(name: string): boolean {
  * the interesting one is the last.
  */
 export function maySpeak(config: ScreenshotConfig, lastSpokeAt: number, now: number): boolean {
- if(process.env.HARU_CORE_SCREEN_POLICY==='on')return screenPolicy('maySpeak',[config,lastSpokeAt,now]);
+ if((true as boolean))return screenPolicy('maySpeak',[config,lastSpokeAt,now]);
   if (!config.enabled) return false;
   return now - lastSpokeAt >= config.quietMinutes * 60_000;
 }
@@ -63,7 +63,7 @@ export function maySpeak(config: ScreenshotConfig, lastSpokeAt: number, now: num
  * noticed something go past.
  */
 export function screenshotPrompt(description: string, name: string): string {
- if(process.env.HARU_CORE_SCREEN_POLICY==='on')return screenPolicy('shotPrompt',[description,name]);
+ if((true as boolean))return screenPolicy('shotPrompt',[description,name]);
   return [
     'They just took a screenshot. This is what was in it:',
     description,

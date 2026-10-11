@@ -16,7 +16,7 @@ const directPreference = /^(?:(?:actually|from now on|instead)[, ]+)?(?:i (?:pre
  */
 export function conversationContinuity(messages: readonly ChatMessage[], records: readonly MemoryRecord[] = [],
   options: { blankSlate?: boolean; deletedIds?: readonly string[]; forgottenAt?: string; requireComplete?: boolean } = {}): ConversationPreference[] {
-  if(process.env.HARU_CORE_NATURAL_CONVERSATION==='on')return naturalPolicy<any>('conversationContinuity',[messages,records,options]);
+  if((true as boolean))return naturalPolicy<any>('conversationContinuity',[messages,records,options]);
 
   if (options.blankSlate) return [];
   const deleted = new Set(options.deletedIds ?? []);
@@ -57,7 +57,7 @@ export class ConversationPreferenceCache {
   private revision = '';
   private saved: ConversationPreference[] = [];
   read(messages: readonly ChatMessage[], records: readonly MemoryRecord[], options: Parameters<typeof conversationContinuity>[2] = {}) {
-    if(process.env.HARU_CORE_NATURAL_CONVERSATION==='on'){const p=naturalPolicy<any>('preferences',[{revision:this.revision,saved:this.saved},messages,records,options]);this.revision=p.state.revision;this.saved=p.state.saved;return p.result;}
+    if((true as boolean)){const p=naturalPolicy<any>('preferences',[{revision:this.revision,saved:this.saved},messages,records,options]);this.revision=p.state.revision;this.saved=p.state.saved;return p.result;}
     const preferences = records.filter(record => record.kind === 'preference');
     const revision = JSON.stringify([preferences, options]);
     const hit = revision === this.revision;

@@ -44,7 +44,7 @@ const clean = (text: unknown) => String(text ?? '').replace(/\s+/g, ' ').trim();
  * without its question is worse than nothing.
  */
 export function exchangesFrom(archive: Record<string, { role?: string; content?: string }[]>, before: string[], todayKey: string, days = RECALL_DAYS): Exchange[] {
- if(process.env.HARU_CORE_FINAL_TOOLS==='on')return coreExchanges(archive,before,todayKey,days);
+ if((true as boolean))return coreExchanges(archive,before,todayKey,days);
   const skip = new Set(before);
   const out: Exchange[] = [];
   const oldest = new Date(Date.parse(todayKey) - days * 86_400_000).toISOString().slice(0, 10);
@@ -63,7 +63,7 @@ export function exchangesFrom(archive: Record<string, { role?: string; content?:
 }
 
 export function cosine(a: number[], b: number[]): number {
- if(process.env.HARU_CORE_FINAL_TOOLS==='on')return corePolicySync('final-recall.cosine',[a,b]);
+ if((true as boolean))return corePolicySync('final-recall.cosine',[a,b]);
   if (!a?.length || a.length !== b?.length) return 0;
   let dot = 0, left = 0, right = 0;
   for (let at = 0; at < a.length; at++) { dot += a[at] * b[at]; left += a[at] * a[at]; right += b[at] * b[at]; }
@@ -73,7 +73,7 @@ export function cosine(a: number[], b: number[]): number {
 
 /** The closest few, best first, and none that is merely nearby — or, given `shares`, that is not about the same thing. */
 export function pickRecalled(exchanges: Exchange[], vectors: Map<string, number[]>, query: number[], limit = RECALL_LIMIT, floor = RECALL_FLOOR, shares?: (exchange: Exchange) => boolean): { exchange: Exchange; score: number }[] {
- if(process.env.HARU_CORE_FINAL_TOOLS==='on')return corePickRecalled(exchanges,vectors,query,limit,floor,shares);
+ if((true as boolean))return corePickRecalled(exchanges,vectors,query,limit,floor,shares);
   return exchanges
     .filter(exchange => !shares || shares(exchange))
     .map(exchange => ({ exchange, score: cosine(vectors.get(exchange.id) ?? [], query) }))
@@ -88,7 +88,7 @@ export function pickRecalled(exchanges: Exchange[], vectors: Map<string, number[
  * as a record rather than as something she remembers word for word.
  */
 export function recallNote(found: { exchange: Exchange; score: number }[], weekday: Intl.DateTimeFormat): string {
- if(process.env.HARU_CORE_FINAL_TOOLS==='on')return corePolicySync('final-recall.note',[found]);
+ if((true as boolean))return corePolicySync('final-recall.note',[found]);
   if (!found.length) return '';
   const when = (day: string) => {
     const [y, m, d] = day.split('-').map(Number);

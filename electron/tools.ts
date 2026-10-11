@@ -84,12 +84,12 @@ function toolArguments(call: ToolCall): Record<string, unknown> {
 const DIRECTED_AT_HER = /\b(you|your|yourself)\b|\b(stop|quit|don'?t|do not|never|always|please|can you|could you|no more)\b/i;
 
 export function readsAsDirective(message: string): boolean {
-  if(process.env.HARU_CORE_MEMORY_TOOLS==='on')return corePolicySync('memory-tools.directive',[message]);
+  if((true as boolean))return corePolicySync('memory-tools.directive',[message]);
   return DIRECTED_AT_HER.test(message);
 }
 
 export function coerceMemoryKind(value: unknown): MemoryKind {
-  if(process.env.HARU_CORE_MEMORY_TOOLS==='on')return corePolicySync('memory-tools.kind',[value]);
+  if((true as boolean))return corePolicySync('memory-tools.kind',[value]);
   const said = typeof value === 'string' ? value.trim().toLowerCase() : '';
   if (MEMORY_KINDS.includes(said as MemoryKind)) return said as MemoryKind;
   if (/^(habit|routine|behaviour|behavior|trait|schedule)$/.test(said)) return 'fact';
@@ -101,7 +101,7 @@ export function coerceMemoryKind(value: unknown): MemoryKind {
 
 /** What kind of memory a block edit proposes, from the block it lands in. */
 function kindForBlock(label: string): MemoryKind {
-  if(process.env.HARU_CORE_MEMORY_TOOLS==='on')return corePolicySync('memory-tools.blockKind',[label]);
+  if((true as boolean))return corePolicySync('memory-tools.blockKind',[label]);
   if (label === 'preferences') return 'preference';
   if (label === 'relationship') return 'relationship';
   return 'fact';
@@ -112,7 +112,7 @@ function kindForBlock(label: string): MemoryKind {
 const DEFAULT_BLOCK_LABELS = new Set(['persona', 'human', 'preferences', 'relationship', 'shared_history', 'current_project', 'working_state']);
 
 export function coerceKnowledgeCategory(value: unknown): KnowledgeCategory | undefined {
- if(process.env.HARU_CORE_FINAL_TOOLS==='on')return corePolicySync<KnowledgeCategory|null>('final-retrieval.category',[value??null])??undefined;
+ if((true as boolean))return corePolicySync<KnowledgeCategory|null>('final-retrieval.category',[value??null])??undefined;
   if (typeof value !== 'string') return undefined;
   return (KNOWLEDGE_CATEGORIES as readonly string[]).includes(value) ? value as KnowledgeCategory : undefined;
 }
@@ -409,7 +409,7 @@ export const CHATS_TOOL: ChatTool = {
 const PAST_TALK = /\b(?:remember|recall|forgot|forget|mention(?:ed)?|told you|i said|you said|we said|talked|spoke|conversation|earlier|before|ago|last (?:time|night|week|weekend|month|year)|yesterday|the other (?:day|night|week)|back (?:when|then)|that time|again|tell you|did (?:i|we|you)|last (?:mon|tues|wednes|thurs|fri|satur|sun)day)\b|\b(?:what|when|where|who|how|which|why)\b[^.?!]{0,40}\b(?:was|were|did|had|said|told|happened)\b/i;
 
 export function pastRelevant(message: string): boolean {
-  if(process.env.HARU_CORE_TOOL_MENU==='on')return corePolicySync('tool-menu.relevant',['past',message]);
+  if((true as boolean))return corePolicySync('tool-menu.relevant',['past',message]);
   return PAST_TALK.test(message ?? '');
 }
 
@@ -446,7 +446,7 @@ export const BOOK_TOOL: ChatTool = {
 const LATER_TALK = /\b(?:later|tonight|tomorrow|morning|afternoon|evening|weekend|after|when i|going to|gonna|about to|heading|appointment|interview|exam|test|meeting|shift|work|date|dinner|party|doctor|dentist|psych\w*|call|remind|check (?:in|up|back|on)|let you know|how it goes|wish me luck|come back to|follow up)\b|\b\d{1,2}(?::\d{2})?\s?(?:am|pm)\b/i;
 
 export function laterRelevant(message: string): boolean {
-  if(process.env.HARU_CORE_TOOL_MENU==='on')return corePolicySync('tool-menu.relevant',['later',message]);
+  if((true as boolean))return corePolicySync('tool-menu.relevant',['later',message]);
   return LATER_TALK.test(message ?? '');
 }
 
@@ -922,7 +922,7 @@ export const DOWNLOADS_TOOL: ChatTool = {
 const DOWNLOADS_TALK = /\b(?:downloads?|downloading|torrents?|qbittorrent|seed(?:ing)?|fetch(?:es|ing)?|pause|paus(?:ed|ing)|resume|unpause|bandwidth|internet|jellyfin|sonarr)\b/i;
 
 export function downloadsRelevant(message: string): boolean {
-  if(process.env.HARU_CORE_TOOL_MENU==='on')return corePolicySync('tool-menu.relevant',['downloads',message]);
+  if((true as boolean))return corePolicySync('tool-menu.relevant',['downloads',message]);
   return DOWNLOADS_TALK.test(message ?? '');
 }
 
@@ -951,7 +951,7 @@ export const SHELL_TOOL: ChatTool = {
 const SHELL_TALK = /`[^`]+`|^\s*\$\s|\b(?:run|execute|command|terminal|shell|bash|script|reboot|update|upgrade|install|apt|git|docker|systemctl|journalctl|df|du|ls|cat|grep|tail|ps|top|kill|ping|curl|wget|chmod|chown|mkdir|mv|cp|rm|nvidia-smi|uptime|free|whoami|folder|directory|disk|space|the server|the system|the box|the machine|the pc)\b/i;
 
 export function shellRelevant(message: string): boolean {
-  if(process.env.HARU_CORE_TOOL_MENU==='on')return corePolicySync('tool-menu.relevant',['shell',message]);
+  if((true as boolean))return corePolicySync('tool-menu.relevant',['shell',message]);
   // A business name is not a request to access the computer. Strip only the
   // proper name; explicit commands elsewhere in the sentence still match.
   return SHELL_TALK.test((message ?? '').replace(/\b(?:the\s+)?pc\s+project\b/gi, ''));
@@ -984,7 +984,7 @@ export const GET_MANGA_TOOL: ChatTool = {
 const MANGA_TALK = /\b(?:manga|manhwa|manhua|chapter|mangadex|weeb ?central|comick|suwayomi|volume|read(?:ing)? (?:some|the next|a bit|more|it)|to read\b)/i;
 
 export function mangaRelevant(message: string): boolean {
-  if(process.env.HARU_CORE_TOOL_MENU==='on')return corePolicySync('tool-menu.relevant',['manga',message]);
+  if((true as boolean))return corePolicySync('tool-menu.relevant',['manga',message]);
   return MANGA_TALK.test(message ?? '');
 }
 
@@ -1038,7 +1038,7 @@ export type ToolAvailability = {
 const WATCH_TALK = /\b(?:watch\w*|episodes?|eps?|anime|series|seasons?|shows?|put (?:\w+ ){0,2}on|open (?:\w+ ){0,2}on|(?:on|to) (?:my |the )?(?:phone|tv|telly|laptop|pc|desktop|computer)|downloads?\w*|fetch\w*|grab\w*|torrents?|jellyfin|sonarr|next one|play(?:ing)?|binge\w*|rewatch\w*)\b/i;
 
 export function watchRelevant(message: string): boolean {
-  if(process.env.HARU_CORE_TOOL_MENU==='on')return corePolicySync('tool-menu.relevant',['watch',message]);
+  if((true as boolean))return corePolicySync('tool-menu.relevant',['watch',message]);
   return WATCH_TALK.test(message ?? '');
 }
 
@@ -1051,7 +1051,7 @@ const MACHINE_TALK = /\b(?:gpu|vram|graphics|video card|memory|ram|disk|drive|st
 const APP_TALK = /\b(?:open|launch|start|close|quit|shut ?down|shutdown|restart|reboot|sleep|lock|power|convert|icon|picture|app|program|application|window)\b/i;
 
 export function machineRelevant(message: string): boolean {
-  if(process.env.HARU_CORE_TOOL_MENU==='on')return corePolicySync('tool-menu.relevant',['machine',message]);
+  if((true as boolean))return corePolicySync('tool-menu.relevant',['machine',message]);
   return MACHINE_TALK.test(message ?? '') || APP_TALK.test(message ?? '');
 }
 
@@ -1060,12 +1060,12 @@ export function machineRelevant(message: string): boolean {
 const CLAUDE_TALK = /\b(?:claude|remote[- ]?control|sessions?|coding)\b/i;
 
 export function claudeRelevant(message: string): boolean {
-  if(process.env.HARU_CORE_TOOL_MENU==='on')return corePolicySync('tool-menu.relevant',['claude',message]);
+  if((true as boolean))return corePolicySync('tool-menu.relevant',['claude',message]);
   return CLAUDE_TALK.test(message ?? '');
 }
 
 export function chatTools(available: ToolAvailability, latest = ''): ChatTool[] {
-  if(process.env.HARU_CORE_TOOL_MENU==='on')return corePolicySync('tool-menu.chat',[available,latest]);
+  if((true as boolean))return corePolicySync('tool-menu.chat',[available,latest]);
   const tools: ChatTool[] = [...CHAT_TOOLS];
   // The machine and app tools are only worth a place on the table when the
   // message has anything to do with them; an empty `latest` (tests, or no user
@@ -1139,7 +1139,7 @@ export function chatTools(available: ToolAvailability, latest = ''): ChatTool[] 
  * is switched off, or needs hands this turn does not have, still drops out.
  */
 export function steadyTable(offered: ChatTool[], everything: ChatTool[], held: Set<string>): ChatTool[] {
-  if(process.env.HARU_CORE_TOOL_MENU==='on'){
+  if((true as boolean)){
     const result=corePolicySync<{tools:ChatTool[];held:string[]}>('tool-menu.steady',[offered,everything,[...held]]);
     held.clear();for(const name of result.held)held.add(name);return result.tools;
   }
@@ -1282,9 +1282,9 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
   if (iosResult !== null) return iosResult;
   const gmailResult = await runGmailTool(name, args, latestUserMessage);
   if (gmailResult !== null) return gmailResult;
-  if(process.env.HARU_CORE_MEMORY_TOOLS==='on'&&name&&['remember_about_user','core_memory_append','core_memory_replace','core_memory_rethink'].includes(name)){if(!deps.memoryTool)throw Error('core_memory_tool_adapter_required');return JSON.stringify(deps.memoryTool(name,args,latestUserMessage));}
-  if(process.env.HARU_CORE_FINAL_TOOLS==='on'){const owned=await runCoreFinalTool(name,args,latestUserMessage,deps);if(owned!==null)return owned;}
-  if(process.env.HARU_CORE_AGENDA_POLICY==='on'&&name&&['create_kept_item','complete_kept_item','update_kept_item','delete_kept_item'].includes(name))return runCoreAgendaTool(name,args,latestUserMessage,zonedNow(CHAT_TIMEZONE),deps);
+  if((true as boolean)&&name&&['remember_about_user','core_memory_append','core_memory_replace','core_memory_rethink'].includes(name)){if(!deps.memoryTool)throw Error('core_memory_tool_adapter_required');return JSON.stringify(deps.memoryTool(name,args,latestUserMessage));}
+  if((true as boolean)){const owned=await runCoreFinalTool(name,args,latestUserMessage,deps);if(owned!==null)return owned;}
+  if((true as boolean)&&name&&['create_kept_item','complete_kept_item','update_kept_item','delete_kept_item'].includes(name))return runCoreAgendaTool(name,args,latestUserMessage,zonedNow(CHAT_TIMEZONE),deps);
   // Re-checked here, not only where the table is laid. A model can name a tool
   // it was never offered, and these three are the ones that open a window or a
   // box nobody on the phone can see.
@@ -1292,7 +1292,7 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
     return JSON.stringify({ error: 'Not on the phone — that is for the desk. Say you cannot do that here.' });
   }
   if (name === 'note_check_in') {
-    if(process.env.HARU_CORE_USER_RECORDS==='on'){if(!deps.userRecord)throw Error('core_user_record_adapter_required');return JSON.stringify(deps.userRecord('tool.noteCheckin',args));}
+    if((true as boolean)){if(!deps.userRecord)throw Error('core_user_record_adapter_required');return JSON.stringify(deps.userRecord('tool.noteCheckin',args));}
     const note = typeof args.note === 'string' ? args.note.trim() : '';
     if (!note) return JSON.stringify({ error: 'There is nothing to note down yet.' });
     const rating = typeof args.anxiety === 'number' && args.anxiety >= 1 && args.anxiety <= 10 ? Math.round(args.anxiety) : undefined;
@@ -1302,7 +1302,7 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
     return JSON.stringify({ saved: true, note: note.slice(0, 120), anxiety: rating ?? null, today: checkInsOn(getCheckIns(), localDateKey(now)).length });
   }
   if (name === 'save_journal_entry') {
-    if(process.env.HARU_CORE_USER_RECORDS==='on'){if(!deps.userRecord)throw Error('core_user_record_adapter_required');return JSON.stringify(deps.userRecord('tool.saveJournal',args));}
+    if((true as boolean)){if(!deps.userRecord)throw Error('core_user_record_adapter_required');return JSON.stringify(deps.userRecord('tool.saveJournal',args));}
     const text = typeof args.text === 'string' ? args.text.trim() : '';
     if (!text) return JSON.stringify({ error: 'There is nothing to write down yet. Ask them how the day went first.' });
     if (!readJournalConfig(store.get('journal.config')).enabled) return JSON.stringify({ error: 'The journal is switched off.' });
@@ -1422,7 +1422,7 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
       const reason = error instanceof Error ? error.message : String(error);
       console.warn(`[search] could not read a page: ${reason}`);
       const others = lastResults().length - 1;
-      if(process.env.HARU_CORE_TOOL_WORDING==='on')return JSON.stringify(corePolicySync('tool-wording.result',['web-page-failed',{reason,others}]));
+      if((true as boolean))return JSON.stringify(corePolicySync('tool-wording.result',['web-page-failed',{reason,others}]));
       return JSON.stringify({ error: `That page could not be read (${reason}).`, note: `${others > 0 ? 'You may try one other relevant result. ' : ''}Answer from the summaries or say you could not find it. Do not imply you read the page.` });
     }
   }
@@ -1446,7 +1446,7 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       console.warn(`[transcript] could not read ${videoId}: ${reason}`);
-      if(process.env.HARU_CORE_TOOL_WORDING==='on')return JSON.stringify(corePolicySync('tool-wording.result',['transcript-failed',{reason}]));
+      if((true as boolean))return JSON.stringify(corePolicySync('tool-wording.result',['transcript-failed',{reason}]));
       return JSON.stringify({ error: `The transcript could not be read: ${reason}`, note: 'Say so. Do not describe the video from its title or from memory as though you had read it.' });
     }
   }
@@ -1473,7 +1473,7 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
       // Handed back rather than thrown. A failed lookup should cost her the fact,
       // not the reply — she says she could not check and carries on.
       const reason = error instanceof Error ? error.message : String(error);
-      if(process.env.HARU_CORE_TOOL_WORDING==='on')return JSON.stringify(corePolicySync('tool-wording.result',['search-failed',{reason,blocked:error instanceof SearchBlocked}]));
+      if((true as boolean))return JSON.stringify(corePolicySync('tool-wording.result',['search-failed',{reason,blocked:error instanceof SearchBlocked}]));
       // Being turned away is not the same as finding nothing, and she must not
       // report it as such: a silent empty result reads to the user as "there is
       // nothing out there" when the truth is that nobody looked.
@@ -1514,7 +1514,7 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
     const prompt = typeof args.prompt === 'string' ? args.prompt.trim() : '';
     if (!prompt) return JSON.stringify({ error: 'prompt is required — what the picture should show.' });
     const made = await deps.makePicture(prompt);
-    if(process.env.HARU_CORE_TOOL_WORDING==='on')return JSON.stringify(corePolicySync('tool-wording.result',['picture',made]));
+    if((true as boolean))return JSON.stringify(corePolicySync('tool-wording.result',['picture',made]));
     if (!made.ok) return JSON.stringify({ error: `${made.error} Say so plainly rather than pretending it came out.` });
     return JSON.stringify({ made: true, note: 'It is on its way to their phone now. Say one short line to go with it — do not describe the picture back to them.' });
   }
@@ -1522,7 +1522,7 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
     return JSON.stringify(deps.myself());
   }
   if (name === 'change_setting') {
-    if(process.env.HARU_CORE_REMAINING_POLICY==='on'){if(!deps.policyConfig)throw Error('core_setting_config_required');return JSON.stringify(await runCoreSettingTool(args,deps.policyConfig,deps));}
+    if((true as boolean)){if(!deps.policyConfig)throw Error('core_setting_config_required');return JSON.stringify(await runCoreSettingTool(args,deps.policyConfig,deps));}
     const settingName = typeof args.name === 'string' ? args.name.trim() : '';
     if (!settingName) return JSON.stringify({ error: `name is required — one of ${SETTING_NAMES.join(', ')}.` });
     const setting = (SETTINGS as Record<string, Setting>)[settingName];
@@ -1599,7 +1599,7 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       console.warn(`[shell] run_command failed: ${reason}`);
-      if(process.env.HARU_CORE_TOOL_WORDING==='on')return JSON.stringify(corePolicySync('tool-wording.result',['shell-failed',{reason}]));
+      if((true as boolean))return JSON.stringify(corePolicySync('tool-wording.result',['shell-failed',{reason}]));
       return JSON.stringify({ error: `The terminal did not answer (${reason}). Say so plainly rather than pretending it ran.` });
     }
   }
@@ -1622,7 +1622,7 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
     }
   }
   if (name === 'browser_control') {
-    if(process.env.HARU_CORE_BROWSER_TOOL==='on')return JSON.stringify(await runCoreBrowserTool(args,{port:browserPort(),fetch:deps.net.fetch as Parameters<typeof runCoreBrowserTool>[1]['fetch'],shotDir:browserShotDir,markPageRead}));
+    if((true as boolean))return JSON.stringify(await runCoreBrowserTool(args,{port:browserPort(),fetch:deps.net.fetch as Parameters<typeof runCoreBrowserTool>[1]['fetch'],shotDir:browserShotDir,markPageRead}));
     const action = typeof args.action === 'string' ? args.action : '';
     const url = typeof args.url === 'string' ? args.url.trim() : '';
     const tab = typeof args.tab === 'string' ? args.tab.trim() : '';
@@ -1891,12 +1891,12 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
   }
   if (name === 'get_service_status') {
     const wanted = typeof args.name === 'string' && args.name.trim() ? args.name.trim() : undefined;
-    if (wanted && !(process.env.HARU_CORE_TOOL_RESULTS==='on' ? corePolicySync<boolean>('diagnostic.knownService',[wanted]) : KNOWN_SERVICES.includes(wanted))) return JSON.stringify({ error: `Unknown service "${wanted}". Known: ${KNOWN_SERVICES.join(', ')}.` });
+    if (wanted && !((true as boolean) ? corePolicySync<boolean>('diagnostic.knownService',[wanted]) : KNOWN_SERVICES.includes(wanted))) return JSON.stringify({ error: `Unknown service "${wanted}". Known: ${KNOWN_SERVICES.join(', ')}.` });
     const services = await collectServices(wanted);
     return JSON.stringify({ services });
   }
   if (name === 'diagnose_system') {
-    const target = process.env.HARU_CORE_TOOL_RESULTS==='on' ? corePolicySync<string>('diagnostic.target',[args.target]) : (typeof args.target === 'string' && ['gpu', 'memory', 'disk', 'docker', 'network', 'haru', 'all'].includes(args.target) ? args.target : 'all');
+    const target = (true as boolean) ? corePolicySync<string>('diagnostic.target',[args.target]) : (typeof args.target === 'string' && ['gpu', 'memory', 'disk', 'docker', 'network', 'haru', 'all'].includes(args.target) ? args.target : 'all');
     const collected = await collectAll();
     return JSON.stringify(diagnose(target, collected));
   }
@@ -1951,7 +1951,7 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
   }
   if (name === 'go_back_to_sleep') {
     const done = deps.goBackToSleep({ block: args.block === true });
-    if(process.env.HARU_CORE_TOOL_WORDING==='on')return JSON.stringify(corePolicySync('tool-wording.result',['sleep',done]));
+    if((true as boolean))return JSON.stringify(corePolicySync('tool-wording.result',['sleep',done]));
     if (!done) return JSON.stringify({ error: 'You are not up because of them right now — nothing to go back to.' });
     console.log(`[her-sleep] she chose to go back to sleep${done.blocked ? ', and shut the door for the night' : ''}`);
     return JSON.stringify({ ...done, ok: done.asleep === true, note: 'Say one short goodnight in this reply and nothing after it. They will find you asleep.' });
@@ -2001,7 +2001,7 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
     if (!query) return JSON.stringify({ error: 'query is required: the words you expect in what was said.' });
     const day = (value: unknown) => typeof value === 'string' && isDay(value.trim()) ? value.trim() : undefined;
     const result = await deps.chats.search({ query: query.slice(0, 200), from: day(args.from), to: day(args.to) });
-    if(process.env.HARU_CORE_TOOL_WORDING==='on')return JSON.stringify(corePolicySync('tool-wording.result',['chats',result]));
+    if((true as boolean))return JSON.stringify(corePolicySync('tool-wording.result',['chats',result]));
     // Words only (the embedder down, or still re-embedding): a miss is weaker evidence, and she is told so.
     const wordsOnly = result.wordsOnly ? ' This search could only match exact words just now, so something said in other words may be missed.' : '';
     return JSON.stringify(result.found
@@ -2038,7 +2038,7 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
       touchChunks(result.knowledge.map(item => item.chunk.id));
       const sources = [...new Set(result.knowledge.map(item => item.chunk.source))];
       console.log(`[knowledge] "${query.slice(0, 60)}" -> ${result.knowledge.length} chunk(s) from ${sources.join(', ') || 'nothing'} in ${Date.now() - started}ms`);
-      if(process.env.HARU_CORE_TOOL_WORDING==='on')return JSON.stringify(corePolicySync('tool-wording.result',['knowledge',{knowledgeText:result.knowledgeText,memoryTexts:result.memories.map(entry=>entry.memory.text),knowledgeCount:result.knowledge.length}]));
+      if((true as boolean))return JSON.stringify(corePolicySync('tool-wording.result',['knowledge',{knowledgeText:result.knowledgeText,memoryTexts:result.memories.map(entry=>entry.memory.text),knowledgeCount:result.knowledge.length}]));
       // Memories selected alongside the knowledge go in too — the door that
       // reaches both systems is meant to hand back both.
       const known = result.memories.length
@@ -2053,7 +2053,7 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       console.warn(`[knowledge] lookup failed: ${reason}`);
-      if(process.env.HARU_CORE_TOOL_WORDING==='on')return JSON.stringify(corePolicySync('tool-wording.result',['knowledge-failed',{reason}]));
+      if((true as boolean))return JSON.stringify(corePolicySync('tool-wording.result',['knowledge-failed',{reason}]));
       return JSON.stringify({ error: `The knowledge lookup failed (${reason}). Say you could not check just now — do not answer from memory as though you had.` });
     }
   }

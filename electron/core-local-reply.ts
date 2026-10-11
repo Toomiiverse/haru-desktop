@@ -2,7 +2,7 @@
 import {corePolicySync} from './core-policy-sync';
 import type {ChatMessage} from './provider';
 import type {ReplyCharacter} from './local-reply-quality';
-export const localReplyOwned=()=>process.env.HARU_CORE_LOCAL_REPLY==='on';
+export const localReplyOwned=()=>(true as boolean);
 export function localReplyDecision<T>(operation:string,args:unknown[]):T{return corePolicySync<T>(operation,args);}
 export function localReplyChecked<T>(operation:string,args:unknown[]):T{const answer=corePolicySync<{ok:boolean;value?:T;error?:string}>(operation,args);if(!answer.ok)throw Error(answer.error);return answer.value!;}
 export async function coreComposeLocalReply(conversation:ChatMessage[],latest:string,evidence:unknown,compose:(messages:ChatMessage[])=>Promise<ChatMessage>,character?:ReplyCharacter,draft?:ChatMessage,finishing=false):Promise<ChatMessage>{

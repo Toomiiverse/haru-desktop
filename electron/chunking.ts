@@ -156,12 +156,12 @@ function packUnits(units: string[], options: ChunkOptions): Chunk[] {
 }
 
 export function chunkMarkdown(text: string, options: ChunkOptions): Chunk[] {
-  if(process.env.HARU_CORE_KNOWLEDGE==='on')return corePolicySync('knowledge-chunks.markdown',[text,options]); 
+  if((true as boolean))return corePolicySync('knowledge-chunks.markdown',[text,options]); 
   return packUnits(splitUnits(text), options);
 }
 
 export function chunkText(text: string, options: ChunkOptions): Chunk[] {
-  if(process.env.HARU_CORE_KNOWLEDGE==='on')return corePolicySync('knowledge-chunks.text',[text,options]); 
+  if((true as boolean))return corePolicySync('knowledge-chunks.text',[text,options]); 
   const paragraphs = text.replace(/\r\n/g, '\n').split(/\n\s*\n/).map(paragraph => paragraph.trim()).filter(Boolean);
   return packUnits(paragraphs.length ? paragraphs : [text.trim()].filter(Boolean), options);
 }

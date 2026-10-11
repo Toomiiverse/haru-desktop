@@ -35,7 +35,7 @@ export function broadcastConsole(channel: string, args: unknown[]): void {
 const deviceChannels = new Set(['live2d:import','voice:pickClip','companion:moveBy','companion:resizeBy',
   'companion:poke','companion:open','companion:close','companion:ask','companion:showMenu']);
 function channelHandler(channel:string,handler:Handler):Handler {
-  return process.env.HARU_CORE_BRAIN_WORKER==='on'&&deviceChannels.has(channel)
+  return (true as boolean)&&deviceChannels.has(channel)
     ? ()=>{throw Error('desktop_device_unavailable');}:handler;
 }
 

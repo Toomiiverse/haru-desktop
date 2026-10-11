@@ -28,7 +28,7 @@ export type RetrieveContextResult = {
 };
 
 export async function retrieveContext(options: RetrieveContextOptions): Promise<RetrieveContextResult> {
- if(process.env.HARU_CORE_FINAL_TOOLS==='on'){
+ if((true as boolean)){
   const {embed,memories,semantic,knowledge,...rest}=options;
   const packet=corePolicySync<any>('final-retrieval.start',[{...rest,now:(options.now??new Date()).toISOString()}]);
   if(packet.command.kind!=='embed')throw Error('retrieval_command_protocol');

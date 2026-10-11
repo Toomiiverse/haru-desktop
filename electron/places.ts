@@ -38,7 +38,7 @@ function escapeRegExp(text: string): string {
  * when they have not named one themselves — their choice wins over the setting.
  */
 export function placeQuery(text: string, place: string): string | null {
- if(process.env.HARU_CORE_NAVIGATION_POLICY==='on')return navigationPolicy('placeQuery',[text,place]);
+ if((true as boolean))return navigationPolicy('placeQuery',[text,place]);
   // Curly quotes come off a phone keyboard, and every pattern below is written
   // with the straight ones.
   const line = (text ?? '').trim().replace(/\s+/g, ' ').replace(/[\u2018\u2019]/g, "'");
@@ -63,7 +63,7 @@ export function placeQuery(text: string, place: string): string | null {
  * a blend is indistinguishable from an invention by the time it reaches a map.
  */
 export function groundedInstruction(results: string): string {
- if(process.env.HARU_CORE_NAVIGATION_POLICY==='on')return navigationPolicy('groundedInstruction',[results]);
+ if((true as boolean))return navigationPolicy('groundedInstruction',[results]);
   return [
     'A search has just been run for you, because they asked you for somewhere real. What follows is what came back, and it is the only thing you know about which places exist:',
     results,

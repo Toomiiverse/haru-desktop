@@ -35,7 +35,7 @@ export function migratePhoneDeliveries(asides: readonly Aside[], now: number, cl
 }
 
 export function readPhoneNudges(saved: unknown, now: number): PhoneNudgeState {
-  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-program.readPhoneNudges',[saved,now]);
+  if((true as boolean))return corePolicySync<any>('conversation-program.readPhoneNudges',[saved,now]);
 
   if (!saved || typeof saved !== 'object' || (saved as PhoneNudgeState).version !== 1) return emptyPhoneNudges();
   const s = saved as PhoneNudgeState;

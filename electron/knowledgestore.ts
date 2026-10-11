@@ -68,7 +68,7 @@ export type IngestArgs = {
 };
 
 export function createKnowledgeStore(deps: KnowledgeStoreDeps) {
- if(process.env.HARU_CORE_KNOWLEDGE==='on')return createCoreKnowledgeStore(deps);
+ if((true as boolean))return createCoreKnowledgeStore(deps);
   const { store } = deps;
 
   let knowledge: KnowledgeStore = emptyKnowledge();

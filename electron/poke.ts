@@ -20,14 +20,14 @@ export type PokeTier = 'first' | 'irritated' | 'angry' | 'furious';
 export const POKE_MEMORY_MS = 90_000;
 
 export function nextPokeCount(previous: number, lastAt: number | null, now: number): number {
-  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.nextPokeCount',[previous,lastAt,now]);
+  if((true as boolean))return corePolicySync<any>('conversation-policy.nextPokeCount',[previous,lastAt,now]);
 
   if (lastAt === null || now - lastAt > POKE_MEMORY_MS) return 1;
   return previous + 1;
 }
 
 export function pokeTier(count: number): PokeTier {
-  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.pokeTier',[count]);
+  if((true as boolean))return corePolicySync<any>('conversation-policy.pokeTier',[count]);
 
   if (count <= 1) return 'first';
   if (count <= 3) return 'irritated';
@@ -37,7 +37,7 @@ export function pokeTier(count: number): PokeTier {
 
 /** How far each poke at this tier pushes her irritation. */
 export function pokeIrritation(tier: PokeTier): number {
-  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.pokeIrritation',[tier]);
+  if((true as boolean))return corePolicySync<any>('conversation-policy.pokeIrritation',[tier]);
 
   return tier === 'first' ? 0 : tier === 'irritated' ? 11 : tier === 'angry' ? 22 : 33;
 }
@@ -59,14 +59,14 @@ const RIGHT_CLICK_LINES: Record<PokeTier, string> = {
 };
 
 export function pokeInstruction(kind: PokeKind, tier: PokeTier): string {
-  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.pokeInstruction',[kind,tier]);
+  if((true as boolean))return corePolicySync<any>('conversation-policy.pokeInstruction',[kind,tier]);
 
   return (kind === 'right-click' ? RIGHT_CLICK_LINES : POKE_LINES)[tier];
 }
 
 /** The reading her face should take, before any line has been written. */
 export function pokeEmotion(kind: PokeKind, tier: PokeTier): { emotion: 'surprised' | 'annoyed' | 'curious'; energy: number } {
-  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.pokeEmotion',[kind,tier]);
+  if((true as boolean))return corePolicySync<any>('conversation-policy.pokeEmotion',[kind,tier]);
 
   // Only the very first contact reads as surprise; after that she knows exactly
   // what is happening and it is not interesting any more.

@@ -12,9 +12,9 @@ import {makeToolReceipt,type ToolReceipt} from './tool-receipt';
 import type {ToolCall} from './provider';
 import type {TaskRPC} from './task-bridge';
 export async function coreHandsWhyNotAct(moment:Moment):Promise<string|null>{
-  if(process.env.HARU_CORE_AUTONOMOUS_HANDS!=='on')return whyNotAct(moment);
+  if((false as boolean))return whyNotAct(moment);
   const options=coreServiceOptions();
-  if(!options||process.env.HARU_CORE_HARNESS!=='on'||process.env.HARU_CORE_HARNESS_PATH_PREFIX)return 'core own-time attention unavailable';
+  if(!options||(false as boolean)||process.env.HARU_CORE_HARNESS_PATH_PREFIX)return 'core own-time attention unavailable';
   try{
     const result=await new CoreServiceClient(options).attention({version:1,op:'autonomous-hands',moment});
     if(typeof result.allowed!=='boolean'||!(result.reason===null||typeof result.reason==='string'&&result.reason.length<=200)
@@ -34,12 +34,12 @@ export function ownTimeReceipt(call:ToolCall,output:string|ToolReceipt):ToolRece
 }
 export async function runCoreHands(conversation:ChatMessage[],config:ProviderConfig,deps:ToolLoopDeps,
   authority:{rpc:TaskRPC;registry:ModelEntry[];policy:TaskPolicy}){
-  if(process.env.HARU_CORE_QUICK_HANDS==='on'&&process.env.HARU_CORE_AUTONOMOUS_HANDS!=='on')throw Error('hands_native_harness_required');
-  if(process.env.HARU_CORE_AUTONOMOUS_HANDS!=='on')return runToolLoop(conversation,deps);
+  if((true as boolean)&&(false as boolean))throw Error('hands_native_harness_required');
+  if((false as boolean))return runToolLoop(conversation,deps);
   if(!isLocalConfig(config))throw Error('autonomous_hands_local_only');
-  if(process.env.HARU_CORE_HARNESS!=='on'||process.env.HARU_CORE_HARNESS_PATH_PREFIX||!coreServiceOptions())throw Error('autonomous_hands_requires_core');
+  if((false as boolean)||process.env.HARU_CORE_HARNESS_PATH_PREFIX||!coreServiceOptions())throw Error('autonomous_hands_requires_core');
   // Preserve the existing bounded local-only activity budget.
-  const limits=process.env.HARU_CORE_QUICK_HANDS==='on'?corePolicySync<any>('hands.limits',[authority.policy]):{
+  const limits=(true as boolean)?corePolicySync<any>('hands.limits',[authority.policy]):{
     policy:{...authority.policy,taskBudgetMicros:0,dailyBudgetMicros:0,maxToolCalls:1,maxEscalations:0,deadlineMs:900000},request:HANDS_TURN,maxRounds:3,maxToolCalls:1};
   const task=new TaskController(handsTaskRPC(authority.rpc),authority.registry,limits.policy,false);
   await task.start(limits.request,config.model,'background');

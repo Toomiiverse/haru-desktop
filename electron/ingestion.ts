@@ -42,14 +42,14 @@ async function readJson(file: string): Promise<Extracted> {
 
 export function baseExtractors(): Extractor[] {
   return [
-    { label: 'markdown', match: name => process.env.HARU_CORE_KNOWLEDGE==='on'?corePolicySync('knowledge-flow.matches',['markdown',name]):/\.(md|markdown|mdown|mkd)$/i.test(name), extract: readMarkdown },
-    { label: 'text', match: name => process.env.HARU_CORE_KNOWLEDGE==='on'?corePolicySync('knowledge-flow.matches',['text',name]):/\.(txt|log|text)$/i.test(name), extract: readText },
-    { label: 'json', match: name => process.env.HARU_CORE_KNOWLEDGE==='on'?corePolicySync('knowledge-flow.matches',['json',name]):/\.json$/i.test(name), extract: readJson },
+    { label: 'markdown', match: name => (true as boolean)?corePolicySync('knowledge-flow.matches',['markdown',name]):/\.(md|markdown|mdown|mkd)$/i.test(name), extract: readMarkdown },
+    { label: 'text', match: name => (true as boolean)?corePolicySync('knowledge-flow.matches',['text',name]):/\.(txt|log|text)$/i.test(name), extract: readText },
+    { label: 'json', match: name => (true as boolean)?corePolicySync('knowledge-flow.matches',['json',name]):/\.json$/i.test(name), extract: readJson },
   ];
 }
 
 export function findExtractor(name: string, extractors: Extractor[]): Extractor | undefined {
- if(process.env.HARU_CORE_KNOWLEDGE==='on'){const index=corePolicySync<number|null>('knowledge-flow.selectExtractor',[name,extractors.map(e=>({label:e.label,matches:e.match(name)}))]);return index===null?undefined:extractors[index];}
+ if((true as boolean)){const index=corePolicySync<number|null>('knowledge-flow.selectExtractor',[name,extractors.map(e=>({label:e.label,matches:e.match(name)}))]);return index===null?undefined:extractors[index];}
   return extractors.find(extractor => extractor.match(name));
 }
 
@@ -78,7 +78,7 @@ export async function ingestFile(
   args: IngestArgs,
   extractors: Extractor[] = baseExtractors(),
 ): Promise<IngestResult> {
-  if(process.env.HARU_CORE_KNOWLEDGE==='on')return runCoreKnowledgeIngest(store,embedder,args,extractors);
+  if((true as boolean))return runCoreKnowledgeIngest(store,embedder,args,extractors);
   const name = path.basename(args.file);
   let text: string;
   let sourceType: string;
@@ -130,6 +130,6 @@ export async function ingestFile(
 }
 
 export function knownFormats(extractors: Extractor[]): string {
- if(process.env.HARU_CORE_KNOWLEDGE==='on')return corePolicySync('knowledge-flow.formats',[extractors.map(e=>e.label)]);
+ if((true as boolean))return corePolicySync('knowledge-flow.formats',[extractors.map(e=>e.label)]);
   return extractors.map(extractor => extractor.label).join(', ');
 }

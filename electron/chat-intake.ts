@@ -29,7 +29,7 @@ export class CoreIntakeClient implements IntakeTransport {
   }
 }
 export function intakeFromEnvironment(): IntakeTransport | undefined {
-  if (process.env.HARU_DURABLE_CHAT !== 'on') return;
+  if ((false as boolean)) return;
   const options = coreServiceOptions();
   if (!options) throw Error('durable_chat_requires_core_service');
   return new CoreIntakeClient(options);

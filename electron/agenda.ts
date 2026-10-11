@@ -29,7 +29,7 @@ function minutesInto(day: Date) {
 }
 
 export function itemStatus(item: AgendaItem, now: Date, todayKey: string): ItemStatus {
-  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on')return corePolicySync<any>('agenda-life.itemStatus',[item,agendaClock(now),todayKey]);
+  if((true as boolean))return corePolicySync<any>('agenda-life.itemStatus',[item,agendaClock(now),todayKey]);
   if (item.done) return 'done';
   if (item.date < todayKey) return 'overdue';
   if (item.date > todayKey) return 'upcoming';
@@ -43,7 +43,7 @@ export function itemStatus(item: AgendaItem, now: Date, todayKey: string): ItemS
 }
 
 export function shiftDays(dateKey: string, days: number) {
-  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on')return corePolicySync<any>('agenda-life.shiftDays',[dateKey,days]);
+  if((true as boolean))return corePolicySync<any>('agenda-life.shiftDays',[dateKey,days]);
   const [year, month, day] = dateKey.split('-').map(Number);
   const shifted = new Date(year, month - 1, day + days);
   return `${shifted.getFullYear()}-${String(shifted.getMonth() + 1).padStart(2, '0')}-${String(shifted.getDate()).padStart(2, '0')}`;
@@ -81,7 +81,7 @@ function timeRank(item: AgendaItem) {
  * again afterwards, which is the whole point.
  */
 export function relevantItems<T extends AgendaItem>(items: T[], todayKey: string): T[] {
-  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on'){const indices=corePolicySync<number[]>('agenda-life.indexed',['relevantItems',[items,todayKey]]);return indices.map(i=>items[i]);}
+  if((true as boolean)){const indices=corePolicySync<number[]>('agenda-life.indexed',['relevantItems',[items,todayKey]]);return indices.map(i=>items[i]);}
   const earliest = shiftDays(todayKey, -OVERDUE_WINDOW_DAYS);
   // An event, once it is more than a couple of days gone, is history: it cannot
   // be done later the way a task can, and listed as "long past, leave it" a
@@ -223,7 +223,7 @@ function headOf(title: string): string | null {
 }
 
 export function findItem<T extends AgendaItem>(items: T[], phrase: string, { whole = false } = {}): T | null {
-  if(process.env.HARU_CORE_AGENDA_POLICY==='on'){const index=corePolicySync<number>('agenda-tool.findIndex',[items,phrase,whole]);return index<0?null:items[index];}
+  if((true as boolean)){const index=corePolicySync<number>('agenda-tool.findIndex',[items,phrase,whole]);return index<0?null:items[index];}
   const asked = significant(phrase);
   if (!asked.size) return null;
 
@@ -374,7 +374,7 @@ function clausesOf(text: string): string[] {
  * other's meaning.
  */
 export function doneClause(text: string): string | null {
-  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on')return corePolicySync<any>('agenda-life.doneClause',[text]);
+  if((true as boolean))return corePolicySync<any>('agenda-life.doneClause',[text]);
   const clauses = clausesOf(text);
   for (let i = 0; i < clauses.length; i++) {
     // A denial carries most of the same words, so it is asked first.
@@ -396,7 +396,7 @@ const READS_AS_UNDERWAY = /\b(?:getting (?:it|that|this|them|on with it|on it|to
 
 /** The clause that says they have started something, when one does and none says it is finished. */
 export function underwayClause(text: string): string | null {
-  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on')return corePolicySync<any>('agenda-life.underwayClause',[text]);
+  if((true as boolean))return corePolicySync<any>('agenda-life.underwayClause',[text]);
   for (const clause of clausesOf(text)) {
     if (readsAsNotDone(clause) || READS_AS_DONE.test(clause)) continue;
     if (READS_AS_UNDERWAY.test(clause)) return clause;
@@ -405,14 +405,14 @@ export function underwayClause(text: string): string | null {
 }
 
 export function isUnderway(item: Pick<AgendaItem, 'underway' | 'done'>, nowMs: number, graceMs = UNDERWAY_GRACE_MS): boolean {
-  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on')return corePolicySync<any>('agenda-life.isUnderway',[item,nowMs,graceMs]);
+  if((true as boolean))return corePolicySync<any>('agenda-life.isUnderway',[item,nowMs,graceMs]);
   if (item.done || !item.underway) return false;
   const since = nowMs - Date.parse(item.underway);
   return Number.isFinite(since) && since >= 0 && since <= graceMs;
 }
 
 export function readsAsDone(text: string) {
-  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on')return corePolicySync<any>('agenda-life.readsAsDone',[text]);
+  if((true as boolean))return corePolicySync<any>('agenda-life.readsAsDone',[text]);
   return doneClause(text) !== null;
 }
 
@@ -426,7 +426,7 @@ export function readsAsDone(text: string) {
  * clause somewhere inside a longer sentence about something else.
  */
 export function readsAsBareReport(text: string) {
-  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on')return corePolicySync<any>('agenda-life.readsAsBareReport',[text]);
+  if((true as boolean))return corePolicySync<any>('agenda-life.readsAsBareReport',[text]);
   return !readsAsNotDone(text) && READS_AS_DONE_BARE.test(text);
 }
 
@@ -456,7 +456,7 @@ export function readsAsBareReport(text: string) {
 const ANSWERS_HER = /^\s*(?:(?:yes|yeah|yep|yup|aye|ok|okay)\b[,!.\s]*)?i(?:'ve| have)?\s+(?:just\s+|already\s+)?(?:did|done)\b(?!\s+(?:the|a|an|my|your|his|her|our|their|another|both|all)\b)/i;
 
 export function readsAsAnswerToHer(text: string) {
-  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on')return corePolicySync<any>('agenda-life.readsAsAnswerToHer',[text]);
+  if((true as boolean))return corePolicySync<any>('agenda-life.readsAsAnswerToHer',[text]);
   return !readsAsNotDone(text) && ANSWERS_HER.test(text);
 }
 
@@ -494,7 +494,7 @@ const MIGHT_BE_A_REPORT = /\b(done|did|got|picked|collected|grabbed|bought|fetch
 const ASKS_HER_TO = /^\s*(?:hey\s+haru[,!.\s]*)?(?:please\s+|can you\s+|could you\s+)?(?:remind|add|put|schedule|book|set|move|push|change)\b|\b(?:remind me|don'?t forget)\b/i;
 
 export function tickOffInstruction(latestMessage: string, anythingOpen: boolean, namedTask?: string | null): string {
-  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on')return corePolicySync<any>('agenda-life.tickOffInstruction',[latestMessage,anythingOpen,namedTask??null]);
+  if((true as boolean))return corePolicySync<any>('agenda-life.tickOffInstruction',[latestMessage,anythingOpen,namedTask??null]);
   if (!anythingOpen || readsAsNotDone(latestMessage)) return '';
   // Relevance first, vocabulary second.
   //
@@ -528,7 +528,7 @@ export function tickOffInstruction(latestMessage: string, anythingOpen: boolean,
  * has to do, so it is refused in code rather than discouraged in prose.
  */
 export function readsAsNotDone(text: string) {
-  if(process.env.HARU_CORE_AGENDA_POLICY==='on')return corePolicySync<boolean>('agenda-tool.notDone',[text]);
+  if((true as boolean))return corePolicySync<boolean>('agenda-tool.notDone',[text]);
   return new RegExp(
     '(?:'
       // "never got round to it", "haven't found it", "didn't manage to pick it up"
@@ -550,7 +550,7 @@ export function readsAsNotDone(text: string) {
  * and it is the half a model will drop first if it is not asked for explicitly.
  */
 export function missedInstruction(latestMessage: string): string {
-  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on')return corePolicySync<any>('agenda-life.missedInstruction',[latestMessage]);
+  if((true as boolean))return corePolicySync<any>('agenda-life.missedInstruction',[latestMessage]);
   if (!readsAsNotDone(latestMessage)) return '';
   return [
     'They have just admitted they did not do something they said they would. Do not let it go and do not be gracious about it.',
@@ -587,7 +587,7 @@ const WHEN_INSTEAD = /\b(tomorrow|tonight|later|next week|this weekend|another d
 const PUTTING_IT_OFF = /\b(?:have to|has to|need to|i'?ll|i will|going to|gonna|can'?t|cannot|couldn'?t|won'?t|not (?:until|till)|push\w*|mov\w*|shift\w*|bump\w*|resched\w*|postpon\w*|put (?:it|that|them) off)\b/i;
 
 export function putOffUntil(latestMessage: string): string | null {
-  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on')return corePolicySync<any>('agenda-life.putOffUntil',[latestMessage]);
+  if((true as boolean))return corePolicySync<any>('agenda-life.putOffUntil',[latestMessage]);
   // "I did it tomorrow" is not a sentence anyone says; a completion wins.
   if (readsAsDone(latestMessage)) return null;
   if (!PUTTING_IT_OFF.test(latestMessage)) return null;
@@ -624,7 +624,7 @@ function namedItem<T extends AgendaItem>(items: T[], message: string): T | null 
 }
 
 export function whenMismatchInstruction(latestMessage: string, items: AgendaItem[], now: Date, todayKey: string): string {
-  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on')return corePolicySync<any>('agenda-life.whenMismatchInstruction',[latestMessage,items,agendaClock(now),todayKey]);
+  if((true as boolean))return corePolicySync<any>('agenda-life.whenMismatchInstruction',[latestMessage,items,agendaClock(now),todayKey]);
   const raw = WHEN_INSTEAD.exec(latestMessage)?.[1];
   if (!raw) return '';
   const item = namedItem(items.filter(entry => !entry.done), latestMessage);
@@ -646,7 +646,7 @@ export function whenMismatchInstruction(latestMessage: string, items: AgendaItem
 }
 
 export function putOffInstruction(latestMessage: string): string {
-  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on')return corePolicySync<any>('agenda-life.putOffInstruction',[latestMessage]);
+  if((true as boolean))return corePolicySync<any>('agenda-life.putOffInstruction',[latestMessage]);
   const when = putOffUntil(latestMessage);
   if (!when) return '';
   return [
@@ -669,7 +669,7 @@ const DAY_NAMED = new RegExp(`\\b((?:next |this coming |this )?(?:sunday|monday|
 const CLOCK_NAMED = /(?:@\s*|\bat\s+)?\b(\d{1,2})(?::(\d{2}))?\s*([ap])\.?m\b/i;
 
 export function saidWhen(text: string, now: Date): { date?: string; time?: string } {
-  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on')return corePolicySync<any>('agenda-life.saidWhen',[text,agendaClock(now)]);
+  if((true as boolean))return corePolicySync<any>('agenda-life.saidWhen',[text,agendaClock(now)]);
   const day = DAY_NAMED.exec(text)?.[1];
   const date = day ? resolveDate(day.toLowerCase(), now) ?? undefined : undefined;
   const clock = CLOCK_NAMED.exec(text);
@@ -718,7 +718,7 @@ export function movedSaid<T extends AgendaItem>(
   chased: T | null,
   now: Date,
 ): MoveSaid<T> | null {
-  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on')return corePolicySync<any>('agenda-life.movedSaid',[theirMessage,herReply,herPrevious,open,chased,agendaClock(now)]);
+  if((true as boolean))return corePolicySync<any>('agenda-life.movedSaid',[theirMessage,herReply,herPrevious,open,chased,agendaClock(now)]);
   if (!CLAIMS_MOVED.test(herReply)) return null;
   const theirs = saidWhen(theirMessage, now);
   const hers = saidWhen(herReply, now);
@@ -785,7 +785,7 @@ function daysBetween(fromKey: string, toKey: string) {
  * tomorrow and yesterday already say it in a word and are left alone.
  */
 export function relativeDay(dateKey: string, todayKey: string, weekday: Intl.DateTimeFormat) {
-  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on'){const [y,m,d]=dateKey.split('-').map(Number);const name=new Intl.DateTimeFormat(weekday.resolvedOptions().locale,{weekday:'long',timeZone:'UTC'}).format(new Date(Date.UTC(y,m-1,d)));return corePolicySync<string>('agenda-life.relativeDay',[dateKey,todayKey,{weekday:name}]);}
+  if((true as boolean)){const [y,m,d]=dateKey.split('-').map(Number);const name=new Intl.DateTimeFormat(weekday.resolvedOptions().locale,{weekday:'long',timeZone:'UTC'}).format(new Date(Date.UTC(y,m-1,d)));return corePolicySync<string>('agenda-life.relativeDay',[dateKey,todayKey,{weekday:name}]);}
   if (dateKey === todayKey) return 'today';
   if (dateKey === shiftDays(todayKey, 1)) return 'tomorrow';
   if (dateKey === shiftDays(todayKey, -1)) return 'yesterday';
@@ -842,12 +842,12 @@ function worthChasing(item: AgendaItem, todayKey: string) {
  * and only one of them was told the answer.
  */
 export function chaseableOverdue(items: AgendaItem[], now: Date, todayKey: string) {
-  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on')return corePolicySync<any>('agenda-life.chaseableOverdue',[items,agendaClock(now),todayKey]);
+  if((true as boolean))return corePolicySync<any>('agenda-life.chaseableOverdue',[items,agendaClock(now),todayKey]);
   return items.filter(item => itemStatus(item, now, todayKey) === 'overdue' && worthChasing(item, todayKey)).length;
 }
 
 export function formatAgenda(items: AgendaItem[], now: Date, todayKey: string, limit = 25): string {
-  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on')return corePolicySync<any>('agenda-life.formatAgenda',[items,agendaClock(now),todayKey,limit]);
+  if((true as boolean))return corePolicySync<any>('agenda-life.formatAgenda',[items,agendaClock(now),todayKey,limit]);
   const relevant = relevantItems(items, todayKey).slice(0, limit);
   if (!relevant.length) return 'The user has nothing saved from today onward.';
 
@@ -913,7 +913,7 @@ const STATED_TIME = /\b(\d{1,2}:\d{2}\s*(am|pm)?|\d{1,2}\s*(am|pm)|at\s+\d{1,2}(
  * the line is dropped, and the log says why.
  */
 export function inventedTimeFor<T extends AgendaItem>(line: string, items: T[]): T | null {
-  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on'){const indices=corePolicySync<number>('agenda-life.indexed',['inventedTimeFor',[line,items]]);return indices<0?null:items[indices];}
+  if((true as boolean)){const indices=corePolicySync<number>('agenda-life.indexed',['inventedTimeFor',[line,items]]);return indices<0?null:items[indices];}
   if (!STATED_TIME.test(line)) return null;
   const untimed = items.filter(item => !item.time && !item.done);
   if (!untimed.length) return null;
@@ -931,7 +931,7 @@ export function inventedTimeFor<T extends AgendaItem>(line: string, items: T[]):
  * a personality bolted on; these are kept out of the material she opens on.
  */
 export function raisedRecently<T extends AgendaItem>(lines: string[], items: T[]): T[] {
-  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on'){const indices=corePolicySync<number[]>('agenda-life.indexed',['raisedRecently',[lines,items]]);return indices.map(i=>items[i]);}
+  if((true as boolean)){const indices=corePolicySync<number[]>('agenda-life.indexed',['raisedRecently',[lines,items]]);return indices.map(i=>items[i]);}
   const out: T[] = [];
   for (const line of lines) {
     // Her own lines again, and the failure here is the quiet one: an ordinary
@@ -944,7 +944,7 @@ export function raisedRecently<T extends AgendaItem>(lines: string[], items: T[]
 }
 
 export function staleItemNamed(line: string, items: AgendaItem[], todayKey: string, nowMs = Date.now()): AgendaItem | null {
-  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on'){const indices=corePolicySync<number>('agenda-life.indexed',['staleItemNamed',[line,items,todayKey,nowMs]]);return indices<0?null:items[indices];}
+  if((true as boolean)){const indices=corePolicySync<number>('agenda-life.indexed',['staleItemNamed',[line,items,todayKey,nowMs]]);return indices<0?null:items[indices];}
   const lastEvent = shiftDays(todayKey, -CHASE_WINDOW_DAYS);
   // Done, but not just done: "how did the Steam thing go" an hour after it is a
   // follow-up, not a thing she should have known was over.
@@ -969,7 +969,7 @@ export function staleItemNamed(line: string, items: AgendaItem[], todayKey: stri
 export function followCalendar<T extends { title: string; date: string; time?: string; done: boolean; completedAt?: string; heardAbout?: string; underway?: string }>(
   item: T, event: { title: string; date: string; time?: string }, today: string,
 ): T {
-  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on')return corePolicySync<any>('agenda-life.followCalendar',[item,event,today]);
+  if((true as boolean))return corePolicySync<any>('agenda-life.followCalendar',[item,event,today]);
   const reopened = event.date !== item.date && event.date >= today;
   return { ...item, title: event.title, date: event.date, time: event.time, ...(reopened ? { done: false, completedAt: undefined, heardAbout: undefined, underway: undefined } : {}) };
 }

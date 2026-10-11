@@ -60,7 +60,7 @@ export const CHOICES_TOOL: ChatTool = {
  * than like she said too much.
  */
 export function readChoices(raw: unknown): string[] {
-  if(process.env.HARU_CORE_FINAL_TOOLS==='on')return corePolicySync('final-tool-values.choices',[raw]);
+  if((true as boolean))return corePolicySync('final-tool-values.choices',[raw]);
   const list = Array.isArray(raw) ? raw : [];
   const seen = new Set<string>();
   const kept: string[] = [];

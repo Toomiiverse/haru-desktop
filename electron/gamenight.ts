@@ -47,7 +47,7 @@ function shiftDays(key: string, days: number): string {
  * how "Dark Souls guide" becomes "Dark Souls Capra Demon guide".
  */
 export function gamesPlayedLately(log: ActivityLog, todayKey: string, days = PLAYED_WINDOW_DAYS): Played[] {
-  if(process.env.HARU_CORE_GAME_GUIDE==='on')return corePolicySync<Played[]>('game-guide.playedLately',[log,todayKey,days]);
+  if((true as boolean))return corePolicySync<Played[]>('game-guide.playedLately',[log,todayKey,days]);
   const from = shiftDays(todayKey, -days);
   const byName = new Map<string, Played>();
   for (const [day, entries] of Object.entries(log ?? {})) {
@@ -81,13 +81,13 @@ const NOT_GAMES = /^(wallpaper engine|steamvr|steam link|blender|aseprite|source
 
 /** "Overwatch®" is not what anyone types into a search box. */
 export function plainName(name: string): string {
-  if(process.env.HARU_CORE_GAME_GUIDE==='on')return corePolicySync<string>('game-guide.plainName',[name]);
+  if((true as boolean))return corePolicySync<string>('game-guide.plainName',[name]);
   return name.replace(/[®™©]/g, '').replace(/\s+/g, ' ').trim();
 }
 
 /** The desk's record and Steam's, as one list. Steam fills in what the desk never saw. */
 export function withSteam(played: Played[], steam: SteamRecent[]): Played[] {
-  if(process.env.HARU_CORE_GAME_GUIDE==='on')return corePolicySync<Played[]>('game-guide.withSteam',[played,steam]);
+  if((true as boolean))return corePolicySync<Played[]>('game-guide.withSteam',[played,steam]);
   const out = played.map(entry => ({ ...entry, name: plainName(entry.name) }));
   for (const recent of steam) {
     const name = plainName(recent.name ?? '');
@@ -108,7 +108,7 @@ export function withSteam(played: Played[], steam: SteamRecent[]): Played[] {
  * the last few nights. Null means the night is hers to spend on anything.
  */
 export function pickGame(played: Played[], nights: Night[], todayKey: string): Played | null {
-  if(process.env.HARU_CORE_GAME_GUIDE==='on')return corePolicySync<Played|null>('game-guide.pickGame',[played,nights,todayKey]);
+  if((true as boolean))return corePolicySync<Played|null>('game-guide.pickGame',[played,nights,todayKey]);
   const restFrom = shiftDays(todayKey, -GUIDE_REST_NIGHTS);
   const readLately = new Set(nights.filter(night => night.game && night.day >= restFrom).map(night => night.game!.toLowerCase()));
   return played.find(entry => !readLately.has(entry.name.toLowerCase())) ?? null;
@@ -120,7 +120,7 @@ export function pickGame(played: Played[], nights: Night[], todayKey: string): P
  * guide, and a game she has read about before gets a different angle.
  */
 export function guideQuery(game: Played, nights: Night[]): string {
-  if(process.env.HARU_CORE_GAME_GUIDE==='on')return corePolicySync<string>('game-guide.guideQuery',[game,nights]);
+  if((true as boolean))return corePolicySync<string>('game-guide.guideQuery',[game,nights]);
   const before = nights.filter(night => night.game?.toLowerCase() === game.name.toLowerCase()).length;
   const hint = game.seen.map(specificThing).find(Boolean);
   if (hint) return `${game.name} ${hint} guide`;
@@ -130,7 +130,7 @@ export function guideQuery(game: Played, nights: Night[]): string {
 
 /** A proper noun or two out of a caption, if it has one worth searching. */
 export function specificThing(caption: string): string | null {
-  if(process.env.HARU_CORE_GAME_GUIDE==='on')return corePolicySync<string|null>('game-guide.specificThing',[caption]);
+  if((true as boolean))return corePolicySync<string|null>('game-guide.specificThing',[caption]);
   // Up to four capitalised words, allowing a small connector between them —
   // "Margit the Fell Omen", "Lake of Rot" — and never starting on one.
   const names = caption.match(/\b[A-Z][a-z]+(?:\s+(?:(?:of|the|de)\s+)?[A-Z][a-z]+){0,3}\b/g) ?? [];
@@ -142,7 +142,7 @@ const STOPNAMES = new Set(['the', 'a', 'an', 'this', 'that', 'there', 'screensho
 
 /** What she is told with the guide in front of her. */
 export function guideNoteInstruction(game: Played, query: string, found: string): string {
-  if(process.env.HARU_CORE_GAME_GUIDE==='on')return corePolicySync<string>('game-guide.instruction',[game,query,found]);
+  if((true as boolean))return corePolicySync<string>('game-guide.instruction',[game,query,found]);
   const how = game.minutes >= 60 ? `${Math.round(game.minutes / 60)} hours over the last few days` : game.minutes ? `${game.minutes} minutes lately` : game.steamMinutes ? `${Math.round(game.steamMinutes / 60)} hours in the last fortnight` : 'lately';
   const seen = game.seen.length ? `You have seen their screenshots from it: ${game.seen.map(text => `"${text}"`).join('; ')}.` : '';
   return [

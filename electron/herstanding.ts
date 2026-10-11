@@ -82,7 +82,7 @@ export type Slight = {
 export const SLIGHTS_KEPT = 60;
 
 export function readSlights(saved: unknown): Slight[] {
-  if(process.env.HARU_CORE_OWN_TIME==='on')return corePolicySync<ReturnType<typeof readSlights>>('own-time.standingreadSlights',[saved]);
+  if((true as boolean))return corePolicySync<ReturnType<typeof readSlights>>('own-time.standingreadSlights',[saved]);
   if (!Array.isArray(saved)) return [];
   return saved
     .filter((entry): entry is Slight => Boolean(entry) && typeof entry === 'object'
@@ -94,14 +94,14 @@ export function readSlights(saved: unknown): Slight[] {
 
 /** One a day per kind. A bad evening is one evening however many times it fires. */
 export function keepSlight(slights: Slight[], slight: Slight): Slight[] {
-  if(process.env.HARU_CORE_OWN_TIME==='on')return corePolicySync<ReturnType<typeof keepSlight>>('own-time.standingkeepSlight',[slights,slight]);
+  if((true as boolean))return corePolicySync<ReturnType<typeof keepSlight>>('own-time.standingkeepSlight',[slights,slight]);
   const already = slights.some(kept => kept.kind === slight.kind && dayOf(kept.at) === dayOf(slight.at));
   if (already) return slights;
   return [...slights, slight].slice(-SLIGHTS_KEPT);
 }
 
 export function slightsAsIncidents(slights: Slight[]): Incident[] {
-  if(process.env.HARU_CORE_OWN_TIME==='on')return corePolicySync<ReturnType<typeof slightsAsIncidents>>('own-time.standingslightsAsIncidents',[slights]);
+  if((true as boolean))return corePolicySync<ReturnType<typeof slightsAsIncidents>>('own-time.standingslightsAsIncidents',[slights]);
   return slights.map(slight => ({ what: slight.what, at: slight.at }));
 }
 
@@ -114,7 +114,7 @@ export type Standing = {
 
 /** Inside the window, and parseable. Anything else is not evidence of a habit. */
 export function recentIncidents(incidents: Incident[], nowMs: number, days = STANDING_WINDOW_DAYS): Incident[] {
-  if(process.env.HARU_CORE_OWN_TIME==='on')return corePolicySync<ReturnType<typeof recentIncidents>>('own-time.standingrecentIncidents',[incidents,nowMs,days]);
+  if((true as boolean))return corePolicySync<ReturnType<typeof recentIncidents>>('own-time.standingrecentIncidents',[incidents,nowMs,days]);
   const floor = nowMs - days * 86_400_000;
   return incidents
     .filter(incident => incident.what.trim() && !Number.isNaN(Date.parse(incident.at)))
@@ -131,13 +131,13 @@ export function recentIncidents(incidents: Incident[], nowMs: number, days = STA
  * model for a week in which nothing happened twice.
  */
 export function enoughToStandOn(incidents: Incident[], minTimes = STANDING_MIN_TIMES): boolean {
-  if(process.env.HARU_CORE_OWN_TIME==='on')return corePolicySync<ReturnType<typeof enoughToStandOn>>('own-time.standingenoughToStandOn',[incidents,minTimes]);
+  if((true as boolean))return corePolicySync<ReturnType<typeof enoughToStandOn>>('own-time.standingenoughToStandOn',[incidents,minTimes]);
   return new Set(incidents.map(incident => dayOf(incident.at))).size >= minTimes;
 }
 
 /** Weekly, and never twice in a day however often the tick runs. */
 export function standingDue(lastAt: string | undefined, now: Date, everyDays = STANDING_EVERY_DAYS): boolean {
-  if(process.env.HARU_CORE_OWN_TIME==='on')return corePolicySync<ReturnType<typeof standingDue>>('own-time.standingstandingDue',[lastAt,now,everyDays]);
+  if((true as boolean))return corePolicySync<ReturnType<typeof standingDue>>('own-time.standingstandingDue',[lastAt,now,everyDays]);
   if (!lastAt) return true;
   const last = Date.parse(lastAt);
   if (Number.isNaN(last)) return true;
@@ -154,7 +154,7 @@ export function standingDue(lastAt: string | undefined, now: Date, everyDays = S
  * every week until she has a rulebook, which is the opposite of a standing.
  */
 export function standingPrompt(incidents: Incident[], existing: string[]): string {
-  if(process.env.HARU_CORE_OWN_TIME==='on')return corePolicySync<ReturnType<typeof standingPrompt>>('own-time.standingstandingPrompt',[incidents,existing]);
+  if((true as boolean))return corePolicySync<ReturnType<typeof standingPrompt>>('own-time.standingstandingPrompt',[incidents,existing]);
   const said = incidents.map(incident => `- ${dayOf(incident.at)}: ${incident.what.trim()}`).join('\n');
   const held = existing.length ? `\n\nRules you already hold, which you do not need to write again:\n${existing.map(rule => `- ${rule}`).join('\n')}` : '';
   return [
@@ -175,7 +175,7 @@ export function standingPrompt(incidents: Incident[], existing: string[]): strin
 
 /** `NONE`, or the two lines. Anything else is a model that did not answer. */
 export function parseStanding(raw: string): Standing | null {
-  if(process.env.HARU_CORE_OWN_TIME==='on')return corePolicySync<ReturnType<typeof parseStanding>>('own-time.standingparseStanding',[raw]);
+  if((true as boolean))return corePolicySync<ReturnType<typeof parseStanding>>('own-time.standingparseStanding',[raw]);
   const text = (raw ?? '').trim();
   if (!text || /^\s*none\b/i.test(text)) return null;
   const rule = /^\s*RULE\s*:\s*(.+)$/im.exec(text);
@@ -197,12 +197,12 @@ export function parseStanding(raw: string): Standing | null {
 
 /** Hers, not his. */
 export function isHerStanding(record: { kind?: string; subject?: string }): boolean {
-  if(process.env.HARU_CORE_OWN_TIME==='on')return corePolicySync<ReturnType<typeof isHerStanding>>('own-time.standingisHerStanding',[record]);
+  if((true as boolean))return corePolicySync<ReturnType<typeof isHerStanding>>('own-time.standingisHerStanding',[record]);
   return record.kind === 'preference' && (record.subject ?? '').toLowerCase() === HER_SUBJECT;
 }
 
 export function herStandings(memories: MemoryRecord[]): MemoryRecord[] {
-  if(process.env.HARU_CORE_OWN_TIME==='on')return corePolicySync<ReturnType<typeof herStandings>>('own-time.standingherStandings',[memories]);
+  if((true as boolean))return corePolicySync<ReturnType<typeof herStandings>>('own-time.standingherStandings',[memories]);
   return memories
     .filter(memory => isHerStanding(memory) && !memory.supersededBy && memory.status !== 'archived')
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
@@ -219,7 +219,7 @@ export function herStandings(memories: MemoryRecord[]): MemoryRecord[] {
  * refuse would be a different character, and a worse one.
  */
 export function herStandingInstruction(standings: MemoryRecord[]): string {
-  if(process.env.HARU_CORE_OWN_TIME==='on')return corePolicySync<ReturnType<typeof herStandingInstruction>>('own-time.standingherStandingInstruction',[standings]);
+  if((true as boolean))return corePolicySync<ReturnType<typeof herStandingInstruction>>('own-time.standingherStandingInstruction',[standings]);
   if (!standings.length) return '';
   const lines = standings.map(standing => {
     // The reason she gave, kept on the record's first observed moment.

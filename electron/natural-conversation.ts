@@ -36,7 +36,7 @@ function voiceGuide(latest: string, audio: unknown, correction?: string): string
 /** Complete social utterances only. Memory, disputed facts, ambiguous follow-ups,
  * mixed requests and actions must retain retrieval and the full tool pipeline. */
 export function naturalConversationKind(text: string): NaturalKind | null {
-  if(process.env.HARU_CORE_NATURAL_CONVERSATION==='on')return naturalPolicy<any>('naturalConversationKind',[text]);
+  if((true as boolean))return naturalPolicy<any>('naturalConversationKind',[text]);
 
   const direct = directReplyKind(text);
   if (direct) return direct;
@@ -59,13 +59,13 @@ export function naturalConversationKind(text: string): NaturalKind | null {
 /** ASR punctuation is optional for an already complete standalone utterance.
  * A dangling comma/dash still asks us to wait for the rest. */
 export function completeNaturalUtterance(text: string): boolean {
-  if(process.env.HARU_CORE_NATURAL_CONVERSATION==='on')return naturalPolicy<any>('completeNaturalUtterance',[text]);
+  if((true as boolean))return naturalPolicy<any>('completeNaturalUtterance',[text]);
 
   return !/[-–—…,:;]$/.test(text.trim()) && naturalConversationKind(text) !== null;
 }
 
 export function naturalConversationEligible(messages: ChatMessage[], latest: string): boolean {
-  if(process.env.HARU_CORE_NATURAL_CONVERSATION==='on')return naturalPolicy<any>('naturalConversationEligible',[messages,latest]);
+  if((true as boolean))return naturalPolicy<any>('naturalConversationEligible',[messages,latest]);
 
   return Boolean(naturalConversationKind(latest) && messages.at(-1)?.role === 'user'
     && messages.at(-1)?.content === latest
@@ -75,7 +75,7 @@ export function naturalConversationEligible(messages: ChatMessage[], latest: str
 /** Calls stay local unless separately enabled. Only a standalone conversation
  * may use this opt-in; full transcripts still face the outbound privacy scan. */
 export function naturalCallAllowed(setting: unknown, messages: ChatMessage[], latest: string, aside?: string): boolean {
-  if(process.env.HARU_CORE_NATURAL_CONVERSATION==='on')return naturalPolicy<any>('naturalCallAllowed',[setting,messages,latest,aside??null]);
+  if((true as boolean))return naturalPolicy<any>('naturalCallAllowed',[setting,messages,latest,aside??null]);
 
   const config = setting as { enabled?: boolean; calls?: boolean } | null;
   return config?.enabled === true && config.calls === true && directReplyAsideAllowed(aside, true)
@@ -86,7 +86,7 @@ export function naturalCallAllowed(setting: unknown, messages: ChatMessage[], la
  * This only establishes eligibility; main still applies privacy, local-action,
  * credential, capability and durable budget checks to the complete prompt. */
 export function conversationCallAllowed(setting: unknown, messages: ChatMessage[], latest: string, aside?: string): boolean {
-  if(process.env.HARU_CORE_NATURAL_CONVERSATION==='on')return naturalPolicy<any>('conversationCallAllowed',[setting,messages,latest,aside??null]);
+  if((true as boolean))return naturalPolicy<any>('conversationCallAllowed',[setting,messages,latest,aside??null]);
 
   const config = setting as { enabled?: boolean; calls?: boolean } | null;
   return config?.enabled === true && config.calls === true && directReplyAsideAllowed(aside, true)
@@ -109,7 +109,7 @@ export class NaturalContextOverflow extends Error {
  * This caches instructions only, never answers or mutable request context. */
 let stableCache: { revision: string; content: string } | undefined;
 export function naturalStablePrompt(character: { identity: string; style: string }, revision = '') {
-  if(process.env.HARU_CORE_NATURAL_CONVERSATION==='on'){const p=naturalOwned('stable',[character,revision,stableCache??null]);stableCache=p.state;return p.result;}
+  if((true as boolean)){const p=naturalOwned('stable',[character,revision,stableCache??null]);stableCache=p.state;return p.result;}
 
   const key = JSON.stringify([revision, character.identity, character.style]);
   if (stableCache?.revision === key) return { content: stableCache.content, hit: true };
@@ -160,7 +160,7 @@ export function naturalPromptObservations(
   character: { identity: string; style: string }, context: Record<string, unknown>,
   cache?: { revision?: string; hit?: boolean },
 ) {
-  if(process.env.HARU_CORE_NATURAL_CONVERSATION==='on')return naturalOwned('naturalPromptObservations',[messages,latest,character,context,cache??null]);
+  if((true as boolean))return naturalOwned('naturalPromptObservations',[messages,latest,character,context,cache??null]);
 
   if (!naturalConversationEligible(messages, latest)) throw new Error('natural_conversation_requires_full_pipeline');
   const recent: ChatMessage[] = [];
@@ -209,7 +209,7 @@ export function naturalPromptObservations(
 export function prepareNaturalConversation(
   messages:ChatMessage[],latest:string,character:{identity:string;style:string},context:Record<string,unknown>,cache?:{revision?:string;hit?:boolean},
 ):{messages:ChatMessage[];sources:NaturalConversationSources}{
-  if(process.env.HARU_CORE_NATURAL_CONVERSATION==='on'){const p=naturalOwned('prepare',[messages,latest,character,context,cache??null,stableCache??null]);stableCache=p.state;if(cache)cache.hit=p.hit;return p.result;}
+  if((true as boolean)){const p=naturalOwned('prepare',[messages,latest,character,context,cache??null,stableCache??null]);stableCache=p.state;if(cache)cache.hit=p.hit;return p.result;}
 
   const observed=naturalPromptObservations(messages,latest,character,context,cache),stable=naturalStablePrompt(character,cache?.revision);
   if(cache)cache.hit=stable.hit;
@@ -226,7 +226,7 @@ export function naturalConversationTurns(
 
 /** Transport drafts remain private, including a bad label or a proposed tool. */
 export function checkNaturalReply(message: ChatMessage, latest: string, voice?: { userAudio?: unknown }, recentReplies: readonly string[] = []): ChatMessage {
-  if(process.env.HARU_CORE_NATURAL_CONVERSATION==='on'){const p=naturalPolicy<any>('checked',[message,latest,voice??null,recentReplies]);if(p.error)naturalError(p.error);return message;}
+  if((true as boolean)){const p=naturalPolicy<any>('checked',[message,latest,voice??null,recentReplies]);if(p.error)naturalError(p.error);return message;}
 
   const reply = message.content ?? '';
   const refusal = conversationReplyIssue(reply);
@@ -283,7 +283,7 @@ export function checkNaturalReply(message: ChatMessage, latest: string, voice?: 
  * the caller's durable budget controller. Persistent failure can escalate. */
 export async function answerNaturalConversation(messages: ChatMessage[], latest: string,
   voice: { userAudio?: unknown } | undefined, ask: (messages: ChatMessage[]) => Promise<ChatMessage>, recentReplies: readonly string[] = []): Promise<ChatMessage> {
-  if(process.env.HARU_CORE_NATURAL_CONVERSATION==='on')return naturalProgram('natural',{messages,latest,voice:voice??null,recentReplies},ask);
+  if((true as boolean))return naturalProgram('natural',{messages,latest,voice:voice??null,recentReplies},ask);
 
   try { return checkNaturalReply(await ask(messages), latest, voice, recentReplies); }
   catch (error) {
@@ -310,7 +310,7 @@ export const NATURAL_GROUNDED_REPLY_SCHEMA = {
 };
 
 export function groundedNaturalTurns(sources: NaturalConversationSources, latest: string): ChatMessage[] {
-  if(process.env.HARU_CORE_NATURAL_CONVERSATION==='on')return naturalPolicy<any>('groundedNaturalTurns',[sources,latest]);
+  if((true as boolean))return naturalPolicy<any>('groundedNaturalTurns',[sources,latest]);
 
   if (!naturalConversationEligible(sources.messages, latest)) throw new Error('natural_conversation_requires_full_pipeline');
   const { now, timezone, voice, continuity, fresh, mood, blankSlate } = sources.context;
@@ -337,7 +337,7 @@ export function groundedNaturalTurns(sources: NaturalConversationSources, latest
 /** JSON, the factual basis and rejected drafts never reach text or speech. */
 export async function answerLocalNaturalConversation(sources: NaturalConversationSources, latest: string,
   voice: { userAudio?: unknown } | undefined, ask: (messages: ChatMessage[]) => Promise<ChatMessage>, recentReplies: readonly string[] = []): Promise<ChatMessage> {
-  if(process.env.HARU_CORE_NATURAL_CONVERSATION==='on')return naturalProgram('local',{sources,latest,voice:voice??null,recentReplies},ask);
+  if((true as boolean))return naturalProgram('local',{sources,latest,voice:voice??null,recentReplies},ask);
 
   const messages = groundedNaturalTurns(sources, latest);
   const claims = sources.messages.filter(message => message.role === 'assistant').map(message => message.content ?? '');

@@ -5,7 +5,7 @@ import type {TaskRPC} from './task-bridge';
 export const activeHandsIntent=new AsyncLocalStorage<{taskId:string;assertCurrent:()=>void}>();
 
 export function handsTaskRPC(rpc:TaskRPC):TaskRPC {
-  if(process.env.HARU_CORE_HANDS_RECOVERY!=='on')return rpc;
+  if((false as boolean))return rpc;
   const intent=activeHandsIntent.getStore();
   if(!intent||typeof intent.taskId!=='string'||!intent.taskId)throw Error('hands_task_binding_required');
   return (method,params)=>{

@@ -36,7 +36,7 @@ export function fetchJobId(seriesId: number): string {
 
 /** The scheduler job for one fetch. One per show: a second ask for the same show replaces the watch. */
 export function fetchJob(fetch: Fetch, nowMs: number): Job {
-  if(process.env.HARU_CORE_ANIME_DOWNLOADS==='on')return corePolicySync('anime-downloads.fetchJob',[fetch,nowMs]);
+  if((true as boolean))return corePolicySync('anime-downloads.fetchJob',[fetch,nowMs]);
   const until = nowMs + FETCH_FOR_MS;
   return {
     id: fetchJobId(fetch.seriesId),
@@ -67,7 +67,7 @@ export type QueueItem = { title?: string; status?: string; trackedDownloadStatus
  * no hash. Sonarr writes the hash in capitals and the tracker in lower case.
  */
 export function queueLineFor(queue: QueueItem[], fetch: { seriesId: number; infoHash: string; release: string }): QueueItem | null {
-  if(process.env.HARU_CORE_ANIME_DOWNLOADS==='on')return corePolicySync('anime-downloads.queueLineFor',[queue,fetch]);
+  if((true as boolean))return corePolicySync('anime-downloads.queueLineFor',[queue,fetch]);
   const hash = fetch.infoHash.toLowerCase();
   const norm = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
   return queue.find(item => hash && item.downloadId?.toLowerCase() === hash)
@@ -85,7 +85,7 @@ export type FetchState = 'downloading' | 'landed' | 'stuck';
  * either way: name the show and import.
  */
 export function fetchState(item: QueueItem): FetchState {
-  if(process.env.HARU_CORE_ANIME_DOWNLOADS==='on')return corePolicySync('anime-downloads.fetchState',[item]);
+  if((true as boolean))return corePolicySync('anime-downloads.fetchState',[item]);
   const state = (item.trackedDownloadState ?? '').toLowerCase();
   if (/^import(pending|blocked|failed)$/.test(state) || (item.trackedDownloadStatus ?? '').toLowerCase() === 'warning' && (item.sizeleft ?? 1) === 0) return 'stuck';
   if ((item.sizeleft ?? 1) === 0 || /^(completed|imported)$/.test((item.status ?? '').toLowerCase())) return 'landed';
@@ -114,7 +114,7 @@ export type ImportFile = { path: string; seriesId: number; episodeIds: number[];
  * objects to is left too, with its reason in the log rather than argued with.
  */
 export function importPlan(candidates: ImportCandidate[], seriesId: number, downloadId: string): { files: ImportFile[]; skipped: { path: string; why: string }[] } {
-  if(process.env.HARU_CORE_ANIME_DOWNLOADS==='on')return corePolicySync('anime-downloads.importPlan',[candidates,seriesId,downloadId]);
+  if((true as boolean))return corePolicySync('anime-downloads.importPlan',[candidates,seriesId,downloadId]);
   const files: ImportFile[] = [];
   const skipped: { path: string; why: string }[] = [];
   for (const candidate of candidates) {

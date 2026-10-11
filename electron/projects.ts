@@ -124,14 +124,14 @@ function clipped(text: string, max: number): string {
 
 /** The want without its "to", which is how it reads in a sentence of hers. */
 export function stripProject(text: string): string {
-  if(process.env.HARU_CORE_PROJECTS==='on')return corePolicySync<ReturnType<typeof stripProject>>('projects.stripProject',[text]);
+  if((true as boolean))return corePolicySync<ReturnType<typeof stripProject>>('projects.stripProject',[text]);
   return tidy(String(text ?? '').replace(/^(?:to\s+|i\s+want\s+to\s+)/i, '').replace(/[.!]+$/, ''));
 }
 
 // -- reading them back -------------------------------------------------------
 
 export function readProjects(saved: unknown): Project[] {
-  if(process.env.HARU_CORE_PROJECTS==='on')return corePolicySync<ReturnType<typeof readProjects>>('projects.readProjects',[saved]);
+  if((true as boolean))return corePolicySync<ReturnType<typeof readProjects>>('projects.readProjects',[saved]);
   if (!Array.isArray(saved)) return [];
   return saved.filter((project): project is Project =>
     !!project && typeof project === 'object'
@@ -148,7 +148,7 @@ export function readProjects(saved: unknown): Project[] {
  * nothing in the store changes until something actually happened.
  */
 export function asProject(want: Project): Worked {
-  if(process.env.HARU_CORE_PROJECTS==='on')return corePolicySync<ReturnType<typeof asProject>>('projects.asProject',[want]);
+  if((true as boolean))return corePolicySync<ReturnType<typeof asProject>>('projects.asProject',[want]);
   return {
     ...want,
     hardness: clamp(Math.round(want.hardness ?? HARDNESS.min), HARDNESS.min, HARDNESS.max),
@@ -161,12 +161,12 @@ export function asProject(want: Project): Worked {
 }
 
 export function isActive(project: Project): boolean {
-  if(process.env.HARU_CORE_PROJECTS==='on')return corePolicySync<ReturnType<typeof isActive>>('projects.isActive',[project]);
+  if((true as boolean))return corePolicySync<ReturnType<typeof isActive>>('projects.isActive',[project]);
   return ACTIVE.includes(project.status);
 }
 
 export function activeIn(projects: Project[]): Project[] {
-  if(process.env.HARU_CORE_PROJECTS==='on')return corePolicySync<ReturnType<typeof activeIn>>('projects.activeIn',[projects]);
+  if((true as boolean))return corePolicySync<ReturnType<typeof activeIn>>('projects.activeIn',[projects]);
   return projects.filter(isActive);
 }
 
@@ -179,7 +179,7 @@ export function activeIn(projects: Project[]): Project[] {
  * anything up again — the pile would have locked the ladder shut.
  */
 export function roomForNew(projects: Project[]): boolean {
-  if(process.env.HARU_CORE_PROJECTS==='on')return corePolicySync<ReturnType<typeof roomForNew>>('projects.roomForNew',[projects]);
+  if((true as boolean))return corePolicySync<ReturnType<typeof roomForNew>>('projects.roomForNew',[projects]);
   return activeIn(projects).filter(project => (project.nights ?? 0) > 0 || (project.bornOf && project.bornOf !== 'taste')).length < ACTIVE_MAX;
 }
 
@@ -198,7 +198,7 @@ export function roomForNew(projects: Project[]): boolean {
  * against is not a standing.
  */
 export function standingIn(projects: Project[], interest?: string): number {
-  if(process.env.HARU_CORE_PROJECTS==='on')return corePolicySync<ReturnType<typeof standingIn>>('projects.standingIn',[projects,interest]);
+  if((true as boolean))return corePolicySync<ReturnType<typeof standingIn>>('projects.standingIn',[projects,interest]);
   const hers = projects.filter(project => !interest || project.interest === interest);
   const done = hers.filter(project => project.status === 'done').map(project => project.hardness ?? HARDNESS.min);
   const beaten = hers.filter(project => project.status === 'shelved').length;
@@ -216,7 +216,7 @@ export function standingIn(projects: Project[], interest?: string): number {
  * nothing, she is asked for something.
  */
 export function needsSomethingNew(projects: Project[]): boolean {
-  if(process.env.HARU_CORE_PROJECTS==='on')return corePolicySync<ReturnType<typeof needsSomethingNew>>('projects.needsSomethingNew',[projects]);
+  if((true as boolean))return corePolicySync<ReturnType<typeof needsSomethingNew>>('projects.needsSomethingNew',[projects]);
   return roomForNew(projects) && !activeIn(projects).some(project => (project.nights ?? 0) > 0);
 }
 
@@ -230,7 +230,7 @@ function words(text: string): Set<string> {
 
 /** How much of the same idea two lines are, 0 to 1. */
 export function sameIdea(left: string, right: string): number {
-  if(process.env.HARU_CORE_PROJECTS==='on')return corePolicySync<ReturnType<typeof sameIdea>>('projects.sameIdea',[left,right]);
+  if((true as boolean))return corePolicySync<ReturnType<typeof sameIdea>>('projects.sameIdea',[left,right]);
   const one = words(left), two = words(right);
   if (!one.size || !two.size) return 0;
   let shared = 0;
@@ -248,7 +248,7 @@ export function sameIdea(left: string, right: string): number {
  * ledger behind it.
  */
 export function needsHim(text: string): boolean {
-  if(process.env.HARU_CORE_PROJECTS==='on')return corePolicySync<ReturnType<typeof needsHim>>('projects.needsHim',[text]);
+  if((true as boolean))return corePolicySync<ReturnType<typeof needsHim>>('projects.needsHim',[text]);
   // Third-party pronouns are left out on purpose: "what the writers were
   // thinking when they wrote it" is a fine thing to spend a night on, and only
   // the second person and the one person she lives with are a problem. A false
@@ -267,7 +267,7 @@ export type Refusal = 'duplicate' | 'no-substrate' | 'out-of-reach' | 'needs-him
  * about reach it. Everything else is thrown away rather than attempted.
  */
 export function admits(candidate: Candidate, past: Project[], standing: number): { ok: true } | { ok: false; why: Refusal } {
-  if(process.env.HARU_CORE_PROJECTS==='on')return corePolicySync<ReturnType<typeof admits>>('projects.admits',[candidate,past,standing]);
+  if((true as boolean))return corePolicySync<ReturnType<typeof admits>>('projects.admits',[candidate,past,standing]);
   const text = stripProject(candidate.text);
   if (text.length < 8) return { ok: false, why: 'empty' };
   if (needsHim(text)) return { ok: false, why: 'needs-him' };
@@ -289,7 +289,7 @@ export function admits(candidate: Candidate, past: Project[], standing: number):
  * she keeps at things, but not so reliably that she is a rota.
  */
 export function pickProject(projects: Project[], interest?: string, random: () => number = Math.random): Project | null {
-  if(process.env.HARU_CORE_PROJECTS==='on')return coreRandomPolicy<ReturnType<typeof pickProject>>('projects.pickProject',[projects,interest],random);
+  if((true as boolean))return coreRandomPolicy<ReturnType<typeof pickProject>>('projects.pickProject',[projects,interest],random);
   const active = activeIn(projects).filter(project => (interest ? project.interest === interest : true));
   if (!active.length) return null;
   const byNights = [...active].sort((a, b) => (b.nights ?? 0) - (a.nights ?? 0) || a.id.localeCompare(b.id));
@@ -304,7 +304,7 @@ export type AttemptVerdict = 'DID' | 'PART' | 'NO';
 
 /** The three-way read of what she is about to be asked. */
 export function judgeAttemptPrompt(): string {
-  if(process.env.HARU_CORE_PROJECTS==='on')return corePolicySync<ReturnType<typeof judgeAttemptPrompt>>('projects.judgeAttemptPrompt',[]);
+  if((true as boolean))return corePolicySync<ReturnType<typeof judgeAttemptPrompt>>('projects.judgeAttemptPrompt',[]);
   return [
     'Haru spent a night reading about something she is trying to do. You are deciding what she got out of it — not whether the writing is good, and not whether she enjoyed it.',
     'You are given the thing she is trying, the step she was on tonight, and everything she actually read. Exactly one of:',
@@ -323,7 +323,7 @@ export function judgeAttemptPrompt(): string {
 }
 
 export function judgeAttemptInput(project: Project, reading: string): string {
-  if(process.env.HARU_CORE_PROJECTS==='on')return corePolicySync<ReturnType<typeof judgeAttemptInput>>('projects.judgeAttemptInput',[project,reading]);
+  if((true as boolean))return corePolicySync<ReturnType<typeof judgeAttemptInput>>('projects.judgeAttemptInput',[project,reading]);
   return [
     `She is trying to ${stripProject(project.text)}.`,
     `Tonight's step: ${tidy(project.step ?? stripProject(project.text))}`,
@@ -342,7 +342,7 @@ export function judgeAttemptInput(project: Project, reading: string): string {
  * the caller falls back to the old coin rather than guessing.
  */
 export function readAttemptVerdict(answer: string): AttemptVerdict | null {
-  if(process.env.HARU_CORE_PROJECTS==='on')return corePolicySync<ReturnType<typeof readAttemptVerdict>>('projects.readAttemptVerdict',[answer]);
+  if((true as boolean))return corePolicySync<ReturnType<typeof readAttemptVerdict>>('projects.readAttemptVerdict',[answer]);
   // Whole words only. `lastIndexOf('NO')` finds one inside CANNOT, KNOW and
   // NOTHING, so "I cannot say" came back as a verdict of NO — which is the
   // worst way for this to fail, because a judge that shrugs would have been
@@ -353,7 +353,7 @@ export function readAttemptVerdict(answer: string): AttemptVerdict | null {
 
 /** What the verdict means for the night. `nothing` is only ever the fallback's doing. */
 export function settleFromRead(verdict: AttemptVerdict | null, fallback: Outcome): Outcome {
-  if(process.env.HARU_CORE_PROJECTS==='on')return corePolicySync<ReturnType<typeof settleFromRead>>('projects.settleFromRead',[verdict,fallback]);
+  if((true as boolean))return corePolicySync<ReturnType<typeof settleFromRead>>('projects.settleFromRead',[verdict,fallback]);
   if (verdict === 'DID') return 'did';
   if (verdict === 'PART') return 'part';
   if (verdict === 'NO') return 'no';
@@ -372,7 +372,7 @@ export function settleFromRead(verdict: AttemptVerdict | null, fallback: Outcome
  * is the part that is allowed to hurt.
  */
 export function advanceProject(project: Project, attempt: Attempt, now: string): Worked {
-  if(process.env.HARU_CORE_PROJECTS==='on')return corePolicySync<ReturnType<typeof advanceProject>>('projects.advanceProject',[project,attempt,now]);
+  if((true as boolean))return corePolicySync<ReturnType<typeof advanceProject>>('projects.advanceProject',[project,attempt,now]);
   const had = asProject(project);
   const attempts = [...had.attempts, attempt].slice(-ATTEMPTS_KEPT);
   const nights = (had.nights ?? 0) + 1;
@@ -403,7 +403,7 @@ export function advanceProject(project: Project, attempt: Attempt, now: string):
 
 /** Whether this attempt is the one that should cost her something (feelings.ts `broke`). */
 export function nowItStings(before: Project, after: Project): boolean {
-  if(process.env.HARU_CORE_PROJECTS==='on')return corePolicySync<ReturnType<typeof nowItStings>>('projects.nowItStings',[before,after]);
+  if((true as boolean))return corePolicySync<ReturnType<typeof nowItStings>>('projects.nowItStings',[before,after]);
   return (after.stuck ?? 0) >= STUCK_SHELVES && (before.stuck ?? 0) < STUCK_SHELVES;
 }
 
@@ -428,7 +428,7 @@ function seeded(parent: Project, text: string, now: string, bornOf: BornOf, hard
 
 /** One she took on herself, at the rung she is standing on. */
 export function hersOwn(interest: string | undefined, text: string, now: string, hardness: number): Project {
-  if(process.env.HARU_CORE_PROJECTS==='on')return corePolicySync<ReturnType<typeof hersOwn>>('projects.hersOwn',[interest===undefined?{$undefined:true}:interest,text,now,hardness,Math.random().toString(36).slice(2,10)]);
+  if((true as boolean))return corePolicySync<ReturnType<typeof hersOwn>>('projects.hersOwn',[interest===undefined?{$undefined:true}:interest,text,now,hardness,Math.random().toString(36).slice(2,10)]);
   return {
     id: Math.random().toString(36).slice(2, 10),
     interest,
@@ -446,19 +446,19 @@ export function hersOwn(interest: string | undefined, text: string, now: string,
 
 /** The harder version of a thing she can now do. */
 export function childOf(parent: Project, text: string, now: string): Project {
-  if(process.env.HARU_CORE_PROJECTS==='on')return corePolicySync<ReturnType<typeof childOf>>('projects.childOf',[parent,text,now,Math.random().toString(36).slice(2,10)]);
+  if((true as boolean))return corePolicySync<ReturnType<typeof childOf>>('projects.childOf',[parent,text,now,Math.random().toString(36).slice(2,10)]);
   return seeded(parent, text, now, 'child', (parent.hardness ?? HARDNESS.min) + 1);
 }
 
 /** And the way in she should have taken, after the second time the same rung beat her. */
 export function siblingOf(parent: Project, text: string, now: string): Project {
-  if(process.env.HARU_CORE_PROJECTS==='on')return corePolicySync<ReturnType<typeof siblingOf>>('projects.siblingOf',[parent,text,now,Math.random().toString(36).slice(2,10)]);
+  if((true as boolean))return corePolicySync<ReturnType<typeof siblingOf>>('projects.siblingOf',[parent,text,now,Math.random().toString(36).slice(2,10)]);
   return seeded(parent, text, now, 'sibling', (parent.hardness ?? HARDNESS.min) - 1);
 }
 
 /** Whether a shelve is the second one at this rung, which is what asks for an easier way in. */
 export function beatenTwiceAt(projects: Project[], project: Project): boolean {
-  if(process.env.HARU_CORE_PROJECTS==='on')return corePolicySync<ReturnType<typeof beatenTwiceAt>>('projects.beatenTwiceAt',[projects,project]);
+  if((true as boolean))return corePolicySync<ReturnType<typeof beatenTwiceAt>>('projects.beatenTwiceAt',[projects,project]);
   const rung = project.hardness ?? HARDNESS.min;
   return projects.filter(other => other.status === 'shelved' && other.interest === project.interest && (other.hardness ?? HARDNESS.min) === rung).length >= 2;
 }
@@ -471,7 +471,7 @@ export function beatenTwiceAt(projects: Project[], project: Project): boolean {
  * feature does — going back, months later, to the one she gave up on.
  */
 export function dueForRevisit(projects: Project[], nowMs: number): Project | null {
-  if(process.env.HARU_CORE_PROJECTS==='on')return corePolicySync<ReturnType<typeof dueForRevisit>>('projects.dueForRevisit',[projects,nowMs]);
+  if((true as boolean))return corePolicySync<ReturnType<typeof dueForRevisit>>('projects.dueForRevisit',[projects,nowMs]);
   return projects
     .filter(project => project.status === 'shelved' && project.shelved)
     .filter(project => nowMs - Date.parse(project.shelved!.at) >= REVISIT_DAYS * DAY_MS)
@@ -480,7 +480,7 @@ export function dueForRevisit(projects: Project[], nowMs: number): Project | nul
 }
 
 export function revisit(project: Project, now: string): Worked {
-  if(process.env.HARU_CORE_PROJECTS==='on')return corePolicySync<ReturnType<typeof revisit>>('projects.revisit',[project,now]);
+  if((true as boolean))return corePolicySync<ReturnType<typeof revisit>>('projects.revisit',[project,now]);
   return { ...asProject(project), status: 'working', bornOf: 'revisit', stuck: 0, shelved: undefined, step: undefined, since: now.slice(0, 10) };
 }
 
@@ -490,7 +490,7 @@ export function revisit(project: Project, now: string): Worked {
  * what they were, and gives the block something to say that is not a boast.
  */
 export function staleSpawns(projects: Project[], nowMs: number): Project[] {
-  if(process.env.HARU_CORE_PROJECTS==='on')return corePolicySync<ReturnType<typeof staleSpawns>>('projects.staleSpawns',[projects,nowMs]);
+  if((true as boolean))return corePolicySync<ReturnType<typeof staleSpawns>>('projects.staleSpawns',[projects,nowMs]);
   return projects.filter(project => project.status === 'declared'
     && project.bornOf !== 'taste'
     && (project.nights ?? 0) === 0
@@ -498,7 +498,7 @@ export function staleSpawns(projects: Project[], nowMs: number): Project[] {
 }
 
 export function keepProjects(projects: Project[]): Project[] {
-  if(process.env.HARU_CORE_PROJECTS==='on')return corePolicySync<ReturnType<typeof keepProjects>>('projects.keepProjects',[projects]);
+  if((true as boolean))return corePolicySync<ReturnType<typeof keepProjects>>('projects.keepProjects',[projects]);
   return projects.slice(-PROJECTS_KEPT);
 }
 
@@ -506,14 +506,14 @@ export function keepProjects(projects: Project[]): Project[] {
 
 /** The search for a night on a project: the step, not the whole ambition. */
 export function projectQuery(project: Project): string {
-  if(process.env.HARU_CORE_PROJECTS==='on')return corePolicySync<ReturnType<typeof projectQuery>>('projects.projectQuery',[project]);
+  if((true as boolean))return corePolicySync<ReturnType<typeof projectQuery>>('projects.projectQuery',[project]);
   const step = tidy(project.step ?? '');
   return step ? `how to ${stripProject(step)}` : `how to ${stripProject(project.text)}`;
 }
 
 /** Asked, before she goes looking, what she is actually trying tonight. */
 export function stepInstruction(project: Project, recent: Attempt[]): string {
-  if(process.env.HARU_CORE_PROJECTS==='on')return corePolicySync<ReturnType<typeof stepInstruction>>('projects.stepInstruction',[project,recent]);
+  if((true as boolean))return corePolicySync<ReturnType<typeof stepInstruction>>('projects.stepInstruction',[project,recent]);
   const been = recent.slice(-3).map(attempt => `- ${attempt.step} — ${attempt.outcome === 'no' ? 'got nowhere' : attempt.outcome === 'part' ? 'got part of the way' : 'done'}`).join('\n');
   return [
     `You are trying to ${stripProject(project.text)}. Tonight you are going to go and read about it.`,
@@ -533,7 +533,7 @@ const OUTCOME_CUE: Record<Outcome, string> = {
 
 /** Handed to her once the reading for a night on a project is in front of her. */
 export function projectInstruction(project: Project, outcome: Outcome, found: string): string {
-  if(process.env.HARU_CORE_PROJECTS==='on')return corePolicySync<ReturnType<typeof projectInstruction>>('projects.projectInstruction',[project,outcome,found]);
+  if((true as boolean))return corePolicySync<ReturnType<typeof projectInstruction>>('projects.projectInstruction',[project,outcome,found]);
   const step = tidy(project.step ?? '');
   return [
     `You wanted to ${stripProject(project.text)}. Tonight was your ${ordinal((project.nights ?? 0) + 1)} night on it${step ? `, and what you were trying was: ${step}` : ''}.`,
@@ -547,7 +547,7 @@ export function projectInstruction(project: Project, outcome: Outcome, found: st
 
 /** And what she is asked once one of them lands, or once one of them has beaten her twice. */
 export function spawnInstruction(project: Project, kind: 'child' | 'sibling'): string {
-  if(process.env.HARU_CORE_PROJECTS==='on')return corePolicySync<ReturnType<typeof spawnInstruction>>('projects.spawnInstruction',[project,kind]);
+  if((true as boolean))return corePolicySync<ReturnType<typeof spawnInstruction>>('projects.spawnInstruction',[project,kind]);
   const said = tidy(project.note ?? '');
   return kind === 'child'
     ? [
@@ -568,7 +568,7 @@ export function spawnInstruction(project: Project, kind: 'child' | 'sibling'): s
 
 /** And what she is asked when she has nothing of her own on the go at all. */
 export function newProjectInstruction(interest: string, stance: string, past: string[]): string {
-  if(process.env.HARU_CORE_PROJECTS==='on')return corePolicySync<ReturnType<typeof newProjectInstruction>>('projects.newProjectInstruction',[interest,stance,past]);
+  if((true as boolean))return corePolicySync<ReturnType<typeof newProjectInstruction>>('projects.newProjectInstruction',[interest,stance,past]);
   const already = past.slice(-8).map(text => `"${clipped(text, 70)}"`).join(', ');
   return [
     `You have nothing of your own on the go. ${interest} is one of your things${stance ? `, and what you make of it is: ${clipped(stance, 300)}` : ''}.`,
@@ -621,8 +621,8 @@ function fitLines(lines: string[], limit: number): string[] {
  * takes the fact that something beat her.
  */
 export function projectsNote(projects: Project[], nowMs: number): string {
-  if(process.env.HARU_CORE_PROJECTS==='on')return corePolicySync<ReturnType<typeof projectsNote>>('projects.projectsNote',[projects,nowMs]);
-  if(process.env.HARU_CORE_OWN_TIME==='on')return corePolicySync<string>('own-time.projectsNote',[projects,nowMs]);
+  if((true as boolean))return corePolicySync<ReturnType<typeof projectsNote>>('projects.projectsNote',[projects,nowMs]);
+  if((true as boolean))return corePolicySync<string>('own-time.projectsNote',[projects,nowMs]);
   const lines: string[] = [];
   const gone = projects.filter(project => project.status === 'shelved' && project.shelved)
     .sort((a, b) => Date.parse(b.shelved!.at) - Date.parse(a.shelved!.at))[0];

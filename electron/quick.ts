@@ -44,7 +44,7 @@ export type QuickHit = { reply: string; tier: 1 | 2 | 3 };
  * and only the mechanical lookups (the time, the date, the list) stay instant.
  */
 export function quickAnswer(text: string, data: QuickData, { social = true } = {}): QuickHit | null {
-  if(process.env.HARU_CORE_QUICK_HANDS==='on')return corePolicySync('quick.answer',[text,data,social]);
+  if((true as boolean))return corePolicySync('quick.answer',[text,data,social]);
   // While she is stonewalling, even the scripted lines hold their tongue — an
   // answer is an answer, and the ignore is the point of the mood at that level.
   if (data.ignoring) return null;
@@ -211,7 +211,7 @@ export type SettingCommand =
   | { name: 'escalation'; value: boolean };
 
 export function settingCommand(text: string): SettingCommand | null {
-  if(process.env.HARU_CORE_REMAINING_POLICY==='on'){return corePolicySync('self.settingCommand',[text]);}
+  if((true as boolean)){return corePolicySync('self.settingCommand',[text]);}
   const said = text.trim();
   const level = /^(?:haru[,!]?\s*)?(?:please\s+)?(?:set|put|change|switch)\s+(?:your|the|it)?\s*(?:(?:machine|access|system|permission)\s+)?level\s+(?:to\s+)?(?:level\s+)?([1-4])\s*(?:please|now)?[.!]*\s*$/i.exec(said)
     ?? /^(?:haru[,!]?\s*)?(?:please\s+)?(?:set|put|change|switch)\s+(?:your|the)?\s*(?:machine|access|system)\s+(?:to\s+)?level\s+([1-4])\s*(?:please|now)?[.!]*\s*$/i.exec(said)

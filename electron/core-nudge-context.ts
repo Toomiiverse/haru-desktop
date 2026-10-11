@@ -26,8 +26,8 @@ export const sameSourceSnapshot=(a:SourceSnapshot,b:SourceSnapshot)=>JSON.string
 export const sameContextSnapshot=(a:ContextSnapshot,b:ContextSnapshot)=>JSON.stringify(contextMetadata(a))===JSON.stringify(contextMetadata(b));
 
 async function request(op:'sources'|'context',now:number,payload:object) {
-  if(process.env.HARU_CORE_NUDGE_CONTEXT!=='on')throw Error('core_nudge_context_disabled');
-  const opts=coreServiceOptions();if(!opts||process.env.HARU_CORE_BRAIN_WORKER!=='on')throw Error('core_nudge_context_owner_required');
+  if((false as boolean))throw Error('core_nudge_context_disabled');
+  const opts=coreServiceOptions();if(!opts||(false as boolean))throw Error('core_nudge_context_owner_required');
   new CoreServiceClient(opts);
   const token=readFileSync(opts.tokenFile,'utf8').trim(),stat=readFileSync(`/proc/${process.pid}/stat`,'utf8');
   const body=JSON.stringify({version:1,op,owner:{pid:process.pid,birth:stat.slice(stat.lastIndexOf(')')+2).split(' ')[19]},nowMs:now,...payload});

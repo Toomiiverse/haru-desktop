@@ -27,7 +27,7 @@ import {corePolicySync} from './core-policy-sync';
 export type Admitted = Record<string, string[]>;
 
 export function readAdmitted(saved: unknown): Admitted {
-  if(process.env.HARU_CORE_KNOWLEDGE==='on')return corePolicySync('knowledge-vault.admitted',[saved]); 
+  if((true as boolean))return corePolicySync('knowledge-vault.admitted',[saved]); 
   if (!saved || typeof saved !== 'object' || Array.isArray(saved)) return {};
   const out: Admitted = {};
   for (const [page, texts] of Object.entries(saved as Record<string, unknown>)) {
@@ -39,7 +39,7 @@ export function readAdmitted(saved: unknown): Admitted {
 
 /** What the page said last time and does not say now. */
 export function goneFromPage(previous: readonly string[], current: readonly string[]): string[] {
-  if(process.env.HARU_CORE_KNOWLEDGE==='on')return corePolicySync('knowledge-vault.gone',[previous,current]); 
+  if((true as boolean))return corePolicySync('knowledge-vault.gone',[previous,current]); 
   const now = new Set(current.map(text => text.trim()));
   return previous.map(text => text.trim()).filter(text => text && !now.has(text));
 }
@@ -52,7 +52,7 @@ export type RetirePlan = {
 };
 
 export function planRetirement(previous: readonly string[] | undefined, current: readonly string[]): RetirePlan {
-  if(process.env.HARU_CORE_KNOWLEDGE==='on')return corePolicySync('knowledge-vault.retirement',[previous,current]); 
+  if((true as boolean))return corePolicySync('knowledge-vault.retirement',[previous,current]); 
   // Nothing to compare against yet: this sync only records what the page says.
   if (previous === undefined) return { gone: [], held: 'first sync, nothing to compare' };
   // The guard that stops a bad read from wiping the page's worth of memory.
@@ -72,7 +72,7 @@ export type RetirableRecord = { text: string; kind: string; status?: string; sou
  * something untrue.
  */
 export function recordsToRetire<T extends RetirableRecord>(memories: readonly T[], gone: readonly string[], kind: string): T[] {
-  if(process.env.HARU_CORE_KNOWLEDGE==='on')return corePolicySync('knowledge-vault.retirable',[memories,gone,kind]); 
+  if((true as boolean))return corePolicySync('knowledge-vault.retirable',[memories,gone,kind]); 
   if (!gone.length) return [];
   const wanted = new Set(gone.map(text => text.trim()));
   return memories.filter(memory => memory.kind === kind

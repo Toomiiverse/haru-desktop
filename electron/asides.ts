@@ -95,13 +95,13 @@ export const ASK_AGAIN_MS = 2 * 60 * 60_000;
 export const ASK_HELD_MS = 12 * 60 * 60_000;
 
 export function markAsked(asides: Aside[], id: string, asked: string): Aside[] {
-  if(process.env.HARU_CORE_ASIDES==='on')return corePolicySync('asides.markAsked',[asides,id,asked]);
+  if((true as boolean))return corePolicySync('asides.markAsked',[asides,id,asked]);
   return asides.map(aside => (aside.id === id ? { ...aside, asked } : aside));
 }
 
 /** The ask a message of theirs would be answering: her latest question about their day, still open. */
 export function openAsk(asides: Aside[], now: number, withinMs = ASK_OPEN_MS): Aside | null {
-  if(process.env.HARU_CORE_ASIDES==='on')return corePolicySync('asides.openAsk',[asides,now,withinMs]);
+  if((true as boolean))return corePolicySync('asides.openAsk',[asides,now,withinMs]);
   for (let i = asides.length - 1; i >= 0; i--) {
     const aside = asides[i];
     if (!aside.asked || aside.answeredAt) continue;
@@ -113,23 +113,23 @@ export function openAsk(asides: Aside[], now: number, withinMs = ASK_OPEN_MS): A
 }
 
 export function answerAsk(asides: Aside[], id: string, at: string): Aside[] {
-  if(process.env.HARU_CORE_ASIDES==='on')return corePolicySync('asides.answerAsk',[asides,id,at]);
+  if((true as boolean))return corePolicySync('asides.answerAsk',[asides,id,at]);
   return asides.map(aside => (aside.id === id ? { ...aside, answeredAt: at } : aside));
 }
 
 export function askedRecently(asides: Aside[], now: number, withinMs = ASK_AGAIN_MS): boolean {
-  if(process.env.HARU_CORE_ASIDES==='on')return corePolicySync('asides.askedRecently',[asides,now,withinMs]);
+  if((true as boolean))return corePolicySync('asides.askedRecently',[asides,now,withinMs]);
   return asides.some(aside => aside.asked && Number.isFinite(Date.parse(aside.at)) && now - Date.parse(aside.at) >= 0 && now - Date.parse(aside.at) < withinMs);
 }
 
 /** The asks they left hanging, for her to hold over them. */
 export function unansweredAsks(asides: Aside[], now: number, withinMs = ASK_HELD_MS): Aside[] {
-  if(process.env.HARU_CORE_ASIDES==='on')return corePolicySync('asides.unansweredAsks',[asides,now,withinMs]);
+  if((true as boolean))return corePolicySync('asides.unansweredAsks',[asides,now,withinMs]);
   return asides.filter(aside => aside.asked && !aside.answeredAt && Number.isFinite(Date.parse(aside.at)) && now - Date.parse(aside.at) > ASK_OPEN_MS && now - Date.parse(aside.at) < withinMs);
 }
 
 export function unansweredAsksNote(asides: Aside[], timeZone: string, now: number): string {
-  if(process.env.HARU_CORE_ASIDES==='on')return corePolicySync('asides.unansweredAsksNote',[asides,timeZone,now]);
+  if((true as boolean))return corePolicySync('asides.unansweredAsksNote',[asides,timeZone,now]);
   const hanging = unansweredAsks(asides, now);
   if (!hanging.length) return '';
   const lines = hanging.slice(-3).map(aside => `at ${clock(aside.at, timeZone)} you asked ${aside.asked} and heard nothing back`);
@@ -151,7 +151,7 @@ export const ASIDE_DAYS = 7;
 const SOURCES: AsideSource[] = ['screen', 'screenshot', 'activity', 'fullscreen', 'reminder', 'idle', 'journal', 'page', 'poke', 'kept', 'system', 'hanging', 'weather', 'upcoming', 'other', 'followup', 'goodnight', 'booked', 'thought', 'minecraft', 'anime'];
 
 export function readAsides(saved: unknown): Aside[] {
-  if(process.env.HARU_CORE_ASIDES==='on'){const count=corePolicySync<number>('asides.missingIds',[saved]);return corePolicySync('asides.read',[saved,Array.from({length:count},()=>Math.random().toString(36).slice(2,10))]);}
+  if((true as boolean)){const count=corePolicySync<number>('asides.missingIds',[saved]);return corePolicySync('asides.read',[saved,Array.from({length:count},()=>Math.random().toString(36).slice(2,10))]);}
   if (!Array.isArray(saved)) return [];
   return saved
     .filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === 'object')
@@ -178,12 +178,12 @@ export function readAsides(saved: unknown): Aside[] {
 
 /** Records whether one of them got to the phone. See Aside.reached. */
 export function markReached(asides: Aside[], id: string, reached: boolean): Aside[] {
-  if(process.env.HARU_CORE_ASIDES==='on')return corePolicySync('asides.markReached',[asides,id,reached]);
+  if((true as boolean))return corePolicySync('asides.markReached',[asides,id,reached]);
   return asides.map(aside => (aside.id === id ? { ...aside, reached } : aside));
 }
 
 export function addAside(asides: Aside[], text: string, source: AsideSource, now: Date, day: string, about = '', nudgeTopic = '', nudgeKind?: NudgeKind, detail: Pick<Aside, 'nudgeKeywords' | 'nudgeEvent' | 'nudgeEventAt' | 'nudgeTone'> = {}): { asides: Aside[]; aside: Aside } {
-  if(process.env.HARU_CORE_ASIDES==='on')return corePolicySync('asides.add',[asides,text,source,now.toISOString(),day,about,nudgeTopic,nudgeKind,detail,Math.random().toString(36).slice(2,10)]);
+  if((true as boolean))return corePolicySync('asides.add',[asides,text,source,now.toISOString(),day,about,nudgeTopic,nudgeKind,detail,Math.random().toString(36).slice(2,10)]);
   const aside: Aside = {
     ...detail,
     id: Math.random().toString(36).slice(2, 10),
@@ -207,13 +207,13 @@ export function addAside(asides: Aside[], text: string, source: AsideSource, now
  * unit it forgets in.
  */
 export function pruneAsides(asides: Aside[], days = ASIDE_DAYS): Aside[] {
-  if(process.env.HARU_CORE_ASIDES==='on')return corePolicySync('asides.prune',[asides,days]);
+  if((true as boolean))return corePolicySync('asides.prune',[asides,days]);
   const kept = new Set([...new Set(asides.map(aside => aside.day).filter(Boolean))].sort().slice(-days));
   return asides.filter(aside => !aside.day || kept.has(aside.day));
 }
 
 export function asidesOn(asides: Aside[], day: string): Aside[] {
-  if(process.env.HARU_CORE_ASIDES==='on')return corePolicySync('asides.on',[asides,day]);
+  if((true as boolean))return corePolicySync('asides.on',[asides,day]);
   return asides.filter(aside => aside.day === day);
 }
 
@@ -243,7 +243,7 @@ const ASIDE_CONTEXT_LIMIT = 3;
  * her still discussing a screenshot the following afternoon.
  */
 export function asideContext(asides: Aside[], now: number): string {
-  if(process.env.HARU_CORE_ASIDES==='on')return corePolicySync('asides.context',[asides,now]);
+  if((true as boolean))return corePolicySync('asides.context',[asides,now]);
   const recent = asides
     .filter(aside => {
       const at = Date.parse(aside.at);
@@ -294,7 +294,7 @@ const CLOCK_STAMP_OPENING = /^\s*\d{1,2}(?::\d{2})?\s*(?:am|pm)?\s*[—–-]/i;
 const bare = (text: string) => text.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ').replace(/\s+/g, ' ').trim();
 
 export function alreadySaidRecently(asides: Aside[], timeZone: string, now: number, theirLastAt?: number, limit = ALREADY_SAID_LIMIT, subjectNow?: string): string {
-  if(process.env.HARU_CORE_ASIDES==='on')return corePolicySync('asides.alreadySaid',[asides,timeZone,now,theirLastAt,limit,subjectNow]);
+  if((true as boolean))return corePolicySync('asides.alreadySaid',[asides,timeZone,now,theirLastAt,limit,subjectNow]);
   const said = asides
     .filter(aside => {
       const at = Date.parse(aside.at);
@@ -353,7 +353,7 @@ function asideEchoText(line: string): string {
  * underneath can be compared with what she has already said.
  */
 export function echoesAside(line: string, asides: Aside[], now: number): boolean {
-  if(process.env.HARU_CORE_ASIDES==='on')return corePolicySync('asides.echoes',[line,asides,now]);
+  if((true as boolean))return corePolicySync('asides.echoes',[line,asides,now]);
   const candidate = asideEchoText(line);
   if (!candidate) return false;
   return asides.some(aside => {
@@ -383,7 +383,7 @@ export function echoesAside(line: string, asides: Aside[], now: number): boolean
  * not come back as though it were hanging in the air.
  */
 export function spliceRecentAsides<T extends { role: string; content: string; at?: string }>(messages: T[], asides: Aside[], now: number): { messages: T[]; spliced: Aside[] } {
-  if(process.env.HARU_CORE_ASIDES==='on')return corePolicySync('asides.splice',[messages,asides,now]);
+  if((true as boolean))return corePolicySync('asides.splice',[messages,asides,now]);
   const last = messages.at(-1);
   if (!last || last.role !== 'user') return { messages, spliced: [] };
   const before = Date.parse(messages.at(-2)?.at ?? '');
@@ -406,7 +406,7 @@ export function spliceRecentAsides<T extends { role: string; content: string; at
 
 /** What she is told about the lines that were spliced in: follow the thread. */
 export function splicedAsidesNote(spliced: Aside[]): string {
-  if(process.env.HARU_CORE_ASIDES==='on')return corePolicySync('asides.splicedNote',[spliced]);
+  if((true as boolean))return corePolicySync('asides.splicedNote',[spliced]);
   if (!spliced.length) return '';
   const about = spliced.filter(aside => aside.about).map(aside => `"${aside.text.replace(/\s+/g, ' ').slice(0, 80)}" was you chasing "${aside.about}" off their list`);
   return [

@@ -66,7 +66,7 @@ function tidy(task: string): string {
 const ASKING_NOT_SCHEDULING = /^\s*(?:again\s+)?(?:what|whats|what's|who|whose|where|when(?:\s+(?:did|do|does|was|were|is|are|had|have))|why|how|whether|if\s+(?:i|we|you|he|she|they)\b)\b/i;
 
 export function reminderAsk(text: string, now: Date): ReminderAsk | null {
-  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on')return corePolicySync<any>('agenda-life.reminderAsk',[text,agendaClock(now)]);
+  if((true as boolean))return corePolicySync<any>('agenda-life.reminderAsk',[text,agendaClock(now)]);
   const line = (text ?? '').trim().replace(/\s+/g, ' ');
   if (!line || line.length > 240 || line.includes('?') || recallRequest(line)) return null;
   const asking = line.match(TRIGGER);
@@ -118,7 +118,7 @@ export function reminderAsk(text: string, now: Date): ReminderAsk | null {
 
 /** What she is told, so the reply matches what was actually saved. */
 export function reminderSavedAside(ask: ReminderAsk, todayKey: string): string {
-  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on')return corePolicySync<any>('agenda-life.reminderSavedAside',[ask,todayKey]);
+  if((true as boolean))return corePolicySync<any>('agenda-life.reminderSavedAside',[ask,todayKey]);
   const day = ask.date === todayKey ? 'today' : `on ${ask.date}`;
   const when = ask.time ? `${day} at ${ask.time}` : day;
   return `This is already written down: "${ask.title}", ${when}. It is on the list and you will chase them about it when it comes round. Confirm it in your own way in one short line — do not offer to set it, do not call a tool for it, and do not change the time.`;
@@ -154,7 +154,7 @@ const PROMISE_LEAD = "\\b(?:i'll|i will|i'm going to|i am going to|i'm gonna)\\s
 const PROMISED_DAY = new RegExp(`${PROMISE_LEAD}remind(?:ing)? you\\b[^.!?\\n]*?\\b(?:on|by|for)\\s+((?:the )?\\d{1,2}(?:st|nd|rd|th)?(?: of)? ${MONTH_PATTERN}(?:,? \\d{4})?|${MONTH_PATTERN} (?:the )?\\d{1,2}(?:st|nd|rd|th)?(?:,? \\d{4})?|tomorrow|(?:next |this )?(?:sunday|monday|tuesday|wednesday|thursday|friday|saturday))\\b`, 'i');
 
 export function reminderPromised(herReply: string, now: Date): { time?: string; date: string } | null {
-  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on')return corePolicySync<any>('agenda-life.reminderPromised',[herReply,agendaClock(now)]);
+  if((true as boolean))return corePolicySync<any>('agenda-life.reminderPromised',[herReply,agendaClock(now)]);
   const said = (herReply ?? '').replace(/[‘’]/g, "'");
   const m = PROMISED.exec(said);
   if (!m) {
@@ -189,7 +189,7 @@ export function reminderPromised(herReply: string, now: Date): { time?: string; 
 const ASKS_NOT_PROMISES = /^\s*(?:(?:hey|so|and|but|also|haru)[,\s]+)*(?:remind me\s+)?(?:what|whats|what's|who|whose|where|when|why|how|which|did|do|does|is|are|was|were|can|could|have|has|had)\b/i;
 
 export function promisedTitle(theirRecent: string[]): string {
-  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on')return corePolicySync<any>('agenda-life.promisedTitle',[theirRecent]);
+  if((true as boolean))return corePolicySync<any>('agenda-life.promisedTitle',[theirRecent]);
   const said = [...theirRecent].reverse().find(text => text.trim().split(/\s+/).length >= 4
     && !/^(?:yes|yeah|yep|sure|ok(?:ay)?|please|do it|go on|thanks)\b/i.test(text.trim())
     && !/\?\s*$/.test(text.trim())
@@ -217,7 +217,7 @@ export function promisedTitle(theirRecent: string[]): string {
 const OFFERED = /\b(?:(?:want|like|need) me to|shall i|should i|do you want (?:me to |a )?|i(?:'|’)?ll|i can|i could)\s+(?:set (?:you )?(?:up )?(?:a |the )?(?:reminder|alarm)(?: for you)?\s*(?:for|at|@)|remind you(?: about \S+(?: \S+){0,4})?\s+(?:at|@|for)|(?:set|wake you|nudge you|ping you)\s+(?:up\s+)?(?:for|at|@))\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)?)\b/i;
 
 export function reminderOffered(herLine: string, now: Date): { time?: string; date: string } | null {
-  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on')return corePolicySync<any>('agenda-life.reminderOffered',[herLine,agendaClock(now)]);
+  if((true as boolean))return corePolicySync<any>('agenda-life.reminderOffered',[herLine,agendaClock(now)]);
   const line = (herLine ?? '').replace(/[‘’]/g, "'");
   if (!OFFERED.test(line)) return null;
   // Same clock reading as a promise, once the offer's shape has been recognised.
@@ -227,7 +227,7 @@ export function reminderOffered(herLine: string, now: Date): { time?: string; da
 
 /** "Yes please", "sure", "do it", "you can set a reminder for me can't you" — consent, not a new ask. */
 export function acceptsOffer(text: string): boolean {
-  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on')return corePolicySync<any>('agenda-life.acceptsOffer',[text]);
+  if((true as boolean))return corePolicySync<any>('agenda-life.acceptsOffer',[text]);
   const t = (text ?? '').trim().toLowerCase().replace(/[‘’]/g, "'").replace(/[!.]+$/, '');
   if (!t || t.length > 90) return false;
   if (/^(?:yes|yeah|yep|yup|ya|sure|ok|okay|please|please do|yes please|do it|go on|go for it|sounds good|that works|do that|thanks|thank you|alright|all right|fine)(?:[,!. ]+(?:please|thanks|haru|do it|go on|that would be great))*\s*(?:haru)?$/i.test(t)) return true;
@@ -239,7 +239,7 @@ export function acceptsOffer(text: string): boolean {
  * last reply before this message of theirs; `theirRecent` their last few.
  */
 export function acceptedOffer(latest: string, herPrevious: string | undefined, theirRecent: string[], now: Date): ReminderAsk | null {
-  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on')return corePolicySync<any>('agenda-life.acceptedOffer',[latest,herPrevious??null,theirRecent,agendaClock(now)]);
+  if((true as boolean))return corePolicySync<any>('agenda-life.acceptedOffer',[latest,herPrevious??null,theirRecent,agendaClock(now)]);
   if (!herPrevious || !acceptsOffer(latest)) return null;
   const offer = reminderOffered(herPrevious, now);
   if (!offer) return null;

@@ -12,7 +12,7 @@ export type DirectReplyKind = 'social' | 'voice';
 /** The ordinary call instruction asks for concise speech; it is not a tool
  * result or extra evidence. Other asides still require the full composer. */
 export function directReplyAsideAllowed(aside: string | undefined, call = false): boolean {
-  if(process.env.HARU_CORE_NATURAL_CONVERSATION==='on')return naturalPolicy<any>('directReplyAsideAllowed',[aside??null,call]);
+  if((true as boolean))return naturalPolicy<any>('directReplyAsideAllowed',[aside??null,call]);
 
   return !aside || call && (aside === callAside(false) || aside === callAside(true));
 }
@@ -21,7 +21,7 @@ export function directReplyAsideAllowed(aside: string | undefined, call = false)
  * A mixed request, quotation, follow-up instruction or factual question keeps
  * the normal tool loop. Never decide this from a matching keyword alone. */
 export function directReplyKind(text: string): DirectReplyKind | null {
-  if(process.env.HARU_CORE_NATURAL_CONVERSATION==='on')return naturalPolicy<any>('directReplyKind',[text]);
+  if((true as boolean))return naturalPolicy<any>('directReplyKind',[text]);
 
   if (text.length > 240 || /["“”`<>:;\n]/.test(text)) return null;
   // A complete privacy directive does not change the conversational intent.
@@ -60,7 +60,7 @@ export function directReplyKind(text: string): DirectReplyKind | null {
 /** The latest turn must still be the user's standalone request. An answer
  * after a tool, an attachment, or an augmented reply needs its full context. */
 export function canReplyDirectly(conversation: ChatMessage[], latest: string): boolean {
-  if(process.env.HARU_CORE_NATURAL_CONVERSATION==='on')return naturalPolicy<any>('canReplyDirectly',[conversation,latest]);
+  if((true as boolean))return naturalPolicy<any>('canReplyDirectly',[conversation,latest]);
 
   const last = conversation.at(-1);
   return Boolean(directReplyKind(latest) && last?.role === 'user' && last.content === latest
@@ -71,14 +71,14 @@ export function canReplyDirectly(conversation: ChatMessage[], latest: string): b
  * copy of the whole memory archive. The full transcript and the same factual
  * validation rules remain in the request. No inferred feelings are persisted. */
 export function directReplyEvidence(evidence: Record<string, unknown>) {
-  if(process.env.HARU_CORE_NATURAL_CONVERSATION==='on')return naturalPolicy<any>('directReplyEvidence',[evidence]);
+  if((true as boolean))return naturalPolicy<any>('directReplyEvidence',[evidence]);
 
   const { now, timezone, body, herSleep, onHerMind, voice, continuity, fresh, mood, blankSlate } = evidence;
   return { now, timezone, body, herSleep, onHerMind, voice, continuity, fresh, mood, blankSlate };
 }
 
 export function directLocalReplyTurns(conversation: ChatMessage[], latest: string, evidence: Record<string, unknown>) {
-  if(process.env.HARU_CORE_NATURAL_CONVERSATION==='on')return naturalPolicy<any>('directLocalReplyTurns',[conversation,latest,evidence]);
+  if((true as boolean))return naturalPolicy<any>('directLocalReplyTurns',[conversation,latest,evidence]);
 
   return groundedReplyTurns(conversation, latest, directReplyEvidence(evidence));
 }
@@ -101,7 +101,7 @@ export class VoiceReplyNeedsReview extends Error {}
  * the voice landed. Send a conflicting draft to the full grounded composer;
  * nothing from the rejected draft can reach text, speech or memory. */
 export function contradictsToneFeedback(latest: string, reply: string): boolean {
-  if(process.env.HARU_CORE_NATURAL_CONVERSATION==='on')return naturalPolicy<any>('contradictsToneFeedback',[latest,reply]);
+  if((true as boolean))return naturalPolicy<any>('contradictsToneFeedback',[latest,reply]);
 
   const adjustment = directReplyKind(latest) === 'voice'
     && /\b(?:speak|talk|softer|slower|faster|quieter|louder|gently|warmer|calmer|soften|less (?:annoyed|angry|harsh|robotic))\b/i.test(latest);
@@ -120,7 +120,7 @@ export async function composeConversationalReply(
   character: { identity: string; style: string },
   compose: (messages: ChatMessage[]) => Promise<ChatMessage>, aside?: string,
 ): Promise<ChatMessage> {
-  if(process.env.HARU_CORE_NATURAL_CONVERSATION==='on')return naturalProgram('direct',{messages:conversation,latest,evidence,character,aside:aside??null},compose,VoiceReplyNeedsReview);
+  if((true as boolean))return naturalProgram('direct',{messages:conversation,latest,evidence,character,aside:aside??null},compose,VoiceReplyNeedsReview);
 
   if (!canReplyDirectly(conversation, latest)) throw new Error('This turn requires the full reply composer.');
   const turns = directLocalReplyTurns(conversation, latest, evidence);
@@ -154,7 +154,7 @@ function endpointKey(endpoint: string): string {
  * the same model must keep its chat-sized runner; other models keep their own
  * requested window. A larger explicit request is never silently reduced. */
 export function requestContextSize(config: ProviderConfig, chat: ProviderConfig | undefined, chatSize: number, requested: number): number {
-  if(process.env.HARU_CORE_NATURAL_CONVERSATION==='on')return naturalPolicy<any>('requestContextSize',[config,chat??null,chatSize,requested,[endpointKey(config.endpoint),chat?endpointKey(chat.endpoint):null]]);
+  if((true as boolean))return naturalPolicy<any>('requestContextSize',[config,chat??null,chatSize,requested,[endpointKey(config.endpoint),chat?endpointKey(chat.endpoint):null]]);
 
   return chat && config.provider === 'ollama' && chat.provider === 'ollama'
     && config.model === chat.model && endpointKey(config.endpoint) === endpointKey(chat.endpoint)

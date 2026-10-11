@@ -11,8 +11,8 @@ export type NudgeComposeResult={line:string|null;reason:'accepted'|'invalid_draf
 export type ComposerAsk=(conversation:{role:string;content:string}[],options:{tools:false;temperature:number;maxTokens:number;numCtx:number;format?:object;signal:AbortSignal})=>Promise<{role?:string;content?:string;tool_calls?:unknown[]}>;
 export type ComposerAsides=()=>{atMs:number|null;text:string}[];
 export async function coreComposeNudge(input:ComposeInput,ask:ComposerAsk,asides:ComposerAsides):Promise<NudgeComposeResult> {
-  if(process.env.HARU_CORE_NUDGE_COMPOSER!=='on')throw Error('core_nudge_composer_disabled');
-  const options=coreServiceOptions();if(!options||process.env.HARU_CORE_BRAIN_WORKER!=='on')throw Error('core_nudge_composer_owner_required');
+  if((false as boolean))throw Error('core_nudge_composer_disabled');
+  const options=coreServiceOptions();if(!options||(false as boolean))throw Error('core_nudge_composer_owner_required');
   new CoreServiceClient(options);
   const token=readFileSync(options.tokenFile,'utf8').trim(),stat=readFileSync(`/proc/${process.pid}/stat`,'utf8');
   const start={version:1,op:'compose',owner:{pid:process.pid,birth:stat.slice(stat.lastIndexOf(')')+2).split(' ')[19]},nowMs:Date.now(),...input};

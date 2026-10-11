@@ -49,7 +49,7 @@ export type VisionConfig = {
 export const DEFAULT_VISION: VisionConfig = { enabled: false, model: 'gemma4:12b', folder: '', endpoint: '' };
 
 export function readVisionConfig(saved: unknown): VisionConfig {
-  if(process.env.HARU_CORE_ATTACHMENTS==='on')return attachmentPolicy('vision',[saved]);
+  if((true as boolean))return attachmentPolicy('vision',[saved]);
   if (!saved || typeof saved !== 'object') return DEFAULT_VISION;
   const record = saved as Partial<VisionConfig>;
   return {
@@ -102,7 +102,7 @@ export type LookOptions = {
 
 /** The actual vision prompt, shared with native attempt accounting. */
 export function visionConversation(imageBase64:string|string[],options:LookOptions={}) {
-  if(process.env.HARU_CORE_ATTACHMENTS==='on')return attachmentPolicy<any[]>('conversation',[{...options,signal:undefined}]).map(m=>m.images?{...m,images:Array.isArray(imageBase64)?imageBase64:[imageBase64]}:m);
+  if((true as boolean))return attachmentPolicy<any[]>('conversation',[{...options,signal:undefined}]).map(m=>m.images?{...m,images:Array.isArray(imageBase64)?imageBase64:[imageBase64]}:m);
   return [
     ...(options.system ? [{role:'system',content:options.system}] : []),
     {role:'user',content:options.ask??LOOK_PROMPT,images:Array.isArray(imageBase64)?imageBase64:[imageBase64]},
@@ -110,7 +110,7 @@ export function visionConversation(imageBase64:string|string[],options:LookOptio
 }
 
 export async function look(imageBase64: string | string[], config: VisionConfig, endpoint: string, headers: Record<string, string>, fetchImpl: Fetcher, options: LookOptions = {}): Promise<Sighting> {
-  if(process.env.HARU_CORE_ATTACHMENTS==='on')return coreVisionLook(imageBase64,config,endpoint,headers,fetchImpl,options);
+  if((true as boolean))return coreVisionLook(imageBase64,config,endpoint,headers,fetchImpl,options);
   if (!config.enabled) throw new Error('Looking at pictures is switched off.');
   const response = await fetchImpl(`${endpoint.replace(/\/+$/, '')}/api/chat`, {
     method: 'POST',
@@ -188,7 +188,7 @@ const WHILE_LOOKING = [
 ];
 
 export function whileLooking(random: () => number = Math.random): string {
-  if(process.env.HARU_CORE_ATTACHMENTS==='on')return attachmentPolicy('waiting',[random()]);
+  if((true as boolean))return attachmentPolicy('waiting',[random()]);
   return WHILE_LOOKING[Math.floor(random() * WHILE_LOOKING.length)];
 }
 
@@ -213,7 +213,7 @@ const SAID_NOTHING = /^(?:none|nothing|n\/a|no text|not visible|unknown|empty)\.
 const TEMPLATE_ECHO = /^(?:everything you read|one sentence|the text you read|your one sentence|all the text|text|doing)\b/i;
 
 export function readShotDescription(raw: string): string {
-  if(process.env.HARU_CORE_ATTACHMENTS==='on')return attachmentPolicy('shotDescription',[raw]);
+  if((true as boolean))return attachmentPolicy('shotDescription',[raw]);
   // Conservative on purpose: a line is touched only when it is the template
   // talking or the template's brackets, and is otherwise passed through exactly
   // as it came. A first cut normalised every line and quietly reflowed the
@@ -248,7 +248,7 @@ function unwrap(value: string): string {
 
 /** A filename that sorts by date and cannot collide or escape the folder. */
 export function photoName(original: string, when: Date): string {
-  if(process.env.HARU_CORE_ATTACHMENTS==='on')return attachmentPolicy('photoName',[original,[when.getFullYear(),when.getMonth()+1,when.getDate(),when.getHours(),when.getMinutes(),when.getSeconds()]]);
+  if((true as boolean))return attachmentPolicy('photoName',[original,[when.getFullYear(),when.getMonth()+1,when.getDate(),when.getHours(),when.getMinutes(),when.getSeconds()]]);
   const stamp = [
     when.getFullYear(), String(when.getMonth() + 1).padStart(2, '0'), String(when.getDate()).padStart(2, '0'),
   ].join('-') + '-' + [String(when.getHours()).padStart(2, '0'), String(when.getMinutes()).padStart(2, '0'), String(when.getSeconds()).padStart(2, '0')].join('');

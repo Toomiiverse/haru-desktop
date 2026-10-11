@@ -52,7 +52,7 @@ function sameDay(a: Date, b: Date) {
  * long enough that "later" stops being meaningful.
  */
 export function describeGap(before: Date, after: Date, timeZone: string): string {
-  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.describeGap',[before.toISOString(),after.toISOString(),timeZone]);
+  if((true as boolean))return corePolicySync<any>('conversation-policy.describeGap',[before.toISOString(),after.toISOString(),timeZone]);
 
   // The length of the gap is a fact about the two instants and needs no zone;
   // which day and which part of the day they fall in is a fact about the user.
@@ -86,7 +86,7 @@ export function describeGap(before: Date, after: Date, timeZone: string): string
  * than the flatness being fixed.
  */
 export function markTimeGaps<T extends Dated>(messages: T[], timeZone: string, gapMinutes = GAP_MINUTES): (T | { role: 'system'; content: string })[] {
-  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.markTimeGaps',[messages,timeZone,gapMinutes]);
+  if((true as boolean))return corePolicySync<any>('conversation-policy.markTimeGaps',[messages,timeZone,gapMinutes]);
 
   const out: (T | { role: 'system'; content: string })[] = [];
   let previous: Date | null = null;
@@ -114,7 +114,7 @@ export function markTimeGaps<T extends Dated>(messages: T[], timeZone: string, g
  * exchange were still warm is the same failure seen from the other end.
  */
 export function sinceLast(messages: Dated[], now: Date, timeZone: string): string {
-  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.sinceLast',[messages,now.toISOString(),timeZone]);
+  if((true as boolean))return corePolicySync<any>('conversation-policy.sinceLast',[messages,now.toISOString(),timeZone]);
 
   for (let i = messages.length - 1; i >= 0; i--) {
     const at = messages[i].at ? new Date(messages[i].at as string) : null;
@@ -149,7 +149,7 @@ export const HISTORY_BUDGET_CHARS = 20_000;
  * none — so the trim drops from the front and never mid-day.
  */
 export function earlierTurns<T extends Dated>(archive: Record<string, T[]>, todayKey: string, days = DAYS_OF_HISTORY, budget = HISTORY_BUDGET_CHARS): T[] {
-  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.earlierTurns',[archive,todayKey,days,budget]);
+  if((true as boolean))return corePolicySync<any>('conversation-policy.earlierTurns',[archive,todayKey,days,budget]);
 
   const wanted = Object.keys(archive).filter(day => day < todayKey).sort().slice(-days);
   const byDay = wanted.map(day => (archive[day] ?? []).filter(message => message.role === 'user' || message.role === 'assistant'));
@@ -184,7 +184,7 @@ export type MonthNote = { month: string; summary: string; createdAt?: string };
  * days of raw turns cost.
  */
 export function earlierDayNotes(sessions: DayNote[], todayKey: string, days = 7): DayNote[] {
-  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.earlierDayNotes',[sessions,todayKey,days]);
+  if((true as boolean))return corePolicySync<any>('conversation-policy.earlierDayNotes',[sessions,todayKey,days]);
 
   return sessions
     .filter(session => session.day < todayKey)
@@ -198,7 +198,7 @@ export function earlierDayNotes(sessions: DayNote[], todayKey: string, days = 7)
  * of them for the price of a single day's raw turns.
  */
 export function earlierMonthNotes(monthNotes: MonthNote[], todayKey: string, count = 6): MonthNote[] {
-  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.earlierMonthNotes',[monthNotes,todayKey,count]);
+  if((true as boolean))return corePolicySync<any>('conversation-policy.earlierMonthNotes',[monthNotes,todayKey,count]);
 
   const current = todayKey.slice(0, 7);
   return monthNotes
@@ -223,7 +223,7 @@ export function earlierDaysContext(
   todayKey: string,
   opts: { days?: number; months?: number; budget?: number; turnsDays?: number } = {},
 ): { notes: string[]; turns: Dated[] } {
-  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.earlierDaysContext',[sessions,monthNotes,archive,todayKey,opts]);
+  if((true as boolean))return corePolicySync<any>('conversation-policy.earlierDaysContext',[sessions,monthNotes,archive,todayKey,opts]);
 
   const days = opts.days ?? DAYS_OF_HISTORY;
   const months = opts.months ?? 6;

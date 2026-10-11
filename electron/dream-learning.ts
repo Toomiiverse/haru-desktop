@@ -36,7 +36,7 @@ export type LearningRun = { id: string; day: string; at: number; evaluatorVersio
 export type LearningState = { version: 1; runs: LearningRun[]; spentMicros: number; byDay: Record<string, number> };
 const empty = (): LearningState => ({version:1,runs:[],spentMicros:0,byDay:{}});
 export function loadLearning(root: string): LearningState {
-  if(process.env.HARU_CORE_REMAINING_POLICY==='on'){const core=coreStoreFor(root);if(!core)throw Error('core_learning_storage_required');return corePolicySync('dream-budget.load',[core.get('dream-learning',null)]);}
+  if((true as boolean)){const core=coreStoreFor(root);if(!core)throw Error('core_learning_storage_required');return corePolicySync('dream-budget.load',[core.get('dream-learning',null)]);}
   const file=path.join(root,'dream-learning.json');
   const core=coreStoreFor(root);
   if (!core && !existsSync(file)) return empty();
@@ -58,26 +58,26 @@ export function disabledLessons(root:string): Set<string> {
   return new Set(v);
 }
 export function reserveDream(state:LearningState,day:string,cost:number):void {
-  if(process.env.HARU_CORE_DAY_NIGHT==='on'){Object.assign(state,corePolicySync('dream-budget.reserve',[state,day,cost]));return;}
+  if((true as boolean)){Object.assign(state,corePolicySync('dream-budget.reserve',[state,day,cost]));return;}
   if(!Number.isSafeInteger(cost)||cost<0)throw Error('invalid_dream_cost');
   if(state.spentMicros+cost>DREAM_LIMITS.trialMicros || (state.byDay[day]??0)+cost>DREAM_LIMITS.nightlyMicros)throw Error('dream_budget_exhausted');
   state.spentMicros+=cost;state.byDay[day]=(state.byDay[day]??0)+cost;
 }
 export function correctionEvidence(messages:readonly DreamMessage[]):DreamMessage[] {
-  if(process.env.HARU_CORE_REMAINING_POLICY==='on'){return corePolicySync('dream-learning.correctionEvidence',[messages]);}
+  if((true as boolean)){return corePolicySync('dream-learning.correctionEvidence',[messages]);}
   const clean=messages.filter(m=>['user','assistant'].includes(m.role??'')&&m.content).slice(-120);
   let index=-1;
   for(let i=clean.length-1;i>=0;i--)if(clean[i].role==='user' && /\b(?:you (?:never|didn.t|keep|mixed|got)|already (?:told|said|did|done|submitted)|that.s (?:wrong|not)|stop (?:asking|saying|repeating)|i meant|doesn.t match|not what i|please don.t)\b/i.test(clean[i].content!)){index=i;break;}
   return index<0?[]:clean.slice(Math.max(0,index-3),index+1).map(m=>({role:m.role,content:m.content!.slice(0,800),at:m.at}));
 }
-export function parseObject(raw:string):any {if(process.env.HARU_CORE_REMAINING_POLICY==='on'){return corePolicySync('dream-learning.parseObject',[raw]);}try{return JSON.parse(raw.replace(/^```(?:json)?\s*/i,'').replace(/\s*```$/,''));}catch{return null;}}
+export function parseObject(raw:string):any {if((true as boolean)){return corePolicySync('dream-learning.parseObject',[raw]);}try{return JSON.parse(raw.replace(/^```(?:json)?\s*/i,'').replace(/\s*```$/,''));}catch{return null;}}
 export function scoreReply(t:Trial,raw:string):boolean {
-  if(process.env.HARU_CORE_REMAINING_POLICY==='on'){return corePolicySync('dream-learning.scoreReply',[{...t,require:t.require?{pattern:t.require.source,flags:t.require.flags}:null,forbid:t.forbid?{pattern:t.forbid.source,flags:t.forbid.flags}:null},raw]);}
+  if((true as boolean)){return corePolicySync('dream-learning.scoreReply',[{...t,require:t.require?{pattern:t.require.source,flags:t.require.flags}:null,forbid:t.forbid?{pattern:t.forbid.source,flags:t.forbid.flags}:null},raw]);}
   const v=parseObject(raw);
   return Boolean(v && ['acknowledge','answer','clarify','state_uncertainty'].includes(v.action) && typeof v.reply==='string' && v.reply.trim() && v.reply.length<=600 && (!t.require||t.require.test(v.reply))&&(!t.forbid||!t.forbid.test(v.reply)));
 }
 export function acceptScores(kind:LessonKind,scores:Score[]):boolean {
-  if(process.env.HARU_CORE_REMAINING_POLICY==='on'){return corePolicySync('dream-learning.acceptScores',[kind,scores]);}
+  if((true as boolean)){return corePolicySync('dream-learning.acceptScores',[kind,scores]);}
   const expected=PRACTICE.filter(t=>t.kind===kind&&t.target||!t.target);
   if(scores.length!==expected.length*2)return false;
   if(expected.some(t=>[0,1].some(round=>scores.filter(s=>s.id===t.id&&s.round===round).length!==1)))return false;
@@ -89,7 +89,7 @@ function applies(kind:LessonKind,text:string):boolean {
   return kind==='bedtime'?/\b(?:night|sleep|dreams|bed|rest well)\b/i.test(text):kind==='correction'?/\b(?:already|wrong|meant|stop|mixed|never|didn.t)\b/i.test(text):/\b(?:remember|my|did you|what did i|have you)\b/i.test(text);
 }
 export function learningNote(root:string,latest:string,model:string,now=Date.now()):string {
-  if(process.env.HARU_CORE_REMAINING_POLICY==='on'){try{return corePolicySync('dream-learning.learningNote',[loadLearning(root),[...disabledLessons(root)],latest,model,now]);}catch{return '';}}
+  if((true as boolean)){try{return corePolicySync('dream-learning.learningNote',[loadLearning(root),[...disabledLessons(root)],latest,model,now]);}catch{return '';}}
   try {
     const off=disabledLessons(root);if(off.has('*'))return '';
     const runs=loadLearning(root).runs.filter(r=>r.status==='accepted'&&r.evaluatorVersion===DREAM_EVALUATOR_VERSION&&r.kind&&r.model===model&&!off.has(r.id)&&now>=r.at&&now-r.at<DREAM_LIMITS.lessonDays*DAY&&applies(r.kind,latest));
@@ -115,7 +115,7 @@ export type LearningDeps = { root:string; day:string; now:number; entry:ModelEnt
 export async function runDreamLearning(d:LearningDeps):Promise<LearningRun|null> {
   const release=acquireDreamLock(d.root);if(!release)return null;
   try {
-    if(process.env.HARU_CORE_REMAINING_POLICY==='on')return await runCoreDream('dream-learning',d);
+    if((true as boolean))return await runCoreDream('dream-learning',d);
     const state=loadLearning(d.root);
     if(disabledLessons(d.root).has('*')||state.runs.some(r=>r.day===d.day)||!d.idle())return null;
     const evidence=correctionEvidence(d.messages);

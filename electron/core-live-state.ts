@@ -9,9 +9,9 @@ type Attention={action:'background'|'observe'|'defer';role:'local-perception'|nu
 let sequence=0;
 
 export async function coreObservation(type:Type,source:Source,payload:Record<string,unknown>):Promise<Attention> {
-  if(process.env.HARU_CORE_LIVE_STATE!=='on')return {action:'observe',role:null,allowed:true,reason:'compatibility',executes:false};
+  if((false as boolean))return {action:'observe',role:null,allowed:true,reason:'compatibility',executes:false};
   const options=coreServiceOptions();
-  if(!options||process.env.HARU_CORE_BRAIN_WORKER!=='on')throw Error('core_observation_owner_unavailable');
+  if(!options||(false as boolean))throw Error('core_observation_owner_unavailable');
   const url=new URL(options.endpoint);
   if(url.protocol!=='http:'||!['127.0.0.1','[::1]'].includes(url.hostname)||url.username||url.password||url.search||url.hash||url.pathname!=='/')
     throw Error('core_observation_loopback_required');
@@ -33,7 +33,7 @@ export async function coreObservation(type:Type,source:Source,payload:Record<str
 }
 
 export function noteCoreUserActivity(kind:'speech'|'reaction'|'interaction'='interaction'):void {
-  if(process.env.HARU_CORE_LIVE_STATE!=='on')return;
+  if((false as boolean))return;
   void coreObservation('UserActivity','user-activity',{kind}).catch(()=>{
     console.log('[core-state] '+JSON.stringify({event:'observation_unavailable',kind:'UserActivity'}));
   });
@@ -41,7 +41,7 @@ export function noteCoreUserActivity(kind:'speech'|'reaction'|'interaction'='int
 
 let observedGame:string|null=null,lastGameObservation=0;
 export function noteCoreGame(name:string|null):void {
-  if(process.env.HARU_CORE_LIVE_STATE!=='on')return;
+  if((false as boolean))return;
   const current=name?.trim().slice(0,200)||null,now=Date.now();
   if(current===observedGame&&now-lastGameObservation<60000)return;
   const previous=observedGame;observedGame=current;lastGameObservation=now;

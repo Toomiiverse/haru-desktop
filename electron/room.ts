@@ -13,7 +13,7 @@ const WANTS_QUIET = /\b(don'?t want to talk|leave it|drop it|not now|need a minu
 export type Reading = { rough: boolean; because: string };
 
 export function readsAsRough(message: string): Reading {
-  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.readsAsRough',[message]);
+  if((true as boolean))return corePolicySync<any>('conversation-policy.readsAsRough',[message]);
 
   const text = message ?? '';
   if (ROUGH.test(text)) return { rough: true, because: 'something has actually happened' };
@@ -29,7 +29,7 @@ export function readsAsRough(message: string): Reading {
  * harshness. The only real failure is ignoring what they said entirely.
  */
 export function roomInstruction(reading: Reading): string {
-  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.roomInstruction',[reading]);
+  if((true as boolean))return corePolicySync<any>('conversation-policy.roomInstruction',[reading]);
 
   if (!reading.rough) return '';
   return [
@@ -110,7 +110,7 @@ export const EXPRESSIVE = [
 export const HER_EMOJI = ['😏', '👀', '😤', '💢', '😒', '🔥', '🙄'] as const;
 
 export function emojiRut(replies: string[], checked = 6, need = 3): string {
-  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<string>('conversation-policy.emojiRut',[replies,checked,need]);
+  if((true as boolean))return corePolicySync<string>('conversation-policy.emojiRut',[replies,checked,need]);
 
   const recent = replies.slice(-checked);
   if (recent.length < need) return '';
@@ -165,7 +165,7 @@ export const MENTION_COOLDOWN_MS = 15 * 60_000;
 const NOTHING_IN_IT = /^(?:hi|hey|heya|hiya|hello|yo|sup|wassup|morning|good morning|good afternoon|good evening|afternoon|evening|night|goodnight|gn|bye|later|cya|ok|okay|k|kk|kay|lol|lmao|haha|hehe|sure|fine|yeah|yep|yup|nah|nope|no|thanks|thank you|ty|cheers|cool|nice|right|alright|aight|hmm|hm|mhm|oh|ah|wow|damn|true|same|fair|w|ez)(?:\s+(?:haru|there|then|mate|man))?[\s!.?,😊🙂👍🙄😒😏]*$|^(?:what'?s up|whats up|you (?:there|around|up|good|ok|okay)|how are you|how'?s it going|hows things|what'?s new|whats new|anything (?:new|happen))[\s!.?,]*$/i;
 
 export function nothingInIt(text: string): boolean {
-  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.nothingInIt',[text]);
+  if((true as boolean))return corePolicySync<any>('conversation-policy.nothingInIt',[text]);
 
   return NOTHING_IN_IT.test((text ?? '').trim());
 }
@@ -181,7 +181,7 @@ export function roomToRant(input: {
   latest?: string;
   mentioned?: boolean;
 }): string {
-  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.roomToRant',[input]);
+  if((true as boolean))return corePolicySync<any>('conversation-policy.roomToRant',[input]);
 
   const wait = input.mentioned ? MENTION_COOLDOWN_MS : RANT_COOLDOWN_MS;
   if (input.sinceLastMs !== null && input.sinceLastMs < wait) return '';
@@ -205,7 +205,7 @@ export function roomToRant(input: {
 const ABOUT_HER = /\b(?:what (?:did|do|are|were) you (?:think|reckon|make of|watch|watching|read|reading|playing|play|up to|doing)|what(?:'s| is) your (?:take|opinion|favourite|favorite)|have you (?:seen|watched|read|played)|do you (?:like|rate|enjoy|actually like)|why (?:do|did) you (?:like|rate|think|rate it)|which (?:part|bit|arc|episode)|what part|tell me (?:about|more)|go on then|and (?:then )?what happened|what(?:'s| is)(?: so)? good about|why is .{2,30} (?:good|better|any good)|what(?:'s| is) it about)\b/i;
 
 export function askingAboutHer(latest: string, subjects: string[]): string {
-  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.askingAboutHer',[latest,subjects]);
+  if((true as boolean))return corePolicySync<any>('conversation-policy.askingAboutHer',[latest,subjects]);
 
   const said = (latest ?? '').trim();
   if (!said) return '';
@@ -220,7 +220,7 @@ const NOT_A_NAME = new Set(['this','that','these','those','there','then','they',
 const CALENDAR = /^(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|january|february|march|april|june|july|august|september|october|november|december)$/i;
 
 export function namesIn(notes: string[], everyday: ReadonlySet<string> = new Set()): string[] {
-  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.namesIn',[notes,[...everyday]]);
+  if((true as boolean))return corePolicySync<any>('conversation-policy.namesIn',[notes,[...everyday]]);
 
   const lowercase = new Set<string>(everyday);
   for (const note of notes) for (const word of (note ?? '').match(/[A-Za-z]+/g) ?? []) if (/^[a-z]/.test(word)) lowercase.add(word.toLowerCase());
@@ -248,7 +248,7 @@ export function namesIn(notes: string[], everyday: ReadonlySet<string> = new Set
 const JUST_TALKING = /\b(?:(?:just|only)\s+(?:want(?:ed|ing)?|wanna|here|felt like)\s+(?:to\s+)?(?:talk|chat|hang|catch up)(?:ing)?\s+(?:to|with)\s+you|(?:nothing|no reason|nothing much)[,.\s—-]+(?:i\s+)?just\s+(?:want(?:ed|ing)?|wanna|felt like)\s+(?:to\s+)?(?:talk|chat)(?:ing)?|just\s+(?:talking|chatting|checking in|saying hi|wanted to hear from you)|(?:wanted|want) to (?:talk|chat|hear from) you|missed (?:talking to )?you)\b/i;
 
 export function justTalking(latest: string): boolean {
-  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.justTalking',[latest]);
+  if((true as boolean))return corePolicySync<any>('conversation-policy.justTalking',[latest]);
 
   return JUST_TALKING.test((latest ?? '').replace(/[‘’]/g, "'"));
 }
@@ -256,7 +256,7 @@ export function justTalking(latest: string): boolean {
 export const JUST_TALKING_NOTE = 'They said they just want to talk to you. Decide how you want to approach it: ignore him, make fun of him, have a conversation with him if you feel like it. Use your own voice — ask something you actually want to know, or tell them something of yours. However that comes out is fine, there are no limits to what you can say.';
 
 export function herSubjectNote(subject: string): string {
-  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.herSubjectNote',[subject]);
+  if((true as boolean))return corePolicySync<any>('conversation-policy.herSubjectNote',[subject]);
 
   return `They are asking you about ${subject} — about you, not about them. Answer the subject they actually raised in your own voice, uncensored. Say what you think and why, take the room to do it. If you want to know what they made of it, ask.`;
 }

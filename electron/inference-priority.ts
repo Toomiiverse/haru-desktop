@@ -52,7 +52,7 @@ export class InferencePriority {
     return result;
   }
   interaction() {
-    if(process.env.HARU_CORE_INFERENCE_PRIORITY==='on') {
+    if((true as boolean)) {
       const keys=this.decision<string[]>('interaction');
       if(!Array.isArray(keys)||new Set(keys).size!==keys.length||keys.some(key=>typeof key!=='string'||!this.background.has(key)))throw Error('inference_priority_protocol_error');
       this.lastInteraction=this.now();
@@ -81,7 +81,7 @@ export class InferencePriority {
 
   /** A separate Ollama endpoint may continue; it does not evict this instance's model. */
   backgroundReason(endpoint: string, protectedEndpoint: string): BackgroundInferenceDeferred['reason'] | null {
-    if(process.env.HARU_CORE_INFERENCE_PRIORITY==='on')return this.backgroundDecision(endpoint,protectedEndpoint).reason;
+    if((true as boolean))return this.backgroundDecision(endpoint,protectedEndpoint).reason;
     const key = inferenceEndpoint(endpoint);
     if (key === inferenceEndpoint(protectedEndpoint)) {
       if (this.foregroundCount) return 'conversation';
@@ -96,7 +96,7 @@ export class InferencePriority {
     return result;
   }
   async runBackground<T>(endpoint: string, protectedEndpoint: string, run: (signal: AbortSignal) => Promise<T>): Promise<T> {
-    const admitted=process.env.HARU_CORE_INFERENCE_PRIORITY==='on'?this.backgroundDecision(endpoint,protectedEndpoint):null;
+    const admitted=(true as boolean)?this.backgroundDecision(endpoint,protectedEndpoint):null;
     const reason = admitted?admitted.reason:this.backgroundReason(endpoint, protectedEndpoint);
     if (reason) {
       this.mark({ event: 'background_deferred', reason });
@@ -123,7 +123,7 @@ export class InferencePriority {
    */
   async localReply<T>(run: () => Promise<T>,limitMs?:number): Promise<T> {
     if(limitMs!==undefined&&(!Number.isInteger(limitMs)||limitMs<1||limitMs>180000))throw Error('invalid_local_reply_limit');
-    const reply=process.env.HARU_CORE_INFERENCE_PRIORITY==='on'
+    const reply=(true as boolean)
       ?corePolicySync<{reuse:boolean;limit?:number;message?:string}>('inference-priority.reply',[Boolean(this.reply.getStore()),limitMs??null,this.options.replyMs??null]):null;
     if(reply&&(typeof reply.reuse!=='boolean'||!reply.reuse&&(typeof reply.limit!=='number'||!Number.isFinite(reply.limit)||typeof reply.message!=='string')))throw Error('inference_priority_protocol_error');
     if (reply?reply.reuse:this.reply.getStore()) return run();

@@ -62,7 +62,7 @@ const SEASON_EPISODE = /\bs\d{1,2}\s?e(\d{1,3})\b/i;
  * name itself often contains a dash — each part is judged on what it looks like.
  */
 export function identifyWork(activity: Activity, gameName = ''): Work | null {
- if(globalThis.process.env.HARU_CORE_DEVICE_ACTIVITY==='on')return devicePolicy('identifyWork',[activity,gameName]);
+ if((true as boolean))return devicePolicy('identifyWork',[activity,gameName]);
   // A game is already named properly by Steam, and its title carries no
   // chapters. Nothing to parse.
   if (activity.kind === 'gaming') {
@@ -126,7 +126,7 @@ function blank(title: string, kind: WorkKind): Work {
  * would have her congratulating them on rereading something they never left.
  */
 export function noteWork(following: Following, work: Work, nowIso: string, dayKey: string): Following {
- if(globalThis.process.env.HARU_CORE_DEVICE_ACTIVITY==='on')return devicePolicy('noteWork',[following,work,nowIso,dayKey]);
+ if((true as boolean))return devicePolicy('noteWork',[following,work,nowIso,dayKey]);
   const existing = following[work.key];
   const days = existing ? (existing.days.includes(dayKey) ? existing.days : [...existing.days, dayKey]) : [dayKey];
   const merged: Work = {
@@ -154,7 +154,7 @@ function prune(following: Following): Following {
 }
 
 export function readFollowing(saved: unknown): Following {
- if(globalThis.process.env.HARU_CORE_DEVICE_ACTIVITY==='on')return devicePolicy('readFollowing',[saved]);
+ if((true as boolean))return devicePolicy('readFollowing',[saved]);
   if (!saved || typeof saved !== 'object') return {};
   const record = saved as Following;
   return Object.fromEntries(Object.entries(record).filter(([, work]) =>
@@ -163,12 +163,12 @@ export function readFollowing(saved: unknown): Following {
 
 /** Something they have come back to, rather than something they opened once. */
 export function isRegular(work: Work): boolean {
- if(globalThis.process.env.HARU_CORE_DEVICE_ACTIVITY==='on')return devicePolicy('isRegular',[work]);
+ if((true as boolean))return devicePolicy('isRegular',[work]);
   return work.days.length >= 2;
 }
 
 export function markMentioned(following: Following, key: string): Following {
- if(globalThis.process.env.HARU_CORE_DEVICE_ACTIVITY==='on')return devicePolicy('markMentioned',[following,key]);
+ if((true as boolean))return devicePolicy('markMentioned',[following,key]);
   const work = following[key];
   if (!work) return following;
   return { ...following, [key]: { ...work, progressWhenMentioned: work.progress } };
@@ -187,7 +187,7 @@ export function markMentioned(following: Following, key: string): Following {
  * Hedged rather than asserted, because it is a guess. They do read other things.
  */
 export function assumeItIsTheirs(following: Following, nowMs: number): string {
- if(globalThis.process.env.HARU_CORE_DEVICE_ACTIVITY==='on')return devicePolicy('assumeItIsTheirs',[following,nowMs]);
+ if((true as boolean))return devicePolicy('assumeItIsTheirs',[following,nowMs]);
   if (!summariseFollowing(following, nowMs)) return '';
   return [
     'You are looking at a picture, so nothing here is labelled.',
@@ -210,7 +210,7 @@ export function assumeItIsTheirs(following: Following, nowMs: number): string {
  * does not know it yet and pretending otherwise is its own kind of wrong.
  */
 export function recogniseNow(following: Following, work: Work | null): string {
- if(globalThis.process.env.HARU_CORE_DEVICE_ACTIVITY==='on')return devicePolicy('recogniseNow',[following,work]);
+ if((true as boolean))return devicePolicy('recogniseNow',[following,work]);
   if (!work) return '';
   const known = following[work.key];
   if (!known || !isRegular(known)) return '';
@@ -235,7 +235,7 @@ const UNIT: Record<WorkKind, string> = { manga: 'chapter', anime: 'episode', gam
  * what it is.
  */
 export function summariseFollowing(following: Following, nowMs: number): string {
- if(globalThis.process.env.HARU_CORE_DEVICE_ACTIVITY==='on')return devicePolicy('summariseFollowing',[following,nowMs]);
+ if((true as boolean))return devicePolicy('summariseFollowing',[following,nowMs]);
   const works = Object.values(following)
     .filter(isRegular)
     .sort((a, b) => Date.parse(b.lastSeen) - Date.parse(a.lastSeen))

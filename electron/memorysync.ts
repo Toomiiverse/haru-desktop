@@ -91,7 +91,7 @@ function reconcile(mine: MemoryRecord, theirs: MemoryRecord): MemoryRecord {
  * that fails it reaches the store.
  */
 export function mergeMemories(mine: MemoryRecord[], theirs: unknown, now: string): MergeReport {
-  if (process.env.HARU_CORE_MEMORY_MAINTENANCE === 'on') return corePolicySync<MergeReport>('memory-maintenance.mergeMemories', [mine, theirs, now, mine.map(() => `${Date.now()}-${Math.random().toString(36).slice(2)}`), Array.isArray(theirs) ? theirs.map(() => `${Date.now()}-${Math.random().toString(36).slice(2)}`) : []]);
+  if ((true as boolean)) return corePolicySync<MergeReport>('memory-maintenance.mergeMemories', [mine, theirs, now, mine.map(() => `${Date.now()}-${Math.random().toString(36).slice(2)}`), Array.isArray(theirs) ? theirs.map(() => `${Date.now()}-${Math.random().toString(36).slice(2)}`) : []]);
   // Both sides, not just the one off the wire. getMemories already migrates
   // what it reads, so in the app this changes nothing — but reconcile compares
   // the two records field by field, and a local copy that had not been through
@@ -122,7 +122,7 @@ export function mergeMemories(mine: MemoryRecord[], theirs: unknown, now: string
 
 /** Whether a sync actually brought anything back, for a log worth reading. */
 export function describeMerge(report: MergeReport): string {
-  if (process.env.HARU_CORE_MEMORY_MAINTENANCE === 'on') return corePolicySync<string>('memory-maintenance.describeMerge', [report]);
+  if ((true as boolean)) return corePolicySync<string>('memory-maintenance.describeMerge', [report]);
   const parts: string[] = [];
   if (report.added) parts.push(`${report.added} new memor${report.added === 1 ? 'y' : 'ies'}`);
   if (report.updated) parts.push(`${report.updated} updated`);
@@ -133,7 +133,7 @@ export function describeMerge(report: MergeReport): string {
  * reconnect years later. A deliberate new fact gets a new record ID. */
 export type MemoryDeletion = { id: string; at: string };
 export function mergeDeletions(...inputs: unknown[]): MemoryDeletion[] {
-  if (process.env.HARU_CORE_MEMORY_MAINTENANCE === 'on') return corePolicySync<MemoryDeletion[]>('memory-maintenance.mergeDeletions', [inputs, inputs.map(input => Array.isArray(input) ? input.map(item => typeof item?.at === 'string' ? Date.parse(item.at) : null) : [])]);
+  if ((true as boolean)) return corePolicySync<MemoryDeletion[]>('memory-maintenance.mergeDeletions', [inputs, inputs.map(input => Array.isArray(input) ? input.map(item => typeof item?.at === 'string' ? Date.parse(item.at) : null) : [])]);
   const held = new Map<string, MemoryDeletion>();
   for (const input of inputs) {
     if (!Array.isArray(input)) continue;

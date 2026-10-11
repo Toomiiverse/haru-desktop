@@ -29,7 +29,7 @@ type Fetcher = (url: string, init: { method: string; headers: Record<string, str
 export const ROUTES_URL = 'https://routes.googleapis.com/directions/v2:computeRoutes';
 
 export function routeRequest(from: { lat: number; lon: number }, to: { lat: number; lon: number }, key: string) {
- if(process.env.HARU_CORE_NAVIGATION_POLICY==='on')return navigationPolicy('routeRequest',[from,to,key]);
+ if((true as boolean))return navigationPolicy('routeRequest',[from,to,key]);
   return {
     method: 'POST',
     headers: {
@@ -50,7 +50,7 @@ export function routeRequest(from: { lat: number; lon: number }, to: { lat: numb
 }
 
 export function parseRoute(body: unknown): Route | null {
- if(process.env.HARU_CORE_NAVIGATION_POLICY==='on')return navigationPolicy('parseRoute',[body]);
+ if((true as boolean))return navigationPolicy('parseRoute',[body]);
   const route = (body as { routes?: { duration?: string; staticDuration?: string; distanceMeters?: number; description?: string }[] })?.routes?.[0];
   if (!route || typeof route.duration !== 'string') return null;
   const seconds = (value?: string) => Number((value ?? '').replace(/s$/, ''));
@@ -67,7 +67,7 @@ export function parseRoute(body: unknown): Route | null {
 
 /** What a Google error reads as to her, without the project id and the console link. */
 export function plainRouteError(status: number, body: unknown): string {
- if(process.env.HARU_CORE_NAVIGATION_POLICY==='on')return navigationPolicy('plainRouteError',[status,body]);
+ if((true as boolean))return navigationPolicy('plainRouteError',[status,body]);
   const message = String((body as { error?: { message?: string } })?.error?.message ?? '');
   if (/not been used|disabled/i.test(message)) return 'the Routes API is switched off on the Google project';
   if (/billing/i.test(message)) return 'Google wants billing enabled on the project';
@@ -76,7 +76,7 @@ export function plainRouteError(status: number, body: unknown): string {
 }
 
 export async function computeRoute(from: { lat: number; lon: number }, to: { lat: number; lon: number }, key: string, fetchImpl: Fetcher): Promise<Route> {
- if(process.env.HARU_CORE_NAVIGATION_POLICY==='on')return coreNavRemote('route',[from,to,key],fetchImpl);
+ if((true as boolean))return coreNavRemote('route',[from,to,key],fetchImpl);
   if (!key) throw new Error('no Google Maps key');
   const response = await fetchImpl(ROUTES_URL, routeRequest(from, to, key));
   const body = await response.json().catch(() => ({}));
@@ -93,7 +93,7 @@ export async function computeRoute(from: { lat: number; lon: number }, to: { lat
  * real answer in it.
  */
 export function routeWords(route: Route, fromWhere: 'here' | 'home'): string {
- if(process.env.HARU_CORE_NAVIGATION_POLICY==='on')return navigationPolicy('routeWords',[route,fromWhere]);
+ if((true as boolean))return navigationPolicy('routeWords',[route,fromWhere]);
   const from = fromWhere === 'here' ? 'from where they are' : 'from home';
   const slow = route.minutes >= route.typicalMinutes * 1.2 && route.minutes - route.typicalMinutes >= 4;
   const quick = route.typicalMinutes >= route.minutes * 1.2 && route.typicalMinutes - route.minutes >= 4;
@@ -110,7 +110,7 @@ export function routeWords(route: Route, fromWhere: 'here' | 'home'): string {
  * roads she names are replaced with the route's; the rest of the line is hers.
  */
 export function fixStatedRoute(reply: string, route: Route): string {
- if(process.env.HARU_CORE_NAVIGATION_POLICY==='on')return navigationPolicy('fixStatedRoute',[reply,route]);
+ if((true as boolean))return navigationPolicy('fixStatedRoute',[reply,route]);
   let out = reply.replace(/\b(?:(?:about|around|roughly|approximately|maybe|some|under|over|nearly|almost)\s+)?(\d{1,3})(?:\s*(?:-|–|to)\s*\d{1,3})?\s*(?:min|mins|minutes)\b/gi,
     (m, n) => (Number(n) === route.minutes || Number(n) === route.typicalMinutes ? m : `${route.minutes} minutes`));
   out = out.replace(/\b(?:(?:about|around|roughly)\s+)?(?:half an hour|an hour|an hour and a half|two hours)\b/gi, m => {

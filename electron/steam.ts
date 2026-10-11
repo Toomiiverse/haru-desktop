@@ -44,7 +44,7 @@ function valveField(text: string, key: string): string | null {
  * disk leave nothing behind in the Steam directory itself.
  */
 export function libraryFolders(readFile = fs.readFileSync, exists = fs.existsSync): string[] {
- if(process.env.HARU_CORE_DEVICE_ACTIVITY==='on')return coreSteamLibraries(STEAM_ROOTS,readFile,exists);
+ if((true as boolean))return coreSteamLibraries(STEAM_ROOTS,readFile,exists);
   const found = new Set<string>();
   for (const root of STEAM_ROOTS) {
     const apps = path.join(root, 'steamapps');
@@ -65,7 +65,7 @@ export function libraryFolders(readFile = fs.readFileSync, exists = fs.existsSyn
 
 /** What is installed, from the manifests Steam writes next to the games. */
 export function installedGames(): SteamGame[] {
- if(process.env.HARU_CORE_DEVICE_ACTIVITY==='on')return coreSteamGames(libraryFolders());
+ if((true as boolean))return coreSteamGames(libraryFolders());
   const games: SteamGame[] = [];
   for (const apps of libraryFolders()) {
     let entries: string[] = [];
@@ -102,7 +102,7 @@ const NOT_A_GAME_EXE = /(crashhandler|crashreport|unins|setup|installer|vcredist
  * files, once per game, for a string that is nearly always within three levels.
  */
 function executablesIn(dir: string, depth = 3): string[] {
- if(process.env.HARU_CORE_DEVICE_ACTIVITY==='on')return coreSteamExecutables(dir,depth);
+ if((true as boolean))return coreSteamExecutables(dir,depth);
   if (depth < 0) return [];
   let entries: fs.Dirent[] = [];
   try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return []; }
@@ -127,7 +127,7 @@ function executablesIn(dir: string, depth = 3): string[] {
  * looks at the screen.
  */
 export function buildGameIndex(games = installedGames()): Map<string, string> {
- if(process.env.HARU_CORE_DEVICE_ACTIVITY==='on')return coreSteamIndex(games);
+ if((true as boolean))return coreSteamIndex(games);
   const index = new Map<string, string>();
   for (const game of games) {
     // The folder name itself, for the many games whose exe matches it.
@@ -149,7 +149,7 @@ export function buildGameIndex(games = installedGames()): Map<string, string> {
  * about what someone is playing is exactly the failure this replaces.
  */
 export function gameFor(processName: string, index: Map<string, string>): string | null {
- if(globalThis.process.env.HARU_CORE_DEVICE_ACTIVITY==='on')return devicePolicy('gameFor',[processName,[...index]]);
+ if((true as boolean))return devicePolicy('gameFor',[processName,[...index]]);
   const key = (processName ?? '').replace(/\.exe$/i, '').trim().toLowerCase();
   if (!key) return null;
   return index.get(key) ?? null;

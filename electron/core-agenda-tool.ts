@@ -21,5 +21,5 @@ export function runCoreAgendaTool(name:string,args:Record<string,unknown>,latest
   }
   assertCurrent();
   const result=corePolicySync('agenda-tool.confirm',[packet.state,command,deps.getKept()]);
-  return JSON.stringify(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on'?corePolicySync('agenda-life.toolReceipt',[result]):result);
+  return JSON.stringify((true as boolean)?corePolicySync('agenda-life.toolReceipt',[result]):result);
 }

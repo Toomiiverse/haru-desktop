@@ -69,7 +69,7 @@ export const DEFAULT_SUWAYOMI: SuwayomiConfig = {
 
 /** The `manga.suwayomi` block, read forward; null when it is off. */
 export function readSuwayomiConfig(manga: unknown): SuwayomiConfig | null {
-  if(process.env.HARU_CORE_MANGA_FETCH==='on')return corePolicySync<SuwayomiConfig|null>('manga-fetch.config',[manga,homedir()]);
+  if((true as boolean))return corePolicySync<SuwayomiConfig|null>('manga-fetch.config',[manga,homedir()]);
   const raw = ((manga && typeof manga === 'object' ? (manga as Record<string, unknown>).suwayomi : undefined) ?? null) as Record<string, unknown> | null;
   if (!raw || raw.enabled === false) return null;
   const text = (value: unknown, fallback: string) => (typeof value === 'string' && value.trim() ? value.trim() : fallback);

@@ -33,7 +33,7 @@ const INVENTABLE = /\b(anime|manga|youtube|netflix|twitch|reddit|discord|tiktok|
  * anything that was genuinely in front of her.
  */
 export function dropInventedScreenTalk(reply: string, told: string): string {
- if(process.env.HARU_CORE_SPEECH_CONTEXT==='on')return corePolicySync<any>('reply-processing.dropInventedScreenTalk',[reply,told]);
+ if((true as boolean))return corePolicySync<any>('reply-processing.dropInventedScreenTalk',[reply,told]);
   const paragraphs = reply.split(/\n{2,}/);
   if (paragraphs.length < 2) return reply;
   const last = paragraphs[paragraphs.length - 1];
@@ -75,14 +75,14 @@ const STAGE_DIRECTION = /^\s*(\[[^\]]{1,80}\]|\*[^*]{1,80}\*|\([^)]{1,80}\))\s*$
  */
 const THINK_MARKER = /<\/?(?:think(?:ing)?|response|tool_call|tool_result|reasoning)>/gi;
 export function stripThinkingMarkers(reply: string): string {
- if(process.env.HARU_CORE_SPEECH_CONTEXT==='on')return corePolicySync<any>('reply-processing.stripThinkingMarkers',[reply]);
+ if((true as boolean))return corePolicySync<any>('reply-processing.stripThinkingMarkers',[reply]);
   if (!THINK_MARKER.test(reply)) return reply;
   THINK_MARKER.lastIndex = 0;
   return reply.replace(THINK_MARKER, '').replace(/\n{3,}/g, '\n\n').trim();
 }
 
 export function dropStageDirections(reply: string): string {
- if(process.env.HARU_CORE_SPEECH_CONTEXT==='on')return corePolicySync<any>('reply-processing.dropStageDirections',[reply]);
+ if((true as boolean))return corePolicySync<any>('reply-processing.dropStageDirections',[reply]);
   const kept = reply.split(/\n{2,}/).filter(paragraph => !STAGE_DIRECTION.test(paragraph));
   // If that was the whole reply, she said nothing else and it is better to keep
   // it than to hand back an empty bubble.
@@ -123,7 +123,7 @@ const NOT_A_CLAIM = /\b(shall i|do you want|want me to|should i|would you like|c
 export type DesktopClaim = 'power' | 'app' | null;
 
 export function claimsDesktopAction(reply: string): DesktopClaim {
- if(process.env.HARU_CORE_SPEECH_CONTEXT==='on')return corePolicySync<any>('reply-processing.claimsDesktopAction',[reply]);
+ if((true as boolean))return corePolicySync<any>('reply-processing.claimsDesktopAction',[reply]);
   const text = (reply ?? '').trim();
   if (!text || NOT_A_CLAIM.test(text)) return null;
   if (CLAIMED_POWER.test(text)) return 'power';
@@ -194,7 +194,7 @@ const OFFERING_TO_TICK = /\b(shall i|should i|can i|do you want|want me to|would
 const NOT_TICKED = /(\bnot\b|\bnever\b|n['’]t\b)[^.!?]{0,20}?(tick|mark|check|cross|struck|strike)/i;
 
 export function claimsTickOff(reply: string): boolean {
- if(process.env.HARU_CORE_SPEECH_CONTEXT==='on')return corePolicySync<any>('reply-processing.claimsTickOff',[reply]);
+ if((true as boolean))return corePolicySync<any>('reply-processing.claimsTickOff',[reply]);
   const text = (reply ?? '').trim();
   if (!text || OFFERING_TO_TICK.test(text) || NOT_TICKED.test(text)) return false;
   return CLAIMED_TICK.test(text);
@@ -220,7 +220,7 @@ export function claimsTickOff(reply: string): boolean {
 const SUPPORT_AGENT = /\b(?:i'?m sorry to hear that|it'?s (?:good|great) to hear|glad to hear that|could you please (?:clarify|specify|provide)|how can i assist|i can assist you|feel free to (?:ask|reach out|let me know)|if there'?s anything else (?:you need|i can)|don'?t hesitate to|i hope this helps|i'?m here to help|as an ai\b)\b/i;
 
 export function readsLikeAssistant(reply: string): boolean {
- if(process.env.HARU_CORE_SPEECH_CONTEXT==='on')return corePolicySync<any>('reply-processing.readsLikeAssistant',[reply]);
+ if((true as boolean))return corePolicySync<any>('reply-processing.readsLikeAssistant',[reply]);
   return SUPPORT_AGENT.test(reply ?? '');
 }
 
@@ -248,7 +248,7 @@ const THINKING_OPENER = new RegExp(`^(?:The user\\b|I should(?:n'?t)?(?::|\\s+${
 const THINKING_CONTINUES = new RegExp(`^(?:They (?:mentioned|said|are|have|'re|'ve|seem|want|opened|need|asked|just)\\b|This is (?:a |just |the |about )|This isn'?t\\b|\\d+[.)]\\s|So I\\b|I can\\b|I'?ll\\b|I won'?t\\b|I should(?:n'?t)?(?::|\\s+${PLANNING_VERBS}\\b)|The \\w+ (?:drops|stays|goes|comes) here|Since (?:they|the user)\\b|Given (?:that|the|what)\\b|No (?:therapy|advice|solutions)\\b|Keep it\\b|Stay (?:in|with)\\b)`);
 
 export function thinksAloud(reply: string): boolean {
-  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.thinksAloud',[reply]);
+  if((true as boolean))return corePolicySync<any>('conversation-policy.thinksAloud',[reply]);
 
   const paragraphs = (reply ?? '').trim().split(/\n\s*\n/);
   if (!paragraphs[0]) return false;
@@ -263,7 +263,7 @@ export function thinksAloud(reply: string): boolean {
  * the last dropped paragraph is where the reply is taken to begin.
  */
 export function dropThinkingAloud(reply: string): { text: string; dropped: number } {
- if(process.env.HARU_CORE_SPEECH_CONTEXT==='on')return corePolicySync<any>('reply-processing.dropThinkingAloud',[reply]);
+ if((true as boolean))return corePolicySync<any>('reply-processing.dropThinkingAloud',[reply]);
   const whole = (reply ?? '').trim();
   const paragraphs = whole.split(/\n\s*\n/);
   let i = 0;
@@ -306,7 +306,7 @@ const squash = (text: string) => text.replace(/\s+/g, ' ');
 
 /** The last stretch of `reply` that appears word for word in `instructions`, if one is at least `min` long. */
 export function recitedSpan(reply: string, instructions: string, min = RECITED_MIN): { start: number; end: number } | null {
- if(process.env.HARU_CORE_SPEECH_CONTEXT==='on')return corePolicySync<any>('reply-processing.recitedSpan',[reply,instructions,min]);
+ if((true as boolean))return corePolicySync<any>('reply-processing.recitedSpan',[reply,instructions,min]);
   const text = reply ?? '';
   const source = squash(instructions ?? '');
   if (text.length < min || source.length < min) return null;
@@ -329,7 +329,7 @@ export function recitedSpan(reply: string, instructions: string, min = RECITED_M
  * no clean reply was found, and she should be asked again.
  */
 export function dropRecitedPrompt(reply: string, instructions: string): { text: string; dropped: number } {
- if(process.env.HARU_CORE_SPEECH_CONTEXT==='on')return corePolicySync<any>('reply-processing.dropRecitedPrompt',[reply,instructions]);
+ if((true as boolean))return corePolicySync<any>('reply-processing.dropRecitedPrompt',[reply,instructions]);
   const whole = (reply ?? '').trim();
   const span = recitedSpan(whole, instructions);
   if (!span) return { text: whole, dropped: 0 };
@@ -362,7 +362,7 @@ export function dropRecitedPrompt(reply: string, instructions: string): { text: 
 const ROLE_HEADER = /^\s*(assistant|user|system|model)\s*:?\s*\n+/i;
 
 export function dropRoleHeader(reply: string): string {
- if(process.env.HARU_CORE_SPEECH_CONTEXT==='on')return corePolicySync<any>('reply-processing.dropRoleHeader',[reply]);
+ if((true as boolean))return corePolicySync<any>('reply-processing.dropRoleHeader',[reply]);
   const withoutHeader = reply.replace(ROLE_HEADER, '');
   // An opening quote with no closing one is the other half of the same leak.
   // Left alone when the quote is balanced, since she does quote people.
@@ -427,7 +427,7 @@ function mentions(passage: string, words: string[]): boolean {
  * and shopping, and any paragraph using one of those went.
  */
 export function dropRepeatedAgendaMentions(reply: string, previousReplies: string[], titles: string[], askedAbout: string): string {
- if(process.env.HARU_CORE_SPEECH_CONTEXT==='on')return corePolicySync<any>('reply-processing.dropRepeatedAgendaMentions',[reply,previousReplies,titles,askedAbout]);
+ if((true as boolean))return corePolicySync<any>('reply-processing.dropRepeatedAgendaMentions',[reply,previousReplies,titles,askedAbout]);
   const subjects = titles.map(distinctiveWords).filter(words => words.length);
   if (!subjects.length) return reply;
   const paragraphs = reply.split(/\n{2,}/).map(part => part.trim()).filter(Boolean);
@@ -504,7 +504,7 @@ function thirdPartyTalk(paragraph: string): boolean {
 const CREDITED = /\byou (said|told me|mentioned|reckoned|were saying)\b/i;
 
 export function dropInventedContact(reply: string): string {
- if(process.env.HARU_CORE_SPEECH_CONTEXT==='on')return corePolicySync<any>('reply-processing.dropInventedContact',[reply]);
+ if((true as boolean))return corePolicySync<any>('reply-processing.dropInventedContact',[reply]);
   const paragraphs = reply.split(/\n{2,}/).map(part => part.trim()).filter(Boolean);
   const invented = (paragraph: string) => gotInTouch(paragraph) || HEARD_FROM.test(paragraph);
   const kept = paragraphs.filter(paragraph =>
@@ -598,7 +598,7 @@ function overlap(a: string, b: string) {
 }
 
 export function dropRepeatedParagraphs(reply: string, previousReplies: string[], ceiling = MAX_PARAGRAPHS): string {
- if(process.env.HARU_CORE_SPEECH_CONTEXT==='on')return corePolicySync<any>('reply-processing.dropRepeatedParagraphs',[reply,previousReplies,ceiling]);
+ if((true as boolean))return corePolicySync<any>('reply-processing.dropRepeatedParagraphs',[reply,previousReplies,ceiling]);
   const seen = new Set(
     previousReplies
       .flatMap(message => message.split(/\n{2,}|\n(?=[A-Z“"])/))
@@ -656,7 +656,7 @@ export function dropRepeatedParagraphs(reply: string, previousReplies: string[],
 const TACKED_ON_CEILING = 2;
 
 export function dropTackedOnParagraphs(reply: string, lookedSomethingUp: boolean, ceiling = TACKED_ON_CEILING): string {
- if(process.env.HARU_CORE_SPEECH_CONTEXT==='on')return corePolicySync<any>('reply-processing.dropTackedOnParagraphs',[reply,lookedSomethingUp,ceiling]);
+ if((true as boolean))return corePolicySync<any>('reply-processing.dropTackedOnParagraphs',[reply,lookedSomethingUp,ceiling]);
   // She went and found this out. Its length is the answer's, not hers.
   if (lookedSomethingUp) return reply;
   const paragraphs = reply.split(/\n{2,}/);
@@ -682,7 +682,7 @@ export function dropTackedOnParagraphs(reply: string, lookedSomethingUp: boolean
 const STOCK_OPENERS = /^(fine|okay|ok|alright|right|good|great|well|ugh|look|listen|oh|honestly|sure|obviously|whatever)$/i;
 
 export function dropRepeatedOpener(reply: string, previousReplies: string[]): string {
- if(process.env.HARU_CORE_SPEECH_CONTEXT==='on')return corePolicySync<any>('reply-processing.dropRepeatedOpener',[reply,previousReplies]);
+ if((true as boolean))return corePolicySync<any>('reply-processing.dropRepeatedOpener',[reply,previousReplies]);
   const opener = (text: string) => (text.trimStart().match(/^[\p{L}']+/u)?.[0] ?? '').toLowerCase();
   const mine = opener(reply);
   if (!mine || !STOCK_OPENERS.test(mine)) return reply;
@@ -709,7 +709,7 @@ export function dropRepeatedOpener(reply: string, previousReplies: string[]): st
 const ECHO_STOPWORDS = new Set(['your', 'yours', 'that', 'this', 'with', 'what', 'about', 'there', 'they', 'them', 'have', 'just', 'like', 'want', 'will', 'were', 'then', 'than', 'from', 'into', 'does', 'dont', 'didn', 'even', 'though', 'still', 'really', 'think', 'know', 'some', 'more', 'when', 'where', 'which', 'would', 'could', 'should', 'going', 'been', 'being', 'also', 'much', 'many', 'very', 'right', 'okay', 'fine', 'sure', 'well', 'good', 'thing', 'things', 'something', 'anything', 'nothing', 'maybe', 'reckon']);
 
 export function dropEchoOpener(reply: string, theirMessage: string): string {
- if(process.env.HARU_CORE_SPEECH_CONTEXT==='on')return corePolicySync<any>('reply-processing.dropEchoOpener',[reply,theirMessage]);
+ if((true as boolean))return corePolicySync<any>('reply-processing.dropEchoOpener',[reply,theirMessage]);
   // A word or two on its own — "Seeds", "Belong" — is the one message she is
   // right to say back: "Belong? What about it?" is her asking what they meant,
   // which is exactly what she is told to do with a stray word. Left alone.
@@ -740,7 +740,7 @@ export function dropEchoOpener(reply: string, theirMessage: string): string {
 const MIN_REPEAT_WORDS = 6;
 
 export function dropRepeatedSentences(reply: string, previousReplies: string[]): string {
- if(process.env.HARU_CORE_SPEECH_CONTEXT==='on')return corePolicySync<any>('reply-processing.dropRepeatedSentences',[reply,previousReplies]);
+ if((true as boolean))return corePolicySync<any>('reply-processing.dropRepeatedSentences',[reply,previousReplies]);
   const sentences = (text: string) => text.match(/[^.!?\n]+[.!?…]+|[^.!?\n]+$/gu) ?? [];
   const seen = new Set(previousReplies.slice(-2).flatMap(sentences).map(normalise).filter(key => key.split(' ').length >= MIN_REPEAT_WORDS));
   if (!seen.size) return reply;
@@ -768,7 +768,7 @@ const STATED_NOW = /\b(it[’']?s|it is|already|now)\s+(\d{1,2}):(\d{2})(?:\s?(a
 const CLOCK_SLACK_MINUTES = 5;
 
 export function fixStatedClock(reply: string, hour: number, minute: number): string {
- if(process.env.HARU_CORE_SPEECH_CONTEXT==='on')return corePolicySync<any>('reply-processing.fixStatedClock',[reply,hour,minute]);
+ if((true as boolean))return corePolicySync<any>('reply-processing.fixStatedClock',[reply,hour,minute]);
   const actual = hour * 60 + minute;
   const shown = `${hour % 12 === 0 ? 12 : hour % 12}:${String(minute).padStart(2, '0')} ${hour < 12 ? 'AM' : 'PM'}`;
   return reply.replace(STATED_NOW, (whole, lead: string, h: string, m: string, meridiem?: string) => {
@@ -791,7 +791,7 @@ export function fixStatedClock(reply: string, hour: number, minute: number): str
 const STATED_TIME = /\b(\d{1,2})(?::(\d{2}))?\s?(am|pm)\b/giu;
 
 export function fixStatedReminderTime(reply: string, savedTime: string): string {
- if(process.env.HARU_CORE_SPEECH_CONTEXT==='on')return corePolicySync<any>('reply-processing.fixStatedReminderTime',[reply,savedTime]);
+ if((true as boolean))return corePolicySync<any>('reply-processing.fixStatedReminderTime',[reply,savedTime]);
   return reply.replace(STATED_TIME, (whole, h: string, m: string | undefined, meridiem: string) => {
     if (Number(h) > 12 || (m !== undefined && Number(m) > 59)) return whole;
     const said = `${Number(h)}:${(m ?? '00').padStart(2, '0')} ${meridiem.toUpperCase()}`;
@@ -825,7 +825,7 @@ export function fixStatedReminderTime(reply: string, savedTime: string): string 
  * lost, every time, to the shape of the conversation.
  */
 export function isCue(user: string): boolean {
-  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.isCue',[user]);
+  if((true as boolean))return corePolicySync<any>('conversation-policy.isCue',[user]);
 
   const text = (user ?? '').trim();
   if (!text || text.length > 40 || /["“”'‘’:]/.test(text)) return false;
@@ -834,7 +834,7 @@ export function isCue(user: string): boolean {
 
 /** The cue, dressed as what it is. Still a user turn — the template needs one — but not one she can answer. */
 export function stageNote(cue: string): string {
-  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.stageNote',[cue]);
+  if((true as boolean))return corePolicySync<any>('conversation-policy.stageNote',[cue]);
 
   return `[Stage direction from the app — not a message from them; they have said nothing. ${cue.trim()}]`;
 }
@@ -842,7 +842,7 @@ export function stageNote(cue: string): string {
 export const CUE_NOTE = 'The final user turn is a stage direction from the app, not a message from them: they have said nothing and nothing they said prompted this. It only tells you it is your turn to speak. Never quote it, mention it, answer it, or write as though they had just messaged you.';
 
 export function answersThePrompt(reply: string, priming: string): boolean {
-  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.answersThePrompt',[reply,priming]);
+  if((true as boolean))return corePolicySync<any>('conversation-policy.answersThePrompt',[reply,priming]);
 
   const words = priming.replace(/[.!?\s]+$/, '').trim();
   if (words.length < 4) return false;
@@ -891,7 +891,7 @@ function spanInHours(minutes: number): string {
  * Only the minutes are touched; the rest of the line is hers.
  */
 export function fixStatedMinutes(line: string, minutes: number): string {
- if(process.env.HARU_CORE_SPEECH_CONTEXT==='on')return corePolicySync<any>('reply-processing.fixStatedMinutes',[line,minutes]);
+ if((true as boolean))return corePolicySync<any>('reply-processing.fixStatedMinutes',[line,minutes]);
   return line.replace(STATED_SPAN, (whole, hours?: string, rest?: string, plain?: string) => {
     if (hours) {
       const value = numberFrom(hours) * 60 + (rest ? numberFrom(rest) : 0);
@@ -912,7 +912,7 @@ export function fixStatedMinutes(line: string, minutes: number): string {
  * only when the reply still says something without it.
  */
 export function dropOverusedEmoji(reply: string, previousReplies: string[], emoji: readonly string[], checked = 4, need = 2): string {
- if(process.env.HARU_CORE_SPEECH_CONTEXT==='on')return corePolicySync<any>('reply-processing.dropOverusedEmoji',[reply,previousReplies,emoji,checked,need]);
+ if((true as boolean))return corePolicySync<any>('reply-processing.dropOverusedEmoji',[reply,previousReplies,emoji,checked,need]);
   const recent = previousReplies.slice(-checked);
   const last = previousReplies[previousReplies.length - 1] ?? '';
   // Two tests, because there are two ways to wear one out. Back to back is the
@@ -935,7 +935,7 @@ export function dropOverusedEmoji(reply: string, previousReplies: string[], emoj
  * sticker sheet the wording already forbids and the model produced anyway.
  */
 export function oneEmojiAtMost(reply: string, emoji: readonly string[]): string {
- if(process.env.HARU_CORE_SPEECH_CONTEXT==='on')return corePolicySync<any>('reply-processing.oneEmojiAtMost',[reply,emoji]);
+ if((true as boolean))return corePolicySync<any>('reply-processing.oneEmojiAtMost',[reply,emoji]);
   const used = [...reply].filter(character => emoji.includes(character));
   if (used.length < 2) return reply;
   const keep = used[0];
@@ -973,7 +973,7 @@ const AT_HIM = /^(?:now,?\s+|and\s+|but\s+|so\s+)*(?:go|stop|get|put|don't|do|do
 const PIVOT_BACK = /^(?:so,?\s+|now,?\s+|anyway,?\s+)*(?:out with it|spit it out|what (?:do|did) you (?:actually |really )?(?:want|need|come (?:here )?for)|what (?:is|was) it,? then|what'?s this (?:really |actually )?about|you'?re (?:not actually|just|only) (?:interested|stalling|avoiding|dodging|putting off|procrastinating)|(?:stop|quit) (?:stalling|dodging|avoiding))/i;
 
 export function dropClosingOrder(reply: string): string {
- if(process.env.HARU_CORE_SPEECH_CONTEXT==='on')return corePolicySync<any>('reply-processing.dropClosingOrder',[reply]);
+ if((true as boolean))return corePolicySync<any>('reply-processing.dropClosingOrder',[reply]);
   // Preserve her generated tone; this compatibility hook no longer trims orders.
   return reply;
 }
@@ -1007,13 +1007,13 @@ const CLAIMS_CHECKED = /\b(?:I(?:'ve| have| just)? (?:checked|verified|confirmed
 const ASKS_TO_LOOK_UP = /\b(?:look (?:it |that |this |them |those |one )?up\b(?! to)|search (?:up|for|online|the web|the internet|it|that)\b|google (?:it|that|this|for)\b|fact[- ]?check|check (?:online|the web|the internet)\b|find out (?:online|if|whether)\b)|^\s*(?:(?:hey|ok|okay|oi)[,!]?\s+)?(?:haru[,!]?\s+)?(?:can you |could you |please )?(?:search|google)\b/i;
 
 export function asksToLookUp(message: string): boolean {
-  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<boolean>('conversation-policy.asksToLookUp',[message]);
+  if((true as boolean))return corePolicySync<boolean>('conversation-policy.asksToLookUp',[message]);
 
   return ASKS_TO_LOOK_UP.test((message ?? '').replace(/[‘’]/g, "'"));
 }
 
 export function claimsChecked(reply: string): boolean {
- if(process.env.HARU_CORE_SPEECH_CONTEXT==='on')return corePolicySync<any>('reply-processing.claimsChecked',[reply]);
+ if((true as boolean))return corePolicySync<any>('reply-processing.claimsChecked',[reply]);
   const text = (reply ?? '').replace(/[‘’]/g, "'");
   for (const match of text.matchAll(new RegExp(CLAIMS_CHECKED.source, 'gi'))) {
     const before = text.slice(Math.max(0, match.index! - 60), match.index);
@@ -1026,6 +1026,6 @@ export function claimsChecked(reply: string): boolean {
 }
 
 export function deniesItExists(reply: string): boolean {
- if(process.env.HARU_CORE_SPEECH_CONTEXT==='on')return corePolicySync<any>('reply-processing.deniesItExists',[reply]);
+ if((true as boolean))return corePolicySync<any>('reply-processing.deniesItExists',[reply]);
   return DENIES_IT_EXISTS.test((reply ?? '').replace(/[‘’]/g, "'"));
 }

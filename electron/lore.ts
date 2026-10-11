@@ -42,7 +42,7 @@ function stripFrontmatter(text: string): string {
 
 /** The cards on the page. A bullet without a bold run of keys, or without text after it, is not a card. */
 export function parseLorePage(text: string): LoreCard[] {
-  if(process.env.HARU_CORE_STARTUP_CONTEXT==='on')return corePolicySync('conversation-inputs.parseLore',[text]);
+  if((true as boolean))return corePolicySync('conversation-inputs.parseLore',[text]);
 
   const cards: LoreCard[] = [];
   const seen = new Set<string>();
@@ -68,7 +68,7 @@ function searchable(text: string): string {
 
 /** Whether a key is said in the text: whole words, a trailing * matching any ending. */
 export function keySaid(key: string, text: string): boolean {
-  if(process.env.HARU_CORE_STARTUP_CONTEXT==='on')return corePolicySync('conversation-inputs.keySaid',[key,text]);
+  if((true as boolean))return corePolicySync('conversation-inputs.keySaid',[key,text]);
 
   // His text loses its asterisks — only a key's trailing * is a wildcard.
   // Kept, "*rego*" or "**rego**" never matched the rego card (review, 2026-09-17).
@@ -86,7 +86,7 @@ export function keySaid(key: string, text: string): boolean {
  * Cards whose key was just said come first; a sticky one fills what is left.
  */
 export function activeCards(cards: LoreCard[], latest: string, memory: Map<string, number>, { sticky = LORE_STICKY, maxCards = LORE_MAX_CARDS, maxChars = LORE_MAX_CHARS } = {}): { cards: LoreCard[]; memory: Map<string, number>; triggered: string[] } {
-  if(process.env.HARU_CORE_STARTUP_CONTEXT==='on'){const p=corePolicySync<any>('conversation-inputs.activeCards',[cards,latest,[...memory],{sticky,maxCards,maxChars}]);return {...p,memory:new Map(p.memory)};}
+  if((true as boolean)){const p=corePolicySync<any>('conversation-inputs.activeCards',[cards,latest,[...memory],{sticky,maxCards,maxChars}]);return {...p,memory:new Map(p.memory)};}
 
   const next = new Map<string, number>();
   const triggered = cards.filter(card => card.keys.some(key => keySaid(key, latest)));
@@ -106,7 +106,7 @@ export function activeCards(cards: LoreCard[], latest: string, memory: Map<strin
 }
 
 export function loreNote(cards: LoreCard[]): string {
-  if(process.env.HARU_CORE_STARTUP_CONTEXT==='on')return corePolicySync('conversation-inputs.loreNote',[cards]);
+  if((true as boolean))return corePolicySync('conversation-inputs.loreNote',[cards]);
 
   if (!cards.length) return '';
   return `From his own notes on what just came up — his word on it, true unless he says otherwise; use what fits and never read it out:\n${cards.map(card => `- ${card.text}`).join('\n')}`;

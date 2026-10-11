@@ -61,7 +61,7 @@ const text = (value: unknown, fallback: string): string => (typeof value === 'st
 const trimSlash = (url: string) => url.replace(/\/+$/, '');
 
 export function readAnimeConfig(saved: unknown): AnimeConfig {
-  if(process.env.HARU_CORE_ANIME_DOWNLOADS==='on')return corePolicySync('anime-downloads.config',[saved??null,homedir()]);
+  if((true as boolean))return corePolicySync('anime-downloads.config',[saved??null,homedir()]);
   if (!saved || typeof saved !== 'object') return { ...DEFAULT_ANIME };
   const record = saved as Record<string, unknown>;
   const sonarr = (record.sonarr ?? {}) as Record<string, unknown>;
@@ -191,7 +191,7 @@ const PACK_WORDS = /\b(?:complete|collection|batch|series|the complete series|fu
  * title Sonarr could not read at all is not vouched for either way.
  */
 export function sameShow(parsedTitle: string | undefined, wanted: string): boolean | null {
-  if(process.env.HARU_CORE_ANIME_DOWNLOADS==='on')return corePolicySync('anime-downloads.sameShow',[parsedTitle??null,wanted]);
+  if((true as boolean))return corePolicySync('anime-downloads.sameShow',[parsedTitle??null,wanted]);
   if (!parsedTitle) return null;
   const strip = (value: string) => normaliseTitle(value).replace(PACK_WORDS, ' ').replace(/\s+/g, ' ').trim();
   return strip(parsedTitle) === strip(wanted);
@@ -207,7 +207,7 @@ export function sameShow(parsedTitle: string | undefined, wanted: string): boole
  * ten thousand, for the reason at the top of the file.
  */
 export function rateRelease(release: ProwlarrRelease, parsed: SonarrParse, want: Want): Rated {
-  if(process.env.HARU_CORE_ANIME_DOWNLOADS==='on')return corePolicySync('anime-downloads.rateRelease',[release,parsed,want]);
+  if((true as boolean))return corePolicySync('anime-downloads.rateRelease',[release,parsed,want]);
   const formats = (parsed.customFormats ?? []).map(format => format.name);
   const info = parsed.parsedEpisodeInfo ?? undefined;
   const sizeGb = (release.size ?? 0) / GB;
@@ -240,7 +240,7 @@ export function rateRelease(release: ProwlarrRelease, parsed: SonarrParse, want:
 
 /** The one to fetch: best that leaves the room; failing that, best that fits at all, for them to approve. */
 export function pickRelease(rated: Rated[]): { pick: Rated; needsWord: boolean } | null {
-  if(process.env.HARU_CORE_ANIME_DOWNLOADS==='on')return corePolicySync('anime-downloads.pickRelease',[rated]);
+  if((true as boolean))return corePolicySync('anime-downloads.pickRelease',[rated]);
   const good = rated.filter(item => item.ok).sort((a, b) => b.score - a.score);
   const roomy = good.find(item => item.fits);
   if (roomy) return { pick: roomy, needsWord: false };
@@ -309,8 +309,8 @@ export class AnimeLink {
 
   async findOnServer(title: string): Promise<JellyfinItem | null> {
     const user = encodeURIComponent(this.keys.jellyfinUserId);
-    const found = await this.jf<{ Items?: JellyfinItem[];TotalRecordCount?:number }>(`/Items?userId=${user}&IncludeItemTypes=Series&Recursive=true&SearchTerm=${encodeURIComponent(title)}&EnableTotalRecordCount=true&Limit=${process.env.HARU_CORE_ANIME_DOWNLOADS==='on'?100:6}`);
-    if(process.env.HARU_CORE_ANIME_DOWNLOADS==='on'&&typeof found?.TotalRecordCount==='number'&&found.TotalRecordCount>(found.Items?.length??0))throw Error('anime_library_truncated');
+    const found = await this.jf<{ Items?: JellyfinItem[];TotalRecordCount?:number }>(`/Items?userId=${user}&IncludeItemTypes=Series&Recursive=true&SearchTerm=${encodeURIComponent(title)}&EnableTotalRecordCount=true&Limit=${(true as boolean)?100:6}`);
+    if((true as boolean)&&typeof found?.TotalRecordCount==='number'&&found.TotalRecordCount>(found.Items?.length??0))throw Error('anime_library_truncated');
     const items = (found?.Items ?? []).map(item => ({ ...item, title: item.Name }));
     const match = matchTitle(title, items);
     if(process.env.HARU_CORE_ANIME_PLAYBACK==='on'){
@@ -418,7 +418,7 @@ export class AnimeLink {
    * and the rows fold to one per download id, which is what a fetch is.
    */
   async queue(): Promise<SonarrQueueItem[]> {
-    if(process.env.HARU_CORE_ANIME_DOWNLOADS==='on')return corePolicySync('anime-downloads.queueSnapshot',[await this.queueRaw()]);
+    if((true as boolean))return corePolicySync('anime-downloads.queueSnapshot',[await this.queueRaw()]);
     const lines: SonarrQueueItem[] = [];
     const seen = new Set<string>();
     for (let page = 1; page <= 10; page++) {
@@ -572,7 +572,7 @@ export class AnimeLink {
 
   /** Retained download policy; HARU_CORE_ANIME_PLAYBACK does not claim ownership. */
   private async watchDownload(input:WatchInput):Promise<Record<string,unknown>>{
-    if(process.env.HARU_CORE_ANIME_DOWNLOADS==='on')return runAnimeDownload(input,this.config,(op,args)=>this.downloadTransport(op,args),this.memory);
+    if((true as boolean))return runAnimeDownload(input,this.config,(op,args)=>this.downloadTransport(op,args),this.memory);
     const title=input.title.trim();
     // Not on the server. In Sonarr already?
     const shows = await this.shows();
@@ -608,7 +608,7 @@ export class AnimeLink {
 
   /** "How's Naruto going": where a fetch is up to, or what is on the server. */
   async status(title: string): Promise<Record<string, unknown>> {
-    if(process.env.HARU_CORE_ANIME_DOWNLOADS==='on')return runAnimeDownload({title},this.config,(op,args)=>this.downloadTransport(op,args),this.memory,'status');
+    if((true as boolean))return runAnimeDownload({title},this.config,(op,args)=>this.downloadTransport(op,args),this.memory,'status');
     const shows = await this.shows();
     const match = matchTitle(title, shows);
     const show = match && 'one' in match ? match.one : null;

@@ -58,7 +58,7 @@ export const CAPTIONS_KEPT = 600;
 export const SHOTS_PER_PASS = 6;
 
 export function readCaptions(saved: unknown): Caption[] {
-  if(process.env.HARU_CORE_SHOT_CAPTIONS==='on')return corePolicySync('shot-captions.readCaptions',[saved]);
+  if((true as boolean))return corePolicySync('shot-captions.readCaptions',[saved]);
   if (!Array.isArray(saved)) return [];
   return saved.filter((entry): entry is Caption =>
     Boolean(entry) && typeof entry === 'object'
@@ -76,7 +76,7 @@ const key = (day: string, name: string) => `${day}/${name}`;
  * sees follows the day as it happened rather than arriving shuffled.
  */
 export function unseenShots(held: Record<string, string[]>, captions: Caption[], limit = SHOTS_PER_PASS, floor: string | null = null): { day: string; name: string }[] {
-  if(process.env.HARU_CORE_SHOT_CAPTIONS==='on')return corePolicySync('shot-captions.unseenShots',[held,captions,limit,floor]);
+  if((true as boolean))return corePolicySync('shot-captions.unseenShots',[held,captions,limit,floor]);
   const done = new Set(captions
     .filter(caption => caption.text.trim() || (caption.tries ?? 0) >= MAX_LOOK_TRIES)
     .map(caption => key(caption.day, caption.name)));
@@ -106,7 +106,7 @@ export function unseenShots(held: Record<string, string[]>, captions: Caption[],
  * is one she has already seen, and it is not looked at again.
  */
 export function fallenOff(captions: Caption[]): string | null {
-  if(process.env.HARU_CORE_SHOT_CAPTIONS==='on')return corePolicySync('shot-captions.fallenOff',[captions]);
+  if((true as boolean))return corePolicySync('shot-captions.fallenOff',[captions]);
   if (captions.length < CAPTIONS_KEPT) return null;
   let oldest: string | null = null;
   for (const caption of captions) {
@@ -119,7 +119,7 @@ export function fallenOff(captions: Caption[]): string | null {
 /** One caption in, the oldest out once the list is full. A second look at the
  *  same shot replaces the first rather than making a duplicate. */
 export function noteCaption(captions: Caption[], entry: Caption): Caption[] {
-  if(process.env.HARU_CORE_SHOT_CAPTIONS==='on')return corePolicySync('shot-captions.noteCaption',[captions,entry]);
+  if((true as boolean))return corePolicySync('shot-captions.noteCaption',[captions,entry]);
   const without = captions.filter(caption => key(caption.day, caption.name) !== key(entry.day, entry.name));
   return [...without, entry].slice(-CAPTIONS_KEPT);
 }
@@ -135,7 +135,7 @@ export function noteCaption(captions: Caption[], entry: Caption): Caption[] {
  * folder is caught up would be 3 GB for nothing.
  */
 export function moreThanOnePass(held: Record<string, string[]>, captions: Caption[], described: Record<string, string[]> = {}): boolean {
-  if(process.env.HARU_CORE_SHOT_CAPTIONS==='on')return corePolicySync('shot-captions.moreThanOnePass',[held,captions,described]);
+  if((true as boolean))return corePolicySync('shot-captions.moreThanOnePass',[held,captions,described]);
   return shotsNeedingALook(held, captions, described, SHOTS_PER_PASS + 1).length > SHOTS_PER_PASS;
 }
 
@@ -159,7 +159,7 @@ export function moreThanOnePass(held: Record<string, string[]>, captions: Captio
  * ever bites is to improve the caption where it is written, not to look again.
  */
 export function describedShots(log: Record<string, { shot?: string; description?: string }[]>): Record<string, string[]> {
-  if(process.env.HARU_CORE_SHOT_CAPTIONS==='on')return corePolicySync('shot-captions.describedShots',[log]);
+  if((true as boolean))return corePolicySync('shot-captions.describedShots',[log]);
   const out: Record<string, string[]> = {};
   for (const [day, entries] of Object.entries(log ?? {})) {
     const named = (entries ?? []).filter(entry => entry?.shot && entry.description?.trim()).map(entry => entry.shot as string);
@@ -181,14 +181,14 @@ export function describedShots(log: Record<string, { shot?: string; description?
  * at them is not hers.
  */
 export function shotsSince(held: Record<string, string[]>, since: string | null | undefined): Record<string, string[]> {
-  if(process.env.HARU_CORE_SHOT_CAPTIONS==='on')return corePolicySync('shot-captions.shotsSince',[held,since??null]);
+  if((true as boolean))return corePolicySync('shot-captions.shotsSince',[held,since??null]);
   if (!since || !/^\d{4}-\d{2}-\d{2}$/.test(since)) return held;
   return Object.fromEntries(Object.entries(held).filter(([day]) => day >= since));
 }
 
 /** And any caption she has already written for one of those days, which is the same thing in words. */
 export function captionsSince(captions: Caption[], since: string | null | undefined): Caption[] {
-  if(process.env.HARU_CORE_SHOT_CAPTIONS==='on')return corePolicySync('shot-captions.captionsSince',[captions,since??null]);
+  if((true as boolean))return corePolicySync('shot-captions.captionsSince',[captions,since??null]);
   if (!since || !/^\d{4}-\d{2}-\d{2}$/.test(since)) return captions;
   return captions.filter(caption => caption.day >= since);
 }
@@ -199,7 +199,7 @@ export function shotsNeedingALook(
   described: Record<string, string[]>,
   limit = SHOTS_PER_PASS,
 ): { day: string; name: string }[] {
-  if(process.env.HARU_CORE_SHOT_CAPTIONS==='on')return corePolicySync('shot-captions.shotsNeedingALook',[held,captions,described,limit]);
+  if((true as boolean))return corePolicySync('shot-captions.shotsNeedingALook',[held,captions,described,limit]);
   // Stand-ins, never stored: they only have to look done to unseenShots, and
   // "done" there means carrying words. An empty text is what a failed look
   // leaves behind, which is the opposite of what these are.
@@ -212,20 +212,20 @@ export function shotsNeedingALook(
 
 /** A look that came to nothing, so the next pass knows it has been here. */
 export function noteFailure(captions: Caption[], day: string, name: string, at: string): Caption[] {
-  if(process.env.HARU_CORE_SHOT_CAPTIONS==='on')return corePolicySync('shot-captions.noteFailure',[captions,day,name,at]);
+  if((true as boolean))return corePolicySync('shot-captions.noteFailure',[captions,day,name,at]);
   const had = captions.find(caption => key(caption.day, caption.name) === key(day, name));
   return noteCaption(captions, { day, name, at, text: '', tries: (had?.tries ?? 0) + 1 });
 }
 
 /** What she saw on one day, in the order she saw it. */
 export function captionsFor(captions: Caption[], day: string): Caption[] {
-  if(process.env.HARU_CORE_SHOT_CAPTIONS==='on')return corePolicySync('shot-captions.captionsFor',[captions,day]);
+  if((true as boolean))return corePolicySync('shot-captions.captionsFor',[captions,day]);
   return captions.filter(caption => caption.day === day && caption.text.trim()).sort((a, b) => a.name.localeCompare(b.name));
 }
 
 /** Captions for days that no longer have shots — dropped alongside them so the
  *  record does not outlive what it describes. */
 export function forgetCaptions(captions: Caption[], cutoffDay: string): Caption[] {
-  if(process.env.HARU_CORE_SHOT_CAPTIONS==='on')return corePolicySync('shot-captions.forgetCaptions',[captions,cutoffDay]);
+  if((true as boolean))return corePolicySync('shot-captions.forgetCaptions',[captions,cutoffDay]);
   return captions.filter(caption => caption.day >= cutoffDay);
 }

@@ -6,12 +6,11 @@ import {CoreServiceClient,coreServiceOptions} from './core-service-client';
 import {eligibleModels,type ModelEntry,type ModelRole,type RouteRequest,type ProviderConfig} from './model-registry';
 import {isAllowedTaskProvider,isDirectProvider} from './direct-providers';
 import {assertOutboundSafe} from './outbound';
-import {taskIntent,selectTaskModel,nextTaskRole,routingTextHistory,type TaskInputs,type TaskIntent} from './task-router';
-import {selectFastConversationModel,NATURAL_MAX_TOKENS} from './natural-conversation';
+import {routingTextHistory,type TaskInputs,type TaskIntent} from './task-router';
+import {NATURAL_MAX_TOKENS} from './natural-conversation';
 const ROLES=new Set(['everyday','conversation','local-perception','affordable-cloud','specialist','complex','premium']);
 function client(){const options=coreServiceOptions();if(!options)throw Error('core_router_requires_service');return new CoreServiceClient(options);}
 export async function coreTaskIntent(message:string,inputs:TaskInputs={}):Promise<TaskIntent>{
-  if(process.env.HARU_CORE_ROUTER!=='on')return taskIntent(message,inputs);
   const started=performance.now();
   const result=await client().route({version:1,op:'intent',message,pictures:!!inputs.pictures,files:!!inputs.files,
     perception:!!inputs.perception,min_words:inputs.minWords??25,history:routingTextHistory((inputs.history??[]).map(row=>({role:row.role,content:row.content??''})))});
@@ -26,7 +25,7 @@ export function provideNightFacts(read:()=>unknown){nightFacts=read;}
 export function coreRouteCandidates(entries:readonly ModelEntry[],role:ModelRole,request:RouteRequest){
   let cloudAllowed=request.cloudAllowed;
   if(cloudAllowed){try{assertOutboundSafe(request.conversation??[],request.toolSchema);}catch{cloudAllowed=false;}}
-  if(process.env.HARU_CORE_ROUTE_ADMISSION==='on'){
+  if((true as boolean)){
     // Core supplies the scope before adapters inspect credentials/cooldowns.
     // Indices refer to this exact snapshot; malformed references fail closed.
     const night=nightFacts();
@@ -42,7 +41,6 @@ export function coreRouteCandidates(entries:readonly ModelEntry[],role:ModelRole
     ...(entry.observed?{attempts:entry.observed.attempts,successes:entry.observed.successes}:{})}}));
 }
 export async function coreSelectTaskModel(entries:readonly ModelEntry[],role:ModelRole,request:RouteRequest):Promise<ModelEntry|undefined>{
-  if(process.env.HARU_CORE_ROUTER!=='on')return selectTaskModel(entries,role,request);
   const started=performance.now(),offered=coreRouteCandidates(entries,role,request);
   markTurn('routing_candidates',{candidates:offered.length});
  const result=await client().route({version:1,op:'select',role,candidates:offered.map(row=>row.candidate)});
@@ -56,8 +54,7 @@ export async function coreSelectTaskModel(entries:readonly ModelEntry[],role:Mod
 }
 
 export async function coreFastConversationModel(entries:readonly ModelEntry[],setting:unknown,request:RouteRequest):Promise<ModelEntry|undefined>{
-  if(process.env.HARU_CORE_ROUTER!=='on')return selectFastConversationModel(entries,setting,request);
-  if(process.env.HARU_CORE_ROUTE_ADMISSION==='on'){
+  if((true as boolean)){
     const selected=routePolicy<ModelEntry|null>('fast',[entries,setting,nightFacts()]);
     if(!selected)return;
     return coreSelectTaskModel([selected],'conversation',{...request,maxOutputTokens:request.maxOutputTokens??NATURAL_MAX_TOKENS,tools:false,toolSchema:[]});
@@ -70,7 +67,6 @@ export async function coreFastConversationModel(entries:readonly ModelEntry[],se
 }
 
 export async function coreNextTaskRole(current:ModelRole,intent:TaskIntent,fastToConversation=false):Promise<ModelRole|undefined>{
-  if(process.env.HARU_CORE_ROUTER!=='on')return fastToConversation?'conversation':nextTaskRole(current,intent);
   const started=performance.now();
   const result=await client().route({version:1,op:'next-role',current_role:current,intent_role:intent.role,fast_to_conversation:fastToConversation});
   if(result.role!==null&&!ROLES.has(result.role))throw Error('core_router_protocol_error');
@@ -81,8 +77,8 @@ export async function coreNextTaskRole(current:ModelRole,intent:TaskIntent,fastT
 // Preparation hint only. Native harness independently checks the ledger request
 // and actual fresh images before selecting a tool-free visual composition.
 export async function coreInputProfile(request:string,freshImages:boolean):Promise<'normal'|'grounded-perception'>{
-  if(process.env.HARU_CORE_INPUT_PROFILES!=='on'||process.env.HARU_CORE_ROUTER!=='on'
-    ||process.env.HARU_CORE_HARNESS!=='on'||process.env.HARU_CORE_VISUAL_PROFILES!=='on'
+  if((false as boolean)||(false as boolean)
+    ||(false as boolean)||(false as boolean)
     ||process.env.HARU_CORE_HARNESS_PATH_PREFIX||!freshImages)return 'normal';
   const started=performance.now();
   let result;

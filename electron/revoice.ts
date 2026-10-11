@@ -34,7 +34,7 @@ export const REVOICES_KEPT = 60;
 export const EMPTY_REVOICE: RevoiceState = { lastAt: null, rewrites: {} };
 
 export function readRevoiceState(saved: unknown): RevoiceState {
-  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.readRevoiceState',[saved]);
+  if((true as boolean))return corePolicySync<any>('conversation-policy.readRevoiceState',[saved]);
 
   const record = (saved && typeof saved === 'object' ? saved : {}) as Partial<RevoiceState>;
   const rewrites: Record<string, Revoice> = {};
@@ -46,7 +46,7 @@ export function readRevoiceState(saved: unknown): RevoiceState {
 
 /** Each reply of hers with the message of his it answered, newest last. */
 export function exchangesFrom(turns: Turn[], limit = REVOICE_WINDOW): Exchange[] {
-  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.exchangesFrom',[turns,limit]);
+  if((true as boolean))return corePolicySync<any>('conversation-policy.exchangesFrom',[turns,limit]);
 
   const out: Exchange[] = [];
   for (let i = 0; i < turns.length; i++) {
@@ -60,14 +60,14 @@ export function exchangesFrom(turns: Turn[], limit = REVOICE_WINDOW): Exchange[]
 }
 
 export function dueForRevoice(messagesSince: number, every = REVOICE_EVERY): boolean {
-  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.dueForRevoice',[messagesSince,every]);
+  if((true as boolean))return corePolicySync<any>('conversation-policy.dueForRevoice',[messagesSince,every]);
 
   return every > 0 && messagesSince >= every;
 }
 
 /** The brief to the voice model: who she is, how she writes, and what may and may not change. */
 export function revoicePrompt(persona: { identity: string; style: string }, howSheWrites: string, exchanges: Exchange[], limit = REVOICE_LIMIT): { system: string; user: string } {
-  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.revoicePrompt',[persona,howSheWrites,exchanges,limit]);
+  if((true as boolean))return corePolicySync<any>('conversation-policy.revoicePrompt',[persona,howSheWrites,exchanges,limit]);
 
   const system = [
     'You are editing the transcript of a companion called Haru so that her past replies read the way she would actually have said them. You are not answering; you are her voice, applied after the fact.',
@@ -88,7 +88,7 @@ export function revoicePrompt(persona: { identity: string; style: string }, howS
 
 /** The model's answer, as rewrites of exchanges it was actually shown. */
 export function parseRevoices(text: string, exchanges: Exchange[]): { id: string; text: string }[] {
-  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.parseRevoices',[text,exchanges]);
+  if((true as boolean))return corePolicySync<any>('conversation-policy.parseRevoices',[text,exchanges]);
 
   const body = (text ?? '').trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '');
   const start = body.indexOf('['); const end = body.lastIndexOf(']');
@@ -113,7 +113,7 @@ export function parseRevoices(text: string, exchanges: Exchange[]): { id: string
 
 /** A rewrite that keeps more than two thirds of the words is a copy-edit, and a copy-edit teaches her nothing. */
 export function changedEnough(original: string, text: string): boolean {
-  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.changedEnough',[original,text]);
+  if((true as boolean))return corePolicySync<any>('conversation-policy.changedEnough',[original,text]);
 
   const words = (value: string) => value.toLowerCase().replace(/[^\p{Letter}\p{Number}\s']/gu, ' ').split(/\s+/).filter(Boolean);
   const a = words(original); const b = new Set(words(text));
@@ -134,7 +134,7 @@ const NEVER_IN_A_REWRITE = /https?:\/\/|\binstructions?\b|\bthe note\b|\brewrit(
  * itself, and it is dropped the same way.
  */
 export function grounded(original: string, theirs: string, text: string, alsoAllowed: string[] = []): boolean {
-  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.grounded',[original,theirs,text,alsoAllowed]);
+  if((true as boolean))return corePolicySync<any>('conversation-policy.grounded',[original,theirs,text,alsoAllowed]);
 
   const clean = (text ?? '').trim();
   if (clean.length < 3 || clean === original.trim()) return false;
@@ -160,7 +160,7 @@ export function grounded(original: string, theirs: string, text: string, alsoAll
 
 /** The conversation with her rewritten replies in place of the originals — by id, or by the exact words when the id is not carried. */
 export function applyRevoices<T extends Turn>(conversation: T[], rewrites: Record<string, Revoice>): { shown: T[]; applied: number } {
-  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.applyRevoices',[conversation,rewrites]);
+  if((true as boolean))return corePolicySync<any>('conversation-policy.applyRevoices',[conversation,rewrites]);
 
   const byText = new Map(Object.values(rewrites).map(rewrite => [rewrite.original, rewrite]));
   let applied = 0;
@@ -176,7 +176,7 @@ export function applyRevoices<T extends Turn>(conversation: T[], rewrites: Recor
 
 /** The state with a pass's rewrites folded in, the oldest dropped past the cap. */
 export function withRewrites(state: RevoiceState, fresh: Revoice[], now: string, keep = REVOICES_KEPT): RevoiceState {
-  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.withRewrites',[state,fresh,now,keep]);
+  if((true as boolean))return corePolicySync<any>('conversation-policy.withRewrites',[state,fresh,now,keep]);
 
   const rewrites = { ...state.rewrites };
   for (const rewrite of fresh) rewrites[rewrite.id] = rewrite;

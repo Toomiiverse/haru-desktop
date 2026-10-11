@@ -124,7 +124,7 @@ export type HeldOptions = {
  * A bare greeting is not decided here; nothingInIt already does that.
  */
 export function roomHeldBack(latest: string, options: HeldOptions = {}): string {
-  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<string>('conversation-policy.roomHeldBack',[latest,{...options,now:agendaClock(options.now??new Date())}]);
+  if((true as boolean))return corePolicySync<string>('conversation-policy.roomHeldBack',[latest,{...options,now:agendaClock(options.now??new Date())}]);
 
   const said = (latest ?? '').replace(/[‘’]/g, "'").trim();
   if (!said) return '';

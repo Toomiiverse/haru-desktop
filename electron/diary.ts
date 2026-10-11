@@ -77,7 +77,7 @@ export const DIARY_BEFORE_WAKE_MINUTES = 45;
  * caller checks it against the last one written.
  */
 export function diaryDueFor(now: Date, prefs: Pick<PushPrefs, 'quietFrom' | 'quietTo'>, eveningKey: (at: Date) => string): string | null {
-  if(process.env.HARU_CORE_DAY_NIGHT==='on')return corePolicySync('diary.dueFor',[now,prefs]);
+  if((true as boolean))return corePolicySync('diary.dueFor',[now,prefs]);
   if (inQuietHours(prefs, now)) {
     const [hour, minute] = prefs.quietTo.split(':').map(Number);
     const wake = new Date(now.getTime());
@@ -128,7 +128,7 @@ export type DayMaterial = {
  * else — the whole point of the file is that it is what happened.
  */
 export function diaryInstruction(m: DayMaterial): string {
-  if(process.env.HARU_CORE_DAY_NIGHT==='on')return corePolicySync('diary.instruction',[m]);
+  if((true as boolean))return corePolicySync('diary.instruction',[m]);
   const said = m.theySaid.length ? `WHAT HE SAID TO YOU today (${m.theirMessages} messages in all):\n${m.theySaid.map(text => `- "${text}"`).join('\n')}` : `He said nothing to you today.`;
   const feeling = [
     m.irritation >= IRRITATION.stonewall ? 'By tonight you were not speaking to them properly.' : m.irritation >= IRRITATION.short ? 'They got on your nerves today.' : m.irritation >= IRRITATION.stirred ? 'They tried your patience a little.' : '',
@@ -180,7 +180,7 @@ export type Entry = { day: string; title: string; text: string };
 
 /** A title she did not give: the first sentence, cut to fit a tab. */
 export function entryTitle(text: string, given?: string): string {
-  if(process.env.HARU_CORE_DAY_NIGHT==='on')return corePolicySync('diary.entryTitle',[text,given??null]);
+  if((true as boolean))return corePolicySync('diary.entryTitle',[text,given??null]);
   const title = (given ?? '').replace(/^["'“”]+|["'“”]+$/g, '').trim();
   if (title) return title.slice(0, 80);
   const first = (text ?? '').trim().split(/(?<=[.!?…])\s+/)[0] ?? '';
@@ -188,7 +188,7 @@ export function entryTitle(text: string, given?: string): string {
 }
 
 export function formatEntry(day: string, text: string, weekday: Intl.DateTimeFormat, title?: string): string {
-  if(process.env.HARU_CORE_DAY_NIGHT==='on')return corePolicySync('diary.formatEntry',[day,text,title??null]);
+  if((true as boolean))return corePolicySync('diary.formatEntry',[day,text,title??null]);
   const [y, m, d] = day.split('-').map(Number);
   const name = weekday.format(new Date(Date.UTC(y, (m ?? 1) - 1, d ?? 1)));
   const head = title ? `## ${day} — ${name} — ${title.replace(/\n/g, ' ').trim()}` : `## ${day} — ${name}`;
@@ -205,7 +205,7 @@ export function appendEntry(root: string, day: string, text: string, weekday: In
 }
 
 export function parseEntries(markdown: string): Entry[] {
-  if(process.env.HARU_CORE_DAY_NIGHT==='on')return corePolicySync('diary.parseEntries',[markdown]);
+  if((true as boolean))return corePolicySync('diary.parseEntries',[markdown]);
   const out: Entry[] = [];
   const parts = (markdown ?? '').split(/^## /m).slice(1);
   for (const part of parts) {
@@ -230,7 +230,7 @@ export function recentEntries(root: string, count: number): Entry[] {
 
 /** The last couple of entries, for her prompt: what her days have been like lately. */
 export function diaryContext(entries: { day: string; text: string }[]): string {
-  if(process.env.HARU_CORE_DAY_NIGHT==='on')return corePolicySync('diary.context',[entries]);
+  if((true as boolean))return corePolicySync('diary.context',[entries]);
   if (!entries.length) return '';
   return [
     'From your own diary, the last night or two — how things have been between you, in your words at the time:',

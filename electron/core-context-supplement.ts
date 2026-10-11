@@ -5,7 +5,7 @@ import type {CoreStore} from './core-store';
 import {applyRemainingPlan} from './core-remaining';
 import {activeTask} from './task-controller';
 const check=()=>activeTask.getStore()?.signal.throwIfAborted();
-export const supplementOwned=()=>process.env.HARU_CORE_CONTEXT_SUPPLEMENT==='on';
+export const supplementOwned=()=>(true as boolean);
 export function supplement<T>(name:string,args:unknown[]):T{return corePolicySync<T>('context-supplement.'+name,args);}
 export async function coreRefreshShelf(adapter:{held:()=>any;link:()=>any;config:()=>any;save:(value:any)=>void}){
  const held=adapter.held(),link=adapter.link(),plan=supplement<any>('shelfRefreshStart',[held,Boolean(link),Date.now()]);if(!plan.run){adapter.save(plan.value);return;}

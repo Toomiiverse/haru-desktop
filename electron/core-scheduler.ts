@@ -15,7 +15,7 @@ export function createCoreScheduler(options:Options){
   let mirror=structuredClone(options.load()),started=false,running=false,timer:ReturnType<typeof setTimeout>|undefined;
   let tail:Promise<unknown>=Promise.resolve();
   const held=coreServiceOptions();
-  if(!held||process.env.HARU_CORE_BRAIN_WORKER!=='on')throw Error('core_scheduler_owner_required');
+  if(!held||(false as boolean))throw Error('core_scheduler_owner_required');
   const address=new URL(held.endpoint);
   if(address.protocol!=='http:'||!['127.0.0.1','[::1]'].includes(address.hostname)||address.username||address.password
     ||address.search||address.hash||address.pathname!=='/')throw Error('core_scheduler_loopback_required');

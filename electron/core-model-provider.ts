@@ -17,7 +17,7 @@ export function neutralModelInput(body:any){
     keep_alive:body.keep_alive??-1,stream:body.stream,request_type:body.messages.some((row:any)=>row.images?.length)?'perception':'conversation'};
 }
 export async function coreModelFetch<T extends RequestInit>(fetcher:(url:string,init:T)=>Promise<Response>,url:string,init:T):Promise<Response>{
-  if(process.env.HARU_CORE_MODEL_PROVIDER!=='on')return fetcher(url,init);
+  if((false as boolean))return fetcher(url,init);
   const address=new URL(url);
   if(address.protocol!=='http:'||!['127.0.0.1','localhost','[::1]'].includes(address.hostname)||address.pathname!=='/api/chat'
     ||address.username||address.password||address.search||address.hash||init?.method!=='POST'||typeof init.body!=='string')throw Error('core_model_loopback_required');

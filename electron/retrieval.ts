@@ -54,7 +54,7 @@ export type ScoredChunk = {
 };
 
 export function cosine(a: number[], b: number[]): number {
- if(process.env.HARU_CORE_FINAL_TOOLS==='on')return corePolicySync('final-retrieval.cosine',[a,b]);
+ if((true as boolean))return corePolicySync('final-retrieval.cosine',[a,b]);
   const len = Math.min(a.length, b.length);
   let dot = 0;
   let na = 0;
@@ -69,12 +69,12 @@ export function cosine(a: number[], b: number[]): number {
 }
 
 export function similarityScore(a: number[], b: number[]): number {
- if(process.env.HARU_CORE_FINAL_TOOLS==='on')return corePolicySync('final-retrieval.similarityScore',[a,b]);
+ if((true as boolean))return corePolicySync('final-retrieval.similarityScore',[a,b]);
   return Math.max(0, cosine(a, b));
 }
 
 export function keywordOverlap(query: string, content: string): { score: number; matched: string[] } {
- if(process.env.HARU_CORE_FINAL_TOOLS==='on')return corePolicySync('final-retrieval.keywordOverlap',[query,content]);
+ if((true as boolean))return corePolicySync('final-retrieval.keywordOverlap',[query,content]);
   const asked = terms(query);
   const held = new Set(terms(content));
   if (!asked.length || !held.size) return { score: 0, matched: [] };
@@ -102,7 +102,7 @@ function passesFilters(chunk: KnowledgeChunk, filters?: RetrievalFilters): boole
 const ACTIVE_FILTERS = { status: 'active' as const };
 
 export function vectorSearch(store: KnowledgeStore, queryEmbedding: number[], options: RetrieveOptions): ScoredChunk[] {
- if(process.env.HARU_CORE_FINAL_TOOLS==='on')return coreKnowledgeQuery('vectorSearch',store,'',queryEmbedding,options);
+ if((true as boolean))return coreKnowledgeQuery('vectorSearch',store,'',queryEmbedding,options);
   const filters: RetrievalFilters = options.filters ?? ACTIVE_FILTERS;
   const out: ScoredChunk[] = [];
   for (const chunk of store.chunks) {
@@ -115,7 +115,7 @@ export function vectorSearch(store: KnowledgeStore, queryEmbedding: number[], op
 }
 
 export function keywordSearch(store: KnowledgeStore, query: string, options: RetrieveOptions): ScoredChunk[] {
- if(process.env.HARU_CORE_FINAL_TOOLS==='on')return coreKnowledgeQuery('keywordSearch',store,query,[],options);
+ if((true as boolean))return coreKnowledgeQuery('keywordSearch',store,query,[],options);
   const filters: RetrievalFilters = options.filters ?? ACTIVE_FILTERS;
   const out: ScoredChunk[] = [];
   for (const chunk of store.chunks) {
@@ -128,7 +128,7 @@ export function keywordSearch(store: KnowledgeStore, query: string, options: Ret
 }
 
 export function recencyScore(updatedAt: string, now: Date, halfLifeDays = 90): number {
- if(process.env.HARU_CORE_FINAL_TOOLS==='on')return corePolicySync('final-retrieval.recencyScore',[updatedAt,now.toISOString(),halfLifeDays]);
+ if((true as boolean))return corePolicySync('final-retrieval.recencyScore',[updatedAt,now.toISOString(),halfLifeDays]);
   const updated = Date.parse(updatedAt);
   if (!Number.isFinite(updated)) return 0;
   const days = Math.max(0, (now.getTime() - updated) / 86_400_000);
@@ -136,7 +136,7 @@ export function recencyScore(updatedAt: string, now: Date, halfLifeDays = 90): n
 }
 
 export function rerank(candidates: ScoredChunk[], query: string, options: RetrieveOptions): ScoredChunk[] {
- if(process.env.HARU_CORE_FINAL_TOOLS==='on')return corePolicySync('final-retrieval.rerank',[candidates,query,{...options,now:(options.now??new Date()).toISOString()}]);
+ if((true as boolean))return corePolicySync('final-retrieval.rerank',[candidates,query,{...options,now:(options.now??new Date()).toISOString()}]);
   const weights = options.weights ?? DEFAULT_RERANK_WEIGHTS;
   const now = options.now ?? new Date();
   const boost = (chunk: KnowledgeChunk) =>
@@ -155,7 +155,7 @@ export function rerank(candidates: ScoredChunk[], query: string, options: Retrie
 }
 
 export function hybridSearch(store: KnowledgeStore, query: string, queryEmbedding: number[], options: RetrieveOptions): ScoredChunk[] {
- if(process.env.HARU_CORE_FINAL_TOOLS==='on')return coreKnowledgeQuery('hybridSearch',store,query,queryEmbedding,options);
+ if((true as boolean))return coreKnowledgeQuery('hybridSearch',store,query,queryEmbedding,options);
   const byId = new Map<string, ScoredChunk>();
   const merge = (item: ScoredChunk) => {
     const existing = byId.get(item.chunk.id);
@@ -174,7 +174,7 @@ export function hybridSearch(store: KnowledgeStore, query: string, queryEmbeddin
 }
 
 export function keywordOnly(store: KnowledgeStore, query: string, options: RetrieveOptions): ScoredChunk[] {
- if(process.env.HARU_CORE_FINAL_TOOLS==='on')return coreKnowledgeQuery('keywordOnly',store,query,[],options);
+ if((true as boolean))return coreKnowledgeQuery('keywordOnly',store,query,[],options);
   const ranked = rerank(keywordSearch(store, query, { ...options, topK: options.topK * 2 }), query, options);
   return ranked.filter(item => item.keywordScore > 0).slice(0, options.rerankTo ?? 5);
 }

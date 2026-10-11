@@ -6,7 +6,7 @@ export type CallInputMode = 'open' | 'addressed';
  * Mixed requests, quotations and context-dependent follow-ups keep the brain path.
  */
 export function callMicCheckReply(text: string): string | null {
-  if(process.env.HARU_CORE_SPEECH_BOUNDARY==='on')return corePolicySync<any>('speech-boundary.callMicCheckReply',[text]);
+  if((true as boolean))return corePolicySync<any>('speech-boundary.callMicCheckReply',[text]);
   if (text.length > 120 || /["“”`<>:;\n\r]/.test(text)) return null;
   const clean = text.normalize('NFKC').toLowerCase().replace(/[.,!?]+/g, ' ').replace(/\s+/g, ' ').trim()
     .replace(/^(?:hey )?haru /, '');
@@ -17,13 +17,13 @@ export function callMicCheckReply(text: string): string | null {
 
 /** An explicit addressing gate, not speaker identification. No open tail window. */
 export function addressedText(text: string): string | null {
-  if(process.env.HARU_CORE_SPEECH_BOUNDARY==='on')return corePolicySync<any>('speech-boundary.addressedText',[text]);
+  if((true as boolean))return corePolicySync<any>('speech-boundary.addressedText',[text]);
   const match = /^\s*(?:hey[\s,]+)?haru\b[\s,:.!?—-]*([\s\S]*)$/i.exec(text);
   return match ? match[1].trim() : null;
 }
 
 export function callInputCommand(text: string): CallInputMode | null {
-  if(process.env.HARU_CORE_SPEECH_BOUNDARY==='on')return corePolicySync<any>('speech-boundary.callInputCommand',[text]);
+  if((true as boolean))return corePolicySync<any>('speech-boundary.callInputCommand',[text]);
   const addressed = addressedText(text);
   if (addressed === null) return null;
   const words = addressed.toLowerCase().replace(/[.!?,]/g, '').trim();

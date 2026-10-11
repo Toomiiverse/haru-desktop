@@ -54,18 +54,18 @@ export const NIGHT_GAP_MS = 75 * 60_000;
  * noon it is still that night, unless a night of today's has already started.
  */
 export function lastNightDay(nights: Night[], hour: number, today: string, yesterday: string): string {
-  if(process.env.HARU_CORE_OWN_TIME==='on')return corePolicySync<ReturnType<typeof lastNightDay>>('own-time.nightlastNightDay',[nights,hour,today,yesterday]);
+  if((true as boolean))return corePolicySync<ReturnType<typeof lastNightDay>>('own-time.nightlastNightDay',[nights,hour,today,yesterday]);
   if (hour < 12) return yesterday;
   return nights.some(night => night.day === today) ? today : yesterday;
 }
 
 export function nightsOn(nights: Night[], day: string): Night[] {
-  if(process.env.HARU_CORE_OWN_TIME==='on')return corePolicySync<ReturnType<typeof nightsOn>>('own-time.nightnightsOn',[nights,day]);
+  if((true as boolean))return corePolicySync<ReturnType<typeof nightsOn>>('own-time.nightnightsOn',[nights,day]);
   return nights.filter(night => night.day === day);
 }
 
 export function keepNights(nights: Night[], night: Night): Night[] {
-  if(process.env.HARU_CORE_OWN_TIME==='on')return corePolicySync<ReturnType<typeof keepNights>>('own-time.nightkeepNights',[nights,night]);
+  if((true as boolean))return corePolicySync<ReturnType<typeof keepNights>>('own-time.nightkeepNights',[nights,night]);
   return [...nights, night].slice(-NIGHTS_KEPT);
 }
 
@@ -80,7 +80,7 @@ export function keepNights(nights: Night[], night: Night): Night[] {
 export const NIGHT_ODDS = 1 / 14;
 
 export function timeForSomething(tonight: Night[], lastAtMs: number | null, nowMs: number, random: () => number = Math.random, odds = NIGHT_ODDS): boolean {
-  if(process.env.HARU_CORE_OWN_TIME==='on')return coreRandomPolicy<ReturnType<typeof timeForSomething>>('own-time.nighttimeForSomething',[tonight,lastAtMs,nowMs,odds],random);
+  if((true as boolean))return coreRandomPolicy<ReturnType<typeof timeForSomething>>('own-time.nighttimeForSomething',[tonight,lastAtMs,nowMs,odds],random);
   if (tonight.length >= MAX_PER_NIGHT) return false;
   if (lastAtMs !== null && nowMs - lastAtMs < NIGHT_GAP_MS) return false;
   // A quiet day is what sends her looking for something (dice.ts 'own-time').
@@ -95,7 +95,7 @@ export function timeForSomething(tonight: Night[], lastAtMs: number | null, nowM
  * that some of it is hers. So half of it is asked for outright.
  */
 export function pickInstruction(theirs: string[], herRecent: string[]): string {
-  if(process.env.HARU_CORE_OWN_TIME==='on')return corePolicySync<ReturnType<typeof pickInstruction>>('own-time.nightpickInstruction',[theirs,herRecent]);
+  if((true as boolean))return corePolicySync<ReturnType<typeof pickInstruction>>('own-time.nightpickInstruction',[theirs,herRecent]);
   const known = theirs.slice(0, 6).map(text => `- ${text.slice(0, 90)}`).join('\n');
   const already = herRecent.slice(-6).map(text => `"${text}"`).join(', ');
   return [
@@ -109,7 +109,7 @@ export function pickInstruction(theirs: string[], herRecent: string[]): string {
 
 /** A search box takes a phrase, not a sentence with her personality in it. */
 export function tidyPick(raw: string): string | null {
-  if(process.env.HARU_CORE_OWN_TIME==='on')return corePolicySync<ReturnType<typeof tidyPick>>('own-time.nighttidyPick',[raw]);
+  if((true as boolean))return corePolicySync<ReturnType<typeof tidyPick>>('own-time.nighttidyPick',[raw]);
   const line = (raw ?? '').trim().split('\n').find(text => text.trim()) ?? '';
   const cleaned = line
     .replace(/^["'“‘]+|["'”’]+$/g, '')
@@ -131,7 +131,7 @@ export function tidyPick(raw: string): string | null {
  * only what is on the page.
  */
 export function nightNoteInstruction(about: string, found: string): string {
-  if(process.env.HARU_CORE_OWN_TIME==='on')return corePolicySync<ReturnType<typeof nightNoteInstruction>>('own-time.nightnightNoteInstruction',[about,found]);
+  if((true as boolean))return corePolicySync<ReturnType<typeof nightNoteInstruction>>('own-time.nightnightNoteInstruction',[about,found]);
   return [
     `You went looking into "${about}" while they slept. This is what you found, and it is everything you know about it:`,
     found,
@@ -150,7 +150,7 @@ export function nightNoteInstruction(about: string, found: string): string {
  */
 /** Whether one of her recent lines already brought this night up. */
 export function mentionsNight(text: string, night: Night): boolean {
-  if(process.env.HARU_CORE_OWN_TIME==='on')return corePolicySync<ReturnType<typeof mentionsNight>>('own-time.nightmentionsNight',[text,night]);
+  if((true as boolean))return corePolicySync<ReturnType<typeof mentionsNight>>('own-time.nightmentionsNight',[text,night]);
   const words = [night.about, night.interest ?? '', night.game ?? ''].join(' ').toLowerCase().match(/[a-z][a-z'’]{4,}/g) ?? [];
   const lower = (text ?? '').toLowerCase();
   return words.some(word => lower.includes(word));
@@ -165,7 +165,7 @@ export const NIGHT_RECENT_LINES = 4;
  * warning. Same lever as the weather itself: stop putting it there.
  */
 export function nightsToDrawOn(nights: Night[], recentLines: string[]): string {
-  if(process.env.HARU_CORE_OWN_TIME==='on')return corePolicySync<ReturnType<typeof nightsToDrawOn>>('own-time.nightnightsToDrawOn',[nights,recentLines]);
+  if((true as boolean))return corePolicySync<ReturnType<typeof nightsToDrawOn>>('own-time.nightnightsToDrawOn',[nights,recentLines]);
   if (!nights.length) return '';
   const recent = recentLines.slice(-NIGHT_RECENT_LINES);
   if (nights.some(night => recent.some(line => mentionsNight(line, night)))) return '';
@@ -180,7 +180,7 @@ export function nightsToDrawOn(nights: Night[], recentLines: string[]): string {
  * final stand." A field name in her material is a field name she will say.
  */
 export function unlabel(note: string): string {
-  if(process.env.HARU_CORE_OWN_TIME==='on')return corePolicySync<ReturnType<typeof unlabel>>('own-time.nightunlabel',[note]);
+  if((true as boolean))return corePolicySync<ReturnType<typeof unlabel>>('own-time.nightunlabel',[note]);
   return (note ?? '')
     // First person, because she quotes these whatever she is told. Written as
     // "the bit you rate above the rest is X" she said exactly that back to him,
@@ -198,7 +198,7 @@ export function unlabel(note: string): string {
 }
 
 export function nightsInstruction(nights: Night[]): string {
-  if(process.env.HARU_CORE_OWN_TIME==='on')return corePolicySync<ReturnType<typeof nightsInstruction>>('own-time.nightnightsInstruction',[nights]);
+  if((true as boolean))return corePolicySync<ReturnType<typeof nightsInstruction>>('own-time.nightnightsInstruction',[nights]);
   if (!nights.length) return '';
   // A manga night is pages read, not a subject read about: told "you read
   // about these" for a chapter she had turned page by page, she denied reading
@@ -228,7 +228,7 @@ export const NIGHT_WORTH_RAISING_DAYS = 3;
  * a few days: last night's is a thing to tell him, last week's is a memory.
  */
 export function nightToRaise(nights: Night[], said: string[], todayKey: string): Night | null {
-  if(process.env.HARU_CORE_OWN_TIME==='on')return corePolicySync<ReturnType<typeof nightToRaise>>('own-time.nightnightToRaise',[nights,said,todayKey]);
+  if((true as boolean))return corePolicySync<ReturnType<typeof nightToRaise>>('own-time.nightnightToRaise',[nights,said,todayKey]);
   const days = (day: string) => Math.round((Date.parse(todayKey) - Date.parse(day)) / 86_400_000);
   const fresh = nights.filter(night => {
     const age = days(night.day);

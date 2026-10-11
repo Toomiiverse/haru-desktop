@@ -81,7 +81,7 @@ export const BLOCKED_LINE = BLOCKED_LINES[0];
 
 /** Which refusal he gets — the nth time he tries, so it moves rather than loops. */
 export function blockedLine(nth: number): string {
-  if(process.env.HARU_CORE_LIFECYCLE_SLEEP==='on') { const result=corePolicySync<any>('sleep.blockedLine',[nth]);return result===null?(undefined as unknown as string):result; }
+  if((true as boolean)) { const result=corePolicySync<any>('sleep.blockedLine',[nth]);return result===null?(undefined as unknown as string):result; }
   return BLOCKED_LINES[Math.min(Math.max(nth, 0), BLOCKED_LINES.length - 1)];
 }
 
@@ -100,7 +100,7 @@ export const ASLEEP_LINES: readonly string[] = [
  * line just wears thinner, the way anyone's would.
  */
 export function asleepLine(nth: number): string {
-  if(process.env.HARU_CORE_LIFECYCLE_SLEEP==='on') { return corePolicySync<any>('sleep.asleepLine',[nth]); }
+  if((true as boolean)) { return corePolicySync<any>('sleep.asleepLine',[nth]); }
   if (nth <= 2) return ASLEEP_LINES[0];
   if (nth <= 5) return ASLEEP_LINES[1];
   if (nth <= 9) return ASLEEP_LINES[2];
@@ -115,7 +115,7 @@ export function asleepLine(nth: number): string {
  * thing foldAsleepExchanges exists to prevent.
  */
 export function isAsleepLine(text: string): boolean {
-  if(process.env.HARU_CORE_LIFECYCLE_SLEEP==='on') { return corePolicySync<any>('sleep.isAsleepLine',[text]); }
+  if((true as boolean)) { return corePolicySync<any>('sleep.isAsleepLine',[text]); }
   const line = (text ?? '').trim();
   return ASLEEP_LINES.includes(line) || BLOCKED_LINES.includes(line);
 }
@@ -131,7 +131,7 @@ export function isAsleepLine(text: string): boolean {
  * turn of theirs that says what it was, and her canned lines go.
  */
 export function foldAsleepExchanges<T extends { role?: string; content?: string; at?: string }>(messages: T[]): (T | { role: 'user'; content: string; at?: string })[] {
-  if(process.env.HARU_CORE_LIFECYCLE_SLEEP==='on') { return corePolicySync<any>('sleep.foldAsleepExchanges',[messages]); }
+  if((true as boolean)) { return corePolicySync<any>('sleep.foldAsleepExchanges',[messages]); }
   const out: (T | { role: 'user'; content: string; at?: string })[] = [];
   let run: T[] = [];
   const flush = () => {
@@ -165,7 +165,7 @@ export const GROGGY_REGISTER = 'You are half asleep: sleepy, soft-spoken, and us
 
 /** Minutes since a knock-wake, for as long as she is up because of it; null otherwise. */
 export function groggyFor(schedule: HerSleepSchedule | null, now: Date): number | null {
-  if(process.env.HARU_CORE_LIFECYCLE_SLEEP==='on') { return corePolicySync<any>('sleep.groggyFor',[schedule,now]); }
+  if((true as boolean)) { return corePolicySync<any>('sleep.groggyFor',[schedule,now]); }
   if (!knockedAwake(schedule, now)) return null;
   const offset = daysBetween(schedule!.day, localDateKey(now));
   return Math.max(0, now.getHours() * 60 + now.getMinutes() + (offset - 1) * 1440 - schedule!.wake);
@@ -173,7 +173,7 @@ export function groggyFor(schedule: HerSleepSchedule | null, now: Date): number 
 
 /** The prompt line while she is up because they got her up. */
 export function groggyNote(schedule: HerSleepSchedule | null, now: Date): string {
-  if(process.env.HARU_CORE_LIFECYCLE_SLEEP==='on') { return corePolicySync<any>('sleep.groggyNote',[schedule,now]); }
+  if((true as boolean)) { return corePolicySync<any>('sleep.groggyNote',[schedule,now]); }
   const since = groggyFor(schedule, now);
   if (since === null) return '';
   const ago = since < 1 ? 'a moment ago' : `${since} minute${since === 1 ? '' : 's'} ago`;
@@ -182,7 +182,7 @@ export function groggyNote(schedule: HerSleepSchedule | null, now: Date): string
 
 /** Up because they got her up: knocked awake, and not yet at the wake she had chosen. */
 export function knockedAwake(schedule: HerSleepSchedule | null, now: Date): boolean {
-  if(process.env.HARU_CORE_LIFECYCLE_SLEEP==='on') { return corePolicySync<any>('sleep.knockedAwake',[schedule,now]); }
+  if((true as boolean)) { return corePolicySync<any>('sleep.knockedAwake',[schedule,now]); }
   if (!schedule?.wokenEarly || schedule.plannedWake === undefined) return false;
   const offset = daysBetween(schedule.day, localDateKey(now));
   const minutesNow = now.getHours() * 60 + now.getMinutes() + (offset - 1) * 1440;
@@ -193,7 +193,7 @@ export function knockedAwake(schedule: HerSleepSchedule | null, now: Date): bool
 export const DOZE_MINUTES = 10;
 
 export function dozeOffDue(schedule: HerSleepSchedule | null, now: Date, lastTheirsMs: number, nowMs: number): boolean {
-  if(process.env.HARU_CORE_LIFECYCLE_SLEEP==='on') { return corePolicySync<any>('sleep.dozeOffDue',[schedule,now,lastTheirsMs,nowMs]); }
+  if((true as boolean)) { return corePolicySync<any>('sleep.dozeOffDue',[schedule,now,lastTheirsMs,nowMs]); }
   if (!knockedAwake(schedule, now)) return false;
   const since = Number.isFinite(lastTheirsMs) ? nowMs - lastTheirsMs : Infinity;
   return since >= DOZE_MINUTES * 60_000;
@@ -207,7 +207,7 @@ export function dozeOffDue(schedule: HerSleepSchedule | null, now: Date, lastThe
  * and the test of it.
  */
 export function pointlessWake(theirs: { content?: string; at?: string }[], knockedAtIso: string): boolean {
-  if(process.env.HARU_CORE_LIFECYCLE_SLEEP==='on') { return corePolicySync<any>('sleep.pointlessWake',[theirs,knockedAtIso]); }
+  if((true as boolean)) { return corePolicySync<any>('sleep.pointlessWake',[theirs,knockedAtIso]); }
   const since = Date.parse(knockedAtIso);
   const after = theirs.filter(message => Number.isFinite(Date.parse(message.at ?? '')) && Date.parse(message.at!) >= since);
   if (!after.length) return true;
@@ -221,7 +221,7 @@ export function pointlessWake(theirs: { content?: string; at?: string }[], knock
 
 /** The schedule with her back in bed: the wake she chose again, and what the night was, kept for the morning. */
 export function backToSleep(schedule: HerSleepSchedule, input: { atIso: string; pointless: boolean; block: boolean }): HerSleepSchedule {
-  if(process.env.HARU_CORE_LIFECYCLE_SLEEP==='on') { return corePolicySync<any>('sleep.backToSleep',[schedule,input]); }
+  if((true as boolean)) { return corePolicySync<any>('sleep.backToSleep',[schedule,input]); }
   return {
     ...schedule,
     wake: schedule.plannedWake ?? schedule.wake,
@@ -259,7 +259,7 @@ const SAYS_GOODNIGHT = /(?<!\b(?:a|the|was|another|such a|any)\s)\bgood ?night\b
 const REPORTING_ONE = /\b(?:you|u)\b[^.!?]{0,30}\b(?:said|say|saying|says|sent|told me|gave me)\b[^.!?]{0,20}\bgood ?night\b|\byour good ?night\b|\bsaid good ?night\b/gi;
 
 export function readsAsGoodnight(reply: string): boolean {
-  if(process.env.HARU_CORE_LIFECYCLE_SLEEP==='on') { return corePolicySync<any>('sleep.readsAsGoodnight',[reply]); }
+  if((true as boolean)) { return corePolicySync<any>('sleep.readsAsGoodnight',[reply]); }
   // Struck rather than vetoed: "You already said goodnight. Fine. Goodnight,
   // Tommy." is both, and the second one is the one that decides.
   const said = (reply ?? '').replace(/[‘’]/g, "'").replace(REPORTING_ONE, ' ');
@@ -274,13 +274,13 @@ export const BLOCK_AFTER_POINTLESS = 2;
 export const POINTLESS_WINDOW_DAYS = 7;
 
 export function readWakes(saved: unknown): Wake[] {
-  if(process.env.HARU_CORE_LIFECYCLE_SLEEP==='on') { return corePolicySync<any>('sleep.readWakes',[saved]); }
+  if((true as boolean)) { return corePolicySync<any>('sleep.readWakes',[saved]); }
   if (!Array.isArray(saved)) return [];
   return saved.filter((wake): wake is Wake => !!wake && typeof wake === 'object' && typeof (wake as Wake).at === 'string' && typeof (wake as Wake).pointless === 'boolean');
 }
 
 export function pointlessWakesLately(wakes: Wake[], nowMs: number, days = POINTLESS_WINDOW_DAYS): number {
-  if(process.env.HARU_CORE_LIFECYCLE_SLEEP==='on') { return corePolicySync<any>('sleep.pointlessWakesLately',[wakes,nowMs,days]); }
+  if((true as boolean)) { return corePolicySync<any>('sleep.pointlessWakesLately',[wakes,nowMs,days]); }
   return wakes.filter(wake => wake.pointless && Number.isFinite(Date.parse(wake.at)) && nowMs - Date.parse(wake.at) <= days * 86_400_000).length;
 }
 
@@ -290,7 +290,7 @@ export const KNOCK_WINDOW_MS = 10 * 60_000;
 
 /** Whether their knocking at the door is enough to get her up. */
 export function enoughKnocking(knocksAtMs: number[], nowMs: number, count = KNOCK_COUNT, windowMs = KNOCK_WINDOW_MS): boolean {
-  if(process.env.HARU_CORE_LIFECYCLE_SLEEP==='on') { return corePolicySync<any>('sleep.enoughKnocking',[knocksAtMs,nowMs,count,windowMs]); }
+  if((true as boolean)) { return corePolicySync<any>('sleep.enoughKnocking',[knocksAtMs,nowMs,count,windowMs]); }
   return knocksAtMs.filter(at => at <= nowMs && nowMs - at <= windowMs).length >= count;
 }
 
@@ -300,7 +300,7 @@ export function enoughKnocking(knocksAtMs: number[], nowMs: number, count = KNOC
  * still on the decision day comes out negative — the window math allows it.
  */
 export function wokenAt(schedule: HerSleepSchedule, now: Date, knocks: number, atIso = new Date().toISOString()): HerSleepSchedule {
-  if(process.env.HARU_CORE_LIFECYCLE_SLEEP==='on') { return corePolicySync<any>('sleep.wokenAt',[schedule,now,knocks,atIso]); }
+  if((true as boolean)) { return corePolicySync<any>('sleep.wokenAt',[schedule,now,knocks,atIso]); }
   const offset = daysBetween(schedule.day, localDateKey(now));
   const wake = now.getHours() * 60 + now.getMinutes() + (offset - 1) * 1440;
   return { ...schedule, wake, wokenEarly: true, wokenBy: knocks, plannedWake: schedule.plannedWake ?? schedule.wake, knockedAt: atIso };
@@ -312,7 +312,7 @@ export function wokenAt(schedule: HerSleepSchedule, now: Date, knocks: number, a
  * a guess. Nothing while she is still asleep, nothing after that day.
  */
 export function sleepNote(schedule: HerSleepSchedule | null, now: Date): string {
-  if(process.env.HARU_CORE_LIFECYCLE_SLEEP==='on') { return corePolicySync<any>('sleep.sleepNote',[schedule,now]); }
+  if((true as boolean)) { return corePolicySync<any>('sleep.sleepNote',[schedule,now]); }
   if (!schedule) return '';
   if (localDateKey(now) !== dayAfter(schedule.day)) return '';
   if (herAsleep(schedule, now)) return '';
@@ -330,31 +330,31 @@ const TIME_RE = /\b([01]?\d|2[0-3]):([0-5]\d)(?!\d)/g;
 const HHMM_RE = /^\d{1,2}:\d{2}$/;
 
 export function minutes(hhmm: string): number {
-  if(process.env.HARU_CORE_LIFECYCLE_SLEEP==='on') { return corePolicySync<any>('sleep.minutes',[hhmm]); }
+  if((true as boolean)) { return corePolicySync<any>('sleep.minutes',[hhmm]); }
   const [hour, minute] = hhmm.split(':').map(Number);
   return hour * 60 + minute;
 }
 
 /** Minutes since midnight, wrapped into a 24-hour "HH:MM" clock string. */
 export function clockMinutes(value: number): string {
-  if(process.env.HARU_CORE_LIFECYCLE_SLEEP==='on') { return corePolicySync<any>('sleep.clockMinutes',[value]); }
+  if((true as boolean)) { return corePolicySync<any>('sleep.clockMinutes',[value]); }
   const wrapped = ((value % 1440) + 1440) % 1440;
   return `${String(Math.floor(wrapped / 60)).padStart(2, '0')}:${String(wrapped % 60).padStart(2, '0')}`;
 }
 
 export function clampBedtime(value: number): number {
-  if(process.env.HARU_CORE_LIFECYCLE_SLEEP==='on') { return corePolicySync<any>('sleep.clampBedtime',[value]); }
+  if((true as boolean)) { return corePolicySync<any>('sleep.clampBedtime',[value]); }
   return Math.min(BEDTIME_MAX, Math.max(BEDTIME_MIN, value));
 }
 
 export function clampWake(value: number): number {
-  if(process.env.HARU_CORE_LIFECYCLE_SLEEP==='on') { return corePolicySync<any>('sleep.clampWake',[value]); }
+  if((true as boolean)) { return corePolicySync<any>('sleep.clampWake',[value]); }
   return Math.min(WAKE_MAX, Math.max(WAKE_MIN, value));
 }
 
 /** Two times out of a line: [bedtime, wake], or null when there are not two. */
 export function parseDecidedTimes(line: string): { bedtime: number; wake: number } | null {
-  if(process.env.HARU_CORE_LIFECYCLE_SLEEP==='on') { return corePolicySync<any>('sleep.parseDecidedTimes',[line]); }
+  if((true as boolean)) { return corePolicySync<any>('sleep.parseDecidedTimes',[line]); }
   const found: number[] = [];
   for (const match of (line ?? '').matchAll(TIME_RE)) found.push(Number(match[1]) * 60 + Number(match[2]));
   // Asked for 24-hour times she has twice answered the military way, "2300 0800",
@@ -372,7 +372,7 @@ export function parseDecidedTimes(line: string): { bedtime: number; wake: number
 
 /** The schedule when she has not decided: her vitals and a little randomness. */
 export function fallbackSchedule(prefs: HerSleepPrefs, tired: boolean, random: () => number = Math.random): { bedtime: number; wake: number } {
-  if(process.env.HARU_CORE_LIFECYCLE_SLEEP==='on') { return corePolicySync<any>('sleep.fallbackSchedule',[prefs,tired,[random(),random()]]); }
+  if((true as boolean)) { return corePolicySync<any>('sleep.fallbackSchedule',[prefs,tired,[random(),random()]]); }
   const jitter = (amount: number) => Math.round((random() * 2 - 1) * amount);
   const bedtime = clampBedtime(minutes(prefs.fallbackBedtime) + jitter(25) + (tired ? -20 : 0));
   const wake = clampWake(minutes(prefs.fallbackWake) + jitter(20));
@@ -380,7 +380,7 @@ export function fallbackSchedule(prefs: HerSleepPrefs, tired: boolean, random: (
 }
 
 export function readHerSleep(saved: unknown): HerSleepPrefs {
-  if(process.env.HARU_CORE_LIFECYCLE_SLEEP==='on') { return corePolicySync<any>('sleep.readHerSleep',[saved]); }
+  if((true as boolean)) { return corePolicySync<any>('sleep.readHerSleep',[saved]); }
   const record = (saved && typeof saved === 'object' ? saved : {}) as Partial<HerSleepPrefs>;
   return {
     enabled: record.enabled !== false,
@@ -390,7 +390,7 @@ export function readHerSleep(saved: unknown): HerSleepPrefs {
 }
 
 export function readHerSleepState(saved: unknown): HerSleepSchedule | null {
-  if(process.env.HARU_CORE_LIFECYCLE_SLEEP==='on') { return corePolicySync<any>('sleep.readHerSleepState',[saved]); }
+  if((true as boolean)) { return corePolicySync<any>('sleep.readHerSleepState',[saved]); }
   if (!saved || typeof saved !== 'object') return null;
   const record = saved as Partial<HerSleepSchedule>;
   if (typeof record.day !== 'string' || typeof record.bedtime !== 'number' || typeof record.wake !== 'number') return null;
@@ -413,13 +413,13 @@ export function readHerSleepState(saved: unknown): HerSleepSchedule | null {
 }
 
 export function dayAfter(dayKey: string): string {
-  if(process.env.HARU_CORE_LIFECYCLE_SLEEP==='on') { return corePolicySync<any>('sleep.dayAfter',[dayKey]); }
+  if((true as boolean)) { return corePolicySync<any>('sleep.dayAfter',[dayKey]); }
   const [year, month, day] = dayKey.split('-').map(Number);
   return new Date(Date.UTC(year, month - 1, day + 1)).toISOString().slice(0, 10);
 }
 
 export function daysBetween(fromDay: string, toDay: string): number {
-  if(process.env.HARU_CORE_LIFECYCLE_SLEEP==='on') { return corePolicySync<any>('sleep.daysBetween',[fromDay,toDay]); }
+  if((true as boolean)) { return corePolicySync<any>('sleep.daysBetween',[fromDay,toDay]); }
   const [y1, m1, d1] = fromDay.split('-').map(Number);
   const [y2, m2, d2] = toDay.split('-').map(Number);
   return Math.round((Date.UTC(y2, m2 - 1, d2) - Date.UTC(y1, m1 - 1, d1)) / 86_400_000);
@@ -433,7 +433,7 @@ export function daysBetween(fromDay: string, toDay: string): number {
  * nor ends returns null, so a stale schedule expires on its own.
  */
 export function sleepWindowOn(schedule: HerSleepSchedule, dayKey: string): { fromMin: number; toMin: number } | null {
-  if(process.env.HARU_CORE_LIFECYCLE_SLEEP==='on') { return corePolicySync<any>('sleep.sleepWindowOn',[schedule,dayKey]); }
+  if((true as boolean)) { return corePolicySync<any>('sleep.sleepWindowOn',[schedule,dayKey]); }
   const offset = daysBetween(schedule.day, dayKey);
   const fromMin = schedule.bedtime - offset * 1440;
   const toMin = schedule.wake + 1440 - offset * 1440;
@@ -443,7 +443,7 @@ export function sleepWindowOn(schedule: HerSleepSchedule, dayKey: string): { fro
 
 /** Whether she is asleep right now. `now` is expected to be a zoned date (zonedNow). */
 export function herAsleep(schedule: HerSleepSchedule | null, now: Date): boolean {
-  if(process.env.HARU_CORE_LIFECYCLE_SLEEP==='on') { return corePolicySync<any>('sleep.herAsleep',[schedule,now]); }
+  if((true as boolean)) { return corePolicySync<any>('sleep.herAsleep',[schedule,now]); }
   if (!schedule) return false;
   const window = sleepWindowOn(schedule, localDateKey(now));
   if (!window) return false;
@@ -457,7 +457,7 @@ export function herAsleep(schedule: HerSleepSchedule | null, now: Date): boolean
  * both had her wake to "twenty-two messages" after thirteen.
  */
 export function messagesWhileAsleep(schedule: HerSleepSchedule, messages: { at?: string; role?: string }[], timeZone: string): number {
-  if(process.env.HARU_CORE_LIFECYCLE_SLEEP==='on') { return corePolicySync<any>('sleep.messagesWhileAsleep',[schedule,messages,timeZone]); }
+  if((true as boolean)) { return corePolicySync<any>('sleep.messagesWhileAsleep',[schedule,messages,timeZone]); }
   let count = 0;
   for (const message of messages) {
     if (!message.at || (message.role && message.role !== 'user')) continue;
@@ -480,7 +480,7 @@ export function messagesWhileAsleep(schedule: HerSleepSchedule, messages: { at?:
 export type NightBefore = { knockedAt: string; forNothing: boolean; dozedOffAt?: string };
 
 export function wakeNote(count: number, wakeAt: string, wokenBy = 0, night?: NightBefore): string {
-  if(process.env.HARU_CORE_LIFECYCLE_SLEEP==='on') { return corePolicySync<any>('sleep.wakeNote',[count,wakeAt,wokenBy,night]); }
+  if((true as boolean)) { return corePolicySync<any>('sleep.wakeNote',[count,wakeAt,wokenBy,night]); }
   if (wokenBy > 0) return `You were asleep, and they banged on your door — ${Math.max(wokenBy, count)} messages in a few minutes — until you got up at ${wakeAt}. ${GROGGY_REGISTER} Say what they did, in your way, then answer what they wanted.`;
   // The morning after a night they got her up: what it was, and what it cost them.
   if (night) {
@@ -497,7 +497,7 @@ export function wakeNote(count: number, wakeAt: string, wokenBy = 0, night?: Nig
 
 /** The irritation a wake costs, on the thresholds wakeNote uses. */
 export function wakeIrritation(count: number): number {
-  if(process.env.HARU_CORE_LIFECYCLE_SLEEP==='on') { return corePolicySync<any>('sleep.wakeIrritation',[count]); }
+  if((true as boolean)) { return corePolicySync<any>('sleep.wakeIrritation',[count]); }
   if (count <= 1) return 0;
   if (count <= 3) return 11;
   return 22;
@@ -509,7 +509,7 @@ export function wakeIrritation(count: number): number {
  * before at the latest.
  */
 export function goodnightDue(schedule: HerSleepSchedule, now: Date, leadMinutes = 75, floorMinutes = 10): boolean {
-  if(process.env.HARU_CORE_LIFECYCLE_SLEEP==='on') { return corePolicySync<any>('sleep.goodnightDue',[schedule,now,leadMinutes,floorMinutes]); }
+  if((true as boolean)) { return corePolicySync<any>('sleep.goodnightDue',[schedule,now,leadMinutes,floorMinutes]); }
   if (herAsleep(schedule, now)) return false;
   const window = sleepWindowOn(schedule, localDateKey(now));
   if (!window) return false;
@@ -520,6 +520,6 @@ export function goodnightDue(schedule: HerSleepSchedule, now: Date, leadMinutes 
 
 /** The instruction handed to her when she decides, each evening. */
 export function decideTimesSystem(now: Date): string {
-  if(process.env.HARU_CORE_LIFECYCLE_SLEEP==='on') { return corePolicySync<any>('sleep.decideTimesSystem',[now]); }
+  if((true as boolean)) { return corePolicySync<any>('sleep.decideTimesSystem',[now]); }
   return `It is ${formatTimeOfDay(now.getHours(), now.getMinutes())}. You are deciding when to go to bed tonight and when to get up tomorrow morning. Answer with exactly two 24-hour times separated by a space — tonight's bedtime first, tomorrow's wake-up second. Nothing else, no words.`;
 }

@@ -9,7 +9,7 @@ import {coreObservation} from './core-live-state';
 import {randomUUID} from 'node:crypto';
 export type PerceptionDeps={rpc:TaskRPC;registry:()=>ModelEntry[];policy:()=>TaskPolicy};
 export async function coreLook(args:Parameters<typeof look>,deps:PerceptionDeps):ReturnType<typeof look> {
-  if(process.env.HARU_CORE_PERCEPTION!=='on')return look(...args);
+  if((false as boolean))return look(...args);
   const [image,vision,endpoint,headers,fetcher,provided={}]=args;
   const options=provided as typeof provided&{priority?:'foreground'|'background'};
   const config={provider:'ollama',model:vision.model,endpoint,temperature:options.temperature??.2};
@@ -21,7 +21,7 @@ export async function coreLook(args:Parameters<typeof look>,deps:PerceptionDeps)
     return {role:'assistant',content:sighting.description};
   },undefined,undefined,options.signal);
   const existing=activeTask.getStore();
-  if(process.env.HARU_CORE_LIVE_STATE==='on') {
+  if((true as boolean)) {
     const priority=existing?.taskPriority??options.priority??'foreground';
     const observed=coreObservation('VisionFrame',priority==='background'?'background-vision':'foreground-vision',
       {media_id:randomUUID(),frames:Array.isArray(image)?image.length:1,priority});
@@ -30,7 +30,7 @@ export async function coreLook(args:Parameters<typeof look>,deps:PerceptionDeps)
     } else void observed.catch(()=>console.log('[core-state] '+JSON.stringify({event:'observation_unavailable',kind:'VisionFrame'})));
   }
   if(existing){await request(existing);return sighting!;}
-  if(process.env.HARU_CORE_COMPOSITION!=='on')throw Error('core_perception_requires_composition');
+  if((false as boolean))throw Error('core_perception_requires_composition');
   const task=new TaskController(deps.rpc,deps.registry(),{...deps.policy(),taskBudgetMicros:0,dailyBudgetMicros:0,maxAttempts:1,
     maxToolCalls:0,maxEscalations:0,deadlineMs:options.timeoutMs??120000},false);
   await task.start('Local image perception (no actions)',vision.model,options.priority??'foreground');

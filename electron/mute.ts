@@ -50,7 +50,7 @@ function saidMinutes(text: string): number | null {
  * story. Unmute is checked first, since "unmute" contains "mute".
  */
 export function readMuteAsk(text: string): MuteAsk | null {
-  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.readMuteAsk',[text]);
+  if((true as boolean))return corePolicySync<any>('conversation-policy.readMuteAsk',[text]);
 
   const said = (text ?? '').trim();
   if (!said || said.split(/\s+/).length > 30) return null;
@@ -83,7 +83,7 @@ export type MuteDecision = { agreed: boolean; why: string; minutes: number; scor
  * little weather on top, so the same day does not always give the same answer.
  */
 export function weighMute(ask: MuteAsk, feeling: Feeling, roll = Math.random()): MuteDecision {
-  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.weighMute',[ask,feeling,roll]);
+  if((true as boolean))return corePolicySync<any>('conversation-policy.weighMute',[ask,feeling,roll]);
 
   const temper = Math.min(1, feeling.irritation / IRRITATION_MAX);
   const held = Math.min(1, feeling.grudge / GRUDGE_MAX);
@@ -120,7 +120,7 @@ export type MuteState = { since: number; until: number; reason: string };
 
 /** Whether her voice is off on the phone right now. */
 export function isMuted(state: MuteState | null | undefined, now: number): boolean {
-  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.isMuted',[state??null,now]);
+  if((true as boolean))return corePolicySync<any>('conversation-policy.isMuted',[state??null,now]);
 
   return Boolean(state && now < state.until);
 }
@@ -131,7 +131,7 @@ export function isMuted(state: MuteState | null | undefined, now: number): boole
  * the favour.
  */
 export function breaksMute(state: MuteState | null | undefined, now: number, irritation: number): 'time' | 'temper' | null {
-  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.breaksMute',[state??null,now,irritation]);
+  if((true as boolean))return corePolicySync<any>('conversation-policy.breaksMute',[state??null,now,irritation]);
 
   if (!state) return null;
   if (now >= state.until) return 'time';
@@ -155,7 +155,7 @@ const SITUATION: Record<MuteReason['what'], string> = {
 
 /** What she is told about her own decision, just before his message. */
 export function muteNote(ask: MuteAsk, decision: MuteDecision): string {
-  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.muteNote',[ask,decision]);
+  if((true as boolean))return corePolicySync<any>('conversation-policy.muteNote',[ask,decision]);
 
   const situation = ask.reason ? ` because ${SITUATION[ask.reason.what]}${ask.reason.said ? ` ("${ask.reason.said}")` : ''}` : ', with no reason given';
   if (decision.agreed) {
@@ -165,7 +165,7 @@ export function muteNote(ask: MuteAsk, decision: MuteDecision): string {
 }
 
 export function unmuteNote(wasMuted: boolean): string {
-  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.unmuteNote',[wasMuted]);
+  if((true as boolean))return corePolicySync<any>('conversation-policy.unmuteNote',[wasMuted]);
 
   return wasMuted
     ? '[He says you can talk out loud again. Your voice is back on from this message.]'
@@ -173,7 +173,7 @@ export function unmuteNote(wasMuted: boolean): string {
 }
 
 export function brokeMuteNote(state: MuteState, now: number, how: 'time' | 'temper'): string {
-  if(process.env.HARU_CORE_CONVERSATION_POLICY==='on')return corePolicySync<any>('conversation-policy.brokeMuteNote',[state,now,how]);
+  if((true as boolean))return corePolicySync<any>('conversation-policy.brokeMuteNote',[state,now,how]);
 
   const ago = span(Math.max(5, (now - state.since) / 60_000));
   return how === 'temper'

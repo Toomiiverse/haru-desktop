@@ -58,7 +58,7 @@ const finite = (value: unknown): value is number => typeof value === 'number' &&
 
 /** Only the local Ollama process qualifies for the no-export/no-cloud-cost path. */
 export function isLocalConfig(config: ProviderConfig): boolean {
-  if(process.env.HARU_CORE_ROUTE_ADMISSION==='on')return routePolicy('local',[config]);
+  if((true as boolean))return routePolicy('local',[config]);
   if (config.provider !== 'ollama') return false;
   try {
     const url = new URL(config.endpoint);
@@ -128,7 +128,7 @@ function capabilities(value: unknown, fallback?: ModelCapabilities): ModelCapabi
  * Persisted shape: { entries: [{ id, role, config, capabilities, pricing }] }.
  */
 export function readModelRegistry(saved: unknown, seeds: RegistrySeeds): ModelEntry[] {
-  if(process.env.HARU_CORE_ROUTE_ADMISSION==='on')return routePolicy('registry',[saved,seeds,Date.now()]);
+  if((true as boolean))return routePolicy('registry',[saved,seeds,Date.now()]);
   const entries = new Map<string, ModelEntry>();
   function seed(role: ModelRole, value: Seed | null | undefined, image = false) {
     const config = providerConfig(value);
@@ -183,7 +183,7 @@ export function readModelRegistry(saved: unknown, seeds: RegistrySeeds): ModelEn
 
 /** The approved caps are defaults; zero explicitly disables automatic cloud spend. */
 export function readTaskPolicy(saved: unknown): TaskPolicy {
-  if(process.env.HARU_CORE_ROUTE_ADMISSION==='on')return routePolicy('taskPolicy',[saved]);
+  if((true as boolean))return routePolicy('taskPolicy',[saved]);
   const item = record(saved);
   const bounded = (key: keyof TaskPolicy, minimum: number, maximum: number): number => integer(item[key], minimum) && (item[key] as number) <= maximum ? item[key] as number : DEFAULT_TASK_POLICY[key] as number;
   return {
@@ -210,7 +210,7 @@ export type ReservationEstimate = { inputTokens: number; maxOutputTokens: number
  * re-measuring the same text. Measured once, then handed to each entry.
  */
 export function measureRequest(conversation: readonly ChatMessage[], toolSchema?: readonly unknown[]): { inputTokens: number; imageCount: number } {
-  if(process.env.HARU_CORE_ROUTE_ADMISSION==='on')return routePolicy('measure',[conversation,toolSchema]);
+  if((true as boolean))return routePolicy('measure',[conversation,toolSchema]);
   let inputTokens = 64;
   let imageCount = 0;
   for (const message of conversation) {
@@ -223,7 +223,7 @@ export function measureRequest(conversation: readonly ChatMessage[], toolSchema?
 }
 
 export function estimateReservation(entry: ModelEntry, conversation: readonly ChatMessage[], maxOutputTokens = entry.capabilities.maxOutputTokens, toolSchema?: readonly unknown[], measured?: { inputTokens: number; imageCount: number }): ReservationEstimate | undefined {
-  if(process.env.HARU_CORE_ROUTE_ADMISSION==='on')return routePolicy<ReservationEstimate|null>('estimate',[entry,conversation,maxOutputTokens,toolSchema,measured])??undefined;
+  if((true as boolean))return routePolicy<ReservationEstimate|null>('estimate',[entry,conversation,maxOutputTokens,toolSchema,measured])??undefined;
   if (!integer(maxOutputTokens, 1) || maxOutputTokens > entry.capabilities.maxOutputTokens || !entry.capabilities.text) return undefined;
   if (!entry.local && !entry.pricing) return undefined;
   if (toolSchema?.length && !entry.capabilities.tools) return undefined;
@@ -252,7 +252,7 @@ export function estimateReservation(entry: ModelEntry, conversation: readonly Ch
 
 /** Missing usage must retain the reservation rather than settle as a free call. */
 export function usageCost(entry: ModelEntry, value: unknown, format: 'openai' | 'anthropic' = 'openai'): number | undefined {
-  if(process.env.HARU_CORE_ROUTE_ADMISSION==='on')return routePolicy<number|null>('usageCost',[entry,value,format])??undefined;
+  if((true as boolean))return routePolicy<number|null>('usageCost',[entry,value,format])??undefined;
   if (entry.local) return 0;
   if (!entry.pricing) return undefined;
   const usage = record(value);
@@ -297,7 +297,7 @@ export type RouteRequest = {
 
 /** A role hint is a preference among eligible routes, never a policy bypass. */
 export function selectModel(entries: readonly ModelEntry[], request: RouteRequest): ModelEntry | undefined {
-  if(process.env.HARU_CORE_ROUTE_ADMISSION==='on')return routePolicy<ModelEntry|null>('select',[entries,observedRequest(entries,request)])??undefined;
+  if((true as boolean))return routePolicy<ModelEntry|null>('select',[entries,observedRequest(entries,request)])??undefined;
   const eligible = eligibleModels(entries,request);
   const hints = request.roleHint ? typeof request.roleHint === 'string' ? [request.roleHint] : request.roleHint : [];
   const preferred = eligible.filter(candidate => hints.includes(candidate.entry.role));
@@ -308,7 +308,7 @@ export function selectModel(entries: readonly ModelEntry[], request: RouteReques
 
 /** Eligibility remains with verified configuration, privacy and credential adapters. */
 export function eligibleModels(entries: readonly ModelEntry[], request: RouteRequest): {entry:ModelEntry;score:number;costMicros:number}[] {
-  if(process.env.HARU_CORE_ROUTE_ADMISSION==='on')return routePolicy('eligible',[entries,observedRequest(entries,request)]);
+  if((true as boolean))return routePolicy('eligible',[entries,observedRequest(entries,request)]);
   if (request.budgetMicros !== undefined && (!integer(request.budgetMicros))) return [];
   const inputs = request.inputs ?? ['text'];
   // Measured once for the whole routing decision, not once per candidate.

@@ -21,7 +21,7 @@ export type CallConfig = {
 export const DEFAULT_CALL: CallConfig = { engine: 'hume', endAfterMs: 550 };
 
 export function readCallConfig(saved: unknown): CallConfig {
-  if(process.env.HARU_CORE_SPEECH_BOUNDARY==='on')return corePolicySync<any>('speech-boundary.readCallConfig',[saved??null]);
+  if((true as boolean))return corePolicySync<any>('speech-boundary.readCallConfig',[saved??null]);
   if (!saved || typeof saved !== 'object') return DEFAULT_CALL;
   const record = saved as Partial<CallConfig>;
   const engines: CallEngine[] = ['hume', 'local'];
@@ -46,7 +46,7 @@ export function readCallConfig(saved: unknown): CallConfig {
 const DANGLING = new Set(['and', 'but', 'or', 'so', 'because', 'the', 'a', 'an', 'to', 'in', 'of', 'on', 'at', 'for', 'with', 'about', 'like', 'um', 'uh', 'er', 'if', 'when', 'my', 'your']);
 
 export function looksUnfinished(text: string): boolean {
-  if(process.env.HARU_CORE_SPEECH_BOUNDARY==='on')return corePolicySync<any>('speech-boundary.looksUnfinished',[text]);
+  if((true as boolean))return corePolicySync<any>('speech-boundary.looksUnfinished',[text]);
   const trimmed = text.trim();
   if (!trimmed) return false;
   if (/[-–—…,:;]$/.test(trimmed)) return true;
@@ -76,7 +76,7 @@ export const FILLERS = [
 
 /** One of the fillers, not the one said last time. `pick` is 0..1, the caller's randomness. */
 export function pickFiller(pick: number, notThis = ''): string {
-  if(process.env.HARU_CORE_SPEECH_BOUNDARY==='on')return corePolicySync<any>('speech-boundary.pickFiller',[pick,notThis]);
+  if((true as boolean))return corePolicySync<any>('speech-boundary.pickFiller',[pick,notThis]);
   const pool = FILLERS.filter(line => line !== notThis);
   const at = Math.min(pool.length - 1, Math.max(0, Math.floor(pick * pool.length)));
   return pool[at];

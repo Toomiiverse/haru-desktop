@@ -30,7 +30,7 @@ export type ClaudeCodeConfig = {
 export const CLAUDE_PERMISSION_MODES = ['acceptEdits', 'auto', 'default', 'dontAsk', 'plan'] as const;
 
 export function readClaudeCodeConfig(saved: unknown, home = os.homedir()): ClaudeCodeConfig {
- if(process.env.HARU_CORE_FINAL_TOOLS==='on')return corePolicySync('final-sessions.config',[saved??null,home]);
+ if((true as boolean))return corePolicySync('final-sessions.config',[saved??null,home]);
   const record = saved && typeof saved === 'object' ? saved as Record<string, unknown> : {};
   const text = (value: unknown) => (typeof value === 'string' && value.trim() ? value.trim() : '');
   const mode = text(record.permissionMode);
@@ -48,7 +48,7 @@ export type OpenedSession = { id: string; name: string; dir: string; url: string
 export const SESSIONS_KEPT = 10;
 
 export function readOpenedSessions(saved: unknown): OpenedSession[] {
- if(process.env.HARU_CORE_FINAL_TOOLS==='on')return corePolicySync('final-sessions.opened',[saved??null]);
+ if((true as boolean))return corePolicySync('final-sessions.opened',[saved??null]);
   if (!Array.isArray(saved)) return [];
   return saved
     .filter((entry): entry is OpenedSession => Boolean(entry) && typeof entry === 'object'
@@ -60,27 +60,27 @@ export function readOpenedSessions(saved: unknown): OpenedSession[] {
 
 /** `claude logs` is a terminal recording; the link is in there between colour codes. */
 export function plainText(raw: string): string {
- if(process.env.HARU_CORE_FINAL_TOOLS==='on')return corePolicySync('final-sessions.plain',[raw]);
+ if((true as boolean))return corePolicySync('final-sessions.plain',[raw]);
   // eslint-disable-next-line no-control-regex
   return raw.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, ' ').replace(/\x1b[\]P^_][\s\S]*?(?:\x07|\x1b\\)/g, ' ');
 }
 
 /** The short id `claude --bg` prints: "backgrounded · 2c4feebf (idle — send a prompt to start)". */
 export function backgroundedId(stdout: string): string | null {
- if(process.env.HARU_CORE_FINAL_TOOLS==='on')return corePolicySync('final-sessions.background',[stdout]);
+ if((true as boolean))return corePolicySync('final-sessions.background',[stdout]);
   return plainText(stdout).match(/backgrounded\s*·\s*([0-9a-f]{8})\b/)?.[1] ?? null;
 }
 
 /** The session's own link, once Remote Control has connected. The last one wins: a reconnect prints a new line. */
 export function sessionUrl(log: string): string | null {
- if(process.env.HARU_CORE_FINAL_TOOLS==='on')return corePolicySync('final-sessions.link',[log]);
+ if((true as boolean))return corePolicySync('final-sessions.link',[log]);
   const found = plainText(log).match(/https:\/\/claude\.ai\/code\/session_[A-Za-z0-9]+/g);
   return found ? found[found.length - 1] : null;
 }
 
 /** The background sessions still alive, by short id, from `claude agents --json`. */
 export function liveSessions(json: string): Map<string, { status: string; cwd: string }> {
- if(process.env.HARU_CORE_FINAL_TOOLS==='on')return new Map(Object.entries(corePolicySync<Record<string,{status:string;cwd:string}>>('final-sessions.live',[json])));
+ if((true as boolean))return new Map(Object.entries(corePolicySync<Record<string,{status:string;cwd:string}>>('final-sessions.live',[json])));
   const live = new Map<string, { status: string; cwd: string }>();
   let rows: unknown;
   try { rows = JSON.parse(json); } catch { return live; }
@@ -114,7 +114,7 @@ export function resolveSessionDir(
   home: string,
   fs: DirLookup = LOCAL_DIRS,
 ): { dir: string } | { error: string } {
- if(process.env.HARU_CORE_FINAL_TOOLS==='on'){const candidate=corePolicySync<string>('final-sessions.candidate',[asked,config,home]);return corePolicySync('final-sessions.resolved',[asked,candidate,{isDir:fs.isDir(candidate),real:fs.real(candidate),realHome:fs.real(home)}]);}
+ if((true as boolean)){const candidate=corePolicySync<string>('final-sessions.candidate',[asked,config,home]);return corePolicySync('final-sessions.resolved',[asked,candidate,{isDir:fs.isDir(candidate),real:fs.real(candidate),realHome:fs.real(home)}]);}
   const wanted = asked.trim();
   let candidate: string;
   if (!wanted) candidate = config.dir;
@@ -131,7 +131,7 @@ export function resolveSessionDir(
 
 /** What the session is called in the Claude app. One line, short, never empty. */
 export function sessionName(asked: string, dir: string): string {
- if(process.env.HARU_CORE_FINAL_TOOLS==='on')return corePolicySync('final-sessions.name',[asked,dir]);
+ if((true as boolean))return corePolicySync('final-sessions.name',[asked,dir]);
   const cleaned = asked.replace(/[\x00-\x1f\x7f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60);
   return cleaned || `Haru · ${path.basename(dir) || 'home'}`;
 }
@@ -145,7 +145,7 @@ export function sessionName(asked: string, dir: string): string {
  * gives it a cgroup that outlives her.
  */
 export function launchCommand(config: ClaudeCodeConfig, name: string, systemdRun: string | null): { file: string; args: string[] } {
- if(process.env.HARU_CORE_FINAL_TOOLS==='on')return corePolicySync('final-sessions.launch',[config,name,systemdRun]);
+ if((true as boolean))return corePolicySync('final-sessions.launch',[config,name,systemdRun]);
   const claude = [config.binary, '--bg', '--remote-control', name, '--name', name];
   if (config.permissionMode) claude.push('--permission-mode', config.permissionMode);
   if (!systemdRun) return { file: claude[0], args: claude.slice(1) };
@@ -174,7 +174,7 @@ async function linkFor(host: SessionHost, id: string, waitMs: number): Promise<s
 }
 
 export async function openSession(host: SessionHost, dir: string, name: string, nowIso: string): Promise<{ session: OpenedSession } | { error: string }> {
- if(process.env.HARU_CORE_FINAL_TOOLS==='on')throw Error('use_core_session_program');
+ if((true as boolean))throw Error('use_core_session_program');
   const { file, args } = launchCommand(host.config, name, host.systemdRun);
   const launched = await host.run(file, args, { cwd: dir, timeoutMs: 60_000 });
   const id = backgroundedId(launched.stdout) ?? backgroundedId(launched.stderr);
@@ -188,7 +188,7 @@ export async function openSession(host: SessionHost, dir: string, name: string, 
 
 /** Hers that are still running, links filled in where the first look missed them. */
 export async function listSessions(host: SessionHost, opened: OpenedSession[]): Promise<{ sessions: (OpenedSession & { status: string })[] } | { error: string }> {
- if(process.env.HARU_CORE_FINAL_TOOLS==='on')throw Error('use_core_session_program');
+ if((true as boolean))throw Error('use_core_session_program');
   const agents = await host.run(host.config.binary, ['agents', '--json'], { timeoutMs: 20_000 });
   if (!agents.ok) return { error: 'Claude would not list its sessions.' };
   const live = liveSessions(agents.stdout);
@@ -203,7 +203,7 @@ export async function listSessions(host: SessionHost, opened: OpenedSession[]): 
 }
 
 export async function stopSession(host: SessionHost, id: string): Promise<{ stopped: boolean; error?: string }> {
- if(process.env.HARU_CORE_FINAL_TOOLS==='on')throw Error('use_core_session_program');
+ if((true as boolean))throw Error('use_core_session_program');
   const stopped = await host.run(host.config.binary, ['stop', id], { timeoutMs: 30_000 });
   if (stopped.ok) return { stopped: true };
   return { stopped: false, error: plainText(`${stopped.stderr} ${stopped.stdout}`).replace(/\s+/g, ' ').trim().slice(0, 200) || 'Claude would not stop it.' };

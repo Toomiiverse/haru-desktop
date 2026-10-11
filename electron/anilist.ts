@@ -44,7 +44,7 @@ export type AniListConfig = {
 export const DEFAULT_ANILIST: AniListConfig = { enabled: false, username: '' };
 
 export function readAniListConfig(saved: unknown): AniListConfig {
- if(process.env.HARU_CORE_FINAL_TOOLS==='on')return corePolicySync('final-anilist.config',[saved??null]);
+ if((true as boolean))return corePolicySync('final-anilist.config',[saved??null]);
   if (!saved || typeof saved !== 'object') return DEFAULT_ANILIST;
   const record = saved as Partial<AniListConfig>;
   return {
@@ -127,7 +127,7 @@ function creditFor(raw: RawMedia, kind: MediaKind) {
 }
 
 function toMedia(raw: RawMedia, kind: MediaKind): Media {
- if(process.env.HARU_CORE_FINAL_TOOLS==='on')return corePolicySync('final-anilist.media',[raw,kind]);
+ if((true as boolean))return corePolicySync('final-anilist.media',[raw,kind]);
   const romaji = raw.title?.romaji?.trim();
   const english = raw.title?.english?.trim();
   return {
@@ -154,7 +154,7 @@ function toMedia(raw: RawMedia, kind: MediaKind): Media {
  * whichever actually exists.
  */
 export async function lookUp(search: string, kind: MediaKind | undefined, fetchImpl: Fetcher): Promise<Media | null> {
- if(process.env.HARU_CORE_FINAL_TOOLS==='on')return coreAniList('lookup',search,kind,fetchImpl);
+ if((true as boolean))return coreAniList('lookup',search,kind,fetchImpl);
   const wanted = search.trim();
   if (!wanted) throw new Error('There was nothing to look up.');
   const kinds: MediaKind[] = kind ? [kind] : ['ANIME', 'MANGA'];
@@ -185,7 +185,7 @@ type RawList = { lists?: { entries?: { status?: string; progress?: number; score
  * titles is not context, it is a database.
  */
 export async function userList(username: string, fetchImpl: Fetcher): Promise<ListEntry[]> {
- if(process.env.HARU_CORE_FINAL_TOOLS==='on')return coreAniList('list',username,undefined,fetchImpl);
+ if((true as boolean))return coreAniList('list',username,undefined,fetchImpl);
   const name = username.trim();
   if (!name) throw new Error('No AniList username has been saved.');
   const entries: ListEntry[] = [];
@@ -229,7 +229,7 @@ const WORD_FOR: Record<MediaKind, string> = { ANIME: 'episodes', MANGA: 'chapter
 
 /** One title, written as facts to answer from rather than as a database row. */
 export function formatMedia(media: Media): string {
-  if(process.env.HARU_CORE_FINAL_TOOLS==='on')return corePolicySync('final-tool-values.formatMedia',[media]);
+  if((true as boolean))return corePolicySync('final-tool-values.formatMedia',[media]);
   const counted = media.units ? `${media.units} ${WORD_FOR[media.kind]}${media.volumes ? ` across ${media.volumes} volumes` : ''}` : '';
   // The name carries the colon and the rest is comma-joined after it — built as
   // one list, the empty gap between them came out as "Fire Punch:, manga".
@@ -252,7 +252,7 @@ export function formatMedia(media: Media): string {
 
 /** Nothing found, said in a way that does not invite her to invent one. */
 export function formatMissing(search: string): string {
-  if(process.env.HARU_CORE_FINAL_TOOLS==='on')return corePolicySync('final-tool-values.formatMissing',[search]);
+  if((true as boolean))return corePolicySync('final-tool-values.formatMissing',[search]);
   return `AniList has nothing matching "${search}". Say you have not heard of it, or ask whether they have the name slightly wrong. Do not describe it from memory as though you had looked it up.`;
 }
 
@@ -266,7 +266,7 @@ const LIST_LIMIT = 12;
  * a model that has to choose to look will often just answer instead.
  */
 export function formatList(entries: ListEntry[]): string {
- if(process.env.HARU_CORE_FINAL_TOOLS==='on')return corePolicySync('final-anilist.formatList',[entries]);
+ if((true as boolean))return corePolicySync('final-anilist.formatList',[entries]);
   if (!entries.length) return '';
   const current = entries.filter(entry => entry.status === 'current');
   const paused = entries.filter(entry => entry.status === 'paused');

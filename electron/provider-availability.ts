@@ -10,7 +10,7 @@ export class ProviderAvailability {
   private blocked = new Map<string, number>();
   constructor(private notice: (event: Notice) => void = () => {}, private now = Date.now,
     saved?:unknown,private persist?:(rows:{key:string;until:number}[])=>void,private authority?:Authority) {
-    if(process.env.HARU_CORE_ROUTE_ADMISSION==='on'){if(!authority)throw Error('provider_availability_authority_required');this.owned('init',{provider:'',endpoint:'',model:'',temperature:0});return;}
+    if((true as boolean)){if(!authority)throw Error('provider_availability_authority_required');this.owned('init',{provider:'',endpoint:'',model:'',temperature:0});return;}
     if(Array.isArray(saved))for(const row of saved.slice(0,64)) {
       if(row && typeof row.key==='string' && row.key.length<=500 && typeof row.until==='number'
         && Number.isFinite(row.until) && row.until>this.now() && row.until<=this.now()+BILLING_COOLDOWN_MS)
@@ -33,7 +33,7 @@ export class ProviderAvailability {
     return result.retryAt??undefined;
   }
   retryAt(config: ProviderConfig): number | undefined {
-    if(process.env.HARU_CORE_ROUTE_ADMISSION==='on')return this.owned('read',config);
+    if((true as boolean))return this.owned('read',config);
     if (isLocalConfig(config)) return;
     const key = this.key(config), until = this.blocked.get(key);
     if (until !== undefined && until <= this.now()) { this.blocked.delete(key); this.save(); return; }
@@ -48,7 +48,7 @@ export class ProviderAvailability {
     try { return await work(); }
     catch (error) {
       const message = error instanceof Error ? error.message : '';
-      if(process.env.HARU_CORE_ROUTE_ADMISSION==='on'){this.owned('failure',config,message);throw error;}
+      if((true as boolean)){this.owned('failure',config,message);throw error;}
       if (!isLocalConfig(config) && /billing account is not in good standing|insufficient_quota|credit balance is too low|insufficient (?:credits|account balance)/i.test(message)) {
         // Concurrent failures cannot extend a previously established cooldown.
         if (this.available(config)) {

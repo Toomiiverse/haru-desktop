@@ -42,7 +42,7 @@ const READS = new Set([
   'look_up_anime', 'describe_myself',
 ]);
 export function isReadTool(name: string, args: Record<string, unknown> = {}): boolean {
-  if(process.env.HARU_CORE_RECEIPT_POLICY==='on')return corePolicySync<boolean>('receipt-policy.isRead',[name,args]);
+  if((true as boolean))return corePolicySync<boolean>('receipt-policy.isRead',[name,args]);
   return READS.has(name) || name === 'browser_control' && ['read', 'list'].includes(String(args.action))
     || name === 'claude_session' && args.action === 'list'
     || name === 'downloads' && !['pause', 'resume'].includes(String(args.action))
@@ -53,7 +53,7 @@ export function toolArgs(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 function outcome(data: unknown, read: boolean): ToolReceipt['outcome'] {
-  if(process.env.HARU_CORE_RECEIPT_POLICY==='on')return corePolicySync<ToolReceipt['outcome']>('receipt-policy.outcome',[data,read]);
+  if((true as boolean))return corePolicySync<ToolReceipt['outcome']>('receipt-policy.outcome',[data,read]);
   if (typeof data === 'string') return /(?:permission denied|failed to|traceback|could not|unknown tool|\berror\b)/i.test(data) ? 'failed' : 'unknown';
   if (Array.isArray(data)) return read ? 'succeeded' : 'unknown';
   if (!data || typeof data !== 'object') return 'unknown';
@@ -79,7 +79,7 @@ function outcome(data: unknown, read: boolean): ToolReceipt['outcome'] {
   return 'unknown';
 }
 export function sourceTime(data: unknown, fallback: number | null): number | null {
-  if(process.env.HARU_CORE_FINAL_TOOLS==='on'){
+  if((true as boolean)){
     const observations=data&&typeof data==='object'&&!Array.isArray(data)?['observedAt','observed_at','timestamp','collectedAt','collected_at'].filter(k=>k in data).map(k=>{
       const value=(data as Record<string,unknown>)[k];const parsed=typeof value==='number'?value:Date.parse(String(value));return Number.isFinite(parsed)?parsed:null;
     }):null;

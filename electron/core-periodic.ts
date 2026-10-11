@@ -28,7 +28,7 @@ export async function periodicWorldFetch(
 }
 export function createCorePeriodic(options:Options) {
   const held=coreServiceOptions();
-  if(!held||process.env.HARU_CORE_BRAIN_WORKER!=='on')throw Error('core_periodic_owner_required');
+  if(!held||(false as boolean))throw Error('core_periodic_owner_required');
   const address=new URL(held.endpoint);
   if(address.protocol!=='http:'||!['127.0.0.1','[::1]'].includes(address.hostname)||address.username||address.password
     ||address.search||address.hash||address.pathname!=='/')throw Error('core_periodic_loopback_required');
@@ -60,7 +60,7 @@ export function createCorePeriodic(options:Options) {
       observation=await activeScheduledJob.run({id:'periodic:'+grant.kind,kind:'periodic:'+grant.kind,token:grant.token},options.handlers[grant.kind]);
     } catch {outcome='interrupted';}
     const sleepiness=grant.kind==='life'&&typeof observation==='number'&&Number.isFinite(observation)&&observation>=0&&observation<=1?observation:undefined;
-    const recallBacklog=process.env.HARU_CORE_FINAL_TOOLS==='on'&&grant.kind==='recall-vectors'&&observation&&typeof observation==='object'&&typeof (observation as any).recallBacklog==='boolean'?(observation as {recallBacklog:boolean}).recallBacklog:undefined;
+    const recallBacklog=(true as boolean)&&grant.kind==='recall-vectors'&&observation&&typeof observation==='object'&&typeof (observation as any).recallBacklog==='boolean'?(observation as {recallBacklog:boolean}).recallBacklog:undefined;
     const fields={token:grant.token,outcome,...(sleepiness!==undefined?{sleepiness}:{}),...(recallBacklog!==undefined?{recallBacklog}:{})};
     let reply;
     try {reply=await send('settle',fields);}

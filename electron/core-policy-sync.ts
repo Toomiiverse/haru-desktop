@@ -26,7 +26,7 @@ export function corePolicySync<T>(operation:string,args:unknown[]):T {
  const started=performance.now();let status:'ok'|'error'='error';
  try {
  const options=coreServiceOptions();
- if(!options||process.env.HARU_CORE_BRAIN_WORKER!=='on')throw Error('core_policy_owner_unavailable');
+ if(!options||(false as boolean))throw Error('core_policy_owner_unavailable');
  if(!worker){
   const created=new Worker(path.join(__dirname,'core-policy-worker.js'),{workerData:options});worker=created;buffers=new Map();
   const lost=()=>{if(worker===created){worker=undefined;buffers=new Map();}};created.on('error',lost);created.on('exit',lost);created.unref();
@@ -36,7 +36,7 @@ export function corePolicySync<T>(operation:string,args:unknown[]):T {
  const transport=worker;
  const packet={version:1,requestId:randomUUID(),owner:coreAdapterOwner(),nowMs:Date.now(),operation,args:wire(args)};
  const encoded=JSON.stringify(packet);
- const limit=process.env.HARU_CORE_KNOWLEDGE==='on'&&/^knowledge-(index|flow|chunks|vault)\./.test(operation)?8388608:LIMIT;
+ const limit=(true as boolean)&&/^knowledge-(index|flow|chunks|vault)\./.test(operation)?8388608:LIMIT;
  if(Buffer.byteLength(encoded)>limit)throw Error('core_policy_payload_too_large');
  let buffer=buffers.get(limit);
  if(!buffer){buffer=new SharedArrayBuffer(limit+8);buffers.set(limit,buffer);}

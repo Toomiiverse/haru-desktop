@@ -19,7 +19,7 @@ import path from 'node:path';
 import type { Work } from './following';
 
 export function gameSlug(name: string): string {
- if(process.env.HARU_CORE_SCREEN_POLICY==='on')return gamePolicy('slug',[name]);
+ if((true as boolean))return gamePolicy('slug',[name]);
   return name.toLowerCase().replace(/[®™©]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'game';
 }
 
@@ -33,7 +33,7 @@ export function memoryFile(root: string, name: string): string {
 
 /** Opens the game's folder, making it on the first boot, and reads what is in it. */
 export function openGameMemory(root: string, name: string, seed: string[], when: Date): { text: string; isNew: boolean } {
- if(process.env.HARU_CORE_SCREEN_POLICY==='on'){const core=coreStoreFor(path.dirname(root));if(!core)throw Error('core_game_authority_required');return openCoreGame(core,name,seed,when.toISOString());}
+ if((true as boolean)){const core=coreStoreFor(path.dirname(root));if(!core)throw Error('core_game_authority_required');return openCoreGame(core,name,seed,when.toISOString());}
   const core = coreStoreFor(path.dirname(root));
   if (core) {
     const key = 'game:' + gameSlug(name) + '.md', held = core.get(key, ''), isNew = !held;
@@ -51,7 +51,7 @@ export function openGameMemory(root: string, name: string, seed: string[], when:
 
 /** Adds a dated line and returns the whole file, so a context held in memory can follow it. */
 export function noteInGameMemory(root: string, name: string, line: string, when: Date): string {
- if(process.env.HARU_CORE_SCREEN_POLICY==='on'){const core=coreStoreFor(path.dirname(root));if(!core)throw Error('core_game_authority_required');return noteCoreGameMemory(core,name,line,when.toISOString());}
+ if((true as boolean)){const core=coreStoreFor(path.dirname(root));if(!core)throw Error('core_game_authority_required');return noteCoreGameMemory(core,name,line,when.toISOString());}
   const core = coreStoreFor(path.dirname(root));
   if (core) {
     const current = openGameMemory(root, name, [], when).text;
@@ -69,7 +69,7 @@ export const MEMORY_IN_PROMPT_CHARS = 2400;
 
 /** The head of the file and the newest notes; the middle goes first when it must. */
 export function gameMemoryForPrompt(text: string): string {
- if(process.env.HARU_CORE_SCREEN_POLICY==='on')return gamePolicy('memory',[text]);
+ if((true as boolean))return gamePolicy('memory',[text]);
   const trimmed = text.trim();
   if (trimmed.length <= MEMORY_IN_PROMPT_CHARS) return trimmed;
   const lines = trimmed.split('\n');
@@ -85,7 +85,7 @@ export function gameMemoryForPrompt(text: string): string {
 
 /** Distinct days it has been opened in the last week, today included. */
 export function timesThisWeek(work: Work | undefined, todayKey: string): number {
- if(process.env.HARU_CORE_SCREEN_POLICY==='on')return gamePolicy('times',[work,todayKey]);
+ if((true as boolean))return gamePolicy('times',[work,todayKey]);
   if (!work) return 0;
   const [y, m, d] = todayKey.split('-').map(Number);
   const from = new Date(Date.UTC(y, (m ?? 1) - 1, (d ?? 1) - 6)).toISOString().slice(0, 10);
@@ -104,7 +104,7 @@ function nth(n: number): string {
  * last time — not to the game. They know what they just launched.
  */
 export function welcomePrompt(name: string, times: number, memory: string, isNew: boolean): string {
- if(process.env.HARU_CORE_SCREEN_POLICY==='on')return gamePolicy('welcome',[name,times,memory,isNew]);
+ if((true as boolean))return gamePolicy('welcome',[name,times,memory,isNew]);
   const often = isNew ? 'You have never seen them play it before.'
     : times > 1 ? `This is the ${nth(times)} day this week they have opened it.`
     : 'First time this week.';

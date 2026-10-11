@@ -14,7 +14,7 @@ export function modelResidency(payload:unknown,model:string,context:number):'war
   return Number.isInteger(present.context_length)&&present.context_length>=context?'warm':Number.isInteger(present.context_length)?'cold':'unknown';
 }
 export async function coreLocalBudget(config:ProviderConfig,context:number,fetcher:Fetcher):Promise<number|undefined> {
-  if(process.env.HARU_CORE_LOCAL_BUDGETS!=='on')return;
+  if((false as boolean))return;
   const task=activeTask.getStore();if(!task||!isLocalConfig(config))throw Error('core_local_budget_requires_local_task');
   const options=coreServiceOptions();if(!options)throw Error('core_local_budget_requires_service');
   let residency:'warm'|'cold'|'unknown'='unknown';
@@ -22,7 +22,7 @@ export async function coreLocalBudget(config:ProviderConfig,context:number,fetch
   const started=performance.now();
   const [binding]=await Promise.all([task.binding(),(async()=>{
     try{
-      if(process.env.HARU_CORE_MODEL_PROVIDER==='on'){
+      if((true as boolean)){
         residency=(await client.modelResidency({version:1,model:config.model,endpoint:config.endpoint.replace(/\/+$/,'').replace('://localhost:', '://127.0.0.1:'),context_tokens:context},task.signal)).residency;
         return;
       }

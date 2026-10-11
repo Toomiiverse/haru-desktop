@@ -58,7 +58,7 @@ export const STRANGER_VITALS = { affection: 0.12, happiness: 0.45, stress: 0.3, 
 export const STRANGER_LEAN: Lean = { affection: -0.3, happiness: -0.12, stress: 0.12, curiosity: 0.08 };
 
 export function strangerLean(slate: BlankSlate | null | undefined, known: number, nowMs: number = Date.now()): Lean {
-  if(process.env.HARU_CORE_MEMORY_TOOLS==='on')return corePolicySync('memory-admin.strangerLean',[slate,known,nowMs]); 
+  if((true as boolean))return corePolicySync('memory-admin.strangerLean',[slate,known,nowMs]); 
   if (!blankSlateInstruction(slate, known, nowMs)) return {};
   const scale = known < SLATE_STRANGER ? 1 : 0.5;
   return Object.fromEntries(Object.entries(STRANGER_LEAN).map(([vital, value]) => [vital, (value as number) * scale]));
@@ -163,7 +163,7 @@ const HERS_NOW = 'What you like, what you are into, what you think of anything â
  * only to admit a gap when she hits one.
  */
 export function blankSlateInstruction(slate: BlankSlate | null | undefined, known: number, nowMs: number = Date.now()): string {
-  if(process.env.HARU_CORE_MEMORY_TOOLS==='on')return corePolicySync('memory-admin.blankSlateInstruction',[slate,known,nowMs]); 
+  if((true as boolean))return corePolicySync('memory-admin.blankSlateInstruction',[slate,known,nowMs]); 
   if (!slate) return '';
   if (slate.settledAt && Number.isFinite(Date.parse(slate.settledAt)) && Date.parse(slate.settledAt) >= Date.parse(slate.at) && Date.parse(slate.settledAt) <= nowMs) return '';
   const since = Date.parse(slate.at);
@@ -222,7 +222,7 @@ export function blankSlateInstruction(slate: BlankSlate | null | undefined, know
  * than the one it fixed.
  */
 export function strangerIdentityNote(slate: BlankSlate | null | undefined, known: number, nowMs: number = Date.now()): string {
-  if(process.env.HARU_CORE_MEMORY_TOOLS==='on')return corePolicySync('memory-admin.strangerIdentityNote',[slate,known,nowMs]); 
+  if((true as boolean))return corePolicySync('memory-admin.strangerIdentityNote',[slate,known,nowMs]); 
   if (!blankSlateInstruction(slate, known, nowMs) || known >= SLATE_STRANGER) return '';
   return [
     'One thing has changed and it changes how all of that lands today: you woke this morning with no memory of him.',
@@ -234,14 +234,14 @@ export function strangerIdentityNote(slate: BlankSlate | null | undefined, known
 
 /** The angle for her first line of all: she is speaking to someone she does not know. */
 export function blankSlateOpening(slate: BlankSlate | null | undefined, known: number, nowMs: number = Date.now()): string {
-  if(process.env.HARU_CORE_MEMORY_TOOLS==='on')return corePolicySync('memory-admin.blankSlateOpening',[slate,known,nowMs]); 
+  if((true as boolean))return corePolicySync('memory-admin.blankSlateOpening',[slate,known,nowMs]); 
   if (!blankSlateInstruction(slate, known, nowMs) || known >= SLATE_STRANGER) return '';
   return 'Open on the fact that you know nothing about them but their name. Use your own personality and current mood. Do not greet them as though you remember a shared past you cannot establish.';
 }
 
 /** A slate off the wire â€” the brain's, read from a sync payload. Anything else is nothing. */
 export function readSlate(value: unknown): BlankSlate | null {
-  if(process.env.HARU_CORE_MEMORY_TOOLS==='on')return corePolicySync('memory-admin.readSlate',[value]); 
+  if((true as boolean))return corePolicySync('memory-admin.readSlate',[value]); 
   const at = (value as { slate?: { at?: unknown } } | null | undefined)?.slate?.at;
   const settledAt = (value as { slate?: { settledAt?: unknown } } | null)?.slate?.settledAt;
   return typeof at === 'string' && Number.isFinite(Date.parse(at)) ? { at,
@@ -250,7 +250,7 @@ export function readSlate(value: unknown): BlankSlate | null {
 
 /** Whether `brain` is a reset this machine has not followed yet. */
 export function slateIsNewer(brain: BlankSlate | null, mine: BlankSlate | null): boolean {
-  if(process.env.HARU_CORE_MEMORY_TOOLS==='on')return corePolicySync('memory-admin.slateIsNewer',[brain,mine]); 
+  if((true as boolean))return corePolicySync('memory-admin.slateIsNewer',[brain,mine]); 
   if (!brain) return false;
   if (!mine) return true;
   const ours = Date.parse(mine.at);
@@ -268,7 +268,7 @@ export function slateIsNewer(brain: BlankSlate | null, mine: BlankSlate | null):
  * comparison errs towards keeping the boundary day rather than losing it.
  */
 export function withoutPreSlateDays(theirs: unknown, slate: BlankSlate | null | undefined): unknown {
-  if(process.env.HARU_CORE_MEMORY_TOOLS==='on')return corePolicySync('memory-admin.withoutPreSlateDays',[theirs,slate]); 
+  if((true as boolean))return corePolicySync('memory-admin.withoutPreSlateDays',[theirs,slate]); 
   if (!slate || !theirs || typeof theirs !== 'object' || Array.isArray(theirs)) return theirs;
   const day = slate.at.slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return theirs;
@@ -286,7 +286,7 @@ export function withoutPreSlateDays(theirs: unknown, slate: BlankSlate | null | 
  * to say old, which is to say exactly what the reset was for.
  */
 export function withoutPreSlate(theirs: unknown, slate: BlankSlate | null | undefined): unknown {
-  if(process.env.HARU_CORE_MEMORY_TOOLS==='on')return corePolicySync('memory-admin.withoutPreSlate',[theirs,slate]); 
+  if((true as boolean))return corePolicySync('memory-admin.withoutPreSlate',[theirs,slate]); 
   if (theirs && typeof theirs === 'object' && !Array.isArray(theirs) && 'memories' in theirs) {
     const envelope = theirs as { memories: unknown };
     return { ...envelope, memories: withoutPreSlate(envelope.memories, slate) };

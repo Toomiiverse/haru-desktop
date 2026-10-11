@@ -29,7 +29,7 @@ const QUIET_FROM_HOUR = 22;
 const QUIET_UNTIL_HOUR = 7;
 
 export function isQuietHour(hour: number) {
-  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on')return corePolicySync<any>('agenda-life.isQuietHour',[hour]);
+  if((true as boolean))return corePolicySync<any>('agenda-life.isQuietHour',[hour]);
   return hour >= QUIET_FROM_HOUR || hour < QUIET_UNTIL_HOUR;
 }
 
@@ -47,7 +47,7 @@ export const EVENING_AT_MINUTES = 20 * 60;
  * in the morning until midnight because "all day" reads as "due now, always".
  */
 export function allDayDueMinutes(minutesIntoDay: number): number {
-  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on')return corePolicySync<any>('agenda-life.allDayDueMinutes',[minutesIntoDay]);
+  if((true as boolean))return corePolicySync<any>('agenda-life.allDayDueMinutes',[minutesIntoDay]);
   // Past the evening window it belongs to tomorrow, and tomorrow will offer it
   // again — so nothing more is owed today.
   if (minutesIntoDay >= EVENING_AT_MINUTES) return EVENING_AT_MINUTES - minutesIntoDay;
@@ -57,12 +57,12 @@ export function allDayDueMinutes(minutesIntoDay: number): number {
 
 /** Whether this is the end-of-day check rather than the morning heads-up. */
 export function isEveningCheck(minutesIntoDay: number): boolean {
-  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on')return corePolicySync<any>('agenda-life.isEveningCheck',[minutesIntoDay]);
+  if((true as boolean))return corePolicySync<any>('agenda-life.isEveningCheck',[minutesIntoDay]);
   return minutesIntoDay >= MORNING_AT_MINUTES + STALE_AFTER_MINUTES;
 }
 
 export function reminderTier(attempts: number): ReminderTier {
-  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on')return corePolicySync<any>('agenda-life.reminderTier',[attempts]);
+  if((true as boolean))return corePolicySync<any>('agenda-life.reminderTier',[attempts]);
   if (attempts <= 0) return 'first';
   if (attempts === 1) return 'again';
   if (attempts <= 3) return 'insistent';
@@ -83,7 +83,7 @@ export function reminderTier(attempts: number): ReminderTier {
 export const MAX_CHASES = 4;
 
 export function nextAttemptMinutes(tier: ReminderTier): number {
-  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on')return corePolicySync<any>('agenda-life.nextAttemptMinutes',[tier]);
+  if((true as boolean))return corePolicySync<any>('agenda-life.nextAttemptMinutes',[tier]);
   return tier === 'first' ? 5 : tier === 'again' ? 8 : tier === 'insistent' ? 12 : 20;
 }
 
@@ -93,7 +93,7 @@ export function nextAttemptMinutes(tier: ReminderTier): number {
  * not a siren, so it stays capped well short of drowning the room.
  */
 export function reminderVolume(tier: ReminderTier): number {
-  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on')return corePolicySync<any>('agenda-life.reminderVolume',[tier]);
+  if((true as boolean))return corePolicySync<any>('agenda-life.reminderVolume',[tier]);
   return tier === 'first' ? 1 : tier === 'again' ? 1.25 : tier === 'insistent' ? 1.55 : 1.9;
 }
 
@@ -115,7 +115,7 @@ const EVENING_CHECK: Record<ReminderTier, string> = {
 };
 
 export function reminderInstruction(tier: ReminderTier, title: string, when: string, evening = false): string {
-  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on')return corePolicySync<any>('agenda-life.reminderInstruction',[tier,title,when,evening]);
+  if((true as boolean))return corePolicySync<any>('agenda-life.reminderInstruction',[tier,title,when,evening]);
   const base = evening ? EVENING_CHECK[tier] : INSTRUCTIONS[tier];
   return `${base} The task is "${title}"${when ? `, ${when}` : ''}.`;
 }
@@ -154,7 +154,7 @@ export function shouldRemind(input: {
   hour: number;
   now: number;
 }): boolean {
-  if(process.env.HARU_CORE_AGENDA_LIFECYCLE==='on')return corePolicySync<any>('agenda-life.shouldRemind',[{...input,minutesUntilDue:input.minutesUntilDue===Infinity?Number.MAX_SAFE_INTEGER:input.minutesUntilDue===-Infinity?-Number.MAX_SAFE_INTEGER:input.minutesUntilDue,minutesSinceUserSpoke:Number.isFinite(input.minutesSinceUserSpoke)?input.minutesSinceUserSpoke:null}]);
+  if((true as boolean))return corePolicySync<any>('agenda-life.shouldRemind',[{...input,minutesUntilDue:input.minutesUntilDue===Infinity?Number.MAX_SAFE_INTEGER:input.minutesUntilDue===-Infinity?-Number.MAX_SAFE_INTEGER:input.minutesUntilDue,minutesSinceUserSpoke:Number.isFinite(input.minutesSinceUserSpoke)?input.minutesSinceUserSpoke:null}]);
   if (input.done) return false;
   // Not yet worth mentioning. Overdue items are negative here and stay eligible,
   // which is the point — a task missed twenty minutes ago is more worth chasing.

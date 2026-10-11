@@ -320,8 +320,8 @@ export async function collectDocker(): Promise<DockerStatus | null> {
 }
 
 export async function collectServices(wanted?: string): Promise<ServiceStatus[]> {
-  if(process.env.HARU_CORE_TOOL_RESULTS==='on'){
-    const commands=corePolicySync<{name:string;user:boolean}[]>('diagnostic.services',[wanted??null,process.env.HARU_CORE_BRAIN_WORKER==='on']);
+  if((true as boolean)){
+    const commands=corePolicySync<{name:string;user:boolean}[]>('diagnostic.services',[wanted??null,(true as boolean)]);
     const observed:ServiceStatus[]=[];
     for(const command of commands){
       if(!command||typeof command.name!=='string'||!command.name||command.name.startsWith('-')||typeof command.user!=='boolean')throw Error('core_diagnostic_service_protocol');
@@ -362,7 +362,7 @@ export async function collectAll(): Promise<SystemCollected> {
 // ---- Diagnostics -------------------------------------------------------------
 
 export function diagnose(target: string, collected: SystemCollected): Diagnosis {
-  if(process.env.HARU_CORE_TOOL_RESULTS==='on')return corePolicySync<Diagnosis>('diagnostic.diagnose',[target,collected,process.env.HARU_CORE_BRAIN_WORKER==='on']);
+  if((true as boolean))return corePolicySync<Diagnosis>('diagnostic.diagnose',[target,collected,(true as boolean)]);
   const findings: string[] = [];
   let status: Diagnosis['status'] = 'ok';
   const note = (level: 'ok' | 'warning' | 'critical', message: string) => {

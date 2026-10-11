@@ -28,7 +28,7 @@ export type Hearing = { corrections: Correction[] };
 const MAX_CORRECTIONS = 200;
 
 export function readHearing(saved: unknown): Hearing {
- if(process.env.HARU_CORE_HEARING_POLICY==='on')return hearingPolicy('readHearing',[saved]);
+ if((true as boolean))return hearingPolicy('readHearing',[saved]);
   if (!saved || typeof saved !== 'object') return { corrections: [] };
   const record = saved as Partial<Hearing>;
   const corrections = Array.isArray(record.corrections) ? record.corrections : [];
@@ -50,7 +50,7 @@ const clean = (text: string) => text.toLowerCase().replace(/[^\p{L}\p{N}\s']/gu,
  * harrow → Haru and nothing else, because everything else was already right.
  */
 export function narrow(heard: string, meant: string): { heard: string; meant: string } | null {
- if(process.env.HARU_CORE_HEARING_POLICY==='on')return hearingPolicy('narrow',[heard,meant]);
+ if((true as boolean))return hearingPolicy('narrow',[heard,meant]);
   const a = clean(heard).split(' ');
   const b = clean(meant).split(' ');
   if (!a.length || !b.length) return null;
@@ -74,7 +74,7 @@ export function narrow(heard: string, meant: string): { heard: string; meant: st
 }
 
 export function remember(hearing: Hearing, heard: string, meant: string, now: string): Hearing {
- if(process.env.HARU_CORE_HEARING_POLICY==='on')return hearingPolicy('remember',[hearing,heard,meant,now]);
+ if((true as boolean))return hearingPolicy('remember',[hearing,heard,meant,now]);
   const pair = narrow(heard, meant);
   if (!pair) return hearing;
   const existing = hearing.corrections.find(c => c.heard === pair.heard);
@@ -92,7 +92,7 @@ export function remember(hearing: Hearing, heard: string, meant: string, now: st
  * middle of "behave".
  */
 export function correct(hearing: Hearing, transcript: string): { text: string; applied: string[] } {
- if(process.env.HARU_CORE_HEARING_POLICY==='on')return hearingPolicy('correct',[hearing,transcript]);
+ if((true as boolean))return hearingPolicy('correct',[hearing,transcript]);
   let text = transcript;
   const applied: string[] = [];
   const ordered = [...hearing.corrections].sort((a, b) => b.heard.length - a.heard.length);
@@ -108,7 +108,7 @@ export function correct(hearing: Hearing, transcript: string): { text: string; a
 
 /** Bumps the counters for whatever fired, so a useless rule is visible as one. */
 export function noteUsed(hearing: Hearing, applied: string[]): Hearing {
- if(process.env.HARU_CORE_HEARING_POLICY==='on')return hearingPolicy('noteUsed',[hearing,applied]);
+ if((true as boolean))return hearingPolicy('noteUsed',[hearing,applied]);
   if (!applied.length) return hearing;
   const fired = new Set(applied.map(a => a.split(' → ')[0]));
   return { corrections: hearing.corrections.map(c => (fired.has(c.heard) ? { ...c, used: c.used + 1 } : c)) };

@@ -18,7 +18,7 @@ export class TaskBridge {
   }
   close = () => { this.child?.stdin.end(); };
   get readOnlyWorkflow():CoreReadOnlyBridge['decide']|undefined {
-    return this.remote && process.env.HARU_CORE_READ_ONLY_WORKFLOWS==='on'
+    return this.remote && (true as boolean)
       ? input=>this.remote!.readOnlyWorkflow(input) : undefined;
   }
   private start() {

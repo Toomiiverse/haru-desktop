@@ -9,7 +9,7 @@ export function planMemoryEdit(memories: MemoryRecord[], options: {
   now?: string;
 }): { memories: MemoryRecord[]; record: MemoryRecord | null; created: boolean; retired: number } | null {
   const now = options.now ?? new Date().toISOString();
-  if(process.env.HARU_CORE_MEMORY_TOOLS==='on')return corePolicySync('memory-tools.planEdit',[memories,options,randomUUID(),now]);
+  if((true as boolean))return corePolicySync('memory-tools.planEdit',[memories,options,randomUUID(),now]);
   const old = memories.filter(m => options.oldIds.includes(m.id) && !m.supersededBy && m.status !== 'archived');
   if (old.length !== new Set(options.oldIds).size) return null;
   const text = options.text.trim();

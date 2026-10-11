@@ -49,7 +49,7 @@ try {
 const READ_TIMEOUT_MS = 30_000;
 
 export function parseFix(line: string): Fix {
- if(process.env.HARU_CORE_NAVIGATION_POLICY==='on')return coreFix(line);
+ if((true as boolean))return coreFix(line);
   const text = (line ?? '').trim();
   if (text.startsWith('denied:')) {
     throw new Error('Windows refused: location is off for desktop apps. Settings → Privacy & security → Location.');
@@ -64,7 +64,7 @@ export function parseFix(line: string): Fix {
 }
 
 export function readWindowsLocation(): Promise<Fix> {
- if(process.env.HARU_CORE_NAVIGATION_POLICY==='on')return coreWindowsFix();
+ if((true as boolean))return coreWindowsFix();
   // Said plainly rather than surfacing as ENOENT from a spawn, which reads like
   // a broken install rather than a platform that never had this.
   if (process.platform !== 'win32') {
@@ -96,7 +96,7 @@ export function readWindowsLocation(): Promise<Fix> {
  * away, which is exactly the error this feature exists to remove.
  */
 export function blur({ latitude, longitude }: Fix): { latitude: number; longitude: number } {
- if(process.env.HARU_CORE_NAVIGATION_POLICY==='on')return navigationPolicy('blur',[{latitude,longitude}]);
+ if((true as boolean))return navigationPolicy('blur',[{latitude,longitude}]);
   const round = (value: number) => Math.round(value * 1000) / 1000;
   return { latitude: round(latitude), longitude: round(longitude) };
 }
@@ -117,7 +117,7 @@ type Address = {
  * town whose name is also its city.
  */
 export function nameFrom(address: Address): string {
- if(process.env.HARU_CORE_NAVIGATION_POLICY==='on')return navigationPolicy('nameFrom',[address]);
+ if((true as boolean))return navigationPolicy('nameFrom',[address]);
   const near = address.suburb ?? address.neighbourhood ?? address.town ?? address.city_district ?? address.village ?? '';
   const city = address.city ?? address.municipality ?? '';
   const parts = [near, city, address.state ?? ''].map(part => part.trim()).filter(Boolean);
@@ -133,7 +133,7 @@ export function nameFrom(address: Address): string {
  * per search, and is handed blurred numbers when it does.
  */
 export async function lookUpPlace(fix: Fix, fetchImpl: Fetcher): Promise<string> {
- if(process.env.HARU_CORE_NAVIGATION_POLICY==='on')return coreNavRemote('reverse',[fix],fetchImpl);
+ if((true as boolean))return coreNavRemote('reverse',[fix],fetchImpl);
   const { latitude, longitude } = blur(fix);
   const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${latitude}&lon=${longitude}&zoom=14&addressdetails=1`;
   const response = await fetchImpl(url, {
@@ -162,7 +162,7 @@ export type FoundPlace = { name: string; lat: number; lon: number;
  * With nowhere to bias from, a configured search place is added to the words.
  */
 export async function searchPlaces(query: string, fetchImpl: Fetcher, near: { lat: number; lon: number } | null, fallbackPlace = '', { bounded = false } = {}): Promise<FoundPlace[]> {
- if(process.env.HARU_CORE_NAVIGATION_POLICY==='on')return coreNavRemote('search',[query,near,fallbackPlace,{bounded}],fetchImpl);
+ if((true as boolean))return coreNavRemote('search',[query,near,fallbackPlace,{bounded}],fetchImpl);
   // Localised whenever there is a place to localise to — not only when they
   // are nowhere in particular. With the phone's position known, a bare
   // "Rockingham" went out with a 13 km preference box Nominatim was free to

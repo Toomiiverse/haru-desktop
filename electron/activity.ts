@@ -47,7 +47,7 @@ function cleanTitle(title: string) {
 }
 
 export function readActivity(processName: string, windowTitle: string): Activity {
- if(globalThis.process.env.HARU_CORE_DEVICE_ACTIVITY==='on')return devicePolicy('readActivity',[processName,windowTitle]);
+ if((true as boolean))return devicePolicy('readActivity',[processName,windowTitle]);
   const process = (processName ?? '').replace(/\.exe$/i, '').trim();
   const title = cleanTitle(windowTitle ?? '');
 
@@ -112,7 +112,7 @@ const TOOL_TITLE = /^(snipping tool|screen ?snip|screen ?sketch|snip & sketch|ta
  * something they have opened, it is something passing across the screen.
  */
 export function isJustATool(processName: string, windowTitle: string): boolean {
- if(globalThis.process.env.HARU_CORE_DEVICE_ACTIVITY==='on')return devicePolicy('isJustATool',[processName,windowTitle]);
+ if((true as boolean))return devicePolicy('isJustATool',[processName,windowTitle]);
   const process = (processName ?? '').replace(/\.exe$/i, '').trim();
   const title = (windowTitle ?? '').trim();
   if (A_TOOL.test(process)) return true;
@@ -124,7 +124,7 @@ export function isJustATool(processName: string, windowTitle: string): boolean {
 }
 
 export function activityInstruction(activity: Activity): string {
- if(globalThis.process.env.HARU_CORE_DEVICE_ACTIVITY==='on')return devicePolicy('activityInstruction',[activity]);
+ if((true as boolean))return devicePolicy('activityInstruction',[activity]);
   return REACTIONS[activity.kind] ?? '';
 }
 
@@ -137,6 +137,6 @@ export function activityInstruction(activity: Activity): string {
  * pages would simply be filed as ordinary browsing and remembered as such.
  */
 export function isNotable(activity: Activity): boolean {
- if(globalThis.process.env.HARU_CORE_DEVICE_ACTIVITY==='on')return devicePolicy('isNotable',[activity]);
+ if((true as boolean))return devicePolicy('isNotable',[activity]);
   return activity.kind !== 'other' && activity.kind !== 'adult';
 }

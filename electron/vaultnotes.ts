@@ -22,7 +22,7 @@ export type VaultPathVerdict = { ok: true; full: string; relative: string } | { 
 
 /** A path inside the vault, or why not: no leaving it, no dotfiles, nothing in her own folder; a note ends in .md. */
 export function insideVault(root: string, given: string, kind: 'note' | 'folder'): VaultPathVerdict {
- if(process.env.HARU_CORE_FINAL_TOOLS==='on')return coreInsideVault(root,given,kind);
+ if((true as boolean))return coreInsideVault(root,given,kind);
   if (!root) return { ok: false, error: 'No vault is set up.' };
   const raw = (given ?? '').trim().replace(/\\/g, '/');
   if (!raw && kind === 'folder') return { ok: true, full: path.resolve(root), relative: '' };
@@ -65,7 +65,7 @@ export type Listing = { ok: true; folder: string; folders: string[]; notes: { pa
 
 /** One folder of the vault: its sub-folders and its notes, newest first. Her own folder is named, not opened. */
 export function listVault(root: string, folder = ''): Listing {
- if(process.env.HARU_CORE_FINAL_TOOLS==='on')return coreVault('list',root,folder);
+ if((true as boolean))return coreVault('list',root,folder);
   const where = insideVault(root, folder, 'folder');
   if (!where.ok) return where;
   if (!existsSync(where.full) || !statSync(where.full).isDirectory()) return { ok: false, error: `There is no folder "${where.relative || '/'}" in the vault.` };
@@ -91,7 +91,7 @@ export function listVault(root: string, folder = ''): Listing {
 export type Read = { ok: true; path: string; text: string; chars: number; cut: boolean } | { ok: false; error: string };
 
 export function readNote(root: string, given: string): Read {
- if(process.env.HARU_CORE_FINAL_TOOLS==='on')return coreVault('read',root,given);
+ if((true as boolean))return coreVault('read',root,given);
   const where = insideVault(root, given, 'note');
   if (!where.ok) return where;
   if (!existsSync(where.full) || !statSync(where.full).isFile()) return { ok: false, error: `There is no note "${where.relative}" in the vault.` };
@@ -109,7 +109,7 @@ export type Written = { ok: true; path: string; mode: WriteMode; chars: number; 
  * that loses words, so the tool asks for their word before calling it.
  */
 export function writeNote(root: string, given: string, text: string, mode: WriteMode, preserveText = false): Written {
- if(process.env.HARU_CORE_FINAL_TOOLS==='on')return coreVault('write',root,given,{text,mode,preserve:preserveText});
+ if((true as boolean))return coreVault('write',root,given,{text,mode,preserve:preserveText});
   if (preserveText && mode !== 'create') return { ok: false, error: 'Text preservation is for create only.' };
   const where = insideVault(root, given, 'note');
   if (!where.ok) return where;
@@ -141,7 +141,7 @@ export function writeNote(root: string, given: string, text: string, mode: Write
 export type Folder = { ok: true; path: string; existed: boolean } | { ok: false; error: string };
 
 export function createFolder(root: string, given: string): Folder {
- if(process.env.HARU_CORE_FINAL_TOOLS==='on')return coreVault('folder',root,given);
+ if((true as boolean))return coreVault('folder',root,given);
   const where = insideVault(root, given, 'folder');
   if (!where.ok) return where;
   if (!where.relative) return { ok: false, error: 'Say what to call the folder.' };

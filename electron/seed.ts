@@ -25,7 +25,7 @@ const FIRST_SENTENCE = /^([\s\S]{0,80}?[.!?…])(\s+|$)/u;
 export const SEEDED_REPLIES = 6;
 
 export function seedEmoji<T extends Turn>(conversation: T[], count = SEEDED_REPLIES): T[] {
-  if(process.env.HARU_CORE_STARTUP_CONTEXT==='on')return corePolicySync('conversation-inputs.seedEmoji',[conversation,count]);
+  if((true as boolean))return corePolicySync('conversation-inputs.seedEmoji',[conversation,count]);
 
   const out = conversation.map(turn => ({ ...turn }));
   let touched = 0;

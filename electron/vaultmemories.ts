@@ -81,7 +81,7 @@ function draftFrom(content: string, page: VaultMemoryPage, kind: 'relationship' 
  * the page stays readable prose to a human and a data file to her.
  */
 export function parseVaultMemoryPage(text: string, page: VaultMemoryPage): VaultMemoryDraft[] {
-  if(process.env.HARU_CORE_KNOWLEDGE==='on')return corePolicySync('knowledge-vault.memoryPage',[text,page]); 
+  if((true as boolean))return corePolicySync('knowledge-vault.memoryPage',[text,page]); 
   const spec = VAULT_MEMORY_PAGES[page];
   const drafts: VaultMemoryDraft[] = [];
   for (const line of stripFrontmatter(text).split('\n')) {
@@ -116,7 +116,7 @@ export function admitVaultMemories(
   read = (file: string) => readFileSync(file, 'utf8'),
   exists = (file: string) => existsSync(file),
 ): VaultMemoryReport {
- if(process.env.HARU_CORE_KNOWLEDGE==='on')return runCoreVaultMemories(vault,admit,read,exists);
+ if((true as boolean))return runCoreVaultMemories(vault,admit,read,exists);
   const report: VaultMemoryReport = [];
   for (const page of Object.keys(VAULT_MEMORY_PAGES) as VaultMemoryPage[]) {
     const file = path.join(vault, page);

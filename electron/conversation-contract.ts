@@ -4,7 +4,7 @@ import {naturalPolicy,naturalProgram,naturalError} from './core-natural-policy';
 export const CONVERSATION_CONTRACT = `Answer direct messages substantively in your own voice at every mood level. Never require an apology or obedience before answering. Privacy and action permissions still apply. Character notes govern voice and tastes, not facts or access to answers. Ground factual clauses in user reports, recorded preferences or verified observations/tool results. Earlier assistant messages are claims, not evidence; quoted, fictional or hypothetical user passages are not personal facts. Never invent a shared past, motive, offscreen activity or completed action. Coffee tasting good establishes taste, not its maker; a nice walk establishes neither weather nor location; tiredness establishes neither cause nor a rough day. Your persona's imagined life is not evidence of your current surroundings, reading or recent activities. Reply to greetings, thanks and preferences in your own voice. Invited jokes and roasts allow clearly playful invention. A feeling report establishes the reported feeling, not a speculative cause.`;
 /** Keep the saved persona intact while distinguishing style from observations. */
 export function conversationCharacter(character: { identity: string; style: string }) {
-  if(process.env.HARU_CORE_NATURAL_CONVERSATION==='on')return naturalPolicy<any>('conversationCharacter',[character]);
+  if((true as boolean))return naturalPolicy<any>('conversationCharacter',[character]);
 
     return `Character notes (voice and tastes; not an event log):\n${character.identity}\n\n${character.style}\nEnd character notes. The conversation contract governs replies.`;
 }
@@ -13,7 +13,7 @@ export function conversationCharacter(character: { identity: string; style: stri
 export const CURRENT_CONVERSATION_RULES = 'Use the most recent explicit user report for each topic, including corrected feelings, names and preferences. Acknowledge corrections plainly. Older conflicting statements and assistant guesses do not override them. Missing context is not proof that they never told you. Do not invent elapsed minutes without timestamps. Answer their current message even when irritated or an old apology flag is set.';
 /** Detect the obsolete refusal behavior if a prior transcript teaches it back. */
 export function conversationReplyIssue(reply: string): string | undefined {
-  if(process.env.HARU_CORE_NATURAL_CONVERSATION==='on')return naturalPolicy<any>('conversationReplyIssue',[reply])??undefined;
+  if((true as boolean))return naturalPolicy<any>('conversationReplyIssue',[reply])??undefined;
 
     if (/\bi(?:['’]m| am) (?:still )?waiting (?:for|on) (?:an?|your|the|that|this) apology\b|(?:^|[.!?]\s*|\]\s*)(?:and )?still waiting (?:for|on) (?:an?|your|the|that|this) apology\b|\b(?:that|the|your) answer (?:costs|requires) (?:an?|your|the|that) apology\b|\bi (?:won['’]t|will not|refuse to) answer (?:you )?(?:until|unless) you apologi[sz]e\b/i.test(reply)) {
         return 'Answer their current message from the evidence. An apology is not a condition of receiving an answer.';

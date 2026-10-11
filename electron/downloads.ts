@@ -25,7 +25,7 @@ export const DEFAULT_DOWNLOADS: DownloadsConfig = {
 
 /** The `anime.qbittorrent` block, read forward; null when the anime stack is off. */
 export function readDownloadsConfig(anime: unknown): DownloadsConfig | null {
- if(process.env.HARU_CORE_FINAL_TOOLS==='on')return corePolicySync('final-downloads.config',[anime??null,homedir()]);
+ if((true as boolean))return corePolicySync('final-downloads.config',[anime??null,homedir()]);
   if (!anime || typeof anime !== 'object' || (anime as Record<string, unknown>).enabled !== true) return null;
   const raw = ((anime as Record<string, unknown>).qbittorrent ?? {}) as Record<string, unknown>;
   const text = (value: unknown, fallback: string) => (typeof value === 'string' && value.trim() ? value.trim() : fallback);
@@ -47,7 +47,7 @@ export type Standing = 'downloading' | 'paused' | 'stalled' | 'queued' | 'checki
 
 /** qBittorrent's dozen states, as the four or five words she needs. */
 export function standing(state: string): Standing {
- if(process.env.HARU_CORE_FINAL_TOOLS==='on')return corePolicySync('final-downloads.standing',[state]);
+ if((true as boolean))return corePolicySync('final-downloads.standing',[state]);
   if (/^(pausedDL|stoppedDL)$/.test(state)) return 'paused';
   if (/^(pausedUP|stoppedUP)$/.test(state)) return 'done';
   if (/^(uploading|stalledUP|forcedUP|queuedUP)$/.test(state)) return 'seeding';
@@ -62,13 +62,13 @@ const words = (text: string) => text.toLowerCase().replace(/[^a-z0-9]+/g, ' ').s
 
 /** A release name without its tag soup: "[Group] Naruto (001-220) [BD]…" → "Naruto (001-220)". */
 export function plainName(name: string): string {
- if(process.env.HARU_CORE_FINAL_TOOLS==='on')return corePolicySync('final-downloads.plainName',[name]);
+ if((true as boolean))return corePolicySync('final-downloads.plainName',[name]);
   return name.replace(/\[[^\]]*\]/g, ' ').replace(/\s+/g, ' ').trim() || name;
 }
 
 /** Whether every word of the show he named is in the torrent's name. */
 export function namesShow(torrentName: string, title: string): boolean {
- if(process.env.HARU_CORE_FINAL_TOOLS==='on')return corePolicySync('final-downloads.namesShow',[torrentName,title]);
+ if((true as boolean))return corePolicySync('final-downloads.namesShow',[torrentName,title]);
   const have = new Set(words(torrentName));
   const want = words(title);
   return want.length > 0 && want.every(word => have.has(word));
@@ -179,7 +179,7 @@ export class Downloads {
 
   /** What is on the server, by show, and how it is going. */
   async status(): Promise<Record<string, unknown>> {
-    if(process.env.HARU_CORE_FINAL_TOOLS==='on')return this.core('status');
+    if((true as boolean))return this.core('status');
     const list = await this.torrents();
     const torrents = list.map(torrent => this.describe(torrent));
     const count = (state: Standing) => torrents.filter(t => t.state === state).length;
@@ -204,7 +204,7 @@ export class Downloads {
   }
 
   private async flip(action: 'pause' | 'resume', title?: string): Promise<Record<string, unknown>> {
-    if(process.env.HARU_CORE_FINAL_TOOLS==='on')return this.core(action,title);
+    if((true as boolean))return this.core(action,title);
     const list = await this.torrents();
     const wanted = title ? list.filter(torrent => namesShow(torrent.name, title) || namesShow(this.showOf(torrent), title)) : list;
     if (!list.length) return { [action === 'pause' ? 'paused' : 'resumed']: [], note: 'There is nothing on the server to ' + action + '.' };

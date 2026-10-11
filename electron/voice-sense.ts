@@ -21,7 +21,7 @@ const SELF_TTL = 10 * 60_000;
 const norm = (text: string) => text.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ').replace(/\s+/g, ' ').trim().replace(/^(?:(?:hey|hi|okay|ok) )?haru\b\s*/, '');
 
 export function readVoiceReading(value: unknown): VoiceReading | null {
- if(process.env.HARU_CORE_VOICE_SENSE==='on')return voiceSensePolicy('readVoiceReading',[value]);
+ if((true as boolean))return voiceSensePolicy('readVoiceReading',[value]);
   if (!value || typeof value !== 'object') return null;
   const r = value as Record<string, unknown>;
   if (r.version !== 1 || !['local-audio', 'hume'].includes(String(r.source)) || !['usable', 'limited', 'unusable'].includes(String(r.quality))) return null;
@@ -41,7 +41,7 @@ export function readVoiceReading(value: unknown): VoiceReading | null {
 }
 
 export function fromHume(scores: Record<string, number>): VoiceReading {
- if(process.env.HARU_CORE_VOICE_SENSE==='on')return voiceSensePolicy('fromHume',[scores]);
+ if((true as boolean))return voiceSensePolicy('fromHume',[scores]);
   const mapping: Record<string, Label> = { Anger: 'angry', Irritation: 'angry', Disgust: 'disgusted', Fear: 'fearful', Anxiety: 'fearful', Joy: 'happy', Amusement: 'happy', Calmness: 'neutral', Sadness: 'sad', Surprise: 'surprised' };
   const out: VoiceReading['scores'] = {};
   for (const [name, value] of Object.entries(scores)) if (mapping[name] && Number.isFinite(value) && value >= 0 && value <= 1) out[mapping[name]] = Math.max(out[mapping[name]] ?? 0, value);
@@ -50,7 +50,7 @@ export function fromHume(scores: Record<string, number>): VoiceReading {
 
 /** Conservative evidence gate: the class score is not a calibrated probability. */
 export function expression(reading: VoiceReading | null): Label | null {
- if(process.env.HARU_CORE_VOICE_SENSE==='on')return voiceSensePolicy('expression',[reading]);
+ if((true as boolean))return voiceSensePolicy('expression',[reading]);
   if (!reading || reading.quality !== 'usable' || !reading.model) return null;
   const sorted = Object.entries(reading.scores).sort((a, b) => b[1]! - a[1]!);
   if (!sorted.length || sorted[0][1]! < 0.65 || sorted[0][1]! - (sorted[1]?.[1] ?? 0) < 0.2) return null;
@@ -84,7 +84,7 @@ function promptReading(reading: VoiceReading | null): VoiceReading | null {
 
 type Adjustment = { instruction: string; emotion?: EmotionName; speedScale?: number; reset?: boolean };
 export function toneFeedback(text: string): Adjustment | null {
- if(process.env.HARU_CORE_VOICE_SENSE==='on')return voiceSensePolicy('toneFeedback',[text]);
+ if((true as boolean))return voiceSensePolicy('toneFeedback',[text]);
   const t = text.toLowerCase().replace(/[’]/g, "'");
   // Explicit delivery requests can stand alone. Observations must refer to
   // Haru herself; a movie, the user, or another person's voice is not feedback.
@@ -125,15 +125,15 @@ export class VoiceSense {
   constructor(private now: () => number = Date.now) {}
 
   configure(analyzer: Analyzer) {
- if(process.env.HARU_CORE_VOICE_SENSE==='on')return this.coreSense.configure(analyzer); this.analyzer = analyzer; }
+ if((true as boolean))return this.coreSense.configure(analyzer); this.analyzer = analyzer; }
 
   async analyze(audio: Uint8Array, mime: string, words?: number): Promise<VoiceReading | null> {
- if(process.env.HARU_CORE_VOICE_SENSE==='on')return this.coreSense.analyze(audio,mime,words);
+ if((true as boolean))return this.coreSense.analyze(audio,mime,words);
     try { return await this.analyzer?.(audio, mime, words) ?? null; } catch { return null; }
   }
 
   heard(text: string, reading: VoiceReading | null) {
- if(process.env.HARU_CORE_VOICE_SENSE==='on')return this.coreSense.call('heard',[text,reading]);
+ if((true as boolean))return this.coreSense.call('heard',[text,reading]);
     const key = norm(text);
     if (!reading || !key) return;
     this.pending = this.pending.filter(p => this.now() - p.at < HEARD_TTL).slice(-11);
@@ -143,7 +143,7 @@ export class VoiceSense {
   }
 
   hasInput(text: string): boolean {
- if(process.env.HARU_CORE_VOICE_SENSE==='on')return this.coreSense.call('hasInput',[text]);
+ if((true as boolean))return this.coreSense.call('hasInput',[text]);
     const pending = this.pending.filter(p => this.now() - p.at < HEARD_TTL);
     for (let end = pending.length; end > 0; end--) {
       for (let start = end - 1; start >= 0; start--) if (pending.slice(start, end).map(p => p.text).join(' ') === norm(text)) return true;
@@ -152,7 +152,7 @@ export class VoiceSense {
   }
 
   beginTurn(text: string): string {
- if(process.env.HARU_CORE_VOICE_SENSE==='on')return this.coreSense.call('beginTurn',[text]);
+ if((true as boolean))return this.coreSense.call('beginTurn',[text]);
     const now = this.now();
     const key = norm(text);
     this.pending = this.pending.filter(p => now - p.at < HEARD_TTL);
@@ -193,7 +193,7 @@ export class VoiceSense {
 
   /** Factual form for the local model's evidence-only final reply pass. */
   evidence() {
- if(process.env.HARU_CORE_VOICE_SENSE==='on')return this.coreSense.call('evidence');
+ if((true as boolean))return this.coreSense.call('evidence');
     const recent = this.takes.filter(t => this.now() - t.at < SELF_TTL).slice(-3);
     return {
       canAnalyzeGeneratedAudio: true,
@@ -204,21 +204,21 @@ export class VoiceSense {
   }
 
   plan(emotion: EmotionName = 'neutral'): DeliveryPlan {
- if(process.env.HARU_CORE_VOICE_SENSE==='on')return this.coreSense.call('plan',[emotion]);
+ if((true as boolean))return this.coreSense.call('plan',[emotion]);
     const feedback = this.adjustment && this.now() - this.adjustment.at < SELF_TTL ? this.adjustment : null;
     if (feedback) return { emotion: feedback.emotion ?? emotion, instruction: feedback.instruction, speedScale: feedback.speedScale ?? 1, reason: 'user feedback' };
     return { emotion, instruction: '', speedScale: 1, reason: 'reply delivery' };
   }
 
   generated(text: string, plan: DeliveryPlan, engine: string, audio: Uint8Array, mime: string): void {
- if(process.env.HARU_CORE_VOICE_SENSE==='on')return this.coreSense.generated(text,plan,engine,audio,mime);
+ if((true as boolean))return this.coreSense.generated(text,plan,engine,audio,mime);
     const take = this.startTake(text, plan, engine, 'generated');
     this.observe(take, audio, mime, text.split(/\s+/).filter(Boolean).length);
   }
 
   /** Observe only consumed bytes. Cancellation propagates and marks a partial take. */
   stream(text: string, plan: DeliveryPlan, engine: string, source: ReadableStream<Uint8Array>, mime: string, wrap?: (bytes: Uint8Array) => Uint8Array): ReadableStream<Uint8Array> {
- if(process.env.HARU_CORE_VOICE_SENSE==='on')return this.coreSense.stream(text,plan,engine,source,mime,wrap);
+ if((true as boolean))return this.coreSense.stream(text,plan,engine,source,mime,wrap);
     const reader = source.getReader();
     let take: Take | null = null;
     const parts: Uint8Array[] = [];
@@ -266,7 +266,7 @@ export const voiceSense = new VoiceSense();
 
 /** Loopback is deliberate: this feature must not silently upload microphone audio. */
 export async function analyzeLocalVoice(audio: Uint8Array, mime: string, fetchImpl: typeof fetch, endpoint = 'http://127.0.0.1:9882', words?: number): Promise<VoiceReading | null> {
- if(process.env.HARU_CORE_VOICE_SENSE==='on')return coreAnalyzeLocalVoice(audio,mime,fetchImpl,endpoint,words);
+ if((true as boolean))return coreAnalyzeLocalVoice(audio,mime,fetchImpl,endpoint,words);
   try {
     const url = new URL(endpoint);
     if (!['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname) || !['http:', 'https:'].includes(url.protocol) || url.username || url.password) return null;
