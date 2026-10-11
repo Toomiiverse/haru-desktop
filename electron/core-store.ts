@@ -12,7 +12,7 @@ const registry=new Map<string,CoreStore>();
 export function coreStoreOptions(env:NodeJS.ProcessEnv=process.env):CoreStoreOptions|undefined{
  if(env.HARU_CORE_STORAGE!=='on')return;
  const root=env.HARU_CORE_ROOT??path.join(os.homedir(),'haru-core');
- return {root,db:env.HARU_CORE_DB??path.join(root,'data/haru-core.db'),node:env.HARU_CORE_NODE??'/usr/bin/node',service:coreServiceOptions(env),asyncTransactions:env.HARU_CORE_ASYNC_TRANSACTIONS==='on'};
+ return {root,db:env.HARU_CORE_DB??path.join(root,'data/haru-core.db'),node:env.HARU_CORE_NODE??'/usr/bin/node',service:coreServiceOptions(env),asyncTransactions:(true as boolean)};
 }
 export function coreStoreFor(root:string):CoreStore|undefined{return registry.get(path.resolve(root));}
 export class CoreStore {

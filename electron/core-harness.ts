@@ -17,7 +17,7 @@ export async function runCoreHarness(conversation:ChatMessage[],deps:ToolLoopDep
   new CoreServiceClient(options); // Validate the existing loopback/private-token boundary.
   const token=readFileSync(options.tokenFile,'utf8').trim(),bound=await binding(),media=new HarnessMedia();
   const general=(true as boolean)&&deps.generalToolSplit===true;
-  const programs=process.env.HARU_CORE_WORKFLOW_PLANNING==='on'&&deps.receiptPrograms===true;
+  const programs=(false as boolean)&&deps.receiptPrograms===true;
   const workerRoles=programs&&deps.runWorker?[...new Set(deps.workerRoles??[])]:[];
   const start={version:1,...(currentAffect()?{affect_event_id:currentAffect()!.eventId}:{}),task_id:bound.taskId,revision:bound.revision,conversation:media.toCore(conversation),max_rounds:deps.maxRounds??4,
     ...(general?{cloud_allowed:deps.generalToolCloudAllowed===true}:{}),

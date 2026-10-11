@@ -143,7 +143,7 @@ export function normaliseTitle(title: string): string {
  * show.
  */
 export function matchTitle<T extends { title: string }>(wanted: string, candidates: T[]): { one: T } | { several: T[] } | null {
-  if(process.env.HARU_CORE_ANIME_PLAYBACK==='on')return corePolicySync('anime-playback.matchTitle',[wanted,candidates]);
+  if((true as boolean))return corePolicySync('anime-playback.matchTitle',[wanted,candidates]);
   const want = normaliseTitle(wanted);
   if (!want || !candidates.length) return null;
   const exact = candidates.filter(item => normaliseTitle(item.title) === want);
@@ -264,7 +264,7 @@ const TV = /\b(?:tv|television|telly|roku|shield|fire|tizen|webos|android tv|app
  * word, every player.
  */
 export function playersWhere<T extends { Client?: string; DeviceName?: string }>(players: T[], where: string | undefined): T[] {
-  if(process.env.HARU_CORE_ANIME_PLAYBACK==='on')return corePolicySync('anime-playback.playersWhere',[players,where??null]);
+  if((true as boolean))return corePolicySync('anime-playback.playersWhere',[players,where??null]);
   const said = (where ?? '').trim().toLowerCase();
   if (!said) return players;
   const label = (player: T) => `${player.DeviceName ?? ''} ${player.Client ?? ''}`;
@@ -313,7 +313,7 @@ export class AnimeLink {
     if((true as boolean)&&typeof found?.TotalRecordCount==='number'&&found.TotalRecordCount>(found.Items?.length??0))throw Error('anime_library_truncated');
     const items = (found?.Items ?? []).map(item => ({ ...item, title: item.Name }));
     const match = matchTitle(title, items);
-    if(process.env.HARU_CORE_ANIME_PLAYBACK==='on'){
+    if((true as boolean)){
       if(match&&'several' in match)throw Error('anime_title_ambiguous');
       return match&&'one' in match?match.one:null;
     }
@@ -322,7 +322,7 @@ export class AnimeLink {
 
   /** The next unwatched episode, or the first when it has all been seen. */
   async nextEpisode(seriesId: string): Promise<{ episode: JellyfinItem; fresh: boolean } | null> {
-    if(process.env.HARU_CORE_ANIME_PLAYBACK==='on')throw Error('anime_legacy_playback_not_permitted');
+    if((true as boolean))throw Error('anime_legacy_playback_not_permitted');
     const user = encodeURIComponent(this.keys.jellyfinUserId);
     const next = await this.jf<{ Items?: JellyfinItem[] }>(`/Shows/NextUp?userId=${user}&seriesId=${encodeURIComponent(seriesId)}&Limit=1`);
     if (next?.Items?.[0]) return { episode: next.Items[0], fresh: false };
@@ -336,7 +336,7 @@ export class AnimeLink {
   async players(): Promise<JellyfinSession[]> {
     const user = encodeURIComponent(this.keys.jellyfinUserId);
     const sessions = await this.jf<JellyfinSession[]>(`/Sessions?controllableByUserId=${user}&activeWithinSeconds=960`);
-    if(process.env.HARU_CORE_ANIME_PLAYBACK==='on')return corePolicySync('anime-playback.activePlayers',[sessions??[],Date.now()]);
+    if((true as boolean))return corePolicySync('anime-playback.activePlayers',[sessions??[],Date.now()]);
     return (sessions ?? [])
       .filter(session => session.SupportsRemoteControl !== false && session.DeviceId !== 'haru-desktop' && !/^Haru\b/i.test(session.Client ?? ''))
       .sort((a, b) => Date.parse(b.LastActivityDate ?? '') - Date.parse(a.LastActivityDate ?? ''));
@@ -557,7 +557,7 @@ export class AnimeLink {
   }
 
   async watch(input: WatchInput): Promise<Record<string, unknown>> {
-    if(process.env.HARU_CORE_ANIME_PLAYBACK==='on'){
+    if((true as boolean)){
       const plan=await runAnimePlayback(input,(op,args)=>this.playbackTransport(op,args),this.memory);
       if(plan.delegateDownload)return this.watchDownload(input);
       if(!plan.result)throw Error('anime_playback_result_missing');

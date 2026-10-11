@@ -23,7 +23,7 @@ export type CoreMemorySelection = { profile: string; oldProfile: string; corePro
 export function readCoreMemoryConfig(env: NodeJS.ProcessEnv = process.env): CoreMemoryConfig {
   const root = env.HARU_CORE_ROOT ?? path.join(os.homedir(), 'haru-core');
   return {
-    mode: env.HARU_CORE_MEMORY === 'shadow' || env.HARU_CORE_MEMORY === 'on' ? env.HARU_CORE_MEMORY : 'off',
+    mode: 'on',   // frozen on (3000); shadow and off were migration modes
     root, node: env.HARU_CORE_NODE ?? '/usr/bin/node', db: env.HARU_CORE_DB ?? path.join(root, 'data/haru-core.db'),
     expectedEpochId: env.HARU_CORE_EPOCH || undefined,
     endpoint: env.HARU_CORE_EMBED_ENDPOINT ?? 'http://127.0.0.1:11436', embedModel: env.HARU_CORE_EMBED_MODEL ?? 'nomic-embed-text',

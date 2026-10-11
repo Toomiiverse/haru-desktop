@@ -9593,8 +9593,8 @@ async function ollamaChatTurn(messages: { role: string; content: string; at?: st
   prepMark('taskStart');
   // Planning is local even when the response is local. Cloud permission still
   // governs every response dispatch; Core restricts this route to scoped reads.
-  const turnLoop=(true as boolean)?naturalTurn<any>('loopFlags',[{splitEnabled:process.env.HARU_CORE_SPLIT_PLANNER==='on',workflowEnabled:process.env.HARU_CORE_WORKFLOW_PLANNING==='on',local:isLocalConfig(config),hosted:!!brain.hosted,cloudAllowed,pictures,naturalKind,directionsRoute:Boolean(directions?.route)}]):null;
-  const splitPlanningAllowed=turnLoop?turnLoop.splitPlanning:process.env.HARU_CORE_SPLIT_PLANNER==='on'&&(isLocalConfig(config)||(!!brain.hosted&&cloudAllowed))&&!pictures&&!naturalKind;
+  const turnLoop=(true as boolean)?naturalTurn<any>('loopFlags',[{splitEnabled:(false as boolean),workflowEnabled:(false as boolean),local:isLocalConfig(config),hosted:!!brain.hosted,cloudAllowed,pictures,naturalKind,directionsRoute:Boolean(directions?.route)}]):null;
+  const splitPlanningAllowed=turnLoop?turnLoop.splitPlanning:(false as boolean)&&(isLocalConfig(config)||(!!brain.hosted&&cloudAllowed))&&!pictures&&!naturalKind;
   const { content: spoken, ran } = await task.loop(conversation, {
     requireToolContract: true,
     splitPlanning:splitPlanningAllowed,
@@ -9602,7 +9602,7 @@ async function ollamaChatTurn(messages: { role: string; content: string; at?: st
     generalToolSplit:(true as boolean),
     generalToolCloudAllowed:cloudAllowed,
     toolSnapshot:()=>chatTools(availableTools(turn),latest),
-    receiptPrograms:turnLoop?turnLoop.receiptPrograms:process.env.HARU_CORE_WORKFLOW_PLANNING==='on'&&cloudAllowed&&!isLocalConfig(config)&&!pictures&&!naturalKind,
+    receiptPrograms:turnLoop?turnLoop.receiptPrograms:(false as boolean)&&cloudAllowed&&!isLocalConfig(config)&&!pictures&&!naturalKind,
     workerRoles:['everyday','conversation','affordable-cloud','specialist','complex','premium'],
     runWorker:async(sending,{role,maxTokens})=>{
       const entry=await coreSelectTaskModel(registry,role,{
@@ -9665,7 +9665,7 @@ async function ollamaChatTurn(messages: { role: string; content: string; at?: st
         }),limit);
       }
       if(inputProfile==='workflow-response'){
-        if(process.env.HARU_CORE_WORKFLOW_PLANNING!=='on'||tools||!cloudAllowed||typeof workflowMaxTokens!=='number'||!Number.isInteger(workflowMaxTokens)
+        if((true as boolean)||tools||!cloudAllowed||typeof workflowMaxTokens!=='number'||!Number.isInteger(workflowMaxTokens)
           ||workflowMaxTokens<1||workflowMaxTokens>1024)throw Error('workflow_response_not_eligible');
         const response=await coreSelectTaskModel(registry,'conversation',{
           cloudAllowed,conversation:sending,tools:false,toolSchema:[],inputs:['text'],maxOutputTokens:workflowMaxTokens,
