@@ -144,15 +144,11 @@ export const RECURRING_THRESHOLD = 3;
  * ones, and fixtures — fall back to mentions, which is all they have.
  */
 export function daysRaised(memory: MemoryRecord): number {
-  if ((true as boolean)) return corePolicySync<ReturnType<typeof daysRaised>>('memory-policy.daysRaised', [memory]);
-  const evidence = memory.evidence ?? [];
-  if (!evidence.length) return memory.mentions;
-  return new Set(evidence.map(entry => entry.at.slice(0, 10))).size;
+  return corePolicySync<ReturnType<typeof daysRaised>>('memory-policy.daysRaised', [memory]);
 }
 
 export function isRecurring(memory: MemoryRecord): boolean {
-  if ((true as boolean)) return corePolicySync<ReturnType<typeof isRecurring>>('memory-policy.isRecurring', [memory]);
-  return daysRaised(memory) >= RECURRING_THRESHOLD;
+  return corePolicySync<ReturnType<typeof isRecurring>>('memory-policy.isRecurring', [memory]);
 }
 
 // Anchored loosely rather than at the start: "so do you remember" and "wait,
@@ -161,8 +157,7 @@ const EXPLICIT_RECALL = /\b(do you remember|d'?you remember|remember when|rememb
 
 /** Asking her to reach back rather than just answer from what's in front of her — worth a wider search than the usual per-message budget. */
 export function isExplicitRecall(text: string): boolean {
-  if ((true as boolean)) return corePolicySync<ReturnType<typeof isExplicitRecall>>('memory-policy.isExplicitRecall', [text]);
-  return EXPLICIT_RECALL.test(text);
+  return corePolicySync<ReturnType<typeof isExplicitRecall>>('memory-policy.isExplicitRecall', [text]);
 }
 
 /** How many memories a turn gets when they've explicitly asked her to recall something, instead of the usual `selectMemories` default. */
@@ -185,31 +180,13 @@ const ALWAYS_INCLUDED: Category[] = ['instruction', 'preference', 'person'];
  * Derived rather than written back, so sorting a record never has to win a sync.
  */
 export function importanceOf(memory: MemoryRecord, now?: Date): number {
-  if ((true as boolean)) return corePolicySync<ReturnType<typeof importanceOf>>('memory-policy.importanceOf', [memory, now]);
-  const stored = memory.importance ?? 0.4;
-  if (!isCategory(memory.category)) return stored;
-  switch (categoryOf(memory, now)) {
-    case 'instruction': return Math.max(stored, 0.85);
-    case 'person':
-    case 'identity': return Math.max(stored, 0.8);
-    case 'preference':
-    case 'shared': return 0.7;
-    case 'knowledge':
-    case 'plan': return 0.5;
-    case 'ongoing': return 0.45;
-    case 'event': return Math.min(stored, 0.6);
-    case 'passing': return 0.1;
-  }
+  return corePolicySync<ReturnType<typeof importanceOf>>('memory-policy.importanceOf', [memory, now]);
 }
 
 export const STOP_WORDS = new Set(['the', 'a', 'an', 'and', 'or', 'but', 'is', 'are', 'was', 'were', 'be', 'been', 'to', 'of', 'in', 'on', 'at', 'for', 'with', 'about', 'my', 'me', 'i', 'you', 'your', 'it', 'that', 'this', 'they', 'them', 'has', 'have', 'had', 'do', 'does', 'did', 'so', 'if', 'as', 'by', 'from', 'up', 'out', 'not', 'can', 'will', 'just', 'what', 'when', 'how', 'who']);
 
 export function keywords(text: string): Set<string> {
-  if ((true as boolean)) return new Set(corePolicySync<string[]>('memory-policy.keywords', [text]));
-  return new Set(
-    text.toLowerCase().replace(/[^a-z0-9\s']/g, ' ').split(/\s+/)
-      .filter(word => word.length > 2 && !STOP_WORDS.has(word)),
-  );
+  return new Set(corePolicySync<string[]>('memory-policy.keywords', [text]));
 }
 
 /** Conservative identity: keep names, numbers and polarity. Similar topics are
@@ -223,14 +200,7 @@ function claimWords(text: string): string[] {
 }
 
 export function isSameMemory(a: string, b: string): boolean {
-  if ((true as boolean)) return corePolicySync<ReturnType<typeof isSameMemory>>('memory-policy.isSameMemory', [a, b]);
-  const canonical = (s: string) => claimWords(s).join(' ');
-  if (canonical(a) === canonical(b)) return true;
-  if (claimWords(a).includes('not') !== claimWords(b).includes('not')) return false;
-  // Appositive detail is allowed only after an identical main claim.
-  const left = a.split(',')[0], right = b.split(',')[0];
-  return canonical(left) === canonical(right) && canonical(left).length > 0
-    && (a === left || b === right);
+  return corePolicySync<ReturnType<typeof isSameMemory>>('memory-policy.isSameMemory', [a, b]);
 }
 
 function assertionWords(text: string): string[] {
@@ -249,21 +219,7 @@ function assertionWords(text: string): string[] {
 /** Only attributable assertions can become personal facts. This deliberately
  * refuses uncertain paraphrases rather than treating lexical overlap as proof. */
 export function isInTheirWords(fact: string, said: string): boolean {
-  if ((true as boolean)) return corePolicySync<ReturnType<typeof isInTheirWords>>('memory-policy.isInTheirWords', [fact, said]);
-  const wanted = assertionWords(fact ?? '');
-  if (!wanted.length || !said?.trim()) return false;
-  let fictional = false;
-  const spans = said.split(/(?<=[.!?])\s+|(?=\b(?:but my real|in real life|outside (?:the|my) (?:story|play|novel))\b)/i);
-  return spans.some(span => {
-    if (/\b(?:my real|in real life|outside (?:the|my) (?:story|play|novel))\b/i.test(span)) fictional = false;
-    if (/\b(?:story|novel|screenplay|script|character|narrator|fictional|hypothetical|pretend|imagine|role.?play)\b/i.test(span)) fictional = true;
-    if (fictional || /["“”`]|^\s*>|\?|\b(?:if|maybe|perhaps|might|suppose|joking|joke|example)\b/i.test(span)) return false;
-    const heard = assertionWords(span);
-    if (wanted.includes('not') !== heard.includes('not')) return false;
-    // Subject and object must stay together, in order. A friend's claim or
-    // another pet's name cannot be borrowed from elsewhere in the sentence.
-    return wanted.every((word, index) => heard[index] === word);
-  });
+  return corePolicySync<ReturnType<typeof isInTheirWords>>('memory-policy.isInTheirWords', [fact, said]);
 }
 
 /**
@@ -359,8 +315,7 @@ const ABOUT_THE_CONVERSATION = new RegExp([
 ].join('|'), 'i');
 
 export function isAboutTheConversation(text: string): boolean {
-  if ((true as boolean)) return corePolicySync<ReturnType<typeof isAboutTheConversation>>('memory-policy.isAboutTheConversation', [text]);
-  return ABOUT_THE_CONVERSATION.test((text ?? '').trim());
+  return corePolicySync<ReturnType<typeof isAboutTheConversation>>('memory-policy.isAboutTheConversation', [text]);
 }
 
 /**
@@ -382,8 +337,7 @@ export function isAboutTheConversation(text: string): boolean {
 const HER_OWN_NAGGING = /^\s*(don['’]?t|do not|never|remember to|make sure|be sure|hurry|get on with|go and|pick up|call|buy|finish)\b/i;
 
 export function readsAsHerNagging(text: string): boolean {
-  if ((true as boolean)) return corePolicySync<ReturnType<typeof readsAsHerNagging>>('memory-policy.readsAsHerNagging', [text]);
-  return HER_OWN_NAGGING.test((text ?? '').trim());
+  return corePolicySync<ReturnType<typeof readsAsHerNagging>>('memory-policy.readsAsHerNagging', [text]);
 }
 
 function namesSomething(text: string): boolean {
@@ -412,8 +366,7 @@ function namesSomething(text: string): boolean {
 const A_BAN = /^\s*(do ?n'?t|do not|never|stop|no more|quit|avoid)\b.{0,14}?\b(mention\w*|talk\w*\s+about|bring\w*\s+up|say\w*|discuss\w*|rais\w+|refer\w*\s+to|go(ing)?\s+on\s+about)\b/i;
 
 export function bansATopic(text: string): boolean {
-  if ((true as boolean)) return corePolicySync<ReturnType<typeof bansATopic>>('memory-policy.bansATopic', [text]);
-  return A_BAN.test((text ?? '').trim());
+  return corePolicySync<ReturnType<typeof bansATopic>>('memory-policy.bansATopic', [text]);
 }
 
 /** `meantAsARule` is a line somebody set on purpose rather than a note she
@@ -422,21 +375,7 @@ export function bansATopic(text: string): boolean {
  *  her own standings about how she is treated. All of those are imperative by
  *  nature, which is the one shape the nagging test refuses. */
 export function isWorthRemembering(text: string, options: { meantAsARule?: boolean } = {}): boolean {
-  if ((true as boolean)) return corePolicySync<ReturnType<typeof isWorthRemembering>>('memory-policy.isWorthRemembering', [text, options]);
-  const clean = (text ?? '').trim();
-  if (!clean) return false;
-  if (!options.meantAsARule && readsAsHerNagging(clean)) return false;
-  // Length turned out to be a bad proxy for worth at every threshold tried.
-  // Three words lost "Allergic to shellfish"; two lost "Vegetarian". Both are
-  // among the most useful things anyone could tell her, and both are shorter
-  // than the junk. So this only requires that there is a word in there at all,
-  // and the vague entries are caught by what they say rather than by size.
-  if (keywords(clean).size < 1) return false;
-  if (bansATopic(clean)) return false;
-  if (isAboutTheConversation(clean)) return false;
-  if (UNIVERSAL.test(clean) || NOWHERE_IN_PARTICULAR.test(clean)) return false;
-  if (TRANSIENT.test(clean) && !namesSomething(clean)) return false;
-  return true;
+  return corePolicySync<ReturnType<typeof isWorthRemembering>>('memory-policy.isWorthRemembering', [text, options]);
 }
 
 /**
@@ -448,87 +387,7 @@ export function rememberInto(
   memories: MemoryRecord[],
   incoming: { text: string; kind: MemoryKind; subject?: string; id: string; now: string; source?: MemorySource; predicate?: string; object?: string; evidenceDetail?: string; emotion?: EmotionName; emotionIntensity?: number; resighting?: boolean; category?: Category; when?: string },
 ): { memories: MemoryRecord[]; created: boolean; record: MemoryRecord } {
-  if ((true as boolean)) return corePolicySync<ReturnType<typeof rememberInto>>('memory-policy.rememberInto', [memories, incoming]);
-  const text = incoming.text.trim();
-  const existing = memories.find(memory => !memory.supersededBy && memory.status !== 'archived' && isSameMemory(memory.text, text));
-  // The same line read off the same page again. The vault sync does that every
-  // hour, and each pass used to count as him saying it again: "Haru, with one r"
-  // reached 354 mentions and 354 evidence entries, most of memories.json by
-  // size, from a page nobody had touched. Still seen — it is on the page — but
-  // not said again.
-  if (existing && incoming.resighting && existing.text === text) {
-    const seen: MemoryRecord = { ...existing, lastSeenAt: incoming.now };
-    return { memories: memories.map(memory => memory.id === existing.id ? seen : memory), created: false, record: seen };
-  }
-  const source = incoming.source ?? 'conversation';
-  // A model repeating a guess is not independent evidence. Replaying the same
-  // attributed source is likewise idempotent, including across a restart.
-  if (existing && (source === 'inferred' || source === 'activity'
-    || incoming.evidenceDetail && existing.evidence?.some(e => e.source === source && e.detail === incoming.evidenceDetail))) {
-    return { memories, created: false, record: existing };
-  }
-  if (existing) {
-    const promoted = source === 'explicit' && existing.source !== 'explicit';
-    const base = baseConfidence(promoted ? source : existing.source ?? 'conversation');
-    const updated: MemoryRecord = {
-      ...existing,
-      source: promoted ? source : existing.source,
-      updatedAt: incoming.now,
-      // The newer phrasing wins when it carries more detail.
-      text: text.length > existing.text.length ? text : existing.text,
-      subject: existing.subject ?? incoming.subject,
-      predicate: existing.predicate ?? incoming.predicate,
-      object: existing.object ?? incoming.object,
-      // The first sighting's mood stands; a repeat in a fresh mood is new
-      // evidence for the same claim, not a relabel.
-      emotion: existing.emotion ?? incoming.emotion,
-      emotionIntensity: Math.max(existing.emotionIntensity ?? 0, incoming.emotionIntensity ?? 0),
-      lastSeenAt: incoming.now,
-      mentions: existing.mentions + 1,
-      // A consistent repeat is fresh evidence for the same claim.
-      confidence: promoted ? base : Math.max(existing.confidence ?? base, base),
-      evidence: [...(existing.evidence ?? []), incoming.evidenceDetail
-        ? { at: incoming.now, kind: 'repeat', source, detail: incoming.evidenceDetail }
-        : { at: incoming.now, kind: 'repeat', source }],
-      importance: Math.max(existing.importance ?? 0, scoreImportance(existing.kind, existing.text)),
-      // Said again, so it is current again: a dormant record that came back up
-      // stayed dormant for good before, since decay only ever moves one way.
-      // Not one that was ticked off — talking about a done thing does not undo
-      // it — and not an archived one, which was shelved on purpose: taken off
-      // his page, or found wrong, and a line that matches it is no reason to
-      // put it back.
-      status: existing.status === 'dormant' && existing.evidence?.at(-1)?.kind !== 'closed' ? 'active' : existing.status,
-      // Sorted already stays sorted; the day is added if it was missing.
-      ...(existing.category ?? incoming.category ? { category: existing.category ?? incoming.category } : {}),
-      ...(existing.when ?? (isDay(incoming.when) ? incoming.when : undefined) ? { when: existing.when ?? incoming.when } : {}),
-    };
-    return { memories: memories.map(memory => memory.id === existing.id ? updated : memory), created: false, record: updated };
-  }
-  const record: MemoryRecord = {
-    id: incoming.id,
-    text,
-    kind: incoming.kind,
-    subject: incoming.subject,
-    predicate: incoming.predicate,
-    object: incoming.object,
-    emotion: incoming.emotion,
-    emotionIntensity: incoming.emotionIntensity,
-    createdAt: incoming.now,
-    updatedAt: incoming.now,
-    lastSeenAt: incoming.now,
-    mentions: 1,
-    confidence: baseConfidence(source),
-    importance: scoreImportance(incoming.kind, text),
-    source,
-    status: 'active',
-    memoryType: guessMemoryType(incoming.kind, text),
-    ...(isCategory(incoming.category) ? { category: incoming.category } : {}),
-    ...(isCategory(incoming.category) && isDay(incoming.when) ? { when: incoming.when } : {}),
-    evidence: [incoming.evidenceDetail
-      ? { at: incoming.now, kind: source === 'inferred' ? 'inference' : 'statement', source, detail: incoming.evidenceDetail }
-      : { at: incoming.now, kind: source === 'inferred' ? 'inference' : 'statement', source }],
-  };
-  return { memories: [...memories, record], created: true, record };
+  return corePolicySync<ReturnType<typeof rememberInto>>('memory-policy.rememberInto', [memories, incoming]);
 }
 
 // Forgetting favours things said once and long ago; something raised repeatedly
@@ -546,23 +405,7 @@ export type PruneResult = {
 };
 
 export function pruneMemories(memories: MemoryRecord[], limit: number): PruneResult {
-  if ((true as boolean)) return corePolicySync<PruneResult>('memory-policy.pruneMemories', [memories, limit, new Date()]);
-  if (memories.length <= limit) return { memories, evicted: [] };
-  const archived = memories.filter(memory => memory.status === 'archived');
-  const rest = memories.filter(memory => memory.status !== 'archived');
-  // Sorted records by what they are; unsorted ones by the old rule, since a
-  // category guessed from a kind is not enough to make anything permanent.
-  const untouchable = rest.filter(memory => isCategory(memory.category)
-    ? LASTING.includes(categoryOf(memory)) || importanceOf(memory) >= ALWAYS_IMPORTANT
-    : memory.kind === 'preference' || memory.kind === 'relationship' || (memory.importance ?? 0) >= ALWAYS_IMPORTANT);
-  const touchable = rest.filter(memory => !untouchable.includes(memory));
-  if (touchable.length <= limit - untouchable.length - archived.length) return { memories, evicted: [] };
-  const scored = touchable.map(memory => ({ memory, score: pruneScore(memory) })).sort((a, b) => b.score - a.score);
-  const keepCount = Math.max(0, limit - untouchable.length - archived.length);
-  const kept = scored.slice(0, keepCount).map(entry => entry.memory);
-  const evicted = scored.slice(keepCount).map(entry => entry.memory);
-  if (!evicted.length) return { memories, evicted: [] };
-  return { memories: [...kept, ...untouchable, ...archived], evicted };
+  return corePolicySync<PruneResult>('memory-policy.pruneMemories', [memories, limit, new Date()]);
 }
 
 /** Categories the cap never takes while anything else can go: who he is, his
@@ -620,45 +463,11 @@ export type DecayResult = {
  * their own; superseded and archived records are history and are left alone.
  */
 export function applyDecay(memories: MemoryRecord[], now: Date): DecayResult {
-  if ((true as boolean)) return corePolicySync<ReturnType<typeof applyDecay>>('memory-policy.applyDecay', [memories, now]);
-  const transitions: DecayTransition[] = [];
-  const forgotten: ForgettingEntry[] = [];
-  const out: MemoryRecord[] = [];
-  for (const memory of memories) {
-    if (memory.supersededBy || memory.status === 'archived') {
-      out.push(memory);
-      continue;
-    }
-    const importance = importanceOf(memory, now);
-    if (importance >= ALWAYS_IMPORTANT) {
-      out.push(memory);
-      continue;
-    }
-    const status = memory.status ?? 'active';
-    const seen = Date.parse(memory.lastSeenAt);
-    const days = Number.isFinite(seen) ? Math.max(0, (now.getTime() - seen) / 86_400_000) : 0;
-    const halfLives = days / memoryHalfLifeDays(importance);
-    if (halfLives >= 6) {
-      forgotten.push({ id: memory.id, text: memory.text, at: now.toISOString(), reason: 'decay', detail: `idle for ${Math.round(halfLives)} half-lives` });
-      continue;
-    }
-    let next: MemoryStatus = status;
-    if (halfLives >= 4) next = 'archived';
-    else if (halfLives >= 2) next = 'dormant';
-    if (next !== status) {
-      transitions.push({ id: memory.id, from: status, to: next, halfLives });
-      out.push({ ...memory, status: next });
-    } else {
-      out.push(memory);
-    }
-  }
-  return { memories: out, transitions, forgotten };
+  return corePolicySync<ReturnType<typeof applyDecay>>('memory-policy.applyDecay', [memories, now]);
 }
 
 export function recurringMemories(memories: MemoryRecord[]) {
-  if ((true as boolean)) return corePolicySync<MemoryRecord[]>('memory-policy.recurringMemories', [memories]);
-  return memories.filter(isRecurring)
-    .sort((a, b) => daysRaised(b) - daysRaised(a));
+  return corePolicySync<MemoryRecord[]>('memory-policy.recurringMemories', [memories]);
 }
 
 /**
@@ -675,31 +484,12 @@ export function recurringMemories(memories: MemoryRecord[]) {
  * fewest words left over wins — the more specific match.
  */
 export function findSuperseded(memories: MemoryRecord[], hint: string): MemoryRecord | null {
-  if ((true as boolean)) return corePolicySync<ReturnType<typeof findSuperseded>>('memory-policy.findSuperseded', [memories, hint]);
-  const active = memories.filter(memory => !memory.supersededBy && memory.status !== 'archived');
-  const exact = active.filter(memory => isSameMemory(memory.text, hint));
-  if (exact.length === 1) return exact[0];
-  const asked = claimWords(hint);
-  if (!asked.length) return null;
-  const matches = active.filter(memory => {
-    const held = claimWords(memory.text);
-    return asked.includes('not') === held.includes('not') && asked.every(word => held.includes(word));
-  });
-  return matches.length === 1 ? matches[0] : null;
+  return corePolicySync<ReturnType<typeof findSuperseded>>('memory-policy.findSuperseded', [memories, hint]);
 }
 
 /** Preserve history; never turn a record into its own replacement or a cycle. */
 export function supersede(memories: MemoryRecord[], oldId: string, newId: string, now = new Date().toISOString()): MemoryRecord[] {
-  if ((true as boolean)) return corePolicySync<ReturnType<typeof supersede>>('memory-policy.supersede', [memories, oldId, newId, now]);
-  if (oldId === newId || !memories.some(m => m.id === newId)) return memories;
-  const seen = new Set([oldId]);
-  let cursor: string | undefined = newId;
-  while (cursor) {
-    if (seen.has(cursor)) return memories;
-    seen.add(cursor);
-    cursor = memories.find(m => m.id === cursor)?.supersededBy;
-  }
-  return memories.map(memory => memory.id === oldId ? { ...memory, supersededBy: newId, updatedAt: now } : memory);
+  return corePolicySync<ReturnType<typeof supersede>>('memory-policy.supersede', [memories, oldId, newId, now]);
 }
 
 /**
@@ -709,24 +499,7 @@ export function supersede(memories: MemoryRecord[], oldId: string, newId: string
  * long memory does not crowd out the conversation.
  */
 export function selectMemories(memories: MemoryRecord[], message: string, limit = 14): MemoryRecord[] {
-  if ((true as boolean)) return corePolicySync<ReturnType<typeof selectMemories>>('memory-policy.selectMemories', [memories, message, limit]);
-  // Superseded records are history, not current knowledge — they stay in the
-  // store for findSuperseded to search, but never surface in a prompt.
-  const active = memories.filter(memory => !memory.supersededBy && categoryOf(memory) !== 'passing');
-  const always = active.filter(memory => ALWAYS_INCLUDED.includes(categoryOf(memory)));
-  const rest = active.filter(memory => !ALWAYS_INCLUDED.includes(categoryOf(memory)));
-  const asked = keywords(message);
-  const ranked = rest
-    .map(memory => {
-      const overlap = [...keywords(memory.text)].filter(word => asked.has(word)).length;
-      return { memory, score: overlap * 10 + memory.mentions };
-    })
-    // Something mentioned repeatedly stays available even with nothing in common
-    // with this message; a one-off needs to actually be relevant.
-    .filter(entry => entry.score >= 10 || isRecurring(entry.memory))
-    .sort((a, b) => b.score - a.score)
-    .map(entry => entry.memory);
-  return [...always, ...ranked].slice(0, limit);
+  return corePolicySync<ReturnType<typeof selectMemories>>('memory-policy.selectMemories', [memories, message, limit]);
 }
 
 // -- unified retrieval --------------------------------------------------------
@@ -763,18 +536,11 @@ function keywordSimilarity(query: string, text: string): number {
 
 /** How long a memory of this importance stays vivid. */
 export function memoryHalfLifeDays(importance: number): number {
-  if ((true as boolean)) return corePolicySync<ReturnType<typeof memoryHalfLifeDays>>('memory-policy.memoryHalfLifeDays', [importance]);
-  if (importance >= 0.8) return 10 * 365;
-  if (importance >= 0.5) return 180;
-  return 45;
+  return corePolicySync<ReturnType<typeof memoryHalfLifeDays>>('memory-policy.memoryHalfLifeDays', [importance]);
 }
 
 export function memoryRecency(lastSeenAt: string, now: Date, halfLifeDays: number): number {
-  if ((true as boolean)) return corePolicySync<ReturnType<typeof memoryRecency>>('memory-policy.memoryRecency', [lastSeenAt, now, halfLifeDays]);
-  const seen = Date.parse(lastSeenAt);
-  if (!Number.isFinite(seen)) return 0;
-  const days = Math.max(0, (now.getTime() - seen) / 86_400_000);
-  return Math.pow(0.5, days / halfLifeDays);
+  return corePolicySync<ReturnType<typeof memoryRecency>>('memory-policy.memoryRecency', [lastSeenAt, now, halfLifeDays]);
 }
 
 /** Memories at or above this importance are always offered, like preferences. */
@@ -818,49 +584,18 @@ const DORMANT_ADMISSION = 0.25;
  * every time, is.
  */
 export function entityTerms(text: string): Set<string> {
-  if ((true as boolean)) return new Set(corePolicySync<string[]>('memory-policy.entityTerms', [text]));
-  const words = String(text ?? '').split(/\s+/)
-    .map(word => word.replace(/[^a-zA-Z'’]/g, ''))
-    .filter(word => word.length >= 3);
-  const lower = new Map<string, number>();
-  for (const word of words) {
-    const key = word.toLowerCase();
-    lower.set(key, (lower.get(key) ?? 0) + 1);
-  }
-  const capped = new Map<string, number>();
-  for (const word of words) {
-    if (!/^[A-Z][a-z'’]*$/.test(word)) continue;
-    const key = word.toLowerCase();
-    capped.set(key, (capped.get(key) ?? 0) + 1);
-  }
-  const out = new Set<string>();
-  for (const [key, count] of capped) {
-    if (STOP_WORDS.has(key)) continue;
-    if (lower.get(key) === count) out.add(key);
-  }
-  return out;
+  return new Set(corePolicySync<string[]>('memory-policy.entityTerms', [text]));
 }
 
 /** Everything a memory can be named by: its proper nouns plus its triple's words. */
 export function memoryEntities(memory: MemoryRecord): Set<string> {
-  if ((true as boolean)) return new Set(corePolicySync<string[]>('memory-policy.memoryEntities', [memory]));
-  const out = entityTerms(memory.text);
-  for (const part of [memory.subject, memory.object, memory.predicate]) {
-    if (!part) continue;
-    for (const word of keywords(part)) out.add(word);
-  }
-  return out;
+  return new Set(corePolicySync<string[]>('memory-policy.memoryEntities', [memory]));
 }
 
 /** How much of what the query names this memory is named by, 0..1. Nothing on
  *  either side to compare means no signal at all. */
 export function entityScore(query: string, memory: MemoryRecord): number {
-  if ((true as boolean)) return corePolicySync<ReturnType<typeof entityScore>>('memory-policy.entityScore', [query, memory]);
-  const asked = entityTerms(query);
-  const held = memoryEntities(memory);
-  if (!asked.size || !held.size) return 0;
-  const shared = [...asked].filter(word => held.has(word)).length;
-  return Math.min(1, shared / asked.size);
+  return corePolicySync<ReturnType<typeof entityScore>>('memory-policy.entityScore', [query, memory]);
 }
 
 export type RetrieveOptions = {
@@ -907,85 +642,7 @@ export type ScoredMemory = {
 };
 
 export function retrieveMemories(memories: MemoryRecord[], message: string, options: RetrieveOptions = {}): ScoredMemory[] {
-  if ((true as boolean)) return corePolicySync<ScoredMemory[]>('memory-policy.retrieveMemories', [memories, message, {...options, now:options.now ?? new Date(), semantic:options.semantic ? [...options.semantic] : undefined, focus:options.focus ? {...options.focus, semantic:options.focus.semantic ? [...options.focus.semantic] : undefined} : undefined}]);
-  const now = options.now ?? new Date();
-  // Fourteen was the budget when an eight-thousand-token local model answered
-  // every turn. She holds fifty-odd records and the window is a million.
-  const limit = options.limit ?? 22;
-  const asked = keywords(message);
-  // The mood of the message, for the emotion signal: a memory written in the
-  // same mood gets a small boost, so what stung before surfaces when it stings
-  // again. Heuristic and cheap — localEmotion is pure text work.
-  const queryEmotion = localEmotion(message);
-  const always: ScoredMemory[] = [];
-  const scored: ScoredMemory[] = [];
-
-  for (const memory of memories) {
-    if (memory.supersededBy) continue;                    // replaced — history only
-    if (memory.status === 'archived') continue;           // shelved — must be unarchived deliberately
-    const category = categoryOf(memory, now);
-    if (category === 'passing') continue;                 // sorted as not worth keeping
-    const importance = importanceOf(memory, now);
-    const confidence = memory.confidence ?? 0.5;
-    const focus = options.focus;
-    const keyword = Math.max(asked.size ? keywordSimilarity(message, memory.text) : 0, focus?.message ? keywordSimilarity(focus.message, memory.text) : 0);
-    const semantic = Math.max(options.semantic?.get(memory.id) ?? keyword, focus?.semantic?.get(memory.id) ?? 0);
-    // The two new signals share a tenth of the relevance, so neither can move
-    // a ranking the words disagree with — they settle the ties the words leave.
-    const entity = Math.max(entityScore(message, memory), focus?.message ? entityScore(focus.message, memory) : 0);
-    const affinity = memory.emotion && memory.emotion === queryEmotion
-      ? 0.5 + 0.5 * (memory.emotionIntensity ?? 0.5)
-      : 0.15;
-    const relevance = 0.4 * semantic + 0.3 * keyword + 0.2 * typeWeight(category) + 0.05 * entity + 0.05 * affinity;
-    const recency = memoryRecency(memory.lastSeenAt, now, memoryHalfLifeDays(importance));
-    const entry: ScoredMemory = {
-      memory,
-      score: relevance * (0.4 + 0.6 * importance) * (0.5 + 0.5 * confidence) * recency,
-      factors: {
-        semantic, keyword, relevance,
-        entity,
-        emotion: affinity,
-        importance: 0.4 + 0.6 * importance,
-        confidence: 0.5 + 0.5 * confidence,
-        recency,
-        type: typeWeight(category),
-      },
-    };
-    // Preferences, relationships and anything of high importance shape how she
-    // talks whatever the topic is. Everything else has to actually relate to
-    // what was said — keyword or semantic overlap — or be something that keeps
-    // coming back on its own.
-    const keptAlive = ALWAYS_INCLUDED.includes(category) || importance >= ALWAYS_IMPORTANT;
-    const floor = options.floor ?? 0;
-    const match = Math.max(semantic, keyword, floor > 0 ? entity : 0);
-    const related = floor > 0 ? match >= floor : match > 0 || isRecurring(memory);
-    if (keptAlive) always.push(entry);
-    else if (memory.status === 'dormant' ? match >= Math.max(DORMANT_ADMISSION, floor) : related) scored.push(entry);
-  }
-
-  // One ranking, not two buckets in series: a highly relevant memory ranks
-  // above an important one that has nothing to do with the question.
-  //
-  // The records that shape how she talks — his rules, his tastes, his people —
-  // are promised a place whatever the message, but never more than half the
-  // budget while there is anything else to show. The promise used to be kept by
-  // displacing the weakest other entry, one at a time, with no end: twenty
-  // preferences and relationships against a limit of twelve displaced every
-  // record the message was about, and the human block, which leaves those kinds
-  // to blocks of their own, rendered no memories at all. "When is my
-  // psychologist appointment" had the rescheduled appointment on record, first
-  // in the semantic ranking, and got none of it (2026-09-17).
-  const byScore = (a: ScoredMemory, b: ScoredMemory) => b.score - a.score;
-  const promised = always.filter(entry => ALWAYS_INCLUDED.includes(categoryOf(entry.memory, now))).sort(byScore);
-  const promisedIds = new Set(promised.map(entry => entry.memory.id));
-  const others = [...always, ...scored].filter(entry => !promisedIds.has(entry.memory.id)).sort(byScore);
-  const kept = others.slice(0, Math.min(others.length, Math.floor(limit / 2)));
-  const out = [...kept, ...promised.slice(0, limit - kept.length)];
-  for (const entry of others.slice(kept.length)) {
-    if (out.length >= limit) break;
-    out.push(entry);
-  }
-  return out.sort(byScore);
+  return corePolicySync<ScoredMemory[]>('memory-policy.retrieveMemories', [memories, message, {...options, now:options.now ?? new Date(), semantic:options.semantic ? [...options.semantic] : undefined, focus:options.focus ? {...options.focus, semantic:options.focus.semantic ? [...options.focus.semantic] : undefined} : undefined}]);
 }
 
 /**
@@ -1005,28 +662,19 @@ export function retrieveMemories(memories: MemoryRecord[], message: string, opti
 export const SEMANTIC_FLOOR = 0.45;
 
 export function calibrateSimilarity(cosine: number): number {
-  if ((true as boolean)) return corePolicySync<ReturnType<typeof calibrateSimilarity>>('memory-policy.calibrateSimilarity', [cosine]);
-  return Math.max(0, Math.min(1, (cosine - SEMANTIC_FLOOR) / (1 - SEMANTIC_FLOOR)));
+  return corePolicySync<ReturnType<typeof calibrateSimilarity>>('memory-policy.calibrateSimilarity', [cosine]);
 }
 
 /** Precompute id → semantic similarity for every memory that has a vector:
  *  the cosine to the query's own embedding, calibrated so unrelated is zero. */
 export function semanticSimilarities(memories: MemoryRecord[], queryVector: number[], vectors: Map<string, number[]>): Map<string, number> {
-  if ((true as boolean)) return new Map(corePolicySync<[string, number][]>('memory-policy.semanticSimilarities', [memories, queryVector, [...vectors]]));
-  const out = new Map<string, number>();
-  for (const memory of memories) {
-    const vector = vectors.get(memory.id);
-    if (vector) out.set(memory.id, calibrateSimilarity(cosineSimilarity(vector, queryVector)));
-  }
-  return out;
+  return new Map(corePolicySync<[string, number][]>('memory-policy.semanticSimilarities', [memories, queryVector, [...vectors]]));
 }
 
 /** Cosine similarity between two memory vectors; undefined when either side
  *  has none, so callers can fall back to keyword scoring. */
 export function vectorSimilarity(a: number[] | undefined, b: number[] | undefined): number | undefined {
-  if ((true as boolean)) return corePolicySync<number | null>('memory-policy.vectorSimilarity', [a, b]) ?? undefined;
-  if (!a || !b) return undefined;
-  return cosineSimilarity(a, b);
+  return corePolicySync<number | null>('memory-policy.vectorSimilarity', [a, b]) ?? undefined;
 }
 
 function describe(memory: MemoryRecord) {
@@ -1054,35 +702,7 @@ function dayDistance(a: string, b: string): number {
 }
 
 export function formatMemoryPrompt(memories: MemoryRecord[], sessions: SessionSummary[]): string {
-  if ((true as boolean)) return corePolicySync<ReturnType<typeof formatMemoryPrompt>>('memory-policy.formatMemoryPrompt', [memories, sessions]);
-  const newestDay = sessions.map(session => session.day).filter(Boolean).sort().at(-1);
-  const parts: string[] = [];
-  const byKind = (kind: MemoryKind) => memories.filter(memory => memory.kind === kind);
-
-  const preferences = byKind('preference');
-  if (preferences.length) parts.push(`How they like things: ${preferences.map(describe).join('; ')}.`);
-  const relationships = byKind('relationship');
-  if (relationships.length) parts.push(`People and pets in their life: ${relationships.map(describe).join('; ')}.`);
-  const events = byKind('event');
-  if (events.length) parts.push(`Things going on for them: ${events.map(describe).join('; ')}.`);
-  const facts = byKind('fact');
-  if (facts.length) parts.push(`Other things you know about them: ${facts.map(describe).join('; ')}.`);
-
-  // The last few days, by date. The array is not in date order — days are
-  // summarised as they are archived and backfilled later — so the last four
-  // by position once held a summary three weeks old, and she opened on a party
-  // from it. And a week is as far back as "earlier conversations" should
-  // reach unprompted; anything older is for memories, not for small talk.
-  const recentDays = [...sessions]
-    .filter(session => !session.day || !newestDay || dayDistance(session.day, newestDay) <= RECENT_SESSION_DAYS)
-    .sort((a, b) => a.day.localeCompare(b.day))
-    .slice(-4);
-  if (recentDays.length) {
-    const recent = recentDays.map(session => `${session.day}: ${session.summary}`).join(' | ');
-    parts.push(`Earlier conversations — ${recent}.`);
-    parts.push('Refer back to those naturally when they are relevant, the way someone would who was there. Do not list them back or announce that you remember.');
-  }
-  return parts.join(' ');
+  return corePolicySync<ReturnType<typeof formatMemoryPrompt>>('memory-policy.formatMemoryPrompt', [memories, sessions]);
 }
 
 // Kept tight on purpose: this is recalled months later as a single line, so it
@@ -1100,14 +720,7 @@ export function formatMemoryPrompt(memories: MemoryRecord[], sessions: SessionSu
  * reason, so the word the note should use is the word the input already uses.
  */
 export function summaryPrompt() {
-  if ((true as boolean)) return corePolicySync<string>('memory-policy.summaryPrompt', []);
-  return [
-    'Summarise this conversation in one sentence, under 25 words, as a note to your future self.',
-    'The note is about the user. Call them "they" — never "you" or "your", which in your own notes mean you, Haru.',
-    'Record what they were doing or dealing with, not what you said back.',
-    'Skip greetings and small talk. If nothing of substance happened, reply with exactly: nothing notable.',
-    'Reply with the sentence only.',
-  ].join(' ');
+  return corePolicySync<string>('memory-policy.summaryPrompt', []);
 }
 
 /**
@@ -1118,12 +731,7 @@ export function summaryPrompt() {
  * passed, and must not invent a name or number the days never carried.
  */
 export function monthFoldPrompt(month: string) {
-  if ((true as boolean)) return corePolicySync<string>('memory-policy.monthFoldPrompt', [month]);
-  return [
-    `These are her own one-line notes on the days of ${month}.`,
-    'Fold them into one sentence, under 30 words, as a note to her future self: what happened that held, what is still open, and nothing invented — every name, place, number and outcome must already be in the notes.',
-    'The notes are in the third person; stay that way. Reply with the sentence only.',
-  ].join(' ');
+  return corePolicySync<string>('memory-policy.monthFoldPrompt', [month]);
 }
 
 /** Said again, harder, when the first answer came back addressed to somebody. */
@@ -1135,14 +743,11 @@ export const THIRD_PERSON_AGAIN = 'That was addressed to a person. Write it agai
  * an instruction, because the instruction demonstrably was not enough.
  */
 export function readsAsSecondPerson(text: string): boolean {
-  if ((true as boolean)) return corePolicySync<ReturnType<typeof readsAsSecondPerson>>('memory-policy.readsAsSecondPerson', [text]);
-  return /\b(you|your|yours|yourself|you're|you've|you'll|you'd)\b/i.test(text);
+  return corePolicySync<ReturnType<typeof readsAsSecondPerson>>('memory-policy.readsAsSecondPerson', [text]);
 }
 
 export function isWorthKeeping(summary: string) {
-  if ((true as boolean)) return corePolicySync<boolean>('memory-policy.isWorthKeeping', [summary]);
-  const clean = summary.trim().toLowerCase().replace(/[.!]+$/, '');
-  return clean.length > 0 && clean !== 'nothing notable' && clean.length < 300;
+  return corePolicySync<boolean>('memory-policy.isWorthKeeping', [summary]);
 }
 
 /**
@@ -1152,35 +757,12 @@ export function isWorthKeeping(summary: string) {
  * while this feeds the memory engine.
  */
 export function eventsPrompt() {
-  if ((true as boolean)) return corePolicySync<string>('memory-policy.eventsPrompt', []);
-  return [
-    'List the events from this conversation worth remembering, one per line, under 15 words each, as a note to your future self.',
-    // Her own life was being filed as his. On 2026-09-15 she said "I finally
-    // started Chainsaw Man last night" and "I'm logging off at 23:40", and the
-    // 9B wrote it down as "They started Chainsaw Man late at night despite
-    // logging off at 23:40" — every line had to be about them, so her lines
-    // became theirs. The labels were already right; the rule about them was
-    // never said.
-    'The transcript says who spoke: lines starting "They:" are the user, lines starting "Haru:" are you.',
-    'Each line is about the user. Call them "they" — never "you" or "your", which in your own notes mean you, Haru.',
-    'What Haru says about herself — what she read or watched, when she sleeps or logs off, her plans and opinions — is your own life, not theirs: never write it as something they did.',
-    'Only note something about them that their own lines, or what they had open, show actually happened; not what Haru asked, guessed or suggested.',
-    'Include only what will still matter in a month: decisions made, projects completed or changed, notable personal events, lasting changes to their setup or plans.',
-    'Skip routine errands, reminders, small talk and passing feelings.',
-    'If nothing qualifies, reply with exactly: nothing notable.',
-    'Reply with the lines only.',
-  ].join(' ');
+  return corePolicySync<string>('memory-policy.eventsPrompt', []);
 }
 
 /** One extracted event line, cleaned for the memory gate. */
 export function eventCandidates(reply: string): string[] {
-  if ((true as boolean)) return corePolicySync<ReturnType<typeof eventCandidates>>('memory-policy.eventCandidates', [reply]);
-  return reply
-    .split('\n')
-    .map(line => line.replace(/^[-*\d.)\s]+/, '').trim())
-    .filter(line => line.length > 0 && !/^nothing notable$/i.test(line))
-    .map(line => line.replace(/[.!]+$/, ''))
-    .filter(line => line.length > 0);
+  return corePolicySync<ReturnType<typeof eventCandidates>>('memory-policy.eventCandidates', [reply]);
 }
 
 // -- forming memories from a day ------------------------------------------------
@@ -1207,63 +789,19 @@ export const MEMORIES_PER_DAY = 10;
  * written down again.
  */
 export function formationPrompt(day: string, known: string[], userName = ''): string {
-  if ((true as boolean)) return corePolicySync<ReturnType<typeof formationPrompt>>('memory-policy.formationPrompt', [day, known, userName]);
-  const weekday = isDay(day) ? new Date(`${day}T00:00:00Z`).toLocaleDateString('en-AU', { weekday: 'long', timeZone: 'UTC' }) : '';
-  const name = userName.trim();
-  return [
-    'You are Haru, going back over part of a day of conversation with the user you live with, writing down what is worth remembering about them.',
-    ...(name ? [`The user is ${name}.`] : []),
-    'The transcript says who spoke: lines starting "They:" are the user, lines starting "Haru:" are you.',
-    'What Haru says about herself — what she read or watched, when she sleeps or logs off, her plans and opinions — is your own life, not theirs: never write it as something they did.',
-    'Only note what their own lines, or what they had open, show. Haru\'s lines are only there to make sense of theirs: what Haru asked, guessed, suggested, explained, or said they had said is not something they said, unless their own reply confirms it.',
-    'If they mix up a name, a word or a message, that is a slip, not something to remember.',
-    '',
-    'Write each note as one line: <category> | <when> | <note>',
-    ...FORMED.map(category => `${category} — ${CATEGORY_MEANING[category]}.`),
-    '',
-    'The note: under 20 words, about the user as "they", never "you" or "your"; people, places and things by name; still clear on its own months from now.',
-    `WHEN: for a plan or an event, the calendar day as YYYY-MM-DD. This conversation was on ${weekday} ${day}, so "tomorrow" is the day after it. Otherwise -.`,
-    'Keep only what would still matter a month from now. Skip small talk, passing moods, errands finished in the moment and what was on the screen for a moment.',
-    ...(known.length ? ['Haru already knows these, so leave them out unless the day changed one:', ...known.map(text => `- ${text}`)] : []),
-    '',
-    'At most 6 lines, the ones that matter most. If nothing qualifies, reply with exactly: nothing notable.',
-  ].join('\n');
+  return corePolicySync<ReturnType<typeof formationPrompt>>('memory-policy.formationPrompt', [day, known, userName]);
 }
 
 export type FormedNote = { category: Category; when?: string; note: string };
 
 /** The day's notes, read strictly: a line not in the shape, or in a category a day cannot form, is left out. */
 export function readFormation(answer: string): FormedNote[] {
-  if ((true as boolean)) return corePolicySync<ReturnType<typeof readFormation>>('memory-policy.readFormation', [answer]);
-  const out: FormedNote[] = [];
-  for (const raw of String(answer ?? '').split('\n')) {
-    const match = raw.trim().replace(/^[-*\d.)\s]+(?=[a-z])/i, '').match(/^([a-z]+)\s*\|\s*(\S+)\s*\|\s*(.+)$/i);
-    if (!match) continue;
-    const category = match[1].toLowerCase() as Category;
-    const note = match[3].trim().replace(/[.!]+$/, '');
-    if (!FORMED.includes(category) || note.length < 4) continue;
-    out.push(isDay(match[2]) && (category === 'plan' || category === 'event') ? { category, when: match[2], note } : { category, note });
-  }
-  return out;
+  return corePolicySync<ReturnType<typeof readFormation>>('memory-policy.readFormation', [answer]);
 }
 
 /** A day's labelled lines in windows of at most `size` characters, whole lines only. */
 export function formationWindows(lines: string[], size = FORMATION_WINDOW): string[] {
-  if ((true as boolean)) return corePolicySync<ReturnType<typeof formationWindows>>('memory-policy.formationWindows', [lines, size]);
-  const windows: string[] = [];
-  let current: string[] = [];
-  let length = 0;
-  for (const line of lines) {
-    if (current.length && length + line.length + 1 > size) {
-      windows.push(current.join('\n'));
-      current = [];
-      length = 0;
-    }
-    current.push(line);
-    length += line.length + 1;
-  }
-  if (current.length) windows.push(current.join('\n'));
-  return windows;
+  return corePolicySync<ReturnType<typeof formationWindows>>('memory-policy.formationWindows', [lines, size]);
 }
 
 /**
@@ -1278,23 +816,7 @@ export function formationWindows(lines: string[], size = FORMATION_WINDOW): stri
 const GENERIC_MOMENT = /\b(procrastinat\w*|feel\w*|struggl\w*|annoyed|bored|tired|cleaned?|dodged?|avoided?|monitor\w*|remind\w*)\b/i;
 
 export function isWorthAnEvent(text: string): boolean {
-  if ((true as boolean)) return corePolicySync<ReturnType<typeof isWorthAnEvent>>('memory-policy.isWorthAnEvent', [text]);
-  const clean = (text ?? '').trim();
-  if (!isWorthRemembering(clean)) return false;
-  // A sentence addressed to Haru is material for the preference/task systems,
-  // not an event in the user's life.
-  if (/^haru\b/i.test(clean)) return false;
-  // Nor is one addressed to the user. "You're closing the store from Monday to
-  // Tuesday" reached the store this way and then read, in her own prompt, as
-  // something she was doing — the same drift the summary prompt now pins.
-  if (readsAsSecondPerson(clean)) return false;
-  // A passing moment stays a moment even when it names the subject — "work
-  // emails" in a procrastination sentence does not make it an event.
-  if (GENERIC_MOMENT.test(clean)) return false;
-  // Otherwise it has to name something concrete — a proper noun, a number, a
-  // quoted title — or be about something that matters long-term.
-  if (IMPORTANT_TOPICS.test(clean) || namesSomething(clean)) return true;
-  return false;
+  return corePolicySync<ReturnType<typeof isWorthAnEvent>>('memory-policy.isWorthAnEvent', [text]);
 }
 
 /**
@@ -1316,11 +838,7 @@ const TASK_VERBS = new Set(['get', 'got', 'getting', 'done', 'doing', 'finish', 
  * the wrong one takes something true out of her prompt.
  */
 export function closesEvent(title: string, text: string): boolean {
-  if ((true as boolean)) return corePolicySync<ReturnType<typeof closesEvent>>('memory-policy.closesEvent', [title, text]);
-  const wanted = [...keywords(title)].filter(word => !TASK_VERBS.has(word));
-  if (!wanted.length) return false;
-  const has = keywords(text);
-  return wanted.every(word => has.has(word));
+  return corePolicySync<ReturnType<typeof closesEvent>>('memory-policy.closesEvent', [title, text]);
 }
 
 /**
@@ -1338,87 +856,16 @@ export function closesEvent(title: string, text: string): boolean {
  * undone and then it was never finished at all.
  */
 export function closeEvents(memories: MemoryRecord[], title: string, now: string, done = true): { memories: MemoryRecord[]; changed: MemoryRecord[] } {
-  if ((true as boolean)) {
+  {
     const result = corePolicySync<ReturnType<typeof closeEvents>>('memory-policy.closeEvents', [memories, title, now, done]);
     return {...result, memories:result.changed.length ? result.memories : memories};
   }
-  const from: MemoryStatus = done ? 'active' : 'dormant';
-  const to: MemoryStatus = done ? 'dormant' : 'active';
-  const changed: MemoryRecord[] = [];
-  const out = memories.map(memory => {
-    if (memory.kind !== 'event' || (memory.status ?? 'active') !== from) return memory;
-    if (memory.supersededBy || !closesEvent(title, memory.text)) return memory;
-    const updated: MemoryRecord = {
-      ...memory,
-      status: to,
-      evidence: [...(memory.evidence ?? []), {
-        at: now, kind: 'closed' as const, source: memory.source ?? 'conversation',
-        detail: done ? `"${title}" ticked off` : `"${title}" un-ticked`,
-      }],
-    };
-    changed.push(updated);
-    return updated;
-  });
-  return { memories: changed.length ? out : memories, changed };
 }
 
 // Old flat records predate kinds and counters; they are read forward rather than
 // dropped, since they are the only history an existing user has.
 export function migrateMemories(saved: unknown, now: string): MemoryRecord[] {
-  if ((true as boolean)) return corePolicySync<MemoryRecord[]>('memory-policy.migrateMemories', [saved, now, Array.isArray(saved) ? saved.map(() => `${Date.now()}-${Math.random().toString(36).slice(2)}`) : []]);
-  if (!Array.isArray(saved)) return [];
-  return saved.flatMap(entry => {
-    if (!entry || typeof entry !== 'object') return [];
-    const record = entry as Partial<MemoryRecord>;
-    if (typeof record.text !== 'string' || !record.text.trim()) return [];
-    const mentions = typeof record.mentions === 'number' && record.mentions > 0 ? record.mentions : 1;
-    const kind = MEMORY_KINDS.includes(record.kind as MemoryKind) ? record.kind as MemoryKind : 'fact';
-    const text = record.text.trim();
-    const createdAt = typeof record.createdAt === 'string' ? record.createdAt : now;
-    return [{
-      id: typeof record.id === 'string' ? record.id : `${Date.now()}-${Math.random().toString(36).slice(2)}`,
-      text,
-      kind,
-      subject: typeof record.subject === 'string' ? record.subject : undefined,
-      createdAt,
-      ...(typeof record.updatedAt === 'string' && Number.isFinite(Date.parse(record.updatedAt)) ? { updatedAt: record.updatedAt } : {}),
-      lastSeenAt: typeof record.lastSeenAt === 'string' ? record.lastSeenAt : (typeof record.createdAt === 'string' ? record.createdAt : now),
-      mentions,
-      // v2 fields. Legacy records have none of them; they are derived here so
-      // old data gains the new lifecycle without being rewritten by hand, and
-      // the derivation is idempotent — a record that already has a field keeps
-      // it.
-      confidence: typeof record.confidence === 'number' && Number.isFinite(record.confidence)
-        ? Math.min(1, Math.max(0, record.confidence))
-        : mentionConfidence(mentions, baseConfidence('conversation')),
-      importance: typeof record.importance === 'number' && Number.isFinite(record.importance)
-        ? Math.min(1, Math.max(0, record.importance))
-        : scoreImportance(kind, text),
-      source: MEMORY_SOURCES.includes(record.source as MemorySource) ? record.source as MemorySource : 'conversation',
-      status: MEMORY_STATUSES.includes(record.status as MemoryStatus) ? record.status as MemoryStatus : 'active',
-      memoryType: MEMORY_TYPES.includes(record.memoryType as MemoryType) ? record.memoryType as MemoryType : guessMemoryType(kind, text),
-      predicate: typeof record.predicate === 'string' ? record.predicate : undefined,
-      object: typeof record.object === 'string' ? record.object : undefined,
-      emotion: EMOTIONS.includes(record.emotion as EmotionName) ? record.emotion as EmotionName : undefined,
-      emotionIntensity: typeof record.emotionIntensity === 'number' && Number.isFinite(record.emotionIntensity)
-        ? Math.min(1, Math.max(0, record.emotionIntensity))
-        : undefined,
-      evidence: Array.isArray(record.evidence)
-        ? tidyEvidence(record.evidence.filter(entry => entry && typeof entry.at === 'string' && EVIDENCE_KINDS.includes(entry.kind)))
-        : [{ at: createdAt, kind: record.source === 'inferred' ? 'inference' : 'statement', source: record.source ?? 'conversation' }],
-      mergedFrom: Array.isArray(record.mergedFrom) ? record.mergedFrom.filter(id => typeof id === 'string') : undefined,
-      conflictsWith: Array.isArray(record.conflictsWith) ? record.conflictsWith.filter(id => typeof id === 'string') : undefined,
-      // Carried like the two above it. Left out, every read quietly revived what
-      // had been replaced: "lives in Manchester" came back alongside "lives in
-      // Sheffield", and the next write put the resurrection on disk.
-      supersededBy: typeof record.supersededBy === 'string' ? record.supersededBy : undefined,
-      // Checked like kind is, so a value this code does not know is dropped
-      // rather than trusted; left off entirely when absent, so a record that
-      // has not been sorted reads back exactly as it was written.
-      ...(isCategory(record.category) ? { category: record.category } : {}),
-      ...(isDay(record.when) ? { when: record.when } : {}),
-    }];
-  });
+  return corePolicySync<MemoryRecord[]>('memory-policy.migrateMemories', [saved, now, Array.isArray(saved) ? saved.map(() => `${Date.now()}-${Math.random().toString(36).slice(2)}`) : []]);
 }
 
 /**
@@ -1431,17 +878,7 @@ export function migrateMemories(saved: unknown, now: string): MemoryRecord[] {
  * the way in, every time.
  */
 export function tidyEvidence(entries: EvidenceEntry[]): EvidenceEntry[] {
-  if ((true as boolean)) return corePolicySync<ReturnType<typeof tidyEvidence>>('memory-policy.tidyEvidence', [entries]);
-  const days = new Set<string>();
-  const kept: EvidenceEntry[] = [];
-  for (const entry of entries) {
-    if (entry.kind !== 'repeat') { kept.push(entry); continue; }
-    const day = entry.at.slice(0, 10);
-    if (days.has(day)) continue;
-    days.add(day);
-    kept.push(entry);
-  }
-  return kept;
+  return corePolicySync<ReturnType<typeof tidyEvidence>>('memory-policy.tidyEvidence', [entries]);
 }
 
 // -- confidence --------------------------------------------------------------
@@ -1460,14 +897,7 @@ export const CONFIDENCE = {
 
 /** How believable a brand-new memory is, from where it came. */
 export function baseConfidence(source: MemorySource): number {
-  if ((true as boolean)) return corePolicySync<ReturnType<typeof baseConfidence>>('memory-policy.baseConfidence', [source]);
-  switch (source) {
-    case 'explicit': return CONFIDENCE.explicitBase;
-    case 'inferred': return CONFIDENCE.inferredBase;
-    case 'activity': return CONFIDENCE.activityBase;
-    case 'import': return CONFIDENCE.conversationBase;
-    default: return CONFIDENCE.conversationBase;
-  }
+  return corePolicySync<ReturnType<typeof baseConfidence>>('memory-policy.baseConfidence', [source]);
 }
 
 const round2 = (value: number) => Math.round(value * 100) / 100;
@@ -1475,19 +905,15 @@ const round2 = (value: number) => Math.round(value * 100) / 100;
 /** Confidence grows with every consistent repeat, capped so no memory is ever
  *  held as certain beyond reasonable doubt. */
 export function mentionConfidence(mentions: number, base: number): number {
-  if ((true as boolean)) return corePolicySync<ReturnType<typeof mentionConfidence>>('memory-policy.mentionConfidence', [mentions, base]);
-  const gained = Math.max(0, (mentions - 1)) * CONFIDENCE.repeatedStep;
-  return round2(Math.min(CONFIDENCE.max, Math.max(CONFIDENCE.min, base + gained)));
+  return corePolicySync<ReturnType<typeof mentionConfidence>>('memory-policy.mentionConfidence', [mentions, base]);
 }
 
 export function withConfirmation(confidence: number): number {
-  if ((true as boolean)) return corePolicySync<ReturnType<typeof withConfirmation>>('memory-policy.withConfirmation', [confidence]);
-  return round2(Math.min(CONFIDENCE.max, confidence + CONFIDENCE.confirmationStep));
+  return corePolicySync<ReturnType<typeof withConfirmation>>('memory-policy.withConfirmation', [confidence]);
 }
 
 export function withContradiction(confidence: number): number {
-  if ((true as boolean)) return corePolicySync<ReturnType<typeof withContradiction>>('memory-policy.withContradiction', [confidence]);
-  return round2(Math.max(CONFIDENCE.min, confidence - CONFIDENCE.contradictionPenalty));
+  return corePolicySync<ReturnType<typeof withContradiction>>('memory-policy.withContradiction', [confidence]);
 }
 
 // -- importance --------------------------------------------------------------
@@ -1527,38 +953,14 @@ const IMPORTANT_TOPICS = new RegExp(`${LASTING_TOPICS.source}|${LIVING_TOPICS.so
 const TRIVIAL_TOPICS = /\b(youtube|video\b|clip\b|stream\b|episode\b|manga\b|anime\b|game\b|steam\b|browser\b|tab\b|window\b|download\w*|watched\b|played\b)\b/i;
 
 export function scoreImportance(kind: MemoryKind, text: string): number {
-  if ((true as boolean)) return corePolicySync<ReturnType<typeof scoreImportance>>('memory-policy.scoreImportance', [kind, text]);
-  const said = text ?? '';
-  switch (kind) {
-    // These shape how she talks to him — always in the prompt, so they are
-    // always important.
-    case 'preference': return 0.85;
-    case 'relationship': return 0.8;
-    // A moment in time matters while it is current and as history afterwards.
-    case 'event': return 0.45;
-    default: {
-      if (LASTING_TOPICS.test(said)) return 0.8;
-      if (LIVING_TOPICS.test(said)) return 0.6;
-      if (TRIVIAL_TOPICS.test(said)) return 0.2;
-      // Something nameable — a person, a place, a project — is worth more than
-      // a generic sentence about now.
-      if (namesSomething(said)) return 0.6;
-      return 0.4;
-    }
-  }
+  return corePolicySync<ReturnType<typeof scoreImportance>>('memory-policy.scoreImportance', [kind, text]);
 }
 
 // -- memory types ------------------------------------------------------------
 
 /** How a memory behaves, derived from its kind and wording. */
 export function guessMemoryType(kind: MemoryKind, text: string): MemoryType {
-  if ((true as boolean)) return corePolicySync<ReturnType<typeof guessMemoryType>>('memory-policy.guessMemoryType', [kind, text]);
-  switch (kind) {
-    case 'relationship': return 'relational';
-    case 'event': return 'episodic';
-    case 'preference': return PROCEDURAL_WORDING.test(text ?? '') ? 'procedural' : 'semantic';
-    default: return PROCEDURAL_WORDING.test(text ?? '') ? 'procedural' : 'semantic';
-  }
+  return corePolicySync<ReturnType<typeof guessMemoryType>>('memory-policy.guessMemoryType', [kind, text]);
 }
 
 // A tendency rather than a stance: "usually", "commonly", "tends to" describe

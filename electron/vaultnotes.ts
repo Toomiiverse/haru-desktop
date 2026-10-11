@@ -22,82 +22,20 @@ export type VaultPathVerdict = { ok: true; full: string; relative: string } | { 
 
 /** A path inside the vault, or why not: no leaving it, no dotfiles, nothing in her own folder; a note ends in .md. */
 export function insideVault(root: string, given: string, kind: 'note' | 'folder'): VaultPathVerdict {
- if((true as boolean))return coreInsideVault(root,given,kind);
-  if (!root) return { ok: false, error: 'No vault is set up.' };
-  const raw = (given ?? '').trim().replace(/\\/g, '/');
-  if (!raw && kind === 'folder') return { ok: true, full: path.resolve(root), relative: '' };
-  if (!raw) return { ok: false, error: 'Say which note — a path inside the vault, like Projects/Website.md.' };
-  if (path.posix.isAbsolute(raw) || /^[a-zA-Z]:/.test(raw)) return { ok: false, error: 'Paths are inside the vault; no absolute paths.' };
-  const relative = path.posix.normalize(raw).replace(/^\/+|\/+$/g, '');
-  const parts = relative.split('/');
-  if (relative === '.' || parts.includes('..')) return { ok: false, error: 'That leaves the vault.' };
-  if (parts.some(part => part.startsWith('.'))) return { ok: false, error: "Dotfiles and Obsidian's own folders are not notes." };
-  if (parts[0] === HARU_FOLDER) return { ok: false, error: `${HARU_FOLDER}/ is your own folder, written by the app from what you keep — not for editing by hand.` };
-  if (DEFAULT_VAULT_SKIP.includes(parts[0])) return { ok: false, error: `${parts[0]}/ is housekeeping, not notes.` };
-  const withExt = kind === 'note' && !/\.md$/i.test(relative) ? `${relative}.md` : relative;
-  const full = path.resolve(root, withExt);
-  const inside = path.resolve(root) + path.sep;
-  if (!full.startsWith(inside)) return { ok: false, error: 'That leaves the vault.' };
-  // A lexical child can still point elsewhere. Root is the operator-selected
-  // anchor; links beneath it are not valid note/folder paths. This guards
-  // existing links, not a hostile concurrent process swapping parent directories.
-  let current = path.resolve(root);
-  for (const part of withExt.split('/')) {
-    current = path.join(current, part);
-    try {
-      const stat = lstatSync(current);
-      if (stat.isSymbolicLink()) return { ok: false, error: 'Linked paths are not editable vault notes.' };
-      if (stat.isFile() && stat.nlink > 1) return { ok: false, error: 'Shared hard-linked files are not editable vault notes.' };
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') break;
-      return { ok: false, error: 'Cannot verify this vault path.' };
-    }
-  }
-  // "Projects" is a folder: not a note to read, and not one to start beside it.
-  if (kind === 'note' && withExt !== relative) {
-    const bare = path.resolve(root, relative);
-    if (existsSync(bare) && statSync(bare).isDirectory()) return { ok: false, error: `"${relative}" is a folder, not a note.` };
-  }
-  return { ok: true, full, relative: withExt };
+ return coreInsideVault(root,given,kind);
 }
 
 export type Listing = { ok: true; folder: string; folders: string[]; notes: { path: string; chars: number; modified: string }[]; more: boolean } | { ok: false; error: string };
 
 /** One folder of the vault: its sub-folders and its notes, newest first. Her own folder is named, not opened. */
 export function listVault(root: string, folder = ''): Listing {
- if((true as boolean))return coreVault('list',root,folder);
-  const where = insideVault(root, folder, 'folder');
-  if (!where.ok) return where;
-  if (!existsSync(where.full) || !statSync(where.full).isDirectory()) return { ok: false, error: `There is no folder "${where.relative || '/'}" in the vault.` };
-  const folders: string[] = [];
-  const notes: { path: string; chars: number; modified: string }[] = [];
-  let more = false;
-  for (const entry of readdirSync(where.full, { withFileTypes: true })) {
-    if (entry.name.startsWith('.')) continue;
-    const relative = where.relative ? `${where.relative}/${entry.name}` : entry.name;
-    if (entry.isDirectory()) {
-      if (!where.relative && DEFAULT_VAULT_SKIP.includes(entry.name) && entry.name !== HARU_FOLDER) continue;
-      folders.push(entry.name === HARU_FOLDER && !where.relative ? `${entry.name} (yours, written by the app)` : relative);
-    } else if (entry.isFile() && /\.md$/i.test(entry.name)) {
-      if (notes.length >= LIST_CAP) { more = true; break; }
-      const stat = statSync(path.join(where.full, entry.name));
-      notes.push({ path: relative, chars: stat.size, modified: stat.mtime.toISOString() });
-    }
-  }
-  notes.sort((a, b) => b.modified.localeCompare(a.modified));
-  return { ok: true, folder: where.relative || '/', folders: folders.sort(), notes, more };
+ return coreVault('list',root,folder);
 }
 
 export type Read = { ok: true; path: string; text: string; chars: number; cut: boolean } | { ok: false; error: string };
 
 export function readNote(root: string, given: string): Read {
- if((true as boolean))return coreVault('read',root,given);
-  const where = insideVault(root, given, 'note');
-  if (!where.ok) return where;
-  if (!existsSync(where.full) || !statSync(where.full).isFile()) return { ok: false, error: `There is no note "${where.relative}" in the vault.` };
-  const text = readFileSync(where.full, 'utf8');
-  const cut = text.length > NOTE_CAP_CHARS;
-  return { ok: true, path: where.relative, text: cut ? text.slice(0, NOTE_CAP_CHARS) : text, chars: text.length, cut };
+ return coreVault('read',root,given);
 }
 
 export type WriteMode = 'create' | 'append' | 'replace';
@@ -109,44 +47,11 @@ export type Written = { ok: true; path: string; mode: WriteMode; chars: number; 
  * that loses words, so the tool asks for their word before calling it.
  */
 export function writeNote(root: string, given: string, text: string, mode: WriteMode, preserveText = false): Written {
- if((true as boolean))return coreVault('write',root,given,{text,mode,preserve:preserveText});
-  if (preserveText && mode !== 'create') return { ok: false, error: 'Text preservation is for create only.' };
-  const where = insideVault(root, given, 'note');
-  if (!where.ok) return where;
-  const body = preserveText ? (text ?? '') : (text ?? '').replace(/\r\n/g, '\n');
-  if (!preserveText && !body.trim()) return { ok: false, error: 'There is nothing to write.' };
-  const existed = existsSync(where.full);
-  if (existed && !statSync(where.full).isFile()) return { ok: false, error: `"${where.relative}" is a folder.` };
-  if (mode === 'create' && existed) return { ok: false, error: `"${where.relative}" already exists — append to it, or replace it with their say-so.`, exists: true };
-  mkdirSync(path.dirname(where.full), { recursive: true });
-  if (mode === 'append' && existed) {
-    const current = readFileSync(where.full, 'utf8');
-    const joint = current.endsWith('\n\n') ? '' : current.endsWith('\n') ? '\n' : '\n\n';
-    appendFileSync(where.full, `${joint}${body.replace(/\n*$/, '\n')}`, 'utf8');
-  } else {
-    try {
-      writeFileSync(where.full, preserveText ? body : body.replace(/\n*$/, '\n'), { encoding: 'utf8', flag: mode === 'create' ? 'wx' : 'w' });
-    } catch (error) {
-      if (mode === 'create' && (error as NodeJS.ErrnoException).code === 'EEXIST') {
-        return { ok: false, error: `"${where.relative}" already exists — append to it, or replace it with their say-so.`, exists: true };
-      }
-      // A partial I/O failure is not proof of no effect. Preserve the exception
-      // so the caller records uncertainty rather than safely retrying a mutation.
-      throw error;
-    }
-  }
-  return { ok: true, path: where.relative, mode, chars: body.length, existed, ...(preserveText ? { preserved: true as const } : {}) };
+ return coreVault('write',root,given,{text,mode,preserve:preserveText});
 }
 
 export type Folder = { ok: true; path: string; existed: boolean } | { ok: false; error: string };
 
 export function createFolder(root: string, given: string): Folder {
- if((true as boolean))return coreVault('folder',root,given);
-  const where = insideVault(root, given, 'folder');
-  if (!where.ok) return where;
-  if (!where.relative) return { ok: false, error: 'Say what to call the folder.' };
-  const existed = existsSync(where.full);
-  if (existed && !statSync(where.full).isDirectory()) return { ok: false, error: `"${where.relative}" is a note, not a folder.` };
-  if (!existed) mkdirSync(where.full, { recursive: true });
-  return { ok: true, path: where.relative, existed };
+ return coreVault('folder',root,given);
 }

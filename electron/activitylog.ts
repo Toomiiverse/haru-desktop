@@ -64,8 +64,7 @@ export const SAME_STRETCH_MS = 8 * 60_000;
  * titles like any other.
  */
 export function isRedacted(kind: ActivityKind): boolean {
- if((true as boolean))return devicePolicy('isRedacted',[kind]);
-  return kind === 'adult';
+ return devicePolicy('isRedacted',[kind]);
 }
 
 function sameWindow(entry: ActivityEntry, next: { process: string; title: string }): boolean {
@@ -85,29 +84,7 @@ export function noteActivity(
   seen: { kind: ActivityKind; label: string; process: string; title: string; url?: string },
   now: Date,
 ): ActivityLog {
- if((true as boolean))return devicePolicy('noteActivity',[log,day,seen,now.toISOString()]);
-  const at = now.toISOString();
-  const redacted = isRedacted(seen.kind);
-  const entry: ActivityEntry = {
-    at,
-    until: at,
-    kind: seen.kind,
-    label: redacted ? '' : seen.label,
-    process: seen.process,
-    title: redacted ? '' : seen.title,
-    ...(redacted || !seen.url ? {} : { url: seen.url }),
-  };
-  const today = log[day] ?? [];
-  const last = today[today.length - 1];
-  // Still here: move the end, do not add a row. Compared on the raw window
-  // rather than the label, since two different pages on one site share a label
-  // and are not the same stretch.
-  if (last && sameWindow(last, { process: entry.process, title: entry.title })
-    && now.getTime() - new Date(last.until).getTime() < SAME_STRETCH_MS) {
-    if (last.until === at) return log;
-    return { ...log, [day]: [...today.slice(0, -1), { ...last, until: at }] };
-  }
-  return { ...log, [day]: [...today, entry].slice(-MAX_ENTRIES_PER_DAY) };
+ return devicePolicy('noteActivity',[log,day,seen,now.toISOString()]);
 }
 
 /**
@@ -123,19 +100,7 @@ export function noteScreenshot(
   shot: { name: string; doing?: { kind: ActivityKind; label: string } },
   now: Date,
 ): ActivityLog {
- if((true as boolean))return devicePolicy('noteScreenshot',[log,day,shot,now.toISOString()]);
-  const at = now.toISOString();
-  const doing = shot.doing && !isRedacted(shot.doing.kind) ? shot.doing : null;
-  const entry: ActivityEntry = {
-    at,
-    until: at,
-    kind: doing ? doing.kind : 'other',
-    label: 'screenshot',
-    process: SCREENSHOT_PROCESS,
-    title: doing ? `${shot.name} — while in ${doing.label}` : shot.name,
-    shot: shot.name,
-  };
-  return { ...log, [day]: [...(log[day] ?? []), entry].slice(-MAX_ENTRIES_PER_DAY) };
+ return devicePolicy('noteScreenshot',[log,day,shot,now.toISOString()]);
 }
 
 /** The process name a screenshot entry carries, so nothing has to parse a title
@@ -143,8 +108,7 @@ export function noteScreenshot(
 export const SCREENSHOT_PROCESS = 'screenshot';
 
 export function isScreenshotEntry(entry: ActivityEntry): boolean {
- if((true as boolean))return devicePolicy('isScreenshotEntry',[entry]);
-  return entry.process === SCREENSHOT_PROCESS;
+ return devicePolicy('isScreenshotEntry',[entry]);
 }
 
 /**
@@ -156,25 +120,12 @@ export function isScreenshotEntry(entry: ActivityEntry): boolean {
  * it to, so a caller can avoid a pointless write.
  */
 export function describeShot(log: ActivityLog, day: string, name: string, description: string): ActivityLog {
- if((true as boolean))return devicePolicy('describeShot',[log,day,name,description]);
-  const today = log[day];
-  const text = description.trim();
-  if (!today || !text) return log;
-  let index = -1;
-  for (let at = today.length - 1; at >= 0; at -= 1) {
-    if (today[at].shot === name) { index = at; break; }
-  }
-  if (index < 0 || today[index].description === text) return log;
-  const next = [...today];
-  next[index] = { ...next[index], description: text };
-  return { ...log, [day]: next };
+ return devicePolicy('describeShot',[log,day,name,description]);
 }
 
 /** Whole minutes at one window, rounded down; a stretch under a minute is 0. */
 export function minutesOf(entry: ActivityEntry): number {
- if((true as boolean))return devicePolicy('minutesOf',[entry]);
-  const span = new Date(entry.until).getTime() - new Date(entry.at).getTime();
-  return Number.isFinite(span) && span > 0 ? Math.floor(span / 60_000) : 0;
+ return devicePolicy('minutesOf',[entry]);
 }
 
 /**
@@ -187,46 +138,14 @@ export function minutesOf(entry: ActivityEntry): number {
  * a window someone passed through is not something they did.
  */
 export function summariseDay(entries: ActivityEntry[], limit = 12): string {
- if((true as boolean))return devicePolicy('summariseDay',[entries,limit]);
-  const byLabel = new Map<string, { label: string; kind: ActivityKind; minutes: number }>();
-  for (const entry of entries) {
-    // Screenshots are counted below, not timed. They are taken at an instant,
-    // so their duration is zero by construction — put through the minutes floor
-    // with everything else they were silently dropped, which made the whole log
-    // of them reach the server and then never reach her.
-    if (isScreenshotEntry(entry)) continue;
-    const label = entry.label || entry.process;
-    if (!label) continue;
-    const held = byLabel.get(label.toLowerCase());
-    if (held) held.minutes += minutesOf(entry);
-    else byLabel.set(label.toLowerCase(), { label, kind: entry.kind, minutes: minutesOf(entry) });
-  }
-  const stretches = [...byLabel.values()]
-    .filter(item => item.minutes >= 5)
-    .sort((a, b) => b.minutes - a.minutes)
-    .slice(0, limit)
-    .map(item => `${item.label} (${item.kind}, ${item.minutes}m)`)
-    .join('; ');
-  return [stretches, summariseShots(entries)].filter(Boolean).join('. ');
+ return devicePolicy('summariseDay',[entries,limit]);
 }
 
 /** How many screenshots, and what the ones she looked at were of. */
 export const SHOT_DESCRIPTIONS = 3;
 
 export function summariseShots(entries: ActivityEntry[]): string {
- if((true as boolean))return devicePolicy('summariseShots',[entries]);
-  const shots = entries.filter(isScreenshotEntry);
-  if (!shots.length) return '';
-  const count = `${shots.length} screenshot${shots.length === 1 ? '' : 's'}`;
-  // The descriptions are the whole reason a screenshot is worth remembering —
-  // "a screenshot was taken" is not a fact about anybody's day. Trimmed hard,
-  // because a vision model given no limit will write a paragraph per image.
-  const said = shots
-    .map(entry => entry.description?.trim())
-    .filter((text): text is string => Boolean(text))
-    .slice(-SHOT_DESCRIPTIONS)
-    .map(text => text.slice(0, 160));
-  return said.length ? `${count}: ${said.join('; ')}` : count;
+ return devicePolicy('summariseShots',[entries]);
 }
 
 /**
@@ -272,21 +191,7 @@ function preferred(a: ActivityEntry, b: ActivityEntry): ActivityEntry {
  * front; which copy of it survives is preferred()'s business.
  */
 export function mergeActivity(mine: ActivityLog, theirs: unknown): ActivityLog {
- if((true as boolean))return devicePolicy('mergeActivity',[mine,theirs]);
-  const incoming = normalizeActivityLog(theirs);
-  const merged: ActivityLog = { ...mine };
-  for (const [day, entries] of Object.entries(incoming)) {
-    const byKey = new Map<string, ActivityEntry>();
-    for (const entry of [...(merged[day] ?? []), ...entries]) {
-      const key = `${entry.at}|${entry.process}|${entry.title}`;
-      const held = byKey.get(key);
-      byKey.set(key, held ? preferred(held, entry) : entry);
-    }
-    merged[day] = [...byKey.values()]
-      .sort((a, b) => a.at.localeCompare(b.at))
-      .slice(-MAX_ENTRIES_PER_DAY);
-  }
-  return merged;
+ return devicePolicy('mergeActivity',[mine,theirs]);
 }
 
 /**
@@ -295,17 +200,5 @@ export function mergeActivity(mine: ActivityLog, theirs: unknown): ActivityLog {
  * on half-formed.
  */
 export function normalizeActivityLog(value: unknown): ActivityLog {
- if((true as boolean))return devicePolicy('normalizeActivityLog',[value]);
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
-  const out: ActivityLog = {};
-  for (const [day, entries] of Object.entries(value as Record<string, unknown>)) {
-    if (!Array.isArray(entries)) continue;
-    const kept = entries.filter((entry): entry is ActivityEntry =>
-      Boolean(entry) && typeof entry === 'object'
-      && typeof (entry as ActivityEntry).at === 'string'
-      && typeof (entry as ActivityEntry).process === 'string')
-      .map(entry => ({ ...entry, until: typeof entry.until === 'string' ? entry.until : entry.at }));
-    if (kept.length) out[day] = kept.slice(-MAX_ENTRIES_PER_DAY);
-  }
-  return out;
+ return devicePolicy('normalizeActivityLog',[value]);
 }

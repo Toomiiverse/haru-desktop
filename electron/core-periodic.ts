@@ -60,7 +60,7 @@ export function createCorePeriodic(options:Options) {
       observation=await activeScheduledJob.run({id:'periodic:'+grant.kind,kind:'periodic:'+grant.kind,token:grant.token},options.handlers[grant.kind]);
     } catch {outcome='interrupted';}
     const sleepiness=grant.kind==='life'&&typeof observation==='number'&&Number.isFinite(observation)&&observation>=0&&observation<=1?observation:undefined;
-    const recallBacklog=(true as boolean)&&grant.kind==='recall-vectors'&&observation&&typeof observation==='object'&&typeof (observation as any).recallBacklog==='boolean'?(observation as {recallBacklog:boolean}).recallBacklog:undefined;
+    const recallBacklog=(grant.kind==='recall-vectors')&&observation&&typeof observation==='object'&&typeof (observation as any).recallBacklog==='boolean'?(observation as {recallBacklog:boolean}).recallBacklog:undefined;
     const fields={token:grant.token,outcome,...(sleepiness!==undefined?{sleepiness}:{}),...(recallBacklog!==undefined?{recallBacklog}:{})};
     let reply;
     try {reply=await send('settle',fields);}

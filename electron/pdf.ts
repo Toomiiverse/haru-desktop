@@ -41,42 +41,7 @@ export type PdfRead = {
 const EMPTY_PAGE_CHARS = 20;
 
 export async function readPdf(file: string, maxChars = MAX_PDF_CHARS): Promise<PdfRead> {
-  if((true as boolean))return coreReadPdf(file,maxChars);
-  const data = new Uint8Array(fs.readFileSync(file));
-  // The legacy build, deliberately: the default entry point assumes a browser
-  // and reaches for DOM globals that do not exist in the main process.
-  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
-  // Cast because isEvalSupported is honoured at runtime and absent from the
-  // published types. It is worth keeping: a PDF is something being read, and
-  // nothing in one should get to run.
-  const task = pdfjs.getDocument({ data, useSystemFonts: true, disableFontFace: true, isEvalSupported: false } as Parameters<typeof pdfjs.getDocument>[0]);
-  const doc = await task.promise;
-
-  const pages = doc.numPages;
-  const read = Math.min(pages, MAX_PDF_PAGES);
-  const parts: string[] = [];
-  let total = 0;
-  for (let number = 1; number <= read && total < maxChars; number++) {
-    const page = await doc.getPage(number);
-    const content = await page.getTextContent();
-    // Joined on spaces rather than concatenated: pdf.js hands back positioned
-    // runs, and without the separator words at the end of a line fuse with the
-    // start of the next.
-    const text = content.items.map(item => ('str' in item ? item.str : '')).join(' ').replace(/\s+/g, ' ').trim();
-    if (text) { parts.push(text); total += text.length; }
-  }
-  // Through the loading task: the document proxy does not expose destroy in the types.
-  await task.destroy();
-
-  const joined = parts.join('\n\n');
-  const perPage = read > 0 ? joined.length / read : 0;
-  return {
-    text: joined.length > maxChars ? `${joined.slice(0, maxChars)}\n…(cut off here)` : joined,
-    pages,
-    read,
-    scanned: perPage < EMPTY_PAGE_CHARS,
-    truncated: joined.length > maxChars || pages > read,
-  };
+  return coreReadPdf(file,maxChars);
 }
 
 /**

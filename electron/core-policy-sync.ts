@@ -36,7 +36,7 @@ export function corePolicySync<T>(operation:string,args:unknown[]):T {
  const transport=worker;
  const packet={version:1,requestId:randomUUID(),owner:coreAdapterOwner(),nowMs:Date.now(),operation,args:wire(args)};
  const encoded=JSON.stringify(packet);
- const limit=(true as boolean)&&/^knowledge-(index|flow|chunks|vault)\./.test(operation)?8388608:LIMIT;
+ const limit=(/^knowledge-(index|flow|chunks|vault)\./.test(operation))?8388608:LIMIT;
  if(Buffer.byteLength(encoded)>limit)throw Error('core_policy_payload_too_large');
  let buffer=buffers.get(limit);
  if(!buffer){buffer=new SharedArrayBuffer(limit+8);buffers.set(limit,buffer);}

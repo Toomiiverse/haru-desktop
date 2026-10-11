@@ -24,7 +24,7 @@ if(config.service){
    // Closing a desktop client must never close the independent authority.
    if(request.method==='close'){finish(buffer,{id:request.id,ok:true,result:{closed:true}});return;}
    try{const result=await client.call('storage',request.method,request.params,request.id);finish(buffer,{id:request.id,ok:true,result});}
-   catch(error){finish(buffer,{id:request.id,ok:false,error:(true as boolean)&&error instanceof CoreServiceError&&error.code==='authority_revision_conflict'?'authority_revision_conflict':'authority_remote_unconfirmed'});}
+   catch(error){finish(buffer,{id:request.id,ok:false,error:(error instanceof CoreServiceError)&&error.code==='authority_revision_conflict'?'authority_revision_conflict':'authority_remote_unconfirmed'});}
   });
  });
 }else{

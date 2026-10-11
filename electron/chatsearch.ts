@@ -43,13 +43,7 @@ function stem(word: string): string {
 
 /** Lowercase words, stop words out, endings off. */
 export function chatTerms(text: string): string[] {
- if((true as boolean))return corePolicySync('final-chat.terms',[text]);
-  const out: string[] = [];
-  for (const word of String(text ?? '').toLowerCase().replace(/['’]/g, '').match(/[a-z0-9]+/g) ?? []) {
-    if (STOP.has(word) || (word.length < 3 && !/^\d+$/.test(word))) continue;
-    out.push(stem(word));
-  }
-  return out;
+ return corePolicySync('final-chat.terms',[text]);
 }
 
 export type ChatIndex = {
@@ -64,41 +58,12 @@ export type ChatIndex = {
 };
 
 export function buildChatIndex(exchanges: Exchange[]): ChatIndex {
- if((true as boolean))return coreChatIndex(exchanges);
-  const counts = exchanges.map(exchange => {
-    const count = new Map<string, number>();
-    for (const term of chatTerms(exchange.text)) count.set(term, (count.get(term) ?? 0) + 1);
-    return count;
-  });
-  const spread = new Map<string, number>();
-  for (const count of counts) for (const term of count.keys()) spread.set(term, (spread.get(term) ?? 0) + 1);
-  const lengths = counts.map(count => [...count.values()].reduce((sum, n) => sum + n, 0));
-  return {
-    exchanges,
-    position: new Map(exchanges.map((exchange, at) => [exchange.id, at])),
-    counts,
-    lengths,
-    average: lengths.reduce((sum, n) => sum + n, 0) / Math.max(1, lengths.length),
-    spread,
-  };
+ return coreChatIndex(exchanges);
 }
 
 /** BM25 (k1 1.2, b 0.75, ReFind's values) of every exchange against the query; 0 where no word is shared. */
 export function keywordScores(index: ChatIndex, query: string): number[] {
- if((true as boolean))return coreChatKeywordScores(index,query);
-  const terms = [...new Set(chatTerms(query))];
-  const total = index.exchanges.length;
-  return index.counts.map((count, at) => {
-    let score = 0;
-    for (const term of terms) {
-      const often = count.get(term);
-      if (!often) continue;
-      const spread = index.spread.get(term) ?? 0;
-      const weight = Math.log(1 + (total - spread + 0.5) / (spread + 0.5));
-      score += weight * often * 2.2 / (often + 1.2 * (0.25 + 0.75 * index.lengths[at] / (index.average || 1)));
-    }
-    return score;
-  });
+ return coreChatKeywordScores(index,query);
 }
 
 /**
@@ -114,21 +79,12 @@ const RARE_FLOOR = 5;
 
 /** The specific words of `text` that some kept exchange also uses. */
 export function rareTerms(index: ChatIndex, text: string): Set<string> {
- if((true as boolean))return new Set(corePolicySync<string[]>('final-chat.rare',[index.exchanges.length,Object.fromEntries(index.spread),text]));
-  const limit = Math.max(RARE_FLOOR, Math.round(index.exchanges.length * RARE_SHARE));
-  return new Set(chatTerms(text).filter(term => {
-    const spread = index.spread.get(term) ?? 0;
-    return spread > 0 && spread <= limit;
-  }));
+ return new Set(corePolicySync<string[]>('final-chat.rare',[index.exchanges.length,Object.fromEntries(index.spread),text]));
 }
 
 /** Whether the exchange uses any of these words. */
 export function mentionsAny(index: ChatIndex, id: string, terms: Set<string>): boolean {
- if((true as boolean))return corePolicySync('final-chat.mentions',[Object.fromEntries(index.counts[index.position.get(id)??-1]??new Map()),[...terms]]);
-  const at = index.position.get(id);
-  if (at === undefined) return false;
-  for (const term of terms) if (index.counts[at].has(term)) return true;
-  return false;
+ return corePolicySync('final-chat.mentions',[Object.fromEntries(index.counts[index.position.get(id)??-1]??new Map()),[...terms]]);
 }
 
 /**
@@ -137,14 +93,12 @@ export function mentionsAny(index: ChatIndex, id: string, terms: Set<string>): b
  * lines alike; other models get the text as it is.
  */
 export function embedText(model: string, kind: 'query' | 'document', text: string): string {
- if((true as boolean))return corePolicySync('final-chat.embed',[model,kind,text]);
-  return /nomic-embed/i.test(model) ? `search_${kind}: ${text}` : text;
+ return corePolicySync('final-chat.embed',[model,kind,text]);
 }
 
 /** Which vectors are comparable: the model and whether the prefixes were used. */
 export function embedFormat(model: string): string {
- if((true as boolean))return corePolicySync('final-chat.embedFormat',[model]);
-  return `${model}${/nomic-embed/i.test(model) ? '+search-prefixes' : ''}`;
+ return corePolicySync('final-chat.embedFormat',[model]);
 }
 
 /**
@@ -185,70 +139,12 @@ const WORD_SHARE_WITHOUT_MEANING = 0.05;
  * the model works the dates out itself and is known to land a day out.
  */
 export function searchChats(index: ChatIndex, input: { query: string; queryVector?: number[] | null; vectors: Map<string, number[]>; from?: string; to?: string; limit?: number }): ChatHit[] {
- if((true as boolean))return coreChatSearch(index,input);
-  const from = isDay(input.from) ? shiftDay(input.from, -1) : '';
-  const to = isDay(input.to) ? shiftDay(input.to, 1) : '';
-  const words = keywordScores(index, input.query);
-  const near = new Map<number, number>();
-  const inRange: number[] = [];
-  index.exchanges.forEach((exchange, at) => {
-    if ((from && exchange.day < from) || (to && exchange.day > to)) return;
-    inRange.push(at);
-    const vector = input.queryVector ? input.vectors.get(exchange.id) : undefined;
-    if (vector && input.queryVector) near.set(at, cosine(vector, input.queryVector));
-  });
-  // Inside a date range he named, any shared word will do — the days already
-  // narrowed it. Without vectors, a common name still counts.
-  const share = from || to ? 1 : near.size ? WORD_SHARE : WORD_SHARE_WITHOUT_MEANING;
-  const telling = Math.max(RARE_FLOOR, Math.round(index.exchanges.length * share));
-  const specific = new Set(chatTerms(input.query).filter(term => (index.spread.get(term) ?? 0) <= telling));
-  const sharesSpecific = (at: number) => words[at] > 0 && mentionsAny(index, index.exchanges[at].id, specific) && (!near.has(at) || (near.get(at) ?? 0) >= WORD_FLOOR);
-  const fused = new Map<number, number>();
-  const fuse = (ranked: number[]) => ranked.slice(0, 100).forEach((at, rank) => fused.set(at, (fused.get(at) ?? 0) + 1 / (60 + rank + 1)));
-  fuse(inRange.filter(at => words[at] > 0).sort((a, b) => words[b] - words[a]));
-  fuse(inRange.filter(at => near.has(at)).sort((a, b) => (near.get(b) ?? 0) - (near.get(a) ?? 0)));
-  const hits: ChatHit[] = [];
-  const shown = new Set<number>();
-  for (const [at, score] of [...fused.entries()].sort((a, b) => b[1] - a[1])) {
-    if (hits.length >= (input.limit ?? SEARCH_LIMIT)) break;
-    if (shown.has(at) || (!sharesSpecific(at) && (near.get(at) ?? 0) < SEARCH_FLOOR)) continue;
-    const exchange = index.exchanges[at];
-    // A neighbour already on show beside an earlier find is not shown again.
-    const beside = (other: number) => !shown.has(other) && index.exchanges[other]?.day === exchange.day ? index.exchanges[other] : undefined;
-    const before = beside(at - 1);
-    const after = beside(at + 1);
-    // Only what is actually on show: a neighbour refused for being another day's
-    // used to be marked shown anyway, and a strong find just across midnight was
-    // skipped for it (review, 2026-09-17).
-    shown.add(at);
-    if (before) shown.add(at - 1);
-    if (after) shown.add(at + 1);
-    hits.push({ exchange, score, before, after });
-  }
-  // "What did we talk about on the 10th": a day or two named and nothing that
-  // matched the words — the day itself is the answer, a few exchanges across it.
-  const span = from && to ? Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000) : Infinity;
-  if (!hits.length && span <= 4 && inRange.length) {
-    const limit = input.limit ?? SEARCH_LIMIT;
-    const step = Math.max(1, Math.floor(inRange.length / limit));
-    for (let pick = 0; pick < inRange.length && hits.length < limit; pick += step) hits.push({ exchange: index.exchanges[inRange[pick]], score: 0 });
-  }
-  return hits;
+ return coreChatSearch(index,input);
 }
 
 const clip = (text: string, most: number) => text.split('\n').map(line => line.length > most ? `${line.slice(0, most - 1)}…` : line).join('\n');
 
 /** What she is handed: each find under its date, with the exchange either side trimmed, and relative dates written out. */
 export function chatHitsNote(hits: ChatHit[], weekday: Intl.DateTimeFormat): string {
- if((true as boolean))return corePolicySync('final-chat.note',[hits]);
-  return hits.map(hit => {
-    const [y, m, d] = hit.exchange.day.split('-').map(Number);
-    const when = `${weekday.format(new Date(Date.UTC(y, (m ?? 1) - 1, d ?? 1)))} ${hit.exchange.day}`;
-    const lines = [
-      hit.before ? clip(hit.before.text, 200) : '',
-      hit.exchange.text,
-      hit.after ? clip(hit.after.text, 200) : '',
-    ].filter(Boolean).map(text => withRelativeDates(text, hit.exchange.day));
-    return `[${when}]\n${lines.join('\n')}`;
-  }).join('\n\n');
+ return corePolicySync('final-chat.note',[hits]);
 }

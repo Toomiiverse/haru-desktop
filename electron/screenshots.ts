@@ -19,15 +19,7 @@ export type ScreenshotConfig = {
 export const DEFAULT_SCREENSHOTS: ScreenshotConfig = { enabled: false, folder: '', quietMinutes: 3 };
 
 export function readScreenshotConfig(saved: unknown): ScreenshotConfig {
- if((true as boolean))return screenPolicy('screenshots',[saved]);
-  if (!saved || typeof saved !== 'object') return DEFAULT_SCREENSHOTS;
-  const record = saved as Partial<ScreenshotConfig>;
-  const quietMinutes = typeof record.quietMinutes === 'number' ? Math.max(1, Math.min(60, Math.round(record.quietMinutes))) : DEFAULT_SCREENSHOTS.quietMinutes;
-  return {
-    enabled: record.enabled === true,
-    folder: typeof record.folder === 'string' ? record.folder.trim() : '',
-    quietMinutes,
-  };
+ return screenPolicy('screenshots',[saved]);
 }
 
 const PICTURE = /\.(png|jpe?g)$/i;
@@ -39,8 +31,7 @@ export const SETTLE_MS = 400;
 export const SETTLE_TRIES = 12;
 
 export function looksLikeScreenshot(name: string): boolean {
- if((true as boolean))return screenPolicy('looks',[name]);
-  return PICTURE.test(name);
+ return screenPolicy('looks',[name]);
 }
 
 /**
@@ -52,9 +43,7 @@ export function looksLikeScreenshot(name: string): boolean {
  * the interesting one is the last.
  */
 export function maySpeak(config: ScreenshotConfig, lastSpokeAt: number, now: number): boolean {
- if((true as boolean))return screenPolicy('maySpeak',[config,lastSpokeAt,now]);
-  if (!config.enabled) return false;
-  return now - lastSpokeAt >= config.quietMinutes * 60_000;
+ return screenPolicy('maySpeak',[config,lastSpokeAt,now]);
 }
 
 /**
@@ -63,15 +52,5 @@ export function maySpeak(config: ScreenshotConfig, lastSpokeAt: number, now: num
  * noticed something go past.
  */
 export function screenshotPrompt(description: string, name: string): string {
- if((true as boolean))return screenPolicy('shotPrompt',[description,name]);
-  return [
-    'They just took a screenshot. This is what was in it:',
-    description,
-    'Say one short line about it, in your own voice, the way you would if you had glanced over and seen it.',
-    'React to what is actually in it. Do not describe it back to them, do not mention screenshots, files or descriptions, and do not ask them to explain it.',
-    // The point of the whole feature is that it is a passing remark. Anything
-    // longer turns a keypress into an interruption.
-    'One line. If there is nothing worth saying about it, say something short and unbothered rather than inventing interest.',
-    `(The file is called ${name}, which you may ignore.)`,
-  ].join(' ');
+ return screenPolicy('shotPrompt',[description,name]);
 }

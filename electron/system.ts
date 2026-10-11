@@ -320,7 +320,7 @@ export async function collectDocker(): Promise<DockerStatus | null> {
 }
 
 export async function collectServices(wanted?: string): Promise<ServiceStatus[]> {
-  if((true as boolean)){
+  {
     const commands=corePolicySync<{name:string;user:boolean}[]>('diagnostic.services',[wanted??null,(true as boolean)]);
     const observed:ServiceStatus[]=[];
     for(const command of commands){
@@ -329,13 +329,6 @@ export async function collectServices(wanted?: string): Promise<ServiceStatus[]>
     }
     return observed;
   }
-  const names = wanted ? KNOWN_SERVICES.filter(name => name === wanted) : KNOWN_SERVICES;
-  const statuses: ServiceStatus[] = [];
-  for (const name of names) {
-    const args = USER_SERVICES.includes(name) ? ['--user', 'is-active', name] : ['is-active', name];
-    statuses.push({ name, state: parseSystemctlState(await runKeep('systemctl', args)) });
-  }
-  return statuses;
 }
 
 export function readCpuTemp(): number | null {
@@ -362,65 +355,5 @@ export async function collectAll(): Promise<SystemCollected> {
 // ---- Diagnostics -------------------------------------------------------------
 
 export function diagnose(target: string, collected: SystemCollected): Diagnosis {
-  if((true as boolean))return corePolicySync<Diagnosis>('diagnostic.diagnose',[target,collected,(true as boolean)]);
-  const findings: string[] = [];
-  let status: Diagnosis['status'] = 'ok';
-  const note = (level: 'ok' | 'warning' | 'critical', message: string) => {
-    if (level === 'ok') return;
-    findings.push(message);
-    if (level === 'critical' || (level === 'warning' && status !== 'critical')) status = level;
-  };
-
-  if (target === 'gpu' || target === 'all') {
-    if (!collected.gpu?.length) note('warning', 'GPU information is unavailable.');
-    else for (const gpu of collected.gpu) {
-      if (gpu.utilization_percent >= 90) note('critical', `GPU is at ${gpu.utilization_percent}% utilisation.`);
-      else if (gpu.utilization_percent >= 75) note('warning', `GPU is at ${gpu.utilization_percent}% utilisation.`);
-      if (gpu.temperature_c >= 85) note('critical', `GPU is at ${gpu.temperature_c}°C.`);
-      else if (gpu.temperature_c >= 75) note('warning', `GPU is at ${gpu.temperature_c}°C.`);
-      if (gpu.vram_total_gb && gpu.vram_used_gb / gpu.vram_total_gb >= 0.9) note('warning', `VRAM is nearly full (${gpu.vram_used_gb}/${gpu.vram_total_gb} GiB).`);
-    }
-  }
-
-  if (target === 'memory' || target === 'all') {
-    const memory = collected.memory;
-    if (!memory) note('warning', 'Memory information is unavailable.');
-    else if (memory.usage_percent >= 90) note('critical', `RAM is at ${memory.usage_percent}%.`);
-    else if (memory.usage_percent >= 80) note('warning', `RAM is at ${memory.usage_percent}%.`);
-  }
-
-  if (target === 'disk' || target === 'all') {
-    const disk = collected.disk ?? [];
-    if (!disk.length) note('warning', 'Disk information is unavailable.');
-    else for (const mount of disk) {
-      if (mount.usage_percent >= 90) note('critical', `${mount.mount} is ${mount.usage_percent}% full.`);
-      else if (mount.usage_percent >= 80) note('warning', `${mount.mount} is ${mount.usage_percent}% full.`);
-    }
-  }
-
-  if (target === 'docker' || target === 'all') {
-    const docker = collected.docker;
-    if (!docker) note('critical', 'The Docker daemon is not responding.');
-    else {
-      const down = docker.containers.filter(container => container.state !== 'running');
-      const unhealthy = docker.containers.filter(container => container.health === 'unhealthy' || /restarting/i.test(container.status));
-      const restarted = docker.containers.filter(container => container.restart_count > 5);
-      if (down.length) note('warning', `${down.length} container${down.length === 1 ? '' : 's'} not running (${down.map(container => container.name).join(', ')}).`);
-      if (unhealthy.length) note('critical', `${unhealthy.length} unhealthy container${unhealthy.length === 1 ? '' : 's'} (${unhealthy.map(container => container.name).join(', ')}).`);
-      if (restarted.length) note('warning', `${restarted.map(container => `${container.name} restarted ${container.restart_count}x`).join(', ')}.`);
-    }
-  }
-
-  if (target === 'network' || target === 'all') {
-    const network = collected.network;
-    if (!network || network.status !== 'online') note('critical', 'The server has no default network route.');
-  }
-
-  if (target === 'haru' || target === 'all') {
-    const haru = collected.services.find(service => service.name === 'haru');
-    if (haru && haru.state !== 'active') note('critical', 'The Haru service is not active.');
-    else if (!haru) note('warning', 'Could not read the Haru service state.');
-  }
-
-  return { target, status, findings };
+  return corePolicySync<Diagnosis>('diagnostic.diagnose',[target,collected,(true as boolean)]);
 }

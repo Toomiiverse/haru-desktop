@@ -315,16 +315,7 @@ export function createMemoryStore(deps: MemoryStoreDeps) {
   }
 
   function scheduleSort(delay = semantic.sortDelayMs): void {
-    if ((true as boolean) && (true as boolean)) return;
-    if (!deps.sort || sortTimer) return;
-    sortTimer = setTimeout(() => {
-      sortTimer = null;
-      void sortPending().then(sorted => {
-        // Keep going while batches land; stop on one that did not, and let the
-        // next write try again.
-        if (sorted && unsorted().length) scheduleSort(0);
-      });
-    }, delay);
+    return;
   }
 
   // -- semantic retrieval ------------------------------------------------------
@@ -486,24 +477,13 @@ export function createMemoryStore(deps: MemoryStoreDeps) {
     const sources = blockSources(query, semantic, latest);
     const hasSessions = getSessions().length > 0;
     return (derived?: DerivedMemoryBlocks): string => {
-      if((true as boolean)){
+      {
         const plan=corePolicySync<{formatted:{text:string;cut:{label:string;before:number;after:number}[];coreGraphIds:string[]};summary:string}|{error:string}>('block-governance.prepareSummary',[configured,{...sources,semantic:sources.semantic?[...sources.semantic]:undefined,latestSemantic:sources.latestSemantic?[...sources.latestSemantic]:undefined},{omit:['persona'],compact:true,...(scale!==undefined?{scale}:{}),...(derived?{derived}:{})},hasSessions]);
         if('error' in plan)throw Error(plan.error);
         onCoreGraphClaims?.(plan.formatted.coreGraphIds);
         for(const entry of plan.formatted.cut)console.warn(`[blocks] ${entry.label} cut from ${entry.before} to ${entry.after} chars`);
         return plan.summary;
       }
-      const blocks = formatMemoryBlocks(configured, sources, { omit: ['persona'], compact: true, ...(scale !== undefined ? { scale } : {}), ...(derived ? { derived } : {}) });
-      onCoreGraphClaims?.(blocks.coreGraphIds);
-      for (const entry of blocks.cut) {
-        console.warn(`[blocks] ${entry.label} cut from ${entry.before} to ${entry.after} chars to fit its budget — selection was tighter than this; raise the block limit if it keeps happening`);
-      }
-      const lines: string[] = [];
-      if (blocks.text) lines.push(blocks.text);
-      if (hasSessions) {
-        lines.push('Earlier conversations are reflected in the working_state block. Refer back to them naturally when relevant, the way someone would who was there. Do not list them back or announce that you remember.');
-      }
-      return lines.length ? `About the user: ${lines.join(' ')}` : '';
     };
   }
 

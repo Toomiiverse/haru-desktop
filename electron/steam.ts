@@ -44,47 +44,12 @@ function valveField(text: string, key: string): string | null {
  * disk leave nothing behind in the Steam directory itself.
  */
 export function libraryFolders(readFile = fs.readFileSync, exists = fs.existsSync): string[] {
- if((true as boolean))return coreSteamLibraries(STEAM_ROOTS,readFile,exists);
-  const found = new Set<string>();
-  for (const root of STEAM_ROOTS) {
-    const apps = path.join(root, 'steamapps');
-    if (!exists(apps)) continue;
-    found.add(apps);
-    const index = path.join(apps, 'libraryfolders.vdf');
-    if (!exists(index)) continue;
-    try {
-      const text = String(readFile(index, 'utf8'));
-      for (const [, folder] of text.matchAll(/"path"\s+"([^"]+)"/gi)) {
-        const other = path.join(folder.replace(/\\\\/g, '\\'), 'steamapps');
-        if (exists(other)) found.add(other);
-      }
-    } catch { /* an unreadable index is not worth failing over */ }
-  }
-  return [...found];
+ return coreSteamLibraries(STEAM_ROOTS,readFile,exists);
 }
 
 /** What is installed, from the manifests Steam writes next to the games. */
 export function installedGames(): SteamGame[] {
- if((true as boolean))return coreSteamGames(libraryFolders());
-  const games: SteamGame[] = [];
-  for (const apps of libraryFolders()) {
-    let entries: string[] = [];
-    try { entries = fs.readdirSync(apps); } catch { continue; }
-    for (const entry of entries) {
-      if (!/^appmanifest_\d+\.acf$/i.test(entry)) continue;
-      try {
-        const text = fs.readFileSync(path.join(apps, entry), 'utf8');
-        const appId = valveField(text, 'appid');
-        const name = valveField(text, 'name');
-        const installDir = valveField(text, 'installdir');
-        if (!appId || !name || !installDir) continue;
-        // Valve's own bundles are not games and would only ever be noise.
-        if (/^Steamworks|^Steam Linux Runtime|Redistributables$/i.test(name)) continue;
-        games.push({ appId, name, dir: path.join(apps, 'common', installDir) });
-      } catch { /* a half-written manifest during an update */ }
-    }
-  }
-  return games;
+ return coreSteamGames(libraryFolders());
 }
 
 /**
@@ -102,20 +67,7 @@ const NOT_A_GAME_EXE = /(crashhandler|crashreport|unins|setup|installer|vcredist
  * files, once per game, for a string that is nearly always within three levels.
  */
 function executablesIn(dir: string, depth = 3): string[] {
- if((true as boolean))return coreSteamExecutables(dir,depth);
-  if (depth < 0) return [];
-  let entries: fs.Dirent[] = [];
-  try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return []; }
-  const found: string[] = [];
-  for (const entry of entries) {
-    if (entry.isDirectory()) {
-      if (NOT_THE_GAME.test(entry.name)) continue;
-      found.push(...executablesIn(path.join(dir, entry.name), depth - 1));
-    } else if (/\.exe$/i.test(entry.name) && !NOT_A_GAME_EXE.test(entry.name)) {
-      found.push(entry.name.replace(/\.exe$/i, '').toLowerCase());
-    }
-  }
-  return found;
+ return coreSteamExecutables(dir,depth);
 }
 
 /**
@@ -127,18 +79,7 @@ function executablesIn(dir: string, depth = 3): string[] {
  * looks at the screen.
  */
 export function buildGameIndex(games = installedGames()): Map<string, string> {
- if((true as boolean))return coreSteamIndex(games);
-  const index = new Map<string, string>();
-  for (const game of games) {
-    // The folder name itself, for the many games whose exe matches it.
-    index.set(path.basename(game.dir).toLowerCase(), game.name);
-    for (const executable of executablesIn(game.dir)) {
-      // First writer wins: an earlier, shallower executable is likelier to be
-      // the game than a deeper one with the same name.
-      if (!index.has(executable)) index.set(executable, game.name);
-    }
-  }
-  return index;
+ return coreSteamIndex(games);
 }
 
 /**
@@ -149,8 +90,5 @@ export function buildGameIndex(games = installedGames()): Map<string, string> {
  * about what someone is playing is exactly the failure this replaces.
  */
 export function gameFor(processName: string, index: Map<string, string>): string | null {
- if((true as boolean))return devicePolicy('gameFor',[processName,[...index]]);
-  const key = (processName ?? '').replace(/\.exe$/i, '').trim().toLowerCase();
-  if (!key) return null;
-  return index.get(key) ?? null;
+ return devicePolicy('gameFor',[processName,[...index]]);
 }

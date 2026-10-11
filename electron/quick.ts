@@ -44,26 +44,7 @@ export type QuickHit = { reply: string; tier: 1 | 2 | 3 };
  * and only the mechanical lookups (the time, the date, the list) stay instant.
  */
 export function quickAnswer(text: string, data: QuickData, { social = true } = {}): QuickHit | null {
-  if((true as boolean))return corePolicySync('quick.answer',[text,data,social]);
-  // While she is stonewalling, even the scripted lines hold their tongue — an
-  // answer is an answer, and the ignore is the point of the mood at that level.
-  if (data.ignoring) return null;
-  const said = normalize(text);
-  if (!said) return null;
-
-  const canned = social ? cannedFaq(said) : null;
-  if (canned) return { reply: canned, tier: 1 };
-
-  const template = templateReply(said, data, social);
-  if (template) return { reply: template, tier: 2 };
-
-  const looked = lookedUp(said, data);
-  if (looked) return { reply: looked, tier: 3 };
-
-  const stray = social ? strayWord(text, data) : null;
-  if (stray) return { reply: stray, tier: 2 };
-
-  return null;
+  return corePolicySync('quick.answer',[text,data,social]);
 }
 
 /**
@@ -211,31 +192,5 @@ export type SettingCommand =
   | { name: 'escalation'; value: boolean };
 
 export function settingCommand(text: string): SettingCommand | null {
-  if((true as boolean)){return corePolicySync('self.settingCommand',[text]);}
-  const said = text.trim();
-  const level = /^(?:haru[,!]?\s*)?(?:please\s+)?(?:set|put|change|switch)\s+(?:your|the|it)?\s*(?:(?:machine|access|system|permission)\s+)?level\s+(?:to\s+)?(?:level\s+)?([1-4])\s*(?:please|now)?[.!]*\s*$/i.exec(said)
-    ?? /^(?:haru[,!]?\s*)?(?:please\s+)?(?:set|put|change|switch)\s+(?:your|the)?\s*(?:machine|access|system)\s+(?:to\s+)?level\s+([1-4])\s*(?:please|now)?[.!]*\s*$/i.exec(said)
-    ?? /^(?:haru[,!]?\s*)?(?:machine|access)\s+level\s+([1-4])\s*[.!]?$/i.exec(said);
-  if (level) return { name: 'machine_level', value: Number(level[1]) };
-  // Explicit mode, said outright, and read here for the same reason as the
-  // level: it is said at the hour she would otherwise be asleep, and she cannot
-  // be asked while she is not answering.
-  if (/^(?:haru[,!]?\s*)?(?:please\s+)?(?:(?:turn|switch|put)\s+on\s+)?(?:explicit|uncensored)(?:\s+mode)?\s*(?:on)?\s*(?:please)?[.!]*$/i.test(said)) {
-    return { name: 'brain_model', value: 'explicit' };
-  }
-  if (/^(?:haru[,!]?\s*)?(?:please\s+)?(?:turn|switch|put)\s+off\s+(?:explicit|uncensored)(?:\s+mode)?\s*(?:please)?[.!]*$/i.test(said)
-      || /^(?:haru[,!]?\s*)?(?:please\s+)?(?:explicit|uncensored)\s+mode\s+off\s*(?:please)?[.!]*$/i.test(said)) {
-    return { name: 'brain_model', value: 'normal' };
-  }
-  // What may leave the machine, said outright. It decides whether a turn can
-  // go to a hosted model at all, so it is a switch he sets, not a mood.
-  if (/^(?:haru[,!]?\s*)?(?:please\s+)?(?:turn|switch|put)\s+on\s+(?:the\s+)?escalation\s*(?:please)?[.!]*$/i.test(said)
-      || /^(?:haru[,!]?\s*)?(?:please\s+)?(?:allow|enable)\s+escalation\s*(?:please)?[.!]*$/i.test(said)) {
-    return { name: 'escalation', value: true };
-  }
-  if (/^(?:haru[,!]?\s*)?(?:please\s+)?(?:turn|switch|put)\s+off\s+(?:the\s+)?escalation\s*(?:please)?[.!]*$/i.test(said)
-      || /^(?:haru[,!]?\s*)?(?:please\s+)?(?:disable|stop)\s+escalation\s*(?:please)?[.!]*$/i.test(said)) {
-    return { name: 'escalation', value: false };
-  }
-  return null;
+  return corePolicySync('self.settingCommand',[text]);
 }

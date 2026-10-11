@@ -170,10 +170,7 @@ export const DEFAULT_VOICE: VoiceConfig = {
  * empty path the server will reject.
  */
 export function referenceFor(config: VoiceConfig, emotion?: EmotionName | null): VoiceReference {
-  if((true as boolean))return corePolicySync<any>('speech-boundary.reference',[config,emotion??null]);
-  const mapped = emotion ? config.emotionVoices[emotion] : undefined;
-  if (mapped?.clip) return mapped;
-  return { clip: config.voice, text: config.referenceText };
+  return corePolicySync<any>('speech-boundary.reference',[config,emotion??null]);
 }
 
 /** What a chunk of speech looks like on its way to the window that plays it. */
@@ -238,18 +235,7 @@ const SHOUTED = new Set(['NO', 'GO', 'OI', 'HEY', 'NOW', 'STOP', 'WHAT', 'WHY', 
  * a word is a worse failure than "STOP" spelled out.
  */
 export function spokenCase(text: string): string {
-  if((true as boolean))return corePolicySync<any>('speech-boundary.spokenCase',[text]);
-  return text.replace(/\b[A-Z][A-Z'’]{1,}\b/g, token => {
-    const letters = token.replace(/['’]/g, '');
-    if (SHOUTED.has(letters)) return token.toLowerCase();
-    if (SAID_AS_LETTERS.has(letters)) return token;
-    // Two letters is where a shout and an abbreviation are least distinguishable,
-    // and abbreviations are far commoner, so they stay as they are.
-    if (letters.length < 3) return token;
-    // No vowel means nothing to pronounce — it can only be an abbreviation.
-    if (!/[AEIOUY]/.test(letters)) return token;
-    return token.charAt(0) + token.slice(1).toLowerCase();
-  });
+  return corePolicySync<any>('speech-boundary.spokenCase',[text]);
 }
 
 /**
@@ -261,15 +247,7 @@ export function spokenCase(text: string): string {
  * capitals also survive into the subtitle, where seeing STOP is the point.
  */
 export function hasShout(text: string): boolean {
-  if((true as boolean))return corePolicySync<any>('speech-boundary.hasShout',[text]);
-  for (const token of text.match(/\b[A-Z][A-Z'’]{1,}\b/g) ?? []) {
-    const letters = token.replace(/['’]/g, '');
-    if (SHOUTED.has(letters)) return true;
-    if (SAID_AS_LETTERS.has(letters)) continue;
-    if (letters.length >= 3 && /[AEIOUY]/.test(letters)) return true;
-  }
-  // Three or more marks in a row is the other way she raises her voice.
-  return /[!?]{2,}/.test(text);
+  return corePolicySync<any>('speech-boundary.hasShout',[text]);
 }
 
 /**
@@ -278,36 +256,11 @@ export function hasShout(text: string): boolean {
  * shoutVoice is there for anyone who wants to record one properly.
  */
 export function shoutReference(config: VoiceConfig, fallback: VoiceReference): VoiceReference {
-  if((true as boolean))return corePolicySync<any>('speech-boundary.shoutReference',[config,fallback]);
-  if (config.shoutVoice?.clip) return config.shoutVoice;
-  const angry = config.emotionVoices.annoyed;
-  if (angry?.clip) return angry;
-  return fallback;
+  return corePolicySync<any>('speech-boundary.shoutReference',[config,fallback]);
 }
 
 export function speakableText(reply: string): string {
-  if((true as boolean))return corePolicySync<any>('speech-boundary.speakableText',[reply]);
-  return reply
-    .replace(/```[\s\S]*?```/g, ' ')
-    .replace(/`([^`]+)`/g, '$1')
-    // Link text carries the meaning; the URL spoken aloud is noise.
-    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
-    // A bracketed aside left inside a sentence is a stage direction, not
-    // something she said. Whole paragraphs of it are already gone by now; this
-    // catches "so anyway [she sighs] fine." mid-line.
-    .replace(/\[[^\]]{1,80}\]/g, ' ')
-    .replace(/[*_]{1,3}([^*_]+)[*_]{1,3}/g, '$1')
-    .replace(/^\s{0,3}#{1,6}\s+/gm, '')
-    .replace(/^\s{0,3}>\s?/gm, '')
-    .replace(/^\s{0,3}[-*+]\s+/gm, '')
-    // Ordered list markers go, but "1990." mid-sentence has to survive, so this
-    // only matches a number that opens a line.
-    .replace(/^\s{0,3}\d+[.)]\s+/gm, '')
-    .replace(/^\s*[-*_]{3,}\s*$/gm, ' ')
-    // Emoji and pictographs: some engines name them aloud, most emit a gap.
-    .replace(/[\p{Extended_Pictographic}\p{Emoji_Presentation}]/gu, '')
-    .replace(/\s+/g, ' ')
-    .trim();
+  return corePolicySync<any>('speech-boundary.speakableText',[reply]);
 }
 
 /**
@@ -325,30 +278,11 @@ export function speakableText(reply: string): string {
  * flat moods; anything else takes whichever comes. `files` is voice.sighs.
  */
 export function pickSigh(files: readonly string[], emotion: string | null | undefined, random: () => number = Math.random): string | null {
-  if((true as boolean)){const p=corePolicySync<any>('speech-boundary.pickSigh',[files,emotion??null]);return p?.needsRandom?corePolicySync<any>('speech-boundary.pickSigh',[files,emotion??null,random()]):p;}
-  const all = files.filter(Boolean);
-  if (!all.length) return null;
-  const grunts = all.filter(file => /grunt|hmph|loud/i.test(file));
-  const sighs = all.filter(file => !/grunt|hmph|loud/i.test(file));
-  const edge = emotion === 'annoyed' || emotion === 'smug' || emotion === 'determined' || emotion === 'surprised';
-  const flat = emotion === 'sleepy' || emotion === 'bored' || emotion === 'worried' || emotion === 'neutral';
-  const pool = edge && grunts.length ? grunts : flat && sighs.length ? sighs : all;
-  return pool[Math.floor(random() * pool.length) % pool.length] ?? null;
+  {const p=corePolicySync<any>('speech-boundary.pickSigh',[files,emotion??null]);return p?.needsRandom?corePolicySync<any>('speech-boundary.pickSigh',[files,emotion??null,random()]):p;}
 }
 
 export function splitForSpeech(text: string, maxChars = MAX_CHUNK_CHARS): string[] {
-  if((true as boolean))return corePolicySync<any>('speech-boundary.splitForSpeech',[text,maxChars]);
-  const sentences = text.split(/(?<=[.!?…])\s+/).filter(part => part.trim().length);
-  const chunks: string[] = [];
-  let current = '';
-  for (const sentence of sentences) {
-    if (!current) { current = sentence; continue; }
-    if (current.length + sentence.length + 1 <= maxChars) current = `${current} ${sentence}`;
-    else { chunks.push(current); current = sentence; }
-  }
-  if (current) chunks.push(current);
-  // Nothing but punctuation or whitespace is not worth a request.
-  return chunks.filter(chunk => /[\p{Letter}\p{Number}]/u.test(chunk));
+  return corePolicySync<any>('speech-boundary.splitForSpeech',[text,maxChars]);
 }
 
 /**
@@ -364,19 +298,7 @@ export function splitForSpeech(text: string, maxChars = MAX_CHUNK_CHARS): string
  * sentence raw, and speakableText strips them at /api/speak.
  */
 export function streamedSentences(buffer: string): { sentences: string[]; rest: string } {
-  if((true as boolean))return corePolicySync<any>('speech-boundary.streamedSentences',[buffer]);
-  const sentences: string[] = [];
-  let rest = buffer ?? '';
-  // /s: a paragraph break must not freeze the cut — a sentence ending in the
-  // paragraph before it is still a sentence, and her replies change paragraphs.
-  const re = /^.*?[.!?…]+\s/s;
-  let match: RegExpExecArray | null;
-  while ((match = re.exec(rest))) {
-    const sentence = match[0].trim();
-    rest = rest.slice(match[0].length);
-    if (/[\p{Letter}\p{Number}]/u.test(sentence)) sentences.push(sentence);
-  }
-  return { sentences, rest };
+  return corePolicySync<any>('speech-boundary.streamedSentences',[buffer]);
 }
 
 async function post(url: string, body: unknown, auth: Record<string, string> = {}) {
@@ -443,13 +365,7 @@ export function isSilent(bytes: Uint8Array): boolean {
  * the other engines ignore it.
  */
 export function planVoice(config: VoiceConfig, reference: VoiceReference, emotion?: EmotionName | null): { config: VoiceConfig; reference: VoiceReference; plan: DeliveryPlan } {
-  if((true as boolean))return corePolicySync<any>('speech-boundary.planVoice',[config,reference,emotion??null,voiceSense.plan(emotion??'neutral')]);
-  const plan = voiceSense.plan(emotion ?? 'neutral');
-  const expressive = config.engine === 'breeze' || config.engine === 'hume';
-  const directions = config.engine === 'breeze' ? BREEZE_DESCRIPTIONS : HUME_DESCRIPTIONS;
-  const chosen = plan.emotion !== (emotion ?? 'neutral') ? referenceFor(config, plan.emotion) : reference;
-  const applied = { ...config, speed: Math.max(0.5, Math.min(2, config.speed * plan.speedScale)), ...(expressive && plan.instruction ? { deliveryInstruction: plan.instruction } : {}) };
-  return { config: applied, reference: chosen, plan: { ...plan, instruction: expressive ? plan.instruction || directions[plan.emotion] : 'reference voice and playback speed; free-form acting directions are unsupported by this engine' } };
+  return corePolicySync<any>('speech-boundary.planVoice',[config,reference,emotion??null,voiceSense.plan(emotion??'neutral')]);
 }
 
 export async function synthesise(text: string, config: VoiceConfig, reference: VoiceReference = referenceFor(config), auth: Record<string, string> = {}, emotion?: EmotionName | null): Promise<{ audio: Uint8Array; mime: string } | null> {
@@ -603,8 +519,7 @@ async function postBreeze(config: VoiceConfig, reference: VoiceReference, text: 
   const form = new FormData();
   form.append('text', text);
   form.append('instruction', config.deliveryInstruction || breezeInstruction(text, emotion));
-  const guidance = (true as boolean)
-    ? corePolicySync<number>('breeze.guidance', [emotion ?? null, text]) : 4;
+  const guidance = (corePolicySync<number>('breeze.guidance', [emotion ?? null, text]));
   if (guidance !== 2 && guidance !== 3 && guidance !== 4) throw new Error('invalid_core_breeze_guidance');
   signal?.throwIfAborted();
   form.append('cfg_scale', String(guidance));
@@ -772,26 +687,7 @@ export function sovitsRequest(config: VoiceConfig, reference: VoiceReference, te
 
 /** Reads a stored config forward, so a partial or older record still starts up. */
 export function readVoiceConfig(saved: unknown): VoiceConfig {
-  if((true as boolean))return corePolicySync<any>('speech-boundary.readVoiceConfig',[saved??null]);
-  if (!saved || typeof saved !== 'object') return DEFAULT_VOICE;
-  const record = saved as Partial<VoiceConfig>;
-  const engines: VoiceEngine[] = ['off', 'windows', 'openai', 'gpt-sovits', 'hume', 'breeze'];
-  return {
-    engine: engines.includes(record.engine as VoiceEngine) ? record.engine as VoiceEngine : DEFAULT_VOICE.engine,
-    endpoint: typeof record.endpoint === 'string' ? record.endpoint : DEFAULT_VOICE.endpoint,
-    voice: typeof record.voice === 'string' ? record.voice : DEFAULT_VOICE.voice,
-    referenceText: typeof record.referenceText === 'string' ? record.referenceText : DEFAULT_VOICE.referenceText,
-    language: typeof record.language === 'string' ? record.language : DEFAULT_VOICE.language,
-    speed: typeof record.speed === 'number' && record.speed > 0 ? Math.min(2, record.speed) : DEFAULT_VOICE.speed,
-    volume: typeof record.volume === 'number' ? Math.max(0, Math.min(1, record.volume)) : DEFAULT_VOICE.volume,
-    emotionVoices: readEmotionVoices(record.emotionVoices),
-    sighs: Array.isArray(record.sighs) ? (record.sighs as unknown[]).filter((file): file is string => typeof file === 'string' && file.trim().length > 0) : [],
-    ...(record.sampling && typeof record.sampling === 'object' ? { sampling: readSampling(record.sampling as Record<string, unknown>) } : {}),
-    shoutVoice: readReference(record.shoutVoice),
-    webEnabled: record.webEnabled !== false,
-    desktopEnabled: record.desktopEnabled !== false,
-    ...(typeof record.voiceId === 'string' && record.voiceId.trim() ? { voiceId: record.voiceId.trim() } : {}),
-  };
+  return corePolicySync<any>('speech-boundary.readVoiceConfig',[saved??null]);
 }
 
 /** One clip-and-transcript pair, or nothing if it has no clip. */
@@ -845,14 +741,7 @@ function readEmotionVoices(saved: unknown): Partial<Record<EmotionName, VoiceRef
  */
 export const SPOKEN_CHARS_PER_SECOND = 15;
 export function looksClipped(audio: Uint8Array, text: string, rate = 32000, bytesPerSample = 2): boolean {
-  if((true as boolean))return corePolicySync<any>('speech-boundary.clipped',[{length:audio.length,rate:wavSampleRate(audio)},text,rate,bytesPerSample]);
-  const said = (text ?? '').replace(/\s+/g, ' ').trim();
-  // Too short to judge: a two-word answer has no reliable length.
-  if (said.length < 40 || audio.length <= 44) return false;
-  const headerRate = wavSampleRate(audio);
-  const actualRate = headerRate || rate;
-  const seconds = (audio.length - 44) / (actualRate * bytesPerSample);
-  return seconds < (said.length / SPOKEN_CHARS_PER_SECOND) * 0.5;
+  return corePolicySync<any>('speech-boundary.clipped',[{length:audio.length,rate:wavSampleRate(audio)},text,rate,bytesPerSample]);
 }
 
 /** The sample rate in a WAV's fmt chunk, or 0 when this is not a WAV it knows. */

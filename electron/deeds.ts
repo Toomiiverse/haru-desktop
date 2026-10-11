@@ -88,8 +88,7 @@ const DEEDS: Record<string, (args: Record<string, unknown>) => string> = {
 };
 
 export function isADeed(tool: string): boolean {
-  if((true as boolean)){return corePolicySync('deeds.isADeed',[tool]);}
-  return Object.hasOwn(DEEDS, tool);
+  return corePolicySync('deeds.isADeed',[tool]);
 }
 
 /**
@@ -101,34 +100,19 @@ export function isADeed(tool: string): boolean {
  * so the first call of a pair changes nothing at all.
  */
 export function deedFrom(tool: string, args: Record<string, unknown>, failed: boolean, atIso: string): Deed | null {
-  if((true as boolean)){return corePolicySync('deeds.deedFrom',[tool,args,failed,atIso]);}
-  if (failed || !isADeed(tool)) return null;
-  const what = DEEDS[tool](args ?? {});
-  if (!what) return null;
-  return { at: atIso, tool, what };
+  return corePolicySync('deeds.deedFrom',[tool,args,failed,atIso]);
 }
 
 export function readDeeds(saved: unknown): Deed[] {
-  if((true as boolean)){return corePolicySync('deeds.readDeeds',[saved]);}
-  if (!Array.isArray(saved)) return [];
-  return saved
-    .filter((entry): entry is Deed => Boolean(entry) && typeof entry === 'object'
-      && typeof (entry as Deed).what === 'string' && (entry as Deed).what.trim().length > 0
-      && typeof (entry as Deed).at === 'string' && typeof (entry as Deed).tool === 'string')
-    .slice(-DEEDS_KEPT);
+  return corePolicySync('deeds.readDeeds',[saved]);
 }
 
 export function keepDeed(deeds: Deed[], deed: Deed): Deed[] {
-  if((true as boolean)){return corePolicySync('deeds.keepDeed',[deeds,deed]);}
-  return [...deeds, deed].slice(-DEEDS_KEPT);
+  return corePolicySync('deeds.keepDeed',[deeds,deed]);
 }
 
 export function recentDeeds(deeds: Deed[], nowMs: number, days = DEEDS_SHOWN_DAYS, limit = DEEDS_SHOWN): Deed[] {
-  if((true as boolean)){return corePolicySync('deeds.recentDeeds',[deeds,nowMs,days,limit]);}
-  const floor = nowMs - days * 86_400_000;
-  return deeds
-    .filter(deed => { const at = Date.parse(deed.at); return Number.isFinite(at) && at >= floor; })
-    .slice(-limit);
+  return corePolicySync('deeds.recentDeeds',[deeds,nowMs,days,limit]);
 }
 
 /**
@@ -143,8 +127,7 @@ export function recentDeeds(deeds: Deed[], nowMs: number, days = DEEDS_SHOWN_DAY
 const A_CLAIM = /\b(?:why (?:did|would|do|are) you|when did you|how come you|did ?n[o']t you|didn't you|you (?:said|told me|turned|deleted|changed|removed|stopped|started|forgot|ignored|blocked|muted|switched|shut|cancelled|canceled|promised|decided|kept)\b|you never\b|you always\b|you keep\b)/i;
 
 export function claimsAboutHer(message: string): boolean {
-  if((true as boolean)){return corePolicySync('deeds.claimsAboutHer',[message]);}
-  return A_CLAIM.test(message ?? '');
+  return corePolicySync('deeds.claimsAboutHer',[message]);
 }
 
 /**
@@ -156,15 +139,5 @@ export function claimsAboutHer(message: string): boolean {
  * because the failure being fixed is her filling a silence with a reason.
  */
 export function deedsInstruction(deeds: Deed[], nowMs: number, dayOf: (iso: string) => string): string {
-  if((true as boolean)){const selected=corePolicySync<Deed[]>('deeds.recentDeeds',[deeds,nowMs]);return corePolicySync('deeds.deedsInstruction',[deeds,nowMs,selected.map(d=>dayOf(d.at))]);}
-  const recent = recentDeeds(deeds, nowMs);
-  if (!recent.length) {
-    return 'You have not done anything to their things or your own settings lately. If they say you did, they are mistaken — say so, and do not invent a reason for it.';
-  }
-  const lines = recent.map(deed => `- ${dayOf(deed.at)}: you ${deed.what}`);
-  return [
-    'Everything you have actually done lately, which is all of it:',
-    lines.join('\n'),
-    'That list is complete. When they tell you that you did something and it is not on it, you did not do it — say so plainly, and never supply a reason for a thing you did not do.',
-  ].join('\n');
+  {const selected=corePolicySync<Deed[]>('deeds.recentDeeds',[deeds,nowMs]);return corePolicySync('deeds.deedsInstruction',[deeds,nowMs,selected.map(d=>dayOf(d.at))]);}
 }

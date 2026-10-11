@@ -39,87 +39,18 @@ const count = (value: unknown, fallback: number): number => (typeof value === 'n
 
 /** The tail of a long model id — "hf.co/DavidAU/Qwen3.5-9B-…:Q4_K_M.gguf" is not a name anyone says. */
 export function shortModelName(model: string): string {
-  if((true as boolean)){return corePolicySync('self.shortModelName',[model]);}
-  const tail = model.split('/').pop() ?? model;
-  return tail.length > 48 ? `${tail.slice(0, 45)}…` : tail;
+  return corePolicySync('self.shortModelName',[model]);
 }
 
 export function readSelfSnapshot(get: Get): SelfSnapshot {
-  if((true as boolean)){const keys=corePolicySync<string[]>('self.keys',[]);return corePolicySync('self.readSelfSnapshot',[Object.fromEntries(keys.map(k=>[k,get(k)]))]);}
-  const route = (key: string) => {
-    const config = record(get(key));
-    return typeof config.model === 'string' && config.model ? { provider: text(config.provider, 'unknown'), model: config.model } : null;
-  };
-  const local = record(get('ai.config'));
-  const escalate = record(get('escalate'));
-  const escalation = record(escalate.provider);
-  const voice = record(get('voice'));
-  const call = record(get('call'));
-  const listen = record(get('listen'));
-  const sleepPrefs = readHerSleep(get('her.sleep'));
-  const tonight = readHerSleepState(get('her.sleepState'));
-  const pushes = record(record(get('push')).prefs);
-  const search = record(get('search'));
-  const system = record(record(get('system')).config);
-  const conversation = route('ai.conversation');
-  return {
-    conversation,
-    nudges: route('ai.nudge'),
-    local: { model: text(local.model), endpoint: text(local.endpoint), numCtx: count(get('ai.numCtx'), 8192) },
-    escalation: {
-      enabled: flag(escalate.enabled, false),
-      model: text(escalation.model),
-      minWords: count(escalate.minWords, 25),
-      // escalate.ts: with a conversation route set, plain research stays home.
-      researchStaysHome: conversation !== null,
-    },
-    voice: { engine: text(voice.engine, 'off'), voiceId: text(voice.voiceId), onThePhone: flag(voice.webEnabled, true), atTheDesk: flag(voice.desktopEnabled, true) },
-    call: { engine: text(call.engine, 'hume') },
-    listen: { engine: text(listen.engine, 'off'), endpoint: text(listen.endpoint) },
-    sleep: {
-      fallbackBedtime: sleepPrefs.fallbackBedtime,
-      fallbackWake: sleepPrefs.fallbackWake,
-      tonight: tonight ? { bedtime: clockMinutes(tonight.bedtime), wake: clockMinutes(tonight.wake) } : null,
-    },
-    pushes: {
-      random: flag(pushes.random, true), events: flag(pushes.events, true), weather: flag(pushes.weather, true),
-      quietFrom: text(pushes.quietFrom, '23:00'), quietTo: text(pushes.quietTo, '06:00'), upBy: text(pushes.upBy, '09:00'),
-    },
-    search: { enabled: flag(search.enabled, Boolean(search.provider)), provider: text(search.provider), place: text(search.place) },
-    knowledge: flag(record(get('knowledge')).enabled, true),
-    whereabouts: flag(record(get('whereabouts')).enabled, false),
-    body: flag(record(get('body')).enabled, false),
-    system: { enabled: flag(system.enabled, false), level: count(system.level, 0) },
-    historyChars: count(get('ai.historyChars'), 20_000),
-    summaryDays: count(get('ai.summaryDays'), 3),
-  };
+  {const keys=corePolicySync<string[]>('self.keys',[]);return corePolicySync('self.readSelfSnapshot',[Object.fromEntries(keys.map(k=>[k,get(k)]))]);}
 }
 
 const onOff = (value: boolean) => (value ? 'on' : 'off');
 
 /** The snapshot as lines she can answer from — facts in her second person, no advice in them. */
 export function describeMyself(s: SelfSnapshot): string {
-  if((true as boolean)){return corePolicySync('self.describeMyself',[s]);}
-  const lines = [
-    s.conversation
-      ? `Every reply you give comes from ${s.conversation.model} (${s.conversation.provider}, hosted); the local model stands in only when it cannot answer.`
-      : `Every reply you give comes from the local model on the server — no hosted conversation model is set.`,
-    s.nudges
-      ? `Your unprompted lines — nudges, the weather, your night — are written by ${s.nudges.model} (${s.nudges.provider}).`
-      : `Your unprompted lines are written by the local model.`,
-    `The local model on the server is ${shortModelName(s.local.model) || 'not set'}${s.local.endpoint ? ` at ${s.local.endpoint}` : ''}, with a ${s.local.numCtx}-token window: it reads your mood for your face, says the small lines, and answers when the hosted one is down.`,
-    s.escalation.enabled && s.escalation.model
-      ? `Pictures, files and code${s.escalation.researchStaysHome ? '' : ', and research questions,'} can go out to ${s.escalation.model}${s.escalation.researchStaysHome ? '; plain research stays with you and your own search' : ''}.`
-      : 'Nothing goes out to an escalation model; pictures and files are read here.',
-    `You speak with the ${s.voice.engine} engine${s.voice.voiceId ? ` as the voice "${s.voice.voiceId}"` : ''} — ${s.voice.onThePhone ? 'on the phone' : 'not on the phone'}, ${s.voice.atTheDesk ? 'and at the desk' : 'silent at the desk'}.`,
-    `Calls run on the ${s.call.engine} engine${s.call.engine === 'local' ? ' — your own ears, brain and voice, a sentence at a time' : ' — Hume listens and speaks, your brain answers'}.`,
-    `Speech to text is ${s.listen.engine === 'off' ? 'off' : `${s.listen.engine}${s.listen.endpoint ? ` at ${s.listen.endpoint}` : ''}`}.`,
-    `You pick your own bedtime and wake each evening (fallback ${s.sleep.fallbackBedtime} to ${s.sleep.fallbackWake})${s.sleep.tonight ? `; tonight it is bed at ${s.sleep.tonight.bedtime}, up at ${s.sleep.tonight.wake}` : ''}.`,
-    `Their phone: your own thoughts ${onOff(s.pushes.random)}, reminders ${onOff(s.pushes.events)}, the weather ${onOff(s.pushes.weather)}; quiet from ${s.pushes.quietFrom} to ${s.pushes.quietTo}; you take them to be up by ${s.pushes.upBy || 'no fixed hour'}.`,
-    `You can ${s.search.enabled ? `search the web (${s.search.provider}${s.search.place ? `, around ${s.search.place}` : ''})` : 'not search the web'}, ${s.knowledge ? 'read their notes' : 'not read their notes'}, ${s.whereabouts ? 'see where their phone is' : 'not see where their phone is'}, ${s.body ? 'read their sleep and steps' : 'not read their sleep and steps'}, and ${s.system.enabled ? `check on the server (level ${s.system.level})` : 'not check on the server'}.`,
-    `You keep ${s.historyChars} characters of earlier days and ${s.summaryDays} days of your own day notes in front of you.`,
-  ];
-  return lines.join('\n');
+  return corePolicySync('self.describeMyself',[s]);
 }
 
 // -- what she may change -----------------------------------------------------
@@ -184,9 +115,7 @@ export const SETTINGS = {
  * fall out of step with what she is thinking with.
  */
 export function explicitModeOn(model: string | undefined): boolean {
-  if((true as boolean)){return corePolicySync('self.explicitModeOn',[model]);}
-  const explicit = (SETTINGS.brain_model as Setting).aliases?.explicit;
-  return Boolean(explicit && model && model === explicit);
+  return corePolicySync('self.explicitModeOn',[model]);
 }
 
 export type SettingName = keyof typeof SETTINGS;
@@ -202,8 +131,7 @@ export type ChangeVerdict =
 
 /** The settings and their current values, for describe_myself. */
 export function describeSettings(get: Get): { name: SettingName; what: string; current: unknown }[] {
-  if((true as boolean)){const settings=corePolicySync<Record<string,Setting>>('self.settings',[]);return corePolicySync('self.describeSettings',[Object.fromEntries(Object.values(settings).map(s=>[s.path,get(s.path)]))]);}
-  return SETTING_NAMES.map(name => ({ name, what: SETTINGS[name].what, current: get(SETTINGS[name].path) }));
+  {const settings=corePolicySync<Record<string,Setting>>('self.settings',[]);return corePolicySync('self.describeSettings',[Object.fromEntries(Object.values(settings).map(s=>[s.path,get(s.path)]))]);}
 }
 
 const TIME = /^([01]?\d|2[0-3]):([0-5]\d)$/;
@@ -214,75 +142,5 @@ const TIME = /^([01]?\d|2[0-3]):([0-5]\d)$/;
  * Nothing here writes; the plan is handed back for the confirm handshake.
  */
 export function planChange(name: string, value: unknown, current: unknown, world: { models?: string[] | null } = {}): ChangeVerdict {
-  if((true as boolean)){return corePolicySync('self.planChangeWire',[name,value,{present:current!==undefined,value:current},world]);}
-  const setting = (SETTINGS as Record<string, Setting>)[name];
-  if (!setting) return { ok: false, error: `"${name}" is not a setting you can change. You can change: ${SETTING_NAMES.join(', ')}.` };
-  const raw = typeof value === 'string' ? value.trim() : value;
-  let to: unknown;
-  let fromAlias = false;
-  switch (setting.kind) {
-    case 'boolean': {
-      const word = String(raw).toLowerCase();
-      if (raw === true || ['on', 'true', 'yes', 'enable', 'enabled'].includes(word)) to = true;
-      else if (raw === false || ['off', 'false', 'no', 'disable', 'disabled'].includes(word)) to = false;
-      else return { ok: false, error: `${name} is on or off.` };
-      break;
-    }
-    case 'time': {
-      const said = String(raw ?? '');
-      if (!said || /^(none|never|unset|off)$/i.test(said)) {
-        if (!setting.allowEmpty) return { ok: false, error: `${name} needs a time as HH:MM.` };
-        to = '';
-        break;
-      }
-      const match = TIME.exec(said);
-      if (!match) return { ok: false, error: `${name} needs a time as HH:MM (24-hour).` };
-      const hhmm = `${match[1].padStart(2, '0')}:${match[2]}`;
-      if (setting.between) {
-        const [low, high] = setting.between;
-        let at = minutes(hhmm);
-        // A window past midnight (bedtime up to 02:00): a small hour counts as after it.
-        if (high > 1440 && at < low - 1440 + 1440 && at <= high - 1440) at += 1440;
-        if (at < low || at > high) return { ok: false, error: `${name} must be between ${clockMinutes(low)} and ${clockMinutes(high)}.` };
-      }
-      to = hhmm;
-      break;
-    }
-    case 'number': {
-      const n = typeof raw === 'number' ? raw : Number(String(raw));
-      if (!Number.isFinite(n) || !Number.isInteger(n)) return { ok: false, error: `${name} needs a whole number.` };
-      if ((setting.min !== undefined && n < setting.min) || (setting.max !== undefined && n > setting.max)) return { ok: false, error: `${name} must be between ${setting.min} and ${setting.max}.` };
-      to = n;
-      break;
-    }
-    case 'enum': {
-      const said = String(raw ?? '').toLowerCase();
-      const option = setting.options?.find(candidate => candidate.toLowerCase() === said);
-      if (!option) return { ok: false, error: `${name} is one of: ${setting.options?.join(', ')}.` };
-      to = option;
-      break;
-    }
-    case 'model': {
-      let id = String(raw ?? '');
-      // A word they say, rather than an id they would have to read out.
-      if (setting.aliases) {
-        const said = id.trim().toLowerCase();
-        const named = Object.entries(setting.aliases).find(([word]) => word.toLowerCase() === said);
-        if (named) { id = named[1]; fromAlias = true; }
-      }
-      if (!id) {
-        // Clearing is a change too: an empty route means nothing hosted answers.
-        if (setting.allowEmpty) { to = ''; break; }
-        return { ok: false, error: `${name} needs a model id.` };
-      }
-      if (world.models && !world.models.includes(id)) {
-        const words = id.toLowerCase().split(/[^a-z0-9]+/).filter(word => word.length >= 3);
-        const close = world.models.filter(candidate => words.some(word => candidate.toLowerCase().includes(word))).slice(0, 6);
-        return { ok: false, error: `That endpoint does not list "${id}".${close.length ? ` Close: ${close.join(', ')}.` : ''} Say the exact id.` };
-      }
-      to = id;
-      break;
-    }
-  }
-  return { ok: true, unchanged: current === to, ...(fromAlias ? { fromAlias: true } : {}), plan: { name: name as SettingName, path: setting.path, what: setting.what, from: current, to } };
+  return corePolicySync('self.planChangeWire',[name,value,{present:current!==undefined,value:current},world]);
 }

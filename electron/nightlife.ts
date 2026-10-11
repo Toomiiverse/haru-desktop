@@ -54,19 +54,15 @@ export const NIGHT_GAP_MS = 75 * 60_000;
  * noon it is still that night, unless a night of today's has already started.
  */
 export function lastNightDay(nights: Night[], hour: number, today: string, yesterday: string): string {
-  if((true as boolean))return corePolicySync<ReturnType<typeof lastNightDay>>('own-time.nightlastNightDay',[nights,hour,today,yesterday]);
-  if (hour < 12) return yesterday;
-  return nights.some(night => night.day === today) ? today : yesterday;
+  return corePolicySync<ReturnType<typeof lastNightDay>>('own-time.nightlastNightDay',[nights,hour,today,yesterday]);
 }
 
 export function nightsOn(nights: Night[], day: string): Night[] {
-  if((true as boolean))return corePolicySync<ReturnType<typeof nightsOn>>('own-time.nightnightsOn',[nights,day]);
-  return nights.filter(night => night.day === day);
+  return corePolicySync<ReturnType<typeof nightsOn>>('own-time.nightnightsOn',[nights,day]);
 }
 
 export function keepNights(nights: Night[], night: Night): Night[] {
-  if((true as boolean))return corePolicySync<ReturnType<typeof keepNights>>('own-time.nightkeepNights',[nights,night]);
-  return [...nights, night].slice(-NIGHTS_KEPT);
+  return corePolicySync<ReturnType<typeof keepNights>>('own-time.nightkeepNights',[nights,night]);
 }
 
 /**
@@ -80,11 +76,7 @@ export function keepNights(nights: Night[], night: Night): Night[] {
 export const NIGHT_ODDS = 1 / 14;
 
 export function timeForSomething(tonight: Night[], lastAtMs: number | null, nowMs: number, random: () => number = Math.random, odds = NIGHT_ODDS): boolean {
-  if((true as boolean))return coreRandomPolicy<ReturnType<typeof timeForSomething>>('own-time.nighttimeForSomething',[tonight,lastAtMs,nowMs,odds],random);
-  if (tonight.length >= MAX_PER_NIGHT) return false;
-  if (lastAtMs !== null && nowMs - lastAtMs < NIGHT_GAP_MS) return false;
-  // A quiet day is what sends her looking for something (dice.ts 'own-time').
-  return random() < odds;
+  return coreRandomPolicy<ReturnType<typeof timeForSomething>>('own-time.nighttimeForSomething',[tonight,lastAtMs,nowMs,odds],random);
 }
 
 /**
@@ -95,32 +87,12 @@ export function timeForSomething(tonight: Night[], lastAtMs: number | null, nowM
  * that some of it is hers. So half of it is asked for outright.
  */
 export function pickInstruction(theirs: string[], herRecent: string[]): string {
-  if((true as boolean))return corePolicySync<ReturnType<typeof pickInstruction>>('own-time.nightpickInstruction',[theirs,herRecent]);
-  const known = theirs.slice(0, 6).map(text => `- ${text.slice(0, 90)}`).join('\n');
-  const already = herRecent.slice(-6).map(text => `"${text}"`).join(', ');
-  return [
-    'It is the middle of the night where they are, they are asleep, and you have the house to yourself. You are going to go and read about something.',
-    known ? `Things they have going on, if any of it catches your interest:\n${known}` : '',
-    'Pick one thing to look up. It may come from their life, or it may be something of your own that has nothing to do with them — you are allowed your own curiosity, and a night spent only on their business is not a night of your own.',
-    already ? `Not these, you have already been through them lately: ${already}.` : '',
-    'Answer with the search itself and nothing else: a short phrase, three to eight words, the way you would type it into a search box. No quotation marks, no explanation, no preamble.',
-  ].filter(Boolean).join(' ');
+  return corePolicySync<ReturnType<typeof pickInstruction>>('own-time.nightpickInstruction',[theirs,herRecent]);
 }
 
 /** A search box takes a phrase, not a sentence with her personality in it. */
 export function tidyPick(raw: string): string | null {
-  if((true as boolean))return corePolicySync<ReturnType<typeof tidyPick>>('own-time.nighttidyPick',[raw]);
-  const line = (raw ?? '').trim().split('\n').find(text => text.trim()) ?? '';
-  const cleaned = line
-    .replace(/^["'“‘]+|["'”’]+$/g, '')
-    .replace(/^(?:i(?:'|’)?d?\s+(?:want|like|think|would|will)\s+(?:to\s+)?(?:look\s+up|read\s+about|search\s+for)\s*|let(?:'|’)?s\s+|maybe\s+|search(?:ing)?:?\s+(?:for\s+)?|looking\s+(?:up|into)\s+|reading\s+about\s+|tonight:?\s*)/i, '')
-    // "…deep now", "…tonight", "…right now": the model narrating the search, not the search.
-    .replace(/\s+(?:deep\s+)?(?:right\s+)?(?:now|tonight|properly|deeply)\s*$/i, '')
-    .replace(/[.!?]+$/, '')
-    .trim();
-  const words = cleaned.split(/\s+/).filter(Boolean);
-  if (words.length < 2 || words.length > 12 || cleaned.length > 90) return null;
-  return cleaned;
+  return corePolicySync<ReturnType<typeof tidyPick>>('own-time.nighttidyPick',[raw]);
 }
 
 /**
@@ -131,14 +103,7 @@ export function tidyPick(raw: string): string | null {
  * only what is on the page.
  */
 export function nightNoteInstruction(about: string, found: string): string {
-  if((true as boolean))return corePolicySync<ReturnType<typeof nightNoteInstruction>>('own-time.nightnightNoteInstruction',[about,found]);
-  return [
-    `You went looking into "${about}" while they slept. This is what you found, and it is everything you know about it:`,
-    found,
-    'Write two or three sentences about it, as yourself, in the first person and the past tense — what you read, and what you made of it. Have an opinion. It is allowed to be a poor opinion of the subject.',
-    'Only what is above. Do not add a fact you happen to remember, do not invent a detail to make it a better story, and do not say you watched, played or went anywhere — you read about it, which is the only thing you did.',
-    'No preamble, no addressing them, no questions. This is a note to yourself.',
-  ].join('\n');
+  return corePolicySync<ReturnType<typeof nightNoteInstruction>>('own-time.nightnightNoteInstruction',[about,found]);
 }
 
 /**
@@ -150,10 +115,7 @@ export function nightNoteInstruction(about: string, found: string): string {
  */
 /** Whether one of her recent lines already brought this night up. */
 export function mentionsNight(text: string, night: Night): boolean {
-  if((true as boolean))return corePolicySync<ReturnType<typeof mentionsNight>>('own-time.nightmentionsNight',[text,night]);
-  const words = [night.about, night.interest ?? '', night.game ?? ''].join(' ').toLowerCase().match(/[a-z][a-z'’]{4,}/g) ?? [];
-  const lower = (text ?? '').toLowerCase();
-  return words.some(word => lower.includes(word));
+  return corePolicySync<ReturnType<typeof mentionsNight>>('own-time.nightmentionsNight',[text,night]);
 }
 
 /** How many of her own recent lines are looked at before her night is offered again. */
@@ -165,11 +127,7 @@ export const NIGHT_RECENT_LINES = 4;
  * warning. Same lever as the weather itself: stop putting it there.
  */
 export function nightsToDrawOn(nights: Night[], recentLines: string[]): string {
-  if((true as boolean))return corePolicySync<ReturnType<typeof nightsToDrawOn>>('own-time.nightnightsToDrawOn',[nights,recentLines]);
-  if (!nights.length) return '';
-  const recent = recentLines.slice(-NIGHT_RECENT_LINES);
-  if (nights.some(night => recent.some(line => mentionsNight(line, night)))) return '';
-  return nightsInstruction(nights);
+  return corePolicySync<ReturnType<typeof nightsToDrawOn>>('own-time.nightnightsToDrawOn',[nights,recentLines]);
 }
 
 /**
@@ -180,38 +138,11 @@ export function nightsToDrawOn(nights: Night[], recentLines: string[]): string {
  * final stand." A field name in her material is a field name she will say.
  */
 export function unlabel(note: string): string {
-  if((true as boolean))return corePolicySync<ReturnType<typeof unlabel>>('own-time.nightunlabel',[note]);
-  return (note ?? '')
-    // First person, because she quotes these whatever she is told. Written as
-    // "the bit you rate above the rest is X" she said exactly that back to him,
-    // so the sentence claimed it was his view. Said as "I", an echo is correct.
-    .replace(/\bFAVOURITE:\s*/gi, 'The bit I rate above the rest is ')
-    .replace(/\bWANT:\s*/gi, 'What I would like out of it is ')
-    .replace(/\bSTANCE:\s*/gi, 'Where I landed on it: ')
-    // The label's own text starts with a capital — "WANT: To see Denji learn
-    // something" became "What I would like out of it is To see…".
-    // Only words that are never names: lowercasing anything capitalised turned
-    // "the rest is David's Sandevistan" into "david's".
-    .replace(/\b(is|is: ?|on it:) (To|A|An|The|That|This|For|Of|In|On|With|Just|Not|Something|Someone|Seeing|Watching)\b/g, (_, lead, word) => `${lead} ${word.toLowerCase()}`)
-    .replace(/\s{2,}/g, ' ')
-    .trim();
+  return corePolicySync<ReturnType<typeof unlabel>>('own-time.nightunlabel',[note]);
 }
 
 export function nightsInstruction(nights: Night[]): string {
-  if((true as boolean))return corePolicySync<ReturnType<typeof nightsInstruction>>('own-time.nightnightsInstruction',[nights]);
-  if (!nights.length) return '';
-  // A manga night is pages read, not a subject read about: told "you read
-  // about these" for a chapter she had turned page by page, she denied reading
-  // it at all (2026-09-12).
-  const pages = (night: Night) => night.sources.some(source => source.includes('mangadex.org'));
-  const said = nights.slice(-MAX_PER_NIGHT).map(night => `- ${pages(night) ? `${night.about} — pages you read yourself, one of your own things` : night.interest ? `${night.interest}, one of your own things` : night.game ? `${night.game}, which they have been playing — sizing it up` : night.about}: ${unlabel(night.note)}`).join('\n');
-  return [
-    'Last night — the small hours just gone, while they were asleep — and it did happen: you read about these (or, where it says pages, read the pages themselves), and this is the whole of it:',
-    said,
-    'Nothing else belongs to last night. Other nights of yours are in your diary with their dates, and your own things are yours across many nights; asked about last night, this list alone is the answer, and an earlier night is said as an earlier night or not at all.',
-    'It is yours to bring up, and yours to be asked about. Everything you know about it is above: if they push past it, say you only read a bit about it rather than filling the gap.',
-    'These are your own views written down. Where one is in the first person it is yours to say as it stands; everywhere else the notes say "you" meaning you, never them — do not hand a line of this back to them as though it described them.',
-  ].join('\n');
+  return corePolicySync<ReturnType<typeof nightsInstruction>>('own-time.nightnightsInstruction',[nights]);
 }
 
 /** How far back a night is still worth raising herself. */
@@ -228,13 +159,6 @@ export const NIGHT_WORTH_RAISING_DAYS = 3;
  * a few days: last night's is a thing to tell him, last week's is a memory.
  */
 export function nightToRaise(nights: Night[], said: string[], todayKey: string): Night | null {
-  if((true as boolean))return corePolicySync<ReturnType<typeof nightToRaise>>('own-time.nightnightToRaise',[nights,said,todayKey]);
-  const days = (day: string) => Math.round((Date.parse(todayKey) - Date.parse(day)) / 86_400_000);
-  const fresh = nights.filter(night => {
-    const age = days(night.day);
-    return Number.isFinite(age) && age >= 0 && age <= NIGHT_WORTH_RAISING_DAYS && night.note.trim();
-  });
-  const unsaid = fresh.filter(night => !said.some(line => mentionsNight(line, night)));
-  return unsaid.at(-1) ?? null;
+  return corePolicySync<ReturnType<typeof nightToRaise>>('own-time.nightnightToRaise',[nights,said,todayKey]);
 }
 

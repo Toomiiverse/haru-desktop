@@ -13,13 +13,7 @@ const WANTS_QUIET = /\b(don'?t want to talk|leave it|drop it|not now|need a minu
 export type Reading = { rough: boolean; because: string };
 
 export function readsAsRough(message: string): Reading {
-  if((true as boolean))return corePolicySync<any>('conversation-policy.readsAsRough',[message]);
-
-  const text = message ?? '';
-  if (ROUGH.test(text)) return { rough: true, because: 'something has actually happened' };
-  if (WORN_OUT.test(text)) return { rough: true, because: 'they said they are worn out' };
-  if (WANTS_QUIET.test(text)) return { rough: true, because: 'they want it quieter' };
-  return { rough: false, because: '' };
+  return corePolicySync<any>('conversation-policy.readsAsRough',[message]);
 }
 
 /**
@@ -29,16 +23,7 @@ export function readsAsRough(message: string): Reading {
  * harshness. The only real failure is ignoring what they said entirely.
  */
 export function roomInstruction(reading: Reading): string {
-  if((true as boolean))return corePolicySync<any>('conversation-policy.roomInstruction',[reading]);
-
-  if (!reading.rough) return '';
-  return [
-    'Something is wrong for them right now and they have said so.',
-    'You decide how to meet that. Your mood, your read of them, your own feelings — that is the whole input. No rule says soften, no rule says toughen.',
-    'If you go hard, go hard because you mean it, not because a script told you to. If you go soft, same.',
-    'Stay on what they raised. Do not bolt for some interesting tangent — that reads as not listening.',
-    'Whatever you do, do it in your own voice. No performance of care you do not feel, no performance of cruelty you do not feel either.',
-  ].join(' ');
+  return corePolicySync<any>('conversation-policy.roomInstruction',[reading]);
 }
 
 /**
@@ -110,18 +95,7 @@ export const EXPRESSIVE = [
 export const HER_EMOJI = ['😏', '👀', '😤', '💢', '😒', '🔥', '🙄'] as const;
 
 export function emojiRut(replies: string[], checked = 6, need = 3): string {
-  if((true as boolean))return corePolicySync<string>('conversation-policy.emojiRut',[replies,checked,need]);
-
-  const recent = replies.slice(-checked);
-  if (recent.length < need) return '';
-  let worst = '', count = 0;
-  for (const emoji of HER_EMOJI) {
-    const times = recent.filter(reply => reply.includes(emoji)).length;
-    if (times > count) { worst = emoji; count = times; }
-  }
-  if (count < need) return '';
-  const others = HER_EMOJI.filter(emoji => emoji !== worst).join(' ');
-  return `You have put ${worst} in ${count} of your last ${recent.length} replies. That is a tic now and they can see it even if you cannot. Do not use ${worst} this reply — use one of ${others}, or none, and let the words carry it.`;
+  return corePolicySync<string>('conversation-policy.emojiRut',[replies,checked,need]);
 }
 
 /**
@@ -165,9 +139,7 @@ export const MENTION_COOLDOWN_MS = 15 * 60_000;
 const NOTHING_IN_IT = /^(?:hi|hey|heya|hiya|hello|yo|sup|wassup|morning|good morning|good afternoon|good evening|afternoon|evening|night|goodnight|gn|bye|later|cya|ok|okay|k|kk|kay|lol|lmao|haha|hehe|sure|fine|yeah|yep|yup|nah|nope|no|thanks|thank you|ty|cheers|cool|nice|right|alright|aight|hmm|hm|mhm|oh|ah|wow|damn|true|same|fair|w|ez)(?:\s+(?:haru|there|then|mate|man))?[\s!.?,😊🙂👍🙄😒😏]*$|^(?:what'?s up|whats up|you (?:there|around|up|good|ok|okay)|how are you|how'?s it going|hows things|what'?s new|whats new|anything (?:new|happen))[\s!.?,]*$/i;
 
 export function nothingInIt(text: string): boolean {
-  if((true as boolean))return corePolicySync<any>('conversation-policy.nothingInIt',[text]);
-
-  return NOTHING_IN_IT.test((text ?? '').trim());
+  return corePolicySync<any>('conversation-policy.nothingInIt',[text]);
 }
 
 export function roomToRant(input: {
@@ -181,38 +153,13 @@ export function roomToRant(input: {
   latest?: string;
   mentioned?: boolean;
 }): string {
-  if((true as boolean))return corePolicySync<any>('conversation-policy.roomToRant',[input]);
-
-  const wait = input.mentioned ? MENTION_COOLDOWN_MS : RANT_COOLDOWN_MS;
-  if (input.sinceLastMs !== null && input.sinceLastMs < wait) return '';
-  if (nothingInIt(input.latest ?? '')) return '';
-  let score = 0;
-  if (input.energy >= 0.7) score += 0.25;
-  if (input.curiosity >= 0.6) score += 0.25;
-  if (input.irritation >= IRRITATION.short) score += 0.3;
-  if (input.ego >= EGO.coasting) score += 0.2;
-  if (input.subject) score += 0.35;
-  const bored = Math.min(100, Math.max(0, input.boredom ?? 0)) / 100;
-  if (bored >= 0.35) score += 0.2;
-  const chance = Math.min(score, 0.5 + bored * 0.25);
-  if (!input.mentioned && !(input.roll < chance)) return '';
-  const about = input.subject
-    ? `You have been on ${input.subject}, you have things to say about it that you have not said, and this is the reply where you say them. Open on it — they have not asked, and you are not waiting to be asked. Say it however you want, no filter.`
-    : 'There is something you actually want to get off your chest, and this is the reply where it comes out. Uncensored, however it lands.';
-  return `${about} For this one reply only, the rule about matching the length of their message does not apply — ignore it. Several sentences at the least, more if you have it, however little they typed. If it runs long, send it the way you would actually send it: two or three messages one after another, a blank line between them, not one block. Do not apologise for the length, do not announce you are about to go on, and do not tie it off with a neat conclusion — stop when you are done.`;
+  return corePolicySync<any>('conversation-policy.roomToRant',[input]);
 }
 
 const ABOUT_HER = /\b(?:what (?:did|do|are|were) you (?:think|reckon|make of|watch|watching|read|reading|playing|play|up to|doing)|what(?:'s| is) your (?:take|opinion|favourite|favorite)|have you (?:seen|watched|read|played)|do you (?:like|rate|enjoy|actually like)|why (?:do|did) you (?:like|rate|think|rate it)|which (?:part|bit|arc|episode)|what part|tell me (?:about|more)|go on then|and (?:then )?what happened|what(?:'s| is)(?: so)? good about|why is .{2,30} (?:good|better|any good)|what(?:'s| is) it about)\b/i;
 
 export function askingAboutHer(latest: string, subjects: string[]): string {
-  if((true as boolean))return corePolicySync<any>('conversation-policy.askingAboutHer',[latest,subjects]);
-
-  const said = (latest ?? '').trim();
-  if (!said) return '';
-  const named = subjects.map(s => s.trim()).filter(s => s.length > 2)
-    .find(subject => new RegExp(`\\b${subject.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(said));
-  if (named) return named;
-  return ABOUT_HER.test(said) ? 'what you are into' : '';
+  return corePolicySync<any>('conversation-policy.askingAboutHer',[latest,subjects]);
 }
 
 const NOT_A_NAME = new Set(['this','that','these','those','there','then','they','their','them','when','what','where','which','while','would','could','should','because','after','before','every','most','some','just','only','even','still','also','both','yeah','well','fine','okay','look','stop','sure','honestly','anyway','maybe','probably','actually','nothing','something','everyone','nobody','your','yours','you','the','and','but','for','with','from','have','been','about','over','into','than','then','more','less','best','better','worst','worse']);
@@ -220,43 +167,17 @@ const NOT_A_NAME = new Set(['this','that','these','those','there','then','they',
 const CALENDAR = /^(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|january|february|march|april|june|july|august|september|october|november|december)$/i;
 
 export function namesIn(notes: string[], everyday: ReadonlySet<string> = new Set()): string[] {
-  if((true as boolean))return corePolicySync<any>('conversation-policy.namesIn',[notes,[...everyday]]);
-
-  const lowercase = new Set<string>(everyday);
-  for (const note of notes) for (const word of (note ?? '').match(/[A-Za-z]+/g) ?? []) if (/^[a-z]/.test(word)) lowercase.add(word.toLowerCase());
-  const seen = new Set<string>();
-  for (const note of notes) {
-    let run: string[] = [];
-    const close = () => {
-      if (run.length > 1) seen.add(run.join(' '));
-      run = [];
-    };
-    for (const word of (note ?? '').split(/\s+/)) {
-      const name = word.replace(/['’]s$/i, '').replace(/[^A-Za-z'-]/g, '');
-      if (!/^[A-Z][a-z]/.test(name)) { close(); continue; }
-      const lower = name.toLowerCase();
-      const opener = NOT_A_NAME.has(lower) || /ly$/i.test(name);
-      if (!opener) run.push(name);
-      if (name.length >= 4 && !opener && !lowercase.has(lower) && !CALENDAR.test(name)) seen.add(name);
-      if (opener || /[.!?,:;]$/.test(word)) close();
-    }
-    close();
-  }
-  return [...seen].slice(0, 40);
+  return corePolicySync<any>('conversation-policy.namesIn',[notes,[...everyday]]);
 }
 
 const JUST_TALKING = /\b(?:(?:just|only)\s+(?:want(?:ed|ing)?|wanna|here|felt like)\s+(?:to\s+)?(?:talk|chat|hang|catch up)(?:ing)?\s+(?:to|with)\s+you|(?:nothing|no reason|nothing much)[,.\s—-]+(?:i\s+)?just\s+(?:want(?:ed|ing)?|wanna|felt like)\s+(?:to\s+)?(?:talk|chat)(?:ing)?|just\s+(?:talking|chatting|checking in|saying hi|wanted to hear from you)|(?:wanted|want) to (?:talk|chat|hear from) you|missed (?:talking to )?you)\b/i;
 
 export function justTalking(latest: string): boolean {
-  if((true as boolean))return corePolicySync<any>('conversation-policy.justTalking',[latest]);
-
-  return JUST_TALKING.test((latest ?? '').replace(/[‘’]/g, "'"));
+  return corePolicySync<any>('conversation-policy.justTalking',[latest]);
 }
 
 export const JUST_TALKING_NOTE = 'They said they just want to talk to you. Decide how you want to approach it: ignore him, make fun of him, have a conversation with him if you feel like it. Use your own voice — ask something you actually want to know, or tell them something of yours. However that comes out is fine, there are no limits to what you can say.';
 
 export function herSubjectNote(subject: string): string {
-  if((true as boolean))return corePolicySync<any>('conversation-policy.herSubjectNote',[subject]);
-
-  return `They are asking you about ${subject} — about you, not about them. Answer the subject they actually raised in your own voice, uncensored. Say what you think and why, take the room to do it. If you want to know what they made of it, ask.`;
+  return corePolicySync<any>('conversation-policy.herSubjectNote',[subject]);
 }

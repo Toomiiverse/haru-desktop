@@ -75,29 +75,11 @@ export const DEFAULT_KNOWLEDGE: KnowledgeConfig = {
 };
 
 export function readKnowledgeConfig(saved: unknown): KnowledgeConfig {
-  if((true as boolean))return corePolicySync('knowledge-index.config',[saved]); 
-  if (!saved || typeof saved !== 'object') return DEFAULT_KNOWLEDGE;
-  const record = saved as Partial<KnowledgeConfig>;
-  const clamp = (value: unknown, fallback: number, min: number, max: number) =>
-    typeof value === 'number' && Number.isFinite(value) ? Math.min(max, Math.max(min, Math.round(value))) : fallback;
-  return {
-    enabled: record.enabled === true,
-    embedModel: typeof record.embedModel === 'string' && record.embedModel.trim() ? record.embedModel.trim() : DEFAULT_KNOWLEDGE.embedModel,
-    chunkSize: clamp(record.chunkSize, DEFAULT_KNOWLEDGE.chunkSize, 200, 8000),
-    chunkOverlap: clamp(record.chunkOverlap, DEFAULT_KNOWLEDGE.chunkOverlap, 0, 1000),
-    topK: clamp(record.topK, DEFAULT_KNOWLEDGE.topK, 1, 100),
-    threshold: typeof record.threshold === 'number' && Number.isFinite(record.threshold)
-      ? Math.min(1, Math.max(0, record.threshold))
-      : DEFAULT_KNOWLEDGE.threshold,
-    rerankTo: clamp(record.rerankTo, DEFAULT_KNOWLEDGE.rerankTo, 1, 20),
-    contextChunks: clamp(record.contextChunks, DEFAULT_KNOWLEDGE.contextChunks, 1, 20),
-    contextChars: clamp(record.contextChars, DEFAULT_KNOWLEDGE.contextChars, 200, 12000),
-  };
+  return corePolicySync('knowledge-index.config',[saved]);
 }
 
 export function emptyKnowledge(): KnowledgeStore {
-  if((true as boolean))return corePolicySync('knowledge-index.empty',[]); 
-  return { documents: [], chunks: [] };
+  return corePolicySync('knowledge-index.empty',[]);
 }
 
 function isCategory(value: unknown): value is KnowledgeCategory {
@@ -156,12 +138,7 @@ function asChunk(value: unknown): KnowledgeChunk | null {
 }
 
 export function normalizeKnowledge(saved: unknown): KnowledgeStore {
-  if((true as boolean))return corePolicySync('knowledge-index.normalize',[saved,new Date().toISOString()]); 
-  if (!saved || typeof saved !== 'object') return emptyKnowledge();
-  const record = saved as Partial<KnowledgeStore>;
-  const documents = Array.isArray(record.documents) ? record.documents.map(asDocument).filter((doc): doc is KnowledgeDocument => doc !== null) : [];
-  const chunks = Array.isArray(record.chunks) ? record.chunks.map(asChunk).filter((chunk): chunk is KnowledgeChunk => chunk !== null) : [];
-  return { documents, chunks };
+  return corePolicySync('knowledge-index.normalize',[saved,new Date().toISOString()]);
 }
 
 export function loadKnowledge(file: string): KnowledgeStore {
@@ -182,28 +159,23 @@ export function saveKnowledge(file: string, store: KnowledgeStore): void {
 }
 
 export function hashContent(text: string): string {
-  if((true as boolean))return corePolicySync('knowledge-index.hash',[text]); 
-  return createHash('sha256').update(text).digest('hex').slice(0, 24);
+  return corePolicySync('knowledge-index.hash',[text]);
 }
 
 export function stableId(parts: string[]): string {
-  if((true as boolean))return corePolicySync('knowledge-index.stable',[parts]); 
-  return createHash('sha256').update(parts.join('\u0000')).digest('hex').slice(0, 16);
+  return corePolicySync('knowledge-index.stable',[parts]);
 }
 
 export function documentIdFor(source: string, sourceType: string): string {
-  if((true as boolean))return corePolicySync('knowledge-index.documentId',[source,sourceType]); 
-  return stableId([source, sourceType]);
+  return corePolicySync('knowledge-index.documentId',[source,sourceType]);
 }
 
 export function findDocument(store: KnowledgeStore, id: string): KnowledgeDocument | undefined {
-  if((true as boolean))return corePolicySync('knowledge-index.find',[store,id]); 
-  return store.documents.find(document => document.id === id);
+  return corePolicySync('knowledge-index.find',[store,id]);
 }
 
 export function findDocumentBySource(store: KnowledgeStore, source: string): KnowledgeDocument | undefined {
-  if((true as boolean))return corePolicySync('knowledge-index.findSource',[store,source]); 
-  return store.documents.find(document => document.source === source && document.status === 'active');
+  return corePolicySync('knowledge-index.findSource',[store,source]);
 }
 
 export type ChunkSeed = {
@@ -235,139 +207,25 @@ export function planIngest(
     now: string;
   },
 ): IngestOutcome {
-  if((true as boolean))return corePolicySync('knowledge-index.plan',[store,args]); 
-  const existing = findDocument(store, args.id);
-  const hash = hashContent(args.text);
-  if (existing && existing.status === 'active' && existing.hash === hash) {
-    return {
-      action: 'unchanged',
-      document: existing,
-      chunks: store.chunks.filter(chunk => chunk.documentId === existing.id),
-      supersededIds: [],
-    };
-  }
-  if (args.chunks.length !== args.embeddings.length) throw new Error(`chunk/embedding count mismatch (${args.chunks.length} chunks, ${args.embeddings.length} embeddings)`);
-  const version = existing ? existing.version + 1 : 1;
-  const confidence = typeof args.confidence === 'number' ? Math.min(1, Math.max(0, args.confidence)) : 1;
-  const metadata = args.metadata ?? {};
-  const supersededIds = store.chunks.filter(chunk => chunk.documentId === args.id).map(chunk => chunk.id);
-  const fresh: KnowledgeChunk[] = args.chunks.map((seed, index) => {
-    const embedding = args.embeddings[index];
-    const id = stableId([args.id, String(index), String(version), seed.content]);
-    return {
-      id,
-      documentId: args.id,
-      chunkIndex: index,
-      content: seed.content,
-      heading: seed.heading,
-      embedding,
-      embedModel: args.embedModel,
-      embedDimension: args.embedDimension,
-      source: args.source,
-      sourceType: args.sourceType,
-      category: args.category,
-      metadata,
-      version,
-      confidence,
-      status: 'active',
-      hash: hashContent(seed.content),
-      createdAt: args.now,
-      updatedAt: args.now,
-    };
-  });
-  // Only the version just replaced stays behind, stale, for its supersededBy
-  // link; older ones go. Every version used to be kept with its embedding, and a
-  // page rewritten hourly (Haru/Configuration.md, by the snapshot cron) had
-  // piled up 5,534 stale chunks — knowledge.json at 62 MB, rewritten whole on
-  // every save, 7.8 s an ingest (2026-09-17). Nothing searches stale chunks.
-  const stale: KnowledgeChunk[] = supersededIds.length
-    ? store.chunks.filter(chunk => chunk.documentId === args.id && chunk.status === 'active').map(chunk => ({
-        ...chunk,
-        status: 'stale' as const,
-        supersededBy: fresh[0]?.id,
-        updatedAt: args.now,
-      }))
-    : [];
-  const document: KnowledgeDocument = {
-    id: args.id,
-    source: args.source,
-    sourceType: args.sourceType,
-    category: args.category,
-    hash,
-    version,
-    metadata,
-    status: 'active',
-    chunkIds: fresh.map(chunk => chunk.id),
-    createdAt: existing?.createdAt ?? args.now,
-    updatedAt: args.now,
-  };
-  return {
-    action: existing ? 'updated' : 'created',
-    document,
-    chunks: [...store.chunks.filter(chunk => chunk.documentId !== args.id), ...stale, ...fresh],
-    supersededIds,
-  };
+  return corePolicySync('knowledge-index.plan',[store,args]);
 }
 
 export function applyIngest(store: KnowledgeStore, outcome: IngestOutcome): KnowledgeStore {
-  if((true as boolean))return corePolicySync('knowledge-index.apply',[store,outcome]); 
-  if (outcome.action === 'unchanged') return store;
-  return {
-    documents: [...store.documents.filter(document => document.id !== outcome.document.id), outcome.document],
-    chunks: outcome.chunks,
-  };
+  return corePolicySync('knowledge-index.apply',[store,outcome]);
 }
 
 export function deleteDocument(store: KnowledgeStore, id: string, now: string): KnowledgeStore {
-  if((true as boolean))return corePolicySync('knowledge-index.delete',[store,id,now]); 
-  return {
-    documents: store.documents.map(document => document.id === id ? { ...document, status: 'deleted' as const, updatedAt: now } : document),
-    chunks: store.chunks.map(chunk => chunk.documentId === id ? { ...chunk, status: 'stale' as const, updatedAt: now } : chunk),
-  };
+  return corePolicySync('knowledge-index.delete',[store,id,now]);
 }
 
 export function reconcileChunkIds(store: KnowledgeStore): KnowledgeStore {
-  if((true as boolean))return corePolicySync('knowledge-index.reconcile',[store]); 
-  const documents = store.documents.map(document => {
-    const ids = store.chunks.filter(chunk => chunk.documentId === document.id).map(chunk => chunk.id);
-    return ids.length && ids.length === document.chunkIds.length ? document : { ...document, chunkIds: ids };
-  });
-  return { ...store, documents };
+  return corePolicySync('knowledge-index.reconcile',[store]);
 }
 
 export function knowledgeStats(store: KnowledgeStore) {
-  if((true as boolean))return corePolicySync<{documents:number;chunks:number;stale:number;characters:number;byCategory:Record<string,number>;sources:Record<string,number>;embedModels:string[];embedDimensions:number[];lastIngestedAt:string}>('knowledge-index.stats',[store]); 
-  const activeDocuments = store.documents.filter(document => document.status === 'active');
-  const activeChunks = store.chunks.filter(chunk => chunk.status === 'active');
-  const byCategory = Object.fromEntries(KNOWLEDGE_CATEGORIES.map(category => [
-    category,
-    activeChunks.filter(chunk => chunk.category === category).length,
-  ]));
-  const bySource: Record<string, number> = {};
-  for (const chunk of activeChunks) bySource[chunk.source] = (bySource[chunk.source] ?? 0) + 1;
-  const embedModels = [...new Set(activeChunks.map(chunk => chunk.embedModel))];
-  const lastIngestedAt = activeDocuments.reduce((latest, document) => document.updatedAt > latest ? document.updatedAt : latest, '');
-  return {
-    documents: activeDocuments.length,
-    chunks: activeChunks.length,
-    stale: store.chunks.filter(chunk => chunk.status === 'stale').length,
-    characters: activeChunks.reduce((sum, chunk) => sum + chunk.content.length, 0),
-    byCategory,
-    sources: bySource,
-    embedModels,
-    embedDimensions: [...new Set(activeChunks.map(chunk => chunk.embedDimension))],
-    lastIngestedAt,
-  };
+  return corePolicySync<{documents:number;chunks:number;stale:number;characters:number;byCategory:Record<string,number>;sources:Record<string,number>;embedModels:string[];embedDimensions:number[];lastIngestedAt:string}>('knowledge-index.stats',[store]);
 }
 
 export function guessCategory(source: string): KnowledgeCategory {
-  if((true as boolean))return corePolicySync('knowledge-index.guess',[source]); 
-  const name = source.toLowerCase();
-  if (name.includes('haru') || name.includes('companion')) return 'haru';
-  if (/(^|\/)projects?\//.test(name) || name.includes('project')) return 'projects';
-  if (name.includes('docs') || name.includes('documentation') || /\.(md|markdown|rst)$/.test(name) && name.includes('doc')) return 'documentation';
-  if (name.includes('server') || name.includes('docker') || name.includes('deploy') || name.includes('config') || /\.(ts|tsx|js|py|json|yaml|yml)$/.test(name)) return 'technical';
-  if (name.includes('business') || name.includes('finance') || name.includes('client') || name.includes('invoice')) return 'business';
-  if (name.includes('personal') || name.includes('family') || name.includes('diary')) return 'personal';
-  return 'general';
+  return corePolicySync('knowledge-index.guess',[source]);
 }

@@ -47,29 +47,12 @@ const NOT_A_JOURNEY = /^(?:you|i|we|they|he|she|it|this|that|boil|cook|make|bake
 
 /** Tidied for a search: quotes, a leading article, a trailing "from here" gone; casing kept for names. */
 export function cleanDestination(raw: string): string {
- if((true as boolean))return navigationPolicy('cleanDestination',[raw]);
-  return raw.trim().replace(/^["'“”‘’]+|["'“”‘’]+$/g, '').replace(/^(?:the|a|my)\s+(?=\S)/i, m => (/^my/i.test(m) ? '' : m)).replace(/\s+/g, ' ').trim().slice(0, 80);
+ return navigationPolicy('cleanDestination',[raw]);
 }
 
 /** The ask in a message, if it is one: where to, and whether "the nearest" of something. */
 export function directionsAsk(text: string): DirectionsAsk | null {
- if((true as boolean))return navigationPolicy('directionsAsk',[text]);
-  const line = (text ?? '').trim();
-  if (!line || line.length > 300) return null;
-  for (const { pattern, nearest } of ASKS) {
-    const m = line.match(pattern);
-    if (!m) continue;
-    // "the nearest Coles" is a Coles, searched near them — the word itself
-    // means nothing to a map and everything to how the search is bounded.
-    const cleaned = cleanDestination(m[1]);
-    const near = /^(?:the )?(?:nearest|closest|nearby|near(?:by)? )\s*/i.exec(cleaned);
-    const destination = near ? cleanDestination(cleaned.slice(near[0].length)) : cleaned;
-    // Not this pattern's place; a later one may still read the sentence right
-    // ("take me to get home" is not a place called "get home", but it is home).
-    if (destination.length < 2 || NOT_A_PLACE.test(destination) || NOT_A_JOURNEY.test(destination)) continue;
-    return { destination, nearest: nearest === true || near !== null };
-  }
-  return null;
+ return navigationPolicy('directionsAsk',[text]);
 }
 
 /**
@@ -84,17 +67,7 @@ export function directionsAsk(text: string): DirectionsAsk | null {
  */
 const ROUTE_TALK = /\b(?:via|hwy|highway|freeway|motorway|exit \d|turn (?:left|right)|(?:bus|train|tram|ferry|route)(?:es)? ?\d|(?:take|catch) the (?:bus|train|tram|ferry)|\d+\s*(?:-|–|to)?\s*\d*\s*(?:mins?|minutes|hrs?|hours)\b|parking|car ?park|campus lots?|head (?:north|south|east|west)|left onto|right onto|roundabout)/i;
 export function dropRouteTalk(reply: string): string {
- if((true as boolean))return navigationPolicy('dropRouteTalk',[reply]);
-  const paragraphs = reply.split(/\n\s*\n/);
-  const kept = paragraphs.map(paragraph => {
-    if (/^\s*(?:[-*•]|\d+[.)])\s/.test(paragraph)) return '';
-    // Traffic claims go with the route talk: both are things she cannot see.
-    return paragraph.split(/(?<=[.!?])\s+/).filter(sentence => !ROUTE_TALK.test(sentence) && !TRAFFIC_CLAIM.test(sentence)).join(' ');
-  }).filter(p => p.trim());
-  const out = kept.join('\n\n').trim();
-  if (out) return out;
-  const first = reply.trim().match(/^[^.!?\n]*[.!?]?/);
-  return (first?.[0] ?? reply).trim();
+ return navigationPolicy('dropRouteTalk',[reply]);
 }
 
 // A street address, as Australians write one: "40 Boddington Circuit",
@@ -108,15 +81,7 @@ const NOT_A_SUBURB = /^,?\s+(?:And|But|Then|Now|Today|Tomorrow|Please|Pls|Thanks
 
 /** The street address in the text, if there is one: number, street, and the suburb when it was given. */
 export function streetAddress(text: string): string | null {
- if((true as boolean))return navigationPolicy('streetAddress',[text]);
-  const m = ADDRESS.exec(text ?? '');
-  if (!m) return null;
-  let rest = m[2] ?? '';
-  // The suburb only when written as a name — the regex is case-blind for the
-  // street, and "40 Boddington Circuit tomorrow" has no suburb in it.
-  if (rest && !/^,?\s+(?:[A-Z][a-z]|WA\b|NSW\b|VIC\b|QLD\b|SA\b|TAS\b|NT\b|ACT\b)/.test(rest)) rest = '';
-  if (NOT_A_SUBURB.test(rest)) rest = '';
-  return `${m[1]}${rest}`.replace(/\s+/g, ' ').replace(/\s*,\s*/g, ', ').trim();
+ return navigationPolicy('streetAddress',[text]);
 }
 
 // A claim about the roads right now. She cannot see them, and with no route in
@@ -126,8 +91,7 @@ const TRAFFIC_CLAIM = /\btraffic(?:'s| is| was)?\s*(?:already\s+|pretty\s+|a bit
 
 /** Whether her reply claims to know what the roads are doing. */
 export function claimsTraffic(reply: string): boolean {
- if((true as boolean))return navigationPolicy('claimsTraffic',[reply]);
-  return TRAFFIC_CLAIM.test(reply ?? '');
+ return navigationPolicy('claimsTraffic',[reply]);
 }
 
 // "how long will that take?", "is traffic bad?" — a journey question with the
@@ -139,10 +103,7 @@ export function claimsTraffic(reply: string): boolean {
 const BARE_JOURNEY = new RegExp(String.raw`^(?:.*\b)?(?:so\s+)?(?:how long (?:will|would|does|is) (?:that|it|this)(?: take| be)?|is (?:the )?traffic (?:bad|heavy|ok|okay|alright|any good)|how(?:'s|’s|s| is) (?:the )?traffic|what(?:'s|’s|s| is) (?:the )?traffic like|how bad is (?:the )?traffic|(?:is there )?(?:any|much) traffic|(?:(?:can|could|would|will) you\s+)?(?:please\s+)?(?:check|look up|look at|pull up|get)(?: me)?\s+(?:the |on (?:the )?)?(?:traffic|travel time|drive time|eta)(?: (?:report|update))?)` + TAIL, 'i');
 /** Where they said they were off to, in their own words: "going to X", "stopping by X", "off to X". */
 export function destinationNamed(text: string): string | null {
- if((true as boolean))return navigationPolicy('destinationNamed',[text]);
-  const m = new RegExp(String.raw`\b(?:going|heading|off|driving|walking|nipping|popping|stopping(?: by| in| at)?|on my way)\s+(?:to|by|at|into|over to|down to|round to)?\s*([A-Z][\w'&-]*(?:\s+(?:in|at|on)\s+[A-Z][\w'&-]*|\s+[A-Z][\w'&-]*){0,3})`, '').exec(text ?? '');
-  const named = m?.[1]?.trim().replace(/\s+(?:then|and|so|but)$/i, '').trim();
-  return named && named.length > 2 ? named.slice(0, 60) : null;
+ return navigationPolicy('destinationNamed',[text]);
 }
 
 /** "pick up the cpu", "the Dianella address" — a thing to do, not a place; the place is an address they gave. */
@@ -177,80 +138,26 @@ const BARE_ASK = /^(?:(?:can|could|would|will) you )?(?:(?:give|send|show|get|sh
  * directions", after a directions question, is that question answered.
  */
 export function directionsAskFrom(latest: string, recentUser: string[]): DirectionsAsk | null {
- if((true as boolean))return navigationPolicy('directionsAskFrom',[latest,recentUser]);
-  const remembered = () => {
-    for (const earlier of [...recentUser].reverse()) { const found = streetAddress(earlier); if (found) return found; }
-    return null;
-  };
-  const ask = directionsAsk(latest);
-  if (ask) {
-    if (!ERRAND.test(ask.destination)) return ask;
-    const address = streetAddress(latest) ?? remembered();
-    return address ? { destination: address, nearest: false } : null;
-  }
-  const line = (latest ?? '').trim();
-  // A journey question with the place named in the same message or a recent one.
-  if (BARE_JOURNEY.test(line)) {
-    const named = destinationNamed(line) ?? (() => {
-      for (const earlier of [...recentUser].reverse()) { const found = destinationNamed(earlier); if (found) return found; }
-      return null;
-    })();
-    if (named) return { destination: named, nearest: false };
-    // "What's the traffic like going back" — no place named, because home is
-    // not a name they use. Asked that from the shop, with her holding live
-    // traffic and their position, she said she could not check and told him
-    // to open Waze. "Back" and "home" are the place she knows as home.
-    if (HOMEWARD.test(line) || recentUser.slice(-3).some(earlier => HOMEWARD.test(earlier))) return { destination: 'home', nearest: false };
-  }
-  if (asksAboutRoads(line)) {
-    const named = destinationNamed(line);
-    if (named) return { destination: named, nearest: false };
-    if (HOMEWARD.test(line) || /\bhome\b/i.test(line)) return { destination: 'home', nearest: false };
-  }
-  if (AGAIN.test(line)) {
-    // The latest earlier message that was a route question, read with what came before it.
-    for (let at = recentUser.length - 1; at >= Math.max(0, recentUser.length - 3); at--) {
-      const again = directionsAskFrom(recentUser[at], recentUser.slice(0, at));
-      if (again) return again;
-    }
-    return null;
-  }
-  if (BARE_ASK.test(line)) {
-    const address = remembered();
-    return address ? { destination: address, nearest: false } : null;
-  }
-  const here = streetAddress(line);
-  if (here && line.length <= here.length + 40 && recentUser.slice(-3).some(earlier => directionsAsk(earlier) !== null || BARE_ASK.test(earlier.trim()))) {
-    return { destination: here, nearest: false };
-  }
-  return null;
+ return navigationPolicy('directionsAskFrom',[latest,recentUser]);
 }
 
 /** A place she knows by that name — "home", "the store", "my place" for home. */
 export function matchNamedPlace(destination: string, places: Place[]): Place | null {
- if((true as boolean))return navigationPolicy('matchNamedPlace',[destination,places]);
-  const key = destination.toLowerCase().replace(/^(?:the|my)\s+/, '').trim();
-  if (/^(?:place|house|home|flat|apartment)$/.test(key)) return homeOf(places);
-  return places.find(p => p.name.toLowerCase().replace(/^the\s+/, '') === key) ?? null;
+ return navigationPolicy('matchNamedPlace',[destination,places]);
 }
 
 /** Where they are for the purposes of "from here": a fresh fix, else home. */
 export function startingPoint(where: Whereabouts, nowMs = Date.now()): { lat: number; lon: number; known: 'here' | 'home' } | null {
- if((true as boolean))return locationPolicy('startingPoint',[where,nowMs]);
-  if (where.enabled && where.last && nowMs - Date.parse(where.last.at) <= SPOT_STALE_MS) return { lat: where.last.lat, lon: where.last.lon, known: 'here' };
-  const home = homeOf(where.places);
-  return home ? { lat: home.lat, lon: home.lon, known: 'home' } : null;
+ return locationPolicy('startingPoint',[where,nowMs]);
 }
 
 /** Apple Maps opens this on an iPhone with the route asked for; the page turns it into Google Maps on anything else. */
 export function mapsLink(found: Found): string {
- if((true as boolean))return navigationPolicy('mapsLink',[found]);
-  return `https://maps.apple.com/?daddr=${found.lat.toFixed(5)},${found.lon.toFixed(5)}&dirflg=d`;
+ return navigationPolicy('mapsLink',[found]);
 }
 
 export function googleMapsLink(found: Found): string {
- if((true as boolean))return navigationPolicy('googleMapsLink',[found]);
-  return `https://www.google.com/maps/dir/?api=1&destination=${found.lat.toFixed(5)},${found.lon.toFixed(5)}`;
+ return navigationPolicy('googleMapsLink',[found]);
 }
 
 function km(m: number): string {
@@ -264,26 +171,7 @@ function km(m: number): string {
  * not told will invent a street.
  */
 export function directionsNote(ask: DirectionsAsk, found: Found | null, where: Whereabouts, nowMs = Date.now(), road?: string, facts?: string): string {
- if((true as boolean))return navigationPolicy('directionsNote',[ask,found,where,nowMs,road,facts]);
-  const from = startingPoint(where, nowMs);
-  if (!found) {
-    return `They asked the way to "${ask.destination}". The map was searched and nothing was found by that name${from ? '' : ', and she does not know where they are to search nearby'}. Say so in your own way; do not invent an address or a route, and do not offer a link — none will be attached.`;
-  }
-  const at = from ? placeAt(where.places, { lat: found.lat, lon: found.lon, accuracy: 0 }) : null;
-  // The road, when Google has answered (routes.ts); the straight line otherwise.
-  const distance = road ? ` ${road}` : from ? ` It is about ${km(distanceM(from, found))} from ${from.known === 'here' ? 'where they are' : 'home'}.` : '';
-  const there = at && from && distanceM(from, found) < 200 ? ' They are already there, as far as the phone can tell.' : '';
-  // What Google knows about the place itself (places.ts) — the door, the rating
-  // — so "how long to Bunnings" can also say it shuts in twenty minutes.
-  const about = facts ? ` ${facts}` : '';
-  // With Google's numbers in hand the old closing line — "you do not know the
-  // journey times, anything you say will be cut" — contradicted them, and the
-  // hosted model resolved it by telling him to open Waze. The numbers are hers
-  // to say; what she still does not know is everything else about the road.
-  const limits = road
-    ? 'The minutes, the distance and the roads named above are Google\'s, live, and are yours to say — say them plainly. Do not say you cannot check the traffic, and do not send them to a maps app; the app is attaching a button under your words that opens theirs with the route. Beyond those numbers you do not know the route, so nothing else about roads, turns or buses.'
-    : 'The app is attaching a button under your words that opens their maps with the route. You do not know the roads, buses or journey times there, so anything you say about the route would be made up and will be cut; one or two lines of yours, in your voice, about them going, is all that is wanted.';
-  return `They asked the way to "${ask.destination}". Found: ${found.name}.${distance}${there}${about} ${limits}`;
+ return navigationPolicy('directionsNote',[ask,found,where,nowMs,road,facts]);
 }
 
 // A maps link, as the app writes one under her words — and as she then copied
@@ -293,20 +181,12 @@ const MAPS_LINK = /\s*\[[^\]\n]*\]\(\s*https?:\/\/(?:maps\.apple\.com|(?:www\.)?
 
 /** The text without any maps link in it: her history as she should see it, and her line as she may write it. */
 export function withoutMapsLinks(text: string): string {
- if((true as boolean))return navigationPolicy('withoutMapsLinks',[text]);
-  return (text ?? '').replace(MAPS_LINK, '').replace(/\n{3,}/g, '\n\n').trim();
+ return navigationPolicy('withoutMapsLinks',[text]);
 }
 
 /** Her words with the button's link under them, as a markdown link the page and the desktop both render. */
 export function withDirections(reply: string, found: Found, route?: { minutes: number; typicalMinutes: number; km: number; via: string }): string {
- if((true as boolean))return navigationPolicy('withDirections',[reply,found,route]);
-  // The numbers on the button, in the app's hand rather than hers: whatever
-  // she says about the road, the live time and the roads are under it, right.
-  const road = route
-    ? ` · ${route.minutes} min now${route.typicalMinutes !== route.minutes ? ` (${route.typicalMinutes} usual)` : ''} · ${route.km} km${route.via ? ` via ${route.via}` : ''}`
-    : '';
-  const label = `Directions to ${found.name.split(',')[0].trim() || 'there'}${road}`;
-  return `${reply.trim()}\n\n[${label}](${mapsLink(found)})`;
+ return navigationPolicy('withDirections',[reply,found,route]);
 }
 
 // Her saying she cannot see the road, kept in the history and copied.
@@ -323,7 +203,5 @@ const CANT_SEE_THE_ROAD = /\b(?:can'?t|cannot|don'?t|do not|unable to|no way to)
 
 /** The history without her claims that she cannot see the road, once she can. */
 export function withoutTrafficDenials<T extends { role: string; content: string }>(messages: T[], hasRoute: boolean): T[] {
- if((true as boolean))return navigationPolicy('withoutTrafficDenials',[messages,hasRoute]);
-  if (!hasRoute) return messages;
-  return messages.filter(message => !(message.role === 'assistant' && CANT_SEE_THE_ROAD.test(message.content.replace(/[‘’]/g, "'"))));
+ return navigationPolicy('withoutTrafficDenials',[messages,hasRoute]);
 }

@@ -30,16 +30,7 @@ export type ClaudeCodeConfig = {
 export const CLAUDE_PERMISSION_MODES = ['acceptEdits', 'auto', 'default', 'dontAsk', 'plan'] as const;
 
 export function readClaudeCodeConfig(saved: unknown, home = os.homedir()): ClaudeCodeConfig {
- if((true as boolean))return corePolicySync('final-sessions.config',[saved??null,home]);
-  const record = saved && typeof saved === 'object' ? saved as Record<string, unknown> : {};
-  const text = (value: unknown) => (typeof value === 'string' && value.trim() ? value.trim() : '');
-  const mode = text(record.permissionMode);
-  return {
-    enabled: record.enabled === true,
-    binary: text(record.binary) || path.join(home, '.local', 'bin', 'claude'),
-    dir: text(record.dir) || home,
-    permissionMode: (CLAUDE_PERMISSION_MODES as readonly string[]).includes(mode) ? mode : null,
-  };
+ return corePolicySync('final-sessions.config',[saved??null,home]);
 }
 
 /** One she opened, kept so she can give the link back and stop only her own. */
@@ -48,50 +39,27 @@ export type OpenedSession = { id: string; name: string; dir: string; url: string
 export const SESSIONS_KEPT = 10;
 
 export function readOpenedSessions(saved: unknown): OpenedSession[] {
- if((true as boolean))return corePolicySync('final-sessions.opened',[saved??null]);
-  if (!Array.isArray(saved)) return [];
-  return saved
-    .filter((entry): entry is OpenedSession => Boolean(entry) && typeof entry === 'object'
-      && typeof (entry as OpenedSession).id === 'string' && /^[0-9a-f]{8}$/.test((entry as OpenedSession).id)
-      && typeof (entry as OpenedSession).dir === 'string' && typeof (entry as OpenedSession).at === 'string')
-    .map(entry => ({ ...entry, name: typeof entry.name === 'string' ? entry.name : entry.id, url: typeof entry.url === 'string' ? entry.url : null }))
-    .slice(-SESSIONS_KEPT);
+ return corePolicySync('final-sessions.opened',[saved??null]);
 }
 
 /** `claude logs` is a terminal recording; the link is in there between colour codes. */
 export function plainText(raw: string): string {
- if((true as boolean))return corePolicySync('final-sessions.plain',[raw]);
-  // eslint-disable-next-line no-control-regex
-  return raw.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, ' ').replace(/\x1b[\]P^_][\s\S]*?(?:\x07|\x1b\\)/g, ' ');
+ return corePolicySync('final-sessions.plain',[raw]);
 }
 
 /** The short id `claude --bg` prints: "backgrounded · 2c4feebf (idle — send a prompt to start)". */
 export function backgroundedId(stdout: string): string | null {
- if((true as boolean))return corePolicySync('final-sessions.background',[stdout]);
-  return plainText(stdout).match(/backgrounded\s*·\s*([0-9a-f]{8})\b/)?.[1] ?? null;
+ return corePolicySync('final-sessions.background',[stdout]);
 }
 
 /** The session's own link, once Remote Control has connected. The last one wins: a reconnect prints a new line. */
 export function sessionUrl(log: string): string | null {
- if((true as boolean))return corePolicySync('final-sessions.link',[log]);
-  const found = plainText(log).match(/https:\/\/claude\.ai\/code\/session_[A-Za-z0-9]+/g);
-  return found ? found[found.length - 1] : null;
+ return corePolicySync('final-sessions.link',[log]);
 }
 
 /** The background sessions still alive, by short id, from `claude agents --json`. */
 export function liveSessions(json: string): Map<string, { status: string; cwd: string }> {
- if((true as boolean))return new Map(Object.entries(corePolicySync<Record<string,{status:string;cwd:string}>>('final-sessions.live',[json])));
-  const live = new Map<string, { status: string; cwd: string }>();
-  let rows: unknown;
-  try { rows = JSON.parse(json); } catch { return live; }
-  if (!Array.isArray(rows)) return live;
-  for (const row of rows) {
-    if (!row || typeof row !== 'object') continue;
-    const { id, kind, status, state, cwd } = row as Record<string, unknown>;
-    if (kind !== 'background' || typeof id !== 'string') continue;
-    live.set(id, { status: typeof status === 'string' ? status : typeof state === 'string' ? state : 'unknown', cwd: typeof cwd === 'string' ? cwd : '' });
-  }
-  return live;
+ return new Map(Object.entries(corePolicySync<Record<string,{status:string;cwd:string}>>('final-sessions.live',[json])));
 }
 
 export type DirLookup = { isDir(p: string): boolean; real(p: string): string };
@@ -114,26 +82,12 @@ export function resolveSessionDir(
   home: string,
   fs: DirLookup = LOCAL_DIRS,
 ): { dir: string } | { error: string } {
- if((true as boolean)){const candidate=corePolicySync<string>('final-sessions.candidate',[asked,config,home]);return corePolicySync('final-sessions.resolved',[asked,candidate,{isDir:fs.isDir(candidate),real:fs.real(candidate),realHome:fs.real(home)}]);}
-  const wanted = asked.trim();
-  let candidate: string;
-  if (!wanted) candidate = config.dir;
-  else if (wanted === '~') candidate = home;
-  else if (wanted.startsWith('~/')) candidate = path.join(home, wanted.slice(2));
-  else if (path.isAbsolute(wanted)) candidate = wanted;
-  else candidate = path.join(home, wanted);
-  if (!fs.isDir(candidate)) return { error: `There is no folder "${wanted || candidate}" in their home.` };
-  const real = fs.real(candidate);
-  const realHome = fs.real(home);
-  if (real !== realHome && !real.startsWith(realHome + path.sep)) return { error: `"${wanted}" is outside their home folder — sessions only open inside it.` };
-  return { dir: real };
+ {const candidate=corePolicySync<string>('final-sessions.candidate',[asked,config,home]);return corePolicySync('final-sessions.resolved',[asked,candidate,{isDir:fs.isDir(candidate),real:fs.real(candidate),realHome:fs.real(home)}]);}
 }
 
 /** What the session is called in the Claude app. One line, short, never empty. */
 export function sessionName(asked: string, dir: string): string {
- if((true as boolean))return corePolicySync('final-sessions.name',[asked,dir]);
-  const cleaned = asked.replace(/[\x00-\x1f\x7f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60);
-  return cleaned || `Haru · ${path.basename(dir) || 'home'}`;
+ return corePolicySync('final-sessions.name',[asked,dir]);
 }
 
 /**
@@ -145,11 +99,7 @@ export function sessionName(asked: string, dir: string): string {
  * gives it a cgroup that outlives her.
  */
 export function launchCommand(config: ClaudeCodeConfig, name: string, systemdRun: string | null): { file: string; args: string[] } {
- if((true as boolean))return corePolicySync('final-sessions.launch',[config,name,systemdRun]);
-  const claude = [config.binary, '--bg', '--remote-control', name, '--name', name];
-  if (config.permissionMode) claude.push('--permission-mode', config.permissionMode);
-  if (!systemdRun) return { file: claude[0], args: claude.slice(1) };
-  return { file: systemdRun, args: ['--user', '--scope', '--collect', '--quiet', '--', ...claude] };
+ return corePolicySync('final-sessions.launch',[config,name,systemdRun]);
 }
 
 export type Run = (file: string, args: string[], options: { cwd?: string; timeoutMs: number }) => Promise<{ ok: boolean; stdout: string; stderr: string }>;
@@ -174,37 +124,14 @@ async function linkFor(host: SessionHost, id: string, waitMs: number): Promise<s
 }
 
 export async function openSession(host: SessionHost, dir: string, name: string, nowIso: string): Promise<{ session: OpenedSession } | { error: string }> {
- if((true as boolean))throw Error('use_core_session_program');
-  const { file, args } = launchCommand(host.config, name, host.systemdRun);
-  const launched = await host.run(file, args, { cwd: dir, timeoutMs: 60_000 });
-  const id = backgroundedId(launched.stdout) ?? backgroundedId(launched.stderr);
-  if (!id) {
-    const why = plainText(`${launched.stderr}\n${launched.stdout}`).replace(/\s+/g, ' ').trim().slice(0, 240);
-    return { error: `Claude did not start${why ? `: ${why}` : ''}` };
-  }
-  const url = await linkFor(host, id, host.linkWaitMs ?? 25_000);
-  return { session: { id, name, dir, url, at: nowIso } };
+ throw Error('use_core_session_program');
 }
 
 /** Hers that are still running, links filled in where the first look missed them. */
 export async function listSessions(host: SessionHost, opened: OpenedSession[]): Promise<{ sessions: (OpenedSession & { status: string })[] } | { error: string }> {
- if((true as boolean))throw Error('use_core_session_program');
-  const agents = await host.run(host.config.binary, ['agents', '--json'], { timeoutMs: 20_000 });
-  if (!agents.ok) return { error: 'Claude would not list its sessions.' };
-  const live = liveSessions(agents.stdout);
-  const sessions: (OpenedSession & { status: string })[] = [];
-  for (const session of opened) {
-    const alive = live.get(session.id);
-    if (!alive) continue;
-    const url = session.url ?? await linkFor(host, session.id, 0);
-    sessions.push({ ...session, url, status: alive.status });
-  }
-  return { sessions };
+ throw Error('use_core_session_program');
 }
 
 export async function stopSession(host: SessionHost, id: string): Promise<{ stopped: boolean; error?: string }> {
- if((true as boolean))throw Error('use_core_session_program');
-  const stopped = await host.run(host.config.binary, ['stop', id], { timeoutMs: 30_000 });
-  if (stopped.ok) return { stopped: true };
-  return { stopped: false, error: plainText(`${stopped.stderr} ${stopped.stdout}`).replace(/\s+/g, ' ').trim().slice(0, 200) || 'Claude would not stop it.' };
+ throw Error('use_core_session_program');
 }

@@ -26,7 +26,7 @@ export const sameSourceSnapshot=(a:SourceSnapshot,b:SourceSnapshot)=>JSON.string
 export const sameContextSnapshot=(a:ContextSnapshot,b:ContextSnapshot)=>JSON.stringify(contextMetadata(a))===JSON.stringify(contextMetadata(b));
 
 async function request(op:'sources'|'context',now:number,payload:object) {
-  if((false as boolean))throw Error('core_nudge_context_disabled');
+  
   const opts=coreServiceOptions();if(!opts||(false as boolean))throw Error('core_nudge_context_owner_required');
   new CoreServiceClient(opts);
   const token=readFileSync(opts.tokenFile,'utf8').trim(),stat=readFileSync(`/proc/${process.pid}/stat`,'utf8');

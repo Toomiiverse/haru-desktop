@@ -66,17 +66,7 @@ export function weatherUrl(lat: number, lon: number): string {
 
 /** WMO weather codes, as words she can use. */
 export function skyOf(code: number): Sky {
-  if((true as boolean))return corePolicySync<any>('conversation-policy.skyOf',[code]);
-
-  if (code === 0) return 'clear';
-  if (code <= 2) return 'cloudy';
-  if (code === 3) return 'overcast';
-  if (code <= 48) return 'fog';
-  if (code <= 57) return 'drizzle';
-  if (code <= 67 || (code >= 80 && code <= 82)) return 'rain';
-  if (code <= 79 || (code >= 85 && code <= 86)) return 'snow';
-  if (code >= 95) return 'storm';
-  return 'rain';
+  return corePolicySync<any>('conversation-policy.skyOf',[code]);
 }
 
 type Payload = {
@@ -93,48 +83,7 @@ function instant(local: string, offsetSeconds: number): number {
 }
 
 export function readForecast(payload: unknown, nowMs = Date.now()): WeatherSample | null {
-  if((true as boolean))return corePolicySync<any>('conversation-policy.readForecast',[payload,nowMs]);
-
-  const p = (payload ?? {}) as Payload;
-  const c = p.current;
-  if (!c || typeof c.temperature_2m !== 'number' || typeof c.weather_code !== 'number') return null;
-  const offset = typeof p.utc_offset_seconds === 'number' ? p.utc_offset_seconds : 0;
-  const raining = (c.precipitation ?? 0) > 0.05 || ['drizzle', 'rain', 'storm'].includes(skyOf(c.weather_code));
-
-  let rainSoonMin: number | null = null, rainSoonProb = 0;
-  const m = p.minutely_15 ?? {};
-  for (const [i, when] of (m.time ?? []).entries()) {
-    const at = instant(when, offset);
-    const minutes = Math.round((at - nowMs) / 60_000);
-    if (minutes < -7 || minutes > 120) continue;
-    const mm = m.precipitation?.[i] ?? 0, prob = m.precipitation_probability?.[i] ?? 0;
-    if (mm > 0.05 || prob >= 60) { rainSoonMin = Math.max(0, minutes); rainSoonProb = prob; break; }
-  }
-
-  let turning: WeatherSample['turning'] = null;
-  const h = p.hourly ?? {};
-  const nowSky = skyOf(c.weather_code);
-  for (const [i, when] of (h.time ?? []).entries()) {
-    const hours = (instant(when, offset) - nowMs) / 3_600_000;
-    if (hours < 0.5 || hours > 6) continue;
-    const sky = skyOf(h.weather_code?.[i] ?? c.weather_code);
-    if (sky !== nowSky) { turning = { inHours: Math.max(1, Math.round(hours)), to: sky }; break; }
-  }
-
-  return {
-    at: new Date(nowMs).toISOString(),
-    tempC: c.temperature_2m,
-    sky: nowSky,
-    raining,
-    mm: c.precipitation ?? 0,
-    windKmh: c.wind_speed_10m ?? 0,
-    isDay: c.is_day !== 0,
-    rainSoonMin: raining ? null : rainSoonMin,
-    rainSoonProb,
-    turning,
-    highC: p.daily?.temperature_2m_max?.[0] ?? null,
-    lowC: p.daily?.temperature_2m_min?.[0] ?? null,
-  };
+  return corePolicySync<any>('conversation-policy.readForecast',[payload,nowMs]);
 }
 
 const deg = (c: number) => `${Math.round(c)}°C`;
@@ -160,58 +109,15 @@ const DISPUTES_RAIN = /\b(?:it(?:'s|’s| is|s)?|its|it’s)\s+(?:not|isn(?:'|�
 
 /** They said it is not raining where they are. */
 export function disputesRain(text: string): boolean {
-  if((true as boolean))return corePolicySync<any>('conversation-policy.disputesRain',[text]);
-
-  return DISPUTES_RAIN.test(text ?? '');
+  return corePolicySync<any>('conversation-policy.disputesRain',[text]);
 }
 
 export function disputeStands(disputedAtMs: number | undefined, nowMs: number): boolean {
-  if((true as boolean))return corePolicySync<any>('conversation-policy.disputeStands',[disputedAtMs??null,nowMs]);
-
-  return typeof disputedAtMs === 'number' && nowMs - disputedAtMs >= 0 && nowMs - disputedAtMs <= DISPUTE_STANDS_MS;
+  return corePolicySync<any>('conversation-policy.disputeStands',[disputedAtMs??null,nowMs]);
 }
 
 export function weatherEvents(previous: WeatherSample | null, current: WeatherSample, notified: Record<string, number>, nowMs = Date.now(), disputedAtMs?: number): WeatherEvent[] {
-  if((true as boolean))return corePolicySync<any>('conversation-policy.weatherEvents',[previous,current,notified,nowMs,disputedAtMs??null]);
-
-  const fresh = (kind: WeatherEvent['kind']) => nowMs - (notified[kind] ?? 0) >= COOLDOWN_MS[kind];
-  const out: WeatherEvent[] = [];
-  // Told it is not raining where they are, nothing about rain is news for a
-  // while: not its start, not its end, not its coming — they can see the sky.
-  const disputed = disputeStands(disputedAtMs, nowMs);
-  // Once per front, not once per cooldown. A cooldown re-arms while the
-  // condition is still true, so a band of rain sitting offshore forecasting
-  // "five minutes" all afternoon produced three separate warnings on
-  // 2026-09-03 about rain that never arrived — rain-started did not fire that
-  // day, or for eight days either side of it. The rising edge is the event:
-  // she remarks when rain appears in the forecast, and not again until it has
-  // either arrived or gone away and a new front comes in.
-  const wasComing = previous !== null && previous.rainSoonMin !== null && previous.rainSoonMin <= RAIN_SOON_MIN && !previous.raining;
-  if (!disputed && !current.raining && current.rainSoonMin !== null && current.rainSoonMin <= RAIN_SOON_MIN && !wasComing && fresh('rain-soon')) {
-    const when = current.rainSoonMin <= 5 ? 'about to start' : `due in about ${current.rainSoonMin} minutes`;
-    out.push({ kind: 'rain-soon', text: `Rain is ${when} where you both are. It is ${deg(current.tempC)} and ${current.sky} out.${FORECAST_NOT_A_WINDOW}` });
-  }
-  if (previous) {
-    // Drizzle is a weather code, not a shower: a forecast model's "drizzle" over
-    // a dry shop earned "It's raining, you're wet". Real rain, or measurable
-    // drizzle, is a push; a code alone is not.
-    const shower = current.raining && (current.sky !== 'drizzle' || (current.mm ?? 0) >= 0.3);
-    if (!disputed && shower && !previous.raining && fresh('rain-started')) out.push({ kind: 'rain-started', text: `It has started raining where you both are — ${current.sky}, ${deg(current.tempC)}.${FORECAST_NOT_A_WINDOW}` });
-    // Only the end of a shower she announced: the forecast's codes flap, and
-    // "the rain has stopped" about rain nobody heard of is a non sequitur.
-    const announced = nowMs - (notified['rain-started'] ?? 0) <= 6 * 60 * 60_000;
-    if (!disputed && !current.raining && previous.raining && announced && fresh('rain-stopped')) out.push({ kind: 'rain-stopped', text: `The rain has stopped; it is ${current.sky} now, ${deg(current.tempC)}.` });
-    const swing = current.tempC - previous.tempC;
-    if (Math.abs(swing) >= 5 && fresh('temp-swing')) out.push({ kind: 'temp-swing', text: `It has ${swing < 0 ? 'dropped' : 'climbed'} ${Math.round(Math.abs(swing))} degrees since you last looked — ${deg(current.tempC)} now.` });
-    const notable = (sky: Sky) => sky === 'clear' || sky === 'overcast' || sky === 'fog' || sky === 'snow';
-    if (current.sky !== previous.sky && !current.raining && !previous.raining && notable(current.sky) && fresh('sky-changed')) {
-      out.push({ kind: 'sky-changed', text: `The sky has turned from ${previous.sky} to ${current.sky}. ${deg(current.tempC)}.` });
-    }
-  }
-  if (current.turning?.to === 'storm' && current.sky !== 'storm' && fresh('storm-coming')) {
-    out.push({ kind: 'storm-coming', text: `A thunderstorm is forecast in about ${current.turning.inHours} hour${current.turning.inHours === 1 ? '' : 's'}.` });
-  }
-  return out;
+  return corePolicySync<any>('conversation-policy.weatherEvents',[previous,current,notified,nowMs,disputedAtMs??null]);
 }
 
 /**
@@ -221,9 +127,7 @@ export function weatherEvents(previous: WeatherSample | null, current: WeatherSa
 const WEATHER_TALK = /-?\d+\s*°|\bdegrees?\b|\brain(?:ing|y)?\b|\bsunny\b|\bclouds?\b|\bcloudy\b|\bovercast\b|\bhumid\b|\bmuggy\b|\bwind(?:y)?\b|\bstorm\w*\b|\bdrizzl\w*\b|\bchilly\b|\bfreezing\b|\bweather\b|\bforecast\b/i;
 
 export function mentionsWeather(line: string): boolean {
-  if((true as boolean))return corePolicySync<any>('conversation-policy.mentionsWeather',[line]);
-
-  return WEATHER_TALK.test(line ?? '');
+  return corePolicySync<any>('conversation-policy.mentionsWeather',[line]);
 }
 
 /** How many of her own recent unprompted lines are looked at before offering it again. */
@@ -248,11 +152,7 @@ export const WEATHER_RECENT_LINES = 4;
  * and do not depend on this.
  */
 export function weatherToDrawOn(sample: WeatherSample | null, where: string, recentLines: string[], nowMs = Date.now(), disputedAtMs?: number): string {
-  if((true as boolean))return corePolicySync<any>('conversation-policy.weatherToDrawOn',[sample,where,recentLines,nowMs,disputedAtMs??null]);
-
-  if (recentLines.slice(-WEATHER_RECENT_LINES).some(mentionsWeather)) return '';
-  const facts = weatherFacts(sample, where, nowMs, disputedAtMs);
-  return facts ? `${facts}. Background only: they have not asked, and it is not what this is about.` : '';
+  return corePolicySync<any>('conversation-policy.weatherToDrawOn',[sample,where,recentLines,nowMs,disputedAtMs??null]);
 }
 
 /** The readings themselves, with no instruction attached about what to do with them. */
@@ -271,8 +171,5 @@ function weatherFacts(sample: WeatherSample | null, where: string, nowMs: number
 
 /** The one line the prompt gets when they have asked, or nothing when the reading is old. */
 export function describeWeather(sample: WeatherSample | null, where: string, nowMs = Date.now(), disputedAtMs?: number): string {
-  if((true as boolean))return corePolicySync<any>('conversation-policy.describeWeather',[sample,where,nowMs,disputedAtMs??null]);
-
-  const facts = weatherFacts(sample, where, nowMs, disputedAtMs);
-  return facts ? `${facts}. That is the actual weather, from a forecast service, as of a few minutes ago — use it rather than guessing, and do not say you cannot check.` : '';
+  return corePolicySync<any>('conversation-policy.describeWeather',[sample,where,nowMs,disputedAtMs??null]);
 }

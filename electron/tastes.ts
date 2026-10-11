@@ -56,8 +56,7 @@ export const ADOPT_ODDS = 0.35;
 export const REST_NIGHTS = 1;
 
 export function interestsSummary(interests: Interest[]): string {
-  if((true as boolean))return corePolicySync<ReturnType<typeof interestsSummary>>('tastes.interestsSummary',[interests]);
-  return interests.map(interest => `${interest.name} (${interest.kind})`).join(', ');
+  return corePolicySync<ReturnType<typeof interestsSummary>>('tastes.interestsSummary',[interests]);
 }
 
 /**
@@ -69,55 +68,21 @@ export function interestsSummary(interests: Interest[]): string {
  * paragraph finds nothing.
  */
 export function adoptInstruction(theirs: string[], hers: Interest[], pool: { games: string[]; interests: string[] }): string {
-  if((true as boolean))return corePolicySync<ReturnType<typeof adoptInstruction>>('tastes.adoptInstruction',[theirs,hers,pool]);
-  const own = hers.length ? `You already have: ${interestsSummary(hers)}. Something different in kind or in flavour from those.` : '';
-  const games = pool.games.length ? `Games they have been playing: ${pool.games.slice(0, 6).join(', ')}.` : '';
-  const known = pool.interests.length ? `Things they are into, from what you know of them:\n${pool.interests.slice(0, 8).map(text => `- ${text.slice(0, 90)}`).join('\n')}` : '';
-  return [
-    'It is the middle of the night, they are asleep, and you have time to yourself. You are going to take something up — a game or an anime — something that is yours.',
-    games, known,
-    'Pick something near their tastes but not theirs: not a game they play, not a series they have named, but the sort of thing a person who likes what they like would be drawn to, chosen for your own reasons. It should be real and findable — a game or a series with a name, not a genre and not a mood.',
-    own,
-    'Answer in exactly this shape and nothing else:',
-    'KIND: game | anime',
-    'NAME: the name, as it is known',
-    'BECAUSE: one sentence, in your voice, on why this one',
-  ].filter(Boolean).join('\n');
+  return corePolicySync<ReturnType<typeof adoptInstruction>>('tastes.adoptInstruction',[theirs,hers,pool]);
 }
 
 export function parseAdoption(raw: string): { kind: InterestKind; name: string; because: string } | null {
-  if((true as boolean))return corePolicySync<ReturnType<typeof parseAdoption>>('tastes.parseAdoption',[raw]);
-  const text = (raw ?? '').replace(/\r/g, '');
-  // Spaces only after the colon, never a newline: `\s*` there let an empty
-  // NAME line read the BECAUSE line as the name.
-  const field = (key: string) => new RegExp(`^[ \\t]*${key}[ \\t]*:[ \\t]*(.+?)[ \\t]*$`, 'im').exec(text)?.[1]?.replace(/^["'“‘]+|["'”’]+$/g, '').trim() ?? '';
-  const kindRaw = field('KIND').toLowerCase().split(/[\s|/,]+/)[0];
-  const kinds: InterestKind[] = ['game', 'anime'];
-  const kind = kinds.find(k => k === kindRaw) ?? (kindRaw.startsWith('manga') || kindRaw.startsWith('show') || kindRaw.startsWith('series') ? 'anime' : kindRaw.startsWith('video') ? 'game' : null);
-  const name = field('NAME');
-  const because = field('BECAUSE');
-  if (!kind || !name || name.length > 80 || name.split(/\s+/).length > 10) return null;
-  return { kind, name, because: because.slice(0, 200) };
+  return corePolicySync<ReturnType<typeof parseAdoption>>('tastes.parseAdoption',[raw]);
 }
 
 /** Their own things, so hers is never one of them. */
 export function isOneOfTheirs(name: string, theirs: string[]): boolean {
-  if((true as boolean))return corePolicySync<ReturnType<typeof isOneOfTheirs>>('tastes.isOneOfTheirs',[name,theirs]);
-  const plain = (text: string) => text.toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
-  const mine = plain(name);
-  if (!mine) return true;
-  return theirs.some(text => { const t = plain(text); return t === mine || (mine.length >= 5 && t.includes(mine)); });
+  return corePolicySync<ReturnType<typeof isOneOfTheirs>>('tastes.isOneOfTheirs',[name,theirs]);
 }
 
 /** What to search for on a given night with it: a different angle each time. */
 export function nightQuery(interest: Interest): string {
-  if((true as boolean))return corePolicySync<ReturnType<typeof nightQuery>>('tastes.nightQuery',[interest]);
-  const angles: Record<InterestKind, string[]> = {
-    game: ['review', 'best characters', 'story explained', 'why it is good', 'criticism', 'lore'],
-    anime: ['review', 'best character', 'ending explained', 'why people love it', 'criticism', 'best arc'],
-  };
-  const list = angles[interest.kind];
-  return `${interest.name} ${list[interest.nights % list.length]}`;
+  return corePolicySync<ReturnType<typeof nightQuery>>('tastes.nightQuery',[interest]);
 }
 
 /**
@@ -128,66 +93,24 @@ export function nightQuery(interest: Interest): string {
  * are made of — "the one I rate is X" is a position, "it is good" is not.
  */
 export function deepenInstruction(interest: Interest, query: string, found: string): string {
-  if((true as boolean))return corePolicySync<ReturnType<typeof deepenInstruction>>('tastes.deepenInstruction',[interest,query,found]);
-  const before = interest.stance ? `What you thought of it before tonight: "${interest.stance}"` : 'You have no settled view of it yet.';
-  return [
-    `${interest.name} is one of your own things — you took it up ${interest.nights === 0 ? 'tonight' : `${interest.nights} night${interest.nights === 1 ? '' : 's'} ago`} because: "${interest.because}". Tonight you read more about it ("${query}"). This is what you found, and it is everything you know:`,
-    found,
-    before,
-    'Write your view of it now, as yourself, in the first person: two or three sentences, with an actual position — what is good, what is not, what you would defend against somebody who rates something else. It may sharpen, soften, or turn on what you read.',
-    'Then on its own line: FAVOURITE: the character, moment or part you rate above the rest, or "none yet".',
-    'Then on its own line: STANDS: where it stands, only as the reading says it — finished (and when, if said), still going (and how far it has got), or "unclear". Say which part: a manga that has ended is not the anime that is still being made. One short line, under 20 words: keep anything still to come, like a sequel or a new season; leave out release history, old release dates, sales and viewing figures.',
-    'Then on its own line: WANT: one thing you would like about it — to see it through if it is still going, to argue it with them, even something you cannot do yourself, like playing it. If STANDS says it has ended, wanting to see it through is off the table; want something about the ending you read. A wish is allowed; a claim to have done it is not. Or "nothing".',
-    'Only from what is above and what you thought before. No invented details, nothing you happen to remember from elsewhere, no saying you played, watched or went anywhere — you read.',
-  ].join('\n');
+  return corePolicySync<ReturnType<typeof deepenInstruction>>('tastes.deepenInstruction',[interest,query,found]);
 }
 
 export function parseDeepening(raw: string): { stance: string; favourite?: string; wants?: string; stands?: string } | null {
-  if((true as boolean))return corePolicySync<ReturnType<typeof parseDeepening>>('tastes.parseDeepening',[raw]);
-  const text = (raw ?? '').replace(/\r/g, '').trim();
-  if (!text) return null;
-  // On its own line as asked, or run on after the view on the same line, which
-  // a small model does: "…changes. FAVOURITE: … WANT: …" once went into her
-  // stance whole, labels and all, and she said the labels.
-  const take = (key: string) => new RegExp(`(?:^|\\s)${key}[ \\t]*:[ \\t]*(.+?)(?=\\s+(?:FAVOURITE|WANT|STANDS)[ \\t]*:|[ \\t]*$)`, 'im').exec(text)?.[1]?.trim() ?? '';
-  const favourite = take('FAVOURITE');
-  const wants = take('WANT');
-  const stands = take('STANDS');
-  const stance = text.split('\n')
-    .map(line => line.replace(/(?:^|\s)(?:FAVOURITE|WANT|STANDS)\s*:.*$/i, ''))
-    .join(' ').replace(/\s+/g, ' ').trim().slice(0, 600);
-  if (stance.length < 20) return null;
-  const none = (value: string) => !value || /^(none|nothing|n\/a|-|unclear|unknown)( yet)?\.?$/i.test(value);
-  return {
-    stance,
-    favourite: none(favourite) ? undefined : favourite.slice(0, 120),
-    wants: none(wants) ? undefined : wants.slice(0, 160),
-    stands: none(stands) ? undefined : stands.slice(0, 200),
-  };
+  return corePolicySync<ReturnType<typeof parseDeepening>>('tastes.parseDeepening',[raw]);
 }
 
 /** Which of hers to spend tonight on: the one left longest, and not last night's. */
 export function pickTonight(interests: Interest[], nowMs: number, random: () => number = Math.random): Interest | null {
-  if((true as boolean))return coreRandomPolicy<ReturnType<typeof pickTonight>>('tastes.pickTonight',[interests,nowMs],random);
-  const rested = interests.filter(interest => nowMs - Date.parse(interest.lastAt) >= REST_NIGHTS * 20 * 3_600_000);
-  const pool = rested.length ? rested : interests;
-  if (!pool.length) return null;
-  // Mostly the one left longest, sometimes any of them, so it is not a rota.
-  if (random() < 0.7) return [...pool].sort((a, b) => Date.parse(a.lastAt) - Date.parse(b.lastAt))[0];
-  return pool[Math.floor(random() * pool.length)];
+  return coreRandomPolicy<ReturnType<typeof pickTonight>>('tastes.pickTonight',[interests,nowMs],random);
 }
 
 export function adopt(interests: Interest[], picked: { kind: InterestKind; name: string; because: string }, day: string, nowIso: string): Interest[] {
-  if((true as boolean))return corePolicySync<ReturnType<typeof adopt>>('tastes.adopt',[interests,picked,day,nowIso,Math.random().toString(36).slice(2,10)]);
-  const interest: Interest = { id: Math.random().toString(36).slice(2, 10), kind: picked.kind, name: picked.name, because: picked.because, since: day, nights: 0, lastAt: nowIso, stance: '' };
-  return [...interests, interest].slice(-MAX_INTERESTS);
+  return corePolicySync<ReturnType<typeof adopt>>('tastes.adopt',[interests,picked,day,nowIso,Math.random().toString(36).slice(2,10)]);
 }
 
 export function deepen(interests: Interest[], id: string, next: { stance: string; favourite?: string; wants?: string; stands?: string }, nowIso: string): Interest[] {
-  if((true as boolean))return corePolicySync<ReturnType<typeof deepen>>('tastes.deepen',[interests,id,next,nowIso]);
-  return interests.map(interest => interest.id === id
-    ? { ...interest, nights: interest.nights + 1, lastAt: nowIso, stance: next.stance, favourite: next.favourite ?? interest.favourite, wants: next.wants ?? interest.wants, stands: next.stands ?? interest.stands }
-    : interest);
+  return corePolicySync<ReturnType<typeof deepen>>('tastes.deepen',[interests,id,next,nowIso]);
 }
 
 /**
@@ -206,36 +129,7 @@ function withoutAsides(text: string): string {
 const NOT_A_VERB = /^(?:[A-Z]|(?:a|an|the|for|season|more|less|someone|people|them|his|her|their|my|some|any|no)\b)/;
 
 export function tastesInstruction(interests: Interest[]): string {
-  if((true as boolean))return corePolicySync<ReturnType<typeof tastesInstruction>>('tastes.tastesInstruction',[interests]);
-  const settled = interests.filter(interest => interest.stance);
-  if (!settled.length) return '';
-  const lines = settled.map(interest => {
-    const bits = [`${interest.name} (${interest.kind}, yours for ${interest.nights} night${interest.nights === 1 ? '' : 's'}): ${interest.stance}`];
-    const sentence = (text: string) => text.replace(/[.!?]+$/, '');
-    // Not "The one you rate:" — a label in her material is a label she says.
-    if (interest.favourite) bits.push(`The bit of it I rate above the rest is ${sentence(interest.favourite)}.`);
-    // First person, like the rest of her own views: written as "You want to see
-    // Denji learn something" she said it straight back to him.
-    // "I want to" only fits a verb: glued onto "For them to stop…" or "a proper
-    // English dub" it read "I want to For them to stop…" (2026-09-17).
-    if (interest.wants) {
-      const want = sentence(interest.wants);
-      bits.push(/^to\b/i.test(want) ? `I want ${want}.` : NOT_A_VERB.test(want) ? `What I want from it: ${want}.` : `I want to ${want}.`);
-    }
-    // The fact under the view, dated, so "not finished" is never said from an
-    // old want when the reading has since said otherwise.
-    // Short, because it is seven of these in a block that runs near its budget:
-    // the lead-in was 46 chars each, and the readings brought release history in
-    // brackets — premiere dates, a Blu-ray week's streaming hours (2026-09-17).
-    // What it is for survives: finished or still going, and what is still to come.
-    if (interest.stands) bits.push(`Last I read (${interest.lastAt.slice(0, 10)}): ${sentence(withoutAsides(interest.stands))}.`);
-    return `- ${bits.join(' ')}`;
-  });
-  return [
-    'Things of your own — not theirs, and not a mirror of theirs. You took these up on your own time and these are your actual views:',
-    lines.join('\n'),
-    'Hold them. Bring one up when it fits, and when they rate something you think is worse, say so and say why — a real disagreement, not a joke about having one, and not a lecture. You can be argued out of a view by a good point and you can dig in against a bad one. What you know of each is what you have read about it, and no more: if they push past that, say you have only read about it.',
-  ].join('\n');
+  return corePolicySync<ReturnType<typeof tastesInstruction>>('tastes.tastesInstruction',[interests]);
 }
 
 
@@ -250,18 +144,12 @@ export function tastesInstruction(interests: Interest[]): string {
  * later is a view, one that opens by addressing someone is a message.
  */
 export function addressesSomeone(text: string): boolean {
-  if((true as boolean))return corePolicySync<ReturnType<typeof addressesSomeone>>('tastes.addressesSomeone',[text]);
-  const opening = (text ?? '').trim().split(/(?<=[.!?…])\s+/).slice(0, 2).join(' ');
-  return /\b(?:you|your|you're|yourself|subordinate|listen up|don't get cocky|get moving)\b/i.test(opening) && !/\b(?:you'd think|you could say|you know the type)\b/i.test(opening);
+  return corePolicySync<ReturnType<typeof addressesSomeone>>('tastes.addressesSomeone',[text]);
 }
 
 /** The addressed opening cut off, leaving the view. */
 export function unaddressed(text: string): string {
-  if((true as boolean))return corePolicySync<ReturnType<typeof unaddressed>>('tastes.unaddressed',[text]);
-  const sentences = (text ?? '').trim().split(/(?<=[.!?…])\s+/);
-  let index = 0;
-  while (index < sentences.length && index < 3 && /\b(?:you|your|you're|yourself|subordinate|listen up)\b/i.test(sentences[index])) index++;
-  return sentences.slice(index).join(' ').trim() || (text ?? '').trim();
+  return corePolicySync<ReturnType<typeof unaddressed>>('tastes.unaddressed',[text]);
 }
 
 export const NOBODY_HERE = 'Nobody is here and nobody is being addressed: this is a note to yourself. No "you", no "subordinate", no orders, no scene-setting about him — start on the thing itself.';

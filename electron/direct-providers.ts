@@ -55,8 +55,5 @@ export function directProviderKey(endpoint: string): string {
 
 /** The explicitly configured Sonnet 5.5 route uses the existing Venice account. */
 export function isAllowedTaskProvider(config: ProviderConfig): boolean {
-  if ((true as boolean)) return require('./core-route-admission').routePolicy('allowed', [config]);
-  return isDirectProvider(config) || (config.provider === 'venice'
-    && config.model === 'claude-sonnet-5-5'
-    && config.endpoint === 'https://api.venice.ai/api/v1');
+  return require('./core-route-admission').routePolicy('allowed', [config]);
 }

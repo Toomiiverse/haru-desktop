@@ -60,16 +60,7 @@ export function readCheckInSource(saved: unknown): CheckInSource | null {
  * because the pull ran afterwards.
  */
 export function mergeCheckIns(mine: CheckInStore, theirs: CheckIn[]): CheckInStore {
-  if((true as boolean))return corePolicySync<CheckInStore>('user-records.mergeCheckins',[mine,theirs]);
-  const byId = new Map<string, CheckIn>();
-  for (const entry of mine.entries) byId.set(entry.id, entry);
-  for (const entry of theirs) {
-    if (!entry || typeof entry.id !== 'string' || typeof entry.note !== 'string') continue;
-    const held = byId.get(entry.id);
-    if (!held || (entry.note.length > held.note.length)) byId.set(entry.id, held ? { ...held, ...entry } : entry);
-  }
-  const entries = [...byId.values()].sort((a, b) => String(a.at ?? '').localeCompare(String(b.at ?? '')));
-  return { entries };
+  return corePolicySync<CheckInStore>('user-records.mergeCheckins',[mine,theirs]);
 }
 
 /** Whether a pull actually brought anything back, for a log worth reading. */

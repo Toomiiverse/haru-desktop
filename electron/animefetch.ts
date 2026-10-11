@@ -36,23 +36,7 @@ export function fetchJobId(seriesId: number): string {
 
 /** The scheduler job for one fetch. One per show: a second ask for the same show replaces the watch. */
 export function fetchJob(fetch: Fetch, nowMs: number): Job {
-  if((true as boolean))return corePolicySync('anime-downloads.fetchJob',[fetch,nowMs]);
-  const until = nowMs + FETCH_FOR_MS;
-  return {
-    id: fetchJobId(fetch.seriesId),
-    kind: ANIME_FETCH_KIND,
-    schedule: { at: nowMs + FETCH_EVERY_MS },
-    dueAt: nowMs + FETCH_EVERY_MS,
-    // A check, not a line said at a time: run late it is as good as run on
-    // time. A reboot longer than three misses used to end a three-day watch
-    // (2026-09-18: both fetches dropped at 84% and 44%); expiresAt is the end.
-    staleAfterMs: FETCH_FOR_MS,
-    payload: { seriesId: fetch.seriesId, title: fetch.title, infoHash: fetch.infoHash, release: fetch.release, episodes: fetch.episodes, startedAt: nowMs, until, misses: 0 },
-    createdBy: 'app',
-    createdAt: nowMs,
-    expiresAt: until + 3 * FETCH_EVERY_MS,
-    failures: 0,
-  };
+  return corePolicySync('anime-downloads.fetchJob',[fetch,nowMs]);
 }
 
 // -- reading Sonarr's queue ----------------------------------------------------
@@ -67,13 +51,7 @@ export type QueueItem = { title?: string; status?: string; trackedDownloadStatus
  * no hash. Sonarr writes the hash in capitals and the tracker in lower case.
  */
 export function queueLineFor(queue: QueueItem[], fetch: { seriesId: number; infoHash: string; release: string }): QueueItem | null {
-  if((true as boolean))return corePolicySync('anime-downloads.queueLineFor',[queue,fetch]);
-  const hash = fetch.infoHash.toLowerCase();
-  const norm = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
-  return queue.find(item => hash && item.downloadId?.toLowerCase() === hash)
-    ?? queue.find(item => item.seriesId === fetch.seriesId)
-    ?? queue.find(item => item.title && norm(item.title) === norm(fetch.release))
-    ?? null;
+  return corePolicySync('anime-downloads.queueLineFor',[queue,fetch]);
 }
 
 export type FetchState = 'downloading' | 'landed' | 'stuck';
@@ -85,11 +63,7 @@ export type FetchState = 'downloading' | 'landed' | 'stuck';
  * either way: name the show and import.
  */
 export function fetchState(item: QueueItem): FetchState {
-  if((true as boolean))return corePolicySync('anime-downloads.fetchState',[item]);
-  const state = (item.trackedDownloadState ?? '').toLowerCase();
-  if (/^import(pending|blocked|failed)$/.test(state) || (item.trackedDownloadStatus ?? '').toLowerCase() === 'warning' && (item.sizeleft ?? 1) === 0) return 'stuck';
-  if ((item.sizeleft ?? 1) === 0 || /^(completed|imported)$/.test((item.status ?? '').toLowerCase())) return 'landed';
-  return 'downloading';
+  return corePolicySync('anime-downloads.fetchState',[item]);
 }
 
 // -- telling Sonarr which show it is ------------------------------------------
@@ -114,26 +88,7 @@ export type ImportFile = { path: string; seriesId: number; episodeIds: number[];
  * objects to is left too, with its reason in the log rather than argued with.
  */
 export function importPlan(candidates: ImportCandidate[], seriesId: number, downloadId: string): { files: ImportFile[]; skipped: { path: string; why: string }[] } {
-  if((true as boolean))return corePolicySync('anime-downloads.importPlan',[candidates,seriesId,downloadId]);
-  const files: ImportFile[] = [];
-  const skipped: { path: string; why: string }[] = [];
-  for (const candidate of candidates) {
-    const episodeIds = (candidate.episodes ?? []).map(episode => episode.id).filter(id => typeof id === 'number');
-    const objection = candidate.rejections?.map(rejection => rejection.reason).filter(Boolean).join('; ');
-    if (!episodeIds.length) { skipped.push({ path: candidate.path, why: 'no episode Sonarr could read' }); continue; }
-    if (objection) { skipped.push({ path: candidate.path, why: objection }); continue; }
-    files.push({
-      path: candidate.path,
-      seriesId,
-      episodeIds,
-      quality: candidate.quality,
-      languages: candidate.languages,
-      releaseGroup: candidate.releaseGroup,
-      downloadId: candidate.downloadId ?? downloadId,
-      indexerFlags: candidate.indexerFlags ?? 0,
-    });
-  }
-  return { files, skipped };
+  return corePolicySync('anime-downloads.importPlan',[candidates,seriesId,downloadId]);
 }
 
 // -- what she is handed to say --------------------------------------------------

@@ -66,62 +66,12 @@ function tidy(task: string): string {
 const ASKING_NOT_SCHEDULING = /^\s*(?:again\s+)?(?:what|whats|what's|who|whose|where|when(?:\s+(?:did|do|does|was|were|is|are|had|have))|why|how|whether|if\s+(?:i|we|you|he|she|they)\b)\b/i;
 
 export function reminderAsk(text: string, now: Date): ReminderAsk | null {
-  if((true as boolean))return corePolicySync<any>('agenda-life.reminderAsk',[text,agendaClock(now)]);
-  const line = (text ?? '').trim().replace(/\s+/g, ' ');
-  if (!line || line.length > 240 || line.includes('?') || recallRequest(line)) return null;
-  const asking = line.match(TRIGGER);
-  if (asking && ASKING_NOT_SCHEDULING.test(asking[1] ?? '')) return null;
-  const m = line.match(TRIGGER);
-  if (!m) return null;
-  let rest = m[1].trim();
-  const todayKey = localDateKey(now);
-  let date = todayKey;
-  let time: string | undefined;
-
-  const relative = rest.match(IN);
-  if (relative) {
-    const amount = Number(relative[1]);
-    const minutes = /^h/i.test(relative[2]) ? amount * 60 : amount;
-    if (!minutes || minutes > 24 * 60) return null;
-    const at = new Date(now.getTime() + minutes * 60_000);
-    date = localDateKey(at);
-    time = formatTimeOfDay(at.getHours(), at.getMinutes());
-    rest = rest.replace(relative[0], ' ');
-  }
-
-  const day = rest.match(DAY);
-  if (day) {
-    const resolved = resolveDate(day[1].toLowerCase().replace(/^on /, ''), now);
-    if (!resolved) return null;
-    date = resolved;
-    rest = rest.replace(day[0], ' ');
-  }
-
-  const clock = relative ? null : rest.match(AT);
-  if (clock) {
-    const said = (clock[1] ?? clock[2]).toLowerCase().replace(/\s+/g, '').replace(/\./g, '');
-    const parsed = parseTimeOfDay(said);
-    if (!parsed) return null;
-    const explicit = /am|pm/.test(said) || Number(said.split(':')[0]) > 12;
-    // Today's bare hour is the next reading of that clock; on another day a
-    // small bare hour is the afternoon one — "tomorrow at 4" is not 4am.
-    const reading = date === todayKey ? nextReading(parsed.hour, parsed.minute, now, explicit)
-      : !explicit && parsed.hour >= 1 && parsed.hour <= 6 ? { hour: parsed.hour + 12, minute: parsed.minute } : parsed;
-    time = formatTimeOfDay(reading.hour, reading.minute);
-    rest = rest.replace(clock[0], ' ');
-  }
-
-  const task = tidy(rest) || (relative && /\b(timer|alarm)\b/i.test(line) ? 'Timer' : '');
-  if (!task || task.split(' ').length > 14 || /^(me|it|that|this|something|about it|again|later)$/i.test(task)) return null;
-  return { title: task.charAt(0).toUpperCase() + task.slice(1), date, ...(time ? { time } : {}) };
+  return corePolicySync<any>('agenda-life.reminderAsk',[text,agendaClock(now)]);
 }
 
 /** What she is told, so the reply matches what was actually saved. */
 export function reminderSavedAside(ask: ReminderAsk, todayKey: string): string {
-  if((true as boolean))return corePolicySync<any>('agenda-life.reminderSavedAside',[ask,todayKey]);
-  const day = ask.date === todayKey ? 'today' : `on ${ask.date}`;
-  const when = ask.time ? `${day} at ${ask.time}` : day;
-  return `This is already written down: "${ask.title}", ${when}. It is on the list and you will chase them about it when it comes round. Confirm it in your own way in one short line — do not offer to set it, do not call a tool for it, and do not change the time.`;
+  return corePolicySync<any>('agenda-life.reminderSavedAside',[ask,todayKey]);
 }
 
 
@@ -154,34 +104,7 @@ const PROMISE_LEAD = "\\b(?:i'll|i will|i'm going to|i am going to|i'm gonna)\\s
 const PROMISED_DAY = new RegExp(`${PROMISE_LEAD}remind(?:ing)? you\\b[^.!?\\n]*?\\b(?:on|by|for)\\s+((?:the )?\\d{1,2}(?:st|nd|rd|th)?(?: of)? ${MONTH_PATTERN}(?:,? \\d{4})?|${MONTH_PATTERN} (?:the )?\\d{1,2}(?:st|nd|rd|th)?(?:,? \\d{4})?|tomorrow|(?:next |this )?(?:sunday|monday|tuesday|wednesday|thursday|friday|saturday))\\b`, 'i');
 
 export function reminderPromised(herReply: string, now: Date): { time?: string; date: string } | null {
-  if((true as boolean))return corePolicySync<any>('agenda-life.reminderPromised',[herReply,agendaClock(now)]);
-  const said = (herReply ?? '').replace(/[‘’]/g, "'");
-  const m = PROMISED.exec(said);
-  if (!m) {
-    const day = PROMISED_DAY.exec(said);
-    const date = day ? resolveDate(day[1].toLowerCase(), now) : null;
-    return date ? { date } : null;
-  }
-  const raw = m[1].toLowerCase().replace(/\./g, '').replace(/\s+/g, '');
-  const parts = /^(\d{1,2})(?::(\d{2}))?(am|pm)?$/.exec(raw);
-  if (!parts) return null;
-  let hour = Number(parts[1]); const minute = Number(parts[2] ?? '0');
-  if (hour > 23 || minute > 59) return null;
-  const meridiem = parts[3];
-  if (meridiem === 'pm' && hour < 12) hour += 12;
-  if (meridiem === 'am' && hour === 12) hour = 0;
-  // No meridiem: the next reading of that clock from now.
-  if (!meridiem && hour <= 12) {
-    const asIs = hour * 60 + minute, later = (hour + 12) * 60 + minute, nowMin = now.getHours() * 60 + now.getMinutes();
-    if (asIs <= nowMin && hour < 12 && later > nowMin) hour += 12;
-  }
-  const when = new Date(now.getTime()); when.setHours(hour, minute, 0, 0);
-  const tomorrow = /\btomorrow\b/i.test(herReply) || when.getTime() <= now.getTime();
-  if (tomorrow && when.getTime() <= now.getTime() + 60_000) when.setDate(when.getDate() + 1);
-  else if (tomorrow && /\btomorrow\b/i.test(herReply) && when.getDate() === now.getDate()) when.setDate(when.getDate() + 1);
-  const h12 = hour % 12 === 0 ? 12 : hour % 12;
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return { time: `${h12}:${pad(minute)} ${hour < 12 ? 'AM' : 'PM'}`, date: `${when.getFullYear()}-${pad(when.getMonth() + 1)}-${pad(when.getDate())}` };
+  return corePolicySync<any>('agenda-life.reminderPromised',[herReply,agendaClock(now)]);
 }
 
 /** What the reminder is for, from what they said: the last thing with a time or an obligation in it. */
@@ -189,19 +112,7 @@ export function reminderPromised(herReply: string, now: Date): { time?: string; 
 const ASKS_NOT_PROMISES = /^\s*(?:(?:hey|so|and|but|also|haru)[,\s]+)*(?:remind me\s+)?(?:what|whats|what's|who|whose|where|when|why|how|which|did|do|does|is|are|was|were|can|could|have|has|had)\b/i;
 
 export function promisedTitle(theirRecent: string[]): string {
-  if((true as boolean))return corePolicySync<any>('agenda-life.promisedTitle',[theirRecent]);
-  const said = [...theirRecent].reverse().find(text => text.trim().split(/\s+/).length >= 4
-    && !/^(?:yes|yeah|yep|sure|ok(?:ay)?|please|do it|go on|thanks)\b/i.test(text.trim())
-    && !/\?\s*$/.test(text.trim())
-    // Their yes to her offer makes a reminder out of the last thing they said
-    // with an obligation in it. "What happened with that motherboard from
-    // Umart" has none: it is a question they forgot the mark on, and it went
-    // on the list as a task, to Google, and into a nudge about it being done.
-    && !ASKS_NOT_PROMISES.test(text));
-  if (!said) return 'What you asked her to remind you about';
-  const cut = said.replace(/^(?:kinda sucks because |it sucks because |well,? |so,? |anyway,? )/i, '').replace(/^i (?:have|need|\'ve got|got|ve got) to /i, '').replace(/\s+as we have .*$/i, '').replace(/\s+because .*$/i, '').trim();
-  const title = cut.charAt(0).toUpperCase() + cut.slice(1);
-  return title.length > 64 ? `${title.slice(0, 61).trimEnd()}…` : title;
+  return corePolicySync<any>('agenda-life.promisedTitle',[theirRecent]);
 }
 
 
@@ -217,21 +128,12 @@ export function promisedTitle(theirRecent: string[]): string {
 const OFFERED = /\b(?:(?:want|like|need) me to|shall i|should i|do you want (?:me to |a )?|i(?:'|’)?ll|i can|i could)\s+(?:set (?:you )?(?:up )?(?:a |the )?(?:reminder|alarm)(?: for you)?\s*(?:for|at|@)|remind you(?: about \S+(?: \S+){0,4})?\s+(?:at|@|for)|(?:set|wake you|nudge you|ping you)\s+(?:up\s+)?(?:for|at|@))\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)?)\b/i;
 
 export function reminderOffered(herLine: string, now: Date): { time?: string; date: string } | null {
-  if((true as boolean))return corePolicySync<any>('agenda-life.reminderOffered',[herLine,agendaClock(now)]);
-  const line = (herLine ?? '').replace(/[‘’]/g, "'");
-  if (!OFFERED.test(line)) return null;
-  // Same clock reading as a promise, once the offer's shape has been recognised.
-  const m = OFFERED.exec(line)!;
-  return reminderPromised(`I'll set the reminder at ${m[1]}${/\btomorrow\b/i.test(line) ? ' tomorrow' : ''}`, now);
+  return corePolicySync<any>('agenda-life.reminderOffered',[herLine,agendaClock(now)]);
 }
 
 /** "Yes please", "sure", "do it", "you can set a reminder for me can't you" — consent, not a new ask. */
 export function acceptsOffer(text: string): boolean {
-  if((true as boolean))return corePolicySync<any>('agenda-life.acceptsOffer',[text]);
-  const t = (text ?? '').trim().toLowerCase().replace(/[‘’]/g, "'").replace(/[!.]+$/, '');
-  if (!t || t.length > 90) return false;
-  if (/^(?:yes|yeah|yep|yup|ya|sure|ok|okay|please|please do|yes please|do it|go on|go for it|sounds good|that works|do that|thanks|thank you|alright|all right|fine)(?:[,!. ]+(?:please|thanks|haru|do it|go on|that would be great))*\s*(?:haru)?$/i.test(t)) return true;
-  return /\b(?:you can|can you|could you|would you|will you)\b.*\b(?:reminder|remind|alarm)\b/i.test(t) || /\bset (?:it|one|that)\b/i.test(t);
+  return corePolicySync<any>('agenda-life.acceptsOffer',[text]);
 }
 
 /**
@@ -239,9 +141,5 @@ export function acceptsOffer(text: string): boolean {
  * last reply before this message of theirs; `theirRecent` their last few.
  */
 export function acceptedOffer(latest: string, herPrevious: string | undefined, theirRecent: string[], now: Date): ReminderAsk | null {
-  if((true as boolean))return corePolicySync<any>('agenda-life.acceptedOffer',[latest,herPrevious??null,theirRecent,agendaClock(now)]);
-  if (!herPrevious || !acceptsOffer(latest)) return null;
-  const offer = reminderOffered(herPrevious, now);
-  if (!offer) return null;
-  return { title: promisedTitle(theirRecent), date: offer.date, time: offer.time };
+  return corePolicySync<any>('agenda-life.acceptedOffer',[latest,herPrevious??null,theirRecent,agendaClock(now)]);
 }

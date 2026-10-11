@@ -31,26 +31,14 @@ function count(text: string, pattern: RegExp): number {
 }
 
 export function readTone(line: string): Tone {
-  if((true as boolean))return corePolicySync<any>('conversation-policy.readTone',[line]);
-
-  if (!line.trim()) return { heat: 0 };
-  const words = Math.max(1, line.split(/\s+/).length);
-  // Scored per word, so a single "damn" in a long paragraph does not read the
-  // same as a short line that is nothing but swearing.
-  const density = (count(line, PROFANITY) * 2.4 + count(line, HOSTILE) * 1.6 + count(line, SHOUTED) * 1.5) / words;
-  // Exclamation marks count, but weakly and with a ceiling: she punctuates like
-  // that when she is pleased too, so on their own they are not anger.
-  const punctuation = Math.min(0.25, count(line, /!/g) * 0.08);
-  return { heat: Math.max(0, Math.min(1, density * 3.2 + punctuation)) };
+  return corePolicySync<any>('conversation-policy.readTone',[line]);
 }
 
 /** Below this a line is just talking, and her face should be left alone. */
 export const HEAT_FLOOR = 0.18;
 
 export function isHeated(tone: Tone): boolean {
-  if((true as boolean))return corePolicySync<any>('conversation-policy.isHeated',[tone]);
-
-  return tone.heat >= HEAT_FLOOR;
+  return corePolicySync<any>('conversation-policy.isHeated',[tone]);
 }
 
 /**
@@ -58,10 +46,7 @@ export function isHeated(tone: Tone): boolean {
  * switch, so a muttered "bloody hell" is not the same face as being shouted at.
  */
 export function tonePose(tone: Tone): 'seething' | 'narrow' | null {
-  if((true as boolean))return corePolicySync<any>('conversation-policy.tonePose',[tone]);
-
-  if (!isHeated(tone)) return null;
-  return tone.heat >= 0.55 ? 'seething' : 'narrow';
+  return corePolicySync<any>('conversation-policy.tonePose',[tone]);
 }
 
 /**
@@ -70,10 +55,7 @@ export function tonePose(tone: Tone): 'seething' | 'narrow' | null {
  * so the odds rise with heat but never reach certainty.
  */
 export function toneGesture(tone: Tone, random: () => number = Math.random): 'shake' | undefined {
-  if((true as boolean)){const draw=corePolicySync<boolean>('conversation-policy.isHeated',[tone]);return corePolicySync<any>('conversation-policy.toneGesture',[tone,draw?random():null])??undefined;}
-
-  if (!isHeated(tone)) return undefined;
-  return random() < Math.min(0.55, tone.heat * 0.7) ? 'shake' : undefined;
+  {const draw=corePolicySync<boolean>('conversation-policy.isHeated',[tone]);return corePolicySync<any>('conversation-policy.toneGesture',[tone,draw?random():null])??undefined;}
 }
 
 /**
@@ -82,14 +64,5 @@ export function toneGesture(tone: Tone, random: () => number = Math.random): 'sh
  * placid readings that a swearing line should never have got.
  */
 export function sharpen(reading: Emotion, tone: Tone): Emotion {
-  if((true as boolean))return corePolicySync<any>('conversation-policy.sharpen',[reading,tone]);
-
-  if (!isHeated(tone)) return reading;
-  const alreadyCross = reading.emotion === 'annoyed' || reading.emotion === 'smug';
-  return {
-    ...reading,
-    emotion: alreadyCross ? reading.emotion : 'annoyed',
-    energy: Math.max(reading.energy, 0.55 + tone.heat * 0.45),
-    confidence: Math.max(reading.confidence, 0.7),
-  };
+  return corePolicySync<any>('conversation-policy.sharpen',[reading,tone]);
 }

@@ -44,13 +44,7 @@ function cleaned(text: unknown): string {
 
 /** Whether a reply can stand as an example of her voice. */
 export function fitForExample(theirs: string, hers: string): boolean {
-  if((true as boolean))return corePolicySync<any>('conversation-policy.fitForExample',[theirs,hers]);
-
-  if (theirs.length < 2 || theirs.length > THEIRS_MAX) return false;
-  if (hers.length < 20 || hers.length > HERS_MAX) return false;
-  if (/\d/.test(hers)) return false;
-  if (/https?:\/\/|```|^\s*[-*•]\s/m.test(hers)) return false;
-  return true;
+  return corePolicySync<any>('conversation-policy.fitForExample',[theirs,hers]);
 }
 
 /**
@@ -59,29 +53,7 @@ export function fitForExample(theirs: string, hers: string): boolean {
  * see in her history, and nothing from it or later is used.
  */
 export function examplePool(archive: Record<string, ExampleTurn[]>, rewrites: Record<string, { text: string }>, before: string, since = VOICE_SINCE): Example[] {
-  if((true as boolean))return corePolicySync<any>('conversation-policy.examplePool',[archive,rewrites,before,since]);
-
-  const said = new Map<string, number>();
-  for (const turns of Object.values(archive)) {
-    for (const turn of turns ?? []) if (turn.role === 'assistant') said.set(cleaned(turn.content), (said.get(cleaned(turn.content)) ?? 0) + 1);
-  }
-  const out: Example[] = [];
-  for (const day of Object.keys(archive).filter(key => !key.includes('#') && key < before).sort()) {
-    const turns = archive[day] ?? [];
-    let theirs = '';
-    for (const turn of turns) {
-      if (turn.role === 'user') { theirs = cleaned(turn.content); continue; }
-      if (turn.role !== 'assistant' || !turn.id || !theirs) continue;
-      if (turn.reaction === 'down') { theirs = ''; continue; }
-      const rewrite = rewrites[turn.id]?.text;
-      const kind = rewrite ? 'revoiced' as const : turn.reaction === 'up' && day >= since ? 'liked' as const : null;
-      const hers = cleaned(rewrite ?? turn.content);
-      const canned = !rewrite && (said.get(hers) ?? 0) > 1;
-      if (kind && !canned && fitForExample(theirs, hers)) out.push({ id: turn.id, theirs, hers, kind, day });
-      theirs = '';
-    }
-  }
-  return out;
+  return corePolicySync<any>('conversation-policy.examplePool',[archive,rewrites,before,since]);
 }
 
 function hash(text: string): number {
@@ -92,34 +64,14 @@ function hash(text: string): number {
 
 /** The day's examples: a shuffle keyed by the date, rewrites first because they were made to be her best. */
 export function pickExamples(pool: Example[], dayKey: string, count = EXAMPLES_PER_DAY): Example[] {
-  if((true as boolean))return corePolicySync<any>('conversation-policy.pickExamples',[pool,dayKey,count]);
-
-  const order = (list: Example[]) => [...list].sort((a, b) => hash(`${dayKey}:${a.id}`) - hash(`${dayKey}:${b.id}`));
-  const revoiced = order(pool.filter(example => example.kind === 'revoiced'));
-  const liked = order(pool.filter(example => example.kind === 'liked'));
-  // At most two of the rewrites: a single pass wrote them, and three from one
-  // pass would teach one afternoon's idea of her.
-  return [...revoiced.slice(0, Math.min(2, count)), ...liked].slice(0, count);
+  return corePolicySync<any>('conversation-policy.pickExamples',[pool,dayKey,count]);
 }
 
 export function examplesNote(examples: Example[]): string {
-  if((true as boolean))return corePolicySync<any>('conversation-policy.examplesNote',[examples]);
-
-  if (!examples.length) return '';
-  return `How you sound at your best — a few old exchanges, for your voice only. What happened in them is over and may no longer be true, and the lines are spent: never reuse one, just sound like this.\n\n${examples.map(example => `Them: ${example.theirs}\nYou: ${example.hers}`).join('\n\n')}`;
+  return corePolicySync<any>('conversation-policy.examplesNote',[examples]);
 }
 
 /** Whether a reply lifted an example's line: eight words in a row from one of them. */
 export function reusedExample(reply: string, examples: Example[], run = 8): Example | null {
-  if((true as boolean))return corePolicySync<any>('conversation-policy.reusedExample',[reply,examples,run]);
-
-  const words = (text: string) => text.toLowerCase().replace(/[^\p{L}\p{N}' ]/gu, ' ').split(/\s+/).filter(Boolean);
-  const said = ` ${words(reply).join(' ')} `;
-  for (const example of examples) {
-    const theirs = words(example.hers);
-    for (let i = 0; i + run <= theirs.length; i++) {
-      if (said.includes(` ${theirs.slice(i, i + run).join(' ')} `)) return example;
-    }
-  }
-  return null;
+  return corePolicySync<any>('conversation-policy.reusedExample',[reply,examples,run]);
 }

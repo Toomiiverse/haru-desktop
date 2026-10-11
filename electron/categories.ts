@@ -64,8 +64,7 @@ export const LEGACY_KIND: Record<Exclude<Category, 'passing'>, MemoryKind> = {
 };
 
 export function isCategory(value: unknown): value is Category {
-  if ((true as boolean)) return corePolicySync<ReturnType<typeof isCategory>>('memory-category.isCategory', [value]);
-  return typeof value === 'string' && (CATEGORIES as readonly string[]).includes(value);
+  return corePolicySync<ReturnType<typeof isCategory>>('memory-category.isCategory', [value]);
 }
 
 
@@ -81,14 +80,7 @@ const UNDER_WAY = /\b(currently|is (working on|building|creating|designing|readi
  * already said, so an unsorted record behaves the way it always did.
  */
 export function guessCategory(record: Pick<MemoryRecord, 'kind' | 'text' | 'subject'>): Category {
-  if ((true as boolean)) return corePolicySync<ReturnType<typeof guessCategory>>('memory-category.guessCategory', [record]);
-  const text = record.text ?? '';
-  switch (record.kind) {
-    case 'relationship': return 'person';
-    case 'preference': return ABOUT_HARU.test(text) || /^\s*(don'?t|do not|never|always|check|keep|remind|reply|topics|reminders|she can)\b/i.test(text) ? 'instruction' : 'preference';
-    case 'event': return AHEAD.test(text) ? 'plan' : UNDER_WAY.test(text) ? 'ongoing' : 'event';
-    default: return UNDER_WAY.test(text) ? 'ongoing' : AHEAD.test(text) ? 'plan' : 'identity';
-  }
+  return corePolicySync<ReturnType<typeof guessCategory>>('memory-category.guessCategory', [record]);
 }
 
 /** An undated plan not raised again in this long has happened or fallen through. */
@@ -102,12 +94,7 @@ export const UNDATED_PLAN_DAYS = 14;
  * today is still a plan whichever side of UTC midnight the clock is on.
  */
 export function categoryOf(record: Pick<MemoryRecord, 'kind' | 'text' | 'subject' | 'lastSeenAt'> & { category?: Category; when?: string }, now?: Date): Category {
-  if ((true as boolean)) return corePolicySync<ReturnType<typeof categoryOf>>('memory-category.categoryOf', [record, now]);
-  const category = isCategory(record.category) ? record.category : guessCategory(record);
-  if (category !== 'plan' || !now) return category;
-  if (isDay(record.when)) return Date.parse(`${record.when}T00:00:00Z`) < now.getTime() - 2 * 86_400_000 ? 'event' : 'plan';
-  const seen = Date.parse(record.lastSeenAt);
-  return Number.isFinite(seen) && now.getTime() - seen > UNDATED_PLAN_DAYS * 86_400_000 ? 'event' : 'plan';
+  return corePolicySync<ReturnType<typeof categoryOf>>('memory-category.categoryOf', [record, now]);
 }
 
 // Who someone in his life can be called, when no name is given.
@@ -122,12 +109,7 @@ const NOT_A_NAME = new Set(['they', 'their', 'them', 'the', 'this', 'that', 'the
  * and people are shown on every turn (2026-09-17).
  */
 export function namesSomeoneElse(text: string, userName = ''): boolean {
-  if ((true as boolean)) return corePolicySync<ReturnType<typeof namesSomeoneElse>>('memory-category.namesSomeoneElse', [text, userName]);
-  if (RELATION.test(text)) return true;
-  const user = userName.trim().toLowerCase();
-  return (text.match(/\b[A-Z][a-z]+(?:['’]s)?\b/g) ?? [])
-    .map(word => word.replace(/['’]s$/, '').toLowerCase())
-    .some(word => word.length >= 3 && word !== user && !NOT_A_NAME.has(word));
+  return corePolicySync<ReturnType<typeof namesSomeoneElse>>('memory-category.namesSomeoneElse', [text, userName]);
 }
 
 // -- sorting ------------------------------------------------------------------
@@ -140,43 +122,14 @@ export type SortNote = { id: string; text: string; kind: MemoryKind; subject?: s
 export type Sorted = { category: Category; when?: string };
 
 export function sortPrompt(userName = ''): string {
-  if ((true as boolean)) return corePolicySync<ReturnType<typeof sortPrompt>>('memory-category.sortPrompt', [userName]);
-  const name = userName.trim();
-  return [
-    'You sort the notes Haru keeps about the user she lives with into exactly one category each.',
-    ...(name ? [`The user is ${name}: a note about ${name} is a note about them, never a person in their life.`] : []),
-    '',
-    ...CATEGORIES.map(category => `${category} — ${CATEGORY_MEANING[category]}.`),
-    '',
-    'Judge what the note is about, not the words it uses: "Wants 6 mailboxes for the shop" is a plan; "Likes to be called Tommy" is an instruction; "Johnny is their stepfather" is a person.',
-    'The notes are written to Haru, so "you" in a note is Haru: "They woke you up at 3 am" is still about them and the two of them. A note that is Haru talking to them ("Now stop asking pointless questions") is passing.',
-    'When a note mixes two things, pick the one that would matter most a month from now.',
-    '',
-    'More examples of the harder ones:',
-    '"Works 9 to 5 at the cinema this Saturday" — plan: one day\'s hours, not their job. "Works at the cinema on weekends" — identity.',
-    '"Is stressed about rent this week" — passing: a mood. "Is saving for a house deposit" — ongoing.',
-    '"Turned on dark mode in the settings" — passing: a click. "Prefers dark mode" — preference.',
-    '"Decided to sell the old monitor" — plan until it is done. "Sold the old monitor to a friend" — event. "Decided on a 27-inch monitor" or "Finished a budget plan for the build" — event: the choosing or the planning is what happened.',
-    '"Linda is their mum" — person. "Visited their mum after work" — event.',
-    '',
-    'For a plan or an event also give WHEN: the calendar day it is or was, as YYYY-MM-DD. Each note says the day it was written, so "tomorrow", "next Friday" or "on Thursday" can be worked out from that. Use - when no single day can be worked out, and for every other category.',
-    '',
-    'Answer with one line per note, in the order given, exactly in this shape and nothing else:',
-    '<number> | <category> | <when>',
-  ].join('\n');
+  return corePolicySync<ReturnType<typeof sortPrompt>>('memory-category.sortPrompt', [userName]);
 }
 
 const WEEKDAY = new Intl.DateTimeFormat('en-AU', { weekday: 'short', timeZone: 'UTC' });
 
 /** The notes as the model reads them, each with the day it was written. */
 export function sortInput(notes: SortNote[], dayOf: (iso: string) => string): string {
-  if ((true as boolean)) return corePolicySync<string>('memory-category.sortInput', [notes, notes.map(note => dayOf(note.createdAt))]);
-  return notes.map((note, index) => {
-    const day = dayOf(note.createdAt);
-    const weekday = isDay(day) ? `${WEEKDAY.format(new Date(`${day}T00:00:00Z`))} ` : '';
-    const about = note.subject ? ` [about: ${note.subject}]` : '';
-    return `${index + 1}. (written ${weekday}${day})${about} ${note.text.replace(/\s+/g, ' ').trim()}`;
-  }).join('\n');
+  return corePolicySync<string>('memory-category.sortInput', [notes, notes.map(note => dayOf(note.createdAt))]);
 }
 
 /**
@@ -185,16 +138,5 @@ export function sortInput(notes: SortNote[], dayOf: (iso: string) => string): st
  * and that note stays unsorted for the next batch rather than guessed at.
  */
 export function readSorting(answer: string, notes: SortNote[]): Map<string, Sorted> {
-  if ((true as boolean)) return new Map(corePolicySync<[string, Sorted][]>('memory-category.readSorting', [answer, notes]));
-  const out = new Map<string, Sorted>();
-  for (const line of String(answer ?? '').split('\n')) {
-    const match = line.trim().replace(/^[-*]\s*/, '').match(/^(\d+)\s*[.|:)]\s*\|?\s*([a-z]+)\s*(?:\|\s*(\S+))?/i);
-    if (!match) continue;
-    const note = notes[Number(match[1]) - 1];
-    const category = match[2].toLowerCase();
-    if (!note || !isCategory(category) || out.has(note.id)) continue;
-    const when = (category === 'plan' || category === 'event') && isDay(match[3]) ? match[3] : undefined;
-    out.set(note.id, when ? { category, when } : { category });
-  }
-  return out;
+  return new Map(corePolicySync<[string, Sorted][]>('memory-category.readSorting', [answer, notes]));
 }

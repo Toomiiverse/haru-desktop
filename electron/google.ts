@@ -82,15 +82,7 @@ function credentials(store: StoreLike) {
 }
 
 export function googleStatus(store: StoreLike): GoogleStatus {
-  if((true as boolean))return corePolicySync<any>('agenda-google.status',[{google:store.get('google')??{}}]);
-  return {
-    hasCredentials: Boolean(store.get('google.clientId')),
-    connected: Boolean(store.get('google.refreshToken')),
-    email: store.get('google.email') as string | undefined,
-    lastSync: store.get('google.lastSync') as string | undefined,
-    lastError: store.get('google.lastError') as string | undefined,
-    tasksGranted: Boolean(store.get('google.tasksGranted')),
-  };
+  return corePolicySync<any>('agenda-google.status',[{google:store.get('google')??{}}]);
 }
 
 export function disconnectGoogle(store: StoreLike) {
@@ -241,67 +233,19 @@ async function authorisedFetch(store: StoreLike, path: string, init: RequestInit
 // Sending a floating dateTime with an explicit timeZone avoids computing UTC
 // offsets here and keeps the event correct if the zone ever changes.
 export function eventTimes(item: KeptForSync, timeZone: string) {
-  if((true as boolean))return corePolicySync<any>('agenda-google.eventTimes',[item,timeZone]);
-  const parsed = item.time ? parseTimeOfDay(item.time) : null;
-  if (!parsed) {
-    const end = new Date(`${item.date}T00:00:00Z`);
-    end.setUTCDate(end.getUTCDate() + 1);
-    return { start: { date: item.date }, end: { date: end.toISOString().slice(0, 10) } };
-  }
-  const startClock = `${String(parsed.hour).padStart(2, '0')}:${String(parsed.minute).padStart(2, '0')}`;
-  const endHour = (parsed.hour + 1) % 24;
-  // An hour-long block that would cross midnight is clamped to end of day.
-  const endClock = parsed.hour === 23 ? '23:59' : `${String(endHour).padStart(2, '0')}:${String(parsed.minute).padStart(2, '0')}`;
-  return {
-    start: { dateTime: `${item.date}T${startClock}:00`, timeZone },
-    end: { dateTime: `${item.date}T${endClock}:00`, timeZone },
-  };
+  return corePolicySync<any>('agenda-google.eventTimes',[item,timeZone]);
 }
 
 export async function pushItem(store: StoreLike, item: KeptForSync, timeZone: string) {
-  if((true as boolean))throw Error('google_legacy_entry_requires_core_intent');
-  const body = { summary: item.title, description: 'Created in Haru', ...eventTimes(item, timeZone) };
-  if (item.googleEventId) {
-    await authorisedFetch(store, `/calendars/primary/events/${encodeURIComponent(item.googleEventId)}`, { method: 'PATCH', body: JSON.stringify(body) });
-    return item.googleEventId;
-  }
-  const created = await authorisedFetch(store, '/calendars/primary/events', { method: 'POST', body: JSON.stringify(body) });
-  return created.id as string;
+  throw Error('google_legacy_entry_requires_core_intent');
 }
 
 export async function removeItem(store: StoreLike, googleEventId: string) {
-  if((true as boolean))throw Error('google_legacy_entry_requires_core_intent');
-  try {
-    await authorisedFetch(store, `/calendars/primary/events/${encodeURIComponent(googleEventId)}`, { method: 'DELETE' });
-  } catch (error) {
-    // Already gone from Google is the desired end state, not a failure.
-    if (!/ 40[04]/.test(String(error))) throw error;
-  }
+  throw Error('google_legacy_entry_requires_core_intent');
 }
 
 export function eventToItem(event: Record<string, unknown>, timeZone: string): CalendarEvent | null {
-  if((true as boolean))return corePolicySync<any>('agenda-google.eventToItem',[event,timeZone]);
-  const id = typeof event.id === 'string' ? event.id : null;
-  const start = event.start as { date?: string; dateTime?: string } | undefined;
-  if (!id || !start) return null;
-  const title = typeof event.summary === 'string' && event.summary.trim() ? event.summary.trim() : '(no title)';
-  if (start.date) return { id, title, date: start.date };
-  if (!start.dateTime) return null;
-  const when = new Date(start.dateTime);
-  if (Number.isNaN(when.getTime())) return null;
-  // Google returns an offset-bearing instant. Rendering it in the configured zone
-  // rather than the machine's keeps a pulled event on the same day and hour the
-  // rest of the app would have written it.
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone, hour12: false,
-    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
-  }).formatToParts(when);
-  const part = (type: string) => parts.find(entry => entry.type === type)?.value ?? '';
-  return {
-    id, title,
-    date: `${part('year')}-${part('month')}-${part('day')}`,
-    time: formatTimeOfDay(Number(part('hour')) % 24, Number(part('minute'))),
-  };
+  return corePolicySync<any>('agenda-google.eventToItem',[event,timeZone]);
 }
 
 // --- tasks ------------------------------------------------------------------
@@ -310,88 +254,23 @@ export function eventToItem(event: Record<string, unknown>, timeZone: string): C
 // task is something you tick off.
 
 export function taskToItem(task: Record<string, unknown>): GoogleTask | null {
-  if((true as boolean))return corePolicySync<any>('agenda-google.taskToItem',[task]);
-  const id = typeof task.id === 'string' ? task.id : null;
-  const title = typeof task.title === 'string' && task.title.trim() ? task.title.trim() : null;
-  if (!id || !title) return null;
-  // `due` is an RFC-3339 timestamp but Google only honours the date part, so the
-  // day is taken straight off the string rather than through a Date, which would
-  // shift it by the local offset.
-  const due = typeof task.due === 'string' ? task.due.slice(0, 10) : null;
-  if (!due || !/^\d{4}-\d{2}-\d{2}$/.test(due)) return null;
-  const done = task.status === 'completed';
-  // Unlike `due`, this one is a real instant and is kept whole. It is the only
-  // way to know when something ticked off on a phone actually happened, rather
-  // than dating it to whenever the sync got round to noticing.
-  const completedAt = done && typeof task.completed === 'string' ? task.completed : undefined;
-  return { id, title, date: due, done, completedAt };
+  return corePolicySync<any>('agenda-google.taskToItem',[task]);
 }
 
 export async function pullTasks(store: StoreLike, fromDate: string, days: number): Promise<GoogleTask[]> {
-  if((true as boolean))throw Error('google_legacy_entry_requires_core_intent');
-  const until = new Date(`${fromDate}T00:00:00Z`);
-  until.setUTCDate(until.getUTCDate() + days);
-  const query = new URLSearchParams({
-    // Completed ones come back too, so a task ticked off in Google shows as done
-    // here rather than reappearing as outstanding.
-    showCompleted: 'true', showHidden: 'true', maxResults: '100',
-    dueMax: until.toISOString(),
-  });
-  const data = await authorisedFetch(store, `/lists/@default/tasks?${query}`, {}, TASKS_API);
-  const items = Array.isArray(data.items) ? data.items as Record<string, unknown>[] : [];
-  return items.map(taskToItem).filter((task): task is GoogleTask => task !== null && task.date >= fromDate);
+  throw Error('google_legacy_entry_requires_core_intent');
 }
 
 export async function pushTask(store: StoreLike, task: { title: string; date: string; done: boolean; googleTaskId?: string }) {
-  if((true as boolean))throw Error('google_legacy_entry_requires_core_intent');
-  const body = {
-    title: task.title,
-    // Google stores the due date at UTC midnight and ignores any time of day.
-    due: `${task.date}T00:00:00.000Z`,
-    status: task.done ? 'completed' : 'needsAction',
-    // Clearing this matters when un-ticking: a task left with a completion
-    // timestamp stays completed in Google whatever the status says.
-    ...(task.done ? {} : { completed: null }),
-  };
-  if (task.googleTaskId) {
-    await authorisedFetch(store, `/lists/@default/tasks/${encodeURIComponent(task.googleTaskId)}`, { method: 'PATCH', body: JSON.stringify(body) }, TASKS_API);
-    return task.googleTaskId;
-  }
-  const created = await authorisedFetch(store, '/lists/@default/tasks', { method: 'POST', body: JSON.stringify(body) }, TASKS_API);
-  return created.id as string;
+  throw Error('google_legacy_entry_requires_core_intent');
 }
 
 export async function removeTask(store: StoreLike, googleTaskId: string) {
-  if((true as boolean))throw Error('google_legacy_entry_requires_core_intent');
-  try {
-    await authorisedFetch(store, `/lists/@default/tasks/${encodeURIComponent(googleTaskId)}`, { method: 'DELETE' }, TASKS_API);
-  } catch (error) {
-    // Already gone is the desired end state, not a failure.
-    if (!/ 40[04]/.test(String(error))) throw error;
-  }
+  throw Error('google_legacy_entry_requires_core_intent');
 }
 
 export async function pullEvents(store: StoreLike, fromDate: string, days: number, timeZone: string): Promise<CalendarEvent[]> {
-  if((true as boolean))throw Error('google_legacy_entry_requires_core_intent');
-  // The window is padded by a day at each end and the results trimmed by their
-  // rendered date below. Building the bounds from a bare date string would parse
-  // them in the machine's zone, which need not be `timeZone`, clipping events
-  // near either edge.
-  const timeMin = new Date(`${fromDate}T00:00:00Z`);
-  timeMin.setUTCDate(timeMin.getUTCDate() - 1);
-  const timeMax = new Date(`${fromDate}T00:00:00Z`);
-  timeMax.setUTCDate(timeMax.getUTCDate() + days + 1);
-  const query = new URLSearchParams({
-    timeMin: timeMin.toISOString(), timeMax: timeMax.toISOString(),
-    // Expands recurring events into individual occurrences so each one lands on
-    // its own day in the panel.
-    singleEvents: 'true', orderBy: 'startTime', maxResults: '50',
-  });
-  const data = await authorisedFetch(store, `/calendars/primary/events?${query}`);
-  const items = Array.isArray(data.items) ? data.items as Record<string, unknown>[] : [];
-  return items
-    .map(item => eventToItem(item, timeZone))
-    .filter((event): event is CalendarEvent => event !== null && event.date >= fromDate);
+  throw Error('google_legacy_entry_requires_core_intent');
 }
 
 let ownedAccessTokenKey:string|null=null;

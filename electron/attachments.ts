@@ -40,23 +40,7 @@ const KINDS: AttachmentKind[] = ['image', 'audio', 'video', 'text', 'document'];
  * writes to disk, so what comes back has been on disk and is not to be trusted.
  */
 export function readAttachments(saved: unknown): Attachment[] {
-  if((true as boolean)){const n=attachmentPolicy<number>('missingIds',[saved]);return attachmentPolicy('read',[saved,Array.from({length:n},()=>Math.random().toString(36).slice(2,10))]);}
-  if (!Array.isArray(saved)) return [];
-  return saved
-    .filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === 'object')
-    .filter(entry => typeof entry.saved === 'string' && entry.saved.trim())
-    // A kind nothing recognises is dropped rather than guessed at. Guessing
-    // 'text' would have her reading a PNG as if it were words, which produces
-    // garbage confidently — the worst of the two failures.
-    .filter(entry => KINDS.includes(entry.kind as AttachmentKind))
-    .map(entry => ({
-      id: typeof entry.id === 'string' ? entry.id : Math.random().toString(36).slice(2, 10),
-      kind: entry.kind as AttachmentKind,
-      name: typeof entry.name === 'string' && entry.name.trim() ? entry.name.trim() : 'a file',
-      saved: String(entry.saved),
-      url: typeof entry.url === 'string' ? entry.url : '',
-      bytes: typeof entry.bytes === 'number' && entry.bytes >= 0 ? entry.bytes : 0,
-    }));
+  {const n=attachmentPolicy<number>('missingIds',[saved]);return attachmentPolicy('read',[saved,Array.from({length:n},()=>Math.random().toString(36).slice(2,10))]);}
 }
 
 /** A message as far as this module cares: when it was said, and what came with it. */
@@ -90,21 +74,7 @@ export function attachmentsInPlay(
   now: number,
   { turns = ATTACHMENT_TURNS, holdsMs = PICTURE_HOLDS_MS } = {},
 ): Map<number, Attachment[]> {
-  if((true as boolean))return new Map(attachmentPolicy('inPlay',[messages,now,{turns,holdsMs}]));
-  const inPlay = new Map<number, Attachment[]>();
-  let found = 0;
-  for (let at = messages.length - 1; at >= 0; at--) {
-    const carried = messages[at].attachments;
-    if (!carried?.length) continue;
-    // Undated counts as current, the same assumption the rest of the app makes
-    // about messages written before timestamps existed. The turn cap bounds it
-    // either way, so this cannot run away.
-    const when = messages[at].at ? Date.parse(messages[at].at as string) : now;
-    if (Number.isFinite(when) && now - when > holdsMs) break;
-    inPlay.set(at, carried);
-    if (++found >= turns) break;
-  }
-  return inPlay;
+  return new Map(attachmentPolicy('inPlay',[messages,now,{turns,holdsMs}]));
 }
 
 const KIND_WORDS: Record<AttachmentKind, string> = {
@@ -135,24 +105,7 @@ export type Opened = { attachment: Attachment; readable?: string };
  * plainly and labelled with where it came from.
  */
 export function describeAttached(files: Opened[]): string {
-  if((true as boolean))return attachmentPolicy('describe',[files]);
-  if (!files.length) return '';
-  const seen = files.filter(file => file.attachment.kind === 'image' && file.readable === undefined);
-  const read = files.filter(file => file.attachment.kind !== 'image' || file.readable !== undefined);
-  const parts: string[] = [];
-  if (seen.length) {
-    parts.push(seen.length === 1
-      ? `They have attached a picture to this message, called "${seen[0].attachment.name}". You can see it — it is right there in front of you. Talk about what is actually in it, and never say you cannot see it or ask them to describe it.`
-      : `They have attached ${seen.length} pictures to this message: ${seen.map(file => `"${file.attachment.name}"`).join(', ')}. You can see all of them. Talk about what is actually in them, and never say you cannot see them or ask them to describe them.`);
-  }
-  for (const { attachment, readable } of read) {
-    const body = (readable ?? '').trim();
-    parts.push(body
-      ? `They have attached ${kindWord(attachment.kind)}, "${attachment.name}". This is what is in it:\n${body}`
-      : `They have attached ${kindWord(attachment.kind)}, "${attachment.name}", but nothing could be read out of it. Say so plainly rather than guessing at what it might have contained.`);
-  }
-  parts.push('Answer what they asked about it using only the available image or extracted content. Be clear when a detail could not be read or verified.');
-  return parts.join('\n\n');
+  return attachmentPolicy('describe',[files]);
 }
 
 /**

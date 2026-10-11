@@ -44,13 +44,7 @@ export type AniListConfig = {
 export const DEFAULT_ANILIST: AniListConfig = { enabled: false, username: '' };
 
 export function readAniListConfig(saved: unknown): AniListConfig {
- if((true as boolean))return corePolicySync('final-anilist.config',[saved??null]);
-  if (!saved || typeof saved !== 'object') return DEFAULT_ANILIST;
-  const record = saved as Partial<AniListConfig>;
-  return {
-    enabled: record.enabled === true,
-    username: typeof record.username === 'string' ? record.username.trim() : '',
-  };
+ return corePolicySync('final-anilist.config',[saved??null]);
 }
 
 const ENDPOINT = 'https://graphql.anilist.co';
@@ -127,25 +121,7 @@ function creditFor(raw: RawMedia, kind: MediaKind) {
 }
 
 function toMedia(raw: RawMedia, kind: MediaKind): Media {
- if((true as boolean))return corePolicySync('final-anilist.media',[raw,kind]);
-  const romaji = raw.title?.romaji?.trim();
-  const english = raw.title?.english?.trim();
-  return {
-    title: english || romaji || 'Untitled',
-    // Kept only when it genuinely differs, so she can recognise whichever name
-    // the user says without repeating the same words back at them.
-    altTitle: english && romaji && english.toLowerCase() !== romaji.toLowerCase() ? romaji : undefined,
-    kind,
-    format: raw.format ?? undefined,
-    status: raw.status ?? undefined,
-    units: (kind === 'ANIME' ? raw.episodes : raw.chapters) ?? undefined,
-    volumes: raw.volumes ?? undefined,
-    year: raw.startDate?.year ?? undefined,
-    score: raw.averageScore ?? undefined,
-    genres: raw.genres ?? [],
-    by: creditFor(raw, kind),
-    summary: tidySummary(raw.description),
-  };
+ return corePolicySync('final-anilist.media',[raw,kind]);
 }
 
 /**
@@ -154,27 +130,7 @@ function toMedia(raw: RawMedia, kind: MediaKind): Media {
  * whichever actually exists.
  */
 export async function lookUp(search: string, kind: MediaKind | undefined, fetchImpl: Fetcher): Promise<Media | null> {
- if((true as boolean))return coreAniList('lookup',search,kind,fetchImpl);
-  const wanted = search.trim();
-  if (!wanted) throw new Error('There was nothing to look up.');
-  const kinds: MediaKind[] = kind ? [kind] : ['ANIME', 'MANGA'];
-  const found: Media[] = [];
-  for (const type of kinds) {
-    try {
-      const data = await query<{ Media: RawMedia | null }>(
-        `query($s: String, $t: MediaType) { Media(search: $s, type: $t, sort: SEARCH_MATCH) { ${MEDIA_FIELDS} } }`,
-        { s: wanted, t: type }, fetchImpl);
-      if (data.Media) found.push(toMedia(data.Media, type));
-    } catch (error) {
-      // "Not Found" for one type is not a failure when the other may have it.
-      if (!/not found/i.test(error instanceof Error ? error.message : '')) throw error;
-    }
-  }
-  if (!found.length) return null;
-  // With both to choose from, prefer the one that has actually finished being
-  // counted — a series with a chapter count is the real entry, and the other is
-  // usually an adaptation stub.
-  return found.sort((a, b) => (b.units ?? 0) - (a.units ?? 0))[0];
+ return coreAniList('lookup',search,kind,fetchImpl);
 }
 
 type RawList = { lists?: { entries?: { status?: string; progress?: number; score?: number; media?: RawMedia & { type?: string } }[] }[] };
@@ -185,75 +141,19 @@ type RawList = { lists?: { entries?: { status?: string; progress?: number; score
  * titles is not context, it is a database.
  */
 export async function userList(username: string, fetchImpl: Fetcher): Promise<ListEntry[]> {
- if((true as boolean))return coreAniList('list',username,undefined,fetchImpl);
-  const name = username.trim();
-  if (!name) throw new Error('No AniList username has been saved.');
-  const entries: ListEntry[] = [];
-  for (const type of ['ANIME', 'MANGA'] as MediaKind[]) {
-    let data: { MediaListCollection: RawList | null };
-    try {
-      data = await query<{ MediaListCollection: RawList | null }>(
-      `query($u: String, $t: MediaType) {
-        MediaListCollection(userName: $u, type: $t, status_in: [CURRENT, PAUSED, PLANNING]) {
-          lists { entries { status progress score media { title { romaji english } episodes chapters } } }
-        }
-      }`, { u: name, t: type }, fetchImpl);
-    } catch (error) {
-      // A private profile is the one failure the user can actually do something
-      // about, and AniList reports it as the bare string "Private User" — which
-      // shown raw reads like a bug rather than a setting of theirs.
-      const complaint = error instanceof Error ? error.message : String(error);
-      if (/private user/i.test(complaint)) throw new Error(`The AniList profile "${name}" is private, so its list cannot be read. Make the list public in AniList's privacy settings, or leave the username blank and she will still look titles up.`);
-      if (/user not found/i.test(complaint)) throw new Error(`AniList has no user called "${name}".`);
-      throw error;
-    }
-    for (const list of data.MediaListCollection?.lists ?? []) {
-      for (const entry of list.entries ?? []) {
-        const title = entry.media?.title?.english?.trim() || entry.media?.title?.romaji?.trim();
-        if (!title) continue;
-        entries.push({
-          title,
-          kind: type,
-          status: (entry.status ?? 'CURRENT').toLowerCase(),
-          progress: entry.progress ?? 0,
-          total: (type === 'ANIME' ? entry.media?.episodes : entry.media?.chapters) ?? undefined,
-          score: entry.score || undefined,
-        });
-      }
-    }
-  }
-  return entries;
+ return coreAniList('list',username,undefined,fetchImpl);
 }
 
 const WORD_FOR: Record<MediaKind, string> = { ANIME: 'episodes', MANGA: 'chapters' };
 
 /** One title, written as facts to answer from rather than as a database row. */
 export function formatMedia(media: Media): string {
-  if((true as boolean))return corePolicySync('final-tool-values.formatMedia',[media]);
-  const counted = media.units ? `${media.units} ${WORD_FOR[media.kind]}${media.volumes ? ` across ${media.volumes} volumes` : ''}` : '';
-  // The name carries the colon and the rest is comma-joined after it — built as
-  // one list, the empty gap between them came out as "Fire Punch:, manga".
-  const name = `${media.title}${media.altTitle ? ` (also called ${media.altTitle})` : ''}`;
-  const parts = [
-    media.kind === 'ANIME' ? 'anime' : 'manga',
-    media.by ? `by ${media.by}` : '',
-    media.year ? `from ${media.year}` : '',
-    counted,
-    media.status ? `status ${media.status.toLowerCase().replace(/_/g, ' ')}` : '',
-    media.score ? `rated ${media.score}/100 on AniList` : '',
-    media.genres.length ? `genres ${media.genres.slice(0, 4).join(', ')}` : '',
-  ].filter(Boolean).join(', ');
-  return [
-    `${name}: ${parts}.`,
-    media.summary ? `What it is about: ${media.summary}` : '',
-    'Answer them from this in your own words. Do not recite the whole entry, and do not give them a score out of 100 unless they asked what it is rated — you have opinions of your own.',
-  ].filter(Boolean).join(' ');
+  return corePolicySync('final-tool-values.formatMedia',[media]);
 }
 
 /** Nothing found, said in a way that does not invite her to invent one. */
 export function formatMissing(search: string): string {
-  if((true as boolean))return corePolicySync('final-tool-values.formatMissing',[search]);
-  return `AniList has nothing matching "${search}". Say you have not heard of it, or ask whether they have the name slightly wrong. Do not describe it from memory as though you had looked it up.`;
+  return corePolicySync('final-tool-values.formatMissing',[search]);
 }
 
 // Enough for her to know what they are in the middle of, and short enough to sit
@@ -266,22 +166,7 @@ const LIST_LIMIT = 12;
  * a model that has to choose to look will often just answer instead.
  */
 export function formatList(entries: ListEntry[]): string {
- if((true as boolean))return corePolicySync('final-anilist.formatList',[entries]);
-  if (!entries.length) return '';
-  const current = entries.filter(entry => entry.status === 'current');
-  const paused = entries.filter(entry => entry.status === 'paused');
-  const say = (entry: ListEntry) => `${entry.title} (${entry.progress}${entry.total ? `/${entry.total}` : ''})`;
-  const lines: string[] = [];
-  if (current.length) lines.push(`They are part-way through: ${current.slice(0, LIST_LIMIT).map(say).join('; ')}.`);
-  if (paused.length) lines.push(`Stalled and not finished: ${paused.slice(0, LIST_LIMIT).map(say).join('; ')}.`);
-  if (!lines.length) return '';
-  // The last sentence is load-bearing and was learned the hard way. With the
-  // list simply present, she stopped calling look_up_anime and started answering
-  // from it — asked how long Fire Punch was she said it was "the English title
-  // for I Am a Hero", a title she had picked up off the stalled list two lines
-  // above. A list of names reads to a model as knowledge of those names, so it
-  // has to be labelled as the opposite: progress markers, and nothing else.
-  return `${lines.join(' ')} That is from their AniList. Use it when it is relevant — you know what they are in the middle of — but do not list it back at them or nag about the stalled ones unless it comes up. It is a record of their progress and nothing more: it tells you no facts about any series, not even these. For anything about what a series is, how long it runs, who made it or whether it has finished, call look_up_anime — including for titles on this list.`;
+ return corePolicySync('final-anilist.formatList',[entries]);
 }
 
 async function coreAniList(mode:'lookup'|'list',asked:string,kind:MediaKind|undefined,fetchImpl:Fetcher):Promise<any>{

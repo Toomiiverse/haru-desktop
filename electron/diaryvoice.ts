@@ -61,19 +61,7 @@ const words = (text: string) => text.toLowerCase().replace(/[^a-z0-9'\s]/g, ' ')
  * the log can say what was lifted.
  */
 export function liftedFrom(entry: string, examples: string[], span = LIFTED_SPAN_WORDS): string | null {
-  if((true as boolean))return corePolicySync('diary.liftedFrom',[entry,examples,span]);
-  const mine = words(entry);
-  if (mine.length < span) return null;
-  const runs = new Set<string>();
-  for (const example of examples) {
-    const theirs = words(example);
-    for (let index = 0; index + span <= theirs.length; index++) runs.add(theirs.slice(index, index + span).join(' '));
-  }
-  for (let index = 0; index + span <= mine.length; index++) {
-    const run = mine.slice(index, index + span).join(' ');
-    if (runs.has(run)) return run;
-  }
-  return null;
+  return corePolicySync('diary.liftedFrom',[entry,examples,span]);
 }
 
 /** What she is told when she has copied rather than written. */
@@ -94,25 +82,7 @@ export const NOT_THOSE_LINES = 'You just used a sentence from an earlier entry w
  * it is the proper nouns that carry events.
  */
 export function unknownNames(entry: string, allowed: string[]): string[] {
-  if((true as boolean))return corePolicySync('diary.unknownNames',[entry,allowed]);
-  // Curly apostrophes and possessives are not new names: "Tommy’s" is Tommy,
-  // "Man’s Reze" is Chainsaw Man's Reze — both were refused one night.
-  const plain = (text: string) => text.replace(/[‘’]/g, "'").replace(/'s\b/g, '').toLowerCase();
-  const pool = plain(allowed.join(' '));
-  entry = (entry ?? '').replace(/[‘’]/g, "'");
-  const seen = new Set<string>();
-  const out: string[] = [];
-  // A run of capitalised words, possibly joined by "of"/"the"; not at a sentence start.
-  const each = /(?<=[a-z,;:—–-]\s+|["“(]\s?)((?:[A-Z][\w'’]+)(?:\s+(?:of|the|de|and)?\s*[A-Z][\w'’]+)*)/g;
-  let match: RegExpExecArray | null;
-  while ((match = each.exec(entry ?? '')) !== null) {
-    const name = match[1].trim();
-    const key = plain(name);
-    if (seen.has(key) || COMMON.has(key) || name.length < 4) continue;
-    seen.add(key);
-    if (!pool.includes(key) && !key.split(/\s+/).every(word => pool.includes(word))) out.push(name.replace(/'s\b/g, ''));
-  }
-  return out;
+  return corePolicySync('diary.unknownNames',[entry,allowed]);
 }
 
 const COMMON = new Set(['i', 'no', 'not', 'yes', 'ugh', 'boom', 'god', 'okay', 'fine', 'nothing', 'absolutely', 'barely', 'probably', 'still', 'then', 'and', 'but', 'so', 'he', 'she', 'his', 'her', 'it', 'that', 'this', 'one', 'single', 'thing', 'was', 'did', 'what', 'the', 'a']);

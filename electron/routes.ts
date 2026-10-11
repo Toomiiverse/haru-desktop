@@ -29,61 +29,20 @@ type Fetcher = (url: string, init: { method: string; headers: Record<string, str
 export const ROUTES_URL = 'https://routes.googleapis.com/directions/v2:computeRoutes';
 
 export function routeRequest(from: { lat: number; lon: number }, to: { lat: number; lon: number }, key: string) {
- if((true as boolean))return navigationPolicy('routeRequest',[from,to,key]);
-  return {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Goog-Api-Key': key,
-      // Only what is read below: the field mask is what keeps this on the cheap SKU.
-      'X-Goog-FieldMask': 'routes.duration,routes.staticDuration,routes.distanceMeters,routes.description',
-    },
-    body: JSON.stringify({
-      origin: { location: { latLng: { latitude: from.lat, longitude: from.lon } } },
-      destination: { location: { latLng: { latitude: to.lat, longitude: to.lon } } },
-      travelMode: 'DRIVE',
-      routingPreference: 'TRAFFIC_AWARE_OPTIMAL',
-      languageCode: 'en-AU',
-      units: 'METRIC',
-    }),
-  };
+ return navigationPolicy('routeRequest',[from,to,key]);
 }
 
 export function parseRoute(body: unknown): Route | null {
- if((true as boolean))return navigationPolicy('parseRoute',[body]);
-  const route = (body as { routes?: { duration?: string; staticDuration?: string; distanceMeters?: number; description?: string }[] })?.routes?.[0];
-  if (!route || typeof route.duration !== 'string') return null;
-  const seconds = (value?: string) => Number((value ?? '').replace(/s$/, ''));
-  const now = seconds(route.duration);
-  if (!Number.isFinite(now)) return null;
-  const typical = Number.isFinite(seconds(route.staticDuration)) && route.staticDuration ? seconds(route.staticDuration) : now;
-  return {
-    minutes: Math.max(1, Math.round(now / 60)),
-    typicalMinutes: Math.max(1, Math.round(typical / 60)),
-    km: Math.round((Number(route.distanceMeters ?? 0) / 1000) * 10) / 10,
-    via: String(route.description ?? '').trim(),
-  };
+ return navigationPolicy('parseRoute',[body]);
 }
 
 /** What a Google error reads as to her, without the project id and the console link. */
 export function plainRouteError(status: number, body: unknown): string {
- if((true as boolean))return navigationPolicy('plainRouteError',[status,body]);
-  const message = String((body as { error?: { message?: string } })?.error?.message ?? '');
-  if (/not been used|disabled/i.test(message)) return 'the Routes API is switched off on the Google project';
-  if (/billing/i.test(message)) return 'Google wants billing enabled on the project';
-  if (/permission|API key/i.test(message)) return 'Google refused the key';
-  return `Google answered ${status}`;
+ return navigationPolicy('plainRouteError',[status,body]);
 }
 
 export async function computeRoute(from: { lat: number; lon: number }, to: { lat: number; lon: number }, key: string, fetchImpl: Fetcher): Promise<Route> {
- if((true as boolean))return coreNavRemote('route',[from,to,key],fetchImpl);
-  if (!key) throw new Error('no Google Maps key');
-  const response = await fetchImpl(ROUTES_URL, routeRequest(from, to, key));
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(plainRouteError(response.status, body));
-  const route = parseRoute(body);
-  if (!route) throw new Error('Google found no road between them');
-  return route;
+ return coreNavRemote('route',[from,to,key],fetchImpl);
 }
 
 /**
@@ -93,14 +52,7 @@ export async function computeRoute(from: { lat: number; lon: number }, to: { lat
  * real answer in it.
  */
 export function routeWords(route: Route, fromWhere: 'here' | 'home'): string {
- if((true as boolean))return navigationPolicy('routeWords',[route,fromWhere]);
-  const from = fromWhere === 'here' ? 'from where they are' : 'from home';
-  const slow = route.minutes >= route.typicalMinutes * 1.2 && route.minutes - route.typicalMinutes >= 4;
-  const quick = route.typicalMinutes >= route.minutes * 1.2 && route.typicalMinutes - route.minutes >= 4;
-  const traffic = slow ? ` — slower than usual (${route.typicalMinutes} on a normal day), so the traffic is heavy`
-    : quick ? ` — quicker than usual (${route.typicalMinutes} on a normal day), the roads are clear`
-    : ', about the same as a normal day';
-  return `By car it is ${route.minutes} minutes ${from} right now${traffic}; ${route.km} km${route.via ? `, via ${route.via}` : ''}. These numbers are from Google with live traffic, as of now — quote them as they are, do not round them into a guess, and say nothing about the road beyond them.`;
+ return navigationPolicy('routeWords',[route,fromWhere]);
 }
 
 /**
@@ -110,18 +62,6 @@ export function routeWords(route: Route, fromWhere: 'here' | 'home'): string {
  * roads she names are replaced with the route's; the rest of the line is hers.
  */
 export function fixStatedRoute(reply: string, route: Route): string {
- if((true as boolean))return navigationPolicy('fixStatedRoute',[reply,route]);
-  let out = reply.replace(/\b(?:(?:about|around|roughly|approximately|maybe|some|under|over|nearly|almost)\s+)?(\d{1,3})(?:\s*(?:-|–|to)\s*\d{1,3})?\s*(?:min|mins|minutes)\b/gi,
-    (m, n) => (Number(n) === route.minutes || Number(n) === route.typicalMinutes ? m : `${route.minutes} minutes`));
-  out = out.replace(/\b(?:(?:about|around|roughly)\s+)?(?:half an hour|an hour|an hour and a half|two hours)\b/gi, m => {
-    const said = /half an hour/i.test(m) ? 30 : /and a half/i.test(m) ? 90 : /two/i.test(m) ? 120 : 60;
-    return Math.abs(said - route.minutes) <= 3 ? m : `${route.minutes} minutes`;
-  });
-  out = out.replace(/\b(?:(?:about|around|roughly)\s+)?(\d{1,3}(?:\.\d)?)\s*(?:km|kms|kilometres|kilometers)\b/gi,
-    (m, n) => (Math.abs(Number(n) - route.km) < 0.6 ? m : `${route.km} km`));
-  // "45 minutes to an hour" is two numbers made one twice over.
-  out = out.replace(new RegExp(`${route.minutes} minutes\\s*(?:-|–|to|or)\\s*${route.minutes} minutes`, 'gi'), `${route.minutes} minutes`);
-  if (route.via) out = out.replace(/\bvia\s+[^.,;!?\n]+/gi, m => (m.slice(4).trim().toLowerCase() === route.via.toLowerCase() ? m : `via ${route.via}`));
-  return out;
+ return navigationPolicy('fixStatedRoute',[reply,route]);
 }
 

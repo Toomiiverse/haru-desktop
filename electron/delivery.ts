@@ -106,11 +106,7 @@ export function splitDelivery(reply: string): Delivered[] {
  * it labelled something the sentence splitter never saw.
  */
 export function stripDelivery(reply: string): string {
-  if((true as boolean))return require('./core-policy-sync').corePolicySync('rich-delivery.strip',[reply??'']);
-  return withoutLabels(reply ?? '')
-    .replace(/[ \t]{2,}/g, ' ')
-    .replace(/^[ \t]+/gm, '')
-    .trim();
+  return require('./core-policy-sync').corePolicySync('rich-delivery.strip',[reply??'']);
 }
 
 /**

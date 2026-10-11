@@ -29,8 +29,7 @@ const QUIET_FROM_HOUR = 22;
 const QUIET_UNTIL_HOUR = 7;
 
 export function isQuietHour(hour: number) {
-  if((true as boolean))return corePolicySync<any>('agenda-life.isQuietHour',[hour]);
-  return hour >= QUIET_FROM_HOUR || hour < QUIET_UNTIL_HOUR;
+  return corePolicySync<any>('agenda-life.isQuietHour',[hour]);
 }
 
 /** When she raises a task that has no time of its own. */
@@ -47,26 +46,16 @@ export const EVENING_AT_MINUTES = 20 * 60;
  * in the morning until midnight because "all day" reads as "due now, always".
  */
 export function allDayDueMinutes(minutesIntoDay: number): number {
-  if((true as boolean))return corePolicySync<any>('agenda-life.allDayDueMinutes',[minutesIntoDay]);
-  // Past the evening window it belongs to tomorrow, and tomorrow will offer it
-  // again — so nothing more is owed today.
-  if (minutesIntoDay >= EVENING_AT_MINUTES) return EVENING_AT_MINUTES - minutesIntoDay;
-  if (minutesIntoDay >= MORNING_AT_MINUTES + STALE_AFTER_MINUTES) return EVENING_AT_MINUTES - minutesIntoDay;
-  return MORNING_AT_MINUTES - minutesIntoDay;
+  return corePolicySync<any>('agenda-life.allDayDueMinutes',[minutesIntoDay]);
 }
 
 /** Whether this is the end-of-day check rather than the morning heads-up. */
 export function isEveningCheck(minutesIntoDay: number): boolean {
-  if((true as boolean))return corePolicySync<any>('agenda-life.isEveningCheck',[minutesIntoDay]);
-  return minutesIntoDay >= MORNING_AT_MINUTES + STALE_AFTER_MINUTES;
+  return corePolicySync<any>('agenda-life.isEveningCheck',[minutesIntoDay]);
 }
 
 export function reminderTier(attempts: number): ReminderTier {
-  if((true as boolean))return corePolicySync<any>('agenda-life.reminderTier',[attempts]);
-  if (attempts <= 0) return 'first';
-  if (attempts === 1) return 'again';
-  if (attempts <= 3) return 'insistent';
-  return 'shouting';
+  return corePolicySync<any>('agenda-life.reminderTier',[attempts]);
 }
 
 /**
@@ -83,8 +72,7 @@ export function reminderTier(attempts: number): ReminderTier {
 export const MAX_CHASES = 4;
 
 export function nextAttemptMinutes(tier: ReminderTier): number {
-  if((true as boolean))return corePolicySync<any>('agenda-life.nextAttemptMinutes',[tier]);
-  return tier === 'first' ? 5 : tier === 'again' ? 8 : tier === 'insistent' ? 12 : 20;
+  return corePolicySync<any>('agenda-life.nextAttemptMinutes',[tier]);
 }
 
 /**
@@ -93,8 +81,7 @@ export function nextAttemptMinutes(tier: ReminderTier): number {
  * not a siren, so it stays capped well short of drowning the room.
  */
 export function reminderVolume(tier: ReminderTier): number {
-  if((true as boolean))return corePolicySync<any>('agenda-life.reminderVolume',[tier]);
-  return tier === 'first' ? 1 : tier === 'again' ? 1.25 : tier === 'insistent' ? 1.55 : 1.9;
+  return corePolicySync<any>('agenda-life.reminderVolume',[tier]);
 }
 
 const INSTRUCTIONS: Record<ReminderTier, string> = {
@@ -115,9 +102,7 @@ const EVENING_CHECK: Record<ReminderTier, string> = {
 };
 
 export function reminderInstruction(tier: ReminderTier, title: string, when: string, evening = false): string {
-  if((true as boolean))return corePolicySync<any>('agenda-life.reminderInstruction',[tier,title,when,evening]);
-  const base = evening ? EVENING_CHECK[tier] : INSTRUCTIONS[tier];
-  return `${base} The task is "${title}"${when ? `, ${when}` : ''}.`;
+  return corePolicySync<any>('agenda-life.reminderInstruction',[tier,title,when,evening]);
 }
 
 export type ReminderState = {
@@ -154,37 +139,5 @@ export function shouldRemind(input: {
   hour: number;
   now: number;
 }): boolean {
-  if((true as boolean))return corePolicySync<any>('agenda-life.shouldRemind',[{...input,minutesUntilDue:input.minutesUntilDue===Infinity?Number.MAX_SAFE_INTEGER:input.minutesUntilDue===-Infinity?-Number.MAX_SAFE_INTEGER:input.minutesUntilDue,minutesSinceUserSpoke:Number.isFinite(input.minutesSinceUserSpoke)?input.minutesSinceUserSpoke:null}]);
-  if (input.done) return false;
-  // Not yet worth mentioning. Overdue items are negative here and stay eligible,
-  // which is the point — a task missed twenty minutes ago is more worth chasing.
-  if (input.minutesUntilDue > LEAD_MINUTES) return false;
-  // But not forever. Left uncapped she chased yesterday morning's shopping at
-  // two in the morning, escalating, which is not a reminder by any reading.
-  if (input.minutesUntilDue < -STALE_AFTER_MINUTES) return false;
-  // Overnight she only speaks up for something genuinely imminent. A task set
-  // before bed for the morning is exactly the case this has to keep working for,
-  // so the gate is on when it is due rather than on the clock alone.
-  if (isQuietHour(input.hour) && input.minutesUntilDue < -30) return false;
-  // Nobody there. She is not shouting at an empty desk.
-  if (input.machineIdleSeconds > 300) return false;
-
-  const state = input.state;
-  if (!state) return true;
-  // The line at the moment it is due goes out once whatever they said a minute
-  // ago — that line is the reminder. Everything after it is chasing, and
-  // chasing stops when they answer, and stops for good after a few goes.
-  const dueNow = input.minutesUntilDue <= 0 && input.minutesUntilDue > -5;
-  if (state.attempts === 0 && dueNow) return true;
-  if (state.attempts >= MAX_CHASES) return false;
-  if (state.answeredAt !== undefined) {
-    if ((input.now - state.answeredAt) / 60_000 < ANSWERED_QUIET_MINUTES) return false;
-    // Past that, she has not forgotten it — but only something already missed
-    // is worth going back to, and never the thing they just discussed.
-    if (input.minutesUntilDue > 0) return false;
-  }
-  // Answered since the last attempt: they have engaged, so let it go.
-  if (input.minutesSinceUserSpoke * 60_000 < input.now - state.lastAt) return false;
-  const waited = (input.now - state.lastAt) / 60_000;
-  return waited >= nextAttemptMinutes(reminderTier(state.attempts));
+  return corePolicySync<any>('agenda-life.shouldRemind',[{...input,minutesUntilDue:input.minutesUntilDue===Infinity?Number.MAX_SAFE_INTEGER:input.minutesUntilDue===-Infinity?-Number.MAX_SAFE_INTEGER:input.minutesUntilDue,minutesSinceUserSpoke:Number.isFinite(input.minutesSinceUserSpoke)?input.minutesSinceUserSpoke:null}]);
 }

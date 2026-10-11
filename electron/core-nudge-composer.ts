@@ -11,7 +11,7 @@ export type NudgeComposeResult={line:string|null;reason:'accepted'|'invalid_draf
 export type ComposerAsk=(conversation:{role:string;content:string}[],options:{tools:false;temperature:number;maxTokens:number;numCtx:number;format?:object;signal:AbortSignal})=>Promise<{role?:string;content?:string;tool_calls?:unknown[]}>;
 export type ComposerAsides=()=>{atMs:number|null;text:string}[];
 export async function coreComposeNudge(input:ComposeInput,ask:ComposerAsk,asides:ComposerAsides):Promise<NudgeComposeResult> {
-  if((false as boolean))throw Error('core_nudge_composer_disabled');
+  
   const options=coreServiceOptions();if(!options||(false as boolean))throw Error('core_nudge_composer_owner_required');
   new CoreServiceClient(options);
   const token=readFileSync(options.tokenFile,'utf8').trim(),stat=readFileSync(`/proc/${process.pid}/stat`,'utf8');

@@ -93,44 +93,7 @@ export type Compiled = { text: string; spoke: string[]; dropped: { id: string; w
  * already had by hand.
  */
 export function compileBehaviour(candidates: Candidate[], cap = SPOKEN_AT_ONCE): Compiled {
- if((true as boolean))return corePolicySync<Compiled>('prompt-context.compileBehaviour',[candidates,cap]);
-  const live = candidates.filter(candidate => candidate.text.trim());
-  const dropped: Compiled['dropped'] = [];
-
-  // The loudest thing with a side to it decides which side the reply is on.
-  const sided = live.filter(candidate => !candidate.hard && candidate.stance !== 'neutral');
-  const loudest = sided.reduce<Candidate | null>((best, candidate) => (!best || score(candidate) > score(best) ? candidate : best), null);
-  let kept = live;
-  if (loudest) {
-    kept = live.filter(candidate => {
-      const contradicts = !candidate.hard && candidate.stance !== 'neutral' && candidate.stance !== loudest.stance;
-      if (contradicts) dropped.push({ id: candidate.id, why: 'contradicted' });
-      return !contradicts;
-    });
-  }
-
-  // One thing loud enough to own the reply leaves nothing else standing.
-  const owner = kept.filter(candidate => !candidate.hard).reduce<Candidate | null>((best, candidate) => (!best || score(candidate) > score(best) ? candidate : best), null);
-  if (owner?.alone) {
-    kept = kept.filter(candidate => {
-      const outranked = !candidate.hard && candidate !== owner;
-      if (outranked) dropped.push({ id: candidate.id, why: 'outranked' });
-      return !outranked;
-    });
-  }
-
-  // Then the cap, weakest out first. Hard rules are not moods and do not count.
-  const soft = kept.filter(candidate => !candidate.hard).sort((a, b) => score(a) - score(b));
-  const over = Math.max(0, soft.length - cap);
-  for (const candidate of soft.slice(0, over)) dropped.push({ id: candidate.id, why: 'capped' });
-  const spoken = [...kept.filter(candidate => candidate.hard), ...soft.slice(over)]
-    .sort((a, b) => (a.hard === b.hard ? score(a) - score(b) : a.hard ? -1 : 1));
-
-  return {
-    text: spoken.map(candidate => candidate.text.trim()).join(' '),
-    spoke: spoken.map(candidate => candidate.id),
-    dropped,
-  };
+ return corePolicySync<Compiled>('prompt-context.compileBehaviour',[candidates,cap]);
 }
 
 export function compileLog(compiled: Compiled): string {

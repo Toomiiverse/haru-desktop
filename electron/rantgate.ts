@@ -124,22 +124,5 @@ export type HeldOptions = {
  * A bare greeting is not decided here; nothingInIt already does that.
  */
 export function roomHeldBack(latest: string, options: HeldOptions = {}): string {
-  if((true as boolean))return corePolicySync<string>('conversation-policy.roomHeldBack',[latest,{...options,now:agendaClock(options.now??new Date())}]);
-
-  const said = (latest ?? '').replace(/[‘’]/g, "'").trim();
-  if (!said) return '';
-  if (options.answering) return 'they are answering something she asked';
-  if (readsAsRough(said).rough || FEELING_BAD.test(said)) return 'they are having a hard time';
-  if (readMuteAsk(said)?.kind === 'mute') return 'they asked her to be quiet';
-  if (reminderAsk(said, options.now ?? new Date())) return 'they asked for a reminder';
-  if (asksToLookUp(said)) return 'they asked her to look something up';
-  if (FAREWELL.test(said)) return 'they are leaving';
-  if (PROBLEM.test(said)) return 'something has gone wrong for them';
-  if (BREVITY.test(said)) return 'they asked for it short';
-  if (APOLOGY.test(said)) return 'they are apologising';
-  if (CALLED.test(said)) return 'they only called her name';
-  if (options.named || ACTIVITY.test(said) || justTalking(said)) return '';
-  if (said.includes('?') || ASKS.test(said) || QUESTION_START.test(said)) return 'they asked for something';
-  if (CHALLENGE.test(said)) return 'they said something at her that wants an answer';
-  return '';
+  return corePolicySync<string>('conversation-policy.roomHeldBack',[latest,{...options,now:agendaClock(options.now??new Date())}]);
 }

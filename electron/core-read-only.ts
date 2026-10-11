@@ -29,7 +29,7 @@ const STOP_REPLIES = {
 export class CoreReadStopped extends Error {
   readonly reply:string;
   constructor(readonly code:keyof typeof STOP_REPLIES,readonly ran:Set<string>) {
-    super(`core_read_only_${code}`);this.reply=(true as boolean)?corePolicySync<string>('task-settlement.stopReply',[code]):STOP_REPLIES[code];
+    super(`core_read_only_${code}`);this.reply=(corePolicySync<string>('task-settlement.stopReply',[code]));
   }
 }
 
@@ -37,7 +37,7 @@ export class CoreReadStopped extends Error {
  * Never fall back after a read, and never dispatch model-proposed actions here.
  */
 export async function prefetchCoreReads(messages:ChatMessage[],task:{task_id:string;revision:number;request:string},deps:PrefixDeps):Promise<Set<string>|null> {
-  const contract=(true as boolean)?corePolicySync<{admit:boolean;roundLimit:number}>('task-settlement.prefetchContract',[task.request,deps.priorOperations??0]):null;
+  const contract=(corePolicySync<{admit:boolean;roundLimit:number}>('task-settlement.prefetchContract',[task.request,deps.priorOperations??0]));
   if(contract&&(typeof contract.admit!=='boolean'||!Number.isInteger(contract.roundLimit)||contract.roundLimit<1||contract.roundLimit>12))throw Error('core_read_only_contract_invalid');
   if (contract ? !contract.admit : !/^(?:Read .+?\.md\.|List .+?(?:, then| and) read the note with the newest modifiedAt value\.)$/i.test(task.request)) return null;
   if (!deps.permitted()) return null;
@@ -53,7 +53,7 @@ export async function prefetchCoreReads(messages:ChatMessage[],task:{task_id:str
     try { raw=await deps.decide({task_id:task.task_id,revision:task.revision,allowed_tools:allowed}); }
     catch {
       await deps.active();
-      const unavailable=(true as boolean)?corePolicySync<{kind:'refuse'|'fallback';reason?:string}>('task-settlement.prefetchUnavailable',[receipts.length]):null;
+      const unavailable=(corePolicySync<{kind:'refuse'|'fallback';reason?:string}>('task-settlement.prefetchUnavailable',[receipts.length]));
       if(unavailable&&!['refuse','fallback'].includes(unavailable.kind))throw Error('core_read_only_contract_invalid');
       if (unavailable ? unavailable.kind==='refuse' : receipts.length)throw Error(unavailable?.reason??'core_read_only_continuation_unavailable');
       deps.log?.('[core-read-only] fallback=unavailable_before_execution');return null;

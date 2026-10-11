@@ -33,22 +33,7 @@ const INVENTABLE = /\b(anime|manga|youtube|netflix|twitch|reddit|discord|tiktok|
  * anything that was genuinely in front of her.
  */
 export function dropInventedScreenTalk(reply: string, told: string): string {
- if((true as boolean))return corePolicySync<any>('reply-processing.dropInventedScreenTalk',[reply,told]);
-  const paragraphs = reply.split(/\n{2,}/);
-  if (paragraphs.length < 2) return reply;
-  const last = paragraphs[paragraphs.length - 1];
-  const invented = last.match(INVENTABLE);
-  if (!invented) return reply;
-  // Everything she legitimately had: the screen, their message, and her own
-  // earlier paragraphs.
-  const known = `${told} ${paragraphs.slice(0, -1).join(' ')}`.toLowerCase();
-  const unfounded = invented.filter(name => !known.includes(name.toLowerCase()));
-  // Every name in it has to be invented before the paragraph goes. One grounded
-  // mention means she is answering something real and merely reached for an
-  // extra example alongside it — throwing the whole line away to remove the
-  // extra costs more than it saves.
-  if (unfounded.length < invented.length) return reply;
-  return paragraphs.slice(0, -1).join('\n\n').trim();
+ return corePolicySync<any>('reply-processing.dropInventedScreenTalk',[reply,told]);
 }
 
 /**
@@ -75,18 +60,11 @@ const STAGE_DIRECTION = /^\s*(\[[^\]]{1,80}\]|\*[^*]{1,80}\*|\([^)]{1,80}\))\s*$
  */
 const THINK_MARKER = /<\/?(?:think(?:ing)?|response|tool_call|tool_result|reasoning)>/gi;
 export function stripThinkingMarkers(reply: string): string {
- if((true as boolean))return corePolicySync<any>('reply-processing.stripThinkingMarkers',[reply]);
-  if (!THINK_MARKER.test(reply)) return reply;
-  THINK_MARKER.lastIndex = 0;
-  return reply.replace(THINK_MARKER, '').replace(/\n{3,}/g, '\n\n').trim();
+ return corePolicySync<any>('reply-processing.stripThinkingMarkers',[reply]);
 }
 
 export function dropStageDirections(reply: string): string {
- if((true as boolean))return corePolicySync<any>('reply-processing.dropStageDirections',[reply]);
-  const kept = reply.split(/\n{2,}/).filter(paragraph => !STAGE_DIRECTION.test(paragraph));
-  // If that was the whole reply, she said nothing else and it is better to keep
-  // it than to hand back an empty bubble.
-  return kept.length ? kept.join('\n\n').trim() : reply;
+ return corePolicySync<any>('reply-processing.dropStageDirections',[reply]);
 }
 
 /**
@@ -123,12 +101,7 @@ const NOT_A_CLAIM = /\b(shall i|do you want|want me to|should i|would you like|c
 export type DesktopClaim = 'power' | 'app' | null;
 
 export function claimsDesktopAction(reply: string): DesktopClaim {
- if((true as boolean))return corePolicySync<any>('reply-processing.claimsDesktopAction',[reply]);
-  const text = (reply ?? '').trim();
-  if (!text || NOT_A_CLAIM.test(text)) return null;
-  if (CLAIMED_POWER.test(text)) return 'power';
-  if (CLAIMED_APP.test(text)) return 'app';
-  return null;
+ return corePolicySync<any>('reply-processing.claimsDesktopAction',[reply]);
 }
 
 /**
@@ -194,10 +167,7 @@ const OFFERING_TO_TICK = /\b(shall i|should i|can i|do you want|want me to|would
 const NOT_TICKED = /(\bnot\b|\bnever\b|n['’]t\b)[^.!?]{0,20}?(tick|mark|check|cross|struck|strike)/i;
 
 export function claimsTickOff(reply: string): boolean {
- if((true as boolean))return corePolicySync<any>('reply-processing.claimsTickOff',[reply]);
-  const text = (reply ?? '').trim();
-  if (!text || OFFERING_TO_TICK.test(text) || NOT_TICKED.test(text)) return false;
-  return CLAIMED_TICK.test(text);
+ return corePolicySync<any>('reply-processing.claimsTickOff',[reply]);
 }
 
 
@@ -220,8 +190,7 @@ export function claimsTickOff(reply: string): boolean {
 const SUPPORT_AGENT = /\b(?:i'?m sorry to hear that|it'?s (?:good|great) to hear|glad to hear that|could you please (?:clarify|specify|provide)|how can i assist|i can assist you|feel free to (?:ask|reach out|let me know)|if there'?s anything else (?:you need|i can)|don'?t hesitate to|i hope this helps|i'?m here to help|as an ai\b)\b/i;
 
 export function readsLikeAssistant(reply: string): boolean {
- if((true as boolean))return corePolicySync<any>('reply-processing.readsLikeAssistant',[reply]);
-  return SUPPORT_AGENT.test(reply ?? '');
+ return corePolicySync<any>('reply-processing.readsLikeAssistant',[reply]);
 }
 
 /**
@@ -248,11 +217,7 @@ const THINKING_OPENER = new RegExp(`^(?:The user\\b|I should(?:n'?t)?(?::|\\s+${
 const THINKING_CONTINUES = new RegExp(`^(?:They (?:mentioned|said|are|have|'re|'ve|seem|want|opened|need|asked|just)\\b|This is (?:a |just |the |about )|This isn'?t\\b|\\d+[.)]\\s|So I\\b|I can\\b|I'?ll\\b|I won'?t\\b|I should(?:n'?t)?(?::|\\s+${PLANNING_VERBS}\\b)|The \\w+ (?:drops|stays|goes|comes) here|Since (?:they|the user)\\b|Given (?:that|the|what)\\b|No (?:therapy|advice|solutions)\\b|Keep it\\b|Stay (?:in|with)\\b)`);
 
 export function thinksAloud(reply: string): boolean {
-  if((true as boolean))return corePolicySync<any>('conversation-policy.thinksAloud',[reply]);
-
-  const paragraphs = (reply ?? '').trim().split(/\n\s*\n/);
-  if (!paragraphs[0]) return false;
-  return THINKING_OPENER.test(paragraphs[0]) || paragraphs.some(paragraph => /^The user\b/.test(paragraph));
+  return corePolicySync<any>('conversation-policy.thinksAloud',[reply]);
 }
 
 /**
@@ -263,23 +228,7 @@ export function thinksAloud(reply: string): boolean {
  * the last dropped paragraph is where the reply is taken to begin.
  */
 export function dropThinkingAloud(reply: string): { text: string; dropped: number } {
- if((true as boolean))return corePolicySync<any>('reply-processing.dropThinkingAloud',[reply]);
-  const whole = (reply ?? '').trim();
-  const paragraphs = whole.split(/\n\s*\n/);
-  let i = 0;
-  while (i < paragraphs.length && (i === 0 ? THINKING_OPENER.test(paragraphs[i]) : THINKING_OPENER.test(paragraphs[i]) || THINKING_CONTINUES.test(paragraphs[i]))) i++;
-  if (i === 0) return { text: whole, dropped: 0 };
-  let salvaged = '';
-  const last = paragraphs[i - 1];
-  // A sentence's end glued to the reply's start counts too: "…then an order.I'm warmer" (2026-09-21).
-  const seams = [...last.matchAll(/[a-z_.!?…](?=[A-Z])/g)];
-  if (seams.length) {
-    const at = seams[seams.length - 1].index! + 1;
-    const tail = last.slice(at).trim();
-    if (tail.length >= 30 && !THINKING_OPENER.test(tail) && !THINKING_CONTINUES.test(tail)) salvaged = tail;
-  }
-  const rest = [salvaged, ...paragraphs.slice(i)].filter(Boolean).join('\n\n').trim();
-  return { text: rest, dropped: whole.length - rest.length };
+ return corePolicySync<any>('reply-processing.dropThinkingAloud',[reply]);
 }
 
 /**
@@ -306,19 +255,7 @@ const squash = (text: string) => text.replace(/\s+/g, ' ');
 
 /** The last stretch of `reply` that appears word for word in `instructions`, if one is at least `min` long. */
 export function recitedSpan(reply: string, instructions: string, min = RECITED_MIN): { start: number; end: number } | null {
- if((true as boolean))return corePolicySync<any>('reply-processing.recitedSpan',[reply,instructions,min]);
-  const text = reply ?? '';
-  const source = squash(instructions ?? '');
-  if (text.length < min || source.length < min) return null;
-  let found: { start: number; end: number } | null = null;
-  for (let i = 0; i + min <= text.length;) {
-    if (!source.includes(squash(text.slice(i, i + min)))) { i++; continue; }
-    let end = i + min;
-    while (end < text.length && source.includes(squash(text.slice(i, end + 1)))) end++;
-    found = { start: i, end };
-    i = end;
-  }
-  return found;
+ return corePolicySync<any>('reply-processing.recitedSpan',[reply,instructions,min]);
 }
 
 /**
@@ -329,22 +266,7 @@ export function recitedSpan(reply: string, instructions: string, min = RECITED_M
  * no clean reply was found, and she should be asked again.
  */
 export function dropRecitedPrompt(reply: string, instructions: string): { text: string; dropped: number } {
- if((true as boolean))return corePolicySync<any>('reply-processing.dropRecitedPrompt',[reply,instructions]);
-  const whole = (reply ?? '').trim();
-  const span = recitedSpan(whole, instructions);
-  if (!span) return { text: whole, dropped: 0 };
-  const tail = whole.slice(span.end).replace(/^["”’'\s.,;:)\]]+/, '');
-  const paragraphs = tail.split(/\n\s*\n/).filter(p => p.trim());
-  if (!paragraphs.length) return { text: '', dropped: whole.length };
-  const first = paragraphs[0];
-  const seams = [...first.matchAll(/[a-z_.!?…](?=[A-Z])/g)];
-  // With no seam there is no telling where the working-out stops and she begins,
-  // and guessing ships a guess ("So that is what I will do." was kept as the reply
-  // in the first draft of this). Nothing is salvaged: she is asked again, once.
-  if (!seams.length) return { text: '', dropped: whole.length };
-  const kept = [first.slice(seams[seams.length - 1].index! + 1).trim(), ...paragraphs.slice(1)];
-  const text = kept.filter(Boolean).join('\n\n').trim();
-  return { text, dropped: whole.length - text.length };
+ return corePolicySync<any>('reply-processing.dropRecitedPrompt',[reply,instructions]);
 }
 
 /**
@@ -362,15 +284,7 @@ export function dropRecitedPrompt(reply: string, instructions: string): { text: 
 const ROLE_HEADER = /^\s*(assistant|user|system|model)\s*:?\s*\n+/i;
 
 export function dropRoleHeader(reply: string): string {
- if((true as boolean))return corePolicySync<any>('reply-processing.dropRoleHeader',[reply]);
-  const withoutHeader = reply.replace(ROLE_HEADER, '');
-  // An opening quote with no closing one is the other half of the same leak.
-  // Left alone when the quote is balanced, since she does quote people.
-  const quotes = (withoutHeader.match(/"/g) ?? []).length;
-  const stripped = quotes === 1 && /^\s*"/.test(withoutHeader)
-    ? withoutHeader.replace(/^\s*"/, '')
-    : withoutHeader;
-  return stripped.trim();
+ return corePolicySync<any>('reply-processing.dropRoleHeader',[reply]);
 }
 
 /** Compared on content, so punctuation or spacing changes do not hide a repeat. */
@@ -427,21 +341,7 @@ function mentions(passage: string, words: string[]): boolean {
  * and shopping, and any paragraph using one of those went.
  */
 export function dropRepeatedAgendaMentions(reply: string, previousReplies: string[], titles: string[], askedAbout: string): string {
- if((true as boolean))return corePolicySync<any>('reply-processing.dropRepeatedAgendaMentions',[reply,previousReplies,titles,askedAbout]);
-  const subjects = titles.map(distinctiveWords).filter(words => words.length);
-  if (!subjects.length) return reply;
-  const paragraphs = reply.split(/\n{2,}/).map(part => part.trim()).filter(Boolean);
-  if (paragraphs.length < 2) return reply;
-  const kept = paragraphs.filter(paragraph => {
-    const stale = subjects.find(words =>
-      mentions(paragraph, words)
-      && previousReplies.some(earlier => mentions(earlier, words))
-      && !mentions(askedAbout, words));
-    return !stale;
-  });
-  // Never everything: a reply that is entirely about a thing she mentioned
-  // before is still her answer, and silence is worse than a repeat.
-  return kept.length ? kept.join('\n\n') : reply;
+ return corePolicySync<any>('reply-processing.dropRepeatedAgendaMentions',[reply,previousReplies,titles,askedAbout]);
 }
 
 /**
@@ -504,19 +404,7 @@ function thirdPartyTalk(paragraph: string): boolean {
 const CREDITED = /\byou (said|told me|mentioned|reckoned|were saying)\b/i;
 
 export function dropInventedContact(reply: string): string {
- if((true as boolean))return corePolicySync<any>('reply-processing.dropInventedContact',[reply]);
-  const paragraphs = reply.split(/\n{2,}/).map(part => part.trim()).filter(Boolean);
-  const invented = (paragraph: string) => gotInTouch(paragraph) || HEARD_FROM.test(paragraph);
-  const kept = paragraphs.filter(paragraph =>
-    !invented(paragraph)
-    && !(thirdPartyTalk(paragraph) && !CREDITED.test(paragraph)));
-  if (kept.length === paragraphs.length) return reply;
-  // If the whole reply was somebody claiming to have contacted her there is
-  // nothing honest left to say, so it collapses to nothing and the caller falls
-  // back rather than shipping it. That only holds for the two precise patterns:
-  // emptying a reply on the loose one is how she came to say nothing at all.
-  if (!kept.length && !paragraphs.some(invented)) return reply;
-  return kept.join('\n\n');
+ return corePolicySync<any>('reply-processing.dropInventedContact',[reply]);
 }
 
 const MIN_REPEAT_LENGTH = 40;
@@ -598,38 +486,7 @@ function overlap(a: string, b: string) {
 }
 
 export function dropRepeatedParagraphs(reply: string, previousReplies: string[], ceiling = MAX_PARAGRAPHS): string {
- if((true as boolean))return corePolicySync<any>('reply-processing.dropRepeatedParagraphs',[reply,previousReplies,ceiling]);
-  const seen = new Set(
-    previousReplies
-      .flatMap(message => message.split(/\n{2,}|\n(?=[A-Z“"])/))
-      .map(normalise)
-      .filter(text => text.length >= MIN_REPEAT_LENGTH),
-  );
-
-  const paragraphs = reply.split(/\n{2,}/);
-  // Kept as it is built, so a reply can be checked against itself. Without this
-  // a loop inside one message passes untouched: every paragraph is compared to
-  // what she said last time and never to what she said two lines ago.
-  const already: string[] = [];
-  const kept = paragraphs.filter(paragraph => {
-    const key = normalise(paragraph);
-    if (key.length < MIN_REPEAT_LENGTH) return true;
-    if (seen.has(key)) return false;
-    if (already.some(earlier => earlier === key || overlap(earlier, key) >= NEAR_DUPLICATE)) return false;
-    already.push(key);
-    return true;
-  });
-  // Never return nothing: if every paragraph was a repeat, the reply is still
-  // hers to make and an empty bubble is worse than a repeated one.
-  if (!kept.length) return reply;
-  // Cut from the end, because a loop degrades as it runs — the opening
-  // paragraphs are the ones she actually meant.
-  // The ceiling is the caller's where the model is a hosted one: its four
-  // paragraphs were being cut to three here, before dropTackedOnParagraphs
-  // ever saw them, and the paragraph that went was the closing question or
-  // the one piece of advice that mattered — six replies in one afternoon
-  // (2026-09-10). A list keeps its parts.
-  return dropTrailingRepeatQuestions(ENUMERATED.test(reply) ? kept : kept.slice(0, ceiling)).join('\n\n').trim();
+ return corePolicySync<any>('reply-processing.dropRepeatedParagraphs',[reply,previousReplies,ceiling]);
 }
 /**
  * The paragraph after the answer.
@@ -656,14 +513,7 @@ export function dropRepeatedParagraphs(reply: string, previousReplies: string[],
 const TACKED_ON_CEILING = 2;
 
 export function dropTackedOnParagraphs(reply: string, lookedSomethingUp: boolean, ceiling = TACKED_ON_CEILING): string {
- if((true as boolean))return corePolicySync<any>('reply-processing.dropTackedOnParagraphs',[reply,lookedSomethingUp,ceiling]);
-  // She went and found this out. Its length is the answer's, not hers.
-  if (lookedSomethingUp) return reply;
-  const paragraphs = reply.split(/\n{2,}/);
-  if (paragraphs.length <= ceiling) return reply;
-  // A list is a shape, not padding: the parts are the answer.
-  if (ENUMERATED.test(reply)) return reply;
-  return paragraphs.slice(0, ceiling).join('\n\n').trim();
+ return corePolicySync<any>('reply-processing.dropTackedOnParagraphs',[reply,lookedSomethingUp,ceiling]);
 }
 
 /**
@@ -682,17 +532,7 @@ export function dropTackedOnParagraphs(reply: string, lookedSomethingUp: boolean
 const STOCK_OPENERS = /^(fine|okay|ok|alright|right|good|great|well|ugh|look|listen|oh|honestly|sure|obviously|whatever)$/i;
 
 export function dropRepeatedOpener(reply: string, previousReplies: string[]): string {
- if((true as boolean))return corePolicySync<any>('reply-processing.dropRepeatedOpener',[reply,previousReplies]);
-  const opener = (text: string) => (text.trimStart().match(/^[\p{L}']+/u)?.[0] ?? '').toLowerCase();
-  const mine = opener(reply);
-  if (!mine || !STOCK_OPENERS.test(mine)) return reply;
-  if (!previousReplies.slice(-2).some(previous => opener(previous) === mine)) return reply;
-  const text = reply.trimStart();
-  const cut = text.match(/^[\p{L}']+(?:[.!…]+|,)\s*/u);
-  if (!cut) return reply;
-  const rest = text.slice(cut[0].length);
-  if (!rest.trim()) return reply;
-  return rest.charAt(0).toUpperCase() + rest.slice(1);
+ return corePolicySync<any>('reply-processing.dropRepeatedOpener',[reply,previousReplies]);
 }
 
 /**
@@ -709,22 +549,7 @@ export function dropRepeatedOpener(reply: string, previousReplies: string[]): st
 const ECHO_STOPWORDS = new Set(['your', 'yours', 'that', 'this', 'with', 'what', 'about', 'there', 'they', 'them', 'have', 'just', 'like', 'want', 'will', 'were', 'then', 'than', 'from', 'into', 'does', 'dont', 'didn', 'even', 'though', 'still', 'really', 'think', 'know', 'some', 'more', 'when', 'where', 'which', 'would', 'could', 'should', 'going', 'been', 'being', 'also', 'much', 'many', 'very', 'right', 'okay', 'fine', 'sure', 'well', 'good', 'thing', 'things', 'something', 'anything', 'nothing', 'maybe', 'reckon']);
 
 export function dropEchoOpener(reply: string, theirMessage: string): string {
- if((true as boolean))return corePolicySync<any>('reply-processing.dropEchoOpener',[reply,theirMessage]);
-  // A word or two on its own — "Seeds", "Belong" — is the one message she is
-  // right to say back: "Belong? What about it?" is her asking what they meant,
-  // which is exactly what she is told to do with a stray word. Left alone.
-  if ((theirMessage.trim().match(/\S+/g) ?? []).length <= 2) return reply;
-  const text = reply.trimStart();
-  const first = text.match(/^([^.!?\n]{1,60}\?)\s+/u);
-  if (!first) return reply;
-  // Real words only: "you" is in every question of hers and every message of
-  // theirs, and would make "Did you pick it up yet?" an echo of anything.
-  const words = (value: string) => new Set((value.toLowerCase().match(/[\p{L}\p{N}]{4,}/gu) ?? []).filter(word => !ECHO_STOPWORDS.has(word)));
-  const shared = [...words(first[1])].filter(word => words(theirMessage).has(word));
-  if (!shared.length) return reply;
-  const rest = text.slice(first[0].length);
-  if (!rest.trim()) return reply;
-  return rest.charAt(0).toUpperCase() + rest.slice(1);
+ return corePolicySync<any>('reply-processing.dropEchoOpener',[reply,theirMessage]);
 }
 
 /**
@@ -740,19 +565,7 @@ export function dropEchoOpener(reply: string, theirMessage: string): string {
 const MIN_REPEAT_WORDS = 6;
 
 export function dropRepeatedSentences(reply: string, previousReplies: string[]): string {
- if((true as boolean))return corePolicySync<any>('reply-processing.dropRepeatedSentences',[reply,previousReplies]);
-  const sentences = (text: string) => text.match(/[^.!?\n]+[.!?…]+|[^.!?\n]+$/gu) ?? [];
-  const seen = new Set(previousReplies.slice(-2).flatMap(sentences).map(normalise).filter(key => key.split(' ').length >= MIN_REPEAT_WORDS));
-  if (!seen.size) return reply;
-  const paragraphs = reply.split(/\n{2,}/);
-  const out = paragraphs.map(paragraph => {
-    const parts = paragraph.match(/[^.!?\n]+[.!?…]+\s*|[^.!?\n]+$/gu) ?? [paragraph];
-    if (parts.length < 2) return paragraph;
-    const kept = parts.filter(part => !(seen.has(normalise(part)) && normalise(part).split(' ').length >= MIN_REPEAT_WORDS));
-    return kept.length ? kept.join('').trim() : paragraph;
-  }).filter(Boolean);
-  const result = out.join('\n\n').trim();
-  return result || reply;
+ return corePolicySync<any>('reply-processing.dropRepeatedSentences',[reply,previousReplies]);
 }
 
 /**
@@ -768,18 +581,7 @@ const STATED_NOW = /\b(it[’']?s|it is|already|now)\s+(\d{1,2}):(\d{2})(?:\s?(a
 const CLOCK_SLACK_MINUTES = 5;
 
 export function fixStatedClock(reply: string, hour: number, minute: number): string {
- if((true as boolean))return corePolicySync<any>('reply-processing.fixStatedClock',[reply,hour,minute]);
-  const actual = hour * 60 + minute;
-  const shown = `${hour % 12 === 0 ? 12 : hour % 12}:${String(minute).padStart(2, '0')} ${hour < 12 ? 'AM' : 'PM'}`;
-  return reply.replace(STATED_NOW, (whole, lead: string, h: string, m: string, meridiem?: string) => {
-    let hours = Number(h); const minutes = Number(m);
-    if (hours > 12 || minutes > 59) return whole;
-    if (meridiem) hours = (hours % 12) + (meridiem.toLowerCase() === 'pm' ? 12 : 0);
-    else if (hours < 12 && Math.abs(hours * 60 + minutes - actual) > Math.abs((hours + 12) * 60 + minutes - actual)) hours += 12;
-    const said = hours * 60 + minutes;
-    if (Math.abs(said - actual) <= CLOCK_SLACK_MINUTES) return whole;
-    return `${lead} ${shown}`;
-  });
+ return corePolicySync<any>('reply-processing.fixStatedClock',[reply,hour,minute]);
 }
 
 /**
@@ -791,12 +593,7 @@ export function fixStatedClock(reply: string, hour: number, minute: number): str
 const STATED_TIME = /\b(\d{1,2})(?::(\d{2}))?\s?(am|pm)\b/giu;
 
 export function fixStatedReminderTime(reply: string, savedTime: string): string {
- if((true as boolean))return corePolicySync<any>('reply-processing.fixStatedReminderTime',[reply,savedTime]);
-  return reply.replace(STATED_TIME, (whole, h: string, m: string | undefined, meridiem: string) => {
-    if (Number(h) > 12 || (m !== undefined && Number(m) > 59)) return whole;
-    const said = `${Number(h)}:${(m ?? '00').padStart(2, '0')} ${meridiem.toUpperCase()}`;
-    return said === savedTime ? whole : savedTime;
-  });
+ return corePolicySync<any>('reply-processing.fixStatedReminderTime',[reply,savedTime]);
 }
 
 /**
@@ -825,31 +622,18 @@ export function fixStatedReminderTime(reply: string, savedTime: string): string 
  * lost, every time, to the shape of the conversation.
  */
 export function isCue(user: string): boolean {
-  if((true as boolean))return corePolicySync<any>('conversation-policy.isCue',[user]);
-
-  const text = (user ?? '').trim();
-  if (!text || text.length > 40 || /["“”'‘’:]/.test(text)) return false;
-  return text.split(/\s+/).length <= 6 && /[.!?]$/.test(text);
+  return corePolicySync<any>('conversation-policy.isCue',[user]);
 }
 
 /** The cue, dressed as what it is. Still a user turn — the template needs one — but not one she can answer. */
 export function stageNote(cue: string): string {
-  if((true as boolean))return corePolicySync<any>('conversation-policy.stageNote',[cue]);
-
-  return `[Stage direction from the app — not a message from them; they have said nothing. ${cue.trim()}]`;
+  return corePolicySync<any>('conversation-policy.stageNote',[cue]);
 }
 
 export const CUE_NOTE = 'The final user turn is a stage direction from the app, not a message from them: they have said nothing and nothing they said prompted this. It only tells you it is your turn to speak. Never quote it, mention it, answer it, or write as though they had just messaged you.';
 
 export function answersThePrompt(reply: string, priming: string): boolean {
-  if((true as boolean))return corePolicySync<any>('conversation-policy.answersThePrompt',[reply,priming]);
-
-  const words = priming.replace(/[.!?\s]+$/, '').trim();
-  if (words.length < 4) return false;
-  // The full stop may sit inside the quotes — “Say something.” — and did, in
-  // a line that went to the phone: "your reply is just “Say something.”"
-  const quoted = new RegExp(`["'\u201c\u201d\u2018\u2019]\\s*${words.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[.!?…]*\\s*["'\u201c\u201d\u2018\u2019]`, 'i');
-  return quoted.test(reply);
+  return corePolicySync<any>('conversation-policy.answersThePrompt',[reply,priming]);
 }
 
 const NUMBER_WORDS: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19, twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60, seventy: 70, eighty: 80, ninety: 90, hundred: 100 };
@@ -891,14 +675,7 @@ function spanInHours(minutes: number): string {
  * Only the minutes are touched; the rest of the line is hers.
  */
 export function fixStatedMinutes(line: string, minutes: number): string {
- if((true as boolean))return corePolicySync<any>('reply-processing.fixStatedMinutes',[line,minutes]);
-  return line.replace(STATED_SPAN, (whole, hours?: string, rest?: string, plain?: string) => {
-    if (hours) {
-      const value = numberFrom(hours) * 60 + (rest ? numberFrom(rest) : 0);
-      return value === minutes ? whole : spanInHours(minutes);
-    }
-    return numberFrom(plain ?? '') === minutes ? whole : `${minutes} minutes`;
-  });
+ return corePolicySync<any>('reply-processing.fixStatedMinutes',[line,minutes]);
 }
 
 /**
@@ -912,20 +689,7 @@ export function fixStatedMinutes(line: string, minutes: number): string {
  * only when the reply still says something without it.
  */
 export function dropOverusedEmoji(reply: string, previousReplies: string[], emoji: readonly string[], checked = 4, need = 2): string {
- if((true as boolean))return corePolicySync<any>('reply-processing.dropOverusedEmoji',[reply,previousReplies,emoji,checked,need]);
-  const recent = previousReplies.slice(-checked);
-  const last = previousReplies[previousReplies.length - 1] ?? '';
-  // Two tests, because there are two ways to wear one out. Back to back is the
-  // obvious one and was the only one checked, which is why she stopped doing it
-  // and started doing the other: 😒 every second reply, nine times in an
-  // afternoon, each one legal against a memory one reply deep.
-  const stuck = emoji.find(one => reply.includes(one)
-    && (last.includes(one) || recent.filter(previous => previous.includes(one)).length >= need));
-  if (!stuck) return reply;
-  const without = reply.split(stuck).join('').replace(/[ \t]{2,}/g, ' ').replace(/ +([.,!?…])/g, '$1').replace(/[ \t]+$/gm, '').trim();
-  // Never leave her with nothing, and never strip the only thing carrying the tone.
-  if (!/[\p{Letter}\p{Number}]/u.test(without)) return reply;
-  return without;
+ return corePolicySync<any>('reply-processing.dropOverusedEmoji',[reply,previousReplies,emoji,checked,need]);
 }
 
 /**
@@ -935,17 +699,7 @@ export function dropOverusedEmoji(reply: string, previousReplies: string[], emoj
  * sticker sheet the wording already forbids and the model produced anyway.
  */
 export function oneEmojiAtMost(reply: string, emoji: readonly string[]): string {
- if((true as boolean))return corePolicySync<any>('reply-processing.oneEmojiAtMost',[reply,emoji]);
-  const used = [...reply].filter(character => emoji.includes(character));
-  if (used.length < 2) return reply;
-  const keep = used[0];
-  let seen = false;
-  const out = [...reply].filter(character => {
-    if (!emoji.includes(character)) return true;
-    if (character === keep && !seen) { seen = true; return true; }
-    return false;
-  }).join('').replace(/[ \t]{2,}/g, ' ').replace(/ +([.,!?…])/g, '$1').replace(/[ \t]+$/gm, '').trim();
-  return /[\p{Letter}\p{Number}]/u.test(out) ? out : reply;
+ return corePolicySync<any>('reply-processing.oneEmojiAtMost',[reply,emoji]);
 }
 
 /**
@@ -973,9 +727,7 @@ const AT_HIM = /^(?:now,?\s+|and\s+|but\s+|so\s+)*(?:go|stop|get|put|don't|do|do
 const PIVOT_BACK = /^(?:so,?\s+|now,?\s+|anyway,?\s+)*(?:out with it|spit it out|what (?:do|did) you (?:actually |really )?(?:want|need|come (?:here )?for)|what (?:is|was) it,? then|what'?s this (?:really |actually )?about|you'?re (?:not actually|just|only) (?:interested|stalling|avoiding|dodging|putting off|procrastinating)|(?:stop|quit) (?:stalling|dodging|avoiding))/i;
 
 export function dropClosingOrder(reply: string): string {
- if((true as boolean))return corePolicySync<any>('reply-processing.dropClosingOrder',[reply]);
-  // Preserve her generated tone; this compatibility hook no longer trims orders.
-  return reply;
+ return corePolicySync<any>('reply-processing.dropClosingOrder',[reply]);
 }
 
 /**
@@ -1007,25 +759,13 @@ const CLAIMS_CHECKED = /\b(?:I(?:'ve| have| just)? (?:checked|verified|confirmed
 const ASKS_TO_LOOK_UP = /\b(?:look (?:it |that |this |them |those |one )?up\b(?! to)|search (?:up|for|online|the web|the internet|it|that)\b|google (?:it|that|this|for)\b|fact[- ]?check|check (?:online|the web|the internet)\b|find out (?:online|if|whether)\b)|^\s*(?:(?:hey|ok|okay|oi)[,!]?\s+)?(?:haru[,!]?\s+)?(?:can you |could you |please )?(?:search|google)\b/i;
 
 export function asksToLookUp(message: string): boolean {
-  if((true as boolean))return corePolicySync<boolean>('conversation-policy.asksToLookUp',[message]);
-
-  return ASKS_TO_LOOK_UP.test((message ?? '').replace(/[‘’]/g, "'"));
+  return corePolicySync<boolean>('conversation-policy.asksToLookUp',[message]);
 }
 
 export function claimsChecked(reply: string): boolean {
- if((true as boolean))return corePolicySync<any>('reply-processing.claimsChecked',[reply]);
-  const text = (reply ?? '').replace(/[‘’]/g, "'");
-  for (const match of text.matchAll(new RegExp(CLAIMS_CHECKED.source, 'gi'))) {
-    const before = text.slice(Math.max(0, match.index! - 60), match.index);
-    // "checked your files" also occurs in "I have not checked your files".
-    // Keep each match separate so "I haven't checked A, but I checked B" still claims B.
-    if (/\b(?:not|never|haven't|hasn't|hadn't|didn't|wasn't|weren't|should have|could have|would have)\s+(?:(?:actually|personally|yet|really)\s+)*$/i.test(before)) continue;
-    return true;
-  }
-  return false;
+ return corePolicySync<any>('reply-processing.claimsChecked',[reply]);
 }
 
 export function deniesItExists(reply: string): boolean {
- if((true as boolean))return corePolicySync<any>('reply-processing.deniesItExists',[reply]);
-  return DENIES_IT_EXISTS.test((reply ?? '').replace(/[‘’]/g, "'"));
+ return corePolicySync<any>('reply-processing.deniesItExists',[reply]);
 }

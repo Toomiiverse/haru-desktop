@@ -35,22 +35,7 @@ export function migratePhoneDeliveries(asides: readonly Aside[], now: number, cl
 }
 
 export function readPhoneNudges(saved: unknown, now: number): PhoneNudgeState {
-  if((true as boolean))return corePolicySync<any>('conversation-program.readPhoneNudges',[saved,now]);
-
-  if (!saved || typeof saved !== 'object' || (saved as PhoneNudgeState).version !== 1) return emptyPhoneNudges();
-  const s = saved as PhoneNudgeState;
-  return {
-    version: 1, scannedAt: Number.isFinite(s.scannedAt) && s.scannedAt <= now ? s.scannedAt : 0,
-    pending: Array.isArray(s.pending) ? s.pending.filter(p => p && typeof p.id === 'string' && typeof p.topic === 'string'
-      && Number.isFinite(p.dueAt) && Number.isFinite(p.expiresAt) && p.dueAt < p.expiresAt && p.expiresAt > now && p.expiresAt <= now + 2 * DAY).slice(-24) : [],
-    seen: Array.isArray(s.seen) ? s.seen.filter(p => p && typeof p.id === 'string' && Number.isFinite(p.at) && p.at <= now && now - p.at < 7 * DAY).slice(-1000) : [],
-    deliveries: Array.isArray(s.deliveries) ? s.deliveries.filter(d => d && typeof d.id === 'string' && Number.isFinite(d.at)
-      && now - d.at >= 0 && now - d.at < 90 * DAY && /^\d{4}-\d{2}-\d{2}$/.test(d.day) && validHour(d.hour)
-      && ['pending', 'sent', 'failed'].includes(d.status)).slice(-300).map(d => ({
-        id: d.id, at: d.at, day: d.day, hour: d.hour, status: d.status,
-        ...(validHour(d.repliedHour) ? { repliedHour: d.repliedHour } : {}),
-      })) : [],
-  };
+  return corePolicySync<any>('conversation-program.readPhoneNudges',[saved,now]);
 }
 
 /** Rewording a prompt or linking recent chat does not create a new event. */

@@ -25,27 +25,9 @@ function parseTime(time: string): number | null {
 }
 
 export function upcomingToMention(items: Dated[], now: Date, todayKey: string, marked: Record<string, number[]>): Upcoming | null {
-  if((true as boolean))return corePolicySync<any>('agenda-life.upcoming',[items,agendaClock(now),todayKey,marked]);
-  const intoDay = now.getHours() * 60 + now.getMinutes();
-  let best: Upcoming | null = null;
-  for (const item of items) {
-    if (item.done || item.date !== todayKey || !item.time) continue;
-    const at = parseTime(item.time);
-    if (at === null) continue;
-    const inMinutes = at - intoDay;
-    for (const lead of LEADS_MIN) {
-      if (inMinutes > lead || inMinutes <= lead - LEAD_SLACK_MIN) continue;
-      if ((marked[item.id] ?? []).includes(lead)) continue;
-      if (!best || inMinutes < best.inMinutes) best = { item, inMinutes, lead };
-    }
-  }
-  return best;
+  return corePolicySync<any>('agenda-life.upcoming',[items,agendaClock(now),todayKey,marked]);
 }
 
 export function markMentioned(marked: Record<string, number[]>, id: string, lead: number, keep: string[]): Record<string, number[]> {
-  if((true as boolean))return corePolicySync<any>('agenda-life.markUpcoming',[marked,id,lead,keep]);
-  const next: Record<string, number[]> = {};
-  for (const key of keep) if (marked[key]) next[key] = marked[key];
-  next[id] = [...new Set([...(marked[id] ?? []), lead])];
-  return next;
+  return corePolicySync<any>('agenda-life.markUpcoming',[marked,id,lead,keep]);
 }

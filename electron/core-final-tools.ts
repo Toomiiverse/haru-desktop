@@ -36,10 +36,10 @@ export async function runCoreFinalTool(name:string|undefined,args:Record<string,
   return Object.fromEntries(keys.map(key=>{if(!values[key])throw Error('final_tool_fact_protocol');return [key,values[key]()] }));
  };
  const owned=async(c:any)=>{
-  if(c.domain==='user-records'){if((false as boolean)||!deps.userRecord)throw Error('owned_records_required');return JSON.stringify(deps.userRecord(c.tool==='note_check_in'?'tool.noteCheckin':'tool.saveJournal',c.args))}
-  if(c.domain==='self'){if((false as boolean)||!deps.policyConfig)throw Error('owned_settings_required');return JSON.stringify(await runCoreSettingTool(c.args,deps.policyConfig,deps))}
-  if(c.domain==='browser-tool'){if((false as boolean))throw Error('owned_browser_required');return JSON.stringify(await runCoreBrowserTool(c.args,{port:deps.browserPort(),fetch:deps.net.fetch as any,shotDir:deps.browserShotDir,markPageRead:deps.markPageRead}))}
-  if(c.domain==='agenda-tool'){if((false as boolean))throw Error('owned_agenda_required');return runCoreAgendaTool(c.tool,c.args,c.latest,zonedNow(deps.CHAT_TIMEZONE),deps)}
+  if(c.domain==='user-records'){if((!deps.userRecord))throw Error('owned_records_required');return JSON.stringify(deps.userRecord(c.tool==='note_check_in'?'tool.noteCheckin':'tool.saveJournal',c.args))}
+  if(c.domain==='self'){if((!deps.policyConfig))throw Error('owned_settings_required');return JSON.stringify(await runCoreSettingTool(c.args,deps.policyConfig,deps))}
+  if(c.domain==='browser-tool'){return JSON.stringify(await runCoreBrowserTool(c.args,{port:deps.browserPort(),fetch:deps.net.fetch as any,shotDir:deps.browserShotDir,markPageRead:deps.markPageRead}))}
+  if(c.domain==='agenda-tool'){return runCoreAgendaTool(c.tool,c.args,c.latest,zonedNow(deps.CHAT_TIMEZONE),deps)}
   throw Error('final_tool_delegate_protocol');
  };
  const execute=async(c:any):Promise<unknown>=>{

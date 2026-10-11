@@ -81,24 +81,7 @@ function draftFrom(content: string, page: VaultMemoryPage, kind: 'relationship' 
  * the page stays readable prose to a human and a data file to her.
  */
 export function parseVaultMemoryPage(text: string, page: VaultMemoryPage): VaultMemoryDraft[] {
-  if((true as boolean))return corePolicySync('knowledge-vault.memoryPage',[text,page]); 
-  const spec = VAULT_MEMORY_PAGES[page];
-  const drafts: VaultMemoryDraft[] = [];
-  for (const line of stripFrontmatter(text).split('\n')) {
-    const match = line.match(/^\s*-\s+(.+)$/);
-    if (!match) continue;
-    let content = match[1].trim();
-    if (!content) continue;
-    if (/^TODO\b/i.test(content)) continue;
-    // An inline "*(TODO: …)*" on a real bullet is a note to the author, not
-    // part of the record — the mum bullet must not carry "TODO: what should
-    // Haru know about her?" into her standing memory.
-    content = content.replace(/\(TODO:[^)]*\)/gi, '').replace(/\s{2,}/g, ' ').trim();
-    if (!content) continue;
-    const draft = draftFrom(content, page, spec.kind);
-    if (draft.text) drafts.push(draft);
-  }
-  return drafts;
+  return corePolicySync('knowledge-vault.memoryPage',[text,page]);
 }
 
 export type VaultMemoryResult = { created: boolean };
@@ -116,21 +99,5 @@ export function admitVaultMemories(
   read = (file: string) => readFileSync(file, 'utf8'),
   exists = (file: string) => existsSync(file),
 ): VaultMemoryReport {
- if((true as boolean))return runCoreVaultMemories(vault,admit,read,exists);
-  const report: VaultMemoryReport = [];
-  for (const page of Object.keys(VAULT_MEMORY_PAGES) as VaultMemoryPage[]) {
-    const file = path.join(vault, page);
-    if (!exists(file)) continue;
-    const drafts = parseVaultMemoryPage(read(file), page);
-    let admitted = 0;
-    let repeated = 0;
-    for (const draft of drafts) {
-      const result = admit(draft);
-      if (!result) continue;
-      if (result.created) admitted += 1;
-      else repeated += 1;
-    }
-    report.push({ page, bullets: drafts.length, admitted, repeated });
-  }
-  return report;
+ return runCoreVaultMemories(vault,admit,read,exists);
 }

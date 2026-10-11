@@ -366,28 +366,7 @@ const WEEKDAY_WORDS = /^(?:this |next |on |this coming )?(?:sunday|monday|tuesda
  * on, and anything else already gone is refused in words that say so.
  */
 export function resolveBookingTime(input: { date?: string; time?: string; inMinutes?: number }, nowMs: number, timeZone: string): number | { error: string } {
- if((true as boolean))return corePolicySync('final-booking.resolve',[input,nowMs,timeZone]);
-  if (typeof input.inMinutes === 'number' && Number.isFinite(input.inMinutes) && input.inMinutes > 0) {
-    return nowMs + Math.round(input.inMinutes) * 60_000;
-  }
-  const clock = input.time ? parseTimeOfDay(input.time) : null;
-  if (!clock) return { error: 'Give a time of day, like "6:00 PM", or minutes from now.' };
-  const local = zonedNow(timeZone, new Date(nowMs));
-  const today = localDateKey(local);
-  const said = input.date ? input.date.trim().toLowerCase().replace(/\s+/g, ' ') : '';
-  let day = said ? resolveDate(said, local) : today;
-  if (!day) return { error: `Could not tell which day "${input.date}" is — use "today", "tomorrow" or a weekday.` };
-  // "Tonight at 1 AM" said at 10 PM is tomorrow's date; said at 00:30 it is
-  // already that night, and today's.
-  if (said === 'tonight' && clock.hour < NIGHT_ENDS_HOUR && local.getHours() >= NIGHT_ENDS_HOUR) day = nextDayKey(day);
-  const minutes = clock.hour * 60 + clock.minute;
-  const at = zonedEpoch(day, minutes, timeZone);
-  if (at > nowMs) return at;
-  // A time already gone today, with no day given, is the next one.
-  if (!said) return zonedEpoch(nextDayKey(day), minutes, timeZone);
-  if (day === today && WEEKDAY_WORDS.test(said)) return zonedEpoch(nextDayKey(day, 7), minutes, timeZone);
-  if (day < today) return { error: `${input.date} has already gone. Pick a day still to come.` };
-  return { error: `${formatTimeOfDay(clock.hour, clock.minute)} ${said === 'tonight' ? 'tonight' : 'today'} has already passed. Pick a later time, or a later day.` };
+ return corePolicySync('final-booking.resolve',[input,nowMs,timeZone]);
 }
 
 function contentWords(text: string): Set<string> {
@@ -460,33 +439,15 @@ export function admitBooking(held: { jobs: Job[]; booked?: BookingRecord[] }, re
 
 /** "6:00 PM today", "9:30 AM tomorrow", "7:00 PM Friday". */
 export function describeWhen(at: number, nowMs: number, timeZone: string): string {
- if((true as boolean))return corePolicySync('final-booking.describe',[at,nowMs,timeZone]);
-  const local = zonedNow(timeZone, new Date(at));
-  const today = localDateKey(zonedNow(timeZone, new Date(nowMs)));
-  const day = localDateKey(local);
-  const clock = formatTimeOfDay(local.getHours(), local.getMinutes());
-  if (day === today) return `${clock} today`;
-  if (day === nextDayKey(today)) return `${clock} tomorrow`;
-  return `${clock} ${new Intl.DateTimeFormat('en-US', { weekday: 'long', timeZone: 'UTC' }).format(new Date(`${day}T12:00:00Z`))}`;
+ return corePolicySync('final-booking.describe',[at,nowMs,timeZone]);
 }
 
 /** Her bookings, in front of her, so she neither books twice nor says early what is set for later. */
 export function bookedNote(jobs: Job[], nowMs: number, timeZone: string): string {
-  if((true as boolean))return corePolicySync<any>('conversation-policy.bookedNote',[jobs,nowMs,timeZone]);
-
-  const hers = jobs.filter(job => job.kind === BOOKED_KIND && job.createdBy === 'haru').sort((a, b) => a.dueAt - b.dueAt);
-  if (!hers.length) return '';
-  return `What you have set yourself to come back to — each comes back to you at its time, so leave it until then and do not book it again:\n${hers.map(job => `- ${describeWhen(job.dueAt, nowMs, timeZone)}: ${job.payload?.why}`).join('\n')}`;
+  return corePolicySync<any>('conversation-policy.bookedNote',[jobs,nowMs,timeZone]);
 }
 
 /** The instruction when a booking's time comes. */
 export function bookedPrompt(why: string, bookedAt: number, nowMs: number, timeZone: string): string {
-  if((true as boolean))return corePolicySync<any>('conversation-policy.bookedPrompt',[why,bookedAt,nowMs,timeZone]);
-
-  const local = zonedNow(timeZone, new Date(bookedAt));
-  const clock = formatTimeOfDay(local.getHours(), local.getMinutes());
-  const day = localDateKey(local);
-  const today = localDateKey(zonedNow(timeZone, new Date(nowMs)));
-  const when = day === today ? `${clock} earlier today` : nextDayKey(day) === today ? `${clock} yesterday` : describeWhen(bookedAt, nowMs, timeZone);
-  return `At ${when} you decided to come back to this now: "${why}". Say it to them now, as a new message of your own — one to three lines, no greeting, and no mention of having planned or booked it. If the conversation since has already covered it, or it no longer makes sense, answer with a single dash and nothing else.`;
+  return corePolicySync<any>('conversation-policy.bookedPrompt',[why,bookedAt,nowMs,timeZone]);
 }

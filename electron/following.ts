@@ -62,56 +62,7 @@ const SEASON_EPISODE = /\bs\d{1,2}\s?e(\d{1,3})\b/i;
  * name itself often contains a dash — each part is judged on what it looks like.
  */
 export function identifyWork(activity: Activity, gameName = ''): Work | null {
- if((true as boolean))return devicePolicy('identifyWork',[activity,gameName]);
-  // A game is already named properly by Steam, and its title carries no
-  // chapters. Nothing to parse.
-  if (activity.kind === 'gaming') {
-    const title = (gameName || activity.label || '').trim();
-    return title ? blank(title, 'game') : null;
-  }
-  // Never anything from the adult classification. She is not going to build a
-  // reading history out of that and bring it up over breakfast.
-  if (activity.kind === 'adult') return null;
-  if (activity.kind !== 'watching' && activity.kind !== 'other') return null;
-
-  const raw = (activity.label ?? '').trim();
-  if (!raw) return null;
-
-  const parts = raw.split(/\s+[-–—|·]\s+|\s*\|\s*/).map(part => part.trim()).filter(Boolean);
-  let progress: number | undefined;
-  let kind: WorkKind | null = null;
-  const nameParts: string[] = [];
-
-  for (const part of parts) {
-    if (SITE.test(part)) continue;
-    const season = SEASON_EPISODE.exec(part);
-    const episode = season ?? EPISODE.exec(part);
-    const chapter = CHAPTER.exec(part);
-    // Chapter wins a tie: "Ch" and "E" are short enough to appear by accident,
-    // and a chapter marker is the more specific of the two.
-    if (chapter) {
-      progress ??= Number(chapter[1]);
-      kind ??= 'manga';
-    } else if (episode) {
-      progress ??= Number(episode[1]);
-      kind ??= 'anime';
-    }
-    // Only what comes *before* the marker. Cutting the marker out of the middle
-    // and keeping both halves glues the site's own trailing words back on:
-    // "Read Oyasumi Punpun Chapter 12 Online" came out as "Oyasumi Punpun
-    // Online". Nothing useful ever follows the chapter number.
-    const marker = chapter ?? episode;
-    const head = marker ? part.slice(0, marker.index) : part;
-    const remainder = head.replace(TRAILING, '').replace(/\s+/g, ' ').trim();
-    if (remainder && !SITE.test(remainder)) nameParts.push(remainder);
-  }
-
-  if (!kind) return null;
-  const title = nameParts.map(part => part.replace(LEAD_IN, '').trim()).filter(Boolean)[0] ?? '';
-  const clean = title.replace(TRAILING, '').trim();
-  // A single word that is only a number, or nothing at all, is not a name.
-  if (!clean || clean.length < 2 || /^\d+$/.test(clean)) return null;
-  return { ...blank(clean, kind), progress };
+ return devicePolicy('identifyWork',[activity,gameName]);
 }
 
 function blank(title: string, kind: WorkKind): Work {
@@ -126,21 +77,7 @@ function blank(title: string, kind: WorkKind): Work {
  * would have her congratulating them on rereading something they never left.
  */
 export function noteWork(following: Following, work: Work, nowIso: string, dayKey: string): Following {
- if((true as boolean))return devicePolicy('noteWork',[following,work,nowIso,dayKey]);
-  const existing = following[work.key];
-  const days = existing ? (existing.days.includes(dayKey) ? existing.days : [...existing.days, dayKey]) : [dayKey];
-  const merged: Work = {
-    ...work,
-    firstSeen: existing?.firstSeen || nowIso,
-    // Never moves backwards: entries can arrive out of order after a restore,
-    // and a stale lastSeen would have her call today's reading last week's.
-    lastSeen: existing && Date.parse(existing.lastSeen) > Date.parse(nowIso) ? existing.lastSeen : nowIso,
-    days: days.slice(-MAX_DAYS),
-    progress: Math.max(work.progress ?? 0, existing?.progress ?? 0) || undefined,
-    progressWhenMentioned: existing?.progressWhenMentioned,
-  };
-  const updated = { ...following, [work.key]: merged };
-  return prune(updated);
+ return devicePolicy('noteWork',[following,work,nowIso,dayKey]);
 }
 
 /** Oldest-touched go first once there are too many. */
@@ -154,24 +91,16 @@ function prune(following: Following): Following {
 }
 
 export function readFollowing(saved: unknown): Following {
- if((true as boolean))return devicePolicy('readFollowing',[saved]);
-  if (!saved || typeof saved !== 'object') return {};
-  const record = saved as Following;
-  return Object.fromEntries(Object.entries(record).filter(([, work]) =>
-    work && typeof work.title === 'string' && Array.isArray(work.days)));
+ return devicePolicy('readFollowing',[saved]);
 }
 
 /** Something they have come back to, rather than something they opened once. */
 export function isRegular(work: Work): boolean {
- if((true as boolean))return devicePolicy('isRegular',[work]);
-  return work.days.length >= 2;
+ return devicePolicy('isRegular',[work]);
 }
 
 export function markMentioned(following: Following, key: string): Following {
- if((true as boolean))return devicePolicy('markMentioned',[following,key]);
-  const work = following[key];
-  if (!work) return following;
-  return { ...following, [key]: { ...work, progressWhenMentioned: work.progress } };
+ return devicePolicy('markMentioned',[following,key]);
 }
 
 /**
@@ -187,14 +116,7 @@ export function markMentioned(following: Following, key: string): Following {
  * Hedged rather than asserted, because it is a guess. They do read other things.
  */
 export function assumeItIsTheirs(following: Following, nowMs: number): string {
- if((true as boolean))return devicePolicy('assumeItIsTheirs',[following,nowMs]);
-  if (!summariseFollowing(following, nowMs)) return '';
-  return [
-    'You are looking at a picture, so nothing here is labelled.',
-    'If it plausibly matches one of the things above — a comic page when they are partway through a manga, a game scene when they are partway through that game — then it is that, and you should treat it as that: name it, and talk about it as something you have been following.',
-    'Describing it as an unfamiliar object when it is the thing you have watched them read all week is the one thing to avoid.',
-    'If it clearly is not any of them, say nothing about them at all.',
-  ].join(' ');
+ return devicePolicy('assumeItIsTheirs',[following,nowMs]);
 }
 
 /**
@@ -210,17 +132,7 @@ export function assumeItIsTheirs(following: Following, nowMs: number): string {
  * does not know it yet and pretending otherwise is its own kind of wrong.
  */
 export function recogniseNow(following: Following, work: Work | null): string {
- if((true as boolean))return devicePolicy('recogniseNow',[following,work]);
-  if (!work) return '';
-  const known = following[work.key];
-  if (!known || !isRegular(known)) return '';
-  const unit = UNIT[known.kind];
-  const at = known.progress && unit ? `, and they are on ${unit} ${known.progress}` : '';
-  return [
-    `This is ${known.title}, which you already know about: they have been ${VERB[known.kind]} it across ${known.days.length} days${at}.`,
-    'Talk about it as something you have been following along with, not something you have just found.',
-    'Do not ask what it is, do not ask them to explain it, and do not react as though it is new or strange to you.',
-  ].join(' ');
+ return devicePolicy('recogniseNow',[following,work]);
 }
 
 const VERB: Record<WorkKind, string> = { manga: 'reading', anime: 'watching', game: 'playing' };
@@ -235,28 +147,5 @@ const UNIT: Record<WorkKind, string> = { manga: 'chapter', anime: 'episode', gam
  * what it is.
  */
 export function summariseFollowing(following: Following, nowMs: number): string {
- if((true as boolean))return devicePolicy('summariseFollowing',[following,nowMs]);
-  const works = Object.values(following)
-    .filter(isRegular)
-    .sort((a, b) => Date.parse(b.lastSeen) - Date.parse(a.lastSeen))
-    .slice(0, 5);
-  if (!works.length) return '';
-  const lines = works.map(work => {
-    const days = work.days.length;
-    const since = Math.round((nowMs - Date.parse(work.lastSeen)) / 86_400_000);
-    const when = since <= 0 ? 'today' : since === 1 ? 'yesterday' : `${since} days ago`;
-    const where = work.progress && UNIT[work.kind] ? `, on ${UNIT[work.kind]} ${work.progress}` : '';
-    // The movement is the interesting part: it is the difference between
-    // knowing what they read and knowing that they are getting through it.
-    const moved = work.progress && work.progressWhenMentioned && work.progress > work.progressWhenMentioned
-      ? ` (was ${work.progressWhenMentioned} when it last came up)`
-      : '';
-    return `${work.title} — ${VERB[work.kind]} it across ${days} day${days === 1 ? '' : 's'}, last ${when}${where}${moved}`;
-  });
-  return [
-    'Things they are partway through, from what has been on their screen:',
-    lines.join('; ') + '.',
-    'You already know about these. Do not ask what they are, do not ask them to explain them, and never act surprised to hear of something on this list.',
-    'Do not bring them up for the sake of it either — this is so you are not caught out, not a list of topics.',
-  ].join(' ');
+ return devicePolicy('summariseFollowing',[following,nowMs]);
 }

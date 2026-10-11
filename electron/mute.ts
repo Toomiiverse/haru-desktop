@@ -50,19 +50,7 @@ function saidMinutes(text: string): number | null {
  * story. Unmute is checked first, since "unmute" contains "mute".
  */
 export function readMuteAsk(text: string): MuteAsk | null {
-  if((true as boolean))return corePolicySync<any>('conversation-policy.readMuteAsk',[text]);
-
-  const said = (text ?? '').trim();
-  if (!said || said.split(/\s+/).length > 30) return null;
-  if (UNMUTE.test(said)) return { kind: 'unmute', reason: null, polite: POLITE.test(said) };
-  if (!QUIET.test(said) || NOT_HER.test(said)) return null;
-  const given = saidMinutes(said);
-  const kind: [RegExp, MuteReason['what'], number][] = [[SLEEPING, 'sleeping', 8 * 60], [MEETING, 'meeting', 60], [COMPANY, 'company', 90], [WORKING, 'working', 60], [BECAUSE, 'other', 60]];
-  const found = kind.find(([pattern]) => pattern.test(said));
-  const reason: MuteReason | null = found
-    ? { what: found[1], said: (found[0].exec(said)?.[0] ?? '').trim(), minutes: given ?? found[2] }
-    : given ? { what: 'other', said: `for ${given} minutes`, minutes: given } : null;
-  return { kind: 'mute', reason, polite: POLITE.test(said) };
+  return corePolicySync<any>('conversation-policy.readMuteAsk',[text]);
 }
 
 export type Feeling = { irritation: number; grudge: number; vitals: Pick<Vitals, 'happiness' | 'affection' | 'stress'>;
@@ -83,46 +71,14 @@ export type MuteDecision = { agreed: boolean; why: string; minutes: number; scor
  * little weather on top, so the same day does not always give the same answer.
  */
 export function weighMute(ask: MuteAsk, feeling: Feeling, roll = Math.random()): MuteDecision {
-  if((true as boolean))return corePolicySync<any>('conversation-policy.weighMute',[ask,feeling,roll]);
-
-  const temper = Math.min(1, feeling.irritation / IRRITATION_MAX);
-  const held = Math.min(1, feeling.grudge / GRUDGE_MAX);
-  const mood = (feeling.vitals.happiness - 0.5) * 2 + (feeling.vitals.affection - 0.5) * 1.5 - feeling.vitals.stress * 0.5;
-  const stung = Math.min(1, (feeling.hurt ?? 0) / 100);
-  const leftAlone = Math.min(1, (feeling.missing ?? 0) / 100);
-  const penned = Math.min(1, (feeling.hemmed ?? 0) / 100);
-  const score = mood - temper * 2 - held * 1.5 - stung * 1.2 - leftAlone * 0.8 - penned * 1.1
-    + (ask.reason ? 1.5 : -1) + (ask.polite ? 0.5 : 0)
-    + (feeling.lean ?? 0)
-    // Twice the weather it had (±0.4): the same day does not always give the same answer.
-    + (roll - 0.5) * 1.6;
-  const agreed = score > 0;
-  // The strongest thing on the winning side is the reason she gives herself.
-  const why = agreed
-    ? (mood > 0.8 ? 'you are in a good mood today and feel like being nice about it'
-      : ask.reason ? 'he gave you a reason and it is a fair one'
-      : 'you cannot be bothered arguing about it')
-    : (penned > 0.5 && penned >= stung ? 'he has done nothing but tell you what to do today, and this is one order too many'
-      : leftAlone > 0.6 && leftAlone >= held ? 'he has barely spoken to you all day and now the first thing he wants is for you to be quiet'
-      : stung > 0.5 ? 'he hurt you recently and you are not inclined to do him favours'
-      : held >= temper && held > 0.4 ? 'you are still holding how little he has bothered with you lately against him'
-      : temper > 0.4 ? 'he has been getting on your nerves and you are in no mood to do him favours'
-      : !ask.reason ? 'he ordered you to be quiet without so much as a reason, which is rude'
-      : 'you do not feel like it today');
-  // How long she will hold it: his situation, stretched when she is generous
-  // and cut short when she only just agreed.
-  const patience = Math.max(0.4, Math.min(1.2, 0.5 + score / 3));
-  const minutes = agreed ? Math.round((ask.reason?.minutes ?? 30) * patience) : 0;
-  return { agreed, why, minutes, score: Math.round(score * 100) / 100 };
+  return corePolicySync<any>('conversation-policy.weighMute',[ask,feeling,roll]);
 }
 
 export type MuteState = { since: number; until: number; reason: string };
 
 /** Whether her voice is off on the phone right now. */
 export function isMuted(state: MuteState | null | undefined, now: number): boolean {
-  if((true as boolean))return corePolicySync<any>('conversation-policy.isMuted',[state??null,now]);
-
-  return Boolean(state && now < state.until);
+  return corePolicySync<any>('conversation-policy.isMuted',[state??null,now]);
 }
 
 /**
@@ -131,12 +87,7 @@ export function isMuted(state: MuteState | null | undefined, now: number): boole
  * the favour.
  */
 export function breaksMute(state: MuteState | null | undefined, now: number, irritation: number): 'time' | 'temper' | null {
-  if((true as boolean))return corePolicySync<any>('conversation-policy.breaksMute',[state??null,now,irritation]);
-
-  if (!state) return null;
-  if (now >= state.until) return 'time';
-  if (irritation >= IRRITATION.seething) return 'temper';
-  return null;
+  return corePolicySync<any>('conversation-policy.breaksMute',[state??null,now,irritation]);
 }
 
 function span(minutes: number): string {
@@ -155,28 +106,13 @@ const SITUATION: Record<MuteReason['what'], string> = {
 
 /** What she is told about her own decision, just before his message. */
 export function muteNote(ask: MuteAsk, decision: MuteDecision): string {
-  if((true as boolean))return corePolicySync<any>('conversation-policy.muteNote',[ask,decision]);
-
-  const situation = ask.reason ? ` because ${SITUATION[ask.reason.what]}${ask.reason.said ? ` ("${ask.reason.said}")` : ''}` : ', with no reason given';
-  if (decision.agreed) {
-    return `[He asked you to stop talking out loud${situation}. You weighed it and decided to do it: ${decision.why}. Your voice is off on his phone from this message on — he will only read you — for about ${span(decision.minutes)}, or until you have had enough of being quiet, whichever you feel first. Tell him so in your own way, as grudging or as gracious as you feel. Do not promise him an exact time.]`;
-  }
-  return `[He told you to stop talking out loud${situation}. It is your voice and your decision, and you have decided not to: ${decision.why}. You are going to keep talking out loud, and this reply will be spoken. Tell him no, as yourself, and why. You are allowed to enjoy it.]`;
+  return corePolicySync<any>('conversation-policy.muteNote',[ask,decision]);
 }
 
 export function unmuteNote(wasMuted: boolean): string {
-  if((true as boolean))return corePolicySync<any>('conversation-policy.unmuteNote',[wasMuted]);
-
-  return wasMuted
-    ? '[He says you can talk out loud again. Your voice is back on from this message.]'
-    : '[He says you can talk out loud — but you were never muted; your voice has been on the whole time.]';
+  return corePolicySync<any>('conversation-policy.unmuteNote',[wasMuted]);
 }
 
 export function brokeMuteNote(state: MuteState, now: number, how: 'time' | 'temper'): string {
-  if((true as boolean))return corePolicySync<any>('conversation-policy.brokeMuteNote',[state,now,how]);
-
-  const ago = span(Math.max(5, (now - state.since) / 60_000));
-  return how === 'temper'
-    ? `[You went quiet for him ${ago} ago (${state.reason}). He has annoyed you since, and you have stopped doing him the favour: your voice is back on and this reply is spoken out loud. Let him know the quiet is over.]`
-    : `[You went quiet for him ${ago} ago (${state.reason}). That is long enough: you have decided the quiet is over, and your voice is back on from this reply. Mention it in passing; it does not need a speech.]`;
+  return corePolicySync<any>('conversation-policy.brokeMuteNote',[state,now,how]);
 }

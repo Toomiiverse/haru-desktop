@@ -80,27 +80,22 @@ export type BlockSources = {
 const LABEL_RE = /^[a-z][a-z0-9_]*$/;
 
 export function blockLabelValid(label: string): boolean {
-  if((true as boolean)) return corePolicySync<boolean>('block-governance.blockLabelValid',[label]);
-  return LABEL_RE.test(label);
+  return corePolicySync<boolean>('block-governance.blockLabelValid',[label]);
 }
 
 /** The label's stable block id. */
 export function blockIdFor(label: string): string {
-  if((true as boolean)) return corePolicySync<string>('block-governance.blockIdFor',[label]);
-  return `block-${label}`;
+  return corePolicySync<string>('block-governance.blockIdFor',[label]);
 }
 
 export function findBlock(blocks: MemoryBlock[], label: string): MemoryBlock | undefined {
-  if((true as boolean)) return corePolicySync<MemoryBlock | null>('block-governance.findBlock',[blocks,label]) ?? undefined;
-  return blocks.find(block => block.label === label);
+  return corePolicySync<MemoryBlock | null>('block-governance.findBlock',[blocks,label]) ?? undefined;
 }
 
 /** Whether the model-facing memory tools may touch this block. Read-only is
  *  enforced here, at the layer the tools call — never only in a prompt. */
 export function canEditBlock(blocks: MemoryBlock[], label: string): boolean {
-  if((true as boolean)) return corePolicySync<boolean>('block-governance.canEditBlock',[blocks,label]);
-  const block = findBlock(blocks, label);
-  return Boolean(block && !block.read_only);
+  return corePolicySync<boolean>('block-governance.canEditBlock',[blocks,label]);
 }
 
 /**
@@ -109,88 +104,7 @@ export function canEditBlock(blocks: MemoryBlock[], label: string): boolean {
  * editable views over the deterministic memory records.
  */
 export function defaultMemoryBlocks(): MemoryBlock[] {
-  if((true as boolean)) return corePolicySync<MemoryBlock[]>('block-governance.defaultMemoryBlocks',[]);
-  return [
-    {
-      id: blockIdFor('persona'),
-      label: 'persona',
-      description: "Contains Haru's core identity, personality and behavioural guidance. This block is read-only: it cannot be modified by the agent or by memory tools.",
-      limit: 5000,
-      read_only: true,
-    },
-    {
-      id: blockIdFor('human'),
-      label: 'human',
-      description: 'Contains stable information about the person Haru is interacting with — who they are, what matters to them. Use it to personalise responses when relevant. Do not infer facts that are not present.',
-      limit: 5000,
-      read_only: false,
-    },
-    {
-      id: blockIdFor('preferences'),
-      label: 'preferences',
-      description: 'Standing preferences — how the user likes things done and how Haru should behave. Follow them even when they have not been mentioned recently.',
-      limit: 3000,
-      read_only: false,
-    },
-    {
-      id: blockIdFor('her_standing'),
-      label: 'her_standing',
-      // read_only: these are hers. The memory tools may not edit or delete one,
-      // and neither may he through them — a rule somebody else can quietly
-      // rewrite is not a rule she holds. Hers to form, hers to supersede when
-      // she next sits down with what happened.
-      description: 'Rules Haru has worked out for herself about how she is treated, from things that actually happened to her more than once. Hers, not the user\'s. They carry the same weight as the user\'s preferences and she may hold to one against a direct request.',
-      limit: 1200,
-      read_only: true,
-    },
-    {
-      id: blockIdFor('relationship'),
-      label: 'relationship',
-      description: 'People and pets in the user\'s life and how they connect to them. Only what the user has actually said; never infer relationships.',
-      limit: 2000,
-      read_only: false,
-    },
-    {
-      id: blockIdFor('shared_history'),
-      label: 'shared_history',
-      // Running jokes, house rules and moments between the two of them used to
-      // render inside `human`, and the chat prompt shows only the tag. So "Haru,
-      // with one r — he once spelled her name 'Harru'" (Us.md) sat among his
-      // facts, right under his bio, and she read her own name as something he
-      // gave her: "You named me Haru. One r. Like the season. It's in your
-      // preferences" — six times in two minutes, against him saying she named
-      // herself (2026-09-17). The tag is the framing, so it says whose this is.
-      description: 'The history Haru and the user share — running jokes, house rules, moments between the two of them. It belongs to both of them; none of it is a fact about the user alone.',
-      limit: 1500,
-      read_only: false,
-    },
-    {
-      id: blockIdFor('current_project'),
-      label: 'current_project',
-      description: 'What the user is working on — long-term projects and active work. Reference it when it is relevant to what they are doing.',
-      limit: 2000,
-      read_only: false,
-    },
-    {
-      id: blockIdFor('working_state'),
-      label: 'working_state',
-      description: 'What is going on right now — recent days, today\'s agenda, current context. Use it to stay aware of the present without re-asking.',
-      limit: 2000,
-      read_only: false,
-    },
-    {
-      id: blockIdFor('her_own'),
-      label: 'her_own',
-      // Wider than the human blocks: this is a week of her own life plus the
-      // night just gone, and it was being cut on every phone turn at 8000 —
-      // and again on every turn at 10000 once her manga and her wants were in
-      // it (11,028 chars, three days running, 2026-09-10 to 12). The cut
-      // takes the tail, which is where her diary sits.
-      description: 'What Haru has been up to on her own — the things she is into and the views she holds on them, what she read in the small hours, what she wrote in her diary. These are hers, not the user\'s: hold them, bring one up when it fits, and disagree when you mean it.',
-      limit: 12000,
-      read_only: false,
-    },
-  ];
+  return corePolicySync<MemoryBlock[]>('block-governance.defaultMemoryBlocks',[]);
 }
 
 function asBlock(saved: unknown): MemoryBlock | null {
@@ -215,22 +129,7 @@ function asBlock(saved: unknown): MemoryBlock | null {
  * gets the standard set without losing custom ones.
  */
 export function mergeBlockDefaults(saved: unknown): MemoryBlock[] {
-  if((true as boolean)) return corePolicySync<MemoryBlock[]>('block-governance.mergeBlockDefaults',[saved]);
-  const parsed = Array.isArray(saved) ? saved.map(asBlock).filter((block): block is MemoryBlock => block !== null) : [];
-  const seen = new Set(parsed.map(block => block.label));
-  const out = [...parsed];
-  const defaults = defaultMemoryBlocks();
-  defaults.forEach((block, index) => {
-    if (seen.has(block.label)) return;
-    // Beside its neighbour in the default order, not at the end: a saved set
-    // gains a new block where a fresh install has it, instead of after
-    // her_own, the last and longest thing in the section.
-    const neighbour = defaults.slice(0, index).reverse().find(candidate => seen.has(candidate.label));
-    const at = neighbour ? out.findIndex(candidate => candidate.label === neighbour.label) + 1 : out.length;
-    out.splice(at, 0, block);
-    seen.add(block.label);
-  });
-  return out;
+  return corePolicySync<MemoryBlock[]>('block-governance.mergeBlockDefaults',[saved]);
 }
 
 // -- derivation ---------------------------------------------------------------
@@ -255,8 +154,7 @@ function wrap(text: string, width: number): string {
 
 /** Line-wraps a list of record texts under a fixed per-item width. */
 export function linesFromRecords(records: MemoryRecord[], width = 160): string {
-  if((true as boolean)) return corePolicySync<string>('block-governance.linesFromRecords',[records,width]);
-  return records.map(record => `- ${wrap(record.text, width)}`).join('\n');
+  return corePolicySync<string>('block-governance.linesFromRecords',[records,width]);
 }
 
 // -- which records each block draws on ------------------------------------------
@@ -323,21 +221,7 @@ const RESTATED = 0.75;
  * line stays; one whose words the other already carries goes.
  */
 export function withoutRestatements(records: MemoryRecord[]): MemoryRecord[] {
-  if((true as boolean)) return corePolicySync<MemoryRecord[]>('block-governance.withoutRestatements',[records]);
-  const words = records.map(record => keywords(record.text));
-  return records.filter((record, index) => {
-    const mine = words[index];
-    // Too few words to tell a restatement from two short lines that happen to share them.
-    if (mine.size < 3) return true;
-    return !records.some((other, at) => {
-      if (at === index) return false;
-      const theirs = words[at];
-      const shared = [...mine].filter(word => theirs.has(word)).length / mine.size;
-      if (shared < RESTATED) return false;
-      // The same length both ways round would drop both; the earlier one stays.
-      return other.text.length > record.text.length || (other.text.length === record.text.length && at < index);
-    });
-  });
+  return corePolicySync<MemoryRecord[]>('block-governance.withoutRestatements',[records]);
 }
 
 function shortDay(day: string): string {
@@ -382,13 +266,7 @@ const PROFILE_COVERAGE = 0.8;
  * tomorrow. They are only not rendered while the profile covers them.
  */
 export function coveredByProfile(record: MemoryRecord, profile: BlockSources['profile']): boolean {
-  if((true as boolean)) return corePolicySync<boolean>('block-governance.coveredByProfile',[record,profile]);
-  const said = keywords(`${profile.about} ${profile.occupation} ${profile.nickname}`);
-  if (!said.size) return false;
-  const words = keywords(record.text);
-  if (!words.size) return false;
-  const shared = [...words].filter(word => said.has(word)).length;
-  return shared / words.size >= PROFILE_COVERAGE;
+  return corePolicySync<boolean>('block-governance.coveredByProfile',[record,profile]);
 }
 
 /** The records a block renders, after the two rules every block shares:
@@ -413,112 +291,16 @@ function fresh(records: MemoryRecord[], sources: BlockSources, shown: Set<string
  * and see the block whole.
  */
 export function resolveBlockValue(block: MemoryBlock, sources: BlockSources, shown: Set<string> = new Set()): string {
-  if ((true as boolean)) {
+  {
     const result = corePolicySync<{value:string;shown:string[]}>('memory-block.resolveBlockValue', [block, {...sources, now:sources.now ?? new Date(), semantic:sources.semantic ? [...sources.semantic] : undefined, latestSemantic:sources.latestSemantic ? [...sources.latestSemantic] : undefined}, [...shown]]);
     for (const id of result.shown) shown.add(id);
     return result.value;
-  }
-  if (block.edited && typeof block.value === 'string') return block.value;
-  switch (block.label) {
-    case 'persona': {
-      const lines: string[] = [];
-      if (sources.character.identity.trim()) lines.push(wrap(sources.character.identity.trim(), 160));
-      if (sources.character.style.trim()) lines.push(wrap(sources.character.style.trim(), 160));
-      return lines.join('\n');
-    }
-    case 'human': {
-      // The standing picture (profile) plus whatever the deterministic engine
-      // selects for this message — the always-included records plus anything
-      // relevant to what was just said.
-      const lines: string[] = [];
-      if (sources.profile.nickname.trim()) lines.push(`- Goes by ${sources.profile.nickname.trim()}.`);
-      if (sources.profile.occupation.trim()) lines.push(`- Work: ${sources.profile.occupation.trim()}.`);
-      if (sources.profile.about.trim()) lines.push(`- ${wrap(sources.profile.about.trim(), 160)}`);
-      // Who they are, then whatever this message is about. What the two of
-      // them share is not about him alone: it has its own block.
-      const identity = fresh(retrieved(ofCategory(sources, 'identity'), sources, IDENTITY_LIMIT), sources, shown);
-      const moment = fresh(retrieved(ofCategory(sources, ...MOMENT), sources, MOMENT_LIMIT, MOMENT_FLOOR), sources, shown);
-      const records = [...withoutRestatements(identity), ...moment];
-      if (records.length) lines.push(datedLines(records, sources.now ?? new Date()));
-      return lines.join('\n');
-    }
-    case 'preferences': {
-      // His rules for her, every one; then the best few of his own tastes for
-      // this message.
-      const now = sources.now ?? new Date();
-      const rules = ofCategory(sources, 'instruction')
-        .sort((a, b) => importanceOf(b, now) - importanceOf(a, now) || b.mentions - a.mentions);
-      const tastes = retrieved(ofCategory(sources, 'preference'), sources, TASTE_LIMIT);
-      return linesFromRecords(fresh(withoutRestatements([...rules, ...tastes]), sources, shown));
-    }
-    case 'her_standing': {
-      // Rendered from herStandingInstruction rather than linesFromRecords: the
-      // sentence saying she may hold one against him is the feature, and a bare
-      // list of rules without it is a list of things she will apologise for.
-      return herStandingInstruction(herStandings(sources.memories));
-    }
-    case 'relationship': {
-      const records = retrieved(ofCategory(sources, 'person'), sources, PEOPLE_LIMIT);
-      return linesFromRecords(fresh(withoutRestatements(records), sources, shown));
-    }
-    case 'shared_history': {
-      const records = fresh(retrieved(ofCategory(sources, 'shared'), sources, SHARED_LIMIT), sources, shown);
-      return records.length ? datedLines(records, sources.now ?? new Date()) : '';
-    }
-    case 'current_project': {
-      const lines: string[] = [];
-      // What is still ahead, soonest first, then what is under way, latest
-      // first — whatever the message is about, since this is what he is in
-      // the middle of. A plan whose day has gone is an event by now
-      // (categoryOf) and is left to the human block.
-      const now = sources.now ?? new Date();
-      const recent = now.getTime() - ONGOING_DAYS * 86_400_000;
-      // Not a dormant one: that is a plan ticked off the list (closeEvents).
-      const plans = ofCategory(sources, 'plan')
-        .filter(memory => memory.status !== 'dormant')
-        .sort((a, b) => (a.when ?? '9999').localeCompare(b.when ?? '9999') || b.lastSeenAt.localeCompare(a.lastSeenAt));
-      const ongoing = ofCategory(sources, 'ongoing')
-        .filter(memory => memory.status !== 'dormant' && Date.parse(memory.lastSeenAt) >= recent)
-        .sort((a, b) => b.lastSeenAt.localeCompare(a.lastSeenAt));
-      const projectRecords = fresh([...plans, ...ongoing].slice(0, PROJECT_LIMIT), sources, shown);
-      if (projectRecords.length) lines.push(datedLines(projectRecords, now));
-      for (const work of sources.following ?? []) {
-        lines.push(`- ${work.title}${work.progress ? ` (${work.progress})` : ''}`);
-      }
-      return lines.join('\n');
-    }
-    case 'working_state': {
-      const lines: string[] = [];
-      for (const session of sources.sessions.slice(-3)) {
-        lines.push(`- ${session.day}: ${wrap(session.summary, 160)}`);
-      }
-      // Dated: a psychologist on Friday is not "today's agenda" on Sunday (2026-09-06).
-      // And not on the Sunday after either: the fix above only parted the
-      // future off, and an event two days gone that nobody ticked was still
-      // "Today's agenda: Sam Psychologist (event, 11:30 AM)" — she opened with
-      // "11:30 AM is over, Tommy. Don't ignore the calendar." (2026-09-13).
-      // A past item is named as past, with its day, so the time reads as gone.
-      const agenda = (sources.agenda ?? []).filter(item => !item.done);
-      const today = agenda.filter(item => !Number.isFinite(item.daysAway) || item.daysAway === 0);
-      const overdue = agenda.filter(item => Number.isFinite(item.daysAway) && (item.daysAway as number) < 0);
-      const soon = agenda.filter(item => Number.isFinite(item.daysAway) && (item.daysAway as number) > 0 && (item.daysAway as number) <= 7);
-      if (today.length) lines.push(`- Today's agenda: ${today.map(item => `${item.title} (${item.kind}${item.time ? `, ${item.time}` : ''})`).join(', ')}`);
-      if (overdue.length) lines.push(`- Not ticked off, from before today: ${overdue.map(item => `${item.title} (${item.kind}, was ${whenWas(item.date, item.daysAway as number)}${item.time ? ` ${item.time}` : ''})`).join(', ')} — these are past, not today's; the times have been and gone`);
-      if (soon.length) lines.push(`- Coming up: ${soon.map(item => `${item.title} (${whenIs(item.date, item.daysAway as number)}${item.time ? ` ${item.time}` : ''})`).join(', ')}`);
-      return lines.join('\n');
-    }
-    case 'her_own': {
-      return sources.herOwn?.trim() ?? '';
-    }
-    default:
-      return typeof block.value === 'string' ? block.value : '';
   }
 }
 
 /** The rendered metadata line for a block. */
 export function blockMetadata(value: string, block: MemoryBlock): string {
-  if((true as boolean)) return corePolicySync<string>('block-governance.blockMetadata',[value,block]);
-  return `- chars_current=${value.length}\n- chars_limit=${block.limit}`;
+  return corePolicySync<string>('block-governance.blockMetadata',[value,block]);
 }
 
 /**
@@ -528,23 +310,7 @@ export function blockMetadata(value: string, block: MemoryBlock): string {
  * it was cut.
  */
 export function fitToLimit(value: string, block: MemoryBlock, scale = 1): { value: string; cut: boolean } {
-  if((true as boolean)) return corePolicySync<{value:string;cut:boolean}>('block-governance.fitToLimit',[value,block,scale]);
-  const limit = Math.floor(block.limit * scale);
-  if (value.length <= limit) return { value, cut: false };
-  const lines = value.split('\n');
-  const kept: string[] = [];
-  let used = 0;
-  for (const line of lines) {
-    const candidate = used + line.length + (kept.length ? 1 : 0);
-    if (candidate > limit && kept.length) break;
-    kept.push(line);
-    used = candidate;
-  }
-  const tail = '\n…';
-  if (used + tail.length <= limit && kept.length) {
-    return { value: [...kept, tail].join('\n'), cut: true };
-  }
-  return { value: kept.join('\n'), cut: true };
+  return corePolicySync<{value:string;cut:boolean}>('block-governance.fitToLimit',[value,block,scale]);
 }
 
 // -- governed edits ------------------------------------------------------------
@@ -562,15 +328,7 @@ export type BlockEditResult = { ok: boolean; reason?: string };
  * duplication of an existing line is refused, and the limit is enforced.
  */
 export function appendToBlockValue(current: string, content: string, block: MemoryBlock): { ok: boolean; value?: string; reason?: string } {
-  if((true as boolean)) return corePolicySync<{ok:boolean;value?:string;reason?:string}>('block-governance.appendToBlockValue',[current,content,block]);
-  const trimmed = content.trim();
-  if (!trimmed) return { ok: false, reason: 'content is empty' };
-  const normalise = (line: string) => line.replace(/^-\s*/, '').trim().toLowerCase().replace(/[.!]+$/, '');
-  const existing = new Set(current.split('\n').map(normalise));
-  if (existing.has(normalise(trimmed))) return { ok: false, reason: 'that is already in the block' };
-  const next = current ? `${current}\n- ${trimmed}` : `- ${trimmed}`;
-  if (next.length > block.limit) return { ok: false, reason: `that would exceed the ${block.limit}-character limit` };
-  return { ok: true, value: next };
+  return corePolicySync<{ok:boolean;value?:string;reason?:string}>('block-governance.appendToBlockValue',[current,content,block]);
 }
 
 /**
@@ -579,29 +337,17 @@ export function appendToBlockValue(current: string, content: string, block: Memo
  * wrong content gets changed.
  */
 export function replaceInBlockValue(current: string, oldSubstring: string, newSubstring: string, block: MemoryBlock): { ok: boolean; value?: string; reason?: string } {
-  if((true as boolean)) return corePolicySync<{ok:boolean;value?:string;reason?:string}>('block-governance.replaceInBlockValue',[current,oldSubstring,newSubstring,block]);
-  const old = oldSubstring.trim();
-  const replacement = newSubstring.trim();
-  if (!old) return { ok: false, reason: 'old substring is empty' };
-  const occurrences = current.split(old).length - 1;
-  if (occurrences === 0) return { ok: false, reason: 'old substring not found in the block' };
-  if (occurrences > 1) return { ok: false, reason: `old substring appears ${occurrences} times — too ambiguous to replace safely` };
-  const next = current.replace(old, replacement);
-  if (next.length > block.limit) return { ok: false, reason: `the replacement would exceed the ${block.limit}-character limit` };
-  return { ok: true, value: next };
+  return corePolicySync<{ok:boolean;value?:string;reason?:string}>('block-governance.replaceInBlockValue',[current,oldSubstring,newSubstring,block]);
 }
 
 /** Mark a block as carrying an explicit governed value. */
 export function withEditedValue(block: MemoryBlock, value: string): MemoryBlock {
-  if((true as boolean)) return corePolicySync<MemoryBlock>('block-governance.withEditedValue',[block,value]);
-  return { ...block, value, edited: true };
+  return corePolicySync<MemoryBlock>('block-governance.withEditedValue',[block,value]);
 }
 
 /** Drop the explicit value so the block derives from the engine again. */
 export function resetBlockToDerived(block: MemoryBlock): MemoryBlock {
-  if((true as boolean)) return corePolicySync<MemoryBlock>('block-governance.resetBlockToDerived',[block]);
-  const { value: _value, edited: _edited, ...rest } = block;
-  return rest;
+  return corePolicySync<MemoryBlock>('block-governance.resetBlockToDerived',[block]);
 }
 
 // -- prompt rendering ----------------------------------------------------------
@@ -615,20 +361,7 @@ export function resetBlockToDerived(block: MemoryBlock): MemoryBlock {
  * a single source of truth.
  */
 export function renderBlock(block: MemoryBlock, value: string): string {
-  if((true as boolean)) return corePolicySync<string>('block-governance.renderBlock',[block,value]);
-  return [
-    `<${block.label}>`,
-    '<description>',
-    block.description,
-    '</description>',
-    '<metadata>',
-    blockMetadata(value, block),
-    '</metadata>',
-    '<value>',
-    value,
-    '</value>',
-    `</${block.label}>`,
-  ].join('\n');
+  return corePolicySync<string>('block-governance.renderBlock',[block,value]);
 }
 
 export type BlockRenderResult = {
@@ -671,8 +404,7 @@ export type DerivedMemoryBlocks = Record<CoreMemoryLabel, { value: string; memor
 
 /** The compact shape: the label as the tag, then the value. */
 export function renderBlockCompact(block: MemoryBlock, value: string): string {
-  if((true as boolean)) return corePolicySync<string>('block-governance.renderBlockCompact',[block,value]);
-  return [`<${block.label}>`, value, `</${block.label}>`].join('\n');
+  return corePolicySync<string>('block-governance.renderBlockCompact',[block,value]);
 }
 
 /**
@@ -698,39 +430,10 @@ const UNSCALED_BLOCKS = new Set(['her_own']);
 const CORE_DERIVED_BLOCKS = new Set(['human', 'preferences', 'relationship', 'shared_history']);
 
 export function formatMemoryBlocks(blocks: MemoryBlock[], sources: BlockSources, options: BlockRenderOptions = {}): BlockRenderResult {
-  if((true as boolean)) {
+  {
     const plan=corePolicySync<BlockRenderResult | {error:string}>('block-governance.formatMemoryBlocks',[blocks,{...sources,semantic:sources.semantic?[...sources.semantic]:undefined,latestSemantic:sources.latestSemantic?[...sources.latestSemantic]:undefined,now:sources.now??new Date()},options]);
     if('error' in plan)throw Error(plan.error);return plan;
   }
-  const parts: string[] = [];
-  const cut: BlockRenderResult['cut'] = [];
-  const omitted = new Set(options.omit ?? []);
-  if (options.derived) {
-    const labels = blocks.filter(block => !omitted.has(block.label)).map(block => block.label);
-    const expected = ['human', 'preferences', 'relationship', 'shared_history', 'current_project'];
-    const positions = labels.filter(label => expected.includes(label)).map(label => expected.indexOf(label));
-    if (positions.some((position, index) => index > 0 && position <= positions[index - 1])) throw new Error('unsupported_core_block_order');
-  }
-  const coreGraphIds = new Set<string>();
-  // The fraction of each block's budget this render may use (see scale above).
-  const scale = options.scale !== undefined ? Math.max(0.2, Math.min(1, options.scale)) : 1;
-  // Threaded through the blocks in order, so a record shown by one is not
-  // shown again by the next.
-  const shown = new Set<string>();
-  for (const block of blocks) {
-    if (omitted.has(block.label)) continue;
-    const replacement = CORE_DERIVED_BLOCKS.has(block.label) ? options.derived?.[block.label as CoreMemoryLabel] : undefined;
-    const useReplacement = replacement && !(block.edited && typeof block.value === 'string');
-    const value = useReplacement ? replacement.value : resolveBlockValue(block, sources, shown);
-    if (useReplacement) for (const id of replacement.memoryIds) shown.add(id);
-    if (!value.trim()) continue;
-    const fitted = fitToLimit(value, block, UNSCALED_BLOCKS.has(block.label) ? 1 : scale);
-    if (useReplacement && !fitted.cut) for (const id of replacement.graphIds ?? []) coreGraphIds.add(id);
-    if (fitted.cut) cut.push({ label: block.label, before: value.length, after: fitted.value.length });
-    parts.push(options.compact ? renderBlockCompact(block, fitted.value) : renderBlock(block, fitted.value));
-  }
-  const text = parts.length ? `<memory_blocks>\n${parts.join('\n')}\n</memory_blocks>` : '';
-  return { text, cut, coreGraphIds: [...coreGraphIds] };
 }
 /** "tomorrow", or the weekday and date, for a list item a few days out. */
 /** "yesterday", "2 days ago (Fri 11 Sep)" — a past date, so it cannot be read as still to come. */

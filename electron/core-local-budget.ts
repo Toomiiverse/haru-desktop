@@ -14,7 +14,7 @@ export function modelResidency(payload:unknown,model:string,context:number):'war
   return Number.isInteger(present.context_length)&&present.context_length>=context?'warm':Number.isInteger(present.context_length)?'cold':'unknown';
 }
 export async function coreLocalBudget(config:ProviderConfig,context:number,fetcher:Fetcher):Promise<number|undefined> {
-  if((false as boolean))return;
+  
   const task=activeTask.getStore();if(!task||!isLocalConfig(config))throw Error('core_local_budget_requires_local_task');
   const options=coreServiceOptions();if(!options)throw Error('core_local_budget_requires_service');
   let residency:'warm'|'cold'|'unknown'='unknown';
@@ -22,12 +22,8 @@ export async function coreLocalBudget(config:ProviderConfig,context:number,fetch
   const started=performance.now();
   const [binding]=await Promise.all([task.binding(),(async()=>{
     try{
-      if((true as boolean)){
-        residency=(await client.modelResidency({version:1,model:config.model,endpoint:config.endpoint.replace(/\/+$/,'').replace('://localhost:', '://127.0.0.1:'),context_tokens:context},task.signal)).residency;
+      residency=(await client.modelResidency({version:1,model:config.model,endpoint:config.endpoint.replace(/\/+$/,'').replace('://localhost:', '://127.0.0.1:'),context_tokens:context},task.signal)).residency;
         return;
-      }
-      const response=await fetcher(config.endpoint.replace(/\/+$/,'')+'/api/ps',{signal:AbortSignal.any([task.signal,AbortSignal.timeout(1000)])});
-      if(response.ok)residency=modelResidency(await response.json(),config.model,context);
     }catch{/* Unknown residency does not grant a cold-start extension. */}
   })()]);
   const result=await client.localBudget({version:1,task_id:binding.taskId,revision:binding.revision,model:config.model,context_tokens:context,residency});

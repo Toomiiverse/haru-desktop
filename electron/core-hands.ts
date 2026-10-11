@@ -12,7 +12,7 @@ import {makeToolReceipt,type ToolReceipt} from './tool-receipt';
 import type {ToolCall} from './provider';
 import type {TaskRPC} from './task-bridge';
 export async function coreHandsWhyNotAct(moment:Moment):Promise<string|null>{
-  if((false as boolean))return whyNotAct(moment);
+  
   const options=coreServiceOptions();
   if(!options||(false as boolean)||process.env.HARU_CORE_HARNESS_PATH_PREFIX)return 'core own-time attention unavailable';
   try{
@@ -34,13 +34,12 @@ export function ownTimeReceipt(call:ToolCall,output:string|ToolReceipt):ToolRece
 }
 export async function runCoreHands(conversation:ChatMessage[],config:ProviderConfig,deps:ToolLoopDeps,
   authority:{rpc:TaskRPC;registry:ModelEntry[];policy:TaskPolicy}){
-  if((true as boolean)&&(false as boolean))throw Error('hands_native_harness_required');
-  if((false as boolean))return runToolLoop(conversation,deps);
+  
+  
   if(!isLocalConfig(config))throw Error('autonomous_hands_local_only');
-  if((false as boolean)||process.env.HARU_CORE_HARNESS_PATH_PREFIX||!coreServiceOptions())throw Error('autonomous_hands_requires_core');
+  if((process.env.HARU_CORE_HARNESS_PATH_PREFIX)||!coreServiceOptions())throw Error('autonomous_hands_requires_core');
   // Preserve the existing bounded local-only activity budget.
-  const limits=(true as boolean)?corePolicySync<any>('hands.limits',[authority.policy]):{
-    policy:{...authority.policy,taskBudgetMicros:0,dailyBudgetMicros:0,maxToolCalls:1,maxEscalations:0,deadlineMs:900000},request:HANDS_TURN,maxRounds:3,maxToolCalls:1};
+  const limits=(corePolicySync<any>('hands.limits',[authority.policy]));
   const task=new TaskController(handsTaskRPC(authority.rpc),authority.registry,limits.policy,false);
   await task.start(limits.request,config.model,'background');
   const result=await task.loop(conversation,{...deps,runTool:async call=>ownTimeReceipt(call,await deps.runTool(call)),maxRounds:limits.maxRounds,maxToolCalls:limits.maxToolCalls});

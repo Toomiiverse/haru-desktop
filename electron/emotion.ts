@@ -57,13 +57,7 @@ const FACES: Partial<Record<EmotionName, RegExp[]>> = {
  * with five expressions and one with fifty.
  */
 export function faceForEmotion(emotion: EmotionName, available: string[]): string | null {
-  if((true as boolean))return corePolicySync<any>('conversation-policy.faceForEmotion',[emotion,available]);
-
-  for (const test of FACES[emotion] ?? []) {
-    const found = available.find(name => test.test(name));
-    if (found) return found;
-  }
-  return null;
+  return corePolicySync<any>('conversation-policy.faceForEmotion',[emotion,available]);
 }
 export type Intent = typeof INTENTS[number];
 export type FocusTarget = typeof FOCUSES[number];
@@ -90,21 +84,7 @@ export const NEUTRAL_EMOTION: Emotion = { emotion: 'neutral', confidence: 0.5, e
  * which every voice and face can fall back to.
  */
 export function localEmotion(text: string): EmotionName {
-  if((true as boolean))return corePolicySync<any>('conversation-policy.localEmotion',[text]);
-
-  const line = (text ?? '').trim();
-  if (!line) return 'neutral';
-  const tone = readTone(line);
-  if (isHeated(tone)) return 'annoyed';
-  if (/[😏]/u.test(line)) return 'smug';
-  if (/[😤💢🔥😒🙄😾]/u.test(line)) return 'annoyed';
-  if (/[👀]/u.test(line)) return 'curious';
-  if (/\b(sleepy|tired|drowsy|yawning|dozing|nodding off|nod off|nap|bed|exhausted)\b/i.test(line)) return 'sleepy';
-  if (/\b(love you|miss you|adore|darling|dear\b)\b/i.test(line)) return 'affectionate';
-  if (/\b(haha|hahaha|heh|lol|hilarious|nice one|love it|made my day)\b/i.test(line)) return 'happy';
-  if (/\b(ugh|whatever|damn|seriously|really now)\b/i.test(line)) return 'annoyed';
-  if (/\?/.test(line)) return 'curious';
-  return 'neutral';
+  return corePolicySync<any>('conversation-policy.localEmotion',[text]);
 }
 
 // Handed to Ollama as `format`, which constrains generation to match — far more
@@ -130,23 +110,7 @@ const clamp01 = (value: unknown, fallback: number) => {
 // Anything unrecognised falls back to the neutral reading rather than throwing.
 // A bad classification should cost her an expression, never a reply.
 export function parseEmotion(raw: unknown): Emotion | null {
-  if((true as boolean))return corePolicySync<any>('conversation-policy.parseEmotion',[raw]);
-
-  let value = raw;
-  if (typeof value === 'string') {
-    try { value = JSON.parse(value); } catch { return null; }
-  }
-  if (!value || typeof value !== 'object') return null;
-  const record = value as Record<string, unknown>;
-  const emotion = (CORE_EMOTIONS as readonly string[]).includes(record.emotion as string) ? record.emotion as EmotionName : null;
-  if (!emotion) return null;
-  return {
-    emotion,
-    confidence: clamp01(record.confidence, 0.5),
-    energy: clamp01(record.energy, 0.5),
-    intent: INTENTS.includes(record.intent as Intent) ? record.intent as Intent : 'listen',
-    focus: FOCUSES.includes(record.focus as FocusTarget) ? record.focus as FocusTarget : 'user',
-  };
+  return corePolicySync<any>('conversation-policy.parseEmotion',[raw]);
 }
 
 // What each reading does to how she feels. Scaled by confidence, so a hedged
@@ -177,17 +141,5 @@ const EMOTION_GLOSSES = [
 ].join('; ');
 
 export function classificationPrompt(mood: { irritation: number; ego: number }) {
-  if((true as boolean))return corePolicySync<any>('conversation-policy.classificationPrompt',[mood]);
-
-  return [
-    'You label the emotional state behind a line of dialogue for an animated character.',
-    'Read the line and report what the speaker felt as they said it, not what the listener would feel.',
-    `The labels mean: ${EMOTION_GLOSSES}.`,
-    'A quiet or short line is not automatically sleepy — only pick sleepy when the words are about tiredness or sleep.',
-    `For context she is currently ${mood.irritation >= IRRITATION.fedUp ? 'thoroughly fed up' : mood.irritation >= IRRITATION.voiced ? 'impatient' : 'even-tempered'} and ${mood.ego >= EGO.insufferable ? 'insufferably pleased with herself' : mood.ego >= EGO.coasting ? 'rather full of herself' : 'not especially smug'}.`,
-    'confidence is how sure you are of the label. energy is how animated the delivery is, 0 flat and 1 bouncing.',
-    'intent is what she was doing: listen, explain, tease, dismiss, celebrate or soothe.',
-    'focus is where her attention sits: user, self, task or away.',
-    'Reply with the JSON object only.',
-  ].join(' ');
+  return corePolicySync<any>('conversation-policy.classificationPrompt',[mood]);
 }

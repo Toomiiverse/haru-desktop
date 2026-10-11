@@ -45,32 +45,15 @@ const NEGATIVE = /\b(do(?:es)?n'?t|do not|does not|not|never|dislikes?|hates?|st
 const POSITIVE = /\b(likes?|loves?|enjoys?|uses?|wants?|prefers?|is a|is the|has|had|does)\b/i;
 
 export function polarity(text: string): 'positive' | 'negative' | 'neutral' {
-  if ((true as boolean)) return corePolicySync<'positive' | 'negative' | 'neutral'>('memory-maintenance.polarity', [text]);
-  if (NEGATIVE.test(text)) return 'negative';
-  if (POSITIVE.test(text)) return 'positive';
-  return 'neutral';
+  return corePolicySync<'positive' | 'negative' | 'neutral'>('memory-maintenance.polarity', [text]);
 }
 
 export function isContradictory(a: MemoryRecord, b: MemoryRecord): boolean {
-  if ((true as boolean)) return corePolicySync<boolean>('memory-maintenance.isContradictory', [a,b]);
-  const left = keywords(a.text);
-  const right = keywords(b.text);
-  if (!left.size || !right.size) return false;
-  const shared = [...left].filter(word => right.has(word)).length;
-  const overlap = shared / Math.max(left.size, right.size);
-  if (overlap < CONTRADICTION_OVERLAP) return false;
-  const aPolarity = polarity(a.text);
-  const bPolarity = polarity(b.text);
-  return (aPolarity === 'positive' && bPolarity === 'negative') || (aPolarity === 'negative' && bPolarity === 'positive');
+  return corePolicySync<boolean>('memory-maintenance.isContradictory', [a,b]);
 }
 
 export function overlapScore(a: MemoryRecord, b: MemoryRecord): number {
-  if ((true as boolean)) return corePolicySync<number>('memory-maintenance.overlapScore', [a,b]);
-  const left = keywords(a.text);
-  const right = keywords(b.text);
-  if (!left.size || !right.size) return 0;
-  const shared = [...left].filter(word => right.has(word)).length;
-  return shared / Math.max(left.size, right.size);
+  return corePolicySync<number>('memory-maintenance.overlapScore', [a,b]);
 }
 
 /**
@@ -91,8 +74,7 @@ export function overlapScore(a: MemoryRecord, b: MemoryRecord): number {
  * while mergedFrom only ever held the ids of records that no longer exist.
  */
 export function mergeText(a: string, b: string): string {
-  if ((true as boolean)) return corePolicySync<string>('memory-maintenance.mergeText', [a,b]);
-  return a.length >= b.length ? a : b;
+  return corePolicySync<string>('memory-maintenance.mergeText', [a,b]);
 }
 
 function mergePair(primary: MemoryRecord, other: MemoryRecord, now: string): MemoryRecord {
@@ -157,7 +139,7 @@ export type ConsolidationResult = {
  */
 export function consolidateMemories(memories: MemoryRecord[], options: ConsolidateOptions = {}): ConsolidationResult {
   const now = options.now ?? new Date().toISOString();
-  if ((true as boolean)) {
+  {
     // Custom callbacks report identity-pair observations. Live callers send raw
     // vectors once, avoiding O(n²) policy RPCs. No Node merge decision runs.
     const observations: [string,string,number | undefined][] = [];
@@ -165,65 +147,4 @@ export function consolidateMemories(memories: MemoryRecord[], options: Consolida
     const result=corePolicySync<ConsolidationResult>('memory-maintenance.consolidateMemories',[memories,now,observations,options.vectors ? [...options.vectors] : []]);
     return result.changes.length ? result : {...result,memories};
   }
-  const changes: ConsolidationChange[] = [];
-  // Superseded and archived records are history, not candidates — the sweep
-  // must not tidy away something that was deliberately shelved.
-  const active = memories.filter(memory => !memory.supersededBy && memory.status !== 'archived');
-  const working = active.map(memory => ({ ...memory }));
-  const removed = new Set<number>();
-  let changed = false;
-
-  for (let i = 0; i < working.length; i++) {
-    if (removed.has(i)) continue;
-    for (let j = i + 1; j < working.length; j++) {
-      if (removed.has(j)) continue;
-      const primary = working[i];
-      const other = working[j];
-
-      const same = isSameMemory(primary.text, other.text);
-      const overlap = overlapScore(primary, other);
-      const semantic = options.similarity ? options.similarity(primary, other) : undefined;
-      const bySemanticsAlone = semantic !== undefined && semantic >= SEMANTIC_MERGE
-        && !KEYWORDS_ONLY_MERGE.includes(primary.kind) && !KEYWORDS_ONLY_MERGE.includes(other.kind);
-      const nearEnough = overlap >= OVERLAP_MERGE || bySemanticsAlone;
-
-      if (isContradictory(primary, other)) {
-        // The older claim loses confidence; both stay, marked, so the conflict
-        // is visible rather than silently resolved.
-        const older = primary.createdAt <= other.createdAt ? primary : other;
-        const younger = older === primary ? other : primary;
-        older.confidence = Math.max(0.1, (older.confidence ?? 0.5) - 0.3);
-        older.conflictsWith = [...new Set([...(older.conflictsWith ?? []), younger.id])];
-        younger.conflictsWith = [...new Set([...(younger.conflictsWith ?? []), older.id])];
-        changes.push({
-          kind: 'conflict', keptId: younger.id, mergedIds: [older.id], at: now,
-          detail: `"${older.text.slice(0, 60)}" contradicts "${younger.text.slice(0, 60)}" — the older claim is now held with less confidence`,
-        });
-        changed = true;
-        continue;
-      }
-
-      if (same || nearEnough) {
-        // The record with more mentions becomes the survivor; its id is the
-        // one the retrieval vectors and the UI already know.
-        const primaryKept = primary.mentions >= other.mentions;
-        const kept = primaryKept ? primary : other;
-        const folded = primaryKept ? other : primary;
-        const merged = mergePair(kept, folded, now);
-        working[primaryKept ? i : j] = merged;
-        removed.add(primaryKept ? j : i);
-        changes.push({
-          kind: 'merged', keptId: merged.id, mergedIds: [folded.id], at: now,
-          detail: `"${folded.text.slice(0, 60)}" merged into "${kept.text.slice(0, 60)}"`,
-        });
-        changed = true;
-      }
-    }
-  }
-
-  const kept = working.filter((_, index) => !removed.has(index));
-  return {
-    memories: changed ? [...kept, ...memories.filter(memory => memory.supersededBy || memory.status === 'archived')] : memories,
-    changes,
-  };
 }

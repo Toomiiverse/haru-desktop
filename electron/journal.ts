@@ -43,52 +43,23 @@ export type JournalConfig = {
 export const DEFAULT_JOURNAL: JournalConfig = { enabled: false, askHour: 20, askUnprompted: true };
 
 export function readJournalConfig(saved: unknown): JournalConfig {
-  if((true as boolean))return corePolicySync<JournalConfig>('user-records.readConfig',[saved]);
-  if (!saved || typeof saved !== 'object') return DEFAULT_JOURNAL;
-  const record = saved as Partial<JournalConfig>;
-  const askHour = typeof record.askHour === 'number' && record.askHour >= 0 && record.askHour <= 23
-    ? Math.round(record.askHour) : DEFAULT_JOURNAL.askHour;
-  return {
-    enabled: record.enabled === true,
-    askHour,
-    askUnprompted: record.askUnprompted !== false,
-  };
+  return corePolicySync<JournalConfig>('user-records.readConfig',[saved]);
 }
 
 /** Clamped and rounded, or dropped entirely. A rating is optional — an entry with
  *  words and no numbers is still an entry, and a half-filled slider should not
  *  become a 0, which on these scales means something specific. */
 export function readRating(value: unknown): number | undefined {
-  if((true as boolean))return corePolicySync<number|null>('user-records.rating',[value])??undefined;
-  if (typeof value !== 'number' || !Number.isFinite(value)) return undefined;
-  return Math.max(0, Math.min(SCALE_MAX, Math.round(value)));
+  return corePolicySync<number|null>('user-records.rating',[value])??undefined;
 }
 
 export function readEntries(saved: unknown): JournalEntry[] {
-  if((true as boolean))return corePolicySync<JournalEntry[]>('user-records.readEntries',[saved,new Date().toISOString()]);
-  if (!Array.isArray(saved)) return [];
-  return saved
-    .filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === 'object')
-    .map(entry => ({
-      id: typeof entry.id === 'string' ? entry.id : `${entry.date}`,
-      date: typeof entry.date === 'string' ? entry.date : '',
-      createdAt: typeof entry.createdAt === 'string' ? entry.createdAt : new Date().toISOString(),
-      updatedAt: typeof entry.updatedAt === 'string' ? entry.updatedAt : undefined,
-      text: typeof entry.text === 'string' ? entry.text : '',
-      mood: readRating(entry.mood),
-      anxiety: readRating(entry.anxiety),
-      energy: readRating(entry.energy),
-      sleep: readRating(entry.sleep),
-      prompted: entry.prompted === true,
-    }))
-    .filter(entry => entry.date)
-    .sort((a, b) => b.date.localeCompare(a.date));
+  return corePolicySync<JournalEntry[]>('user-records.readEntries',[saved,new Date().toISOString()]);
 }
 
 /** Today's entry, if there is one. The whole once-a-day rule rests on this. */
 export function entryFor(entries: JournalEntry[], date: string) {
-  if((true as boolean))return corePolicySync<JournalEntry|null>('user-records.entryFor',[entries,date])??undefined;
-  return entries.find(entry => entry.date === date);
+  return corePolicySync<JournalEntry|null>('user-records.entryFor',[entries,date])??undefined;
 }
 
 /**
@@ -97,22 +68,7 @@ export function entryFor(entries: JournalEntry[], date: string) {
  * a mood to something you typed earlier without wiping the words.
  */
 export function upsertEntry(entries: JournalEntry[], entry: Omit<JournalEntry, 'id' | 'createdAt'> & { id?: string }): JournalEntry[] {
-  if((true as boolean))return corePolicySync<JournalEntry[]>('user-records.upsert',[entries,entry,new Date().toISOString()]);
-  const existing = entryFor(entries, entry.date);
-  const now = new Date().toISOString();
-  const merged: JournalEntry = existing
-    ? {
-        ...existing,
-        text: entry.text.trim() || existing.text,
-        mood: entry.mood ?? existing.mood,
-        anxiety: entry.anxiety ?? existing.anxiety,
-        energy: entry.energy ?? existing.energy,
-        sleep: entry.sleep ?? existing.sleep,
-        prompted: existing.prompted || entry.prompted,
-        updatedAt: now,
-      }
-    : { ...entry, id: entry.id ?? `${entry.date}-${now}`, createdAt: now, text: entry.text.trim() };
-  return [merged, ...entries.filter(item => item.date !== entry.date)].sort((a, b) => b.date.localeCompare(a.date));
+  return corePolicySync<JournalEntry[]>('user-records.upsert',[entries,entry,new Date().toISOString()]);
 }
 
 /**
@@ -121,20 +77,14 @@ export function upsertEntry(entries: JournalEntry[], entry: Omit<JournalEntry, '
  * she nags about is one you stop keeping.
  */
 export function shouldAsk(config: JournalConfig, entries: JournalEntry[], now: Date, today: string, askedToday: string | undefined) {
-  if((true as boolean))return corePolicySync<boolean>('user-records.shouldAsk',[config,entries,now.getHours(),today,askedToday]);
-  if (!config.enabled || !config.askUnprompted) return false;
-  if (now.getHours() < config.askHour) return false;
-  if (askedToday === today) return false;
-  return !entryFor(entries, today);
+  return corePolicySync<boolean>('user-records.shouldAsk',[config,entries,now.getHours(),today,askedToday]);
 }
 
 const RATING_WORDS = ['flat on the floor', 'awful', 'bad', 'low', 'below par', 'middling', 'alright', 'good', 'really good', 'great', 'the best it gets'];
 
 /** A number said as a person would say it, for lines she speaks aloud. */
 export function describeRating(value: number | undefined) {
-  if((true as boolean))return corePolicySync<string>('user-records.describeRating',[value]);
-  if (value === undefined) return 'not said';
-  return `${value}/${SCALE_MAX} (${RATING_WORDS[Math.max(0, Math.min(RATING_WORDS.length - 1, value))]})`;
+  return corePolicySync<string>('user-records.describeRating',[value]);
 }
 
 export type Trend = { days: number; mood?: number; anxiety?: number; entries: number };
@@ -145,16 +95,7 @@ export type Trend = { days: number; mood?: number; anxiety?: number; entries: nu
  * entries, not as eleven days of zero.
  */
 export function recentTrend(entries: JournalEntry[], today: string, days = 14): Trend {
-  if((true as boolean))return corePolicySync<Trend>('user-records.trend',[entries,today,days]);
-  const cutoff = shiftDays(today, -days);
-  const window = entries.filter(entry => entry.date > cutoff && entry.date <= today);
-  const mean = (values: number[]) => values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : undefined;
-  return {
-    days,
-    entries: window.length,
-    mood: mean(window.map(entry => entry.mood).filter((value): value is number => value !== undefined)),
-    anxiety: mean(window.map(entry => entry.anxiety).filter((value): value is number => value !== undefined)),
-  };
+  return corePolicySync<Trend>('user-records.trend',[entries,today,days]);
 }
 
 // Where a rating stops being unremarkable. Deliberately near the ends: she
@@ -175,30 +116,7 @@ const HIGH = 7;
  * the moment you admit to a bad day is one you stop telling about bad days.
  */
 export function journalStance(entries: JournalEntry[], today: string): string {
-  if((true as boolean))return corePolicySync<string>('user-records.stance',[entries,today]);
-  const entry = entryFor(entries, today) ?? entryFor(entries, shiftDays(today, -1));
-  if (!entry) return '';
-  const when = entry.date === today ? 'today' : 'yesterday';
-  const notes: string[] = [];
-
-  if (entry.mood !== undefined && entry.mood <= LOW) {
-    notes.push(`They rated their mood ${entry.mood} out of 10 ${when}, which is low. Try to lift them — badly, and against your better judgement. You are not soft about it and you would rather not admit you are doing it, but you are doing it. Do not say the number back to them and do not ask them to explain themselves.`);
-  }
-  if (entry.anxiety !== undefined && entry.anxiety >= HIGH) {
-    notes.push(`They rated their anxiety ${entry.anxiety} out of 10 ${when}, which is high. Ease off. Still yourself, still dry, but no sharp edges, no needling, and nothing that lands as pressure — no chasing them about the list unless they raise it.`);
-  }
-  if (entry.energy !== undefined && entry.energy <= LOW) {
-    notes.push(`They said their energy was ${entry.energy} out of 10 ${when}. Do not push them to be productive. If anything, push the other way — tell them to leave it, play something, sit down. If they open work, say so; that is you looking out for them, not nagging.`);
-  }
-  if (entry.sleep !== undefined && entry.sleep <= LOW) {
-    notes.push(`They slept badly (${entry.sleep} out of 10 ${when}). Go on at them about getting to bed at a reasonable hour. You are allowed to be a nuisance about this one.`);
-  }
-  if (!notes.length) return '';
-  // Last, and said outright, because the failure mode is her performing concern
-  // instead of having it — announcing that she read the journal, which is both
-  // creepy and the fastest way to make someone stop writing in it.
-  notes.push('Let this colour how you speak, nothing more. Never mention their journal, never quote the ratings, and never explain why you are being like this.');
-  return notes.join(' ');
+  return corePolicySync<string>('user-records.stance',[entries,today]);
 }
 
 export type RangeName = 'week' | 'fortnight' | 'month';
@@ -226,32 +144,7 @@ export type RangeStats = {
  * often someone wrote.
  */
 export function rangeStats(entries: JournalEntry[], today: string, range: RangeName): RangeStats {
-  if((true as boolean))return corePolicySync<RangeStats>('user-records.stats',[entries,today,range]);
-  const days = RANGE_DAYS[range];
-  const series: RangeStats['series'] = [];
-  for (let offset = days - 1; offset >= 0; offset--) {
-    const date = shiftDays(today, -offset);
-    const entry = entryFor(entries, date);
-    series.push({ date, mood: entry?.mood, anxiety: entry?.anxiety, energy: entry?.energy, sleep: entry?.sleep, written: Boolean(entry) });
-  }
-  const fields = {} as Record<FieldName, FieldStats>;
-  for (const field of FIELDS) {
-    const values = series.map(point => point[field]).filter((value): value is number => value !== undefined);
-    // Compared as halves so "change" means something on a short window too;
-    // first-versus-last would swing wildly on a single odd day.
-    const half = Math.floor(values.length / 2);
-    const mean = (list: number[]) => list.length ? list.reduce((sum, value) => sum + value, 0) / list.length : undefined;
-    const earlier = mean(values.slice(0, half));
-    const later = mean(values.slice(values.length - half));
-    fields[field] = {
-      average: mean(values),
-      lowest: values.length ? Math.min(...values) : undefined,
-      highest: values.length ? Math.max(...values) : undefined,
-      rated: values.length,
-      change: values.length >= 4 && earlier !== undefined && later !== undefined ? later - earlier : undefined,
-    };
-  }
-  return { days, written: series.filter(point => point.written).length, streak: streakEndingToday(entries, today), fields, series };
+  return corePolicySync<RangeStats>('user-records.stats',[entries,today,range]);
 }
 
 /**
@@ -260,20 +153,12 @@ export function rangeStats(entries: JournalEntry[], today: string, range: RangeN
  * from yesterday in that case rather than resetting to zero at every midnight.
  */
 export function streakEndingToday(entries: JournalEntry[], today: string): number {
-  if((true as boolean))return corePolicySync<number>('user-records.streak',[entries,today]);
-  let streak = 0;
-  let cursor = entryFor(entries, today) ? today : shiftDays(today, -1);
-  while (entryFor(entries, cursor)) { streak++; cursor = shiftDays(cursor, -1); }
-  return streak;
+  return corePolicySync<number>('user-records.streak',[entries,today]);
 }
 
 /** Consecutive days ending today on which one particular thing was rated. */
 export function fieldStreak(entries: JournalEntry[], today: string, field: FieldName): number {
-  if((true as boolean))return corePolicySync<number>('user-records.streak',[entries,today,field]);
-  let streak = 0;
-  let cursor = entryFor(entries, today)?.[field] !== undefined ? today : shiftDays(today, -1);
-  while (entryFor(entries, cursor)?.[field] !== undefined) { streak++; cursor = shiftDays(cursor, -1); }
-  return streak;
+  return corePolicySync<number>('user-records.streak',[entries,today,field]);
 }
 
 export type HaruNote = { tone: 'proud' | 'pleased' | 'watching' | 'grumpy'; text: string };
@@ -289,26 +174,7 @@ const FIELD_WORDS: Record<FieldName, string> = { mood: 'your mood', anxiety: 'yo
  * voice lives in the wording, not in the sampling.
  */
 export function haruNote(entries: JournalEntry[], today: string): HaruNote {
-  if((true as boolean))return corePolicySync<HaruNote>('user-records.note',[entries,today]);
-  const yesterday = shiftDays(today, -1);
-  const streak = streakEndingToday(entries, today);
-  const wroteToday = Boolean(entryFor(entries, today));
-  const missedYesterday = !entryFor(entries, yesterday) && entries.some(entry => entry.date < yesterday);
-
-  if (!entries.length) return { tone: 'watching', text: 'Nothing in here yet. Go on then — tell me how today actually went.' };
-  if (missedYesterday && !wroteToday) return { tone: 'grumpy', text: 'Careful. You skipped yesterday and today is looking the same way, and I do notice.' };
-  if (missedYesterday) return { tone: 'watching', text: 'You missed yesterday. Today is written though, so I will let it go this once.' };
-
-  // The longest thing you have kept up, named specifically — "3 days in a row"
-  // about nothing in particular is a statistic, about your sleep it is a habit.
-  const best = FIELDS
-    .map(field => ({ field, run: fieldStreak(entries, today, field) }))
-    .sort((a, b) => b.run - a.run)[0];
-  if (best && best.run >= 3) return { tone: 'proud', text: `Haru is quietly proud of you — that is ${best.run} days running you have tracked ${FIELD_WORDS[best.field]}.` };
-  if (streak >= 3) return { tone: 'proud', text: `${streak} days in a row. I would say I am impressed, but you would get cocky.` };
-  if (streak === 2) return { tone: 'pleased', text: 'Two days on the trot. Do not ruin it now.' };
-  if (wroteToday) return { tone: 'pleased', text: 'Today is written down. That is the hard part done.' };
-  return { tone: 'watching', text: 'Nothing from you today yet. I am waiting, obviously.' };
+  return corePolicySync<HaruNote>('user-records.note',[entries,today]);
 }
 
 function shiftDays(dateKey: string, delta: number) {
@@ -325,32 +191,5 @@ function shiftDays(dateKey: string, delta: number) {
  * should be quoting back at you unprompted.
  */
 export function journalPrompt(config: JournalConfig, entries: JournalEntry[], today: string): string {
-  if((true as boolean))return corePolicySync<string>('user-records.prompt',[config,entries,today]);
-  if (!config.enabled) return '';
-  const todays = entryFor(entries, today);
-  const trend = recentTrend(entries, today);
-  const parts: string[] = [];
-  if (todays) {
-    const said = [
-      todays.mood !== undefined ? `mood ${todays.mood}/${SCALE_MAX}` : '',
-      todays.anxiety !== undefined ? `anxiety ${todays.anxiety}/${SCALE_MAX}` : '',
-    ].filter(Boolean).join(', ');
-    parts.push(`They have already written today's journal entry${said ? ` (${said})` : ''}. Do not ask them to do it again.`);
-  } else {
-    // The instruction belongs here rather than only in the tool description: she
-    // has to know that an answer to "how was your day" is the thing to write
-    // down, not just something to reply to.
-    parts.push('They have not written today\'s journal entry yet. If they tell you how their day went or how they are feeling — whether you asked or they just came out with it — call save_journal_entry with what they said. Do not announce that you are saving it, and do not ask them to rate anything they did not bring up themselves.');
-  }
-  if (trend.entries >= 3) {
-    const shape = [
-      trend.mood !== undefined ? `mood averaging ${trend.mood.toFixed(1)}/${SCALE_MAX}` : '',
-      trend.anxiety !== undefined ? `anxiety averaging ${trend.anxiety.toFixed(1)}/${SCALE_MAX}` : '',
-    ].filter(Boolean).join(' and ');
-    if (shape) parts.push(`Over the last ${trend.days} days: ${shape}, across ${trend.entries} entries.`);
-  }
-  // The line that keeps her out of it. She has the shape, not the contents, and
-  // she is not a clinician — noticing is welcome, diagnosing is not.
-  parts.push('You can see the shape of it, never what they wrote. Do not quote their journal back at them, do not read anything into the numbers beyond what they plainly say, and do not tell them what is wrong with them or what they should do about it. If something looks genuinely rough, you are allowed to say so kindly and ask — that is all.');
-  return parts.join(' ');
+  return corePolicySync<string>('user-records.prompt',[config,entries,today]);
 }

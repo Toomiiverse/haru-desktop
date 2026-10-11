@@ -139,14 +139,7 @@ const CHARS_PER_SECOND = 15;
 
 /** The first `seconds` worth of a line, ended at a word, marked as cut. Nothing under half a second. */
 export function saidOf(text: string, seconds: number): string {
-  if((true as boolean))return corePolicySync<any>('speech-boundary.saidOf',[text,seconds]);
-  if (seconds < 0.5) return '';
-  const chars = Math.round(seconds * CHARS_PER_SECOND);
-  if (chars >= text.length) return text;
-  const head = text.slice(0, chars);
-  const atWord = head.lastIndexOf(' ');
-  const kept = (atWord > 0 ? head.slice(0, atWord) : head).replace(/[,;:]$/, '');
-  return kept ? `${kept}—` : '';
+  return corePolicySync<any>('speech-boundary.saidOf',[text,seconds]);
 }
 
 /** The sample rate a WAV header declares, or 0 when the bytes are not a WAV. */
@@ -356,15 +349,7 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
 
   /** Words heard over her: hers, coming back through the phone, or his? */
   function echoOfHers(text: string): boolean {
-  if((true as boolean))return corePolicySync<any>('speech-boundary.echoOfHers',[text,herLines]);
-    const words = (line: string) => line.toLowerCase().replace(/[^a-z0-9' ]+/g, ' ').split(/\s+/).filter(Boolean);
-    const heardWords = words(text);
-    if (!heardWords.length) return true;
-    const hers = new Set(herLines.flatMap(words));
-    const content = heardWords.filter(w => w.length >= 3 && !SMALL_WORDS.has(w));
-    const judged = content.length ? content : heardWords;
-    const found = judged.filter(w => hers.has(w)).length;
-    return found / judged.length >= 0.6;
+  return corePolicySync<any>('speech-boundary.echoOfHers',[text,herLines]);
   }
 
   /** The first stretch of an utterance over her, heard early so his words stop her soon. */
@@ -489,7 +474,7 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
     if(command) {
       inputMode=command;pending='';pendingTiming=null;holdUntil=0;react('mode');
       log('[call-admission] '+JSON.stringify({callId,reason:'mode_changed',mode:inputMode}));
-      commit(text,timing,(true as boolean)?corePolicySync<string>('speech-boundary.commandReply',[command]):command==='addressed' ? 'Noisy room mode is on. Start each request with Haru.' : 'Hands free mode is on for this call.');
+      commit(text,timing,(corePolicySync<string>('speech-boundary.commandReply',[command])));
       return;
     }
     if(inputMode==='addressed'||deps.speaker?.enabled)spokeOver();
@@ -502,10 +487,10 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
     // saying now belongs with it, and she answers the whole once it has ended.
     if (vad.possibleSpeech()) { pending = text; pendingTiming = timing; holdUntil=(samples*1000)/CALL_RATE+UNFINISHED_HOLD_MS; log(`[call] holding "${text.slice(0, 40)}" — they are still talking`); return; }
     // A sentence they stopped in the middle of waits a moment for its end.
-    if ((true as boolean)?corePolicySync<boolean>('speech-boundary.unfinished',[text]):looksUnfinished(text) && !completeNaturalUtterance(text) && !callMicCheckReply(text)) {
+    if ((corePolicySync<boolean>('speech-boundary.unfinished',[text]))) {
       pending = text;
       pendingTiming = timing;
-      const hold = (true as boolean)?corePolicySync<number>('speech-boundary.unfinishedHold',[deps.unfinishedQuietMs??null,now()-timing.speechEndAt]):deps.unfinishedQuietMs ? Math.max(0, deps.unfinishedQuietMs - (now() - timing.speechEndAt)) : UNFINISHED_HOLD_MS;
+      const hold = (corePolicySync<number>('speech-boundary.unfinishedHold',[deps.unfinishedQuietMs??null,now()-timing.speechEndAt]));
       if (!hold) {pending='';pendingTiming=null;commit(text,timing);return;}
       holdUntil = (samples * 1000) / CALL_RATE + hold;
       log(`[call] holding "${text.slice(0, 40)}" — it sounds unfinished`);
@@ -555,17 +540,11 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
     const settleTake = (whole: boolean) => {
       if (take.reported || !reply || !deps.said) return;
       take.reported = true;
-      if((true as boolean)){const p=corePolicySync<any>('speech-boundary.settleTake',[reply,take.voiced,take.cut,whole]);if(p.report)deps.said(reply,p.said);return;}
-      const said = [...take.voiced, take.cut ? saidOf(take.cut.text, take.cut.seconds) : ''].filter(Boolean).join(' ').trim();
-      // A play-time estimate can run past the text ("89 of 22 chars"): that is all of it.
-      if (whole || said === reply || said.length >= reply.length) return;
-      if (!said) { log(`[call] she got none of ${reply.length} chars out — the day keeps the reply as written`); return; }
-      log(`[call] she got ${said.length} of ${reply.length} chars out — the day keeps what she said`);
-      deps.said(reply, said);
+      {const p=corePolicySync<any>('speech-boundary.settleTake',[reply,take.voiced,take.cut,whole]);if(p.report)deps.said(reply,p.said);return;}
     };
     // One take preserves the voice identity. A labelled change of delivery
     // must still reach the speech engine, including a return to neutral.
-    const continued = (true as boolean)?corePolicySync<typeof lastDelivery>('speech-boundary.continued',[wasInterrupted,lastDelivery]):wasInterrupted ? lastDelivery : null;
+    const continued = (corePolicySync<typeof lastDelivery>('speech-boundary.continued',[wasInterrupted,lastDelivery]));
     let mood = continued ? continued.emotion : deps.moodNow?.() ?? null;
     const seed = continued ? continued.seed : Math.floor(Math.random() * 2 ** 31);
     lastEmotion = mood;
@@ -585,26 +564,12 @@ export function openLocalCall(handlers: LocalCallHandlers, deps: LocalCallDeps):
         onSentence: (sentence, emotion) => {
           if (generation !== myGeneration || turns !== mine) return;
           stopReaction();react('replyStart');
-          if((true as boolean)){const p=corePolicySync<any>('speech-boundary.sentencePlan',[{mood,stretch,sentences},sentence,emotion]);mood=p.mood;stretch=p.stretch;sentences=p.sentences;if(p.moodChanged)lastEmotion=mood;for(const command of p.commands)say({...command,seed,filler:false});return;}
-          sentences++;
-          if (emotion && emotion !== mood) {
-            flush();
-            mood = emotion;
-            lastEmotion = mood;
-          }
-          if (sentences === 1) {
-            say({ text: sentence.trim(), emotion: mood, seed, filler: false });
-            return;
-          }
-          // A paragraph is a breath: what came before it is said before it.
-          if (/^\s*\n\s*\n/.test(sentence)) flush();
-          stretch += (stretch && !/\s$/.test(stretch) && !/^\s/.test(sentence) ? ' ' : '') + sentence;
-          if (/\n\s*\n\s*$/.test(stretch) || stretch.length >= STRETCH_CHARS) flush();
+          {const p=corePolicySync<any>('speech-boundary.sentencePlan',[{mood,stretch,sentences},sentence,emotion]);mood=p.mood;stretch=p.stretch;sentences=p.sentences;if(p.moodChanged)lastEmotion=mood;for(const command of p.commands)say({...command,seed,filler:false});return;}
         },
         onToolCall: name => {
           if (generation !== myGeneration || turns !== mine) return;
           if(deps.engagement){react('tool');return;}
-          if((true as boolean)?!corePolicySync<boolean>('speech-boundary.fillerAllowed',[fillerThisTurn,spokeThisTurn]):fillerThisTurn||spokeThisTurn)return;
+          if((!corePolicySync<boolean>('speech-boundary.fillerAllowed',[fillerThisTurn,spokeThisTurn])))return;
           fillerThisTurn = true;
           log(`[call] a tool is running (${name}) — she says something meanwhile`);
           say({ text: deps.filler(), emotion: mood, seed, filler: true });

@@ -136,17 +136,7 @@ const EMPTY_MEMORY_FILE: MemoryFile = { memories: [], sessions: [], monthNotes: 
  *  hand, or half-written by a machine that lost power, comes back usable rather
  *  than throwing at startup — the same bargain loadArchive makes. */
 export function normalizeMemoryFile(value: unknown): MemoryFile {
-  if((true as boolean))return corePolicySync('memory-tools.normalizeFile',[value]);
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return { ...EMPTY_MEMORY_FILE };
-  const held = value as Partial<Record<keyof MemoryFile, unknown>>;
-  const list = <T>(candidate: unknown): T[] => (Array.isArray(candidate) ? candidate as T[] : []);
-  return {
-    memories: list<MemoryRecord>(held.memories),
-    sessions: list<SessionSummary>(held.sessions),
-    monthNotes: list<MonthNote>(held.monthNotes),
-    forgettingLog: list<ForgettingEntry>(held.forgettingLog),
-    ...(Array.isArray(held.deletions) ? { deletions: mergeDeletions(held.deletions) } : {}),
-  };
+  return corePolicySync('memory-tools.normalizeFile',[value]);
 }
 
 export type HaruStoreOptions = {
@@ -367,13 +357,7 @@ export class HaruStore {
 
   /** Records and their deletion markers commit together, including pruning. */
   setMemoryState(items: MemoryRecord[], incoming: MemoryDeletion[]): void {
-    if((true as boolean)){this.writeMemoryFile(corePolicySync('memory-tools.storeState',[this.memories(),items,incoming,new Date().toISOString()]));return;}
-    const kept = new Set(items.map(m => m.id));
-    const at = new Date().toISOString();
-    const removed = this.getMemories().filter(m => !kept.has(m.id)).map(m => ({ id: m.id, at }));
-    const deletions = mergeDeletions(this.getMemoryDeletions(), incoming, removed);
-    const deleted = new Set(deletions.map(d => d.id));
-    this.writeMemoryFile({ ...this.memories(), memories: items.filter(m => !deleted.has(m.id)), deletions });
+    this.writeMemoryFile(corePolicySync('memory-tools.storeState',[this.memories(),items,incoming,new Date().toISOString()]));return;
   }
 
   getSessions(): SessionSummary[] {
@@ -395,14 +379,11 @@ export class HaruStore {
   /** The trail of what she forgot and why — bounded so the log itself cannot
    *  grow forever. */
   getForgettingLog(): ForgettingEntry[] {
-    if((true as boolean))return corePolicySync('memory-tools.forgetting',[this.memories()]);
-    return this.memories().forgettingLog
-      .filter(entry => entry && typeof entry.id === 'string' && typeof entry.at === 'string');
+    return corePolicySync('memory-tools.forgetting',[this.memories()]);
   }
 
   setForgettingLog(entries: ForgettingEntry[]): void {
-    if((true as boolean)){this.writeMemoryFile({...this.memories(),forgettingLog:corePolicySync('memory-tools.boundForgetting',[entries])});return;}
-    this.writeMemoryFile({ ...this.memories(), forgettingLog: entries.slice(-200) });
+    this.writeMemoryFile({...this.memories(),forgettingLog:corePolicySync('memory-tools.boundForgetting',[entries])});return;
   }
 
   appendForgettingLog(entries: ForgettingEntry[]): ForgettingEntry[] {

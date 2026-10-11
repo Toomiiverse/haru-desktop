@@ -12,75 +12,31 @@ export type DirectReplyKind = 'social' | 'voice';
 /** The ordinary call instruction asks for concise speech; it is not a tool
  * result or extra evidence. Other asides still require the full composer. */
 export function directReplyAsideAllowed(aside: string | undefined, call = false): boolean {
-  if((true as boolean))return naturalPolicy<any>('directReplyAsideAllowed',[aside??null,call]);
-
-  return !aside || call && (aside === callAside(false) || aside === callAside(true));
+  return naturalPolicy<any>('directReplyAsideAllowed',[aside??null,call]);
 }
 
 /** Only complete, unambiguous conversational turns can skip tool discovery.
  * A mixed request, quotation, follow-up instruction or factual question keeps
  * the normal tool loop. Never decide this from a matching keyword alone. */
 export function directReplyKind(text: string): DirectReplyKind | null {
-  if((true as boolean))return naturalPolicy<any>('directReplyKind',[text]);
-
-  if (text.length > 240 || /["“”`<>:;\n]/.test(text)) return null;
-  // A complete privacy directive does not change the conversational intent.
-  // Strip it only for this classifier; the original turn still reaches privacy
-  // admission, evidence, memory and the model. Mixed/action turns stay anchored
-  // against the existing whitelist after the directive, never substring-matched.
-  const utterance = text.replace(/^\s*keep this local[.!]\s*/i, '');
-  const clean = utterance.normalize('NFKC').toLowerCase().replace(/’/g, "'")
-    .replace(/[.,!?]+/g, ' ').replace(/\s+/g, ' ').trim();
-  const t = clean.replace(/^(?:(?:hey|hi|hello|haru|whoa|wow|well|testing)\s+)+/, '');
-  if (/^(?:(?:hi|hey|hello)(?: there)?|haru|testing(?: testing)?|mic check)$/.test(t)
-    || /^(?:how are (?:you|we)(?: (?:doing|feeling))?(?: (?:today|tonight|right now))?|how(?:'s| is) it going)$/.test(t)
-    || /^(?:are you (?:there|listening|awake)|can you hear (?:me|my voice)|is (?:my|the) (?:mic|microphone) working)$/.test(t)
-    || /^i(?:'m| am) (?:feeling )?(?:sad|tired|happy|excited|anxious|nervous|frustrated|upset|lonely|overwhelmed)(?: (?:today|tonight|right now))?$/.test(t)
-    || /^(?:please )?keep me company(?: for a moment)?(?: please)?$/.test(t)) return 'social';
-  const quality = '(?:angry|annoyed|irritated|harsh|cold|sad|bored|flat|robotic|monotone|happy|excited|gentle|warm|quiet|loud|rushed|slow|fast)';
-  const modifier = '(?:(?:so|too|really|quite|a little|a bit) )?';
-  const observations = [
-    `(?:why (?:do|did) )?you (?:sound|sounded) ${modifier}${quality}`,
-    `your (?:voice|tone) (?:sounds?|sounded|is|was) ${modifier}${quality}`,
-    `why (?:are|were) you (?:speaking|talking) ${modifier}(?:slowly|quickly|loudly|quietly)`,
-    '(?:what (?:was|is) your tone|how did you sound|can you hear your own (?:voice|tone)|do you know how you sound)',
-    'did you (?:actually )?(?:change your (?:tone|voice)|change how you were speaking)',
-    '(?:how do i sound|what did you notice about how i sounded|can you tell what emotion is in my voice(?: right now)?)',
-  ];
-  if (observations.some(pattern => new RegExp(`^(?:${pattern})(?: just (?:then|now))?(?: (?:can|could) you soften it)?$`).test(t))) return 'voice';
-  const style = '(?:softer|slower|faster|quieter|louder|gently|more gently|warmer|calmer|more naturally)';
-  const request = t.replace(/^(?:(?:please|maybe|can you|could you|would you)\s+)+/, '').replace(/ please$/, '');
-  if (new RegExp(`^(?:speak|talk) (?:a (?:little|bit) )?${style}(?: and ${style})?$`).test(request)
-    || /^say (?:that|it) (?:a little )?more gently$/.test(request)
-    || /^(?:be|sound) less (?:annoyed|angry|harsh|robotic)$/.test(request)
-    || /^(?:slow down|stop (?:shouting|yelling)|(?:use|go back to) your (?:normal|usual|regular) voice|(?:speak|talk|sound) normally|reset (?:your )?(?:voice|tone))$/.test(request)) return 'voice';
-  return null;
+  return naturalPolicy<any>('directReplyKind',[text]);
 }
 
 /** The latest turn must still be the user's standalone request. An answer
  * after a tool, an attachment, or an augmented reply needs its full context. */
 export function canReplyDirectly(conversation: ChatMessage[], latest: string): boolean {
-  if((true as boolean))return naturalPolicy<any>('canReplyDirectly',[conversation,latest]);
-
-  const last = conversation.at(-1);
-  return Boolean(directReplyKind(latest) && last?.role === 'user' && last.content === latest
-    && !conversation.some(message => message.images?.length));
+  return naturalPolicy<any>('canReplyDirectly',[conversation,latest]);
 }
 
 /** Social/voice replies need current state and voice evidence, not a second
  * copy of the whole memory archive. The full transcript and the same factual
  * validation rules remain in the request. No inferred feelings are persisted. */
 export function directReplyEvidence(evidence: Record<string, unknown>) {
-  if((true as boolean))return naturalPolicy<any>('directReplyEvidence',[evidence]);
-
-  const { now, timezone, body, herSleep, onHerMind, voice, continuity, fresh, mood, blankSlate } = evidence;
-  return { now, timezone, body, herSleep, onHerMind, voice, continuity, fresh, mood, blankSlate };
+  return naturalPolicy<any>('directReplyEvidence',[evidence]);
 }
 
 export function directLocalReplyTurns(conversation: ChatMessage[], latest: string, evidence: Record<string, unknown>) {
-  if((true as boolean))return naturalPolicy<any>('directLocalReplyTurns',[conversation,latest,evidence]);
-
-  return groundedReplyTurns(conversation, latest, directReplyEvidence(evidence));
+  return naturalPolicy<any>('directLocalReplyTurns',[conversation,latest,evidence]);
 }
 
 export const CONVERSATIONAL_REPLY_SCHEMA = {
@@ -101,15 +57,7 @@ export class VoiceReplyNeedsReview extends Error {}
  * the voice landed. Send a conflicting draft to the full grounded composer;
  * nothing from the rejected draft can reach text, speech or memory. */
 export function contradictsToneFeedback(latest: string, reply: string): boolean {
-  if((true as boolean))return naturalPolicy<any>('contradictsToneFeedback',[latest,reply]);
-
-  const adjustment = directReplyKind(latest) === 'voice'
-    && /\b(?:speak|talk|softer|slower|faster|quieter|louder|gently|warmer|calmer|soften|less (?:annoyed|angry|harsh|robotic))\b/i.test(latest);
-  const feedback = /\b(?:you (?:sound|sounded)|your (?:reply|answer|voice|tone)|you(?:'re| are) being|(?:be|sound) (?:a little |a bit )?(?:less formal|less robotic|more natural|more relaxed))\b/i.test(latest)
-    && /\b(?:annoyed|angry|irritated|harsh|cold|flat|robotic|loud|rushed|formal|natural|relaxed)\b/i.test(latest);
-  if (!adjustment && !feedback) return false;
-  return /\b(?:not|wasn't|wasn’t|isn't|isn’t|don't|don’t|didn't|didn’t|do not|did not) (?:(?:being|really|actually|sound|sounded|sounding) )*(?:annoyed|angry|irritated|irritation|harsh|cold|flat|robotic|loud|rushed|formal)\b/i.test(reply)
-    || /\b(?:just (?:my|the) (?:normal|usual|regular) voice|just how I (?:talk|sound))\b/i.test(reply);
+  return naturalPolicy<any>('contradictsToneFeedback',[latest,reply]);
 }
 
 /** For the narrowly whitelisted conversational turns, generating an invisible
@@ -120,26 +68,7 @@ export async function composeConversationalReply(
   character: { identity: string; style: string },
   compose: (messages: ChatMessage[]) => Promise<ChatMessage>, aside?: string,
 ): Promise<ChatMessage> {
-  if((true as boolean))return naturalProgram('direct',{messages:conversation,latest,evidence,character,aside:aside??null},compose,VoiceReplyNeedsReview);
-
-  if (!canReplyDirectly(conversation, latest)) throw new Error('This turn requires the full reply composer.');
-  const turns = directLocalReplyTurns(conversation, latest, evidence);
-  turns[0] = { role: 'system', content: [conversationCharacter(character), aside, CONVERSATIONAL_RULES, CONVERSATION_CONTRACT, CURRENT_CONVERSATION_RULES].filter(Boolean).join('\n\n') };
-  let message: ChatMessage;
-  try { message = await compose(turns); }
-  catch (error) { throw new Error(`Local reply check failed: ${error instanceof Error ? error.message : String(error)}`, { cause: error }); }
-  if (message.tool_calls?.length) throw new Error('Conversational reply unexpectedly requested a tool.');
-  let value: unknown;
-  try { value = JSON.parse(message.content ?? ''); }
-  catch { throw new Error('Conversational reply returned incomplete JSON. Please retry.'); }
-  const reply = value && typeof value === 'object' && 'reply' in value ? value.reply : null;
-  if (typeof reply !== 'string' || !reply.trim() || textToolCall(reply)
-      || !splitDelivery(reply).length || splitDelivery(reply).some(segment => !segment.mood)) {
-    throw new Error('Conversational reply returned an invalid answer. Please retry.');
-  }
-  if (contradictsToneFeedback(latest, reply)) throw new VoiceReplyNeedsReview('The draft dismissed their tone feedback.');
-  if (conversationReplyIssue(reply)) throw new VoiceReplyNeedsReview(conversationReplyIssue(reply));
-  return { role: 'assistant', content: reply.trim() };
+  return naturalProgram('direct',{messages:conversation,latest,evidence,character,aside:aside??null},compose,VoiceReplyNeedsReview);
 }
 
 function endpointKey(endpoint: string): string {
@@ -154,9 +83,5 @@ function endpointKey(endpoint: string): string {
  * the same model must keep its chat-sized runner; other models keep their own
  * requested window. A larger explicit request is never silently reduced. */
 export function requestContextSize(config: ProviderConfig, chat: ProviderConfig | undefined, chatSize: number, requested: number): number {
-  if((true as boolean))return naturalPolicy<any>('requestContextSize',[config,chat??null,chatSize,requested,[endpointKey(config.endpoint),chat?endpointKey(chat.endpoint):null]]);
-
-  return chat && config.provider === 'ollama' && chat.provider === 'ollama'
-    && config.model === chat.model && endpointKey(config.endpoint) === endpointKey(chat.endpoint)
-    ? Math.max(chatSize, requested) : requested;
+  return naturalPolicy<any>('requestContextSize',[config,chat??null,chatSize,requested,[endpointKey(config.endpoint),chat?endpointKey(chat.endpoint):null]]);
 }

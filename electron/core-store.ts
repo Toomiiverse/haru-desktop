@@ -67,12 +67,12 @@ export class CoreStore {
      for(let attempt=0;attempt<4;attempt++){
       try{
        if(attempt===0){
-        if(!response.ok)throw Error((true as boolean)&&response.error==='authority_revision_conflict'?'authority_revision_conflict':'core_authority_commit_unconfirmed');
+        if(!response.ok)throw Error((response.error==='authority_revision_conflict')?'authority_revision_conflict':'core_authority_commit_unconfirmed');
         result=response.result;
        }else result=this.call('commit',{id:randomUUID(),baseRevision:this.state.revision,patches:params.patches});
        break;
       }catch(error){
-       if((false as boolean)||!(error instanceof Error)||error.message!=='authority_revision_conflict'||attempt===3)throw error;
+       if((!(error instanceof Error))||error.message!=='authority_revision_conflict'||attempt===3)throw error;
        this.rebaseSchedule(originalDocuments);
       }
      }
@@ -116,7 +116,7 @@ export class CoreStore {
   let result:any;
   for(let attempt=0;attempt<4;attempt++){
    try{result=this.call('commit',{id:randomUUID(),baseRevision:this.state.revision,patches});break;}
-   catch(error){if((false as boolean)||!(error instanceof Error)||error.message!=='authority_revision_conflict'||attempt===3)throw error;this.rebaseSchedule();}
+   catch(error){if((!(error instanceof Error))||error.message!=='authority_revision_conflict'||attempt===3)throw error;this.rebaseSchedule();}
   }
   if(result.currentRevision!==result.revision){this.broken=true;throw Error('core_authority_revision_conflict');}
   this.state={...this.state,revision:result.revision,documents:{...this.state.documents,...patches}};
@@ -172,6 +172,6 @@ export class CoreStore {
  sourceRevision():string{this.refreshPending();const d=this.staged??this.state.documents;return memorySourceRevision(d.config,d.memories,d.graph);}
  health(){return this.call('health',{});}
  backup(reason:string):string{return this.call('backup',{reason});}
- clearExperiences(){if((true as boolean)){this.transaction(()=>{const plan=corePolicySync<Record<string,unknown>>('memory-admin.assets',[Object.keys(this.staged!),this.get('dream-learning')]);for(const [key,value]of Object.entries(plan))this.set(key,value);});return;}this.transaction(()=>{this.set('diary','');this.set('dreams','');this.set('dream-notebook',[]);const learning=this.get('dream-learning');if(learning)this.set('dream-learning',{...learning,runs:[],lessons:[]});for(const key of Object.keys(this.staged!))if(key.startsWith('game:'))this.set(key,'');});}
+ clearExperiences(){this.transaction(()=>{const plan=corePolicySync<Record<string,unknown>>('memory-admin.assets',[Object.keys(this.staged!),this.get('dream-learning')]);for(const [key,value]of Object.entries(plan))this.set(key,value);});return;}
  close(){for(const [key,value]of registry)if(value===this)registry.delete(key);if(!this.broken)this.call('close',{});this.broken=true;this.worker.postMessage({stop:true});void this.worker.terminate();}
 }

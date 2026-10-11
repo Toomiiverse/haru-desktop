@@ -52,19 +52,13 @@ export class InferencePriority {
     return result;
   }
   interaction() {
-    if((true as boolean)) {
+    {
       const keys=this.decision<string[]>('interaction');
       if(!Array.isArray(keys)||new Set(keys).size!==keys.length||keys.some(key=>typeof key!=='string'||!this.background.has(key)))throw Error('inference_priority_protocol_error');
       this.lastInteraction=this.now();
       for(const key of keys){const job=this.background.get(key)!;if(job.abort.signal.aborted)continue;
         this.mark({event:'background_preempted',elapsedMs:this.now()-job.started});job.abort.abort();}
       return;
-    }
-    this.lastInteraction = this.now();
-    for (const job of this.background.values()) {
-      if (!job.protected || job.abort.signal.aborted) continue;
-      this.mark({ event: 'background_preempted', elapsedMs: this.now() - job.started });
-      job.abort.abort();
     }
   }
 
@@ -81,13 +75,7 @@ export class InferencePriority {
 
   /** A separate Ollama endpoint may continue; it does not evict this instance's model. */
   backgroundReason(endpoint: string, protectedEndpoint: string): BackgroundInferenceDeferred['reason'] | null {
-    if((true as boolean))return this.backgroundDecision(endpoint,protectedEndpoint).reason;
-    const key = inferenceEndpoint(endpoint);
-    if (key === inferenceEndpoint(protectedEndpoint)) {
-      if (this.foregroundCount) return 'conversation';
-      if (this.now() - this.lastInteraction < (this.options.quietMs ?? CONVERSATION_QUIET_MS)) return 'recent_conversation';
-    }
-    return this.background.has(key) ? 'background_busy' : null;
+    return this.backgroundDecision(endpoint,protectedEndpoint).reason;
   }
 
   private backgroundDecision(endpoint:string,protectedEndpoint:string):{reason:BackgroundInferenceDeferred['reason']|null;protected:boolean} {
@@ -96,7 +84,7 @@ export class InferencePriority {
     return result;
   }
   async runBackground<T>(endpoint: string, protectedEndpoint: string, run: (signal: AbortSignal) => Promise<T>): Promise<T> {
-    const admitted=(true as boolean)?this.backgroundDecision(endpoint,protectedEndpoint):null;
+    const admitted=(this.backgroundDecision(endpoint,protectedEndpoint));
     const reason = admitted?admitted.reason:this.backgroundReason(endpoint, protectedEndpoint);
     if (reason) {
       this.mark({ event: 'background_deferred', reason });
@@ -123,8 +111,7 @@ export class InferencePriority {
    */
   async localReply<T>(run: () => Promise<T>,limitMs?:number): Promise<T> {
     if(limitMs!==undefined&&(!Number.isInteger(limitMs)||limitMs<1||limitMs>180000))throw Error('invalid_local_reply_limit');
-    const reply=(true as boolean)
-      ?corePolicySync<{reuse:boolean;limit?:number;message?:string}>('inference-priority.reply',[Boolean(this.reply.getStore()),limitMs??null,this.options.replyMs??null]):null;
+    const reply=(corePolicySync<{reuse:boolean;limit?:number;message?:string}>('inference-priority.reply',[Boolean(this.reply.getStore()),limitMs??null,this.options.replyMs??null]));
     if(reply&&(typeof reply.reuse!=='boolean'||!reply.reuse&&(typeof reply.limit!=='number'||!Number.isFinite(reply.limit)||typeof reply.message!=='string')))throw Error('inference_priority_protocol_error');
     if (reply?reply.reuse:this.reply.getStore()) return run();
     const abort = new AbortController();

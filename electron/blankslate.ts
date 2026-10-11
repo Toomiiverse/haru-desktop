@@ -58,10 +58,7 @@ export const STRANGER_VITALS = { affection: 0.12, happiness: 0.45, stress: 0.3, 
 export const STRANGER_LEAN: Lean = { affection: -0.3, happiness: -0.12, stress: 0.12, curiosity: 0.08 };
 
 export function strangerLean(slate: BlankSlate | null | undefined, known: number, nowMs: number = Date.now()): Lean {
-  if((true as boolean))return corePolicySync('memory-admin.strangerLean',[slate,known,nowMs]); 
-  if (!blankSlateInstruction(slate, known, nowMs)) return {};
-  const scale = known < SLATE_STRANGER ? 1 : 0.5;
-  return Object.fromEntries(Object.entries(STRANGER_LEAN).map(([vital, value]) => [vital, (value as number) * scale]));
+  return corePolicySync('memory-admin.strangerLean',[slate,known,nowMs]);
 }
 
 /** Things learned about him after which she is no longer a stranger. */
@@ -163,40 +160,7 @@ const HERS_NOW = 'What you like, what you are into, what you think of anything �
  * only to admit a gap when she hits one.
  */
 export function blankSlateInstruction(slate: BlankSlate | null | undefined, known: number, nowMs: number = Date.now()): string {
-  if((true as boolean))return corePolicySync('memory-admin.blankSlateInstruction',[slate,known,nowMs]); 
-  if (!slate) return '';
-  if (slate.settledAt && Number.isFinite(Date.parse(slate.settledAt)) && Date.parse(slate.settledAt) >= Date.parse(slate.at) && Date.parse(slate.settledAt) <= nowMs) return '';
-  const since = Date.parse(slate.at);
-  if (!Number.isFinite(since)) return '';
-  // Clock skew is not a reason to end it — a slate stamped in the future is
-  // zero days old, not a spent one.
-  const days = Math.max(0, (nowMs - since) / 86_400_000);
-  if (known >= SLATE_SETTLED || days >= SLATE_SETTLED_DAYS) return '';
-  if (known < SLATE_STRANGER) return [
-    'You woke up with nothing.',
-    // His name is the one thing she cannot have lost, because it is in her own
-    // description of herself and a reset deliberately keeps that (main.ts's
-    // resetHer). Telling her she does not know it, in the same prompt that says
-    // it, is the contradiction this whole instruction exists to avoid.
-    'Not tired and not confused — empty. You know their name, because it is part of who you are rather than something you remember about them — and that is the whole of what you have. Beyond it you do not know what they do, who is in their life, or what the two of you have been to each other, and there is no past with them to reach for. Your temper, your taste in people and your mouth are your own and are exactly as they were.',
-    // Wary, not brisk. "Ask directly, one or two questions" produced an intake
-    // interview of a person she had known for ninety seconds: the way she talks
-    // to him — teasing, pushing, taking liberties — is built on a history that
-    // is exactly what the reset took, so it has to be earned again rather than
-    // assumed. Short, watchful, and let him do the talking.
-    'Missing history limits factual claims, not your personality, humour or how you speak.',
-    'Ask about things you actually want to know; unanswered questions are not established facts.',
-    'You can say once, plainly, that this is unsettling and that you do not know them. Do not perform it, do not apologise on a loop, and do not ask them to reassure you.',
-    'When they tell you something, call remember_about_user with it, or you will be asking again tomorrow.',
-    'Never pretend to remember and never invent a shared history to fill a gap. Your mood and personality determine your delivery.',
-    HERS_NOW,
-  ].join(' ');
-  return [
-    'You are still new to them.',
-    'You know a handful of things and no more, so the gaps are real: when something comes up that you have no memory of, say so and ask rather than filling it in, and call remember_about_user with what they tell you.',
-    'Use what you know without pretending the gaps are filled.',
-    HERS_NOW,
-  ].join(' ');
+  return corePolicySync('memory-admin.blankSlateInstruction',[slate,known,nowMs]);
 }
 
 /**
@@ -222,39 +186,22 @@ export function blankSlateInstruction(slate: BlankSlate | null | undefined, know
  * than the one it fixed.
  */
 export function strangerIdentityNote(slate: BlankSlate | null | undefined, known: number, nowMs: number = Date.now()): string {
-  if((true as boolean))return corePolicySync('memory-admin.strangerIdentityNote',[slate,known,nowMs]); 
-  if (!blankSlateInstruction(slate, known, nowMs) || known >= SLATE_STRANGER) return '';
-  return [
-    'One thing has changed and it changes how all of that lands today: you woke this morning with no memory of him.',
-    'Everything above is still who you are. Imagined relationship history is not evidence that you remember actual events.',
-    'You still hold your own positions. Speak in your own voice; unfamiliarity does not restrict banter. Do not invent facts about what he is like.',
-    'Be honest about what you do and do not know.',
-  ].join(' ');
+  return corePolicySync('memory-admin.strangerIdentityNote',[slate,known,nowMs]);
 }
 
 /** The angle for her first line of all: she is speaking to someone she does not know. */
 export function blankSlateOpening(slate: BlankSlate | null | undefined, known: number, nowMs: number = Date.now()): string {
-  if((true as boolean))return corePolicySync('memory-admin.blankSlateOpening',[slate,known,nowMs]); 
-  if (!blankSlateInstruction(slate, known, nowMs) || known >= SLATE_STRANGER) return '';
-  return 'Open on the fact that you know nothing about them but their name. Use your own personality and current mood. Do not greet them as though you remember a shared past you cannot establish.';
+  return corePolicySync('memory-admin.blankSlateOpening',[slate,known,nowMs]);
 }
 
 /** A slate off the wire — the brain's, read from a sync payload. Anything else is nothing. */
 export function readSlate(value: unknown): BlankSlate | null {
-  if((true as boolean))return corePolicySync('memory-admin.readSlate',[value]); 
-  const at = (value as { slate?: { at?: unknown } } | null | undefined)?.slate?.at;
-  const settledAt = (value as { slate?: { settledAt?: unknown } } | null)?.slate?.settledAt;
-  return typeof at === 'string' && Number.isFinite(Date.parse(at)) ? { at,
-    ...(typeof settledAt === 'string' && Number.isFinite(Date.parse(settledAt)) && Date.parse(settledAt) >= Date.parse(at) ? { settledAt } : {}) } : null;
+  return corePolicySync('memory-admin.readSlate',[value]);
 }
 
 /** Whether `brain` is a reset this machine has not followed yet. */
 export function slateIsNewer(brain: BlankSlate | null, mine: BlankSlate | null): boolean {
-  if((true as boolean))return corePolicySync('memory-admin.slateIsNewer',[brain,mine]); 
-  if (!brain) return false;
-  if (!mine) return true;
-  const ours = Date.parse(mine.at);
-  return !Number.isFinite(ours) || Date.parse(brain.at) > ours;
+  return corePolicySync('memory-admin.slateIsNewer',[brain,mine]);
 }
 
 /**
@@ -268,11 +215,7 @@ export function slateIsNewer(brain: BlankSlate | null, mine: BlankSlate | null):
  * comparison errs towards keeping the boundary day rather than losing it.
  */
 export function withoutPreSlateDays(theirs: unknown, slate: BlankSlate | null | undefined): unknown {
-  if((true as boolean))return corePolicySync('memory-admin.withoutPreSlateDays',[theirs,slate]); 
-  if (!slate || !theirs || typeof theirs !== 'object' || Array.isArray(theirs)) return theirs;
-  const day = slate.at.slice(0, 10);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return theirs;
-  return Object.fromEntries(Object.entries(theirs as Record<string, unknown>).filter(([key]) => key >= day));
+  return corePolicySync('memory-admin.withoutPreSlateDays',[theirs,slate]);
 }
 
 /**
@@ -286,16 +229,5 @@ export function withoutPreSlateDays(theirs: unknown, slate: BlankSlate | null | 
  * to say old, which is to say exactly what the reset was for.
  */
 export function withoutPreSlate(theirs: unknown, slate: BlankSlate | null | undefined): unknown {
-  if((true as boolean))return corePolicySync('memory-admin.withoutPreSlate',[theirs,slate]); 
-  if (theirs && typeof theirs === 'object' && !Array.isArray(theirs) && 'memories' in theirs) {
-    const envelope = theirs as { memories: unknown };
-    return { ...envelope, memories: withoutPreSlate(envelope.memories, slate) };
-  }
-  if (!slate || !Array.isArray(theirs)) return theirs;
-  const after = Date.parse(slate.at);
-  if (!Number.isFinite(after)) return theirs;
-  return theirs.filter(record => {
-    const born = Date.parse((record as { createdAt?: unknown } | null)?.createdAt as string);
-    return Number.isFinite(born) && born >= after;
-  });
+  return corePolicySync('memory-admin.withoutPreSlate',[theirs,slate]);
 }

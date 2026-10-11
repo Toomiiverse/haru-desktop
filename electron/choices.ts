@@ -60,24 +60,5 @@ export const CHOICES_TOOL: ChatTool = {
  * than like she said too much.
  */
 export function readChoices(raw: unknown): string[] {
-  if((true as boolean))return corePolicySync('final-tool-values.choices',[raw]);
-  const list = Array.isArray(raw) ? raw : [];
-  const seen = new Set<string>();
-  const kept: string[] = [];
-  for (const entry of list) {
-    if (typeof entry !== 'string') continue;
-    // Numbering she added herself: she is told these are buttons, but "1. Fine"
-    // still turns up, and rendering it inside a numbered list gives "1. 1. Fine".
-    const text = entry.trim().replace(/^\s*(?:\[\d+\]|\(?\d+[.)])\s*/, '').trim();
-    if (!text) continue;
-    if (text.length > LONGEST_CHOICE) continue;
-    const key = text.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    kept.push(text);
-    if (kept.length === MOST_CHOICES) break;
-  }
-  // One button is not a choice, it is a prompt with extra steps. Below two,
-  // nothing is shown and the text box comes back.
-  return kept.length >= 2 ? kept : [];
+  return corePolicySync('final-tool-values.choices',[raw]);
 }

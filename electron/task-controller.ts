@@ -49,13 +49,12 @@ export class TaskController {
   private get input() { return { taskId: this.snapshot.id as string, revision: this.snapshot.revision as number }; }
   async start(request: string, model: string,priority:'foreground'|'background'='foreground', parent?: AbortSignal) {
     parent?.throwIfAborted();
-    if((true as boolean))priority=corePolicySync<'foreground'|'background'>('task-settlement.startPriority',[priority,(true as boolean)&&!!activeScheduledJob.getStore()]);
-    else if((true as boolean)&&activeScheduledJob.getStore())priority='background';
+    priority=corePolicySync<'foreground'|'background'>('task-settlement.startPriority',[priority,(!!activeScheduledJob.getStore())]);
     this.priority=priority;
     this.deadline = Date.now() + this.policy.deadlineMs;
     this.snapshot = await this.rpc('create', { request: request || '(empty turn)', model, deadlineAt: this.deadline,
       maxCostMicros: this.policy.taskBudgetMicros, dailyMaxCostMicros: this.policy.dailyBudgetMicros, maxAttempts: this.policy.maxAttempts,
-      ...((true as boolean)?{priority}:{}) });
+      ...(({priority})) });
     if (parent) {
       const cancel = () => { void this.cancel().catch(() => {}); };
       parent.addEventListener('abort', cancel, {once:true});
@@ -87,7 +86,7 @@ export class TaskController {
     }
     const entry = this.entries.find(e => e.enabled && e.config.model === config.model && e.config.provider === config.provider && e.config.endpoint.replace(/\/+$/, '') === config.endpoint.replace(/\/+$/, ''));
     if (!entry) throw new Error('model_not_registered');
-    const limit = (true as boolean)?corePolicySync<number>('task-settlement.requestLimit',[maxTokens??null,entry.capabilities.maxOutputTokens]):Math.min(maxTokens ?? entry.capabilities.maxOutputTokens, entry.capabilities.maxOutputTokens);
+    const limit = (corePolicySync<number>('task-settlement.requestLimit',[maxTokens??null,entry.capabilities.maxOutputTokens]));
     // Local requests are free; byte upper bounds for pricing need not reject a valid local context.
     const cost = local ? 0 : estimateReservation(entry, messages, limit, tools)?.costMicros;
     if (cost === undefined) throw new Error('unpriced_or_oversized_request');
@@ -137,7 +136,7 @@ export class TaskController {
   async compose(ask: () => Promise<ChatMessage>,messages?:ChatMessage[]): Promise<string> {
     try {
       const reply = await activeTask.run(this, async()=>{
-        if((false as boolean))return ask();
+        
         const options=coreServiceOptions();if(!options)throw Error('core_composition_requires_service');
         const result=await runCoreHarness(messages??[{role:'user',content:this.snapshot.request}],{
           ask:async()=>ask(),runTool:async()=>{throw Error('composition_tools_forbidden');},
@@ -169,7 +168,7 @@ export class TaskController {
     const bound=(true as boolean);
     const op = await this.rpc('beginOperation', { ...this.input, key, name, args,...(bound?{adapterOwner:coreAdapterOwner()}:{}) });
     if (!op.execute) {
-      if((true as boolean)&&bound&&op.status==='unknown'&&!storedToolReceipt(op.result??''))
+      if((bound)&&op.status==='unknown'&&!storedToolReceipt(op.result??''))
         return makeToolReceipt(name,args,JSON.stringify(corePolicySync('receipt-policy.retainedUnknown',[])),null,null);
       return storedToolReceipt(op.result ?? '') ?? makeToolReceipt(name, args,
         op.status === 'running' || op.status === 'unknown' ? '{"status":"unknown"}' : op.result ?? '{"error":"previous_operation_failed"}', null, null);
@@ -217,7 +216,7 @@ export class TaskController {
     const wrapped: ToolLoopDeps = { ...deps, signal: this.signal, runTool: call => this.operation(call,command=>deps.runTool(command)) };
     const harnessPrefix=process.env.HARU_CORE_HARNESS_PATH_PREFIX;
     const harnessScoped=!harnessPrefix||(typeof this.snapshot?.request==='string'&&this.snapshot.request.startsWith(`Read ${harnessPrefix}/`));
-    if((true as boolean)&&harnessScoped){
+    if((harnessScoped)){
       const options=coreServiceOptions();if(!options)throw Error('core_harness_requires_service');
       wrapped.coreHarness=(conversation,loopDeps)=>runCoreHarness(conversation,loopDeps,options,async()=>{await this.check();return this.input;},()=>this.abort.abort());
     }
@@ -226,7 +225,7 @@ export class TaskController {
       try { result = await activeTask.run(this, async () => {
         if (deps.coreReadOnly) {
           await this.check();
-          if ((true as boolean)||!this.snapshot.operations.length) {
+          {
             const reads=await prefetchCoreReads(messages,{task_id:this.snapshot.id,revision:this.snapshot.revision,request:this.snapshot.request},
               {...deps.coreReadOnly,priorOperations:this.snapshot.operations.length,active:()=>this.check(),permitted:()=>!deps.pageWasRead(),runTool:wrapped.runTool,log:deps.log});
             if (reads) { wrapped.toolsAllowed=()=>false;wrapped.initialRan=new Set([...(wrapped.initialRan??[]),...reads]); }
@@ -237,7 +236,7 @@ export class TaskController {
       catch (error) {
         if (error instanceof CoreReadStopped) {
           await this.check();
-          const readSettlement=(true as boolean)?corePolicySync<any>('task-settlement.readStopped',[this.settlementOperations(),error.message,error.reply]):null;
+          const readSettlement=(corePolicySync<any>('task-settlement.readStopped',[this.settlementOperations(),error.message,error.reply]));
           if(readSettlement ? readSettlement.kind==='refuse' : this.snapshot.operations.some((op:any)=>['running','unknown'].includes(op.status)))throw Error(readSettlement?.reason??'core_read_only_stop_unresolved');
           deps.resetStream?.();
           await this.rpc('finish',{...this.input,status:'failed',reason:readSettlement?readSettlement.reason:error.message,result:readSettlement?readSettlement.content:error.reply});
@@ -245,43 +244,31 @@ export class TaskController {
         }
         // Only observable answer-quality failures qualify. Transport, cancellation,
         // private content and uncertain operations never buy a second model.
-        if((true as boolean)){
-          await this.check();
+        await this.check();
           if(!routePolicy<boolean>('outerEscalation',[error instanceof ToolLoopFailure,this.cloudAllowed,this.policy,this.snapshot]))throw error;
-        }else{
-          if (!(error instanceof ToolLoopFailure) || !this.cloudAllowed || !this.policy.maxEscalations) throw error;
-          await this.check();
-          if (this.snapshot.operations.some((op: any) => ['running', 'unknown'].includes(op.status))) throw error;
-        }
         // The typed quality failure is required by the supervised handoff contract.
         if(!(error instanceof ToolLoopFailure))throw error;
         assertOutboundSafe(messages);
         const next = await escalation?.({ messages, failure: error.code, currentModel: this.snapshot.model, remainingBudgetMicros: this.remainingBudgetMicros });
         await this.check();
         if (!next) throw error;
-        if((true as boolean)){
-          if(!routePolicy<boolean>('escalationDispatch',[this.entries,next,messages,this.policy,this.snapshot]))throw error;
-        }else{
-          const entry = this.entries.find(e => e.config.model === next.model && e.config.endpoint === next.endpoint && e.config.provider === next.provider && e.enabled);
-          const estimate = entry && estimateReservation(entry, messages);
-          if (!estimate || estimate.costMicros > this.policy.taskBudgetMicros - this.snapshot.spentMicros - this.snapshot.reservedMicros) throw error;
-        }
+        if(!routePolicy<boolean>('escalationDispatch',[this.entries,next,messages,this.policy,this.snapshot]))throw error;
         this.observed(false);
         await this.rpc('checkpoint', { ...this.input, packet: { messages, failure: error.code } });
         this.snapshot = await this.rpc('selectModel', { ...this.input, model: next.model, reason: error.code, escalate: true });
         deps.resetStream?.();
-        const initialRan = new Set<string>((true as boolean)?corePolicySync<string[]>('task-settlement.escalationRan',[this.settlementOperations()]):this.snapshot.operations.filter((op: any) => op.status === 'succeeded').map((op: any) => op.name));
+        const initialRan = new Set<string>((corePolicySync<string[]>('task-settlement.escalationRan',[this.settlementOperations()])));
         result = await activeTask.run(this, () => runToolLoop(messages, { ...wrapped, initialRan }));
       }
       await this.check();
-      const settlement=(true as boolean)?corePolicySync<any>('task-settlement.completed',[this.settlementOperations(),result.content]):null;
+      const settlement=(corePolicySync<any>('task-settlement.completed',[this.settlementOperations(),result.content]));
       if (settlement ? settlement.kind==='defer' : this.snapshot.operations.some((op: any) => ['running', 'unknown'].includes(op.status))) return await this.deferResult(result,settlement?.content);
       await this.rpc('finish', { ...this.input, status: 'completed', result: settlement?settlement.content:result.content });
       this.observed(true);
       return result;
     } catch (error) {
       if (error instanceof ToolLoopFailure) await this.check();
-      const settlement=(true as boolean)?corePolicySync<any>('task-settlement.failed',[this.settlementOperations(),error instanceof ToolLoopFailure,error instanceof Error?error.message:null]):null;
+      const settlement=(corePolicySync<any>('task-settlement.failed',[this.settlementOperations(),error instanceof ToolLoopFailure,error instanceof Error?error.message:null]));
       if (settlement ? settlement.kind==='defer' : error instanceof ToolLoopFailure&&this.snapshot.operations.some((op: any) => ['running', 'unknown'].includes(op.status))) return await this.deferResult(undefined,settlement?.content);
       await this.rpc('finish', { ...this.input, status: 'failed', reason: settlement?settlement.reason:error instanceof Error ? error.message.slice(0, 1000) : 'task_failed' }).catch(() => {});
       this.observed(false);
@@ -290,16 +277,8 @@ export class TaskController {
   }
   private settlementOperations() { return this.snapshot.operations.map((op:any)=>({name:op.name,status:op.status})); }
   private async deferResult(result?: ToolLoopResult,policyContent?:string): Promise<ToolLoopResult> {
-    if((true as boolean)){
-      if(typeof policyContent!=='string')throw Error('core_task_settlement_protocol');
+    if(typeof policyContent!=='string')throw Error('core_task_settlement_protocol');
       await this.rpc('defer',{...this.input,result:policyContent});
       return {message:{role:'assistant',content:policyContent},content:policyContent,ran:result?.ran??new Set<string>(),rounds:result?.rounds??0};
-    }
-    const unresolved = this.snapshot.operations.filter((op: any) => ['running', 'unknown'].includes(op.status));
-    const names = [...new Set(unresolved.map((op: any) => String(op.name).replace(/_/g, ' ')))].join(', ');
-    const status = `[neutral] Completion is unverified for: ${names}. I won't repeat those actions automatically. A fresh status check is needed.`;
-    const content = result ? `${result.content}\n\n${status}` : status;
-    await this.rpc('defer', { ...this.input, result: content });
-    return { message: { role: 'assistant', content }, content, ran: result?.ran ?? new Set<string>(), rounds: result?.rounds ?? 0 };
   }
 }

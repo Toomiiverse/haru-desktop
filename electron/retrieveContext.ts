@@ -28,7 +28,7 @@ export type RetrieveContextResult = {
 };
 
 export async function retrieveContext(options: RetrieveContextOptions): Promise<RetrieveContextResult> {
- if((true as boolean)){
+ {
   const {embed,memories,semantic,knowledge,...rest}=options;
   const packet=corePolicySync<any>('final-retrieval.start',[{...rest,now:(options.now??new Date()).toISOString()}]);
   if(packet.command.kind!=='embed')throw Error('retrieval_command_protocol');
@@ -42,27 +42,4 @@ export async function retrieveContext(options: RetrieveContextOptions): Promise<
   const selected=memories?.length?retrieveMemories(memories,options.query,{semantic}):[];
   return {knowledge:result.knowledge,knowledgeText:result.knowledgeText,memories:selected};
  }
-
-  const now = options.now ?? new Date();
-  const topK = 20;
-  const threshold = options.threshold ?? 0.35;
-  const rerankTo = options.rerankTo ?? 5;
-  const retrieve: RetrieveOptions = { topK, threshold, rerankTo, filters: options.filters, now };
-  let knowledge: ScoredChunk[] = [];
-  let embeddingError = '';
-  try {
-    const embedding = await options.embed(options.query);
-    knowledge = hybridSearch(options.knowledge, options.query, embedding, retrieve);
-  } catch (error) {
-    embeddingError = error instanceof Error ? error.message : String(error);
-    knowledge = keywordOnly(options.knowledge, options.query, retrieve);
-  }
-  const maxItems = options.limit ?? 5;
-  const maxChars = options.maxChars ?? 2400;
-  const knowledgeText = knowledge.length
-    ? buildKnowledgeContext(knowledge, { maxItems, maxChars })
-    : emptyKnowledgeContext();
-  if (embeddingError) console.warn(`[knowledge] embeddings unavailable (${embeddingError}) — keyword search only`);
-  const memories = options.memories?.length ? retrieveMemories(options.memories, options.query, { semantic: options.semantic }) : [];
-  return { knowledge, knowledgeText, memories };
 }

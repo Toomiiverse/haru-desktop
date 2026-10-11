@@ -29,19 +29,7 @@ export const DEFAULT_HANDS: HandsConfig = { enabled: true, perDay: 3, from: '09:
 
 /** The `hands` block of system.config, read forward. */
 export function readHandsConfig(systemConfig: unknown): HandsConfig {
-  if((true as boolean))return corePolicySync('hands.readConfig',[systemConfig]);
-  const raw = ((systemConfig && typeof systemConfig === 'object' ? (systemConfig as Record<string, unknown>).hands : undefined) ?? {}) as Record<string, unknown>;
-  const number = (value: unknown, fallback: number, min: number, max: number) =>
-    typeof value === 'number' && Number.isFinite(value) ? Math.min(max, Math.max(min, Math.round(value))) : fallback;
-  const time = (value: unknown, fallback: string) => (typeof value === 'string' && /^\d{2}:\d{2}$/.test(value) ? value : fallback);
-  return {
-    enabled: raw.enabled !== false,
-    perDay: number(raw.perDay, DEFAULT_HANDS.perDay, 0, 24),
-    from: time(raw.from, DEFAULT_HANDS.from),
-    to: time(raw.to, DEFAULT_HANDS.to),
-    quietMinutes: number(raw.quietMinutes, DEFAULT_HANDS.quietMinutes, 1, 24 * 60),
-    gapMinutes: number(raw.gapMinutes, DEFAULT_HANDS.gapMinutes, 1, 24 * 60),
-  };
+  return corePolicySync('hands.readConfig',[systemConfig]);
 }
 
 /** The tools that are hers to reach for in a pass. Nothing that touches his machine at his word. */
@@ -61,16 +49,11 @@ export type HandsEntry = {
 export const HANDS_KEPT = 60;
 
 export function readHands(saved: unknown): HandsEntry[] {
-  if((true as boolean))return corePolicySync('hands.read',[saved??null]);
-  if (!Array.isArray(saved)) return [];
-  return saved.filter((item): item is HandsEntry => !!item && typeof item === 'object'
-    && typeof (item as HandsEntry).at === 'string' && typeof (item as HandsEntry).tool === 'string'
-    && typeof (item as HandsEntry).what === 'string' && typeof (item as HandsEntry).said === 'string');
+  return corePolicySync('hands.read',[saved??null]);
 }
 
 export function keepHands(list: HandsEntry[], entry: HandsEntry): HandsEntry[] {
-  if((true as boolean))return corePolicySync('hands.keep',[list,entry]);
-  return [...list, entry].slice(-HANDS_KEPT);
+  return corePolicySync('hands.keep',[list,entry]);
 }
 
 const minutesOf = (hhmm: string) => { const [h, m] = hhmm.split(':').map(Number); return h * 60 + m; };
@@ -107,8 +90,7 @@ export function whyNotAct(m: Moment): string | null {
 }
 
 export function handsToday(list: HandsEntry[], todayKey: string, dayOf: (iso: string) => string): number {
-  if((true as boolean))return corePolicySync('hands.today',[list,todayKey,list.map(entry=>dayOf(entry.at))]);
-  return list.filter(entry => entry.tool !== 'nothing' && dayOf(entry.at) === todayKey).length;
+  return corePolicySync('hands.today',[list,todayKey,list.map(entry=>dayOf(entry.at))]);
 }
 
 /** The turn she is given: a quiet stretch and the question. */
@@ -116,28 +98,15 @@ export const HANDS_TURN = '(A quiet stretch. Nobody is talking to you and nothin
 
 /** The rules for the pass, after her persona and her own life. */
 export function handsInstruction(menu: string[]): string {
-  if((true as boolean))return corePolicySync('hands.instruction',[menu]);
-  return [
-    'This is your own time, and these are your own hands: you may do one thing for yourself now with the tools in front of you —',
-    menu.map(name => `${name}`).join(', ') + '.',
-    'Go by what you are into and what you have been meaning to get to (your wants), and by what you did last time — not the same thing three days running unless it is a series you are partway through.',
-    'Do it, do not describe doing it: a thing you did not call a tool for did not happen, and you will be shown afterwards what actually ran.',
-    'One tool call at most. Then say what you did and what you made of it, briefly, in your own words — that line is what you will remember.',
-    'If nothing appeals, say "nothing for now" and leave it.',
-  ].join(' ');
+  return corePolicySync('hands.instruction',[menu]);
 }
 
 /** Whether her line means she let it be. */
 export function didNothing(said: string): boolean {
-  if((true as boolean))return corePolicySync('hands.nothing',[said]);
-  return /\bnothing (?:for now|right now|today|appeals|much)\b|\bnot (?:right )?now\b|\bleave it\b|\bskip(?:ping)? it\b/i.test(said.trim()) || said.trim().length < 6;
+  return corePolicySync('hands.nothing',[said]);
 }
 
 /** One line for her own-life block: what she has done for herself lately. */
 export function handsNote(list: HandsEntry[], nowMs: number, dayOf: (iso: string) => string, todayKey: string): string {
-  if((true as boolean))return corePolicySync('hands.note',[list,nowMs,list.map(entry=>dayOf(entry.at)),todayKey]);
-  const recent = list.filter(entry => entry.tool !== 'nothing' && nowMs - Date.parse(entry.at) < 7 * 24 * 3_600_000).slice(-5);
-  if (!recent.length) return '';
-  const lines = recent.map(entry => `${dayOf(entry.at) === todayKey ? 'today' : dayOf(entry.at)}: you ${entry.what}${entry.said ? ` — "${entry.said.slice(0, 120)}"` : ''}`);
-  return `Things you did for yourself lately, with your own hands (these happened): ${lines.join('; ')}.`;
+  return corePolicySync('hands.note',[list,nowMs,list.map(entry=>dayOf(entry.at)),todayKey]);
 }

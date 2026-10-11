@@ -84,27 +84,16 @@ function toolArguments(call: ToolCall): Record<string, unknown> {
 const DIRECTED_AT_HER = /\b(you|your|yourself)\b|\b(stop|quit|don'?t|do not|never|always|please|can you|could you|no more)\b/i;
 
 export function readsAsDirective(message: string): boolean {
-  if((true as boolean))return corePolicySync('memory-tools.directive',[message]);
-  return DIRECTED_AT_HER.test(message);
+  return corePolicySync('memory-tools.directive',[message]);
 }
 
 export function coerceMemoryKind(value: unknown): MemoryKind {
-  if((true as boolean))return corePolicySync('memory-tools.kind',[value]);
-  const said = typeof value === 'string' ? value.trim().toLowerCase() : '';
-  if (MEMORY_KINDS.includes(said as MemoryKind)) return said as MemoryKind;
-  if (/^(habit|routine|behaviour|behavior|trait|schedule)$/.test(said)) return 'fact';
-  if (/^(like|dislike|preferences?|opinion|taste|style)$/.test(said)) return 'preference';
-  if (/^(person|people|pet|family|friend|partner|relationships?)$/.test(said)) return 'relationship';
-  if (/^(events?|appointment|occasion|milestone)$/.test(said)) return 'event';
-  return 'fact';
+  return corePolicySync('memory-tools.kind',[value]);
 }
 
 /** What kind of memory a block edit proposes, from the block it lands in. */
 function kindForBlock(label: string): MemoryKind {
-  if((true as boolean))return corePolicySync('memory-tools.blockKind',[label]);
-  if (label === 'preferences') return 'preference';
-  if (label === 'relationship') return 'relationship';
-  return 'fact';
+  return corePolicySync('memory-tools.blockKind',[label]);
 }
 
 /** Default labels keep their derived view; custom blocks persist explicit
@@ -112,9 +101,7 @@ function kindForBlock(label: string): MemoryKind {
 const DEFAULT_BLOCK_LABELS = new Set(['persona', 'human', 'preferences', 'relationship', 'shared_history', 'current_project', 'working_state']);
 
 export function coerceKnowledgeCategory(value: unknown): KnowledgeCategory | undefined {
- if((true as boolean))return corePolicySync<KnowledgeCategory|null>('final-retrieval.category',[value??null])??undefined;
-  if (typeof value !== 'string') return undefined;
-  return (KNOWLEDGE_CATEGORIES as readonly string[]).includes(value) ? value as KnowledgeCategory : undefined;
+ return corePolicySync<KnowledgeCategory|null>('final-retrieval.category',[value??null])??undefined;
 }
 
 export const WARDROBE_TOOL: ChatTool = {
@@ -409,8 +396,7 @@ export const CHATS_TOOL: ChatTool = {
 const PAST_TALK = /\b(?:remember|recall|forgot|forget|mention(?:ed)?|told you|i said|you said|we said|talked|spoke|conversation|earlier|before|ago|last (?:time|night|week|weekend|month|year)|yesterday|the other (?:day|night|week)|back (?:when|then)|that time|again|tell you|did (?:i|we|you)|last (?:mon|tues|wednes|thurs|fri|satur|sun)day)\b|\b(?:what|when|where|who|how|which|why)\b[^.?!]{0,40}\b(?:was|were|did|had|said|told|happened)\b/i;
 
 export function pastRelevant(message: string): boolean {
-  if((true as boolean))return corePolicySync('tool-menu.relevant',['past',message]);
-  return PAST_TALK.test(message ?? '');
+  return corePolicySync('tool-menu.relevant',['past',message]);
 }
 
 /**
@@ -446,8 +432,7 @@ export const BOOK_TOOL: ChatTool = {
 const LATER_TALK = /\b(?:later|tonight|tomorrow|morning|afternoon|evening|weekend|after|when i|going to|gonna|about to|heading|appointment|interview|exam|test|meeting|shift|work|date|dinner|party|doctor|dentist|psych\w*|call|remind|check (?:in|up|back|on)|let you know|how it goes|wish me luck|come back to|follow up)\b|\b\d{1,2}(?::\d{2})?\s?(?:am|pm)\b/i;
 
 export function laterRelevant(message: string): boolean {
-  if((true as boolean))return corePolicySync('tool-menu.relevant',['later',message]);
-  return LATER_TALK.test(message ?? '');
+  return corePolicySync('tool-menu.relevant',['later',message]);
 }
 
 export const SLEEP_TOOL: ChatTool = {
@@ -922,8 +907,7 @@ export const DOWNLOADS_TOOL: ChatTool = {
 const DOWNLOADS_TALK = /\b(?:downloads?|downloading|torrents?|qbittorrent|seed(?:ing)?|fetch(?:es|ing)?|pause|paus(?:ed|ing)|resume|unpause|bandwidth|internet|jellyfin|sonarr)\b/i;
 
 export function downloadsRelevant(message: string): boolean {
-  if((true as boolean))return corePolicySync('tool-menu.relevant',['downloads',message]);
-  return DOWNLOADS_TALK.test(message ?? '');
+  return corePolicySync('tool-menu.relevant',['downloads',message]);
 }
 
 /**
@@ -951,10 +935,7 @@ export const SHELL_TOOL: ChatTool = {
 const SHELL_TALK = /`[^`]+`|^\s*\$\s|\b(?:run|execute|command|terminal|shell|bash|script|reboot|update|upgrade|install|apt|git|docker|systemctl|journalctl|df|du|ls|cat|grep|tail|ps|top|kill|ping|curl|wget|chmod|chown|mkdir|mv|cp|rm|nvidia-smi|uptime|free|whoami|folder|directory|disk|space|the server|the system|the box|the machine|the pc)\b/i;
 
 export function shellRelevant(message: string): boolean {
-  if((true as boolean))return corePolicySync('tool-menu.relevant',['shell',message]);
-  // A business name is not a request to access the computer. Strip only the
-  // proper name; explicit commands elsewhere in the sentence still match.
-  return SHELL_TALK.test((message ?? '').replace(/\b(?:the\s+)?pc\s+project\b/gi, ''));
+  return corePolicySync('tool-menu.relevant',['shell',message]);
 }
 
 /**
@@ -984,8 +965,7 @@ export const GET_MANGA_TOOL: ChatTool = {
 const MANGA_TALK = /\b(?:manga|manhwa|manhua|chapter|mangadex|weeb ?central|comick|suwayomi|volume|read(?:ing)? (?:some|the next|a bit|more|it)|to read\b)/i;
 
 export function mangaRelevant(message: string): boolean {
-  if((true as boolean))return corePolicySync('tool-menu.relevant',['manga',message]);
-  return MANGA_TALK.test(message ?? '');
+  return corePolicySync('tool-menu.relevant',['manga',message]);
 }
 
 /** The shape of an agenda entry the dispatcher touches. */
@@ -1038,8 +1018,7 @@ export type ToolAvailability = {
 const WATCH_TALK = /\b(?:watch\w*|episodes?|eps?|anime|series|seasons?|shows?|put (?:\w+ ){0,2}on|open (?:\w+ ){0,2}on|(?:on|to) (?:my |the )?(?:phone|tv|telly|laptop|pc|desktop|computer)|downloads?\w*|fetch\w*|grab\w*|torrents?|jellyfin|sonarr|next one|play(?:ing)?|binge\w*|rewatch\w*)\b/i;
 
 export function watchRelevant(message: string): boolean {
-  if((true as boolean))return corePolicySync('tool-menu.relevant',['watch',message]);
-  return WATCH_TALK.test(message ?? '');
+  return corePolicySync('tool-menu.relevant',['watch',message]);
 }
 
 /** Whether the message is about the machine or the apps on it. The gate that
@@ -1051,8 +1030,7 @@ const MACHINE_TALK = /\b(?:gpu|vram|graphics|video card|memory|ram|disk|drive|st
 const APP_TALK = /\b(?:open|launch|start|close|quit|shut ?down|shutdown|restart|reboot|sleep|lock|power|convert|icon|picture|app|program|application|window)\b/i;
 
 export function machineRelevant(message: string): boolean {
-  if((true as boolean))return corePolicySync('tool-menu.relevant',['machine',message]);
-  return MACHINE_TALK.test(message ?? '') || APP_TALK.test(message ?? '');
+  return corePolicySync('tool-menu.relevant',['machine',message]);
 }
 
 /** Whether the message could be asking for a Claude session. "session" alone is
@@ -1060,69 +1038,11 @@ export function machineRelevant(message: string): boolean {
 const CLAUDE_TALK = /\b(?:claude|remote[- ]?control|sessions?|coding)\b/i;
 
 export function claudeRelevant(message: string): boolean {
-  if((true as boolean))return corePolicySync('tool-menu.relevant',['claude',message]);
-  return CLAUDE_TALK.test(message ?? '');
+  return corePolicySync('tool-menu.relevant',['claude',message]);
 }
 
 export function chatTools(available: ToolAvailability, latest = ''): ChatTool[] {
-  if((true as boolean))return corePolicySync('tool-menu.chat',[available,latest]);
-  const tools: ChatTool[] = [...CHAT_TOOLS];
-  // The machine and app tools are only worth a place on the table when the
-  // message has anything to do with them; an empty `latest` (tests, or no user
-  // turn yet) offers everything, the safe default.
-  const machine = !latest || machineRelevant(latest);
-  // The wardrobe is a window on the desk. There is nothing for her to open on
-  // the phone, and a panel popping up on the desk mid-web-chat is a surprise
-  // nobody there asked for.
-  if (!available.web) tools.push(WARDROBE_TOOL);
-  // Only where there is a box to draw them in. Offered at the desk she would
-  // call it and nothing would appear, which is a worse failure than not having
-  // it: she would think she had asked and be met with silence.
-  if (available.choices && !available.web) tools.push(CHOICES_TOOL);
-  if (available.journal) tools.push(JOURNAL_TOOL);
-  // Always offered, journal or not: a check-in is a note about a moment, and
-  // the moments worth noting happen whether or not anyone keeps a diary.
-  tools.push(CHECKIN_TOOL);
-  if (available.booking && (!latest || laterRelevant(latest))) tools.push(BOOK_TOOL);
-  if (available.chats && (!latest || pastRelevant(latest))) tools.push(CHATS_TOOL);
-  if (available.anilist && !available.web) tools.push(ANILIST_TOOL);
-  if (available.search.enabled) {
-    tools.push(SEARCH_TOOL);
-    if (available.search.readPages) tools.push(READ_PAGE_TOOL);
-    if (available.search.readPages && available.search.transcripts) tools.push(TRANSCRIPT_TOOL);
-  }
-  if (available.knowledge) tools.push(KNOWLEDGE_TOOL, ...VAULT_TOOLS);
-  // Not gated on hands, unlike everything else that touches the machine: the
-  // point is to open one from the phone, and an idle session only he can drive
-  // is nothing a page could turn against him — see claudesession.ts.
-  if (available.claude && (!latest || claudeRelevant(latest))) tools.push(CLAUDE_SESSION_TOOL);
-  if (available.downloads && (!latest || downloadsRelevant(latest))) tools.push(DOWNLOADS_TOOL);
-  // Offered only in Explicit mode, where the request it answers lives.
-  if (available.pictures) tools.push(PICTURE_TOOL);
-  // Level 3, any door: his word is checked in code (shell.ts), so hands need not gate it.
-  if (available.shell) tools.push(SHELL_TOOL); // Keep access through troubleshooting and approval follow-ups.
-  // Fetching for him: any door, like watching — "download Berserk for me" from the phone is the point.
-  if (available.mangaShelf && (!latest || mangaRelevant(latest))) tools.push(GET_MANGA_TOOL);
-  if (available.system.enabled && machine) {
-    tools.push(...SYSTEM_TOOLS);
-    if (available.system.level >= 2) tools.push(...SYSTEM_ACTION_TOOLS);
-  }
-  if (machine) tools.push(CONVERT_TOOL);
-  // `available.desktop` is already the platform's answer as well as the user's
-  // — see supportedDesktop, applied where the availability is assembled. She is
-  // told emphatically in both descriptions that she really can do this and must
-  // never claim otherwise, which is right on Windows and a trap anywhere else.
-  if (available.hands && available.desktop.launch && machine) tools.push(LAUNCH_TOOL, CLOSE_TOOL);
-  if (available.hands && available.desktop.power && machine) tools.push(POWER_TOOL);
-  if (available.browser && available.hands) tools.push(BROWSER_TOOL);
-  if (available.knockedAwake) tools.push(SLEEP_TOOL);
-  // Her body in the game. Not gated on hands: the worker is her, not the
-  // machine, and the worst a skill can do is walk somewhere in a game.
-  // Watching with her. Not gated on hands, like the Claude sessions: the point
-  // is "let's watch Naruto" from the phone too, and the worst a page could
-  // start is a subtitled anime he is then told about by name and size.
-  if (available.anime && (!latest || watchRelevant(latest))) tools.push(WATCH_TOOL);
-  return tools;
+  return corePolicySync('tool-menu.chat',[available,latest]);
 }
 
 /**
@@ -1139,12 +1059,10 @@ export function chatTools(available: ToolAvailability, latest = ''): ChatTool[] 
  * is switched off, or needs hands this turn does not have, still drops out.
  */
 export function steadyTable(offered: ChatTool[], everything: ChatTool[], held: Set<string>): ChatTool[] {
-  if((true as boolean)){
+  {
     const result=corePolicySync<{tools:ChatTool[];held:string[]}>('tool-menu.steady',[offered,everything,[...held]]);
     held.clear();for(const name of result.held)held.add(name);return result.tools;
   }
-  for (const tool of offered) held.add(tool.function.name);
-  return everything.filter(tool => held.has(tool.function.name));
 }
 
 /**
@@ -1282,9 +1200,9 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
   if (iosResult !== null) return iosResult;
   const gmailResult = await runGmailTool(name, args, latestUserMessage);
   if (gmailResult !== null) return gmailResult;
-  if((true as boolean)&&name&&['remember_about_user','core_memory_append','core_memory_replace','core_memory_rethink'].includes(name)){if(!deps.memoryTool)throw Error('core_memory_tool_adapter_required');return JSON.stringify(deps.memoryTool(name,args,latestUserMessage));}
-  if((true as boolean)){const owned=await runCoreFinalTool(name,args,latestUserMessage,deps);if(owned!==null)return owned;}
-  if((true as boolean)&&name&&['create_kept_item','complete_kept_item','update_kept_item','delete_kept_item'].includes(name))return runCoreAgendaTool(name,args,latestUserMessage,zonedNow(CHAT_TIMEZONE),deps);
+  if((name)&&['remember_about_user','core_memory_append','core_memory_replace','core_memory_rethink'].includes(name)){if(!deps.memoryTool)throw Error('core_memory_tool_adapter_required');return JSON.stringify(deps.memoryTool(name,args,latestUserMessage));}
+  {const owned=await runCoreFinalTool(name,args,latestUserMessage,deps);if(owned!==null)return owned;}
+  if((name)&&['create_kept_item','complete_kept_item','update_kept_item','delete_kept_item'].includes(name))return runCoreAgendaTool(name,args,latestUserMessage,zonedNow(CHAT_TIMEZONE),deps);
   // Re-checked here, not only where the table is laid. A model can name a tool
   // it was never offered, and these three are the ones that open a window or a
   // box nobody on the phone can see.
@@ -1292,36 +1210,10 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
     return JSON.stringify({ error: 'Not on the phone — that is for the desk. Say you cannot do that here.' });
   }
   if (name === 'note_check_in') {
-    if((true as boolean)){if(!deps.userRecord)throw Error('core_user_record_adapter_required');return JSON.stringify(deps.userRecord('tool.noteCheckin',args));}
-    const note = typeof args.note === 'string' ? args.note.trim() : '';
-    if (!note) return JSON.stringify({ error: 'There is nothing to note down yet.' });
-    const rating = typeof args.anxiety === 'number' && args.anxiety >= 1 && args.anxiety <= 10 ? Math.round(args.anxiety) : undefined;
-    const now = zonedNow(CHAT_TIMEZONE);
-    setCheckIns(addCheckIn(getCheckIns(), note.slice(0, 1000), rating, new Date(), localDateKey(now)));
-    console.log(`[checkin] noted from conversation${rating ? ` (anxiety ${rating}/10)` : ''}`);
-    return JSON.stringify({ saved: true, note: note.slice(0, 120), anxiety: rating ?? null, today: checkInsOn(getCheckIns(), localDateKey(now)).length });
+    if(!deps.userRecord)throw Error('core_user_record_adapter_required');return JSON.stringify(deps.userRecord('tool.noteCheckin',args));
   }
   if (name === 'save_journal_entry') {
-    if((true as boolean)){if(!deps.userRecord)throw Error('core_user_record_adapter_required');return JSON.stringify(deps.userRecord('tool.saveJournal',args));}
-    const text = typeof args.text === 'string' ? args.text.trim() : '';
-    if (!text) return JSON.stringify({ error: 'There is nothing to write down yet. Ask them how the day went first.' });
-    if (!readJournalConfig(store.get('journal.config')).enabled) return JSON.stringify({ error: 'The journal is switched off.' });
-    const entry = writeJournal(text, {
-      mood: typeof args.mood === 'number' ? args.mood : undefined,
-      anxiety: typeof args.anxiety === 'number' ? args.anxiety : undefined,
-      energy: typeof args.energy === 'number' ? args.energy : undefined,
-    }, true);
-    // Length and which ratings landed, never the text. A journal that shows up in
-    // a log file is not a private one.
-    console.log(`[journal] wrote ${entry?.date}: ${text.length} chars, mood ${entry?.mood ?? '-'}, anxiety ${entry?.anxiety ?? '-'}`);
-    if (entry?.date) noteJournalAsked(entry.date);
-    return JSON.stringify({
-      saved: true,
-      date: entry?.date,
-      mood: entry?.mood ?? null,
-      anxiety: entry?.anxiety ?? null,
-      note: 'Written down. Say something brief and human about it — react to what they actually told you. Do not read the entry back, do not summarise it as a list, and do not offer advice or diagnose anything.',
-    });
+    if(!deps.userRecord)throw Error('core_user_record_adapter_required');return JSON.stringify(deps.userRecord('tool.saveJournal',args));
   }
   if (name === 'look_up_anime') {
     const title = typeof args.title === 'string' ? args.title.trim() : '';
@@ -1422,8 +1314,7 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
       const reason = error instanceof Error ? error.message : String(error);
       console.warn(`[search] could not read a page: ${reason}`);
       const others = lastResults().length - 1;
-      if((true as boolean))return JSON.stringify(corePolicySync('tool-wording.result',['web-page-failed',{reason,others}]));
-      return JSON.stringify({ error: `That page could not be read (${reason}).`, note: `${others > 0 ? 'You may try one other relevant result. ' : ''}Answer from the summaries or say you could not find it. Do not imply you read the page.` });
+      return JSON.stringify(corePolicySync('tool-wording.result',['web-page-failed',{reason,others}]));
     }
   }
   if (name === 'read_video_transcript') {
@@ -1446,8 +1337,7 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       console.warn(`[transcript] could not read ${videoId}: ${reason}`);
-      if((true as boolean))return JSON.stringify(corePolicySync('tool-wording.result',['transcript-failed',{reason}]));
-      return JSON.stringify({ error: `The transcript could not be read: ${reason}`, note: 'Say so. Do not describe the video from its title or from memory as though you had read it.' });
+      return JSON.stringify(corePolicySync('tool-wording.result',['transcript-failed',{reason}]));
     }
   }
   if (name === 'offer_choices') {
@@ -1473,19 +1363,7 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
       // Handed back rather than thrown. A failed lookup should cost her the fact,
       // not the reply — she says she could not check and carries on.
       const reason = error instanceof Error ? error.message : String(error);
-      if((true as boolean))return JSON.stringify(corePolicySync('tool-wording.result',['search-failed',{reason,blocked:error instanceof SearchBlocked}]));
-      // Being turned away is not the same as finding nothing, and she must not
-      // report it as such: a silent empty result reads to the user as "there is
-      // nothing out there" when the truth is that nobody looked.
-      if (error instanceof SearchBlocked) {
-        console.warn(`[search] "${query}" blocked: ${reason}`);
-        // Named as a search provider in your own settings, not just "Brave" —
-        // told the short version she advised switching browsers, which is not
-        // the setting, not the problem, and not something you can act on.
-        return JSON.stringify({ error: `Search refused by the provider (${reason}).`, note: 'Searching is blocked. The search provider can be changed in setup under Looking things up. Do not answer from memory as though a search succeeded.' });
-      }
-      console.warn(`[search] "${query}" failed: ${reason}`);
-      return JSON.stringify({ error: `The search did not go through (${reason}).`, note: 'Say you could not check. Do not answer from memory as though you had looked it up.' });
+      return JSON.stringify(corePolicySync('tool-wording.result',['search-failed',{reason,blocked:error instanceof SearchBlocked}]));
     }
   }
   if (name === 'show_wardrobe') {
@@ -1514,30 +1392,13 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
     const prompt = typeof args.prompt === 'string' ? args.prompt.trim() : '';
     if (!prompt) return JSON.stringify({ error: 'prompt is required — what the picture should show.' });
     const made = await deps.makePicture(prompt);
-    if((true as boolean))return JSON.stringify(corePolicySync('tool-wording.result',['picture',made]));
-    if (!made.ok) return JSON.stringify({ error: `${made.error} Say so plainly rather than pretending it came out.` });
-    return JSON.stringify({ made: true, note: 'It is on its way to their phone now. Say one short line to go with it — do not describe the picture back to them.' });
+    return JSON.stringify(corePolicySync('tool-wording.result',['picture',made]));
   }
   if (name === 'describe_myself') {
     return JSON.stringify(deps.myself());
   }
   if (name === 'change_setting') {
-    if((true as boolean)){if(!deps.policyConfig)throw Error('core_setting_config_required');return JSON.stringify(await runCoreSettingTool(args,deps.policyConfig,deps));}
-    const settingName = typeof args.name === 'string' ? args.name.trim() : '';
-    if (!settingName) return JSON.stringify({ error: `name is required — one of ${SETTING_NAMES.join(', ')}.` });
-    const setting = (SETTINGS as Record<string, Setting>)[settingName];
-    if (!setting) return JSON.stringify({ error: `"${settingName}" is not a setting you can change. You can change: ${SETTING_NAMES.join(', ')}.` });
-    if (args.value === undefined || args.value === null) return JSON.stringify({ error: `value is required — ${setting.what}.` });
-    const models = setting.kind === 'model' && setting.route ? await deps.hostedModels(setting.route) : null;
-    const verdict = planChange(settingName, args.value, store.get(setting.path), { models });
-    if (!verdict.ok) return JSON.stringify({ error: verdict.error });
-    if (verdict.unchanged) return JSON.stringify({ unchanged: true, note: `${settingName} is already ${JSON.stringify(verdict.plan.to)}.` });
-    // The same handshake as restarting herself: nothing changes until they have said the word.
-    // A spoken mode is the word ? "turn on Explicit mode" needs no second asking, because
-    // asking for it was the whole request. A raw model id still gets the round trip.
-    if (args.confirm !== true && verdict.fromAlias !== true) return JSON.stringify({ confirm: true, name: settingName, what: setting.what, from: verdict.plan.from, to: verdict.plan.to, note: 'Do not act yet. Tell them what would change, ask them to say the word, then call this again with confirm: true.' });
-    const done = await deps.changeMySetting(verdict.plan);
-    return JSON.stringify(done.ok ? { changed: true, name: settingName, from: verdict.plan.from, to: verdict.plan.to, note: done.note } : { error: done.note });
+    if(!deps.policyConfig)throw Error('core_setting_config_required');return JSON.stringify(await runCoreSettingTool(args,deps.policyConfig,deps));
   }
   if (name === 'claude_session') {
     // Re-checked here: a model can name a tool it was never offered.
@@ -1599,8 +1460,7 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       console.warn(`[shell] run_command failed: ${reason}`);
-      if((true as boolean))return JSON.stringify(corePolicySync('tool-wording.result',['shell-failed',{reason}]));
-      return JSON.stringify({ error: `The terminal did not answer (${reason}). Say so plainly rather than pretending it ran.` });
+      return JSON.stringify(corePolicySync('tool-wording.result',['shell-failed',{reason}]));
     }
   }
   if (name === 'get_manga') {
@@ -1622,78 +1482,7 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
     }
   }
   if (name === 'browser_control') {
-    if((true as boolean))return JSON.stringify(await runCoreBrowserTool(args,{port:browserPort(),fetch:deps.net.fetch as Parameters<typeof runCoreBrowserTool>[1]['fetch'],shotDir:browserShotDir,markPageRead}));
-    const action = typeof args.action === 'string' ? args.action : '';
-    const url = typeof args.url === 'string' ? args.url.trim() : '';
-    const tab = typeof args.tab === 'string' ? args.tab.trim() : '';
-    const port = browserPort();
-    const fetchImpl = deps.net.fetch as (url: string, init?: unknown) => Promise<{ ok: boolean; json(): Promise<unknown> }>;
-    const currentTab = async (): Promise<string | null> => {
-      if (tab) return tab;
-      const targets = await listTargets(port, fetchImpl);
-      return targets[0]?.id ?? null;
-    };
-    try {
-      if (action === 'list') {
-        const targets = await listTargets(port, fetchImpl);
-        if (!targets.length) return JSON.stringify({ tabs: [], note: 'No tabs are open.' });
-        return JSON.stringify({ tabs: targets.slice(0, 20).map(target => ({ id: target.id, title: target.title || '(untitled)', url: target.url })) });
-      }
-      if (action === 'open') {
-        if (!url) return JSON.stringify({ error: 'url is required to open a page.' });
-        const id = await openTab(port, url, fetchImpl);
-        console.log(`[browser] opened ${url} (${id})`);
-        return JSON.stringify({ opened: true, tab: id, note: `Opened ${url}.` });
-      }
-      if (action === 'navigate') {
-        if (!url) return JSON.stringify({ error: 'url is required to navigate.' });
-        const id = await currentTab();
-        if (!id) return JSON.stringify({ error: 'no tab to navigate — open one first.' });
-        await navigate(port, id, url, fetchImpl);
-        console.log(`[browser] navigated ${id} to ${url}`);
-        return JSON.stringify({ navigated: true, note: `Navigated to ${url}.` });
-      }
-      if (action === 'read') {
-        const id = await currentTab();
-        if (!id) return JSON.stringify({ error: 'no tab to read.' });
-        const text = await pageText(port, id, fetchImpl);
-        // A stranger's page is in the conversation now, exactly as after
-        // read_web_page: her tools go for the rest of this reply, so nothing on the
-        // page can talk her into writing a memory or touching the machine. Only
-        // when there is text — a tab still loading reads empty and can be read again.
-        if (text) markPageRead();
-        return JSON.stringify({ text: text.slice(0, 3000), note: 'This is what is on the page right now — answer from it, not from memory.' });
-      }
-      if (action === 'screenshot') {
-        const id = await currentTab();
-        if (!id) return JSON.stringify({ error: 'no tab to screenshot.' });
-        const png = await screenshot(port, id, fetchImpl);
-        if (!png) return JSON.stringify({ error: 'the screenshot came back empty.' });
-        const dir = browserShotDir();
-        mkdirSync(dir, { recursive: true });
-        const name = `browser-${Date.now().toString(36)}.png`;
-        writeFileSync(path.join(dir, name), Buffer.from(png));
-        console.log(`[browser] screenshotted the page to ${path.join(dir, name)}`);
-        return JSON.stringify({ saved: path.join(dir, name), note: 'Saved a screenshot of the page.' });
-      }
-      if (action === 'close') {
-        const id = await currentTab();
-        if (!id) return JSON.stringify({ error: 'no tab to close.' });
-        await closeTab(port, id, fetchImpl);
-        console.log(`[browser] closed ${id}`);
-        return JSON.stringify({ closed: true, note: 'Closed the tab.' });
-      }
-      if (action === 'activate') {
-        const id = await currentTab();
-        if (!id) return JSON.stringify({ error: 'no tab to activate.' });
-        await activateTab(port, id, fetchImpl);
-        return JSON.stringify({ activated: true });
-      }
-      return JSON.stringify({ error: 'Unknown action — use open, navigate, list, read, screenshot, close or activate.' });
-    } catch (error) {
-      console.warn('[browser] could not control the browser:', error instanceof Error ? error.message : error);
-      return JSON.stringify({ error: `The browser is not reachable (${error instanceof Error ? error.message : error}). Say so plainly rather than pretending you looked.` });
-    }
+    return JSON.stringify(await runCoreBrowserTool(args,{port:browserPort(),fetch:deps.net.fetch as Parameters<typeof runCoreBrowserTool>[1]['fetch'],shotDir:browserShotDir,markPageRead}));
   }
   if (name === 'remember_about_user') {
     const fact = typeof args.fact === 'string' ? args.fact.trim() : '';
@@ -1891,12 +1680,12 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
   }
   if (name === 'get_service_status') {
     const wanted = typeof args.name === 'string' && args.name.trim() ? args.name.trim() : undefined;
-    if (wanted && !((true as boolean) ? corePolicySync<boolean>('diagnostic.knownService',[wanted]) : KNOWN_SERVICES.includes(wanted))) return JSON.stringify({ error: `Unknown service "${wanted}". Known: ${KNOWN_SERVICES.join(', ')}.` });
+    if (wanted && !((corePolicySync<boolean>('diagnostic.knownService',[wanted])))) return JSON.stringify({ error: `Unknown service "${wanted}". Known: ${KNOWN_SERVICES.join(', ')}.` });
     const services = await collectServices(wanted);
     return JSON.stringify({ services });
   }
   if (name === 'diagnose_system') {
-    const target = (true as boolean) ? corePolicySync<string>('diagnostic.target',[args.target]) : (typeof args.target === 'string' && ['gpu', 'memory', 'disk', 'docker', 'network', 'haru', 'all'].includes(args.target) ? args.target : 'all');
+    const target = (corePolicySync<string>('diagnostic.target',[args.target]));
     const collected = await collectAll();
     return JSON.stringify(diagnose(target, collected));
   }
@@ -1951,10 +1740,7 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
   }
   if (name === 'go_back_to_sleep') {
     const done = deps.goBackToSleep({ block: args.block === true });
-    if((true as boolean))return JSON.stringify(corePolicySync('tool-wording.result',['sleep',done]));
-    if (!done) return JSON.stringify({ error: 'You are not up because of them right now — nothing to go back to.' });
-    console.log(`[her-sleep] she chose to go back to sleep${done.blocked ? ', and shut the door for the night' : ''}`);
-    return JSON.stringify({ ...done, ok: done.asleep === true, note: 'Say one short goodnight in this reply and nothing after it. They will find you asleep.' });
+    return JSON.stringify(corePolicySync('tool-wording.result',['sleep',done]));
   }
   if (name === 'book_follow_up') {
     if (!deps.booking) return JSON.stringify({ error: 'There is nowhere to keep that right now. Do not promise to check back.' });
@@ -2001,12 +1787,7 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
     if (!query) return JSON.stringify({ error: 'query is required: the words you expect in what was said.' });
     const day = (value: unknown) => typeof value === 'string' && isDay(value.trim()) ? value.trim() : undefined;
     const result = await deps.chats.search({ query: query.slice(0, 200), from: day(args.from), to: day(args.to) });
-    if((true as boolean))return JSON.stringify(corePolicySync('tool-wording.result',['chats',result]));
-    // Words only (the embedder down, or still re-embedding): a miss is weaker evidence, and she is told so.
-    const wordsOnly = result.wordsOnly ? ' This search could only match exact words just now, so something said in other words may be missed.' : '';
-    return JSON.stringify(result.found
-      ? { found: result.found, chats: result.text, note: `Word for word from your chats with them, under the day each was said ("Them" is them, "You" is you). Answer from these in your own voice and say when it was. Only the one that is actually what they mean counts; none of it is necessarily still true.${wordsOnly}` }
-      : { found: 0, note: `Nothing in the kept chats matches. Say plainly you cannot find it — never make up what was said. If it might have been worded differently, you may search once more with other words.${wordsOnly}` });
+    return JSON.stringify(corePolicySync('tool-wording.result',['chats',result]));
   }
   if (name === 'look_up_knowledge') {
     const query = typeof args.query === 'string' ? args.query.trim() : '';
@@ -2038,23 +1819,11 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
       touchChunks(result.knowledge.map(item => item.chunk.id));
       const sources = [...new Set(result.knowledge.map(item => item.chunk.source))];
       console.log(`[knowledge] "${query.slice(0, 60)}" -> ${result.knowledge.length} chunk(s) from ${sources.join(', ') || 'nothing'} in ${Date.now() - started}ms`);
-      if((true as boolean))return JSON.stringify(corePolicySync('tool-wording.result',['knowledge',{knowledgeText:result.knowledgeText,memoryTexts:result.memories.map(entry=>entry.memory.text),knowledgeCount:result.knowledge.length}]));
-      // Memories selected alongside the knowledge go in too — the door that
-      // reaches both systems is meant to hand back both.
-      const known = result.memories.length
-        ? `\n\nWhat you already know about them that relates to this: ${result.memories.map(entry => entry.memory.text).join('; ')}.`
-        : '';
-      return JSON.stringify({
-        context: `${result.knowledgeText}${known}`,
-        note: result.knowledge.length
-          ? 'Answer from the context above, in your own voice. If the sources conflict, prefer the most recently updated one, and do not present something possibly outdated as definitely true.'
-          : 'No additional stored documents matched. Use relevant facts from the current message, recent conversation and memories above. An empty document lookup does not erase those facts. Answer requested creative suggestions without an unrelated missing-document caveat; never claim to have read an absent document.',
-      });
+      return JSON.stringify(corePolicySync('tool-wording.result',['knowledge',{knowledgeText:result.knowledgeText,memoryTexts:result.memories.map(entry=>entry.memory.text),knowledgeCount:result.knowledge.length}]));
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       console.warn(`[knowledge] lookup failed: ${reason}`);
-      if((true as boolean))return JSON.stringify(corePolicySync('tool-wording.result',['knowledge-failed',{reason}]));
-      return JSON.stringify({ error: `The knowledge lookup failed (${reason}). Say you could not check just now — do not answer from memory as though you had.` });
+      return JSON.stringify(corePolicySync('tool-wording.result',['knowledge-failed',{reason}]));
     }
   }
 

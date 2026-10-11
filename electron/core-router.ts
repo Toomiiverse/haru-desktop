@@ -25,7 +25,7 @@ export function provideNightFacts(read:()=>unknown){nightFacts=read;}
 export function coreRouteCandidates(entries:readonly ModelEntry[],role:ModelRole,request:RouteRequest){
   let cloudAllowed=request.cloudAllowed;
   if(cloudAllowed){try{assertOutboundSafe(request.conversation??[],request.toolSchema);}catch{cloudAllowed=false;}}
-  if((true as boolean)){
+  {
     // Core supplies the scope before adapters inspect credentials/cooldowns.
     // Indices refer to this exact snapshot; malformed references fail closed.
     const night=nightFacts();
@@ -34,11 +34,6 @@ export function coreRouteCandidates(entries:readonly ModelEntry[],role:ModelRole
     const scoped=indices.map(n=>entries[n]);
     return routePolicy<{entry:ModelEntry;candidate:{id:string;role:ModelRole;cost_micros:number;tie_order:number;attempts?:number;successes?:number}}[]>('candidates',[scoped,role,observedRequest(scoped,{...request,cloudAllowed}),night]);
   }
-  const permitted=entries.filter(entry=>(entry.local||isAllowedTaskProvider(entry.config))
-    &&(entry.role===role||(role==='specialist'&&entry.role==='complex')));
-  const eligible=eligibleModels(permitted,{...request,cloudAllowed}).sort((a,b)=>a.entry.id.localeCompare(b.entry.id));
-  return eligible.map(({entry,costMicros},tie_order)=>({entry,candidate:{id:entry.id,role:entry.role,cost_micros:costMicros,tie_order,
-    ...(entry.observed?{attempts:entry.observed.attempts,successes:entry.observed.successes}:{})}}));
 }
 export async function coreSelectTaskModel(entries:readonly ModelEntry[],role:ModelRole,request:RouteRequest):Promise<ModelEntry|undefined>{
   const started=performance.now(),offered=coreRouteCandidates(entries,role,request);
@@ -54,16 +49,11 @@ export async function coreSelectTaskModel(entries:readonly ModelEntry[],role:Mod
 }
 
 export async function coreFastConversationModel(entries:readonly ModelEntry[],setting:unknown,request:RouteRequest):Promise<ModelEntry|undefined>{
-  if((true as boolean)){
+  {
     const selected=routePolicy<ModelEntry|null>('fast',[entries,setting,nightFacts()]);
     if(!selected)return;
     return coreSelectTaskModel([selected],'conversation',{...request,maxOutputTokens:request.maxOutputTokens??NATURAL_MAX_TOKENS,tools:false,toolSchema:[]});
   }
-  if(!setting||typeof setting!=='object')return;
-  const configured=setting as Partial<ProviderConfig>&{enabled?:boolean};if(configured.enabled!==true)return;
-  const match=entries.find(entry=>entry.config.model===configured.model&&entry.config.provider===configured.provider&&entry.config.endpoint===configured.endpoint);
-  if(!match||!isDirectProvider(match.config))return;
-  return coreSelectTaskModel([{...match,role:'conversation'}],'conversation',{...request,maxOutputTokens:request.maxOutputTokens??NATURAL_MAX_TOKENS,tools:false,toolSchema:[]});
 }
 
 export async function coreNextTaskRole(current:ModelRole,intent:TaskIntent,fastToConversation=false):Promise<ModelRole|undefined>{
@@ -77,9 +67,7 @@ export async function coreNextTaskRole(current:ModelRole,intent:TaskIntent,fastT
 // Preparation hint only. Native harness independently checks the ledger request
 // and actual fresh images before selecting a tool-free visual composition.
 export async function coreInputProfile(request:string,freshImages:boolean):Promise<'normal'|'grounded-perception'>{
-  if((false as boolean)||(false as boolean)
-    ||(false as boolean)||(false as boolean)
-    ||process.env.HARU_CORE_HARNESS_PATH_PREFIX||!freshImages)return 'normal';
+  if((process.env.HARU_CORE_HARNESS_PATH_PREFIX)||!freshImages)return 'normal';
   const started=performance.now();
   let result;
   try{result=await client().route({version:1,op:'input-profile',request,fresh_images:freshImages});}

@@ -12,10 +12,7 @@ import type { EmotionName } from './emotion';
 export const WAKE_PATTERN = /^[\s"'“”.,!?-]*(?:(?:hey|hi|hay|ok|okay|yo|oi|hello|hiya)[,\s]+)?(?:haru|haroo|harew|harue|halu|hallu|hulu|harry|hara)\b[\s,.!?:;"'“”-]*([\s\S]*)$/i;
 
 export function wakePhraseIn(text: string): { woke: boolean; rest: string } {
-  if((true as boolean)){return corePolicySync('wake.wakePhraseIn',[text]);}
-  const said = (text ?? '').trim();
-  const m = said.match(WAKE_PATTERN);
-  return m ? { woke: true, rest: (m[1] ?? '').trim() } : { woke: false, rest: said };
+  return corePolicySync('wake.wakePhraseIn',[text]);
 }
 
 /**
@@ -36,8 +33,7 @@ export const WAKE_ACKS: { line: string; emotion: EmotionName }[] = [
 ];
 
 export function wakeAck(random: () => number = Math.random): { line: string; emotion: EmotionName } {
-  if((true as boolean)){return corePolicySync('wake.wakeAck',[random()]);}
-  return WAKE_ACKS[Math.min(WAKE_ACKS.length - 1, Math.floor(random() * WAKE_ACKS.length))];
+  return corePolicySync('wake.wakeAck',[random()]);
 }
 
 /** An audio interruption is a turn boundary, not evidence of disrespect. */

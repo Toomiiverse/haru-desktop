@@ -69,55 +69,7 @@ export function formatTimeOfDay(hour: number, minute: number) {
 // calendar out in the prompt did not fix it — so the chat tool passes the user's
 // own wording through and this resolves it, which is deterministic and testable.
 export function resolveDate(input: string, now: Date): string | null {
-  if((true as boolean))return corePolicySync<string|null>('agenda-tool.resolveDate',[input,{year:now.getFullYear(),month:now.getMonth()+1,day:now.getDate()}]);
-  const text = input.trim().toLowerCase().replace(/\s+/g, ' ');
-  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text;
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const shift = (days: number) => { const day = new Date(today); day.setDate(day.getDate() + days); return localDateKey(day); };
-
-  if (text === 'today' || text === 'tonight') return shift(0);
-  if (text === 'tomorrow') return shift(1);
-  if (/^(the )?day after tomorrow$/.test(text)) return shift(2);
-  const inDays = text.match(/^in (\d{1,3}) days?$/);
-  if (inDays) return shift(Number(inDays[1]));
-
-  const weekday = text.match(/^(this |next |on |this coming )?(sunday|monday|tuesday|wednesday|thursday|friday|saturday)$/);
-  if (weekday) {
-    const delta = (WEEKDAYS.indexOf(weekday[2]) - today.getDay() + 7) % 7;
-    // "next thursday" said on a Thursday means the following week, not today.
-    return shift(weekday[1]?.trim() === 'next' && delta === 0 ? 7 : delta);
-  }
-
-  const dayOfMonth = text.match(/^(?:the )?(\d{1,2})(?:st|nd|rd|th)?$/);
-  if (dayOfMonth) {
-    const day = Number(dayOfMonth[1]);
-    if (day >= 1 && day <= 31) {
-      const candidate = new Date(today.getFullYear(), today.getMonth(), day);
-      // A day-of-month already past refers to next month.
-      if (candidate.getTime() < today.getTime()) candidate.setMonth(candidate.getMonth() + 1);
-      // Guards against overflow, e.g. the 31st rolling into the next month.
-      if (candidate.getDate() === day) return localDateKey(candidate);
-    }
-  }
-
-  // A calendar date: "the 6th of october", "6 oct", "october 6th", "oct 6, 2027",
-  // "6/10" (day first, as it is written here). Nothing above read one, so
-  // "remind me to do my car registration on the 6th of October" was filed for
-  // the day it was said with the date left in the title (2026-09-11). Without a
-  // year, a date already past is next year's.
-  const dayFirst = text.match(new RegExp(`^(?:on )?(?:the )?(\\d{1,2})(?:st|nd|rd|th)?(?: of)? ${MONTH_PATTERN}(?:,? (\\d{4}))?$`, 'i'));
-  const monthFirst = text.match(new RegExp(`^(?:on )?${MONTH_PATTERN} (?:the )?(\\d{1,2})(?:st|nd|rd|th)?(?:,? (\\d{4}))?$`, 'i'));
-  const numeric = text.match(/^(?:on )?(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?$/);
-  const parts = dayFirst ? { day: Number(dayFirst[1]), month: monthIndex(dayFirst[2]), year: dayFirst[3] }
-    : monthFirst ? { day: Number(monthFirst[2]), month: monthIndex(monthFirst[1]), year: monthFirst[3] }
-    : numeric ? { day: Number(numeric[1]), month: Number(numeric[2]) - 1, year: numeric[3] } : null;
-  if (parts && parts.month >= 0 && parts.month <= 11 && parts.day >= 1 && parts.day <= 31) {
-    const year = parts.year ? Number(parts.year.length === 2 ? `20${parts.year}` : parts.year) : today.getFullYear();
-    const candidate = new Date(year, parts.month, parts.day);
-    if (!parts.year && candidate.getTime() < today.getTime()) candidate.setFullYear(year + 1);
-    if (candidate.getDate() === parts.day) return localDateKey(candidate);
-  }
-  return null;
+  return corePolicySync<string|null>('agenda-tool.resolveDate',[input,{year:now.getFullYear(),month:now.getMonth()+1,day:now.getDate()}]);
 }
 
 const SHORT_DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];

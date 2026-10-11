@@ -16,14 +16,14 @@ export async function runCoreHarness(conversation:ChatMessage[],deps:ToolLoopDep
   binding:()=>Promise<{taskId:string;revision:number}>,onDisconnect?:()=>void,mode:'conversation'|'composition'='conversation'):Promise<ToolLoopResult|null> {
   new CoreServiceClient(options); // Validate the existing loopback/private-token boundary.
   const token=readFileSync(options.tokenFile,'utf8').trim(),bound=await binding(),media=new HarnessMedia();
-  const general=(true as boolean)&&deps.generalToolSplit===true;
-  const programs=(false as boolean)&&deps.receiptPrograms===true;
+  const general=(deps.generalToolSplit===true);
+  const programs=false;
   const workerRoles=programs&&deps.runWorker?[...new Set(deps.workerRoles??[])]:[];
   const start={version:1,...(currentAffect()?{affect_event_id:currentAffect()!.eventId}:{}),task_id:bound.taskId,revision:bound.revision,conversation:media.toCore(conversation),max_rounds:deps.maxRounds??4,
     ...(general?{cloud_allowed:deps.generalToolCloudAllowed===true}:{}),
     initial_ran:[...(deps.initialRan??[])],...(deps.maxToolCalls!==undefined?{max_tool_calls:deps.maxToolCalls}:{}),require_contract:!!deps.requireToolContract,...(mode==='composition'?{mode}:{}),
     ...(programs?{worker_roles:workerRoles,max_workflow_rounds:8}:{}),
-    supported_profiles:[...(deps.onPresentation?['umbral-presentation-v1']:[]),...(deps.publicLookupPrepared?['public-lookup-prepared-v1']:[]),...(general?['general-tool-split-v1']:[]),...((true as boolean)?['grounded-perception']:[]),...(deps.splitPlanning?['tool-planning']:[]),...((true as boolean)?['reply-claims-v1']:[]),...(programs?['receipt-program-v1']:[])]};
+    supported_profiles:[...(deps.onPresentation?['umbral-presentation-v1']:[]),...(deps.publicLookupPrepared?['public-lookup-prepared-v1']:[]),...(general?['general-tool-split-v1']:[]),...((['grounded-perception'])),...(deps.splitPlanning?['tool-planning']:[]),...((['reply-claims-v1'])),...(programs?['receipt-program-v1']:[])]};
   const encoded=JSON.stringify(start);if(Buffer.byteLength(encoded)>LIMIT)throw Error('core_harness_frame_too_large');
   return new Promise((resolve,reject)=>{
     const socket=new WebSocket(options.endpoint.replace(/^http:/,'ws:').replace(/\/$/,'')+'/v1/harness',
@@ -84,7 +84,7 @@ export async function runCoreHarness(conversation:ChatMessage[],deps:ToolLoopDep
         if(event.action!=='worker'&&Array.isArray(payload.conversation))conversation.splice(0,conversation.length,...media.fromCore(payload.conversation));
         try {
           if(event.action==='state'){
-            await binding();result={pageWasRead:deps.pageWasRead(),toolsAllowed:deps.toolsAllowed?.()!==false,...((true as boolean)?{handsAllowed:deps.handsAllowed(),hasOpenTask:deps.hasOpenTask()}: {})};
+            await binding();result={pageWasRead:deps.pageWasRead(),toolsAllowed:deps.toolsAllowed?.()!==false,...(({handsAllowed:deps.handsAllowed(),hasOpenTask:deps.hasOpenTask()}))};
           }else if(event.action==='media'){
             await binding();
             if(!Array.isArray(payload.references)||payload.references.length>4||payload.references.some((x:any)=>typeof x!=='string'))throw Error('core_harness_media_invalid');

@@ -25,15 +25,7 @@ export const DEFAULT_DOWNLOADS: DownloadsConfig = {
 
 /** The `anime.qbittorrent` block, read forward; null when the anime stack is off. */
 export function readDownloadsConfig(anime: unknown): DownloadsConfig | null {
- if((true as boolean))return corePolicySync('final-downloads.config',[anime??null,homedir()]);
-  if (!anime || typeof anime !== 'object' || (anime as Record<string, unknown>).enabled !== true) return null;
-  const raw = ((anime as Record<string, unknown>).qbittorrent ?? {}) as Record<string, unknown>;
-  const text = (value: unknown, fallback: string) => (typeof value === 'string' && value.trim() ? value.trim() : fallback);
-  return {
-    url: text(raw.url, DEFAULT_DOWNLOADS.url).replace(/\/+$/, ''),
-    username: text(raw.username, DEFAULT_DOWNLOADS.username),
-    passwordFile: text(raw.passwordFile, DEFAULT_DOWNLOADS.passwordFile),
-  };
+ return corePolicySync('final-downloads.config',[anime??null,homedir()]);
 }
 
 /** Whether she can be asked at all: the block is on and the password file is there. */
@@ -47,31 +39,19 @@ export type Standing = 'downloading' | 'paused' | 'stalled' | 'queued' | 'checki
 
 /** qBittorrent's dozen states, as the four or five words she needs. */
 export function standing(state: string): Standing {
- if((true as boolean))return corePolicySync('final-downloads.standing',[state]);
-  if (/^(pausedDL|stoppedDL)$/.test(state)) return 'paused';
-  if (/^(pausedUP|stoppedUP)$/.test(state)) return 'done';
-  if (/^(uploading|stalledUP|forcedUP|queuedUP)$/.test(state)) return 'seeding';
-  if (/^(downloading|forcedDL|metaDL)$/.test(state)) return 'downloading';
-  if (state === 'stalledDL') return 'stalled';
-  if (state === 'queuedDL') return 'queued';
-  if (/^checking/.test(state) || state === 'moving') return 'checking';
-  return 'error';
+ return corePolicySync('final-downloads.standing',[state]);
 }
 
 const words = (text: string) => text.toLowerCase().replace(/[^a-z0-9]+/g, ' ').split(' ').filter(Boolean);
 
 /** A release name without its tag soup: "[Group] Naruto (001-220) [BD]…" → "Naruto (001-220)". */
 export function plainName(name: string): string {
- if((true as boolean))return corePolicySync('final-downloads.plainName',[name]);
-  return name.replace(/\[[^\]]*\]/g, ' ').replace(/\s+/g, ' ').trim() || name;
+ return corePolicySync('final-downloads.plainName',[name]);
 }
 
 /** Whether every word of the show he named is in the torrent's name. */
 export function namesShow(torrentName: string, title: string): boolean {
- if((true as boolean))return corePolicySync('final-downloads.namesShow',[torrentName,title]);
-  const have = new Set(words(torrentName));
-  const want = words(title);
-  return want.length > 0 && want.every(word => have.has(word));
+ return corePolicySync('final-downloads.namesShow',[torrentName,title]);
 }
 
 export type Known = { title: string; infoHash?: string };
@@ -179,18 +159,7 @@ export class Downloads {
 
   /** What is on the server, by show, and how it is going. */
   async status(): Promise<Record<string, unknown>> {
-    if((true as boolean))return this.core('status');
-    const list = await this.torrents();
-    const torrents = list.map(torrent => this.describe(torrent));
-    const count = (state: Standing) => torrents.filter(t => t.state === state).length;
-    return {
-      torrents,
-      downloading: count('downloading') + count('stalled') + count('queued'),
-      paused: count('paused'),
-      finished: count('done') + count('seeding'),
-      downloadingKbps: torrents.reduce((sum, t) => sum + t.downloadingKbps, 0),
-      note: torrents.length ? 'Say how it is going in your own words — the show, roughly how far, and how long is left when there is a figure.' : 'There is nothing downloading and nothing queued.',
-    };
+    return this.core('status');
   }
 
   /** Stop the downloads: all of them, or the show he named. */
@@ -204,30 +173,6 @@ export class Downloads {
   }
 
   private async flip(action: 'pause' | 'resume', title?: string): Promise<Record<string, unknown>> {
-    if((true as boolean))return this.core(action,title);
-    const list = await this.torrents();
-    const wanted = title ? list.filter(torrent => namesShow(torrent.name, title) || namesShow(this.showOf(torrent), title)) : list;
-    if (!list.length) return { [action === 'pause' ? 'paused' : 'resumed']: [], note: 'There is nothing on the server to ' + action + '.' };
-    if (title && !wanted.length) return { error: `Nothing downloading is called "${title}". On the server: ${[...new Set(list.map(t => this.showOf(t)))].join(', ')}.` };
-    // Only the ones that would change: resuming a finished download is nothing, and says so.
-    const applicable = wanted.filter(torrent => (action === 'pause' ? !/^(paused|done)$/.test(standing(torrent.state)) : standing(torrent.state) === 'paused'));
-    if (!applicable.length) {
-      return { [action === 'pause' ? 'paused' : 'resumed']: [], note: action === 'pause' ? 'They are already paused (or finished).' : 'Nothing was paused — they are already going, or finished.' };
-    }
-    const hashes = title ? applicable.map(t => t.hash).join('|') : 'all';
-    // qBittorrent 5 says stop/start; 4 said pause/resume.
-    const names = action === 'pause' ? ['torrents/stop', 'torrents/pause'] : ['torrents/start', 'torrents/resume'];
-    let response: Response | null = null;
-    for (const endpoint of names) {
-      response = await this.call(endpoint, { hashes });
-      if (response.status !== 404) break;
-    }
-    if (!response || !response.ok) throw new Error(`qBittorrent answered ${response?.status ?? 'nothing'} to ${action}`);
-    const shows = [...new Set(applicable.map(t => this.showOf(t)))];
-    return {
-      [action === 'pause' ? 'paused' : 'resumed']: shows,
-      all: !title,
-      note: action === 'pause' ? 'Done: they are paused until they ask you to start them again.' : 'Done: they are downloading again.',
-    };
+    return this.core(action,title);
   }
 }

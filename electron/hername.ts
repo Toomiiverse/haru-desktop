@@ -15,14 +15,5 @@ import {corePolicySync} from './core-policy-sync';
 export const DEFAULT_NAME = 'Haru';
 
 export function herNameFrom(identity: string): string {
- if((true as boolean))return corePolicySync('speech-context.herName',[identity]);
-  const after = /\bYou are\s+(.+)/i.exec(identity ?? '')?.[1] ?? '';
-  const words: string[] = [];
-  for (const word of after.split(/\s+/)) {
-    const clean = word.replace(/[.,!?;:—–-]+$/, '');
-    if (!/^[A-Z][A-Za-z'’-]+$/.test(clean)) break;
-    words.push(clean);
-    if (words.length === 3 || clean !== word) break;
-  }
-  return words.length ? words.join(' ') : DEFAULT_NAME;
+ return corePolicySync('speech-context.herName',[identity]);
 }

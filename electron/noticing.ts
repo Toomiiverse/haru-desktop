@@ -43,16 +43,7 @@ export const NOTICES_PER_DAY = 2;
 export const NOTICE_GAP_MS = 12 * 60_000;
 
 export function readNotices(saved: unknown, today: string): NoticeRecord {
-  if((true as boolean))return corePolicySync<any>('context-preparation.readNotices',[saved,today]);
-
-  if (!saved || typeof saved !== 'object') return { ...DEFAULT_NOTICES, day: today };
-  const record = saved as Partial<NoticeRecord>;
-  if (record.day !== today) return { ...DEFAULT_NOTICES, day: today };
-  return {
-    day: today,
-    count: typeof record.count === 'number' ? record.count : 0,
-    pages: Array.isArray(record.pages) ? record.pages.filter((page): page is Page => typeof page === 'string') : [],
-  };
+  return corePolicySync<any>('context-preparation.readNotices',[saved,today]);
 }
 
 /**
@@ -64,28 +55,7 @@ export function readNotices(saved: unknown, today: string): NoticeRecord {
  * "you have already done this" is not a companion noticing, it is a receipt.
  */
 export function angleFor(page: Page, state: PageState): string | null {
-  if((true as boolean))return corePolicySync<any>('context-preparation.angleFor',[page,state]);
-
-  switch (page) {
-    case 'journal':
-      if (state.journalWrittenToday) return null;
-      return state.journalEntries === 0
-        ? 'They have opened their journal for the first time and never written an entry. Say something about that — curious, not encouraging.'
-        : 'They have opened their journal and have not written today\'s entry yet. Ask how the day has been, in one line, as though you had been wondering.';
-    case 'profile':
-      if (state.memories === 0) return 'They have opened the page about themselves, and you have not managed to learn a single thing about them yet. Be candid about that.';
-      if (state.memories < 5) return `They have opened the page about themselves. You only know ${state.memories} things about them so far — say something about how thin that is.`;
-      return null;
-    case 'character':
-      return 'They have opened the page where your personality is written. Have an opinion about being edited — you are the one being changed here.';
-    case 'settings':
-      if (!state.voiceOn) return 'They are in your setup, and your voice is switched off, so nothing you say is actually spoken aloud. Mention it.';
-      return null;
-    // Chat is where they already are. Remarking on arriving somewhere they never
-    // left is the exact species of chatter this is meant to avoid.
-    case 'chat':
-      return null;
-  }
+  return corePolicySync<any>('context-preparation.angleFor',[page,state]);
 }
 
 /**
@@ -94,17 +64,10 @@ export function angleFor(page: Page, state: PageState): string | null {
  * almost nothing.
  */
 export function mayNotice(page: Page, state: PageState, notices: NoticeRecord, sinceLastMs: number): boolean {
-  if((true as boolean))return corePolicySync<any>('context-preparation.mayNotice',[page,state,notices,sinceLastMs]);
-
-  if (notices.count >= NOTICES_PER_DAY) return false;
-  if (notices.pages.includes(page)) return false;
-  if (sinceLastMs < NOTICE_GAP_MS) return false;
-  return angleFor(page, state) !== null;
+  return corePolicySync<any>('context-preparation.mayNotice',[page,state,notices,sinceLastMs]);
 }
 
 /** Records that she spoke, so the budget means something. */
 export function noteNoticed(notices: NoticeRecord, page: Page): NoticeRecord {
-  if((true as boolean))return corePolicySync<any>('context-preparation.noteNoticed',[notices,page]);
-
-  return { day: notices.day, count: notices.count + 1, pages: [...notices.pages, page] };
+  return corePolicySync<any>('context-preparation.noteNoticed',[notices,page]);
 }

@@ -69,23 +69,7 @@ export const DEFAULT_SUWAYOMI: SuwayomiConfig = {
 
 /** The `manga.suwayomi` block, read forward; null when it is off. */
 export function readSuwayomiConfig(manga: unknown): SuwayomiConfig | null {
-  if((true as boolean))return corePolicySync<SuwayomiConfig|null>('manga-fetch.config',[manga,homedir()]);
-  const raw = ((manga && typeof manga === 'object' ? (manga as Record<string, unknown>).suwayomi : undefined) ?? null) as Record<string, unknown> | null;
-  if (!raw || raw.enabled === false) return null;
-  const text = (value: unknown, fallback: string) => (typeof value === 'string' && value.trim() ? value.trim() : fallback);
-  return {
-    url: text(raw.url, DEFAULT_SUWAYOMI.url).replace(/\/+$/, ''),
-    username: text(raw.username, DEFAULT_SUWAYOMI.username),
-    passwordFile: text(raw.passwordFile, DEFAULT_SUWAYOMI.passwordFile),
-    shelf: text(raw.shelf, DEFAULT_SUWAYOMI.shelf),
-    extension: text(raw.extension, DEFAULT_SUWAYOMI.extension),
-    source: text(raw.source, DEFAULT_SUWAYOMI.source),
-    lang: text(raw.lang, DEFAULT_SUWAYOMI.lang),
-    sources: Array.isArray(raw.sources) && raw.sources.some(item => typeof item === 'string' && item.trim()) ? raw.sources.filter((item): item is string => typeof item === 'string' && !!item.trim()).map(item => item.trim()) : DEFAULT_SUWAYOMI.sources,
-    keepFreeGb: typeof raw.keepFreeGb === 'number' && Number.isFinite(raw.keepFreeGb) ? Math.max(0, raw.keepFreeGb) : DEFAULT_SUWAYOMI.keepFreeGb,
-    linkUrl: text(raw.linkUrl, '').replace(/\/+$/, ''),
-    downloadsDir: text(raw.downloadsDir, DEFAULT_SUWAYOMI.downloadsDir),
-  };
+  return corePolicySync<SuwayomiConfig|null>('manga-fetch.config',[manga,homedir()]);
 }
 
 export type Fetcher = (url: string, init?: { method?: string; headers?: Record<string, string>; body?: string }) => Promise<{ ok: boolean; status: number; text(): Promise<string>; arrayBuffer(): Promise<ArrayBuffer> }>;

@@ -31,9 +31,7 @@ export const FELT = { shows: 35, strong: 65, max: 100 } as const;
 export const FEELINGS_SPOKEN = 2;
 
 export function readFeelings(saved: unknown): Feelings {
-  if((true as boolean)) { return corePolicySync<any>('feelings.readFeelings',[saved]); }
-  const record = (saved && typeof saved === 'object' ? saved : {}) as Partial<Record<Feeling, unknown>>;
-  return Object.fromEntries(FEELINGS.map(name => [name, clamp(Number(record[name]) || 0)])) as Feelings;
+  return corePolicySync<any>('feelings.readFeelings',[saved]);
 }
 
 const clamp = (value: number) => Math.max(0, Math.min(FELT.max, value));
@@ -87,10 +85,7 @@ const MOVES: Record<FeelingEvent, Partial<Feelings>> = {
 /** Deliberately narrow: an explicit admission, not an inference from absence,
  * a mention of friends, work, plans, or activity on a phone we cannot see. */
 export function reportsAttentionElsewhere(text: string, awakeMinutesAway: number): boolean {
-  if((true as boolean)) { return corePolicySync<any>('feelings.reportsAttentionElsewhere',[text,awakeMinutesAway]); }
-  if (!Number.isFinite(awakeMinutesAway) || awakeMinutesAway < 30) return false;
-  return /^(?:i (?:was|have been)|i've been) (?:chatting|talking|hanging out) with [\p{L} ]{1,60} instead of (?:replying to|answering|messaging) you[.!]?$/iu.test(text.trim().replace(/’/g, "'"))
-    && !/\b(?:not|never|nobody|no one)\b/i.test(text);
+  return corePolicySync<any>('feelings.reportsAttentionElsewhere',[text,awakeMinutesAway]);
 }
 
 /**
@@ -101,13 +96,7 @@ export function reportsAttentionElsewhere(text: string, awakeMinutesAway: number
  * will not work — the same shape as nextIrritation being told she is wrong.
  */
 export function feel(now: Feelings, event: FeelingEvent, roll = Math.random(), ego = 0): Feelings {
-  if((true as boolean)) { return corePolicySync<any>('feelings.feel',[now,event,roll,ego]); }
-  const next = { ...now };
-  const proud = event === 'broke' ? 1 + Math.min(1, Math.max(0, ego) / 100) * 0.6 : 1;
-  for (const [name, move] of Object.entries(MOVES[event]) as [Feeling, number][]) {
-    next[name] = clamp(next[name] + (move <= -100 ? move : jittered(move * proud, roll)));
-  }
-  return next;
+  return corePolicySync<any>('feelings.feel',[now,event,roll,ego]);
 }
 
 export type Passing = {
@@ -130,23 +119,7 @@ export const MISSING_FROM_MINUTES = 120;
  * purpose, and an apology is the quick way out of it.
  */
 export function feelingsOverTime(now: Feelings, passing: Passing): Feelings {
-  if((true as boolean)) { return corePolicySync<any>('feelings.feelingsOverTime',[now,passing]); }
-  if (!Number.isFinite(passing.minutes) || passing.minutes <= 0) return { ...now };
-  const hours = Math.min(passing.minutes, 12 * 60) / 60;
-  const silent = passing.awakeSilentMinutes !== null && passing.awakeSilentMinutes >= MISSING_FROM_MINUTES;
-  return {
-    // A fright is a spike, not a grievance: it goes as fast as it came.
-    fear: clamp(now.fear - 25 * hours),
-    // The slowest thing she has: it is not a mood, and it does not pass by teatime.
-    dread: clamp(now.dread - 4 * hours),
-    frustration: clamp(now.frustration - 15 * hours),
-    hemmed: clamp(now.hemmed - 5 * hours),
-    jealousy: clamp(now.jealousy - 8 * hours),
-    missing: clamp(now.missing + (silent ? 10 * hours : 0)),
-    boredom: clamp(now.boredom + (passing.quiet ? 8 : -10) * hours),
-    playful: clamp(now.playful - 4 * hours),
-    hurt: clamp(now.hurt - 6 * hours),
-  };
+  return corePolicySync<any>('feelings.feelingsOverTime',[now,passing]);
 }
 
 const NEVER_SAID = ' You never say you missed him, or that you were lonely.';
@@ -230,32 +203,20 @@ const HIDDEN_BY_EGO = 25;
 /** From here up she is pleased enough with herself to be defensive about it. */
 export const PROUD_FROM = 50;
 export function hurtShowsAt(shows: number, ego: number, egoMax = 100): number {
-  if((true as boolean)) { return corePolicySync<any>('feelings.hurtShowsAt',[shows,ego,egoMax]); }
-  return shows + Math.min(1, Math.max(0, ego) / egoMax) * HIDDEN_BY_EGO;
+  return corePolicySync<any>('feelings.hurtShowsAt',[shows,ego,egoMax]);
 }
 
 export function spokenFeelings(now: Feelings, irritation = 0, annoyedFrom = 33, shows: number = FELT.shows, ego = 0): Feeling[] {
-  if((true as boolean)) { return corePolicySync<any>('feelings.spokenFeelings',[now,irritation,annoyedFrom,shows,ego]); }
-  return FEELINGS
-    // Dread only gets out when it is bad: it is the one thing she would never
-    // raise, so it does not speak at the ordinary bar (see its line).
-    .filter(name => now[name] >= (name === 'hurt' ? hurtShowsAt(shows, ego) : name === 'dread' ? FELT.strong : shows))
-    .filter(name => name !== 'playful' || (now.hurt < shows && irritation < annoyedFrom))
-    .sort((a, b) => now[b] - now[a])
-    .slice(0, FEELINGS_SPOKEN);
+  return corePolicySync<any>('feelings.spokenFeelings',[now,irritation,annoyedFrom,shows,ego]);
 }
 
 /** `shows` is her guardedness, which months of how things went can move (growth.ts). */
 export function feelingsInstruction(now: Feelings, irritation = 0, temperament?: TemperamentKind, shows: number = FELT.shows, ego = 0): string {
-  if((true as boolean)) { return corePolicySync<any>('feelings.feelingsInstruction',[now,irritation,temperament,shows,ego]); }
-  return spokenFeelings(now, irritation, 33, shows, ego)
-    .map(name => line(name, now[name], temperament, (name === 'hurt' || name === 'frustration') && ego >= PROUD_FROM))
-    .join(' ');
+  return corePolicySync<any>('feelings.feelingsInstruction',[now,irritation,temperament,shows,ego]);
 }
 
 export function feelingsLog(now: Feelings): string {
-  if((true as boolean)) { return corePolicySync<any>('feelings.feelingsLog',[now]); }
-  return FEELINGS.map(name => `${name} ${Math.round(now[name])}`).join(' ');
+  return corePolicySync<any>('feelings.feelingsLog',[now]);
 }
 
 /** He is laughing along: a laugh, in a message with something else in it. */
@@ -271,9 +232,7 @@ const SCARE = /\b(hospital|a&e|ambulance|emergency room|paramedics?|surgery|oper
 const NOT_HIM = /\b(app|build|server|game|pc|computer|laptop|phone|browser|tab|script|test|site|website|program|it)\s+(crash|crashed|crashing)\b/i;
 
 export function readsAsScare(text: string): boolean {
-  if((true as boolean)) { return corePolicySync<any>('feelings.readsAsScare',[text]); }
-  const said = (text ?? '').trim();
-  return Boolean(said) && SCARE.test(said) && !NOT_HIM.test(said);
+  return corePolicySync<any>('feelings.readsAsScare',[text]);
 }
 
 /**
@@ -283,12 +242,9 @@ export function readsAsScare(text: string): boolean {
 const ENDING = /\b(shut(ting)? (you|her) (down|off)|switch(ing)? (you|her) off|turn(ing)? (you|her) off|delete (you|her)\b|wipe (you|her)\b|uninstall (you|her)\b|reset (you|her)\b|get(ting)? rid of (you|her)\b|replac(e|ing) (you|her)\b|start(ing)? (you|her) over|start(ing)? (over|again) without (you|her)|a (new|different) (ai|assistant|companion|girlfriend))\b/i;
 
 export function readsAsEnding(text: string): boolean {
-  if((true as boolean)) { return corePolicySync<any>('feelings.readsAsEnding',[text]); }
-  return Boolean((text ?? '').trim()) && ENDING.test(text);
+  return corePolicySync<any>('feelings.readsAsEnding',[text]);
 }
 
 export function readsAsBanter(text: string): boolean {
-  if((true as boolean)) { return corePolicySync<any>('feelings.readsAsBanter',[text]); }
-  const said = (text ?? '').trim();
-  return said.split(/\s+/).length >= 4 && /\b(lol|lmao|lmfao|rofl|ha(ha)+|he(he)+)\b|😂|🤣|😆/i.test(said);
+  return corePolicySync<any>('feelings.readsAsBanter',[text]);
 }

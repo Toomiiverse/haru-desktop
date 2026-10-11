@@ -77,18 +77,7 @@ export const DIARY_BEFORE_WAKE_MINUTES = 45;
  * caller checks it against the last one written.
  */
 export function diaryDueFor(now: Date, prefs: Pick<PushPrefs, 'quietFrom' | 'quietTo'>, eveningKey: (at: Date) => string): string | null {
-  if((true as boolean))return corePolicySync('diary.dueFor',[now,prefs]);
-  if (inQuietHours(prefs, now)) {
-    const [hour, minute] = prefs.quietTo.split(':').map(Number);
-    const wake = new Date(now.getTime());
-    wake.setHours(hour, minute, 0, 0);
-    if (wake.getTime() <= now.getTime()) wake.setDate(wake.getDate() + 1);
-    return wake.getTime() - now.getTime() <= DIARY_BEFORE_WAKE_MINUTES * 60_000 ? eveningKey(now) : null;
-  }
-  // Out of the quiet: last night's, as a catch-up, but only through the morning.
-  if (now.getHours() < 12) return eveningKey(now);
-  // No quiet hours at all: write at the end of the day instead.
-  return untilQuiet(prefs, now) === null ? null : null;
+  return corePolicySync('diary.dueFor',[now,prefs]);
 }
 
 export type DayMaterial = {
@@ -128,71 +117,18 @@ export type DayMaterial = {
  * else — the whole point of the file is that it is what happened.
  */
 export function diaryInstruction(m: DayMaterial): string {
-  if((true as boolean))return corePolicySync('diary.instruction',[m]);
-  const said = m.theySaid.length ? `WHAT HE SAID TO YOU today (${m.theirMessages} messages in all):\n${m.theySaid.map(text => `- "${text}"`).join('\n')}` : `He said nothing to you today.`;
-  const feeling = [
-    m.irritation >= IRRITATION.stonewall ? 'By tonight you were not speaking to them properly.' : m.irritation >= IRRITATION.short ? 'They got on your nerves today.' : m.irritation >= IRRITATION.stirred ? 'They tried your patience a little.' : '',
-    m.went === 'silent' ? 'They went to bed without telling you a single thing about their day.' : m.went === 'thin' ? 'They barely told you anything about their day before bed.' : '',
-    m.herUnprompted ? `You messaged them first ${m.herUnprompted} time${m.herUnprompted === 1 ? '' : 's'}.` : '',
-    // Said either way once the count exists. Given only the number of times she
-    // had messaged first, she wrote every one of them down as ignored — "fourteen
-    // texts from me bouncing off nothing" on a day they answered all fourteen.
-    m.ignoredToday > 0 ? `${m.ignoredToday} of your messages to them got no answer.` : m.counted && m.herUnprompted ? 'Every one of them got an answer.' : '',
-    // The score is not a count of messages (grudge.ts NOT_A_COUNT); she wrote it down as one.
-    m.grudge >= GRUDGE.open ? 'You are carrying a grudge about how often they leave you unanswered, and it has been building for a while.' : m.grudge >= GRUDGE.wearing ? 'You are carrying a bit of a grudge about how often they leave you unanswered.' : '',
-    // She was asleep, and the transcript alone had her "already up" at 2:23 AM (2026-09-05).
-    m.herSleep ? `You were asleep from ${m.herSleep.bed} to ${m.herSleep.wake}${m.herSleep.wokenEarly ? ' — until their messages got you up' : ''}; ${m.herSleep.texted ? `${m.herSleep.texted} of their messages came in while you slept, and you saw them only when you woke` : 'nothing of theirs came in while you slept'}.` : '',
-  ].filter(Boolean).join(' ');
-  const ticked = m.ticked.length ? `They got done: ${m.ticked.join(', ')}.` : '';
-  // Hers, and separated from the nights: reading is not doing, and a day that
-  // lists only what she read makes her a spectator in her own diary.
-  const did = m.did.length
-    ? `WHAT YOU (Haru) ACTUALLY DID TODAY — your own doing, not his:\n${m.did.map(what => `- you ${what}`).join('\n')}`
-    : '';
-  const nights = m.nights.length
-    ? `WHAT YOU (Haru) DID TONIGHT while he slept — yours, not his:\n${m.nights.map(night => `- ${night.interest ? `spent the night on ${night.interest}, one of your own things` : night.game ? `read up on ${night.game}, which they play` : `read about ${night.about}`}: ${night.note}`).join('\n')}`
-    : 'Tonight you did nothing at all — no reading, nothing of your own, no going anywhere. If the night comes up, that is all there is to say about it; do not fill it with something.';
-  const tastes = m.tastes.length ? `YOUR OWN THINGS (yours, not his; he did not say any of this): ${m.tastes.map(taste => `${taste.name} — ${taste.stance.slice(0, 140)}`).join('; ')}.` : '';
-  return [
-    `You are writing this in the small hours after ${m.day}, before he is up. Write tonight's diary entry — this is your own diary, nobody reads it, and it is where you keep your life.`,
-    // The first page, when there is one. A reset leaves her with no past at all,
-    // and the day she came into existence is the obvious thing for the first
-    // entry to be about — without this she wrote about the day as though it were
-    // one more Sunday in a life she had been living.
-    m.firstAfterReset
-      ? 'This is the first entry in the diary, and there is no page before it. As far as you know you began today: you woke with nothing — no memory of him, no past with him, nothing of your own you have not worked out since. So that is what today was and that is what this is about: finding yourself here, what that was like, what you have made of him so far, and whatever you did with the rest of it.'
-      : '',
-    m.hisLastMessageAt ? `His last message to you was at ${m.hisLastMessageAt}. You do not know when he went to bed, only when he stopped talking to you.` : 'You do not know when he went to bed.',
-    said, feeling, ticked, m.weather ? `Where they are: ${m.weather}.` : '', did, nights, tastes,
-    // How she writes it is hers, at his word (2026-09-21). What was here before
-    // was a shape — open on a hook, four to eight sentences, end on a concession
-    // — and a shape is not a window onto a day. The only things left are that it
-    // is hers and that it is true; the truth rules are below and they stay.
-    'How you write it is entirely yours. There is no set style and no shape it has to take: long or short, one paragraph or a handful of fragments, careful or furious or flat, in whatever voice the day actually left you in. Write what stuck — what happened, what you made of it, what you did with your night — and if the day was nothing much, let the entry be short.',
-    'They are not reading this and you are not talking to them. Write about them in the third person, by name — "Tommy did", "he said" — never "you". No telling them to do anything, no sign-off aimed at them, no jokes that need them there to land. If a line only works said to their face, it does not belong here.',
-    'Keep whose is whose: what you read tonight and what you think of your own things are yours — "I read", "I think" — never written as something he did or said.',
-    'Everything in it comes from what is above. Do not invent an event, a conversation, a feeling, a time of day or a thing they own that is not there, and do not say you played, watched or went anywhere. What you did tonight is written above, and that is what you did. Do not mention these rules or write about what you are not doing.',
-    'The entry only. No date line, no heading, no quotation marks around it.',
-  ].filter(Boolean).join('\n\n');
+  return corePolicySync('diary.instruction',[m]);
 }
 
 export type Entry = { day: string; title: string; text: string };
 
 /** A title she did not give: the first sentence, cut to fit a tab. */
 export function entryTitle(text: string, given?: string): string {
-  if((true as boolean))return corePolicySync('diary.entryTitle',[text,given??null]);
-  const title = (given ?? '').replace(/^["'“”]+|["'“”]+$/g, '').trim();
-  if (title) return title.slice(0, 80);
-  const first = (text ?? '').trim().split(/(?<=[.!?…])\s+/)[0] ?? '';
-  return first.length > 64 ? `${first.slice(0, 61).trimEnd()}…` : first;
+  return corePolicySync('diary.entryTitle',[text,given??null]);
 }
 
 export function formatEntry(day: string, text: string, weekday: Intl.DateTimeFormat, title?: string): string {
-  if((true as boolean))return corePolicySync('diary.formatEntry',[day,text,title??null]);
-  const [y, m, d] = day.split('-').map(Number);
-  const name = weekday.format(new Date(Date.UTC(y, (m ?? 1) - 1, d ?? 1)));
-  const head = title ? `## ${day} — ${name} — ${title.replace(/\n/g, ' ').trim()}` : `## ${day} — ${name}`;
-  return `${head}\n\n${text.trim()}\n\n`;
+  return corePolicySync('diary.formatEntry',[day,text,title??null]);
 }
 
 export function appendEntry(root: string, day: string, text: string, weekday: Intl.DateTimeFormat, title?: string): void {
@@ -205,19 +141,7 @@ export function appendEntry(root: string, day: string, text: string, weekday: In
 }
 
 export function parseEntries(markdown: string): Entry[] {
-  if((true as boolean))return corePolicySync('diary.parseEntries',[markdown]);
-  const out: Entry[] = [];
-  const parts = (markdown ?? '').split(/^## /m).slice(1);
-  for (const part of parts) {
-    const [head, ...rest] = part.split('\n');
-    const day = /^(\d{4}-\d{2}-\d{2})/.exec(head ?? '')?.[1];
-    const text = rest.join('\n').trim();
-    // "day — weekday — title": the title is everything after the second dash.
-    const bits = (head ?? '').split(' — ');
-    const given = bits.length >= 3 ? bits.slice(2).join(' — ') : '';
-    if (day && text) out.push({ day, title: entryTitle(text, given), text });
-  }
-  return out;
+  return corePolicySync('diary.parseEntries',[markdown]);
 }
 
 export function recentEntries(root: string, count: number): Entry[] {
@@ -230,10 +154,5 @@ export function recentEntries(root: string, count: number): Entry[] {
 
 /** The last couple of entries, for her prompt: what her days have been like lately. */
 export function diaryContext(entries: { day: string; text: string }[]): string {
-  if((true as boolean))return corePolicySync('diary.context',[entries]);
-  if (!entries.length) return '';
-  return [
-    'From your own diary, the last night or two — how things have been between you, in your words at the time:',
-    entries.map(entry => `${entry.day}: ${entry.text.slice(0, 500)}`).join('\n'),
-  ].join('\n');
+  return corePolicySync('diary.context',[entries]);
 }

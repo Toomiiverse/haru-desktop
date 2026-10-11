@@ -91,60 +91,19 @@ function reconcile(mine: MemoryRecord, theirs: MemoryRecord): MemoryRecord {
  * that fails it reaches the store.
  */
 export function mergeMemories(mine: MemoryRecord[], theirs: unknown, now: string): MergeReport {
-  if ((true as boolean)) return corePolicySync<MergeReport>('memory-maintenance.mergeMemories', [mine, theirs, now, mine.map(() => `${Date.now()}-${Math.random().toString(36).slice(2)}`), Array.isArray(theirs) ? theirs.map(() => `${Date.now()}-${Math.random().toString(36).slice(2)}`) : []]);
-  // Both sides, not just the one off the wire. getMemories already migrates
-  // what it reads, so in the app this changes nothing — but reconcile compares
-  // the two records field by field, and a local copy that had not been through
-  // the same derivation would make the result depend on which machine ran the
-  // merge. That is exactly the property this is supposed to have.
-  const held = migrateMemories(mine, now);
-  const incoming = migrateMemories(theirs, now);
-  const byId = new Map(held.map(memory => [memory.id, memory]));
-  let added = 0;
-  let updated = 0;
-  for (const other of incoming) {
-    const mineNow = byId.get(other.id);
-    if (!mineNow) {
-      byId.set(other.id, other);
-      added += 1;
-      continue;
-    }
-    const merged = reconcile(mineNow, other);
-    // Cheap for a list capped at MAX_MEMORIES, and it keeps a pull that changed
-    // nothing from broadcasting a change and re-embedding every record.
-    if (JSON.stringify(merged) !== JSON.stringify(mineNow)) {
-      byId.set(other.id, merged);
-      updated += 1;
-    }
-  }
-  return { memories: [...byId.values()].sort((a, b) => a.id.localeCompare(b.id)), added, updated };
+  return corePolicySync<MergeReport>('memory-maintenance.mergeMemories', [mine, theirs, now, mine.map(() => `${Date.now()}-${Math.random().toString(36).slice(2)}`), Array.isArray(theirs) ? theirs.map(() => `${Date.now()}-${Math.random().toString(36).slice(2)}`) : []]);
 }
 
 /** Whether a sync actually brought anything back, for a log worth reading. */
 export function describeMerge(report: MergeReport): string {
-  if ((true as boolean)) return corePolicySync<string>('memory-maintenance.describeMerge', [report]);
-  const parts: string[] = [];
-  if (report.added) parts.push(`${report.added} new memor${report.added === 1 ? 'y' : 'ies'}`);
-  if (report.updated) parts.push(`${report.updated} updated`);
-  return parts.join(', ');
+  return corePolicySync<string>('memory-maintenance.describeMerge', [report]);
 }
 
 /** Persistent, text-free deletion markers. No log rotation: an old device may
  * reconnect years later. A deliberate new fact gets a new record ID. */
 export type MemoryDeletion = { id: string; at: string };
 export function mergeDeletions(...inputs: unknown[]): MemoryDeletion[] {
-  if ((true as boolean)) return corePolicySync<MemoryDeletion[]>('memory-maintenance.mergeDeletions', [inputs, inputs.map(input => Array.isArray(input) ? input.map(item => typeof item?.at === 'string' ? Date.parse(item.at) : null) : [])]);
-  const held = new Map<string, MemoryDeletion>();
-  for (const input of inputs) {
-    if (!Array.isArray(input)) continue;
-    for (const item of input) {
-      if (!item || typeof item.id !== 'string' || !item.id || item.id.length > 256
-        || typeof item.at !== 'string' || !Number.isFinite(Date.parse(item.at))) continue;
-      const at = new Date(item.at).toISOString();
-      if (!held.has(item.id) || held.get(item.id)!.at < at) held.set(item.id, { id: item.id, at });
-    }
-  }
-  return [...held.values()].sort((a, b) => a.id.localeCompare(b.id));
+  return corePolicySync<MemoryDeletion[]>('memory-maintenance.mergeDeletions', [inputs, inputs.map(input => Array.isArray(input) ? input.map(item => typeof item?.at === 'string' ? Date.parse(item.at) : null) : [])]);
 }
 function union(a?: string[], b?: string[]): string[] | undefined {
   return a || b ? [...new Set([...(a ?? []), ...(b ?? [])])].sort() : undefined;

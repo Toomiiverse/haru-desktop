@@ -45,59 +45,21 @@ function iso(value: unknown): string | null {
 
 /** One report from the phone, or null when it is not one. At least one figure is needed. */
 export function readBodyReport(body: unknown, now = new Date()): BodyReport | null {
-  if((true as boolean))return corePolicySync('conversation-inputs.bodyReport',[body,now.toISOString(),bodyDateFacts(body)]);
-
-  if (!body || typeof body !== 'object') return null;
-  const record = body as Record<string, unknown>;
-  if (typeof record.day !== 'string' || !DAY.test(record.day)) return null;
-  const sleepMinutes = minutes(record.sleepMinutes);
-  const steps = count(record.steps, 200_000);
-  if (sleepMinutes === null && steps === null) return null;
-  return {
-    day: record.day,
-    sleepMinutes,
-    sleepStart: sleepMinutes === null ? null : iso(record.sleepStart),
-    sleepEnd: sleepMinutes === null ? null : iso(record.sleepEnd),
-    steps,
-    at: now.toISOString(),
-  };
+  return corePolicySync('conversation-inputs.bodyReport',[body,now.toISOString(),bodyDateFacts(body)]);
 }
 
 export function readBody(saved: unknown): Body {
-  if((true as boolean))return corePolicySync('conversation-inputs.bodyRead',[saved,bodyDateFacts((saved as any)?.last)]);
-
-  if (!saved || typeof saved !== 'object') return { ...DEFAULT_BODY };
-  const record = saved as Record<string, unknown>;
-  const last = record.last && typeof record.last === 'object' ? (record.last as Record<string, unknown>) : null;
-  const report = last && typeof last.day === 'string' && DAY.test(last.day) && typeof last.at === 'string'
-    ? {
-        day: last.day,
-        sleepMinutes: minutes(last.sleepMinutes),
-        sleepStart: iso(last.sleepStart),
-        sleepEnd: iso(last.sleepEnd),
-        steps: count(last.steps, 200_000),
-        at: last.at,
-      }
-    : null;
-  return { enabled: record.enabled === true, last: report };
+  return corePolicySync('conversation-inputs.bodyRead',[saved,bodyDateFacts((saved as any)?.last)]);
 }
 
 /** What the phone page and the app show under the switch. */
 export function bodyForPage(state: Body, nowMs = Date.now()): { enabled: boolean; at: string | null; fresh: boolean; day: string | null; sleepMinutes: number | null; steps: number | null } {
-  if((true as boolean))return corePolicySync('conversation-inputs.bodyPage',[state,nowMs,dateFact(state.last?.at)]);
-
-  const last = state.last;
-  const fresh = !!last && nowMs - Date.parse(last.at) <= BODY_STALE_MS;
-  return { enabled: state.enabled, at: last?.at ?? null, fresh, day: last?.day ?? null, sleepMinutes: last?.sleepMinutes ?? null, steps: last?.steps ?? null };
+  return corePolicySync('conversation-inputs.bodyPage',[state,nowMs,dateFact(state.last?.at)]);
 }
 
 /** "5 h 40 m", "7 h", "45 m". */
 export function sleepLength(minutes: number): string {
-  if((true as boolean))return corePolicySync('conversation-inputs.sleepLength',[minutes]);
-
-  const h = Math.floor(minutes / 60), m = minutes % 60;
-  if (h === 0) return `${m} m`;
-  return m === 0 ? `${h} h` : `${h} h ${m} m`;
+  return corePolicySync('conversation-inputs.sleepLength',[minutes]);
 }
 
 /**
@@ -106,22 +68,5 @@ export function sleepLength(minutes: number): string {
  * steps is not read as today's.
  */
 export function describeBody(state: Body, nowMs: number, clock: (ms: number) => string, todayKey: string): string {
-  if((true as boolean)){const p=corePolicySync<any>('conversation-inputs.bodyStart',[state,nowMs,todayKey,{at:dateFact(state.last?.at),sleepStart:dateFact(state.last?.sleepStart),sleepEnd:dateFact(state.last?.sleepEnd)}]);if('result' in p)return p.result;return corePolicySync('conversation-inputs.bodyFinish',[p,p.clock.map((ms:number|null)=>clock(ms===null?NaN:ms))]);}
-
-  if (!state.enabled || !state.last) return '';
-  const report = state.last;
-  const age = nowMs - Date.parse(report.at);
-  if (!Number.isFinite(age) || age < 0 || age > BODY_STALE_MS) return '';
-  const parts: string[] = [];
-  if (report.sleepMinutes !== null) {
-    const span = report.sleepStart && report.sleepEnd ? ` (${clock(Date.parse(report.sleepStart))} to ${clock(Date.parse(report.sleepEnd))})` : '';
-    const verdict = report.sleepMinutes < 5 * 60 ? ', a short night' : report.sleepMinutes < 6.5 * 60 ? ', on the short side' : report.sleepMinutes > 9.5 * 60 ? ', a long one' : '';
-    parts.push(`slept ${sleepLength(report.sleepMinutes)} last night${span}${verdict}`);
-  }
-  if (report.steps !== null) {
-    const steps = report.steps.toLocaleString('en-AU');
-    parts.push(report.day === todayKey ? `have walked ${steps} steps so far today` : `walked ${steps} steps yesterday`);
-  }
-  if (!parts.length) return '';
-  return `Their phone says they ${parts.join(' and ')}. That is background she may notice if it fits, never a thing to read out.`;
+  {const p=corePolicySync<any>('conversation-inputs.bodyStart',[state,nowMs,todayKey,{at:dateFact(state.last?.at),sleepStart:dateFact(state.last?.sleepStart),sleepEnd:dateFact(state.last?.sleepEnd)}]);if('result' in p)return p.result;return corePolicySync('conversation-inputs.bodyFinish',[p,p.clock.map((ms:number|null)=>clock(ms===null?NaN:ms))]);}
 }

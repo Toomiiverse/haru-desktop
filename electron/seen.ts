@@ -58,14 +58,7 @@ export const CAPTIONS_KEPT = 600;
 export const SHOTS_PER_PASS = 6;
 
 export function readCaptions(saved: unknown): Caption[] {
-  if((true as boolean))return corePolicySync('shot-captions.readCaptions',[saved]);
-  if (!Array.isArray(saved)) return [];
-  return saved.filter((entry): entry is Caption =>
-    Boolean(entry) && typeof entry === 'object'
-    && typeof (entry as Caption).day === 'string'
-    && typeof (entry as Caption).name === 'string'
-    && typeof (entry as Caption).text === 'string'
-    && typeof (entry as Caption).at === 'string');
+  return corePolicySync('shot-captions.readCaptions',[saved]);
 }
 
 const key = (day: string, name: string) => `${day}/${name}`;
@@ -76,20 +69,7 @@ const key = (day: string, name: string) => `${day}/${name}`;
  * sees follows the day as it happened rather than arriving shuffled.
  */
 export function unseenShots(held: Record<string, string[]>, captions: Caption[], limit = SHOTS_PER_PASS, floor: string | null = null): { day: string; name: string }[] {
-  if((true as boolean))return corePolicySync('shot-captions.unseenShots',[held,captions,limit,floor]);
-  const done = new Set(captions
-    .filter(caption => caption.text.trim() || (caption.tries ?? 0) >= MAX_LOOK_TRIES)
-    .map(caption => key(caption.day, caption.name)));
-  const out: { day: string; name: string }[] = [];
-  for (const day of Object.keys(held).sort()) {
-    for (const name of [...(held[day] ?? [])].sort()) {
-      if (floor !== null && key(day, name) < floor) continue;
-      if (done.has(key(day, name))) continue;
-      out.push({ day, name });
-      if (out.length >= limit) return out;
-    }
-  }
-  return out;
+  return corePolicySync('shot-captions.unseenShots',[held,captions,limit,floor]);
 }
 
 /**
@@ -106,22 +86,13 @@ export function unseenShots(held: Record<string, string[]>, captions: Caption[],
  * is one she has already seen, and it is not looked at again.
  */
 export function fallenOff(captions: Caption[]): string | null {
-  if((true as boolean))return corePolicySync('shot-captions.fallenOff',[captions]);
-  if (captions.length < CAPTIONS_KEPT) return null;
-  let oldest: string | null = null;
-  for (const caption of captions) {
-    const at = key(caption.day, caption.name);
-    if (oldest === null || at < oldest) oldest = at;
-  }
-  return oldest;
+  return corePolicySync('shot-captions.fallenOff',[captions]);
 }
 
 /** One caption in, the oldest out once the list is full. A second look at the
  *  same shot replaces the first rather than making a duplicate. */
 export function noteCaption(captions: Caption[], entry: Caption): Caption[] {
-  if((true as boolean))return corePolicySync('shot-captions.noteCaption',[captions,entry]);
-  const without = captions.filter(caption => key(caption.day, caption.name) !== key(entry.day, entry.name));
-  return [...without, entry].slice(-CAPTIONS_KEPT);
+  return corePolicySync('shot-captions.noteCaption',[captions,entry]);
 }
 
 /**
@@ -135,8 +106,7 @@ export function noteCaption(captions: Caption[], entry: Caption): Caption[] {
  * folder is caught up would be 3 GB for nothing.
  */
 export function moreThanOnePass(held: Record<string, string[]>, captions: Caption[], described: Record<string, string[]> = {}): boolean {
-  if((true as boolean))return corePolicySync('shot-captions.moreThanOnePass',[held,captions,described]);
-  return shotsNeedingALook(held, captions, described, SHOTS_PER_PASS + 1).length > SHOTS_PER_PASS;
+  return corePolicySync('shot-captions.moreThanOnePass',[held,captions,described]);
 }
 
 /**
@@ -159,13 +129,7 @@ export function moreThanOnePass(held: Record<string, string[]>, captions: Captio
  * ever bites is to improve the caption where it is written, not to look again.
  */
 export function describedShots(log: Record<string, { shot?: string; description?: string }[]>): Record<string, string[]> {
-  if((true as boolean))return corePolicySync('shot-captions.describedShots',[log]);
-  const out: Record<string, string[]> = {};
-  for (const [day, entries] of Object.entries(log ?? {})) {
-    const named = (entries ?? []).filter(entry => entry?.shot && entry.description?.trim()).map(entry => entry.shot as string);
-    if (named.length) out[day] = named;
-  }
-  return out;
+  return corePolicySync('shot-captions.describedShots',[log]);
 }
 
 /** The next few with nothing said about them, by either machine. */
@@ -181,16 +145,12 @@ export function describedShots(log: Record<string, { shot?: string; description?
  * at them is not hers.
  */
 export function shotsSince(held: Record<string, string[]>, since: string | null | undefined): Record<string, string[]> {
-  if((true as boolean))return corePolicySync('shot-captions.shotsSince',[held,since??null]);
-  if (!since || !/^\d{4}-\d{2}-\d{2}$/.test(since)) return held;
-  return Object.fromEntries(Object.entries(held).filter(([day]) => day >= since));
+  return corePolicySync('shot-captions.shotsSince',[held,since??null]);
 }
 
 /** And any caption she has already written for one of those days, which is the same thing in words. */
 export function captionsSince(captions: Caption[], since: string | null | undefined): Caption[] {
-  if((true as boolean))return corePolicySync('shot-captions.captionsSince',[captions,since??null]);
-  if (!since || !/^\d{4}-\d{2}-\d{2}$/.test(since)) return captions;
-  return captions.filter(caption => caption.day >= since);
+  return corePolicySync('shot-captions.captionsSince',[captions,since??null]);
 }
 
 export function shotsNeedingALook(
@@ -199,33 +159,21 @@ export function shotsNeedingALook(
   described: Record<string, string[]>,
   limit = SHOTS_PER_PASS,
 ): { day: string; name: string }[] {
-  if((true as boolean))return corePolicySync('shot-captions.shotsNeedingALook',[held,captions,described,limit]);
-  // Stand-ins, never stored: they only have to look done to unseenShots, and
-  // "done" there means carrying words. An empty text is what a failed look
-  // leaves behind, which is the opposite of what these are.
-  const theirs: Caption[] = Object.entries(described)
-    .flatMap(([day, names]) => names.map(name => ({ day, name, at: '', text: 'described where it was taken' })));
-  // The floor is drawn from her own captions, before the stand-ins are added:
-  // they are not stored, so they never push anything off the end.
-  return unseenShots(held, [...captions, ...theirs], limit, fallenOff(captions));
+  return corePolicySync('shot-captions.shotsNeedingALook',[held,captions,described,limit]);
 }
 
 /** A look that came to nothing, so the next pass knows it has been here. */
 export function noteFailure(captions: Caption[], day: string, name: string, at: string): Caption[] {
-  if((true as boolean))return corePolicySync('shot-captions.noteFailure',[captions,day,name,at]);
-  const had = captions.find(caption => key(caption.day, caption.name) === key(day, name));
-  return noteCaption(captions, { day, name, at, text: '', tries: (had?.tries ?? 0) + 1 });
+  return corePolicySync('shot-captions.noteFailure',[captions,day,name,at]);
 }
 
 /** What she saw on one day, in the order she saw it. */
 export function captionsFor(captions: Caption[], day: string): Caption[] {
-  if((true as boolean))return corePolicySync('shot-captions.captionsFor',[captions,day]);
-  return captions.filter(caption => caption.day === day && caption.text.trim()).sort((a, b) => a.name.localeCompare(b.name));
+  return corePolicySync('shot-captions.captionsFor',[captions,day]);
 }
 
 /** Captions for days that no longer have shots — dropped alongside them so the
  *  record does not outlive what it describes. */
 export function forgetCaptions(captions: Caption[], cutoffDay: string): Caption[] {
-  if((true as boolean))return corePolicySync('shot-captions.forgetCaptions',[captions,cutoffDay]);
-  return captions.filter(caption => caption.day >= cutoffDay);
+  return corePolicySync('shot-captions.forgetCaptions',[captions,cutoffDay]);
 }

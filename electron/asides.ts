@@ -95,45 +95,29 @@ export const ASK_AGAIN_MS = 2 * 60 * 60_000;
 export const ASK_HELD_MS = 12 * 60 * 60_000;
 
 export function markAsked(asides: Aside[], id: string, asked: string): Aside[] {
-  if((true as boolean))return corePolicySync('asides.markAsked',[asides,id,asked]);
-  return asides.map(aside => (aside.id === id ? { ...aside, asked } : aside));
+  return corePolicySync('asides.markAsked',[asides,id,asked]);
 }
 
 /** The ask a message of theirs would be answering: her latest question about their day, still open. */
 export function openAsk(asides: Aside[], now: number, withinMs = ASK_OPEN_MS): Aside | null {
-  if((true as boolean))return corePolicySync('asides.openAsk',[asides,now,withinMs]);
-  for (let i = asides.length - 1; i >= 0; i--) {
-    const aside = asides[i];
-    if (!aside.asked || aside.answeredAt) continue;
-    const at = Date.parse(aside.at);
-    if (!Number.isFinite(at) || now - at < 0 || now - at > withinMs) continue;
-    return aside;
-  }
-  return null;
+  return corePolicySync('asides.openAsk',[asides,now,withinMs]);
 }
 
 export function answerAsk(asides: Aside[], id: string, at: string): Aside[] {
-  if((true as boolean))return corePolicySync('asides.answerAsk',[asides,id,at]);
-  return asides.map(aside => (aside.id === id ? { ...aside, answeredAt: at } : aside));
+  return corePolicySync('asides.answerAsk',[asides,id,at]);
 }
 
 export function askedRecently(asides: Aside[], now: number, withinMs = ASK_AGAIN_MS): boolean {
-  if((true as boolean))return corePolicySync('asides.askedRecently',[asides,now,withinMs]);
-  return asides.some(aside => aside.asked && Number.isFinite(Date.parse(aside.at)) && now - Date.parse(aside.at) >= 0 && now - Date.parse(aside.at) < withinMs);
+  return corePolicySync('asides.askedRecently',[asides,now,withinMs]);
 }
 
 /** The asks they left hanging, for her to hold over them. */
 export function unansweredAsks(asides: Aside[], now: number, withinMs = ASK_HELD_MS): Aside[] {
-  if((true as boolean))return corePolicySync('asides.unansweredAsks',[asides,now,withinMs]);
-  return asides.filter(aside => aside.asked && !aside.answeredAt && Number.isFinite(Date.parse(aside.at)) && now - Date.parse(aside.at) > ASK_OPEN_MS && now - Date.parse(aside.at) < withinMs);
+  return corePolicySync('asides.unansweredAsks',[asides,now,withinMs]);
 }
 
 export function unansweredAsksNote(asides: Aside[], timeZone: string, now: number): string {
-  if((true as boolean))return corePolicySync('asides.unansweredAsksNote',[asides,timeZone,now]);
-  const hanging = unansweredAsks(asides, now);
-  if (!hanging.length) return '';
-  const lines = hanging.slice(-3).map(aside => `at ${clock(aside.at, timeZone)} you asked ${aside.asked} and heard nothing back`);
-  return `Left unanswered: ${lines.join('; ')}. That silence is yours to hold over them, in your way — but do not ask the same question again word for word.`;
+  return corePolicySync('asides.unansweredAsksNote',[asides,timeZone,now]);
 }
 
 /** Enough to scroll back through a few days of her, and a bound on the file. */
@@ -151,51 +135,16 @@ export const ASIDE_DAYS = 7;
 const SOURCES: AsideSource[] = ['screen', 'screenshot', 'activity', 'fullscreen', 'reminder', 'idle', 'journal', 'page', 'poke', 'kept', 'system', 'hanging', 'weather', 'upcoming', 'other', 'followup', 'goodnight', 'booked', 'thought', 'minecraft', 'anime'];
 
 export function readAsides(saved: unknown): Aside[] {
-  if((true as boolean)){const count=corePolicySync<number>('asides.missingIds',[saved]);return corePolicySync('asides.read',[saved,Array.from({length:count},()=>Math.random().toString(36).slice(2,10))]);}
-  if (!Array.isArray(saved)) return [];
-  return saved
-    .filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === 'object')
-    .filter(entry => typeof entry.text === 'string' && entry.text.trim())
-    .map(entry => ({
-      id: typeof entry.id === 'string' ? entry.id : Math.random().toString(36).slice(2, 10),
-      at: typeof entry.at === 'string' ? entry.at : '',
-      day: typeof entry.day === 'string' ? entry.day : '',
-      source: SOURCES.includes(entry.source as AsideSource) ? entry.source as AsideSource : 'other',
-      text: String(entry.text).trim(),
-      ...(typeof entry.reached === 'boolean' ? { reached: entry.reached } : {}),
-      ...(typeof entry.asked === 'string' && entry.asked ? { asked: entry.asked } : {}),
-      ...(typeof entry.about === 'string' && entry.about ? { about: entry.about } : {}),
-      ...(typeof entry.nudgeTopic === 'string' && entry.nudgeTopic ? { nudgeTopic: entry.nudgeTopic } : {}),
-      ...(NUDGE_KINDS.includes(entry.nudgeKind as NudgeKind) ? { nudgeKind: entry.nudgeKind as NudgeKind } : {}),
-      ...(['more', 'less', 'discussed'].includes(entry.nudgeFeedback as string) ? { nudgeFeedback: entry.nudgeFeedback as NudgePreference } : {}),
-      ...(Array.isArray(entry.nudgeKeywords) ? { nudgeKeywords: entry.nudgeKeywords.filter((word): word is string => typeof word === 'string').slice(0, 18) } : {}),
-      ...(typeof entry.nudgeEvent === 'string' ? { nudgeEvent: entry.nudgeEvent.slice(0, 300) } : {}),
-      ...(typeof entry.nudgeEventAt === 'string' ? { nudgeEventAt: entry.nudgeEventAt } : {}),
-      ...(NUDGE_TONES.includes(entry.nudgeTone as NudgeTone) ? { nudgeTone: entry.nudgeTone as NudgeTone } : {}),
-      ...(typeof entry.answeredAt === 'string' && entry.answeredAt ? { answeredAt: entry.answeredAt } : {}),
-    }));
+  {const count=corePolicySync<number>('asides.missingIds',[saved]);return corePolicySync('asides.read',[saved,Array.from({length:count},()=>Math.random().toString(36).slice(2,10))]);}
 }
 
 /** Records whether one of them got to the phone. See Aside.reached. */
 export function markReached(asides: Aside[], id: string, reached: boolean): Aside[] {
-  if((true as boolean))return corePolicySync('asides.markReached',[asides,id,reached]);
-  return asides.map(aside => (aside.id === id ? { ...aside, reached } : aside));
+  return corePolicySync('asides.markReached',[asides,id,reached]);
 }
 
 export function addAside(asides: Aside[], text: string, source: AsideSource, now: Date, day: string, about = '', nudgeTopic = '', nudgeKind?: NudgeKind, detail: Pick<Aside, 'nudgeKeywords' | 'nudgeEvent' | 'nudgeEventAt' | 'nudgeTone'> = {}): { asides: Aside[]; aside: Aside } {
-  if((true as boolean))return corePolicySync('asides.add',[asides,text,source,now.toISOString(),day,about,nudgeTopic,nudgeKind,detail,Math.random().toString(36).slice(2,10)]);
-  const aside: Aside = {
-    ...detail,
-    id: Math.random().toString(36).slice(2, 10),
-    at: now.toISOString(),
-    day,
-    source,
-    text: text.trim(),
-    ...(about.trim() ? { about: about.trim() } : {}),
-    ...(nudgeTopic.trim() ? { nudgeTopic: nudgeTopic.trim() } : {}),
-    ...(nudgeKind ? { nudgeKind } : {}),
-  };
-  return { asides: [...asides, aside].slice(-MAX_ASIDES), aside };
+  return corePolicySync('asides.add',[asides,text,source,now.toISOString(),day,about,nudgeTopic,nudgeKind,detail,Math.random().toString(36).slice(2,10)]);
 }
 
 /**
@@ -207,14 +156,11 @@ export function addAside(asides: Aside[], text: string, source: AsideSource, now
  * unit it forgets in.
  */
 export function pruneAsides(asides: Aside[], days = ASIDE_DAYS): Aside[] {
-  if((true as boolean))return corePolicySync('asides.prune',[asides,days]);
-  const kept = new Set([...new Set(asides.map(aside => aside.day).filter(Boolean))].sort().slice(-days));
-  return asides.filter(aside => !aside.day || kept.has(aside.day));
+  return corePolicySync('asides.prune',[asides,days]);
 }
 
 export function asidesOn(asides: Aside[], day: string): Aside[] {
-  if((true as boolean))return corePolicySync('asides.on',[asides,day]);
-  return asides.filter(aside => aside.day === day);
+  return corePolicySync('asides.on',[asides,day]);
 }
 
 /**
@@ -243,28 +189,7 @@ const ASIDE_CONTEXT_LIMIT = 3;
  * her still discussing a screenshot the following afternoon.
  */
 export function asideContext(asides: Aside[], now: number): string {
-  if((true as boolean))return corePolicySync('asides.context',[asides,now]);
-  const recent = asides
-    .filter(aside => {
-      const at = Date.parse(aside.at);
-      return Number.isFinite(at) && now - at >= 0 && now - at < ASIDE_CONTEXT_MS;
-    })
-    .slice(-ASIDE_CONTEXT_LIMIT);
-  if (!recent.length) return '';
-  const lines = recent.map(aside => {
-    const minutes = Math.round((now - Date.parse(aside.at)) / 60_000);
-    const when = minutes < 1 ? 'just now' : `${minutes} minute${minutes === 1 ? '' : 's'} ago`;
-    // What it was about, when it was about something: asked "what's this
-    // about?" two minutes after chasing a task, she answered from the
-    // conversation instead and named the wrong thing entirely.
-    const about = aside.about ? ` — that was you chasing "${aside.about}" off their list` : '';
-    return `${when}: "${aside.text.replace(/\s+/g, ' ').slice(0, 300)}"${about}`;
-  });
-  return [
-    'You said this to them yourself a moment ago, unprompted. It is not written in the conversation below, but they heard it:',
-    lines.join('\n'),
-    'If what they have just said is an answer to it, take it as one. If they are asking what you meant by it — "what plan?", "what are you on about?", "what\'s this about?" — say plainly what it was and where it came from, in a sentence, using what is written above rather than guessing from the conversation; do not expand it into a plan, a list or a task, and do not act on it. If it is neither, leave it alone — do not repeat any of it, do not bring it up again, and do not treat it as something they raised.',
-  ].join('\n');
+  return corePolicySync('asides.context',[asides,now]);
 }
 
 /** The clock, in the user's zone, because "11:40" is how a log is read back. */
@@ -294,44 +219,7 @@ const CLOCK_STAMP_OPENING = /^\s*\d{1,2}(?::\d{2})?\s*(?:am|pm)?\s*[—–-]/i;
 const bare = (text: string) => text.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ').replace(/\s+/g, ' ').trim();
 
 export function alreadySaidRecently(asides: Aside[], timeZone: string, now: number, theirLastAt?: number, limit = ALREADY_SAID_LIMIT, subjectNow?: string): string {
-  if((true as boolean))return corePolicySync('asides.alreadySaid',[asides,timeZone,now,theirLastAt,limit,subjectNow]);
-  const said = asides
-    .filter(aside => {
-      const at = Date.parse(aside.at);
-      return Number.isFinite(at) && now - at >= 0 && now - at < ALREADY_SAID_MS;
-    })
-    .slice(-limit);
-  if (!said.length) return '';
-  const line = (aside: Aside) => `${clock(aside.at, timeZone)} — "${aside.text.replace(/\s+/g, ' ').slice(0, 200)}"`;
-  // "They went unanswered" was said of every line on the list, including the
-  // ones they had long since come back and talked past. Told at half nine that
-  // "text me when you've finished chewing" went unanswered — with "I'm back
-  // home, it was a good dinner" sitting in the conversation from an hour
-  // before — she asked whether he was still eating the steak. A remark made
-  // before their last message is not waiting on anything; only what she has
-  // said since they last spoke is.
-  const spokenSince = (aside: Aside) => theirLastAt !== undefined && Number.isFinite(theirLastAt) && Date.parse(aside.at) <= theirLastAt;
-  const overtaken = said.filter(spokenSince);
-  const hanging = said.filter(aside => !spokenSince(aside));
-  return [
-    overtaken.length ? [
-      'You have already said these, off your own back, before they last spoke to you. They are not in the conversation because nobody said them to you — they were remarks, and the conversation has moved on since: whatever they were waiting on has been overtaken by what they have told you, and none of them says anything about what they are doing now.',
-      overtaken.map(line).join('\n'),
-    ].join('\n') : '',
-    hanging.length ? [
-      'You have already said these, off your own back, since they last spoke. They are not in the conversation because nobody said them to you — they were remarks, and they went unanswered:',
-      hanging.map(line).join('\n'),
-    ].join('\n') : '',
-    // "The weather" is named here as an example of a closed subject, which is
-    // true of a remark she already made and false of the one thing she has been
-    // woken up to say. In a weather push both fired at once — "rain is your
-    // reason for writing" at the top, "the weather is closed" at the bottom —
-    // and what came out was 20% rain and 80% another jab about being left on
-    // read (2026-09-20). Whatever she is writing about now is not closed.
-    subjectNow
-      ? `Do not make any of these points again, and do not open on a subject you have already remarked on. The subjects of those remarks — the time, whatever they were about — are closed: do not raise them again in any form, however fresh they look in the conversation. ${subjectNow} is the exception: it is what you have been prompted to write about this time, and it is not on that list.`
-      : 'Do not make any of these points again, and do not open on a subject you have already remarked on. The subjects of those remarks — the weather, the time, whatever they were about — are closed: do not raise them again in any form, however fresh they look in the conversation.',
-  ].filter(Boolean).join('\n');
+  return corePolicySync('asides.alreadySaid',[asides,timeZone,now,theirLastAt,limit,subjectNow]);
 }
 
 /** The text of a line, with the trappings of a copied log row taken off. */
@@ -353,15 +241,7 @@ function asideEchoText(line: string): string {
  * underneath can be compared with what she has already said.
  */
 export function echoesAside(line: string, asides: Aside[], now: number): boolean {
-  if((true as boolean))return corePolicySync('asides.echoes',[line,asides,now]);
-  const candidate = asideEchoText(line);
-  if (!candidate) return false;
-  return asides.some(aside => {
-    const at = Date.parse(aside.at);
-    if (!Number.isFinite(at) || now - at < 0 || now - at > ALREADY_SAID_MS) return false;
-    const said = asideEchoText(aside.text);
-    return Boolean(said) && (candidate === said || candidate.includes(said) || said.includes(candidate));
-  });
+  return corePolicySync('asides.echoes',[line,asides,now]);
 }
 
 // -- a notification he answers is the conversation ------------------------------
@@ -383,35 +263,10 @@ export function echoesAside(line: string, asides: Aside[], now: number): boolean
  * not come back as though it were hanging in the air.
  */
 export function spliceRecentAsides<T extends { role: string; content: string; at?: string }>(messages: T[], asides: Aside[], now: number): { messages: T[]; spliced: Aside[] } {
-  if((true as boolean))return corePolicySync('asides.splice',[messages,asides,now]);
-  const last = messages.at(-1);
-  if (!last || last.role !== 'user') return { messages, spliced: [] };
-  const before = Date.parse(messages.at(-2)?.at ?? '');
-  const theirs = Date.parse(last.at ?? '');
-  const flat = (text: string) => text.toLowerCase().replace(/\s+/g, ' ').trim();
-  const said = new Set(messages.slice(-8).filter(message => message.role === 'assistant').map(message => flat(message.content)));
-  const spliced = asides
-    .filter(aside => {
-      const at = Date.parse(aside.at);
-      if (!Number.isFinite(at) || now - at < 0 || now - at >= ASIDE_CONTEXT_MS) return false;
-      if (Number.isFinite(before) && at <= before) return false;
-      if (Number.isFinite(theirs) && at > theirs) return false;
-      return !said.has(flat(aside.text));
-    })
-    .slice(-ASIDE_CONTEXT_LIMIT);
-  if (!spliced.length) return { messages, spliced: [] };
-  const hers = spliced.map(aside => ({ role: 'assistant', content: aside.text, at: aside.at }) as unknown as T);
-  return { messages: [...messages.slice(0, -1), ...hers, last], spliced };
+  return corePolicySync('asides.splice',[messages,asides,now]);
 }
 
 /** What she is told about the lines that were spliced in: follow the thread. */
 export function splicedAsidesNote(spliced: Aside[]): string {
-  if((true as boolean))return corePolicySync('asides.splicedNote',[spliced]);
-  if (!spliced.length) return '';
-  const about = spliced.filter(aside => aside.about).map(aside => `"${aside.text.replace(/\s+/g, ' ').slice(0, 80)}" was you chasing "${aside.about}" off their list`);
-  return [
-    `The last ${spliced.length === 1 ? 'thing' : `${spliced.length} things`} you said in the conversation below ${spliced.length === 1 ? 'was a line' : 'were lines'} you sent them unprompted — a notification on their phone — and what they have just written is most likely their answer to it.`,
-    'Follow that thread: answer what they said about it. Do not say the line again, do not start on something else, and if they ask whether it was true, say honestly whether it was.',
-    about.length ? `(${about.join('; ')}.)` : '',
-  ].filter(Boolean).join(' ');
+  return corePolicySync('asides.splicedNote',[spliced]);
 }

@@ -47,27 +47,7 @@ function shiftDays(key: string, days: number): string {
  * how "Dark Souls guide" becomes "Dark Souls Capra Demon guide".
  */
 export function gamesPlayedLately(log: ActivityLog, todayKey: string, days = PLAYED_WINDOW_DAYS): Played[] {
-  if((true as boolean))return corePolicySync<Played[]>('game-guide.playedLately',[log,todayKey,days]);
-  const from = shiftDays(todayKey, -days);
-  const byName = new Map<string, Played>();
-  for (const [day, entries] of Object.entries(log ?? {})) {
-    if (day < from || day > todayKey) continue;
-    const stretches = (entries ?? []).filter(entry => entry.kind === 'gaming' && entry.label?.trim());
-    for (const entry of stretches) {
-      const played = byName.get(entry.label) ?? { name: entry.label, minutes: 0, seen: [] };
-      played.minutes += minutesOf(entry);
-      byName.set(entry.label, played);
-    }
-    for (const entry of entries ?? []) {
-      if (!entry.shot || !entry.description?.trim()) continue;
-      const at = Date.parse(entry.at);
-      const during = stretches.find(stretch => at >= Date.parse(stretch.at) && at <= Date.parse(stretch.until) + 60_000);
-      if (!during) continue;
-      const played = byName.get(during.label);
-      if (played && played.seen.length < 3) played.seen.push(entry.description.trim().slice(0, 160));
-    }
-  }
-  return [...byName.values()].filter(played => played.minutes >= 10).sort((a, b) => b.minutes - a.minutes);
+  return corePolicySync<Played[]>('game-guide.playedLately',[log,todayKey,days]);
 }
 
 export type SteamRecent = { name: string; minutesLastFortnight: number };
@@ -81,26 +61,12 @@ const NOT_GAMES = /^(wallpaper engine|steamvr|steam link|blender|aseprite|source
 
 /** "Overwatch®" is not what anyone types into a search box. */
 export function plainName(name: string): string {
-  if((true as boolean))return corePolicySync<string>('game-guide.plainName',[name]);
-  return name.replace(/[®™©]/g, '').replace(/\s+/g, ' ').trim();
+  return corePolicySync<string>('game-guide.plainName',[name]);
 }
 
 /** The desk's record and Steam's, as one list. Steam fills in what the desk never saw. */
 export function withSteam(played: Played[], steam: SteamRecent[]): Played[] {
-  if((true as boolean))return corePolicySync<Played[]>('game-guide.withSteam',[played,steam]);
-  const out = played.map(entry => ({ ...entry, name: plainName(entry.name) }));
-  for (const recent of steam) {
-    const name = plainName(recent.name ?? '');
-    if (!name || recent.minutesLastFortnight < 30 || NOT_GAMES.test(name)) continue;
-    const known = out.find(entry => entry.name.toLowerCase() === name.toLowerCase());
-    if (known) known.steamMinutes = recent.minutesLastFortnight;
-    else out.push({ name, minutes: 0, steamMinutes: recent.minutesLastFortnight, seen: [] });
-  }
-  // Three days of the desk's record against a fortnight of Steam's: compared
-  // as minutes a day, so a game they are in every evening outranks one they
-  // put ten hours into a week ago.
-  const rate = (entry: Played) => Math.max(entry.minutes / PLAYED_WINDOW_DAYS, (entry.steamMinutes ?? 0) / 14);
-  return out.sort((a, b) => rate(b) - rate(a));
+  return corePolicySync<Played[]>('game-guide.withSteam',[played,steam]);
 }
 
 /**
@@ -108,10 +74,7 @@ export function withSteam(played: Played[], steam: SteamRecent[]): Played[] {
  * the last few nights. Null means the night is hers to spend on anything.
  */
 export function pickGame(played: Played[], nights: Night[], todayKey: string): Played | null {
-  if((true as boolean))return corePolicySync<Played|null>('game-guide.pickGame',[played,nights,todayKey]);
-  const restFrom = shiftDays(todayKey, -GUIDE_REST_NIGHTS);
-  const readLately = new Set(nights.filter(night => night.game && night.day >= restFrom).map(night => night.game!.toLowerCase()));
-  return played.find(entry => !readLately.has(entry.name.toLowerCase())) ?? null;
+  return corePolicySync<Played|null>('game-guide.pickGame',[played,nights,todayKey]);
 }
 
 /**
@@ -120,38 +83,19 @@ export function pickGame(played: Played[], nights: Night[], todayKey: string): P
  * guide, and a game she has read about before gets a different angle.
  */
 export function guideQuery(game: Played, nights: Night[]): string {
-  if((true as boolean))return corePolicySync<string>('game-guide.guideQuery',[game,nights]);
-  const before = nights.filter(night => night.game?.toLowerCase() === game.name.toLowerCase()).length;
-  const hint = game.seen.map(specificThing).find(Boolean);
-  if (hint) return `${game.name} ${hint} guide`;
-  const angles = ['beginner guide tips', 'walkthrough guide', 'tips and tricks', 'best build guide', 'things I wish I knew'];
-  return `${game.name} ${angles[before % angles.length]}`;
+  return corePolicySync<string>('game-guide.guideQuery',[game,nights]);
 }
 
 /** A proper noun or two out of a caption, if it has one worth searching. */
 export function specificThing(caption: string): string | null {
-  if((true as boolean))return corePolicySync<string|null>('game-guide.specificThing',[caption]);
-  // Up to four capitalised words, allowing a small connector between them —
-  // "Margit the Fell Omen", "Lake of Rot" — and never starting on one.
-  const names = caption.match(/\b[A-Z][a-z]+(?:\s+(?:(?:of|the|de)\s+)?[A-Z][a-z]+){0,3}\b/g) ?? [];
-  const useful = names.map(name => name.trim()).filter(name => !STOPNAMES.has(name.toLowerCase()) && name.length > 3);
-  return useful[0] ?? null;
+  return corePolicySync<string|null>('game-guide.specificThing',[caption]);
 }
 
 const STOPNAMES = new Set(['the', 'a', 'an', 'this', 'that', 'there', 'screenshot', 'screen', 'window', 'menu', 'the screen', 'the game', 'game', 'player', 'the player', 'text', 'button', 'image']);
 
 /** What she is told with the guide in front of her. */
 export function guideNoteInstruction(game: Played, query: string, found: string): string {
-  if((true as boolean))return corePolicySync<string>('game-guide.instruction',[game,query,found]);
-  const how = game.minutes >= 60 ? `${Math.round(game.minutes / 60)} hours over the last few days` : game.minutes ? `${game.minutes} minutes lately` : game.steamMinutes ? `${Math.round(game.steamMinutes / 60)} hours in the last fortnight` : 'lately';
-  const seen = game.seen.length ? `You have seen their screenshots from it: ${game.seen.map(text => `"${text}"`).join('; ')}.` : '';
-  return [
-    `They have been playing ${game.name} — ${how}. ${seen} While they slept you went and read about it ("${query}") — not to help them with it, but to have a view of it, since it is what they are spending their time on. This is what you found, and it is everything you know about the game:`,
-    found,
-    'Write two or three sentences, as yourself, first person, past tense: what you make of it. Is it any good? Would you rate it, or is it beneath the things you are into? If their screenshots show them making a hash of it, you may say so. Have an opinion you could defend.',
-    'Only what is above. Do not add anything about the game you happen to remember, do not invent a mechanic or a boss to make a better point, and do not say you played it — you read a guide, which is all you did.',
-    'No preamble, no addressing them, no questions. A note to yourself.',
-  ].filter(Boolean).join('\n');
+  return corePolicySync<string>('game-guide.instruction',[game,query,found]);
 }
 
 /** Supply only the conditional entropy requested by Core. No local selection. */

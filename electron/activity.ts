@@ -47,33 +47,7 @@ function cleanTitle(title: string) {
 }
 
 export function readActivity(processName: string, windowTitle: string): Activity {
- if((true as boolean))return devicePolicy('readActivity',[processName,windowTitle]);
-  const process = (processName ?? '').replace(/\.exe$/i, '').trim();
-  const title = cleanTitle(windowTitle ?? '');
-
-  // Checked first so nothing below can claim the page, but the title travels
-  // with it like any other: she is meant to know what she is looking at. That is
-  // a deliberate choice on the owner's part and it holds only because everything
-  // here stays on this machine — nothing is sent anywhere, and the model reading
-  // it is running locally.
-  if (ADULT.test(title)) return { kind: 'adult', label: title };
-
-  if (GAME_PROCESSES.test(process)) return { kind: 'gaming', label: process };
-  if (CODE_PROCESSES.test(process)) return { kind: 'coding', label: title || process };
-
-  if (BROWSERS.test(process)) {
-    if (WATCHING.test(title)) return { kind: 'watching', label: title };
-    if (WORKING.test(title)) return { kind: 'working', label: title };
-    if (CODING.test(title)) return { kind: 'coding', label: title };
-    if (SOCIAL.test(title)) return { kind: 'social', label: title };
-    if (SHOPPING.test(title)) return { kind: 'shopping', label: title };
-    return { kind: 'other', label: title };
-  }
-
-  // A full-screen game usually reports its own name and nothing helpful, so an
-  // unknown process with no browser furniture is more likely a game than a tab.
-  if (WORKING.test(title)) return { kind: 'working', label: title };
-  return { kind: 'other', label: title || process };
+ return devicePolicy('readActivity',[processName,windowTitle]);
 }
 
 const REACTIONS: Record<ActivityKind, string> = {
@@ -112,20 +86,11 @@ const TOOL_TITLE = /^(snipping tool|screen ?snip|screen ?sketch|snip & sketch|ta
  * something they have opened, it is something passing across the screen.
  */
 export function isJustATool(processName: string, windowTitle: string): boolean {
- if((true as boolean))return devicePolicy('isJustATool',[processName,windowTitle]);
-  const process = (processName ?? '').replace(/\.exe$/i, '').trim();
-  const title = (windowTitle ?? '').trim();
-  if (A_TOOL.test(process)) return true;
-  if (TOOL_TITLE.test(title)) return true;
-  // Nothing to go on. A window with neither a name nor a recognisable process is
-  // an overlay or a stray frame, and she has nothing to say about it that is not
-  // invented.
-  return !title && !process;
+ return devicePolicy('isJustATool',[processName,windowTitle]);
 }
 
 export function activityInstruction(activity: Activity): string {
- if((true as boolean))return devicePolicy('activityInstruction',[activity]);
-  return REACTIONS[activity.kind] ?? '';
+ return devicePolicy('activityInstruction',[activity]);
 }
 
 /**
@@ -137,6 +102,5 @@ export function activityInstruction(activity: Activity): string {
  * pages would simply be filed as ordinary browsing and remembered as such.
  */
 export function isNotable(activity: Activity): boolean {
- if((true as boolean))return devicePolicy('isNotable',[activity]);
-  return activity.kind !== 'other' && activity.kind !== 'adult';
+ return devicePolicy('isNotable',[activity]);
 }

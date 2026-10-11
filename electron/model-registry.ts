@@ -58,12 +58,7 @@ const finite = (value: unknown): value is number => typeof value === 'number' &&
 
 /** Only the local Ollama process qualifies for the no-export/no-cloud-cost path. */
 export function isLocalConfig(config: ProviderConfig): boolean {
-  if((true as boolean))return routePolicy('local',[config]);
-  if (config.provider !== 'ollama') return false;
-  try {
-    const url = new URL(config.endpoint);
-    return ['http:', 'https:'].includes(url.protocol) && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
-  } catch { return false; }
+  return routePolicy('local',[config]);
 }
 
 function providerConfig(value: unknown): ProviderConfig | undefined {
@@ -128,71 +123,12 @@ function capabilities(value: unknown, fallback?: ModelCapabilities): ModelCapabi
  * Persisted shape: { entries: [{ id, role, config, capabilities, pricing }] }.
  */
 export function readModelRegistry(saved: unknown, seeds: RegistrySeeds): ModelEntry[] {
-  if((true as boolean))return routePolicy('registry',[saved,seeds,Date.now()]);
-  const entries = new Map<string, ModelEntry>();
-  function seed(role: ModelRole, value: Seed | null | undefined, image = false) {
-    const config = providerConfig(value);
-    if (!config) return;
-    const local = isLocalConfig(config);
-    if ((role === 'everyday' || role === 'local-perception') && !local) return;
-    const caps = capabilities(value?.capabilities, { text: true, image, tools: role !== 'local-perception', contextWindow: 32_768, maxOutputTokens: 4_096 });
-    if (!caps) return;
-    entries.set(role, { id: role, role, config, local, enabled: value?.enabled !== false, capabilities: caps, pricing: local ? { inputUsdPerMillion: 0, outputUsdPerMillion: 0 } : readPricing(value?.pricing) });
-  }
-  const vision = seeds.vision;
-  const localSees = vision?.enabled === true && vision.model === seeds.local.model && (!vision.endpoint || vision.endpoint.replace(/\/+$/, '') === seeds.local.endpoint.replace(/\/+$/, ''));
-  seed('everyday', seeds.local, localSees);
-  seed('specialist', seeds.specialist);
-  seed('conversation', seeds.conversation);
-  if (vision?.enabled && vision.model.trim()) seed('local-perception', {
-    provider: 'ollama', model: vision.model, endpoint: vision.endpoint || seeds.local.endpoint,
-    temperature: seeds.local.temperature, capabilities: vision.capabilities,
-  }, true);
-
-  const source = Array.isArray(saved) ? saved : record(saved).entries;
-  if (!Array.isArray(source)) return [...entries.values()];
-  for (const raw of source) {
-    const item = record(raw);
-    if (typeof item.id !== 'string' || !/^[a-zA-Z0-9_.:-]{1,100}$/.test(item.id)) continue;
-    const previous = entries.get(item.id);
-    const role = item.role ?? previous?.role;
-    if (typeof role !== 'string' || !ROLES.includes(role as ModelRole)) continue;
-    if (item.id === 'everyday' && role !== 'everyday') continue;
-    const config = providerConfig(item.config ?? previous?.config);
-    if (!config) continue;
-    const local = isLocalConfig(config);
-    if ((role === 'everyday' || role === 'local-perception') && !local) continue;
-    // Capabilities/pricing cannot silently transfer to a different deployment.
-    const sameDeployment = previous && previous.config.provider === config.provider && previous.config.model === config.model && previous.config.endpoint === config.endpoint;
-    const caps = capabilities(item.capabilities, sameDeployment ? previous.capabilities : undefined);
-    if (!caps) continue;
-    const observation = record(item.observed);
-    const observed = integer(observation.attempts, 1) && integer(observation.successes) && observation.successes <= observation.attempts
-      ? { attempts: observation.attempts, successes: observation.successes } : undefined;
-    const verified = item.pricingVerifiedAt;
-    const stale = typeof verified === 'number' && (Date.now() - verified > 86_400_000 || verified > Date.now() + 60_000);
-    const price = stale ? null : Object.hasOwn(item, 'pricing') ? readPricing(item.pricing) : sameDeployment ? previous.pricing : null;
-    entries.set(item.id, {
-      id: item.id, role: role as ModelRole, config, local, enabled: typeof item.enabled === 'boolean' ? item.enabled : previous?.enabled ?? true,
-      capabilities: caps, pricing: local ? { inputUsdPerMillion: 0, outputUsdPerMillion: 0 } : price,
-      ...(observed ? { observed } : {}),
-    });
-  }
-  return [...entries.values()];
+  return routePolicy('registry',[saved,seeds,Date.now()]);
 }
 
 /** The approved caps are defaults; zero explicitly disables automatic cloud spend. */
 export function readTaskPolicy(saved: unknown): TaskPolicy {
-  if((true as boolean))return routePolicy('taskPolicy',[saved]);
-  const item = record(saved);
-  const bounded = (key: keyof TaskPolicy, minimum: number, maximum: number): number => integer(item[key], minimum) && (item[key] as number) <= maximum ? item[key] as number : DEFAULT_TASK_POLICY[key] as number;
-  return {
-    enabled: item.enabled !== false,
-    taskBudgetMicros: bounded('taskBudgetMicros', 0, Number.MAX_SAFE_INTEGER),
-    dailyBudgetMicros: bounded('dailyBudgetMicros', 0, Number.MAX_SAFE_INTEGER),
-    maxAttempts: bounded('maxAttempts', 1, 100), maxToolCalls: bounded('maxToolCalls', 0, 100),
-    deadlineMs: bounded('deadlineMs', 1_000, 3_600_000), maxEscalations: bounded('maxEscalations', 0, 1),
-  };
+  return routePolicy('taskPolicy',[saved]);
 }
 
 export type ReservationEstimate = { inputTokens: number; maxOutputTokens: number; costMicros: number };
@@ -210,76 +146,16 @@ export type ReservationEstimate = { inputTokens: number; maxOutputTokens: number
  * re-measuring the same text. Measured once, then handed to each entry.
  */
 export function measureRequest(conversation: readonly ChatMessage[], toolSchema?: readonly unknown[]): { inputTokens: number; imageCount: number } {
-  if((true as boolean))return routePolicy('measure',[conversation,toolSchema]);
-  let inputTokens = 64;
-  let imageCount = 0;
-  for (const message of conversation) {
-    const { images, ...text } = message;
-    inputTokens += Buffer.byteLength(JSON.stringify(text), 'utf8') + 32;
-    imageCount += images?.length ?? 0;
-  }
-  if (toolSchema?.length) inputTokens += Buffer.byteLength(JSON.stringify(toolSchema), 'utf8') + 1024 + toolSchema.length * 64;
-  return { inputTokens, imageCount };
+  return routePolicy('measure',[conversation,toolSchema]);
 }
 
 export function estimateReservation(entry: ModelEntry, conversation: readonly ChatMessage[], maxOutputTokens = entry.capabilities.maxOutputTokens, toolSchema?: readonly unknown[], measured?: { inputTokens: number; imageCount: number }): ReservationEstimate | undefined {
-  if((true as boolean))return routePolicy<ReservationEstimate|null>('estimate',[entry,conversation,maxOutputTokens,toolSchema,measured])??undefined;
-  if (!integer(maxOutputTokens, 1) || maxOutputTokens > entry.capabilities.maxOutputTokens || !entry.capabilities.text) return undefined;
-  if (!entry.local && !entry.pricing) return undefined;
-  if (toolSchema?.length && !entry.capabilities.tools) return undefined;
-  let inputTokens = 64;
-  let imageCount = 0;
-  if (measured) {
-    inputTokens = measured.inputTokens;
-    imageCount = measured.imageCount;
-  } else {
-    try {
-      const m = measureRequest(conversation, toolSchema);
-      inputTokens = m.inputTokens;
-      imageCount = m.imageCount;
-    } catch { return undefined; }
-  }
-  if (imageCount && !entry.capabilities.image) return undefined;
-  const availableInput = entry.capabilities.contextWindow - maxOutputTokens;
-  if (inputTokens > availableInput) return undefined;
-  if (imageCount) inputTokens = entry.capabilities.imageTokens ? inputTokens + imageCount * entry.capabilities.imageTokens : availableInput;
-  if (!Number.isSafeInteger(inputTokens) || inputTokens > availableInput) return undefined;
-  const price = entry.pricing?.extended && inputTokens > entry.pricing.extended.aboveInputTokens ? entry.pricing.extended : entry.pricing;
-  // USD per million tokens * token count is exactly microUSD before rounding.
-  const costMicros = entry.local ? 0 : Math.ceil(inputTokens * Math.max(price!.inputUsdPerMillion, price!.cachedInputUsdPerMillion ?? 0, price!.uncachedInputUsdPerMillion ?? 0, price!.cacheWriteInputUsdPerMillion ?? 0, price!.cacheWrite1hInputUsdPerMillion ?? 0) + maxOutputTokens * price!.outputUsdPerMillion);
-  return Number.isSafeInteger(costMicros) ? { inputTokens, maxOutputTokens, costMicros } : undefined;
+  return routePolicy<ReservationEstimate|null>('estimate',[entry,conversation,maxOutputTokens,toolSchema,measured])??undefined;
 }
 
 /** Missing usage must retain the reservation rather than settle as a free call. */
 export function usageCost(entry: ModelEntry, value: unknown, format: 'openai' | 'anthropic' = 'openai'): number | undefined {
-  if((true as boolean))return routePolicy<number|null>('usageCost',[entry,value,format])??undefined;
-  if (entry.local) return 0;
-  if (!entry.pricing) return undefined;
-  const usage = record(value);
-  const input = usage.prompt_tokens ?? usage.prompt_eval_count ?? usage.input_tokens;
-  const output = usage.completion_tokens ?? usage.eval_count ?? usage.output_tokens;
-  if (!integer(input) || !integer(output)) return undefined;
-  const details = record(usage.prompt_tokens_details ?? usage.input_tokens_details);
-  const cached = details.cached_tokens ?? usage.cache_read_input_tokens ?? usage.prompt_cache_hit_tokens ?? 0;
-  const written = details.cache_write_tokens ?? usage.cache_creation_input_tokens ?? 0;
-  const cache = record(usage.cache_creation);
-  const longWrite = cache.ephemeral_1h_input_tokens ?? 0;
-  if (![cached, written, longWrite].every(n => integer(n)) || (longWrite as number) > (written as number)) return undefined;
-  const read = cached as number, write = written as number, hour = longWrite as number;
-  if (cache.ephemeral_5m_input_tokens !== undefined && (!integer(cache.ephemeral_5m_input_tokens) || cache.ephemeral_5m_input_tokens + hour !== write)) return undefined;
-  // Native Anthropic input excludes cache tokens; OpenAI-compatible input includes them.
-  const totalInput = format === 'anthropic' ? input + read + write : input;
-  if (!Number.isSafeInteger(totalInput) || read + write > totalInput) return undefined;
-  if (usage.total_tokens !== undefined && (!integer(usage.total_tokens) || usage.total_tokens !== totalInput + output)) return undefined;
-  // Hosted tools carry fees outside token pricing; retain the reservation if encountered.
-  if (Object.values(record(usage.server_tool_use)).some(n => n !== 0)) return undefined;
-  const pricing = entry.pricing.extended && totalInput > entry.pricing.extended.aboveInputTokens ? entry.pricing.extended : entry.pricing;
-  const base = pricing.uncachedInputUsdPerMillion ?? pricing.inputUsdPerMillion;
-  const writeRate = pricing.cacheWriteInputUsdPerMillion ?? pricing.inputUsdPerMillion;
-  const cost = Math.ceil((totalInput - read - write) * base + read * (pricing.cachedInputUsdPerMillion ?? pricing.inputUsdPerMillion)
-    + (write - hour) * writeRate + hour * (pricing.cacheWrite1hInputUsdPerMillion ?? Math.max(writeRate, pricing.inputUsdPerMillion))
-    + output * pricing.outputUsdPerMillion);
-  return Number.isSafeInteger(cost) && cost >= 0 ? cost : undefined;
+  return routePolicy<number|null>('usageCost',[entry,value,format])??undefined;
 }
 
 export type RouteRequest = {
@@ -297,36 +173,10 @@ export type RouteRequest = {
 
 /** A role hint is a preference among eligible routes, never a policy bypass. */
 export function selectModel(entries: readonly ModelEntry[], request: RouteRequest): ModelEntry | undefined {
-  if((true as boolean))return routePolicy<ModelEntry|null>('select',[entries,observedRequest(entries,request)])??undefined;
-  const eligible = eligibleModels(entries,request);
-  const hints = request.roleHint ? typeof request.roleHint === 'string' ? [request.roleHint] : request.roleHint : [];
-  const preferred = eligible.filter(candidate => hints.includes(candidate.entry.role));
-  const candidates = preferred.length ? preferred : eligible;
-  candidates.sort((a, b) => a.score - b.score || Number(b.entry.role === 'everyday') - Number(a.entry.role === 'everyday') || a.entry.id.localeCompare(b.entry.id));
-  return candidates[0]?.entry;
+  return routePolicy<ModelEntry|null>('select',[entries,observedRequest(entries,request)])??undefined;
 }
 
 /** Eligibility remains with verified configuration, privacy and credential adapters. */
 export function eligibleModels(entries: readonly ModelEntry[], request: RouteRequest): {entry:ModelEntry;score:number;costMicros:number}[] {
-  if((true as boolean))return routePolicy('eligible',[entries,observedRequest(entries,request)]);
-  if (request.budgetMicros !== undefined && (!integer(request.budgetMicros))) return [];
-  const inputs = request.inputs ?? ['text'];
-  // Measured once for the whole routing decision, not once per candidate.
-  let measured: { inputTokens: number; imageCount: number } | undefined;
-  try { measured = measureRequest(request.conversation ?? [], request.toolSchema); } catch { measured = undefined; }
-  const eligible = entries.flatMap(entry => {
-    // Reserved adapter-only route. It must never win ordinary conversation,
-    // privacy fallback or automatic escalation selection.
-    if(entry.id==='local-planner')return [];
-    if (!entry.enabled || request.excludeIds?.includes(entry.id) || request.available?.(entry) === false) return [];
-    if (!entry.local && (!request.cloudAllowed || !entry.pricing)) return [];
-    if (inputs.some(input => !entry.capabilities[input]) || (request.tools && !entry.capabilities.tools)) return [];
-    const estimate = estimateReservation(entry, request.conversation ?? [], request.maxOutputTokens, request.toolSchema, measured);
-    if (!estimate || estimate.costMicros > (request.budgetMicros ?? Number.MAX_SAFE_INTEGER)) return [];
-    const observed = entry.observed;
-    // Laplace smoothing prevents one lucky result from establishing a route.
-    const successRate = observed ? (observed.successes + 1) / (observed.attempts + 2) : 0.5;
-    return [{ entry, score: estimate.costMicros / successRate, costMicros:estimate.costMicros }];
-  });
-  return eligible;
+  return routePolicy('eligible',[entries,observedRequest(entries,request)]);
 }

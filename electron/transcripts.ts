@@ -75,32 +75,12 @@ function clock(seconds: number): string {
  * and a silent truncation reads as the video simply stopping.
  */
 export function formatTranscript(captions: Caption[], limit = TRANSCRIPT_CHARS): string {
-  if((true as boolean))return corePolicySync('local-reply-defaults.transcript',[captions,arguments[1]===undefined?{supplied:false}:{supplied:true,value:arguments[1]}]);
-  if((true as boolean))return corePolicySync('final-tool-values.formatTranscript',[captions,limit]);
-  if (!captions.length) return '';
-  const lines: string[] = [];
-  let stampedAt = -Infinity;
-  for (const caption of captions) {
-    if (caption.atSeconds - stampedAt >= 30) { lines.push(`[${clock(caption.atSeconds)}] ${caption.text}`); stampedAt = caption.atSeconds; }
-    else lines.push(caption.text);
-  }
-  const whole = lines.join('\n');
-  if (whole.length <= limit) return whole;
-  const half = Math.floor(limit / 2);
-  const head = whole.slice(0, half);
-  const tail = whole.slice(-half);
-  return `${head}\n\n[… the middle is left out, ${Math.round((whole.length - limit) / 1000)}k characters of it …]\n\n${tail}`;
+  return corePolicySync('local-reply-defaults.transcript',[captions,arguments[1]===undefined?{supplied:false}:{supplied:true,value:arguments[1]}]);
 }
 
 /** What she is handed with it, and the one thing she must not say. */
 export function transcriptInstruction(title: string, generated: boolean, transcript: string): string {
-  if((true as boolean))return corePolicySync('final-tool-values.transcriptInstruction',[title,generated,transcript]);
-  return [
-    `This is the transcript of "${title}" — the words spoken in it, nothing else.`,
-    generated ? 'It was written by speech recognition, so names and unusual words in it may be wrong; treat an odd-looking one as a mishearing rather than a fact.' : '',
-    transcript,
-    'You read this. You did not watch the video: you have not seen a frame of it and you do not know what anything in it looks like. Say what was said in it, and if they ask about something visual, say you only went through the transcript.',
-  ].filter(Boolean).join('\n');
+  return corePolicySync('final-tool-values.transcriptInstruction',[title,generated,transcript]);
 }
 
 const UNESCAPE: Record<string, string> = { '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#39;': "'", '&apos;': "'" };

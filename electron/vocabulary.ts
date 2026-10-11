@@ -77,53 +77,7 @@ const bare = (word: string) => word.replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9]+$/g, ''
  * word, since by then it is mid-sentence.
  */
 export function namesInText(texts: string[]): string[] {
- if((true as boolean))return corePolicySync('speech-context.names',[texts]);
-  // A word seen in lowercase anywhere is a word, not a name: "Fine." at the top
-  // of one reply and "fine" in the middle of the next settles it.
-  const lowercase = new Set<string>();
-  const vouched = new Set<string>();
-  const sentences: string[][] = [];
-  for (const text of texts) for (const sentence of text.split(/[.!?…\n]+/)) {
-    const words = sentence.split(/\s+/).filter(Boolean);
-    if (words.length) sentences.push(words);
-    words.forEach((word, index) => {
-      const clean = bare(word);
-      if (/^[a-z]+$/.test(clean)) lowercase.add(clean);
-      else if (CAPITALISED.test(clean)) {
-        if (index > 0) vouched.add(clean.toLowerCase());
-        if (/[\'’]s[^A-Za-z]*$/i.test(word)) vouched.add(clean.toLowerCase());
-      }
-    });
-  }
-  const isName = (clean: string) => {
-    if (clean.length < 2) return false;
-    if (MIXED_CASE.test(clean)) return true;
-    if (ACRONYM.test(clean)) return !NOT_A_TERM.has(clean.toLowerCase());
-    if (MODEL_NUMBER.test(clean)) return /[A-Za-z]/.test(clean);
-    if (!CAPITALISED.test(clean)) return false;
-    const lower = clean.toLowerCase();
-    return !NOT_A_TERM.has(lower) && !lowercase.has(lower);
-  };
-  const found: string[] = [];
-  for (const words of sentences) {
-    let run: string[] = [];
-    let opensSentence = false;
-    const close = () => {
-      if (opensSentence && run.length && CAPITALISED.test(run[0]) && !vouched.has(run[0].toLowerCase())) run.shift();
-      if (run.length && !/^\d+$/.test(run.join(''))) found.push(run.join(' '));
-      run = [];
-    };
-    words.forEach((word, index) => {
-      const clean = bare(word);
-      if (isName(clean)) { if (!run.length) opensSentence = index === 0; run.push(clean); }
-      else if (run.length && MODEL_NUMBER.test(clean)) run.push(clean);
-      else close();
-      // A comma ends a run: "Denji, Himeno" is two names, not one.
-      if (/[,;:]$/.test(word)) close();
-    });
-    close();
-  }
-  return found;
+ return corePolicySync('speech-context.names',[texts]);
 }
 
 export type VocabularySources = {
@@ -149,27 +103,5 @@ export type VocabularySources = {
  * front when it does.
  */
 export function spokenVocabulary(sources: VocabularySources, limit = LIMIT): string[] {
- if((true as boolean))return corePolicySync('speech-context.vocabulary',[sources,limit]);
-  const chat = (sources.chat ?? []).slice().reverse();
-  const candidates = [
-    ...(sources.names ?? []),
-    ...(sources.taught ?? []),
-    ...(sources.places ?? []),
-    ...namesInText(sources.kept ?? []),
-    ...namesInText(sources.about ?? []),
-    ...namesInText(chat),
-  ];
-  const seen = new Set<string>();
-  const out: string[] = [];
-  let chars = 0;
-  for (const raw of candidates) {
-    const term = (raw ?? '').trim().replace(/\s+/g, ' ');
-    const key = term.toLowerCase();
-    if (term.length < 2 || term.length > 40 || seen.has(key)) continue;
-    if (out.length >= limit || chars + term.length + 2 > MAX_CHARS) break;
-    seen.add(key);
-    out.push(term);
-    chars += term.length + 2;
-  }
-  return out;
+ return corePolicySync('speech-context.vocabulary',[sources,limit]);
 }

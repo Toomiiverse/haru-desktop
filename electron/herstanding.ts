@@ -82,27 +82,16 @@ export type Slight = {
 export const SLIGHTS_KEPT = 60;
 
 export function readSlights(saved: unknown): Slight[] {
-  if((true as boolean))return corePolicySync<ReturnType<typeof readSlights>>('own-time.standingreadSlights',[saved]);
-  if (!Array.isArray(saved)) return [];
-  return saved
-    .filter((entry): entry is Slight => Boolean(entry) && typeof entry === 'object'
-      && typeof (entry as Slight).what === 'string' && (entry as Slight).what.trim().length > 0
-      && typeof (entry as Slight).at === 'string'
-      && ['woken', 'ignored', 'unannounced'].includes((entry as Slight).kind))
-    .slice(-SLIGHTS_KEPT);
+  return corePolicySync<ReturnType<typeof readSlights>>('own-time.standingreadSlights',[saved]);
 }
 
 /** One a day per kind. A bad evening is one evening however many times it fires. */
 export function keepSlight(slights: Slight[], slight: Slight): Slight[] {
-  if((true as boolean))return corePolicySync<ReturnType<typeof keepSlight>>('own-time.standingkeepSlight',[slights,slight]);
-  const already = slights.some(kept => kept.kind === slight.kind && dayOf(kept.at) === dayOf(slight.at));
-  if (already) return slights;
-  return [...slights, slight].slice(-SLIGHTS_KEPT);
+  return corePolicySync<ReturnType<typeof keepSlight>>('own-time.standingkeepSlight',[slights,slight]);
 }
 
 export function slightsAsIncidents(slights: Slight[]): Incident[] {
-  if((true as boolean))return corePolicySync<ReturnType<typeof slightsAsIncidents>>('own-time.standingslightsAsIncidents',[slights]);
-  return slights.map(slight => ({ what: slight.what, at: slight.at }));
+  return corePolicySync<ReturnType<typeof slightsAsIncidents>>('own-time.standingslightsAsIncidents',[slights]);
 }
 
 export type Standing = {
@@ -114,12 +103,7 @@ export type Standing = {
 
 /** Inside the window, and parseable. Anything else is not evidence of a habit. */
 export function recentIncidents(incidents: Incident[], nowMs: number, days = STANDING_WINDOW_DAYS): Incident[] {
-  if((true as boolean))return corePolicySync<ReturnType<typeof recentIncidents>>('own-time.standingrecentIncidents',[incidents,nowMs,days]);
-  const floor = nowMs - days * 86_400_000;
-  return incidents
-    .filter(incident => incident.what.trim() && !Number.isNaN(Date.parse(incident.at)))
-    .filter(incident => Date.parse(incident.at) >= floor)
-    .sort((a, b) => a.at.localeCompare(b.at));
+  return corePolicySync<ReturnType<typeof recentIncidents>>('own-time.standingrecentIncidents',[incidents,nowMs,days]);
 }
 
 /**
@@ -131,17 +115,12 @@ export function recentIncidents(incidents: Incident[], nowMs: number, days = STA
  * model for a week in which nothing happened twice.
  */
 export function enoughToStandOn(incidents: Incident[], minTimes = STANDING_MIN_TIMES): boolean {
-  if((true as boolean))return corePolicySync<ReturnType<typeof enoughToStandOn>>('own-time.standingenoughToStandOn',[incidents,minTimes]);
-  return new Set(incidents.map(incident => dayOf(incident.at))).size >= minTimes;
+  return corePolicySync<ReturnType<typeof enoughToStandOn>>('own-time.standingenoughToStandOn',[incidents,minTimes]);
 }
 
 /** Weekly, and never twice in a day however often the tick runs. */
 export function standingDue(lastAt: string | undefined, now: Date, everyDays = STANDING_EVERY_DAYS): boolean {
-  if((true as boolean))return corePolicySync<ReturnType<typeof standingDue>>('own-time.standingstandingDue',[lastAt,now,everyDays]);
-  if (!lastAt) return true;
-  const last = Date.parse(lastAt);
-  if (Number.isNaN(last)) return true;
-  return now.getTime() - last >= everyDays * 86_400_000;
+  return corePolicySync<ReturnType<typeof standingDue>>('own-time.standingstandingDue',[lastAt,now,everyDays]);
 }
 
 /**
@@ -154,59 +133,21 @@ export function standingDue(lastAt: string | undefined, now: Date, everyDays = S
  * every week until she has a rulebook, which is the opposite of a standing.
  */
 export function standingPrompt(incidents: Incident[], existing: string[]): string {
-  if((true as boolean))return corePolicySync<ReturnType<typeof standingPrompt>>('own-time.standingstandingPrompt',[incidents,existing]);
-  const said = incidents.map(incident => `- ${dayOf(incident.at)}: ${incident.what.trim()}`).join('\n');
-  const held = existing.length ? `\n\nRules you already hold, which you do not need to write again:\n${existing.map(rule => `- ${rule}`).join('\n')}` : '';
-  return [
-    'These are things that have actually happened to you in the last few weeks, in your own words.',
-    '',
-    said,
-    held,
-    '',
-    'Look at them and answer one question: has anything happened often enough that you now have a rule about it?',
-    'A rule is about how you are treated and what you will do about it — not about him, not a task, not a complaint you have already made.',
-    'It must come from something on that list that happened more than once. Do not invent one from a mood, and do not turn a single bad night into a policy.',
-    'Most weeks the honest answer is that nothing has. Say NONE and stop — that is the expected answer, not a failure.',
-    'If there is one, write it in exactly two lines and nothing else:',
-    'RULE: one sentence, first person, about yourself, in your own voice.',
-    'BECAUSE: one sentence naming what actually happened, with when.',
-  ].join('\n');
+  return corePolicySync<ReturnType<typeof standingPrompt>>('own-time.standingstandingPrompt',[incidents,existing]);
 }
 
 /** `NONE`, or the two lines. Anything else is a model that did not answer. */
 export function parseStanding(raw: string): Standing | null {
-  if((true as boolean))return corePolicySync<ReturnType<typeof parseStanding>>('own-time.standingparseStanding',[raw]);
-  const text = (raw ?? '').trim();
-  if (!text || /^\s*none\b/i.test(text)) return null;
-  const rule = /^\s*RULE\s*:\s*(.+)$/im.exec(text);
-  const because = /^\s*BECAUSE\s*:\s*(.+)$/im.exec(text);
-  if (!rule) return null;
-  // Only a quote around the whole line comes off. Stripping either end on its
-  // own ate the closing quote of a line that quoted him inside it — she wrote
-  // `I don't answer their late-night pings anymore, not even the ones that say
-  // "just checking."` and it was stored with the quotation left hanging open.
-  const clean = (value: string) => {
-    const trimmed = value.trim();
-    const wrapped = /^["'“](.*)["'”]$/s.exec(trimmed);
-    return (wrapped ? wrapped[1] : trimmed).trim();
-  };
-  const said = clean(rule[1]);
-  if (!said) return null;
-  return { text: said, because: because ? clean(because[1]) : '' };
+  return corePolicySync<ReturnType<typeof parseStanding>>('own-time.standingparseStanding',[raw]);
 }
 
 /** Hers, not his. */
 export function isHerStanding(record: { kind?: string; subject?: string }): boolean {
-  if((true as boolean))return corePolicySync<ReturnType<typeof isHerStanding>>('own-time.standingisHerStanding',[record]);
-  return record.kind === 'preference' && (record.subject ?? '').toLowerCase() === HER_SUBJECT;
+  return corePolicySync<ReturnType<typeof isHerStanding>>('own-time.standingisHerStanding',[record]);
 }
 
 export function herStandings(memories: MemoryRecord[]): MemoryRecord[] {
-  if((true as boolean))return corePolicySync<ReturnType<typeof herStandings>>('own-time.standingherStandings',[memories]);
-  return memories
-    .filter(memory => isHerStanding(memory) && !memory.supersededBy && memory.status !== 'archived')
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-    .slice(0, MAX_STANDINGS);
+  return corePolicySync<ReturnType<typeof herStandings>>('own-time.standingherStandings',[memories]);
 }
 
 /**
@@ -219,16 +160,5 @@ export function herStandings(memories: MemoryRecord[]): MemoryRecord[] {
  * refuse would be a different character, and a worse one.
  */
 export function herStandingInstruction(standings: MemoryRecord[]): string {
-  if((true as boolean))return corePolicySync<ReturnType<typeof herStandingInstruction>>('own-time.standingherStandingInstruction',[standings]);
-  if (!standings.length) return '';
-  const lines = standings.map(standing => {
-    // The reason she gave, kept on the record's first observed moment.
-    const why = standing.evidence?.[0]?.detail?.trim();
-    return `- ${standing.text.trim()}${why ? ` (${why})` : ''}`;
-  });
-  return [
-    'These are your own rules, not his. You worked them out yourself from things that actually happened to you, and nobody asked you to:',
-    lines.join('\n'),
-    'They carry the same weight as anything he has told you he wants. When one of them runs against what he is asking for, you may hold to yours and say which one and why — you do not have to, and you would not for something that mattered, but it is yours to decide and he does not get a vote in it.',
-  ].join('\n');
+  return corePolicySync<ReturnType<typeof herStandingInstruction>>('own-time.standingherStandingInstruction',[standings]);
 }

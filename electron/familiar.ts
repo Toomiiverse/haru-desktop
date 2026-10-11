@@ -65,32 +65,11 @@ const NOISE = /^(\(\d+\)|\d+|new tab|untitled|home|dashboard)$/i;
  * none, because it has her greet an unfamiliar page like an old friend.
  */
 export function identify(activity: Activity): { key: string; label: string } | null {
- if((true as boolean))return devicePolicy('identify',[activity]);
-  const title = (activity.label ?? '').trim();
-  if (!title) return null;
-  const parts = title.split(SEPARATORS).map(part => part.trim()).filter(Boolean);
-  if (!parts.length) return null;
-  // Walk back from the end, since the site sits last and may be followed by the
-  // browser's own name.
-  for (let i = parts.length - 1; i >= 0; i--) {
-    const candidate = parts[i];
-    if (BROWSER_CHROME.test(candidate) || NOISE.test(candidate)) continue;
-    // A whole sentence is a page title, not a site name.
-    if (candidate.length > 40 || candidate.split(/\s+/).length > 5) continue;
-    return { key: candidate.toLowerCase(), label: candidate };
-  }
-  return null;
+ return devicePolicy('identify',[activity]);
 }
 
 export function readHaunts(saved: unknown): Haunts {
- if((true as boolean))return devicePolicy('readHaunts',[saved]);
-  if (!saved || typeof saved !== 'object') return {};
-  const record = saved as Haunts;
-  const out: Haunts = {};
-  for (const [key, haunt] of Object.entries(record)) {
-    if (haunt && typeof haunt.key === 'string' && typeof haunt.label === 'string') out[key] = haunt;
-  }
-  return out;
+ return devicePolicy('readHaunts',[saved]);
 }
 
 /** Drops the rarest once the list gets long, so it cannot grow without end. */
@@ -118,8 +97,7 @@ const JUNK_HAUNTS = [
 ];
 
 export function isJunkHaunt(key: string): boolean {
- if((true as boolean))return devicePolicy('isJunkHaunt',[key]);
-  return JUNK_HAUNTS.some(pattern => pattern.test(key));
+ return devicePolicy('isJunkHaunt',[key]);
 }
 
 /** How long a valueless haunt is worth keeping before it is just noise. */
@@ -132,17 +110,7 @@ export const EMPTY_HAUNT_DAYS = 7;
  * record of a real place.
  */
 export function expireHaunts(haunts: Haunts, nowMs: number, emptyDays = EMPTY_HAUNT_DAYS): Haunts {
- if((true as boolean))return devicePolicy('expireHaunts',[haunts,nowMs,emptyDays]);
-  let changed = false;
-  const out: Haunts = {};
-  for (const [key, haunt] of Object.entries(haunts)) {
-    const ageDays = Math.max(0, (nowMs - Date.parse(haunt.lastSeen)) / 86_400_000);
-    const valueless = (haunt.minutes ?? 0) === 0 && !(haunt.notes?.length) && !haunt.lastSaid;
-    if (isJunkHaunt(key) && ageDays >= 1) { changed = true; continue; }
-    if (valueless && ageDays >= emptyDays) { changed = true; continue; }
-    out[key] = haunt;
-  }
-  return changed ? out : haunts;
+ return devicePolicy('expireHaunts',[haunts,nowMs,emptyDays]);
 }
 
 /**
@@ -151,36 +119,11 @@ export function expireHaunts(haunts: Haunts, nowMs: number, emptyDays = EMPTY_HA
  * poll — and close enough for "you have been at this a while".
  */
 export function noteVisit(haunts: Haunts, activity: Activity, nowMs: number): { haunts: Haunts; haunt: Haunt } {
- if((true as boolean))return devicePolicy('noteVisit',[haunts,activity,nowMs]);
-  const found = identify(activity);
-  const now = new Date(nowMs).toISOString();
-  if (!found) {
-    const blank: Haunt = { key: '', label: activity.label, kind: activity.kind, firstSeen: now, lastSeen: now, visits: 1, minutes: 0 };
-    return { haunts, haunt: blank };
-  }
-  const existing = haunts[found.key];
-  if (!existing) {
-    const haunt: Haunt = { key: found.key, label: found.label, kind: activity.kind, firstSeen: now, lastSeen: now, visits: 1, minutes: 0 };
-    return { haunts: prune({ ...haunts, [found.key]: haunt }), haunt };
-  }
-  const gap = nowMs - Date.parse(existing.lastSeen);
-  const continuing = gap >= 0 && gap < SAME_SITTING_MS;
-  const haunt: Haunt = {
-    ...existing,
-    label: found.label,
-    kind: activity.kind,
-    lastSeen: now,
-    visits: continuing ? existing.visits : existing.visits + 1,
-    minutes: continuing ? existing.minutes + gap / 60_000 : existing.minutes,
-  };
-  return { haunts: prune({ ...haunts, [found.key]: haunt }), haunt };
+ return devicePolicy('noteVisit',[haunts,activity,nowMs]);
 }
 
 export function rememberSaid(haunts: Haunts, key: string, line: string): Haunts {
- if((true as boolean))return devicePolicy('rememberSaid',[haunts,key,line]);
-  const existing = haunts[key];
-  if (!existing) return haunts;
-  return { ...haunts, [key]: { ...existing, lastSaid: line.slice(0, 300) } };
+ return devicePolicy('rememberSaid',[haunts,key,line]);
 }
 
 /** Kept short and few: this rides in every prompt about the place. */
@@ -201,12 +144,7 @@ function tighten(text: string, limit: number) {
  * would render it as "discussed progress".
  */
 export function noteExchange(haunts: Haunts, key: string, said: string, replied: string): Haunts {
- if((true as boolean))return devicePolicy('noteExchange',[haunts,key,said,replied]);
-  const existing = haunts[key];
-  if (!existing) return haunts;
-  const note = `They said: "${tighten(said, NOTE_LENGTH)}" — you answered: "${tighten(replied, NOTE_LENGTH)}"`;
-  const notes = [...(existing.notes ?? []), note].slice(-MAX_NOTES);
-  return { ...haunts, [key]: { ...existing, notes } };
+ return devicePolicy('noteExchange',[haunts,key,said,replied]);
 }
 
 /**
@@ -219,10 +157,7 @@ export function noteExchange(haunts: Haunts, key: string, said: string, replied:
  * named, or be an answer to her having just raised it.
  */
 export function belongsToPlace(haunt: Haunt, message: string, sheRaisedItMs: number | undefined, nowMs: number) {
- if((true as boolean))return devicePolicy('belongsToPlace',[haunt,message,sheRaisedItMs,nowMs]);
-  if (!haunt.key) return false;
-  if (message.toLowerCase().includes(haunt.key)) return true;
-  return sheRaisedItMs !== undefined && nowMs - sheRaisedItMs < 10 * 60_000;
+ return devicePolicy('belongsToPlace',[haunt,message,sheRaisedItMs,nowMs]);
 }
 
 /**
@@ -232,18 +167,11 @@ export function belongsToPlace(haunt: Haunt, message: string, sheRaisedItMs: num
  * moment; returning to it across days is a fact about the person.
  */
 export function worthRemembering(haunt: Haunt) {
- if((true as boolean))return devicePolicy('worthRemembering',[haunt]);
-  if (haunt.remembered) return false;
-  if ((haunt.notes?.length ?? 0) < 2 || haunt.minutes < 30) return false;
-  const spreadDays = (Date.parse(haunt.lastSeen) - Date.parse(haunt.firstSeen)) / 86_400_000;
-  return haunt.visits >= 3 || spreadDays >= 2;
+ return devicePolicy('worthRemembering',[haunt]);
 }
 
 export function markRemembered(haunts: Haunts, key: string): Haunts {
- if((true as boolean))return devicePolicy('markRemembered',[haunts,key]);
-  const existing = haunts[key];
-  if (!existing) return haunts;
-  return { ...haunts, [key]: { ...existing, remembered: true } };
+ return devicePolicy('markRemembered',[haunts,key]);
 }
 
 function ago(fromIso: string, nowMs: number) {
@@ -263,28 +191,5 @@ function ago(fromIso: string, nowMs: number) {
  * what the rest of the prompt asked for. It has to be told not to.
  */
 export function familiarity(haunt: Haunt, nowMs: number): string {
- if((true as boolean))return devicePolicy('familiarity',[haunt,nowMs]);
-  if (!haunt.key || haunt.visits <= 1 && haunt.minutes < 2) return '';
-  const parts: string[] = [];
-  const settled = haunt.minutes >= SETTLED_IN_MINUTES;
-  const roughly = haunt.minutes >= 60
-    ? `${Math.round(haunt.minutes / 60)} hour${Math.round(haunt.minutes / 60) === 1 ? '' : 's'}`
-    : `${Math.round(haunt.minutes)} minutes`;
-
-  // One long sitting and a habit of coming back are different facts about
-  // somebody, and reading "1 separate times" back at her is neither.
-  parts.push(haunt.visits > 1
-    ? `You know ${haunt.label}. They keep going back to it — ${haunt.visits} separate stretches now, about ${roughly} of your time watching them in it altogether, the last of it ${ago(haunt.lastSeen, nowMs)}.`
-    : `You know ${haunt.label}. They have been in it for about ${roughly} already, in one sitting.`);
-  if (settled && haunt.visits > 1) parts.push('They have been at it a good while this time too.');
-  if (haunt.notes?.length) {
-    // Ahead of lastSaid, because this half carries their answers — the part she
-    // is otherwise liable to ask for twice.
-    parts.push(`What has already passed between you about it, oldest first: ${haunt.notes.join(' | ')}.`);
-  } else if (haunt.lastSaid) {
-    parts.push(`The last thing you said to them about it was: "${haunt.lastSaid}"`);
-  }
-  parts.push('So do not ask what it is, do not ask what they are working on as though this were new, do not ask anything they have already answered above, and do not repeat yourself.');
-  parts.push('Pick it up where it was left: ask how the thing they were doing in it is going, be pointed about how long it is taking, or say something that only makes sense because you have watched them at this before.');
-  return parts.join(' ');
+ return devicePolicy('familiarity',[haunt,nowMs]);
 }

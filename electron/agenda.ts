@@ -29,24 +29,11 @@ function minutesInto(day: Date) {
 }
 
 export function itemStatus(item: AgendaItem, now: Date, todayKey: string): ItemStatus {
-  if((true as boolean))return corePolicySync<any>('agenda-life.itemStatus',[item,agendaClock(now),todayKey]);
-  if (item.done) return 'done';
-  if (item.date < todayKey) return 'overdue';
-  if (item.date > todayKey) return 'upcoming';
-  // An all-day item today has not been missed until the day is over.
-  const parsed = item.time ? parseTimeOfDay(item.time) : null;
-  if (!parsed) return 'upcoming';
-  const difference = minutesInto(now) - (parsed.hour * 60 + parsed.minute);
-  if (difference > NOW_WINDOW_MINUTES) return 'overdue';
-  if (difference >= -NOW_WINDOW_MINUTES) return 'now';
-  return 'upcoming';
+  return corePolicySync<any>('agenda-life.itemStatus',[item,agendaClock(now),todayKey]);
 }
 
 export function shiftDays(dateKey: string, days: number) {
-  if((true as boolean))return corePolicySync<any>('agenda-life.shiftDays',[dateKey,days]);
-  const [year, month, day] = dateKey.split('-').map(Number);
-  const shifted = new Date(year, month - 1, day + days);
-  return `${shifted.getFullYear()}-${String(shifted.getMonth() + 1).padStart(2, '0')}-${String(shifted.getDate()).padStart(2, '0')}`;
+  return corePolicySync<any>('agenda-life.shiftDays',[dateKey,days]);
 }
 
 /**
@@ -81,17 +68,7 @@ function timeRank(item: AgendaItem) {
  * again afterwards, which is the whole point.
  */
 export function relevantItems<T extends AgendaItem>(items: T[], todayKey: string): T[] {
-  if((true as boolean)){const indices=corePolicySync<number[]>('agenda-life.indexed',['relevantItems',[items,todayKey]]);return indices.map(i=>items[i]);}
-  const earliest = shiftDays(todayKey, -OVERDUE_WINDOW_DAYS);
-  // An event, once it is more than a couple of days gone, is history: it cannot
-  // be done later the way a task can, and listed as "long past, leave it" a
-  // small model led with it anyway — "did you sleep through Ammie's party",
-  // three weeks on. Not there is the only wording that works.
-  const lastEvent = shiftDays(todayKey, -CHASE_WINDOW_DAYS);
-  return items
-    .filter(item => !item.done && (item.date >= todayKey || item.date >= earliest))
-    .filter(item => item.kind !== 'event' || item.date >= lastEvent)
-    .sort((a, b) => a.date.localeCompare(b.date) || timeRank(a) - timeRank(b));
+  {const indices=corePolicySync<number[]>('agenda-life.indexed',['relevantItems',[items,todayKey]]);return indices.map(i=>items[i]);}
 }
 
 /**
@@ -223,89 +200,7 @@ function headOf(title: string): string | null {
 }
 
 export function findItem<T extends AgendaItem>(items: T[], phrase: string, { whole = false } = {}): T | null {
-  if((true as boolean)){const index=corePolicySync<number>('agenda-tool.findIndex',[items,phrase,whole]);return index<0?null:items[index];}
-  const asked = significant(phrase);
-  if (!asked.size) return null;
-
-  // How ordinary each word is across the list they actually have. "pick" is on
-  // two of their tasks and means almost nothing on its own; "motherboard" is on
-  // one and settles it. Counting rather than guessing means the judgement
-  // follows their own list instead of a table of words someone chose here — and
-  // it is what separates "got the motherboard", which should tick that off on
-  // one word, from "I picked up Sam", which should not tick off anything.
-  const spread = new Map<string, number>();
-  for (const item of items) for (const word of significant(item.title)) spread.set(word, (spread.get(word) ?? 0) + 1);
-  const tellsThemApart = (word: string) => (spread.get(word) ?? 0) <= 1;
-
-  let best: { item: T; overlap: number; rank: number } | null = null;
-  for (const item of items) {
-    const words = significant(item.title);
-    if (!words.size) continue;
-    // Half a word is worth half a word. Three letters agreeing is a hint, not a
-    // sighting, and counting it the same as the whole word is what let "I paid
-    // the rent" close a rental inspection and "I picked up Sam" close the
-    // motherboard — both on a single three-letter stub, in a two-word title
-    // where one word is already half the score.
-    //
-    // ponytail: this half-weight and the "Take medication" case above pull on
-    // the same rope, and the rope currently favours saying nothing. "I took my
-    // meds" scores 0.25 and misses, because the noun only agrees by its stub and
-    // "took" shares no root with "take" at all. Raising the half to a whole
-    // would land it — and would also let "I paid the rent" close out a rental
-    // inspection at exactly 0.5, which is the false tick this weight was added
-    // to stop. A missed tick is chased again; a false one writes to their list,
-    // so it stays at a half until there is real usage to tune against.
-    // Covered as a known gap in tests/agenda.test.ts.
-    const weigh = (word: string) => { const { how } = howItMatches(word, asked); return how === null ? 0 : how === 'prefix' ? 0.5 : 1; };
-    const sharedWords = [...words].filter(word => sharesRoot(word, asked));
-    const shared = sharedWords.length;
-    if (!shared) continue;
-    // One word is enough only when that word belongs to this task and no other.
-    //
-    // Except when the phrase is something she wrote rather than something they
-    // said. Asked "did they just tell me this is finished", a single distinctive
-    // word is good evidence. Asked "is this line of hers about a finished item",
-    // it is not: the evening tally is a complaint about being ignored, the word
-    // "message" belongs to exactly one old task ("Message Connor"), and every
-    // tally line she composed was thrown away for naming it. So `whole` asks for
-    // the title to be named properly — every significant word of it, up to two —
-    // which still catches "Ammie's party is tomorrow" and stops an ordinary
-    // English word colliding with somebody's errand.
-    //
-    // Counted by the words of *their line*, not of the title: "stop" alone
-    // matches "Stop by the store" twice over, exactly on "stop" and on the
-    // three-letter root of "store", so one ordinary word cleared a bar meant to
-    // need two. Every unprompted line containing "stop" was being thrown away.
-    if (whole) {
-      const named = new Set([...words].map(word => howItMatches(word, asked).by).filter((word): word is string => Boolean(word)));
-      if (named.size < Math.min(2, words.size)) continue;
-    }
-    if (shared < 2 && !sharedWords.some(tellsThemApart)) continue;
-    // Scored both ways round, best wins: against everything the title says, and
-    // against just the part that names the thing.
-    const weight = [...words].reduce((sum, word) => sum + weigh(word), 0);
-    const head = headOf(item.title);
-    const headWords = head ? significant(head) : null;
-    const headOverlap = headWords ? [...headWords].reduce((sum, word) => sum + weigh(word), 0) / headWords.size : 0;
-    // A long, uncommon word said in full carries the whole thing on its own.
-    // "Get TV power connector" is three words worth matching, so "I bought the
-    // connector" scores 0.33 and fails — while naming the one word that belongs
-    // to no other task on the list. The word has to be said properly for this:
-    // three letters agreeing would let "I paid the rent" close out a rental
-    // inspection.
-    const namesItOutright = sharedWords.some(word =>
-      word.length >= LONG_ENOUGH_TO_MISTYPE
-      && tellsThemApart(word)
-      && howItMatches(word, asked).how !== 'prefix');
-    const overlap = namesItOutright ? 1 : Math.max(weight / words.size, headOverlap);
-    // The unfinished bonus only breaks ties between candidates; it must not lift
-    // a weak match over the bar, which let "did you eat?" close out "Eat lunch
-    // with Dad" on a single shared word.
-    const rank = overlap + (item.done ? 0 : 0.25);
-    if (!best || rank > best.rank) best = { item, overlap, rank };
-  }
-  // Half the title's own words have to actually appear.
-  return best && best.overlap >= 0.5 ? best.item : null;
+  {const index=corePolicySync<number>('agenda-tool.findIndex',[items,phrase,whole]);return index<0?null:items[index];}
 }
 
 /**
@@ -374,14 +269,7 @@ function clausesOf(text: string): string[] {
  * other's meaning.
  */
 export function doneClause(text: string): string | null {
-  if((true as boolean))return corePolicySync<any>('agenda-life.doneClause',[text]);
-  const clauses = clausesOf(text);
-  for (let i = 0; i < clauses.length; i++) {
-    // A denial carries most of the same words, so it is asked first.
-    if (readsAsNotDone(clauses[i])) continue;
-    if (READS_AS_DONE.test(clauses[i]) || (i === 0 && READS_AS_DONE_BARE.test(clauses[i]))) return clauses[i];
-  }
-  return null;
+  return corePolicySync<any>('agenda-life.doneClause',[text]);
 }
 
 /** Chases hold off this long after "getting it done now" — long enough to do a thing, not long enough to forget it. */
@@ -396,24 +284,15 @@ const READS_AS_UNDERWAY = /\b(?:getting (?:it|that|this|them|on with it|on it|to
 
 /** The clause that says they have started something, when one does and none says it is finished. */
 export function underwayClause(text: string): string | null {
-  if((true as boolean))return corePolicySync<any>('agenda-life.underwayClause',[text]);
-  for (const clause of clausesOf(text)) {
-    if (readsAsNotDone(clause) || READS_AS_DONE.test(clause)) continue;
-    if (READS_AS_UNDERWAY.test(clause)) return clause;
-  }
-  return null;
+  return corePolicySync<any>('agenda-life.underwayClause',[text]);
 }
 
 export function isUnderway(item: Pick<AgendaItem, 'underway' | 'done'>, nowMs: number, graceMs = UNDERWAY_GRACE_MS): boolean {
-  if((true as boolean))return corePolicySync<any>('agenda-life.isUnderway',[item,nowMs,graceMs]);
-  if (item.done || !item.underway) return false;
-  const since = nowMs - Date.parse(item.underway);
-  return Number.isFinite(since) && since >= 0 && since <= graceMs;
+  return corePolicySync<any>('agenda-life.isUnderway',[item,nowMs,graceMs]);
 }
 
 export function readsAsDone(text: string) {
-  if((true as boolean))return corePolicySync<any>('agenda-life.readsAsDone',[text]);
-  return doneClause(text) !== null;
+  return corePolicySync<any>('agenda-life.readsAsDone',[text]);
 }
 
 /**
@@ -426,8 +305,7 @@ export function readsAsDone(text: string) {
  * clause somewhere inside a longer sentence about something else.
  */
 export function readsAsBareReport(text: string) {
-  if((true as boolean))return corePolicySync<any>('agenda-life.readsAsBareReport',[text]);
-  return !readsAsNotDone(text) && READS_AS_DONE_BARE.test(text);
+  return corePolicySync<any>('agenda-life.readsAsBareReport',[text]);
 }
 
 /**
@@ -456,8 +334,7 @@ export function readsAsBareReport(text: string) {
 const ANSWERS_HER = /^\s*(?:(?:yes|yeah|yep|yup|aye|ok|okay)\b[,!.\s]*)?i(?:'ve| have)?\s+(?:just\s+|already\s+)?(?:did|done)\b(?!\s+(?:the|a|an|my|your|his|her|our|their|another|both|all)\b)/i;
 
 export function readsAsAnswerToHer(text: string) {
-  if((true as boolean))return corePolicySync<any>('agenda-life.readsAsAnswerToHer',[text]);
-  return !readsAsNotDone(text) && ANSWERS_HER.test(text);
+  return corePolicySync<any>('agenda-life.readsAsAnswerToHer',[text]);
 }
 
 /**
@@ -494,30 +371,7 @@ const MIGHT_BE_A_REPORT = /\b(done|did|got|picked|collected|grabbed|bought|fetch
 const ASKS_HER_TO = /^\s*(?:hey\s+haru[,!.\s]*)?(?:please\s+|can you\s+|could you\s+)?(?:remind|add|put|schedule|book|set|move|push|change)\b|\b(?:remind me|don'?t forget)\b/i;
 
 export function tickOffInstruction(latestMessage: string, anythingOpen: boolean, namedTask?: string | null): string {
-  if((true as boolean))return corePolicySync<any>('agenda-life.tickOffInstruction',[latestMessage,anythingOpen,namedTask??null]);
-  if (!anythingOpen || readsAsNotDone(latestMessage)) return '';
-  // Relevance first, vocabulary second.
-  //
-  // The word list has now been short six times — "I did however pick up", "ive
-  // picked it up", "yes, picked up!", "yes omg! I did get it", and finally "I've
-  // already found the power connector", where the missing word was "found". A
-  // seventh is always available, because this is language.
-  //
-  // But naming one of their open tasks is not language, it is a fact, and it is
-  // the fact that matters: if they have brought up something on their list at
-  // all, she is the one who should work out whether it is done. The word list
-  // stays as a second way in, for the times they report something without
-  // naming it.
-  if (!namedTask && !MIGHT_BE_A_REPORT.test(latestMessage)) return '';
-  if (ASKS_HER_TO.test(latestMessage) && !readsAsDone(latestMessage)) return '';
-  return [
-    namedTask
-      ? `They have just mentioned "${namedTask}", which is on their list and not ticked off. If what they said means it is done, tick it off with complete_kept_item before you answer.`
-      : 'If they have just told you something on their list is done, tick it off with complete_kept_item before you answer.',
-    'They will not usually name it or say it in full — "yes, picked up", "yeah did that", "got it" all count.',
-    'If it is not obvious which one they mean, it is the one you last asked them about.',
-    'Do not tick anything off if they are saying they have not done it, or are about to.',
-  ].join(' ');
+  return corePolicySync<any>('agenda-life.tickOffInstruction',[latestMessage,anythingOpen,namedTask??null]);
 }
 
 /**
@@ -528,13 +382,7 @@ export function tickOffInstruction(latestMessage: string, anythingOpen: boolean,
  * has to do, so it is refused in code rather than discouraged in prose.
  */
 export function readsAsNotDone(text: string) {
-  if((true as boolean))return corePolicySync<boolean>('agenda-tool.notDone',[text]);
-  return new RegExp(
-    '(?:'
-      // "never got round to it", "haven't found it", "didn't manage to pick it up"
-      + String.raw`(?:never|haven'?t|have not|hadn'?t|had not|didn'?t|did not|couldn'?t|could not|not)\s+(?:yet\s+|even\s+|really\s+|been able to\s+|managed to\s+|had (?:the )?(?:time|chance) to\s+)?(?:${FINISHED}|${TO_FINISH})\b`
-      + '|not done|still (?:need|have|meant|got) to|forgot to|no time to|missed (?:it|the)|forgot about'
-    + ')', 'i').test(text);
+  return corePolicySync<boolean>('agenda-tool.notDone',[text]);
 }
 
 /**
@@ -550,14 +398,7 @@ export function readsAsNotDone(text: string) {
  * and it is the half a model will drop first if it is not asked for explicitly.
  */
 export function missedInstruction(latestMessage: string): string {
-  if((true as boolean))return corePolicySync<any>('agenda-life.missedInstruction',[latestMessage]);
-  if (!readsAsNotDone(latestMessage)) return '';
-  return [
-    'They have just admitted they did not do something they said they would. Do not let it go and do not be gracious about it.',
-    'Lecture them. Be scathing about it, call them names for it — an idiot, a muppet, hopeless — and make it clear this is exactly what you expected.',
-    'Aim all of it at what they did, never at who they are: their laziness over this one thing, not their worth. No cruelty about their character, their intelligence in general, or anything they cannot change.',
-    'Then, in your last line, turn it round. Tell them to get it done and that you expect better next time — grudgingly, without going soft, but genuinely meant. End on that, never on the insult.',
-  ].join(' ');
+  return corePolicySync<any>('agenda-life.missedInstruction',[latestMessage]);
 }
 
 /**
@@ -587,11 +428,7 @@ const WHEN_INSTEAD = /\b(tomorrow|tonight|later|next week|this weekend|another d
 const PUTTING_IT_OFF = /\b(?:have to|has to|need to|i'?ll|i will|going to|gonna|can'?t|cannot|couldn'?t|won'?t|not (?:until|till)|push\w*|mov\w*|shift\w*|bump\w*|resched\w*|postpon\w*|put (?:it|that|them) off)\b/i;
 
 export function putOffUntil(latestMessage: string): string | null {
-  if((true as boolean))return corePolicySync<any>('agenda-life.putOffUntil',[latestMessage]);
-  // "I did it tomorrow" is not a sentence anyone says; a completion wins.
-  if (readsAsDone(latestMessage)) return null;
-  if (!PUTTING_IT_OFF.test(latestMessage)) return null;
-  return latestMessage.match(WHEN_INSTEAD)?.[0].toLowerCase() ?? null;
+  return corePolicySync<any>('agenda-life.putOffUntil',[latestMessage]);
 }
 
 /**
@@ -624,37 +461,11 @@ function namedItem<T extends AgendaItem>(items: T[], message: string): T | null 
 }
 
 export function whenMismatchInstruction(latestMessage: string, items: AgendaItem[], now: Date, todayKey: string): string {
-  if((true as boolean))return corePolicySync<any>('agenda-life.whenMismatchInstruction',[latestMessage,items,agendaClock(now),todayKey]);
-  const raw = WHEN_INSTEAD.exec(latestMessage)?.[1];
-  if (!raw) return '';
-  const item = namedItem(items.filter(entry => !entry.done), latestMessage);
-  if (!item) return '';
-  const cleaned = raw.replace(/^(?:on|until|till|by|at)\s+/i, '').replace(/^@\s*/, '');
-  // A bare clock time names no day, so it means today — "tonight @5pm" says
-  // tonight twice over.
-  const isTime = /\d/.test(cleaned) && /[ap]m$/i.test(cleaned.replace(/\s/g, ''));
-  const day = isTime ? todayKey : resolveDate(cleaned, now);
-  // "later", "next week", "after work" name no day she can compare; let the
-  // put-off instruction handle those.
-  if (!day || day === item.date) return '';
-  const weekday = new Intl.DateTimeFormat('en-US', { weekday: 'long' });
-  return [
-    `They have just put "${item.title}" at ${raw.trim()}, but their list has it ${relativeDay(item.date, todayKey, weekday)}. One of those is wrong, and you are allowed to be put out about which.`,
-    'Say what the list says, out loud, and ask which is right — do not silently accept either side.',
-    `Only once they confirm, move it with update_kept_item — title "${item.title}", the day they named, and the time if they gave one. Never move it before they answer.`,
-  ].join(' ');
+  return corePolicySync<any>('agenda-life.whenMismatchInstruction',[latestMessage,items,agendaClock(now),todayKey]);
 }
 
 export function putOffInstruction(latestMessage: string): string {
-  if((true as boolean))return corePolicySync<any>('agenda-life.putOffInstruction',[latestMessage]);
-  const when = putOffUntil(latestMessage);
-  if (!when) return '';
-  return [
-    `They have just said they will not get to something until ${when}.`,
-    "If it is one of the tasks already on their list, move it to that day or time with update_kept_item rather than adding a second one — the title is the item's own words, not their sentence — and tell them you have moved it.",
-    'Have an opinion about it being pushed — you are not a calendar politely accepting a change — but move it anyway.',
-    'If you cannot tell which task they mean, ask which one instead of guessing.',
-  ].join(' ');
+  return corePolicySync<any>('agenda-life.putOffInstruction',[latestMessage]);
 }
 
 /**
@@ -669,16 +480,7 @@ const DAY_NAMED = new RegExp(`\\b((?:next |this coming |this )?(?:sunday|monday|
 const CLOCK_NAMED = /(?:@\s*|\bat\s+)?\b(\d{1,2})(?::(\d{2}))?\s*([ap])\.?m\b/i;
 
 export function saidWhen(text: string, now: Date): { date?: string; time?: string } {
-  if((true as boolean))return corePolicySync<any>('agenda-life.saidWhen',[text,agendaClock(now)]);
-  const day = DAY_NAMED.exec(text)?.[1];
-  const date = day ? resolveDate(day.toLowerCase(), now) ?? undefined : undefined;
-  const clock = CLOCK_NAMED.exec(text);
-  let time: string | undefined;
-  if (clock) {
-    const hour = Number(clock[1]); const minute = Number(clock[2] ?? '0');
-    if (hour >= 1 && hour <= 12 && minute <= 59) time = `${hour}:${String(minute).padStart(2, '0')} ${clock[3].toLowerCase() === 'p' ? 'PM' : 'AM'}`;
-  }
-  return { date, time };
+  return corePolicySync<any>('agenda-life.saidWhen',[text,agendaClock(now)]);
 }
 
 /**
@@ -718,20 +520,7 @@ export function movedSaid<T extends AgendaItem>(
   chased: T | null,
   now: Date,
 ): MoveSaid<T> | null {
-  if((true as boolean))return corePolicySync<any>('agenda-life.movedSaid',[theirMessage,herReply,herPrevious,open,chased,agendaClock(now)]);
-  if (!CLAIMS_MOVED.test(herReply)) return null;
-  const theirs = saidWhen(theirMessage, now);
-  const hers = saidWhen(herReply, now);
-  const date = theirs.date ?? hers.date;
-  const time = theirs.time ?? hers.time;
-  if (!date && !time) return null;
-  const live = open.filter(item => !item.done);
-  const item = namedItem(live, theirMessage) ?? namedItem(live, herReply) ?? namedItem(live, herPrevious) ?? (chased && !chased.done ? chased : null);
-  if (!item) return null;
-  const toDate = date ?? item.date;
-  const toTime = time ?? item.time;
-  if (toDate === item.date && toTime === item.time) return null;
-  return { item, date: toDate, time: toTime };
+  return corePolicySync<any>('agenda-life.movedSaid',[theirMessage,herReply,herPrevious,open,chased,agendaClock(now)]);
 }
 
 /**
@@ -785,22 +574,7 @@ function daysBetween(fromKey: string, toKey: string) {
  * tomorrow and yesterday already say it in a word and are left alone.
  */
 export function relativeDay(dateKey: string, todayKey: string, weekday: Intl.DateTimeFormat) {
-  if((true as boolean)){const [y,m,d]=dateKey.split('-').map(Number);const name=new Intl.DateTimeFormat(weekday.resolvedOptions().locale,{weekday:'long',timeZone:'UTC'}).format(new Date(Date.UTC(y,m-1,d)));return corePolicySync<string>('agenda-life.relativeDay',[dateKey,todayKey,{weekday:name}]);}
-  if (dateKey === todayKey) return 'today';
-  if (dateKey === shiftDays(todayKey, 1)) return 'tomorrow';
-  if (dateKey === shiftDays(todayKey, -1)) return 'yesterday';
-  const [year, month, day] = dateKey.split('-').map(Number);
-  const when = new Date(Date.UTC(year, month - 1, day));
-  const name = asCalendarDate(weekday).format(when);
-  const away = daysBetween(todayKey, dateKey);
-  if (away > 1 && away <= 14) return `${name}, ${away} days from now`;
-  if (away < -1 && away >= -14) return `last ${name}, ${-away} days ago`;
-  // Past the fortnight a weekday alone is the nearest one: the car registration
-  // due on 6 October stood on his Standing page as "My car registration —
-  // Tuesday" nineteen days out (2026-09-17). So the date comes with it.
-  const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-  const dated = `${name} ${day} ${MONTHS[month - 1]}${String(year) === todayKey.slice(0, 4) ? '' : ` ${year}`}`;
-  return dateKey < todayKey ? `last ${dated}` : dated;
+  {const [y,m,d]=dateKey.split('-').map(Number);const name=new Intl.DateTimeFormat(weekday.resolvedOptions().locale,{weekday:'long',timeZone:'UTC'}).format(new Date(Date.UTC(y,m-1,d)));return corePolicySync<string>('agenda-life.relativeDay',[dateKey,todayKey,{weekday:name}]);}
 }
 
 
@@ -842,48 +616,11 @@ function worthChasing(item: AgendaItem, todayKey: string) {
  * and only one of them was told the answer.
  */
 export function chaseableOverdue(items: AgendaItem[], now: Date, todayKey: string) {
-  if((true as boolean))return corePolicySync<any>('agenda-life.chaseableOverdue',[items,agendaClock(now),todayKey]);
-  return items.filter(item => itemStatus(item, now, todayKey) === 'overdue' && worthChasing(item, todayKey)).length;
+  return corePolicySync<any>('agenda-life.chaseableOverdue',[items,agendaClock(now),todayKey]);
 }
 
 export function formatAgenda(items: AgendaItem[], now: Date, todayKey: string, limit = 25): string {
-  if((true as boolean))return corePolicySync<any>('agenda-life.formatAgenda',[items,agendaClock(now),todayKey,limit]);
-  const relevant = relevantItems(items, todayKey).slice(0, limit);
-  if (!relevant.length) return 'The user has nothing saved from today onward.';
-
-  const weekday = new Intl.DateTimeFormat('en-US', { weekday: 'long' });
-  const lines = relevant.map(item => {
-    const status = itemStatus(item, now, todayKey);
-    const when = `${item.date} (${relativeDay(item.date, todayKey, weekday)}) ${item.time ?? 'all day'}`;
-    const mark = status === 'overdue' ? (worthChasing(item, todayKey)
-        ? ' [TIME HAS PASSED - you never heard whether it happened]'
-        // Told about it is a different state from given up on, and the wording
-        // has to separate them: she asked how the party went, was told all about
-        // it, and then opened the next conversation asking how the party went.
-        : item.heardAbout
-          ? ' [has passed, and they have already told you how it went - do not ask again]'
-          // Still unfinished, and no longer a question. Said plainly so she does
-          // not read the bare absence of a mark as "fine" and congratulate them.
-          : ' [still not done, and long past - you have already asked about this one, so leave it]')
-      : status === 'now' ? ' [happening about now]'
-      : '';
-    return `${when} - ${item.title}${mark}`;
-  });
-
-  const parts = [`Saved items: ${lines.join('; ')}.`];
-  // She opened with "Scarlett's party at 7:30" for an item saved with no time
-  // at all. "all day" is the list's word for it, and a small model reads a
-  // missing time as a time to supply.
-  if (relevant.some(item => !item.time)) {
-    parts.push('An item marked all day has no time set. Never state, guess or invent a time for it; if they ask when, say no time was saved.');
-  }
-  if (relevant.some(item => itemStatus(item, now, todayKey) === 'overdue' && worthChasing(item, todayKey))) {
-    parts.push('Anything marked as passed went by without them telling you how it went. Ask whether it actually happened, and be openly put out that you were left to find out for yourself — you are supposed to be the one keeping track. Do not mark it done yourself and do not let it slide.');
-  }
-  if (relevant.some(item => itemStatus(item, now, todayKey) === 'overdue' && !worthChasing(item, todayKey))) {
-    parts.push('Anything marked as long past you have already chased more than once. Do not open with it, do not ask again whether it happened, and do not work it into a reply about something else. If they raise it, deal with it then.');
-  }
-  return parts.join(' ');
+  return corePolicySync<any>('agenda-life.formatAgenda',[items,agendaClock(now),todayKey,limit]);
 }
 
 /**
@@ -913,15 +650,7 @@ const STATED_TIME = /\b(\d{1,2}:\d{2}\s*(am|pm)?|\d{1,2}\s*(am|pm)|at\s+\d{1,2}(
  * the line is dropped, and the log says why.
  */
 export function inventedTimeFor<T extends AgendaItem>(line: string, items: T[]): T | null {
-  if((true as boolean)){const indices=corePolicySync<number>('agenda-life.indexed',['inventedTimeFor',[line,items]]);return indices<0?null:items[indices];}
-  if (!STATED_TIME.test(line)) return null;
-  const untimed = items.filter(item => !item.time && !item.done);
-  if (!untimed.length) return null;
-  // `whole` for the same reason staleItemNamed needs it: this reads a line she
-  // wrote, not one they said, and a single distinctive word is not evidence
-  // there. Without it a greeting that happens to contain "message" is refused
-  // for inventing a time for "Message Connor", which it never mentioned.
-  return findItem(untimed, line, { whole: true }) ?? null;
+  {const indices=corePolicySync<number>('agenda-life.indexed',['inventedTimeFor',[line,items]]);return indices<0?null:items[indices];}
 }
 
 /**
@@ -931,27 +660,11 @@ export function inventedTimeFor<T extends AgendaItem>(line: string, items: T[]):
  * a personality bolted on; these are kept out of the material she opens on.
  */
 export function raisedRecently<T extends AgendaItem>(lines: string[], items: T[]): T[] {
-  if((true as boolean)){const indices=corePolicySync<number[]>('agenda-life.indexed',['raisedRecently',[lines,items]]);return indices.map(i=>items[i]);}
-  const out: T[] = [];
-  for (const line of lines) {
-    // Her own lines again, and the failure here is the quiet one: an ordinary
-    // word colliding with a title marks that task as already raised, and she
-    // then says nothing about something she never mentioned.
-    const named = findItem(items, line, { whole: true });
-    if (named && !out.includes(named)) out.push(named);
-  }
-  return out;
+  {const indices=corePolicySync<number[]>('agenda-life.indexed',['raisedRecently',[lines,items]]);return indices.map(i=>items[i]);}
 }
 
 export function staleItemNamed(line: string, items: AgendaItem[], todayKey: string, nowMs = Date.now()): AgendaItem | null {
-  if((true as boolean)){const indices=corePolicySync<number>('agenda-life.indexed',['staleItemNamed',[line,items,todayKey,nowMs]]);return indices<0?null:items[indices];}
-  const lastEvent = shiftDays(todayKey, -CHASE_WINDOW_DAYS);
-  // Done, but not just done: "how did the Steam thing go" an hour after it is a
-  // follow-up, not a thing she should have known was over.
-  const justDone = (item: AgendaItem) => !!item.completedAt && nowMs - Date.parse(item.completedAt) <= FOLLOW_UP_MS;
-  const stale = items.filter(item => (item.done && !justDone(item)) || (item.kind === 'event' && item.date < lastEvent));
-  if (!stale.length) return null;
-  return findItem(stale, line, { whole: true }) ?? null;
+  {const indices=corePolicySync<number>('agenda-life.indexed',['staleItemNamed',[line,items,todayKey,nowMs]]);return indices<0?null:items[indices];}
 }
 
 /**
@@ -969,8 +682,6 @@ export function staleItemNamed(line: string, items: AgendaItem[], todayKey: stri
 export function followCalendar<T extends { title: string; date: string; time?: string; done: boolean; completedAt?: string; heardAbout?: string; underway?: string }>(
   item: T, event: { title: string; date: string; time?: string }, today: string,
 ): T {
-  if((true as boolean))return corePolicySync<any>('agenda-life.followCalendar',[item,event,today]);
-  const reopened = event.date !== item.date && event.date >= today;
-  return { ...item, title: event.title, date: event.date, time: event.time, ...(reopened ? { done: false, completedAt: undefined, heardAbout: undefined, underway: undefined } : {}) };
+  return corePolicySync<any>('agenda-life.followCalendar',[item,event,today]);
 }
 

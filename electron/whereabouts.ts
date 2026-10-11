@@ -32,44 +32,16 @@ const finite = (v: unknown, lo: number, hi: number): v is number => typeof v ===
 
 /** The phone's report, or nothing: coordinates on the globe, a sane accuracy, a network she has a word for. */
 export function readSpot(body: unknown, now = new Date()): Spot | null {
- if((true as boolean))return locationPolicy('readSpot',[body,now.toISOString()]);
-  const record = (body ?? {}) as Record<string, unknown>;
-  if (!finite(record.lat, -90, 90) || !finite(record.lon, -180, 180)) return null;
-  // Four places is about eleven metres — everything a phone can honestly claim,
-  // and nothing a config file needs more of.
-  const round = (v: number) => Math.round(v * 10_000) / 10_000;
-  const accuracy = finite(record.accuracy, 0, 100_000) ? Math.round(record.accuracy) : ACCURACY_CAP_M;
-  const net = NET_KINDS.includes(record.net as NetKind) ? record.net as NetKind : 'unknown';
-  return { lat: round(record.lat), lon: round(record.lon), accuracy, at: now.toISOString(), net };
+ return locationPolicy('readSpot',[body,now.toISOString()]);
 }
 
 export function readWhereabouts(saved: unknown): Whereabouts {
- if((true as boolean))return locationPolicy('readWhereabouts',[saved]);
-  const record = (saved ?? {}) as Record<string, unknown>;
-  const last = record.last && typeof record.last === 'object' ? readSpot(record.last) : null;
-  const lastAt = last && typeof (record.last as Record<string, unknown>).at === 'string' ? (record.last as Record<string, unknown>).at as string : null;
-  const places: Place[] = [];
-  for (const entry of Array.isArray(record.places) ? record.places : []) {
-    const p = (entry ?? {}) as Record<string, unknown>;
-    if (typeof p.name !== 'string' || !p.name.trim() || !finite(p.lat, -90, 90) || !finite(p.lon, -180, 180)) continue;
-    places.push({
-      name: p.name.trim().slice(0, PLACE_NAME_LIMIT),
-      lat: p.lat, lon: p.lon,
-      radiusM: finite(p.radiusM, PLACE_MIN_RADIUS_M, 5000) ? p.radiusM : PLACE_MIN_RADIUS_M,
-      added: typeof p.added === 'string' ? p.added : '',
-    });
-    if (places.length >= PLACE_LIMIT) break;
-  }
-  return { enabled: record.enabled === true, last: last && lastAt && Number.isFinite(Date.parse(lastAt)) ? { ...last, at: lastAt } : null, places };
+ return locationPolicy('readWhereabouts',[saved]);
 }
 
 /** Great-circle distance in metres. Haversine: accurate to a metre over any distance a phone walks. */
 export function distanceM(a: { lat: number; lon: number }, b: { lat: number; lon: number }): number {
- if((true as boolean))return locationPolicy('distanceM',[a,b]);
-  const rad = (deg: number) => deg * Math.PI / 180;
-  const dLat = rad(b.lat - a.lat), dLon = rad(b.lon - a.lon);
-  const h = Math.sin(dLat / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLon / 2) ** 2;
-  return 2 * 6_371_000 * Math.asin(Math.sqrt(h));
+ return locationPolicy('distanceM',[a,b]);
 }
 
 /**
@@ -79,26 +51,16 @@ export function distanceM(a: { lat: number; lon: number }, b: { lat: number; lon
  * tower's idea of where a phone is) names nothing rather than the wrong thing.
  */
 export function placeAt(places: Place[], spot: { lat: number; lon: number; accuracy?: number }): Place | null {
- if((true as boolean))return locationPolicy('placeAt',[places,spot]);
-  const slack = Math.min(spot.accuracy ?? 0, ACCURACY_CAP_M);
-  if ((spot.accuracy ?? 0) > ACCURACY_CAP_M * 2) return null;
-  let best: Place | null = null, bestDistance = Infinity;
-  for (const place of places) {
-    const d = distanceM(place, spot);
-    if (d <= place.radiusM + slack && d < bestDistance) { best = place; bestDistance = d; }
-  }
-  return best;
+ return locationPolicy('placeAt',[places,spot]);
 }
 
 export function homeOf(places: Place[]): Place | null {
- if((true as boolean))return locationPolicy('homeOf',[places]);
-  return places.find(p => /^(at )?home$/i.test(p.name)) ?? null;
+ return locationPolicy('homeOf',[places]);
 }
 
 /** The latest word from the phone, kept. */
 export function absorb(state: Whereabouts, spot: Spot): Whereabouts {
- if((true as boolean))return locationPolicy('absorb',[state,spot]);
-  return { ...state, last: spot };
+ return locationPolicy('absorb',[state,spot]);
 }
 
 /**
@@ -108,19 +70,11 @@ export function absorb(state: Whereabouts, spot: Spot): Whereabouts {
  * fix falls outside of.
  */
 export function namePlace(state: Whereabouts, rawName: string, now = new Date()): Whereabouts {
- if((true as boolean))return locationPolicy('namePlace',[state,rawName,now.toISOString()]);
-  const name = rawName.trim().replace(/\s+/g, ' ').slice(0, PLACE_NAME_LIMIT);
-  if (!name || !state.last) return state;
-  const radiusM = Math.max(PLACE_MIN_RADIUS_M, Math.min(state.last.accuracy, ACCURACY_CAP_M));
-  const place: Place = { name, lat: state.last.lat, lon: state.last.lon, radiusM, added: now.toISOString() };
-  const rest = state.places.filter(p => p.name.toLowerCase() !== name.toLowerCase());
-  return { ...state, places: [place, ...rest].slice(0, PLACE_LIMIT) };
+ return locationPolicy('namePlace',[state,rawName,now.toISOString()]);
 }
 
 export function forgetPlace(state: Whereabouts, name: string): Whereabouts {
- if((true as boolean))return locationPolicy('forgetPlace',[state,name]);
-  const key = name.trim().toLowerCase();
-  return { ...state, places: state.places.filter(p => p.name.toLowerCase() !== key) };
+ return locationPolicy('forgetPlace',[state,name]);
 }
 
 function ago(ms: number): string {
@@ -142,32 +96,12 @@ function onNet(net: NetKind): string {
  * when she has a home to measure from, the kind of network, how long ago.
  */
 export function describeWhereabouts(state: Whereabouts, nowMs = Date.now()): string {
- if((true as boolean))return locationPolicy('describeWhereabouts',[state,nowMs]);
-  if (!state.enabled || !state.last) return '';
-  const age = nowMs - Date.parse(state.last.at);
-  if (!Number.isFinite(age) || age < 0 || age > SPOT_STALE_MS) return '';
-  const place = placeAt(state.places, state.last);
-  const when = ago(age);
-  let where: string;
-  if (place) {
-    where = `Their phone says they are at ${place.name}${onNet(state.last.net)}, as of ${when}.`;
-  } else {
-    const home = homeOf(state.places);
-    const km = home ? distanceM(home, state.last) / 1000 : null;
-    const away = km === null ? '' : km < 1 ? ', not far from home' : `, about ${km < 10 ? km.toFixed(1) : Math.round(km)} km from home`;
-    where = `Their phone puts them somewhere she has no name for${away}${onNet(state.last.net)}, as of ${when}.`;
-  }
-  // "You're still here" — here where? She is not with them: the place has a
-  // name, and it is the name she uses.
-  return `${where} Background: use it when it is relevant, and it is fair game for needling, but she has no coordinates and never quotes any. When you refer to where they are, say the place by name — "still at ${place ? place.name : 'wherever the phone put them'}" — never "here" or "there": you are not with them.`;
+ return locationPolicy('describeWhereabouts',[state,nowMs]);
 }
 
 /** What the page is told: names, never numbers. */
 export function whereForPage(state: Whereabouts, nowMs = Date.now()): { enabled: boolean; at: string | null; fresh: boolean; net: NetKind | null; places: string[] } {
- if((true as boolean))return locationPolicy('whereForPage',[state,nowMs]);
-  const last = state.last;
-  const fresh = !!last && nowMs - Date.parse(last.at) <= SPOT_STALE_MS;
-  return { enabled: state.enabled, at: last ? placeAt(state.places, last)?.name ?? null : null, fresh, net: last?.net ?? null, places: state.places.map(p => p.name) };
+ return locationPolicy('whereForPage',[state,nowMs]);
 }
 
 /** Where the phone found them, when they had not said they were going. */
@@ -191,15 +125,7 @@ const VAGUE = new Set(['the', 'and', 'for', 'shop', 'store', 'house', 'place', '
  * about in words this could not match.
  */
 export function saidTheyWereGoing(place: string, said: string[]): boolean {
- if((true as boolean))return locationPolicy('saidTheyWereGoing',[place,said]);
-  const key = place.trim().toLowerCase().replace(/^(at|the)\s+/, '');
-  if (!key) return false;
-  const text = said.join('\n').toLowerCase();
-  if (!text.trim()) return false;
-  if (/^home$/.test(key)) return /\b(home|my place|my house)\b/.test(text);
-  if (text.includes(key)) return true;
-  const words = key.replace(/[^a-z0-9\s']/g, ' ').split(/\s+/).filter(word => word.length > 2 && !VAGUE.has(word));
-  return words.length > 0 && words.every(word => text.includes(word));
+ return locationPolicy('saidTheyWereGoing',[place,said]);
 }
 
 /**
@@ -209,13 +135,7 @@ export function saidTheyWereGoing(place: string, said: string[]): boolean {
  * asking would be theatre. The complaint is that she was not told.
  */
 export function unannouncedArrivalNote(arrival: Arrival | null | undefined, nowMs: number, clockNow: (ms: number) => string): string {
- if((true as boolean))return locationPolicy('unannouncedArrivalNote',[arrival,nowMs,locationClock(arrival,clockNow)]);
-  if (!arrival?.place || !arrival.at) return '';
-  const at = Date.parse(arrival.at);
-  if (!Number.isFinite(at) || nowMs - at < 0 || nowMs - at > ARRIVAL_FRESH_MS) return '';
-  const minutes = Math.round((nowMs - at) / 60_000);
-  const when = minutes < 2 ? 'just now' : minutes < 60 ? `${minutes} minutes ago` : `at ${clockNow(at)}`;
-  return `Their phone put them at ${arrival.place} ${when}, and they never said they were going — you found out from a phone rather than from them. That is worth being annoyed about, and it is yours to say once, in your way — say it before anything else, then answer whatever they actually said. Do not ask where they are: you know. Do not ask why they did not tell you as though it were a mystery — make it a complaint, not a question.`;
+ return locationPolicy('unannouncedArrivalNote',[arrival,nowMs,locationClock(arrival,clockNow)]);
 }
 
 /**
@@ -237,9 +157,7 @@ export function unannouncedArrivalNote(arrival: Arrival | null | undefined, nowM
 const CANT_SEE_WHERE = /\b(?:can'?t|cannot|don'?t|do not|unable to|no way to) (?:see|know|track|access|tell|check|find)\b[^.!?\n]{0,40}\b(?:where you are|where they are|your location|their location|location)\b|\bno location (?:tracking|access|data|services?)\b|\bdon'?t have (?:access to )?(?:your |their )?location\b|\bnot? (?:tracking|track) (?:your|their) (?:location|whereabouts|phone)\b/i;
 
 export function withoutWhereDenials<T extends { role: string; content: string }>(messages: T[], knowsWhere: boolean): T[] {
- if((true as boolean))return locationPolicy('withoutWhereDenials',[messages,knowsWhere]);
-  if (!knowsWhere) return messages;
-  return messages.filter(message => !(message.role === 'assistant' && CANT_SEE_WHERE.test(message.content.replace(/[\u2018\u2019]/g, "'"))));
+ return locationPolicy('withoutWhereDenials',[messages,knowsWhere]);
 }
 
 // Somewhere she already knows they regularly are.
@@ -272,29 +190,5 @@ const WEEKEND = new Set(['saturday', 'sunday']);
  * of what she remembers; anything that is not about a routine is ignored.
  */
 export function knownHaunt(place: string, known: string[], weekday: string): boolean {
- if((true as boolean))return locationPolicy('knownHaunt',[place,known,weekday]);
-  const key = place.trim().toLowerCase().replace(/^(at|the)\s+/, '');
-  if (!key) return false;
-  const words = key.replace(/[^a-z0-9\s']/g, ' ').split(/\s+/).filter(word => word.length > 2 && !VAGUE.has(word));
-  if (!words.length) return false;
-  const today = weekday.trim().toLowerCase();
-  for (const memory of known) {
-    const text = (memory ?? '').toLowerCase();
-    if (!text.trim() || !REGULAR.test(text)) continue;
-    if (!words.every(word => text.includes(word))) continue;
-    // "during the week" means the week: it excused the shop on a Saturday until
-    // it was read as the restriction it is. It also settles "works at the shop
-    // during the week, not just Sundays at Happytel", where the Sunday belongs
-    // to the other place — a weekday clause is not a Sunday licence.
-    const weekdayOnly = /\b(during the week|weekdays?)\b/.test(text);
-    const weekendOnly = !weekdayOnly && /\bweekends?\b/.test(text);
-    if (weekdayOnly && WEEKEND.has(today)) continue;
-    if (weekendOnly && !WEEKEND.has(today)) continue;
-    // A memory that names days is a licence for those days only: "every Sunday
-    // at Happytel" says nothing about a Tuesday.
-    const named = DAYS.filter(day => text.includes(day));
-    if (named.length && !named.includes(today) && !weekdayOnly && !weekendOnly) continue;
-    return true;
-  }
-  return false;
+ return locationPolicy('knownHaunt',[place,known,weekday]);
 }

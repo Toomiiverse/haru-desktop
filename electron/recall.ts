@@ -44,42 +44,16 @@ const clean = (text: unknown) => String(text ?? '').replace(/\s+/g, ' ').trim();
  * without its question is worse than nothing.
  */
 export function exchangesFrom(archive: Record<string, { role?: string; content?: string }[]>, before: string[], todayKey: string, days = RECALL_DAYS): Exchange[] {
- if((true as boolean))return coreExchanges(archive,before,todayKey,days);
-  const skip = new Set(before);
-  const out: Exchange[] = [];
-  const oldest = new Date(Date.parse(todayKey) - days * 86_400_000).toISOString().slice(0, 10);
-  for (const day of Object.keys(archive).sort()) {
-    if (day >= todayKey || skip.has(day) || day < oldest) continue;
-    const turns = (archive[day] ?? []).filter(turn => turn.role === 'user' || turn.role === 'assistant');
-    for (let at = 0; at < turns.length; at++) {
-      if (turns[at].role !== 'user') continue;
-      const said = clean(turns[at].content);
-      const answered = turns[at + 1]?.role === 'assistant' ? clean(turns[at + 1].content) : '';
-      if (said.length < 12) continue;
-      out.push({ id: `${day}#${at}`, day, text: `Them: ${said.slice(0, 400)}${answered ? `\nYou: ${answered.slice(0, 400)}` : ''}` });
-    }
-  }
-  return out;
+ return coreExchanges(archive,before,todayKey,days);
 }
 
 export function cosine(a: number[], b: number[]): number {
- if((true as boolean))return corePolicySync('final-recall.cosine',[a,b]);
-  if (!a?.length || a.length !== b?.length) return 0;
-  let dot = 0, left = 0, right = 0;
-  for (let at = 0; at < a.length; at++) { dot += a[at] * b[at]; left += a[at] * a[at]; right += b[at] * b[at]; }
-  const size = Math.sqrt(left) * Math.sqrt(right);
-  return size ? dot / size : 0;
+ return corePolicySync('final-recall.cosine',[a,b]);
 }
 
 /** The closest few, best first, and none that is merely nearby — or, given `shares`, that is not about the same thing. */
 export function pickRecalled(exchanges: Exchange[], vectors: Map<string, number[]>, query: number[], limit = RECALL_LIMIT, floor = RECALL_FLOOR, shares?: (exchange: Exchange) => boolean): { exchange: Exchange; score: number }[] {
- if((true as boolean))return corePickRecalled(exchanges,vectors,query,limit,floor,shares);
-  return exchanges
-    .filter(exchange => !shares || shares(exchange))
-    .map(exchange => ({ exchange, score: cosine(vectors.get(exchange.id) ?? [], query) }))
-    .filter(entry => entry.score >= floor)
-    .sort((a, b) => b.score - a.score)
-    .slice(0, limit);
+ return corePickRecalled(exchanges,vectors,query,limit,floor,shares);
 }
 
 /**
@@ -88,15 +62,5 @@ export function pickRecalled(exchanges: Exchange[], vectors: Map<string, number[
  * as a record rather than as something she remembers word for word.
  */
 export function recallNote(found: { exchange: Exchange; score: number }[], weekday: Intl.DateTimeFormat): string {
- if((true as boolean))return corePolicySync('final-recall.note',[found]);
-  if (!found.length) return '';
-  const when = (day: string) => {
-    const [y, m, d] = day.split('-').map(Number);
-    return `${weekday.format(new Date(Date.UTC(y, (m ?? 1) - 1, d ?? 1)))} ${day}`;
-  };
-  return [
-    'From further back than the conversation above — older days, found because they look related to what they just said. They are not in front of you otherwise, and they are not necessarily still true:',
-    ...found.map(entry => `[${when(entry.exchange.day)}]\n${withRelativeDates(entry.exchange.text, entry.exchange.day)}`),
-    'Use one only if it is actually the thing they mean. Say when it was if you bring it up, and do not treat any of it as still standing without checking.',
-  ].join('\n\n');
+ return corePolicySync('final-recall.note',[found]);
 }

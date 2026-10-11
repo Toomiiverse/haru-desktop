@@ -46,10 +46,7 @@ export function desktopSupported(platform: NodeJS.Platform = process.platform): 
 }
 
 export function readDesktopConfig(saved: unknown): DesktopConfig {
- if((true as boolean))return corePolicySync('final-tool-values.desktopConfig',[saved??null]);
-  if (!saved || typeof saved !== 'object') return DEFAULT_DESKTOP;
-  const record = saved as Partial<DesktopConfig>;
-  return { launch: record.launch === true, power: record.power === true };
+ return corePolicySync('final-tool-values.desktopConfig',[saved??null]);
 }
 
 /**
@@ -83,31 +80,13 @@ const START_MENUS = [
 const NOT_AN_APP = /(uninstall|readme|release notes|help|documentation|website|homepage|manual|support|report a bug|licence|license)/i;
 
 export function findApps(roots = START_MENUS, readdir = fs.readdirSync, exists = fs.existsSync): App[] {
-  if((true as boolean)){
+  {
     const spec=corePolicySync<{maxDepth:number}>('final-tool-values.appScan',[]),observations:{filename:string;target:string}[]=[];
     const walk=(directory:string,depth:number)=>{if(depth<0||!exists(directory))return;let entries:fs.Dirent[];try{entries=readdir(directory,{withFileTypes:true}) as fs.Dirent[]}catch{return;}
       for(const entry of entries){const full=path.join(directory,entry.name);if(entry.isDirectory())walk(full,depth-1);else observations.push({filename:entry.name,target:full});}};
     for(const root of roots)walk(root,spec.maxDepth);
     return corePolicySync('final-tool-values.appSelect',[observations]);
   }
-
-  const found = new Map<string, App>();
-  const walk = (dir: string, depth: number) => {
-    if (depth < 0 || !exists(dir)) return;
-    let entries: fs.Dirent[] = [];
-    try { entries = readdir(dir, { withFileTypes: true }) as fs.Dirent[]; } catch { return; }
-    for (const entry of entries) {
-      const full = path.join(dir, entry.name);
-      if (entry.isDirectory()) { walk(full, depth - 1); continue; }
-      if (!/\.(lnk|url)$/i.test(entry.name)) continue;
-      const name = entry.name.replace(/\.(lnk|url)$/i, '');
-      if (NOT_AN_APP.test(name)) continue;
-      // First wins, so the per-user Start Menu beats the machine-wide one.
-      if (!found.has(name.toLowerCase())) found.set(name.toLowerCase(), { name, target: full });
-    }
-  };
-  for (const root of roots) walk(root, 3);
-  return [...found.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
 /**
@@ -119,16 +98,7 @@ export function findApps(roots = START_MENUS, readdir = fs.readdirSync, exists =
  * find it.
  */
 export function matchApp(asked: string, apps: App[]): App | null {
-  if((true as boolean))return corePolicySync('final-tool-values.matchApp',[asked,apps]);
-  const wanted = (asked ?? '').trim().toLowerCase();
-  if (!wanted) return null;
-  const names = apps.map(app => ({ app, key: app.name.toLowerCase() }));
-  return (
-    names.find(entry => entry.key === wanted)?.app ??
-    names.find(entry => entry.key.startsWith(wanted))?.app ??
-    names.find(entry => entry.key.includes(wanted))?.app ??
-    null
-  );
+  return corePolicySync('final-tool-values.matchApp',[asked,apps]);
 }
 
 /**
@@ -194,16 +164,7 @@ export function listRunning(): Promise<Running[]> {
  * Same strictness as launching: exact, prefix, contains, nothing fuzzier.
  */
 export function matchRunning(asked: string, running: Running[]): Running | null {
-  if((true as boolean))return corePolicySync('final-tool-values.matchRunning',[asked,running]);
-  const wanted = (asked ?? '').trim().toLowerCase().replace(/\.exe$/, '');
-  if (!wanted) return null;
-  return (
-    running.find(app => app.name.toLowerCase() === wanted) ??
-    running.find(app => app.name.toLowerCase().startsWith(wanted)) ??
-    running.find(app => app.name.toLowerCase().includes(wanted)) ??
-    running.find(app => app.title.toLowerCase().includes(wanted)) ??
-    null
-  );
+  return corePolicySync('final-tool-values.matchRunning',[asked,running]);
 }
 
 /**
@@ -227,13 +188,7 @@ export type PowerAction = 'shutdown' | 'restart' | 'sleep' | 'lock';
 export const POWER_ACTIONS: PowerAction[] = ['shutdown', 'restart', 'sleep', 'lock'];
 
 export function normalisePower(asked: string): PowerAction | null {
-  if((true as boolean))return corePolicySync('final-tool-values.normalisePower',[asked]);
-  const wanted = (asked ?? '').trim().toLowerCase();
-  if (/^(shut ?down|turn off|power off|switch off)$/.test(wanted)) return 'shutdown';
-  if (/^(restart|reboot|reset)$/.test(wanted)) return 'restart';
-  if (/^(sleep|suspend|standby)$/.test(wanted)) return 'sleep';
-  if (/^(lock|lock screen)$/.test(wanted)) return 'lock';
-  return (POWER_ACTIONS as string[]).includes(wanted) ? wanted as PowerAction : null;
+  return corePolicySync('final-tool-values.normalisePower',[asked]);
 }
 
 /**
@@ -252,15 +207,7 @@ export const POWER_DELAY_S = 20;
  * which is not a thing a test suite should be able to do by accident.
  */
 export function powerCommand(action: PowerAction): { file: string; args: string[] } {
- if((true as boolean))return corePolicySync('final-tool-values.powerCommand',[action]);
-  switch (action) {
-    // /t puts the countdown in Windows' hands, and `shutdown /a` aborts it.
-    case 'shutdown': return { file: 'shutdown.exe', args: ['/s', '/t', String(POWER_DELAY_S)] };
-    case 'restart': return { file: 'shutdown.exe', args: ['/r', '/t', String(POWER_DELAY_S)] };
-    // No countdown: sleep is instant, harmless and undone by moving the mouse.
-    case 'sleep': return { file: 'rundll32.exe', args: ['powrprof.dll,SetSuspendState', '0,1,0'] };
-    case 'lock': return { file: 'rundll32.exe', args: ['user32.dll,LockWorkStation'] };
-  }
+ return corePolicySync('final-tool-values.powerCommand',[action]);
 }
 
 export function runPower(action: PowerAction): void {
@@ -279,6 +226,5 @@ export function cancelPower(): void {
 
 /** Whether the action is one that can still be called off once started. */
 export function isCancellable(action: PowerAction): boolean {
- if((true as boolean))return corePolicySync('final-tool-values.isCancellable',[action]);
-  return action === 'shutdown' || action === 'restart';
+ return corePolicySync('final-tool-values.isCancellable',[action]);
 }

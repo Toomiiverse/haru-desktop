@@ -38,23 +38,7 @@ function escapeRegExp(text: string): string {
  * when they have not named one themselves — their choice wins over the setting.
  */
 export function placeQuery(text: string, place: string): string | null {
- if((true as boolean))return navigationPolicy('placeQuery',[text,place]);
-  // Curly quotes come off a phone keyboard, and every pattern below is written
-  // with the straight ones.
-  const line = (text ?? '').trim().replace(/\s+/g, ' ').replace(/[\u2018\u2019]/g, "'");
-  if (!line || line.length > 200) return null;
-  if (NOT_ASKING.test(line)) return null;
-  if (!WHERE_TO_GET.test(line) && !(KIND.test(line) && ASKING.test(line))) return null;
-  const cleaned = line
-    .replace(/^(hey|ok|okay|so|and)[,!.]?\s+/i, '')
-    .replace(/^(haru)[,!.]?\s+/i, '')
-    .replace(/^(what'?s|what is|whats|whats a|can you|could you|do you know|do you have|got)\s+/i, '')
-    .replace(/[?!.]+$/, '')
-    .trim();
-  if (!cleaned) return null;
-  const city = (place ?? '').split(',')[0].trim();
-  const named = Boolean(city) && new RegExp(`\\b${escapeRegExp(city)}\\b`, 'i').test(line);
-  return named || !place ? cleaned : `${cleaned} ${place}`;
+ return navigationPolicy('placeQuery',[text,place]);
 }
 
 /**
@@ -63,11 +47,5 @@ export function placeQuery(text: string, place: string): string | null {
  * a blend is indistinguishable from an invention by the time it reaches a map.
  */
 export function groundedInstruction(results: string): string {
- if((true as boolean))return navigationPolicy('groundedInstruction',[results]);
-  return [
-    'A search has just been run for you, because they asked you for somewhere real. What follows is what came back, and it is the only thing you know about which places exist:',
-    results,
-    'Every name you give must be one of these, spelled as it is written here, and you may not add a place you happen to remember. If none of them fit, say you could not turn one up rather than filling the gap.',
-    'Answer with the places and nothing about yourself: do not mention, correct or apologise for anything you said about places earlier, and do not remark on where the list came from. Three or four is plenty.',
-  ].join('\n');
+ return navigationPolicy('groundedInstruction',[results]);
 }

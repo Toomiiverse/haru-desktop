@@ -99,44 +99,19 @@ export type Carry = {
  * thing this exists to stop.
  */
 export function rollTemperament(day: string, carry: Carry, random: () => number = Math.random): Temperament {
-  if((true as boolean)) { return corePolicySync<any>('mood.rollTemperament',[day,carry,[random(),random()]]); }
-  const weights = Object.fromEntries(Object.entries(TEMPERAMENTS).map(([kind, shape]) => [kind, shape.weight])) as Record<TemperamentKind, number>;
-  const reasons: string[] = [];
-  if (carry.went === 'silent') { weights.prickly *= 2; weights.flat *= 1.8; weights.clingy *= 1.5; weights.sunny *= 0.5; reasons.push('after a silent evening'); }
-  if (carry.went === 'thin') { weights.prickly *= 1.4; weights.flat *= 1.3; reasons.push('after a thin evening'); }
-  if (carry.wokenInNight) { weights.prickly *= 2; weights.stormy *= 3; weights.sunny *= 0.4; reasons.push('after being woken in the night'); }
-  const grudge = carry.grudge ?? 0;
-  if (grudge >= 55) { weights.sunny *= 0.5; weights.tender *= 0.5; weights.prickly *= 1.5; weights.stormy *= 1.5; reasons.push('with a grudge on'); }
-  else if (grudge <= 5) { weights.sunny *= 1.4; weights.tender *= 1.3; weights.mischievous *= 1.3; }
-  const [last, before] = carry.history ?? [];
-  if (last && last === before && last !== 'ordinary') weights[last] = 0;
-  else if (last && last !== 'ordinary') weights[last] *= 0.5;
-
-  const total = Object.values(weights).reduce((sum, weight) => sum + weight, 0);
-  let pick = random() * total;
-  let kind: TemperamentKind = 'ordinary';
-  for (const [name, weight] of Object.entries(weights) as [TemperamentKind, number][]) {
-    if ((pick -= weight) < 0) { kind = name; break; }
-  }
-  const intensity = Math.round((0.5 + random() * 0.5) * 100) / 100;
-  return { day, kind, intensity, because: reasons.join(', ') || undefined, history: [kind, ...(carry.history ?? [])].slice(0, 3) };
+  return corePolicySync<any>('mood.rollTemperament',[day,carry,[random(),random()]]);
 }
 
 export function temperamentLean(temperament: Temperament | null | undefined): Lean {
-  if((true as boolean)) { return corePolicySync<any>('mood.temperamentLean',[temperament]); }
-  if (!temperament) return {};
-  const shape = TEMPERAMENTS[temperament.kind] ?? TEMPERAMENTS.ordinary;
-  return Object.fromEntries(Object.entries(shape.lean).map(([vital, push]) => [vital, (push ?? 0) * temperament.intensity])) as Lean;
+  return corePolicySync<any>('mood.temperamentLean',[temperament]);
 }
 
 export function temperamentLine(temperament: Temperament | null | undefined): string {
-  if((true as boolean)) { return corePolicySync<any>('mood.temperamentLine',[temperament]); }
-  return temperament ? TEMPERAMENTS[temperament.kind]?.line ?? '' : '';
+  return corePolicySync<any>('mood.temperamentLine',[temperament]);
 }
 
 export function temperamentWord(temperament: Temperament | null | undefined): string {
-  if((true as boolean)) { return corePolicySync<any>('mood.temperamentWord',[temperament]); }
-  return temperament ? TEMPERAMENTS[temperament.kind]?.word ?? '' : '';
+  return corePolicySync<any>('mood.temperamentWord',[temperament]);
 }
 
 const GOOD: readonly VitalEvent[] = ['praised', 'soothed', 'warmed', 'returned-glad', 'caught-interest', 'spoken-to'];
@@ -147,19 +122,12 @@ const GOOD: readonly VitalEvent[] = ['praised', 'soothed', 'warmed', 'returned-g
  * bad news, ±30% on the roll.
  */
 export function eventSize(temperament: Temperament | null | undefined, event: VitalEvent, roll = Math.random()): number {
-  if((true as boolean)) { return corePolicySync<any>('mood.eventSize',[temperament,event,roll]); }
-  const swing = temperament ? TEMPERAMENTS[temperament.kind]?.swing ?? { good: 1, bad: 1 } : { good: 1, bad: 1 };
-  const taken = GOOD.includes(event) ? swing.good : swing.bad;
-  const mine = temperament ? 1 + (taken - 1) * temperament.intensity : 1;
-  return Math.round(1.5 * mine * (0.7 + Math.max(0, Math.min(1, roll)) * 0.6) * 100) / 100;
+  return corePolicySync<any>('mood.eventSize',[temperament,event,roll]);
 }
 
 /** Whether a long silence ending lands as relief or as a grievance, today. */
 export function howHisReturnLands(temperament: Temperament | null | undefined, grudge: number, roll = Math.random()): 'returned-glad' | 'returned-sore' {
-  if((true as boolean)) { return corePolicySync<any>('mood.howHisReturnLands',[temperament,grudge,roll]); }
-  const kind = temperament?.kind ?? 'ordinary';
-  const sore = (kind === 'prickly' || kind === 'stormy' ? 0.7 : kind === 'clingy' ? 0.5 : kind === 'sunny' || kind === 'tender' ? 0.15 : 0.35) + Math.min(0.25, grudge / 400);
-  return roll < sore ? 'returned-sore' : 'returned-glad';
+  return corePolicySync<any>('mood.howHisReturnLands',[temperament,grudge,roll]);
 }
 
 // -- the weather of the day ---------------------------------------------------
@@ -178,16 +146,7 @@ function gaussian(random: () => number): number {
 
 /** One step of the slow walk: pulled back toward nothing, pushed by noise. */
 export function stepWander(wander: Lean, seconds: number, random: () => number = Math.random): Lean {
-  if((true as boolean)) { return corePolicySync<any>('mood.stepWander',[wander,seconds,Array.from({length:10},()=>random())]); }
-  if (!Number.isFinite(seconds) || seconds <= 0) return { ...wander };
-  const dt = Math.min(seconds, 3600) / WANDER_SECONDS;
-  const next: Lean = {};
-  for (const vital of WANDERS) {
-    const now = wander[vital] ?? 0;
-    const moved = now - now * dt + WANDER_SIGMA * Math.sqrt(dt) * gaussian(random);
-    next[vital] = Math.max(-WANDER_LIMIT, Math.min(WANDER_LIMIT, moved));
-  }
-  return next;
+  return corePolicySync<any>('mood.stepWander',[wander,seconds,Array.from({length:10},()=>random())]);
 }
 
 // -- what is left of the last thing that happened ------------------------------
@@ -196,32 +155,14 @@ export const BRUISE_LIMIT = 0.25;
 const BRUISE_HALF_LIFE_SECONDS = 45 * 60;
 
 export function fadeBruise(bruise: Lean, seconds: number): Lean {
-  if((true as boolean)) { return corePolicySync<any>('mood.fadeBruise',[bruise,seconds]); }
-  if (!Number.isFinite(seconds) || seconds <= 0) return { ...bruise };
-  const kept = Math.pow(0.5, seconds / BRUISE_HALF_LIFE_SECONDS);
-  const next: Lean = {};
-  for (const vital of WANDERS) {
-    const left = (bruise[vital] ?? 0) * kept;
-    if (Math.abs(left) >= 0.005) next[vital] = left;
-  }
-  return next;
+  return corePolicySync<any>('mood.fadeBruise',[bruise,seconds]);
 }
 
 /** Half of what an event just did to her stays as a push on where she settles. */
 export function bruiseFrom(bruise: Lean, before: Record<string, number>, after: Record<string, number>): Lean {
-  if((true as boolean)) { return corePolicySync<any>('mood.bruiseFrom',[bruise,before,after]); }
-  const next: Lean = { ...bruise };
-  for (const vital of WANDERS) {
-    const moved = (after[vital] ?? 0) - (before[vital] ?? 0);
-    if (!moved) continue;
-    next[vital] = Math.max(-BRUISE_LIMIT, Math.min(BRUISE_LIMIT, (next[vital] ?? 0) + moved * 0.5));
-  }
-  return next;
+  return corePolicySync<any>('mood.bruiseFrom',[bruise,before,after]);
 }
 
 export function addLeans(...leans: Lean[]): Lean {
-  if((true as boolean)) { return corePolicySync<any>('mood.addLeans',leans); }
-  const total: Lean = {};
-  for (const lean of leans) for (const vital of WANDERS) if (lean[vital]) total[vital] = (total[vital] ?? 0) + (lean[vital] ?? 0);
-  return total;
+  return corePolicySync<any>('mood.addLeans',leans);
 }

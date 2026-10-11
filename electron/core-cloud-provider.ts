@@ -35,7 +35,7 @@ export function cloudWirePrivacyView(body:any,wire:string){
 }
 
 export async function coreCloudFetch<T extends RequestInit>(fetcher:(url:string,init:T)=>Promise<Response>,url:string,init:T):Promise<Response>{
-  if((false as boolean))return fetcher(url,init);
+  
   const address=new URL(url),body=typeof init.body==='string'?JSON.parse(init.body):null;
   const formats=[['/chat/completions','openai'],['/messages','anthropic'],['/responses','responses']] as const;
   const route=formats.find(([suffix])=>address.pathname.endsWith(suffix));

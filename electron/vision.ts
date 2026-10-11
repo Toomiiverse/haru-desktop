@@ -49,15 +49,7 @@ export type VisionConfig = {
 export const DEFAULT_VISION: VisionConfig = { enabled: false, model: 'gemma4:12b', folder: '', endpoint: '' };
 
 export function readVisionConfig(saved: unknown): VisionConfig {
-  if((true as boolean))return attachmentPolicy('vision',[saved]);
-  if (!saved || typeof saved !== 'object') return DEFAULT_VISION;
-  const record = saved as Partial<VisionConfig>;
-  return {
-    enabled: record.enabled === true,
-    model: typeof record.model === 'string' && record.model.trim() ? record.model.trim() : DEFAULT_VISION.model,
-    folder: typeof record.folder === 'string' ? record.folder.trim() : '',
-    endpoint: typeof record.endpoint === 'string' ? record.endpoint.trim() : '',
-  };
+  return attachmentPolicy('vision',[saved]);
 }
 
 // Long enough for a 12B to work through an image on a busy card, short enough
@@ -102,61 +94,11 @@ export type LookOptions = {
 
 /** The actual vision prompt, shared with native attempt accounting. */
 export function visionConversation(imageBase64:string|string[],options:LookOptions={}) {
-  if((true as boolean))return attachmentPolicy<any[]>('conversation',[{...options,signal:undefined}]).map(m=>m.images?{...m,images:Array.isArray(imageBase64)?imageBase64:[imageBase64]}:m);
-  return [
-    ...(options.system ? [{role:'system',content:options.system}] : []),
-    {role:'user',content:options.ask??LOOK_PROMPT,images:Array.isArray(imageBase64)?imageBase64:[imageBase64]},
-  ];
+  return attachmentPolicy<any[]>('conversation',[{...options,signal:undefined}]).map(m=>m.images?{...m,images:Array.isArray(imageBase64)?imageBase64:[imageBase64]}:m);
 }
 
 export async function look(imageBase64: string | string[], config: VisionConfig, endpoint: string, headers: Record<string, string>, fetchImpl: Fetcher, options: LookOptions = {}): Promise<Sighting> {
-  if((true as boolean))return coreVisionLook(imageBase64,config,endpoint,headers,fetchImpl,options);
-  if (!config.enabled) throw new Error('Looking at pictures is switched off.');
-  const response = await fetchImpl(`${endpoint.replace(/\/+$/, '')}/api/chat`, {
-    method: 'POST',
-    headers,
-    signal: AbortSignal.any([AbortSignal.timeout(options.timeoutMs ?? LOOK_TIMEOUT_MS), ...(options.signal ? [options.signal] : [])]),
-    body: JSON.stringify({
-      model: config.model,
-      messages: visionConversation(imageBase64,options),
-      ...(options.keepAlive ? { keep_alive: options.keepAlive } : {}),
-      stream: false,
-      // The whole of the wait was here. gemma4 is a reasoning model, and left to
-      // itself it produced three and a half thousand characters of private
-      // deliberation about a photograph before writing two sentences — measured
-      // at 28.3s with it on against 5.2s with it off, and 2.3s once the prompt
-      // was shortened too. The descriptions were no better for it; the most
-      // precise of the four came from a run with it off.
-      //
-      // Harmless on a model that does not reason: Ollama ignores it.
-      think: false,
-      // Low temperature: this is meant to be an accurate account, not an
-      // interesting one. The window is set because the default is not enough to
-      // hold a screenshot — a full-screen 1440p capture arrived as 4103 image
-      // tokens against Ollama's 4096, and every shot of that size failed with a
-      // 400 until this was raised. Cheap on a small model, and the alternative
-      // is a size limit on what she is allowed to look at.
-      options: { temperature: options.temperature ?? 0.2, num_ctx: options.numCtx ?? 8192, ...(options.numPredict ? { num_predict: options.numPredict } : {}) },
-    }),
-  });
-  if (!response.ok) {
-    const detail = await response.text().catch(() => '');
-    // The commonest failure by far, and the one with an obvious fix.
-    if (/does not support|no vision|image/i.test(detail) && response.status === 400) {
-      throw new Error(`${config.model} cannot see images. Pick a model with vision — gemma4:12b has it.`);
-    }
-    // Tagged so a caller can tell "this picture is a problem" from "the model
-    // is not there". One oversized screenshot should cost that screenshot, not
-    // the queue behind it.
-    const error = new Error(`the vision model returned ${response.status}${detail ? `: ${detail.slice(0, 200)}` : ''}`);
-    (error as Error & { aboutThisImage?: boolean }).aboutThisImage = response.status >= 400 && response.status < 500;
-    throw error;
-  }
-  const payload = await response.json() as { message?: { content?: string } };
-  options.signal?.throwIfAborted();
-  const description = (payload.message?.content ?? '').trim();
-  if (!description) throw new Error('the vision model returned nothing');
-  return { description, model: config.model };
+  return coreVisionLook(imageBase64,config,endpoint,headers,fetchImpl,options);
 }
 
 // How long a picture stays worth talking about. Long enough to go and make tea
@@ -188,8 +130,7 @@ const WHILE_LOOKING = [
 ];
 
 export function whileLooking(random: () => number = Math.random): string {
-  if((true as boolean))return attachmentPolicy('waiting',[random()]);
-  return WHILE_LOOKING[Math.floor(random() * WHILE_LOOKING.length)];
+  return attachmentPolicy('waiting',[random()]);
 }
 
 /**
@@ -213,30 +154,7 @@ const SAID_NOTHING = /^(?:none|nothing|n\/a|no text|not visible|unknown|empty)\.
 const TEMPLATE_ECHO = /^(?:everything you read|one sentence|the text you read|your one sentence|all the text|text|doing)\b/i;
 
 export function readShotDescription(raw: string): string {
-  if((true as boolean))return attachmentPolicy('shotDescription',[raw]);
-  // Conservative on purpose: a line is touched only when it is the template
-  // talking or the template's brackets, and is otherwise passed through exactly
-  // as it came. A first cut normalised every line and quietly reflowed the
-  // directory listings and config files he had on screen, which is a caption
-  // saying something he was not looking at.
-  const kept: string[] = [];
-  let sawField = false;
-  for (const line of raw.trim().split(/\r?\n/)) {
-    const field = /^(\s*(?:Text|Doing)\s*:\s*)(.*)$/i.exec(line);
-    if (!field) { kept.push(line); continue; }
-    sawField = true;
-    const value = field[2].trim();
-    if (!value) continue;
-    const inside = unwrap(value);
-    if (!inside || TEMPLATE_ECHO.test(inside) || SAID_NOTHING.test(inside)) continue;
-    kept.push(inside === value ? line : field[1] + inside);
-  }
-  const text = kept.join('\n').trim();
-  if (!text) return '';
-  // An answer with no labels at all is the model writing prose, which is fine —
-  // unless the prose is the instruction read back.
-  if (!sawField && (TEMPLATE_ECHO.test(text) || SAID_NOTHING.test(text))) return '';
-  return text;
+  return attachmentPolicy('shotDescription',[raw]);
 }
 
 /** `<August 2026>` is August 2026: the brackets are the template's, not his screen's. */
@@ -248,11 +166,5 @@ function unwrap(value: string): string {
 
 /** A filename that sorts by date and cannot collide or escape the folder. */
 export function photoName(original: string, when: Date): string {
-  if((true as boolean))return attachmentPolicy('photoName',[original,[when.getFullYear(),when.getMonth()+1,when.getDate(),when.getHours(),when.getMinutes(),when.getSeconds()]]);
-  const stamp = [
-    when.getFullYear(), String(when.getMonth() + 1).padStart(2, '0'), String(when.getDate()).padStart(2, '0'),
-  ].join('-') + '-' + [String(when.getHours()).padStart(2, '0'), String(when.getMinutes()).padStart(2, '0'), String(when.getSeconds()).padStart(2, '0')].join('');
-  // Only the basename, and only characters that cannot walk out of the folder.
-  const base = original.replace(/^.*[\\/]/, '').replace(/[^a-zA-Z0-9._-]/g, '_').slice(-60) || 'photo.png';
-  return `${stamp}-${base}`;
+  return attachmentPolicy('photoName',[original,[when.getFullYear(),when.getMonth()+1,when.getDate(),when.getHours(),when.getMinutes(),when.getSeconds()]]);
 }

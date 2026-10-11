@@ -53,12 +53,12 @@ async function choose(op:'pick'|'phone',candidates:readonly NudgeCandidate[],asi
   return index as number|null;
 }
 export async function corePickNudge(candidates:readonly NudgeCandidate[],asides:readonly Aside[],now:number,learning:readonly NudgeSignal[]) {
-  if((false as boolean))return pickNudgeCandidate(candidates,asides,now,Math.random,learning);
+  
   const index=await choose('pick',candidates,asides,now,learning);
   return index===null?null:candidates[index];
 }
 export async function coreSelectPhoneNudge(state:PhoneNudgeState,candidates:readonly NudgeCandidate[],asides:readonly Aside[],learning:readonly NudgeSignal[],messages:readonly NudgeMessage[],now:number) {
-  if((false as boolean))return selectPhoneOpportunity(state,candidates,asides,learning,messages,now);
+  
   const messagesOnly=messages.flatMap(m=>{
     const atMs=stamp(m.at);
     return m.role==='user'&&atMs!==null&&atMs<=now?[{atMs,terms:nudgeKeywords(m.content??'')}]:[];
@@ -89,7 +89,7 @@ export function sameCorePhoneScan(before:PhoneScanInput,after:PhoneScanInput) {
   return JSON.stringify(phoneScanMetadata(before))===JSON.stringify(phoneScanMetadata(after));
 }
 export async function coreScanPhoneNudges(input:PhoneScanInput):Promise<PhoneNudgeState> {
-  if((false as boolean))return scanPhoneOpportunities(input);
+  
   const r=await request('scan','scan',input.now,phoneScanMetadata(input));
   const ids=new Set([...input.state.seen.map(s=>s.id),...input.candidates.map(phoneOpportunityId)]);
   const candidateIds=new Set(input.candidates.map(phoneOpportunityId));
@@ -123,7 +123,7 @@ function signalFor(aside:Aside,now:number,choice:NudgePreference|null,engagement
     ...(choice?{choice}:{}),...(engagement!==null?{engagement}:{})};
 }
 export async function coreRateNudge(asides:Aside[],learning:NudgeSignal[],id:string,choice:NudgePreference|null,now:number) {
-  if((false as boolean))return rateNudge(asides,learning,id,choice,now);
+  
   const r=await attributed('rate',asides,learning,now,{id,choice});
   if(r.index===null)return null;
   const target=asides[r.index];
@@ -132,7 +132,7 @@ export async function coreRateNudge(asides:Aside[],learning:NudgeSignal[],id:str
   return {aside,asides:asides.map(a=>a.id===id?aside:a),learning:[...learning.filter(s=>s.asideId!==id),...(r.choice||r.engagement?[signal]:[])].slice(-300)};
 }
 export async function coreLearnNudgeResponse(asides:Aside[],learning:NudgeSignal[],messages:readonly NudgeMessage[],now:number) {
-  if((false as boolean))return learnNudgeResponse(asides,learning,messages,now);
+  
   const message=messages.at(-1);
   if(message?.role!=='user'||!message.content?.trim()||!asides.some(isNudgeAside))return null;
   const preceding=messages.slice(0,-1).filter(m=>m.role==='assistant').at(-1);
@@ -155,15 +155,7 @@ export type CoreDeliveryInput = {
 };
 export const sameCoreDelivery = (before:CoreDeliveryInput,after:CoreDeliveryInput) => JSON.stringify(before)===JSON.stringify(after);
 export async function coreReserveDelivery(input:CoreDeliveryInput,now:number):Promise<{allowed:boolean;state:PhoneNudgeState;id:string|null}> {
-  if((false as boolean)) {
-    const local=zonedNow('Australia/Perth',new Date(now));
-    if(!input.hasDevices||!input.force&&!input.prefs.enabled||!input.force&&!input.urgent&&heldBack(input.prefs,local)
-      ||input.fromAside&&(input.opportunityRequired&&!input.opportunityPresent||input.kind!=='events'&&(!input.userAwake||input.lastReachedAt>0&&now-input.lastReachedAt<1200000)))return {allowed:false,state:input.state,id:null};
-    if(input.kind!=='random'||input.scheduled||input.force)return {allowed:true,state:input.state,id:null};
-    if(input.momentBlocked||input.expiresAt!==null&&input.expiresAt<=now)return {allowed:false,state:input.state,id:null};
-    const state=reservePhoneDelivery(input.state,input.id,now,localDateKey(local),local.getHours());
-    return {allowed:Boolean(state),state:state??input.state,id:state?input.id:null};
-  }
+  
   const r=await request('delivery','reserve',now,input);
   const reasons=['no_devices','preference','quiet','no_opportunity','user_asleep','breather','moment_blocked','expired','duplicate','daily_cap','spacing','deliver','reserved'];
   if(r?.version!==1||r.op!=='reserve'||r.executes!==false||typeof r.allowed!=='boolean'||!reasons.includes(r.reason)
@@ -179,7 +171,7 @@ export async function coreReserveDelivery(input:CoreDeliveryInput,now:number):Pr
   return {allowed:true,state:{...input.state,deliveries:[...input.state.deliveries,d].slice(-300)},id:input.id};
 }
 export async function coreFinishDelivery(state:PhoneNudgeState,id:string,sent:boolean,now:number) {
-  if((false as boolean))return finishPhoneDelivery(state,id,sent);
+  
   const target=state.deliveries.find(d=>d.id===id)??null;
   const r=await request('delivery','finish',now,{target,sent});
   if(r?.version!==1||r.op!=='finish'||r.executes!==false||r.allowed!==Boolean(target)||r.reservation!==null
@@ -190,7 +182,7 @@ export async function coreFinishDelivery(state:PhoneNudgeState,id:string,sent:bo
 export type PublicationInput={asleep:boolean;knockedAwake:boolean;interjectionBlocked:boolean;expiresAt:number|null};
 /** Re-evaluate admission after the await; publication and accepted callbacks stay synchronous. */
 export async function corePublishNudge(draft:NudgeDraft,capture:()=>PublicationInput,publish:(draft:NudgeDraft)=>boolean) {
-  if((false as boolean))return publishNudge(draft,publish);
+  
   const before=capture(),r=await request('publication','publication',Date.now(),before);
   if(r?.version!==1||r.op!=='publication'||r.executes!==false||r.reservation!==null||typeof r.allowed!=='boolean'
     ||!['asleep','knocked_awake','interjection_blocked','expired','publish'].includes(r.reason)||r.allowed!==(r.reason==='publish'))throw Error('core_nudge_protocol_error');

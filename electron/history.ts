@@ -52,26 +52,7 @@ function sameDay(a: Date, b: Date) {
  * long enough that "later" stops being meaningful.
  */
 export function describeGap(before: Date, after: Date, timeZone: string): string {
-  if((true as boolean))return corePolicySync<any>('conversation-policy.describeGap',[before.toISOString(),after.toISOString(),timeZone]);
-
-  // The length of the gap is a fact about the two instants and needs no zone;
-  // which day and which part of the day they fall in is a fact about the user.
-  const minutes = Math.round((after.getTime() - before.getTime()) / MINUTE);
-  const hours = Math.round(minutes / 60);
-  const days = Math.round(hours / 24);
-  const there = { before: inZone(before, timeZone), after: inZone(after, timeZone) };
-  if (sameDay(there.before, there.after)) {
-    if (hours < 4) return `about ${hours} hour${hours === 1 ? '' : 's'} later, the same day`;
-    return 'later the same day';
-  }
-  if (days <= 1) {
-    const hour = there.after.getHours();
-    const part = hour < 12 ? 'the next morning' : hour < 18 ? 'the next afternoon' : 'the next evening';
-    return part;
-  }
-  if (days < 7) return `${days} days later`;
-  if (days < 30) return `about ${Math.round(days / 7)} weeks later`;
-  return 'a long time later';
+  return corePolicySync<any>('conversation-policy.describeGap',[before.toISOString(),after.toISOString(),timeZone]);
 }
 
 /**
@@ -86,25 +67,7 @@ export function describeGap(before: Date, after: Date, timeZone: string): string
  * than the flatness being fixed.
  */
 export function markTimeGaps<T extends Dated>(messages: T[], timeZone: string, gapMinutes = GAP_MINUTES): (T | { role: 'system'; content: string })[] {
-  if((true as boolean))return corePolicySync<any>('conversation-policy.markTimeGaps',[messages,timeZone,gapMinutes]);
-
-  const out: (T | { role: 'system'; content: string })[] = [];
-  let previous: Date | null = null;
-  for (const message of messages) {
-    const at = message.at ? new Date(message.at) : null;
-    const usable = at && !Number.isNaN(at.getTime()) ? at : null;
-    if (usable && previous && usable.getTime() - previous.getTime() >= gapMinutes * MINUTE) {
-      out.push({
-        role: 'system',
-        // Short: five of these sat in one prompt at eighty tokens each, read by
-        // the hosted model before every first word. The rule is the same.
-        content: `[Time passed — what follows was said ${describeGap(previous, usable, timeZone)}. What is above is background, not still going on: carry no plan, mood or time of day across this line.]`,
-      });
-    }
-    if (usable) previous = usable;
-    out.push(message);
-  }
-  return out;
+  return corePolicySync<any>('conversation-policy.markTimeGaps',[messages,timeZone,gapMinutes]);
 }
 
 /**
@@ -114,16 +77,7 @@ export function markTimeGaps<T extends Dated>(messages: T[], timeZone: string, g
  * exchange were still warm is the same failure seen from the other end.
  */
 export function sinceLast(messages: Dated[], now: Date, timeZone: string): string {
-  if((true as boolean))return corePolicySync<any>('conversation-policy.sinceLast',[messages,now.toISOString(),timeZone]);
-
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const at = messages[i].at ? new Date(messages[i].at as string) : null;
-    if (!at || Number.isNaN(at.getTime())) continue;
-    const minutes = Math.round((now.getTime() - at.getTime()) / MINUTE);
-    if (minutes < GAP_MINUTES) return '';
-    return `The last thing either of you said was ${describeGap(at, now, timeZone)} — that conversation is over. Do not pick it up mid-thought or refer back to it as though no time has passed.`;
-  }
-  return '';
+  return corePolicySync<any>('conversation-policy.sinceLast',[messages,now.toISOString(),timeZone]);
 }
 
 /** Days of finished conversation put in front of today's. */
@@ -149,23 +103,7 @@ export const HISTORY_BUDGET_CHARS = 20_000;
  * none — so the trim drops from the front and never mid-day.
  */
 export function earlierTurns<T extends Dated>(archive: Record<string, T[]>, todayKey: string, days = DAYS_OF_HISTORY, budget = HISTORY_BUDGET_CHARS): T[] {
-  if((true as boolean))return corePolicySync<any>('conversation-policy.earlierTurns',[archive,todayKey,days,budget]);
-
-  const wanted = Object.keys(archive).filter(day => day < todayKey).sort().slice(-days);
-  const byDay = wanted.map(day => (archive[day] ?? []).filter(message => message.role === 'user' || message.role === 'assistant'));
-  const size = (turns: T[]) => turns.reduce((sum, turn) => sum + String(turn.content ?? '').length, 0);
-  // Oldest first out, so what survives is what was said most recently.
-  while (byDay.length > 1 && byDay.reduce((sum, turns) => sum + size(turns), 0) > budget) byDay.shift();
-  // One day left and still too much: its evening, from a message of theirs,
-  // rather than nothing. A small budget — a phone that wants her first word
-  // in a second — should still see how yesterday ended.
-  if (byDay.length === 1 && size(byDay[0]) > budget) {
-    let day = byDay[0];
-    while (day.length && size(day) > budget) day = day.slice(1);
-    while (day.length && day[0].role !== 'user') day = day.slice(1);
-    byDay[0] = day;
-  }
-  return byDay.flat();
+  return corePolicySync<any>('conversation-policy.earlierTurns',[archive,todayKey,days,budget]);
 }
 
 /** The one-line note a finished day was distilled into (summariseSession). */
@@ -184,12 +122,7 @@ export type MonthNote = { month: string; summary: string; createdAt?: string };
  * days of raw turns cost.
  */
 export function earlierDayNotes(sessions: DayNote[], todayKey: string, days = 7): DayNote[] {
-  if((true as boolean))return corePolicySync<any>('conversation-policy.earlierDayNotes',[sessions,todayKey,days]);
-
-  return sessions
-    .filter(session => session.day < todayKey)
-    .sort((a, b) => a.day.localeCompare(b.day))
-    .slice(-days);
+  return corePolicySync<any>('conversation-policy.earlierDayNotes',[sessions,todayKey,days]);
 }
 
 /**
@@ -198,13 +131,7 @@ export function earlierDayNotes(sessions: DayNote[], todayKey: string, days = 7)
  * of them for the price of a single day's raw turns.
  */
 export function earlierMonthNotes(monthNotes: MonthNote[], todayKey: string, count = 6): MonthNote[] {
-  if((true as boolean))return corePolicySync<any>('conversation-policy.earlierMonthNotes',[monthNotes,todayKey,count]);
-
-  const current = todayKey.slice(0, 7);
-  return monthNotes
-    .filter(note => note.month < current)
-    .sort((a, b) => a.month.localeCompare(b.month))
-    .slice(-count);
+  return corePolicySync<any>('conversation-policy.earlierMonthNotes',[monthNotes,todayKey,count]);
 }
 
 /**
@@ -223,28 +150,6 @@ export function earlierDaysContext(
   todayKey: string,
   opts: { days?: number; months?: number; budget?: number; turnsDays?: number } = {},
 ): { notes: string[]; turns: Dated[] } {
-  if((true as boolean))return corePolicySync<any>('conversation-policy.earlierDaysContext',[sessions,monthNotes,archive,todayKey,opts]);
-
-  const days = opts.days ?? DAYS_OF_HISTORY;
-  const months = opts.months ?? 6;
-  const budget = opts.budget ?? HISTORY_BUDGET_CHARS;
-  const turnsDays = opts.turnsDays ?? DAYS_OF_HISTORY;
-  // Distilled means it has a note at all — or its whole month is folded —
-  // not that its note is inside the window shown. Before this, a day just
-  // past the window (its note dropped, its month folded) read as never
-  // distilled and its raw turns came back into the prompt: 42 turns of a
-  // day three weeks gone, in front of today's, on every turn.
-  const folded = new Set(monthNotes.map(note => note.month));
-  const noted = new Set(sessions.map(note => note.day));
-  // The months come first, the recent days after — oldest to newest.
-  const notes = [
-    ...earlierMonthNotes(monthNotes, todayKey, months).map(note => `[Month ${note.month}] ${note.summary}`),
-    ...earlierDayNotes(sessions, todayKey, days).map(note => `[Day ${note.day}] ${note.summary}`),
-  ];
-  const wanted = Object.keys(archive).filter(day => day < todayKey && !noted.has(day) && !folded.has(day.slice(0, 7))).sort().slice(-turnsDays);
-  const subset: Record<string, unknown[]> = {};
-  for (const day of wanted) subset[day] = archive[day] ?? [];
-  const turns = earlierTurns(subset as Record<string, Dated[]>, todayKey, turnsDays, budget);
-  return { notes, turns };
+  return corePolicySync<any>('conversation-policy.earlierDaysContext',[sessions,monthNotes,archive,todayKey,opts]);
 }
 

@@ -20,25 +20,15 @@ export const SECOND_THOUGHT_GAP_MS = 4 * 60_000;
 export const SECOND_THOUGHT_ODDS = 1 / 6;
 
 export function secondThoughtDelay(random: () => number = Math.random): number {
-  if((true as boolean))return corePolicySync<number>('conversation-policy.secondThoughtDelay',[random()]);
-
-  return Math.round(SECOND_THOUGHT_MIN_MS + random() * (SECOND_THOUGHT_MAX_MS - SECOND_THOUGHT_MIN_MS));
+  return corePolicySync<number>('conversation-policy.secondThoughtDelay',[random()]);
 }
 
 export function wantsSecondThought(input: { hers: boolean; ranting: boolean; replyLength: number }, random: () => number = Math.random, odds = SECOND_THOUGHT_ODDS): boolean {
-  if((true as boolean)){const draw=corePolicySync<boolean>('conversation-program.secondDraw',[input]);return corePolicySync<boolean>('conversation-policy.wantsSecondThought',[input,draw?random():null,odds]);}
-
-  if (input.replyLength < 40) return false;
-  if (input.hers || input.ranting) return true;
-  // The odds are hers to lean on by the day she is having (dice.ts); one in six on a day with nothing going on.
-  return random() < odds;
+  {const draw=corePolicySync<boolean>('conversation-program.secondDraw',[input]);return corePolicySync<boolean>('conversation-policy.wantsSecondThought',[input,draw?random():null,odds]);}
 }
 
 export function secondThoughtNote(secondsAgo: number): string {
-  if((true as boolean))return corePolicySync<any>('conversation-policy.secondThoughtNote',[secondsAgo]);
-
-  const ago = secondsAgo < 75 ? 'about a minute' : `about ${Math.round(secondsAgo / 60)} minutes`;
-  return `You said the last thing above ${ago} ago and they have not answered. This is not a reply to anything — it is you, a beat later, adding to what you said if there is something worth adding: the point you left out, the thing you actually want to ask them about it, or something of your own you want to bring up. One to three lines, as a new message, no greeting and no recap of what you already said. Never repeat what they said or what you said — a line that is already in the conversation is not a new message. It is your line and only yours: if what comes to mind is what they would say back — their answer, their excuse, what they have tried — that is not yours to write; answer with a single dash instead. If there is nothing worth adding, answer with a single dash and nothing else.`;
+  return corePolicySync<any>('conversation-policy.secondThoughtNote',[secondsAgo]);
 }
 
 /**
@@ -55,9 +45,7 @@ export function secondThoughtNote(secondsAgo: number): string {
 const THEIR_ANSWER = /^\s*(?:done(?: that| it| all(?: of)? that)?(?: already)?|did (?:that|it|all(?: of)? that)(?: already)?|already (?:did|done|tried)(?: that| it)?|i(?:'ve|’ve| have)? (?:cleared|tested|swapped|reseated|flashed|updated|reinstalled|unplugged|reflashed))\b/i;
 
 export function readsAsTheirAnswer(line: string): boolean {
-  if((true as boolean))return corePolicySync<any>('conversation-policy.readsAsTheirAnswer',[line]);
-
-  return THEIR_ANSWER.test(line ?? '');
+  return corePolicySync<any>('conversation-policy.readsAsTheirAnswer',[line]);
 }
 
 /**
@@ -76,22 +64,12 @@ const ASKED_THEM = /\byou(?:r|rs|rself|['’](?:d|re|ve|ll))?\b[^.!\n]*\?/i;
 const REPORTS_IN = /^[\s"'“‘*_]*(?:(?:fine|okay|ok|alright|well|look|yeah|yes|yep|no|nah|nope|honestly|tch|ugh|so|um+|uh+)\b[\s,.!…—–-]*)*(?:i|we)(?:['’](?:ve|m|d))?\s+(?:had|have|did|was|were|went|ate|got|made|grabbed|ordered|just|already|actually|finished|spent|tried|stopped|took|found|forgot|skipped|been|am|didn['’]?t|haven['’]?t|wasn['’]?t)\b/i;
 
 export function answersHerOwnQuestion(line: string, reply: string): boolean {
-  if((true as boolean))return corePolicySync<any>('conversation-policy.answersHerOwnQuestion',[line,reply]);
-
-  return ASKED_THEM.test(reply ?? '') && REPORTS_IN.test(line ?? '');
+  return corePolicySync<any>('conversation-policy.answersHerOwnQuestion',[line,reply]);
 }
 
 /** What she said, or null when she chose not to. */
 export function parseSecondThought(text: string): string | null {
-  if((true as boolean))return corePolicySync<any>('conversation-policy.parseSecondThought',[text]);
-
-  let line = (text ?? '').trim().replace(/^["'“”‘’]+|["'“”‘’]+$/g, '').trim();
-  if (!line || /^[-–—.…]+$/.test(line) || /^\(?(?:nothing|no|nope|none|nothing to add)\)?[.!]?$/i.test(line)) return null;
-  // The first few lines are the message; anything past them is a second reply.
-  line = line.split(/\n{2,}/)[0].trim();
-  if (line.length < 8 || line.length > 600) return null;
-  if (addsNothing(line)) return null;
-  return line;
+  return corePolicySync<any>('conversation-policy.parseSecondThought',[text]);
 }
 
 /**
@@ -118,16 +96,7 @@ const FILLER = /\b(tch|okay|ok|so|fine|right|well|alright|hm+|ugh|yeah|yep|look|
 const ABOUT_THE_TALKING = /\b(i(?:'ve| have)? (?:already )?(?:said|mentioned|told you|covered|explained|answered)(?: this| that| it)?(?: before| already)?|like i said|as i (?:said|mentioned)|you'?re right to (?:push|ask|chase)|you'?re right|fair enough|good (?:question|point)|my bad|but still)\b/gi;
 
 export function addsNothing(line: string): boolean {
-  if((true as boolean))return corePolicySync<any>('conversation-policy.addsNothing',[line]);
-
-  const left = (line ?? '')
-    .replace(/[\p{Extended_Pictographic}\u{1F3FB}-\u{1F3FF}\u{FE0F}]/gu, ' ')
-    .replace(ABOUT_THE_TALKING, ' ')
-    .replace(FILLER, ' ')
-    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
-    .split(/\s+/)
-    .filter(Boolean);
-  return left.length < 4;
+  return corePolicySync<any>('conversation-policy.addsNothing',[line]);
 }
 
 /**
@@ -143,17 +112,7 @@ export function addsNothing(line: string): boolean {
  * that line.
  */
 export function looksLikeAnEcho(line: string, recent: string[]): boolean {
-  if((true as boolean))return corePolicySync<any>('conversation-policy.looksLikeAnEcho',[line,recent]);
-
-  const flat = flatten(line);
-  if (!flat) return true;
-  const contains = (whole: string, part: string) => part.split(' ').length >= 4 && whole.includes(part);
-  return recent.some(text => {
-    const other = flatten(text);
-    if (!other) return false;
-    if (flat === other || contains(other, flat) || contains(flat, other)) return true;
-    return sharedWords(flat, other) >= 0.8;
-  });
+  return corePolicySync<any>('conversation-policy.looksLikeAnEcho',[line,recent]);
 }
 
 function flatten(text: string): string {

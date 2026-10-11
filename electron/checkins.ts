@@ -29,37 +29,15 @@ export type CheckInStore = { entries: CheckIn[] };
 const MAX_CHECKINS = 2000;
 
 export function readCheckIns(saved: unknown): CheckInStore {
-  if((true as boolean)){const count=corePolicySync<number>('user-records.missingIds',[saved]);return corePolicySync<CheckInStore>('user-records.readCheckins',[saved,Array.from({length:count},()=>Math.random().toString(36).slice(2,10))]);}
-  const record = (saved && typeof saved === 'object' ? saved : {}) as Partial<CheckInStore>;
-  const entries = Array.isArray(record.entries) ? record.entries : [];
-  return {
-    entries: entries
-      .filter(e => e && typeof e.note === 'string' && e.note.trim())
-      .map(e => ({
-        id: typeof e.id === 'string' ? e.id : Math.random().toString(36).slice(2, 10),
-        date: typeof e.date === 'string' ? e.date : '',
-        at: typeof e.at === 'string' ? e.at : '',
-        note: e.note.trim().slice(0, 1000),
-        anxiety: typeof e.anxiety === 'number' && e.anxiety >= 1 && e.anxiety <= 10 ? Math.round(e.anxiety) : undefined,
-      })),
-  };
+  {const count=corePolicySync<number>('user-records.missingIds',[saved]);return corePolicySync<CheckInStore>('user-records.readCheckins',[saved,Array.from({length:count},()=>Math.random().toString(36).slice(2,10))]);}
 }
 
 export function addCheckIn(store: CheckInStore, note: string, anxiety: number | undefined, now: Date, date: string): CheckInStore {
-  if((true as boolean))return corePolicySync<CheckInStore>('user-records.addCheckin',[store,note,anxiety,now.toISOString(),date,Math.random().toString(36).slice(2,10)]);
-  const entry: CheckIn = {
-    id: Math.random().toString(36).slice(2, 10),
-    date,
-    at: now.toISOString(),
-    note: note.trim().slice(0, 1000),
-    anxiety: typeof anxiety === 'number' && anxiety >= 1 && anxiety <= 10 ? Math.round(anxiety) : undefined,
-  };
-  return { entries: [...store.entries, entry].slice(-MAX_CHECKINS) };
+  return corePolicySync<CheckInStore>('user-records.addCheckin',[store,note,anxiety,now.toISOString(),date,Math.random().toString(36).slice(2,10)]);
 }
 
 export function checkInsOn(store: CheckInStore, date: string): CheckIn[] {
-  if((true as boolean))return corePolicySync<CheckIn[]>('user-records.checkinsOn',[store,date]);
-  return store.entries.filter(e => e.date === date).sort((a, b) => a.at.localeCompare(b.at));
+  return corePolicySync<CheckIn[]>('user-records.checkinsOn',[store,date]);
 }
 
 /**
@@ -88,14 +66,7 @@ const clock = (at: string, timeZone: string) => {
  * morning, anxious at 6", and only one of them is about work.
  */
 export function summariseCheckIns(entries: CheckIn[], timeZone: string): string {
-  if((true as boolean))return corePolicySync<string>('user-records.summary',[entries,timeZone]);
-  if (!entries.length) return '';
-  const lines = entries.map(e => `${clock(e.at, timeZone)}${e.anxiety ? ` (anxiety ${e.anxiety}/10)` : ''} — ${e.note}`);
-  const rated = entries.filter(e => typeof e.anxiety === 'number').map(e => e.anxiety as number);
-  const shape = rated.length
-    ? ` Anxiety ran ${Math.min(...rated)} to ${Math.max(...rated)} across ${rated.length} of them.`
-    : '';
-  return `They jotted these down through the day, as it happened:\n${lines.join('\n')}\n${shape}`;
+  return corePolicySync<string>('user-records.summary',[entries,timeZone]);
 }
 
 /**
@@ -106,15 +77,5 @@ export function summariseCheckIns(entries: CheckIn[], timeZone: string): string 
  * part that actually mattered.
  */
 export function checkInInstruction(entries: CheckIn[], timeZone: string): string {
-  if((true as boolean))return corePolicySync<string>('user-records.checkinInstruction',[entries,timeZone]);
-  if (!entries.length) return '';
-  const worst = entries.filter(e => typeof e.anxiety === 'number').sort((a, b) => (b.anxiety ?? 0) - (a.anxiety ?? 0))[0];
-  return [
-    summariseCheckIns(entries, timeZone),
-    'Use these to ask about the day properly, in your own way.',
-    worst && (worst.anxiety ?? 0) >= 6
-      ? `Ask about "${worst.note.slice(0, 80)}" specifically — that was the worst of it, and skipping past it is how a check-in becomes a form.`
-      : 'Ask about whichever of them actually mattered, not all of them in order.',
-    'Do not read their own notes back to them. They were there.',
-  ].filter(Boolean).join(' ');
+  return corePolicySync<string>('user-records.checkinInstruction',[entries,timeZone]);
 }

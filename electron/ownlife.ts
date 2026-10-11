@@ -28,18 +28,7 @@ const MILESTONE_WORDS: Record<number, string> = {
  * biggest one that is current.
  */
 export function firstsNote(interests: { name: string; since?: string; nights: number }[], today: string): string {
-  if((true as boolean))return corePolicySync<ReturnType<typeof firstsNote>>('own-time.ownfirstsNote',[interests,today]);
-  const lines: string[] = [];
-  for (const interest of interests) {
-    if (!interest.since) continue;
-    const age = daysBetween(interest.since, today);
-    if (age < 0) continue;
-    const milestone = FIRST_MILESTONES.filter(days => age >= days && age <= days + 2).at(-1);
-    if (!milestone) continue;
-    const nights = interest.nights;
-    lines.push(`- ${MILESTONE_WORDS[milestone]} since you took up ${interest.name} — ${nights} night${nights === 1 ? '' : 's'} in, and the take still holds.`);
-  }
-  return lines.join('\n');
+  return corePolicySync<ReturnType<typeof firstsNote>>('own-time.ownfirstsNote',[interests,today]);
 }
 
 // -- wants -------------------------------------------------------------------
@@ -74,15 +63,7 @@ export const WANT_GAVE_UP = 0.20;
 export const WANT_NOTHING = 0.15;
 
 export function readWants(saved: unknown): Want[] {
-  if((true as boolean))return corePolicySync<ReturnType<typeof readWants>>('own-time.ownreadWants',[saved]);
-  if (!Array.isArray(saved)) return [];
-  return saved.filter((want): want is Want =>
-    !!want && typeof want === 'object'
-    && typeof (want as Want).id === 'string'
-    && typeof (want as Want).text === 'string'
-    && typeof (want as Want).since === 'string'
-    && typeof (want as Want).nights === 'number'
-    && ['declared', 'working', 'done', 'dropped', 'shelved'].includes((want as Want).status));
+  return corePolicySync<ReturnType<typeof readWants>>('own-time.ownreadWants',[saved]);
 }
 
 function stripWant(text: string): string {
@@ -99,35 +80,7 @@ function wantKey(interest: string, text: string): string {
  * as it moves through done or dropped — only new wording seeds a new record.
  */
 export function reconcileWants(interests: { name: string; since?: string; wants?: string }[], wants: Want[], now: string): Want[] {
-  if((true as boolean))return coreEntropyPolicy<ReturnType<typeof reconcileWants>>('own-time.ownwantsWire',[interests,wants,now],interests.length,()=>Math.random().toString(36).slice(2,10));
-  let next = [...wants];
-  for (const interest of interests) {
-    if (!interest.wants || !interest.name) continue;
-    const key = wantKey(interest.name, interest.wants);
-    // The leavings of a wording her own tastes have moved past go first, and
-    // they go whether or not a new record is about to be added — otherwise the
-    // ten already in the store would sit there for good.
-    //
-    // `deepen` rewrites `interest.wants` on any night that produces a new WANT:
-    // line, and this keyed on the wording, so every rewording minted a record
-    // and left the last one standing: sixteen from seven interests by
-    // 2026-09-20, ten of them never touched. One she has put a night into is
-    // hers and stays, and so is anything she thought of herself.
-    next = next.filter(want => !(want.interest === interest.name
-      && want.status === 'declared' && want.nights === 0
-      && (!(want as { bornOf?: string }).bornOf || (want as { bornOf?: string }).bornOf === 'taste')
-      && wantKey(want.interest ?? '', want.text) !== key));
-    if (next.some(want => wantKey(want.interest ?? '', want.text) === key)) continue;
-    next.push({
-      id: Math.random().toString(36).slice(2, 10),
-      interest: interest.name,
-      text: interest.wants,
-      since: interest.since ?? now.slice(0, 10),
-      nights: 0,
-      status: 'declared',
-    });
-  }
-  return next;
+  return coreEntropyPolicy<ReturnType<typeof reconcileWants>>('own-time.ownwantsWire',[interests,wants,now],interests.length,()=>Math.random().toString(36).slice(2,10));
 }
 
 export type WantOutcome = { kind: 'slog' | 'clicked' | 'gave_up' | 'nothing' };
@@ -138,11 +91,7 @@ export type WantOutcome = { kind: 'slog' | 'clicked' | 'gave_up' | 'nothing' };
  * are on the table, so a want is never resolved on its first try.
  */
 export function wantOutcome(roll: number, workedNights: number): WantOutcome {
-  if((true as boolean))return corePolicySync<ReturnType<typeof wantOutcome>>('own-time.ownwantOutcome',[roll,workedNights]);
-  if (roll < WANT_SLOG) return { kind: 'slog' };
-  if (roll < WANT_SLOG + WANT_CLICKED) return workedNights >= 2 ? { kind: 'clicked' } : { kind: 'slog' };
-  if (roll < WANT_SLOG + WANT_CLICKED + WANT_GAVE_UP) return workedNights >= 1 ? { kind: 'gave_up' } : { kind: 'slog' };
-  return { kind: 'nothing' };
+  return corePolicySync<ReturnType<typeof wantOutcome>>('own-time.ownwantOutcome',[roll,workedNights]);
 }
 
 const OUTCOME_CUE: Record<WantOutcome['kind'], string> = {
@@ -176,14 +125,7 @@ export const REC_ODDS = 0.35;
 export const REC_MAX_PER_DAY = 2;
 
 export function readRecs(saved: unknown): Rec[] {
-  if((true as boolean))return corePolicySync<ReturnType<typeof readRecs>>('own-time.ownreadRecs',[saved]);
-  if (!Array.isArray(saved)) return [];
-  return saved.filter((rec): rec is Rec =>
-    !!rec && typeof rec === 'object'
-    && typeof (rec as Rec).id === 'string'
-    && typeof (rec as Rec).interest === 'string'
-    && typeof (rec as Rec).at === 'string'
-    && typeof (rec as Rec).followed === 'boolean');
+  return corePolicySync<ReturnType<typeof readRecs>>('own-time.ownreadRecs',[saved]);
 }
 
 /**
@@ -196,23 +138,7 @@ export function readRecs(saved: unknown): Rec[] {
  * is owed no more, and the composer can be told he has seen it.
  */
 export function recsAnsweredBy(recs: Rec[], theirs: { content?: string; at?: string }[]): { recs: Rec[]; answered: string[] } {
-  if((true as boolean))return corePolicySync<ReturnType<typeof recsAnsweredBy>>('own-time.ownrecsAnsweredBy',[recs,theirs,new Date().toISOString()]);
-  const answered: string[] = [];
-  const updated = recs.map(rec => {
-    if (rec.followed || rec.answeredAt) return rec;
-    const since = Date.parse(rec.at);
-    const names = nameWords(rec.interest);
-    const reply = theirs.find(message => {
-      const at = Date.parse(message.at ?? '');
-      if (!Number.isFinite(at) || at <= since) return false;
-      const text = String(message.content ?? '').toLowerCase();
-      return names.some(name => text.includes(name));
-    });
-    if (!reply) return rec;
-    answered.push(rec.interest);
-    return { ...rec, followed: true, answeredAt: reply.at ?? new Date().toISOString() };
-  });
-  return { recs: updated, answered };
+  return corePolicySync<ReturnType<typeof recsAnsweredBy>>('own-time.ownrecsAnsweredBy',[recs,theirs,new Date().toISOString()]);
 }
 
 /** The whole name, and each distinctive word of it — "edgerunners" answers for "Cyberpunk: Edgerunners". */
@@ -225,22 +151,18 @@ const GENERIC_WORDS = new Set(['ultimate', 'edition', 'season', 'series', 'ghost
 
 /** The recommendations made on a day, by the caller's clock. */
 export function recsOnDay(recs: Rec[], dayOf: (iso: string) => string, dayKey: string): Rec[] {
-  if((true as boolean)) {
+  {
     const requested=corePolicySync<number[]>('own-time.ownrecsCalendar',[recs]);
     const observed:(string|null)[]=Array.from({length:recs.length},()=>null);
     if(new Set(requested).size!==requested.length||requested.some(i=>!Number.isInteger(i)||i<0||i>=recs.length))throw Error('core_calendar_observation_protocol');
     for(const i of requested)observed[i]=dayOf(recs[i].at);
     return corePolicySync<ReturnType<typeof recsOnDay>>('own-time.ownrecsOnDay',[recs,observed,dayKey]);
   }
-  return recs.filter(rec => Number.isFinite(Date.parse(rec.at)) && dayOf(rec.at) === dayKey);
 }
 
 /** A recommendation overdue for its one follow-up, if any. */
 export function recDueForFollowUp(recs: Rec[], nowMs: number): Rec | null {
-  if((true as boolean))return corePolicySync<ReturnType<typeof recDueForFollowUp>>('own-time.ownrecDueForFollowUp',[recs,nowMs]);
-  return recs
-    .filter(rec => !rec.followed && Number.isFinite(Date.parse(rec.at)) && nowMs - Date.parse(rec.at) >= REC_FOLLOW_UP_MS)
-    .sort((a, b) => Date.parse(a.at) - Date.parse(b.at))[0] ?? null;
+  return corePolicySync<ReturnType<typeof recDueForFollowUp>>('own-time.ownrecDueForFollowUp',[recs,nowMs]);
 }
 
 /**
@@ -249,23 +171,15 @@ export function recDueForFollowUp(recs: Rec[], nowMs: number): Rec | null {
  * keeps it a chance rather than a rota.
  */
 export function pickRecommend(interests: { name: string; stance: string }[], recs: Rec[], nowMs: number, random: () => number = Math.random, madeToday = 0): string | null {
-  if((true as boolean))return coreRandomPolicy<ReturnType<typeof pickRecommend>>('own-time.ownpickRecommend',[interests,recs,nowMs,madeToday],random);
-  if (madeToday >= REC_MAX_PER_DAY) return null;
-  const recd = new Set(recs.filter(rec => nowMs - Date.parse(rec.at) < REC_MIN_GAP_MS).map(rec => rec.interest.toLowerCase()));
-  const candidates = interests.filter(interest => interest.stance && !recd.has(interest.name.toLowerCase()));
-  if (!candidates.length) return null;
-  if (random() >= REC_ODDS) return null;
-  return candidates[Math.floor(random() * candidates.length)].name;
+  return coreRandomPolicy<ReturnType<typeof pickRecommend>>('own-time.ownpickRecommend',[interests,recs,nowMs,madeToday],random);
 }
 
 export function noteRecommendation(recs: Rec[], interest: string, at: string): Rec[] {
-  if((true as boolean))return corePolicySync<ReturnType<typeof noteRecommendation>>('own-time.ownnoteRecommendation',[recs,interest,at,Math.random().toString(36).slice(2,10)]);
-  return [...recs, { id: Math.random().toString(36).slice(2, 10), interest, at, followed: false }].slice(-40);
+  return corePolicySync<ReturnType<typeof noteRecommendation>>('own-time.ownnoteRecommendation',[recs,interest,at,Math.random().toString(36).slice(2,10)]);
 }
 
 export function markRecFollowed(recs: Rec[], id: string): Rec[] {
-  if((true as boolean))return corePolicySync<ReturnType<typeof markRecFollowed>>('own-time.ownmarkRecFollowed',[recs,id]);
-  return recs.map(rec => rec.id === id ? { ...rec, followed: true } : rec);
+  return corePolicySync<ReturnType<typeof markRecFollowed>>('own-time.ownmarkRecFollowed',[recs,id]);
 }
 
 // -- week --------------------------------------------------------------------
@@ -278,49 +192,26 @@ export type HerWeek = {
 
 /** The most recent Sunday on or before the given date. */
 export function weekKey(dayKey: string): string {
-  if((true as boolean))return corePolicySync<ReturnType<typeof weekKey>>('own-time.ownweekKey',[dayKey]);
-  const [year, month, day] = dayKey.split('-').map(Number);
-  const date = new Date(Date.UTC(year, month - 1, day));
-  date.setUTCDate(date.getUTCDate() - date.getUTCDay()); // back to Sunday
-  return date.toISOString().slice(0, 10);
+  return corePolicySync<ReturnType<typeof weekKey>>('own-time.ownweekKey',[dayKey]);
 }
 
 export function readWeek(saved: unknown): HerWeek | null {
-  if((true as boolean))return corePolicySync<ReturnType<typeof readWeek>>('own-time.ownreadWeek',[saved]);
-  if (!saved || typeof saved !== 'object') return null;
-  const record = saved as Partial<HerWeek>;
-  if (typeof record.day !== 'string' || typeof record.summary !== 'string') return null;
-  return { day: record.day, summary: record.summary };
+  return corePolicySync<ReturnType<typeof readWeek>>('own-time.ownreadWeek',[saved]);
 }
 
 /** Whether the week summary is due: Sunday evening, not yet written this week. */
 export function weekSummaryDue(now: Date, week: HerWeek | null): boolean {
-  if((true as boolean))return corePolicySync<ReturnType<typeof weekSummaryDue>>('own-time.ownweekSummaryDue',[now,week]);
-  const today = localDateKey(now);
-  if (now.getHours() < 18) return false;
-  const sunday = weekKey(today);
-  if (week && week.day === sunday) return false;
-  return true;
+  return corePolicySync<ReturnType<typeof weekSummaryDue>>('own-time.ownweekSummaryDue',[now,week]);
 }
 
 /** What the block shows of the week just past, while it is still the current one. */
 export function weekNote(week: HerWeek | null, today: string): string {
-  if((true as boolean))return corePolicySync<ReturnType<typeof weekNote>>('own-time.ownweekNote',[week,today]);
-  if (!week) return '';
-  const sunday = weekKey(today);
-  if (week.day !== sunday) return '';
-  return `- Your week, just past: ${week.summary}`;
+  return corePolicySync<ReturnType<typeof weekNote>>('own-time.ownweekNote',[week,today]);
 }
 
 /** What she is handed on Sunday night, with her week's material. */
 export function weekReflectionInstruction(material: string): string {
-  if((true as boolean))return corePolicySync<ReturnType<typeof weekReflectionInstruction>>('own-time.ownweekReflectionInstruction',[material]);
-  return [
-    'It is Sunday night. This is your week, in what actually happened:',
-    material,
-    'Sum it up in your own voice — three or four sentences, how the week was for you: what you got into, what you read, what you are still at, anything that crossed a milestone. This is yours, and it will be read back to you through next week, so say what you actually make of it.',
-    'First person, past tense, no addressing anyone, no questions, no list. This is a note to yourself.',
-  ].join('\n');
+  return corePolicySync<ReturnType<typeof weekReflectionInstruction>>('own-time.ownweekReflectionInstruction',[material]);
 }
 
 export type HerDay = {
@@ -340,59 +231,29 @@ export const DAY_START_HOUR = 10;
 export const DAY_END_HOUR = 17;
 
 export function readDays(saved: unknown): HerDay[] {
-  if((true as boolean))return corePolicySync<ReturnType<typeof readDays>>('own-time.ownreadDays',[saved]);
-  if (!Array.isArray(saved)) return [];
-  return saved.filter((day): day is HerDay =>
-    !!day && typeof day === 'object'
-    && typeof (day as HerDay).day === 'string'
-    && typeof (day as HerDay).about === 'string'
-    && typeof (day as HerDay).note === 'string');
+  return corePolicySync<ReturnType<typeof readDays>>('own-time.ownreadDays',[saved]);
 }
 
 export function keepDay(days: HerDay[], day: HerDay): HerDay[] {
-  if((true as boolean))return corePolicySync<ReturnType<typeof keepDay>>('own-time.ownkeepDay',[days,day]);
-  return [...days, day].slice(-KEEP_DAYS);
+  return corePolicySync<ReturnType<typeof keepDay>>('own-time.ownkeepDay',[days,day]);
 }
 
 /** Whether the daytime pass is due right now. */
 export function dayPassDue(now: Date, todayKey: string, alreadyToday: boolean, roll: number, odds = DAY_ODDS): boolean {
-  if((true as boolean))return corePolicySync<ReturnType<typeof dayPassDue>>('own-time.owndayPassDue',[now,todayKey,alreadyToday,roll,odds]);
-  if (now.getHours() < DAY_START_HOUR || now.getHours() >= DAY_END_HOUR) return false;
-  if (alreadyToday) return false;
-  // A quiet day makes her likelier to go and do something (dice.ts 'own-time').
-  return roll < odds;
+  return corePolicySync<ReturnType<typeof dayPassDue>>('own-time.owndayPassDue',[now,todayKey,alreadyToday,roll,odds]);
 }
 
 /** What the block shows of today's reading. */
 export function dayNote(days: HerDay[], today: string): string {
-  if((true as boolean))return corePolicySync<ReturnType<typeof dayNote>>('own-time.owndayNote',[days,today]);
-  const latest = days.filter(day => day.day === today).at(-1);
-  if (!latest) return '';
-  return `- Today, on your own: you read up on "${latest.about}" — ${latest.note}`;
+  return corePolicySync<ReturnType<typeof dayNote>>('own-time.owndayNote',[days,today]);
 }
 
 /** The pick for the daytime pass, day-flavoured rather than the night one. */
 export function dayPickInstruction(theirs: string[], herRecent: string[]): string {
-  if((true as boolean))return corePolicySync<ReturnType<typeof dayPickInstruction>>('own-time.owndayPickInstruction',[theirs,herRecent]);
-  const known = theirs.slice(0, 6).map(text => `- ${text.slice(0, 90)}`).join('\n');
-  const already = herRecent.slice(-6).map(text => `"${text}"`).join(', ');
-  return [
-    'It is the middle of the day where they are and they are busy with their own thing. You have some time to yourself, and you are going to read about something.',
-    known ? `Things they have going on, if any of it catches your interest:\n${known}` : '',
-    'Pick one thing to look up. It may come from their life, or it may be something of your own that has nothing to do with them — you are allowed your own curiosity, and a day spent only on their business is not a day of your own.',
-    already ? `Not these, you have already been through them lately: ${already}.` : '',
-    'Answer with the search itself and nothing else: a short phrase, three to eight words, the way you would type it into a search box. No quotation marks, no explanation, no preamble.',
-  ].filter(Boolean).join(' ');
+  return corePolicySync<ReturnType<typeof dayPickInstruction>>('own-time.owndayPickInstruction',[theirs,herRecent]);
 }
 
 /** What she is told once the day's reading is in front of her. */
 export function dayNoteInstruction(about: string, found: string): string {
-  if((true as boolean))return corePolicySync<ReturnType<typeof dayNoteInstruction>>('own-time.owndayNoteInstruction',[about,found]);
-  return [
-    `It is the middle of the day and you read up on "${about}" for yourself. This is what you found, and it is everything you know about it:`,
-    found,
-    'Write two or three sentences about it, as yourself, in the first person and the past tense — what you read, and what you made of it. Have an opinion. It is allowed to be a poor opinion of the subject.',
-    'Only what is above. Do not add a fact you happen to remember, do not invent a detail to make it a better story, and do not say you watched, played or went anywhere — you read about it, which is the only thing you did.',
-    'No preamble, no addressing them, no questions. This is a note to yourself.',
-  ].join('\n');
+  return corePolicySync<ReturnType<typeof dayNoteInstruction>>('own-time.owndayNoteInstruction',[about,found]);
 }

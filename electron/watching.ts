@@ -23,11 +23,7 @@ export type WatchingConfig = {
 export const DEFAULT_WATCHING: WatchingConfig = { enabled: false, everyMinutes: 5, gamesOnly: true };
 
 export function readWatchingConfig(saved: unknown): WatchingConfig {
- if((true as boolean))return screenPolicy('watching',[saved]);
-  if (!saved || typeof saved !== 'object') return DEFAULT_WATCHING;
-  const record = saved as Partial<WatchingConfig>;
-  const everyMinutes = typeof record.everyMinutes === 'number' ? Math.max(2, Math.min(30, Math.round(record.everyMinutes))) : DEFAULT_WATCHING.everyMinutes;
-  return { enabled: record.enabled === true, everyMinutes, gamesOnly: record.gamesOnly !== false };
+ return screenPolicy('watching',[saved]);
 }
 
 /**
@@ -50,11 +46,7 @@ export type Look = { at: number; description: string };
  * remark would arrive on top of the previous one.
  */
 export function shouldLook(config: WatchingConfig, lastLookAt: number, now: number, gameOn: boolean, speaking: boolean): boolean {
- if((true as boolean))return screenPolicy('shouldLook',[config,lastLookAt,now,gameOn,speaking]);
-  if (!config.enabled) return false;
-  if (config.gamesOnly && !gameOn) return false;
-  if (speaking) return false;
-  return now - lastLookAt >= config.everyMinutes * 60_000;
+ return screenPolicy('shouldLook',[config,lastLookAt,now,gameOn,speaking]);
 }
 
 /**
@@ -68,17 +60,7 @@ export function shouldLook(config: WatchingConfig, lastLookAt: number, now: numb
 const DULL = /\b(loading|please wait|main menu|pause menu|title screen|settings|options menu|black screen|blank|desktop|taskbar|no visible|nothing (is )?happening|empty)\b/i;
 
 export function worthMentioning(description: string, previous: string): boolean {
- if((true as boolean))return screenPolicy('worth',[description,previous]);
-  if (!description.trim()) return false;
-  if (DULL.test(description)) return false;
-  // Nearly the same scene as last time is not news. Compared on content words so
-  // a shifted camera on the same corridor still counts as the same corridor.
-  const words = (text: string) => new Set(text.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(word => word.length > 3));
-  const now = words(description);
-  const before = words(previous);
-  if (!before.size || !now.size) return true;
-  const shared = [...now].filter(word => before.has(word)).length;
-  return shared / now.size < 0.7;
+ return screenPolicy('worth',[description,previous]);
 }
 
 /**
@@ -111,13 +93,7 @@ export function worthMentioning(description: string, previous: string): boolean 
  * two enemies left" is what she can react to and answer from.
  */
 export function sceneAsk(title: string): string {
- if((true as boolean))return screenPolicy('sceneAsk',[title]);
-  return [
-    `This is a frame of a game${title ? ` — ${title}` : ''}.`,
-    'Say plainly what is on screen in two sentences: which characters or enemies, any health, stamina or resource bars and what they read, what is happening right now, and any readable text.',
-    'Name things rather than hedging about what they might be. If it is a menu, loading screen, map or inventory, say so in a few words and stop.',
-    'No preamble, no "this image shows", no opinion.',
-  ].join(' ');
+ return screenPolicy('sceneAsk',[title]);
 }
 
 /**
@@ -129,21 +105,9 @@ export const SCENE_HOLDS_MS = 10 * 60_000;
 
 /** The last scene, if it is still recent enough to be what they are looking at. */
 export function recentScene(scene: string, at: number, now: number): string {
- if((true as boolean))return screenPolicy('recent',[scene,at,now]);
-  if (!scene.trim() || !at) return '';
-  return now - at <= SCENE_HOLDS_MS ? scene.trim() : '';
+ return screenPolicy('recent',[scene,at,now]);
 }
 
 export function watchingPrompt(description: string, title: string): string {
- if((true as boolean))return screenPolicy('watchingPrompt',[description,title]);
-  return [
-    `They are playing something${title ? ` — the window is called "${title}"` : ''}, and you have just looked over at their screen.`,
-    'You saw this:',
-    description,
-    'Say one short line — the thing you would actually say out loud watching this over their shoulder.',
-    // The failure this whole prompt exists to prevent.
-    'React to it. Do not narrate it. They are looking at the same screen you are, so telling them what is on it is worse than saying nothing — have an opinion, take a side, wind them up, be unimpressed, worry at them about it.',
-    'React to the scene in front of you, not to the name of the game. Never mention screenshots, captures, images or descriptions, and never ask them to explain the plot.',
-    'One line. A small remark is fine; a summary is not.',
-  ].join(' ');
+ return screenPolicy('watchingPrompt',[description,title]);
 }

@@ -54,7 +54,7 @@ export async function makePicture(options: {
   seed?: number;
   safeMode?: boolean;
 }): Promise<MadePicture> {
-  if((true as boolean)){
+  {
     const {key,folder,...facts}=options;
     const prepared=corePolicySync<any>('final-picture.prepare',[facts,Boolean(key)]);
     if(prepared.error)throw new PictureRefused(prepared.error);
@@ -68,55 +68,5 @@ export async function makePicture(options: {
     mkdirSync(folder,{recursive:true});const id=randomUUID(),file=path.join(folder,`${id}.png`);writeFileSync(file,bytes,{flag:'wx'});
     return {id,file,bytes:bytes.length,model:prepared.body.model,prompt:prepared.body.prompt,at:new Date().toISOString()};
   }
-
-  const prompt = (options.prompt ?? '').trim();
-  if (!prompt) throw new PictureRefused('there was nothing to draw');
-  if (!options.key) throw new PictureRefused('no Venice key is set');
-
-  const model = options.model ?? DEFAULT_IMAGE_MODEL;
-  // Widths and heights are a multiple of 16 on the anime model, and a tall
-  // frame is what a picture of a person usually wants.
-  const width = Math.max(256, Math.round((options.width ?? 832) / 16) * 16);
-  const height = Math.max(256, Math.round((options.height ?? 1216) / 16) * 16);
-
-  const body = JSON.stringify({
-    model,
-    prompt,
-    width,
-    height,
-    steps: options.steps ?? 25,
-    format: 'png',
-    hide_watermark: true,
-    ...(options.seed === undefined ? {} : { seed: options.seed }),
-    ...(options.safeMode === undefined ? {} : { safe_mode: options.safeMode }),
-  });
-
-  const response = await fetch(VENICE_IMAGE_ENDPOINT, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${options.key}`, 'Content-Type': 'application/json' },
-    body,
-  });
-
-  const text = await response.text();
-  let reply: VeniceReply;
-  try { reply = JSON.parse(text) as VeniceReply; } catch { reply = {}; }
-
-  if (!response.ok) {
-    const said = typeof reply.error === 'string' ? reply.error : reply.error?.message;
-    throw new PictureRefused(said || `Venice returned ${response.status}`);
-  }
-
-  const base64 = reply.images?.[0];
-  if (!base64) throw new PictureRefused('Venice returned no image');
-
-  const bytes = Buffer.from(base64, 'base64');
-  if (!bytes.length) throw new PictureRefused('Venice returned an empty image');
-
-  mkdirSync(options.folder, { recursive: true });
-  const id = randomUUID();
-  const file = path.join(options.folder, `${id}.png`);
-  writeFileSync(file, bytes);
-
-  return { id, file, bytes: bytes.length, model, prompt, at: new Date().toISOString() };
 }
 

@@ -124,22 +124,13 @@ function clipped(text: string, max: number): string {
 
 /** The want without its "to", which is how it reads in a sentence of hers. */
 export function stripProject(text: string): string {
-  if((true as boolean))return corePolicySync<ReturnType<typeof stripProject>>('projects.stripProject',[text]);
-  return tidy(String(text ?? '').replace(/^(?:to\s+|i\s+want\s+to\s+)/i, '').replace(/[.!]+$/, ''));
+  return corePolicySync<ReturnType<typeof stripProject>>('projects.stripProject',[text]);
 }
 
 // -- reading them back -------------------------------------------------------
 
 export function readProjects(saved: unknown): Project[] {
-  if((true as boolean))return corePolicySync<ReturnType<typeof readProjects>>('projects.readProjects',[saved]);
-  if (!Array.isArray(saved)) return [];
-  return saved.filter((project): project is Project =>
-    !!project && typeof project === 'object'
-    && typeof (project as Project).id === 'string'
-    && typeof (project as Project).text === 'string'
-    && typeof (project as Project).since === 'string'
-    && typeof (project as Project).nights === 'number'
-    && ['declared', 'working', 'done', 'dropped', 'shelved'].includes((project as Project).status));
+  return corePolicySync<ReturnType<typeof readProjects>>('projects.readProjects',[saved]);
 }
 
 /**
@@ -148,26 +139,15 @@ export function readProjects(saved: unknown): Project[] {
  * nothing in the store changes until something actually happened.
  */
 export function asProject(want: Project): Worked {
-  if((true as boolean))return corePolicySync<ReturnType<typeof asProject>>('projects.asProject',[want]);
-  return {
-    ...want,
-    hardness: clamp(Math.round(want.hardness ?? HARDNESS.min), HARDNESS.min, HARDNESS.max),
-    attempts: Array.isArray(want.attempts) ? want.attempts : [],
-    bornOf: want.bornOf ?? 'taste',
-    stuck: typeof want.stuck === 'number' ? want.stuck : 0,
-    landed: typeof want.landed === 'number' ? want.landed : 0,
-    substrate: want.substrate ?? 'read',
-  };
+  return corePolicySync<ReturnType<typeof asProject>>('projects.asProject',[want]);
 }
 
 export function isActive(project: Project): boolean {
-  if((true as boolean))return corePolicySync<ReturnType<typeof isActive>>('projects.isActive',[project]);
-  return ACTIVE.includes(project.status);
+  return corePolicySync<ReturnType<typeof isActive>>('projects.isActive',[project]);
 }
 
 export function activeIn(projects: Project[]): Project[] {
-  if((true as boolean))return corePolicySync<ReturnType<typeof activeIn>>('projects.activeIn',[projects]);
-  return projects.filter(isActive);
+  return corePolicySync<ReturnType<typeof activeIn>>('projects.activeIn',[projects]);
 }
 
 /**
@@ -179,8 +159,7 @@ export function activeIn(projects: Project[]): Project[] {
  * anything up again — the pile would have locked the ladder shut.
  */
 export function roomForNew(projects: Project[]): boolean {
-  if((true as boolean))return corePolicySync<ReturnType<typeof roomForNew>>('projects.roomForNew',[projects]);
-  return activeIn(projects).filter(project => (project.nights ?? 0) > 0 || (project.bornOf && project.bornOf !== 'taste')).length < ACTIVE_MAX;
+  return corePolicySync<ReturnType<typeof roomForNew>>('projects.roomForNew',[projects]);
 }
 
 // -- how far she has got -----------------------------------------------------
@@ -198,12 +177,7 @@ export function roomForNew(projects: Project[]): boolean {
  * against is not a standing.
  */
 export function standingIn(projects: Project[], interest?: string): number {
-  if((true as boolean))return corePolicySync<ReturnType<typeof standingIn>>('projects.standingIn',[projects,interest]);
-  const hers = projects.filter(project => !interest || project.interest === interest);
-  const done = hers.filter(project => project.status === 'done').map(project => project.hardness ?? HARDNESS.min);
-  const beaten = hers.filter(project => project.status === 'shelved').length;
-  const top = done.length ? Math.max(...done) : HARDNESS.min - 1;
-  return clamp(top + 1 - Math.floor(beaten / 2), HARDNESS.min, HARDNESS.max);
+  return corePolicySync<ReturnType<typeof standingIn>>('projects.standingIn',[projects,interest]);
 }
 
 /**
@@ -216,8 +190,7 @@ export function standingIn(projects: Project[], interest?: string): number {
  * nothing, she is asked for something.
  */
 export function needsSomethingNew(projects: Project[]): boolean {
-  if((true as boolean))return corePolicySync<ReturnType<typeof needsSomethingNew>>('projects.needsSomethingNew',[projects]);
-  return roomForNew(projects) && !activeIn(projects).some(project => (project.nights ?? 0) > 0);
+  return corePolicySync<ReturnType<typeof needsSomethingNew>>('projects.needsSomethingNew',[projects]);
 }
 
 // -- POET's minimal criterion ------------------------------------------------
@@ -230,12 +203,7 @@ function words(text: string): Set<string> {
 
 /** How much of the same idea two lines are, 0 to 1. */
 export function sameIdea(left: string, right: string): number {
-  if((true as boolean))return corePolicySync<ReturnType<typeof sameIdea>>('projects.sameIdea',[left,right]);
-  const one = words(left), two = words(right);
-  if (!one.size || !two.size) return 0;
-  let shared = 0;
-  for (const word of one) if (two.has(word)) shared += 1;
-  return shared / new Set([...one, ...two]).size;
+  return corePolicySync<ReturnType<typeof sameIdea>>('projects.sameIdea',[left,right]);
 }
 
 /**
@@ -248,13 +216,7 @@ export function sameIdea(left: string, right: string): number {
  * ledger behind it.
  */
 export function needsHim(text: string): boolean {
-  if((true as boolean))return corePolicySync<ReturnType<typeof needsHim>>('projects.needsHim',[text]);
-  // Third-party pronouns are left out on purpose: "what the writers were
-  // thinking when they wrote it" is a fine thing to spend a night on, and only
-  // the second person and the one person she lives with are a problem. A false
-  // positive here costs one more model call; a false negative is a project
-  // sitting on him for a fortnight.
-  return /\b(?:him|his|he|you|your|yours|us|we|our|together|ask\s+someone|someone\s+else|with\s+me)\b/i.test(String(text ?? ''));
+  return corePolicySync<ReturnType<typeof needsHim>>('projects.needsHim',[text]);
 }
 
 export type Candidate = { text: string; hardness: number; substrate?: Substrate; interest?: string };
@@ -267,14 +229,7 @@ export type Refusal = 'duplicate' | 'no-substrate' | 'out-of-reach' | 'needs-him
  * about reach it. Everything else is thrown away rather than attempted.
  */
 export function admits(candidate: Candidate, past: Project[], standing: number): { ok: true } | { ok: false; why: Refusal } {
-  if((true as boolean))return corePolicySync<ReturnType<typeof admits>>('projects.admits',[candidate,past,standing]);
-  const text = stripProject(candidate.text);
-  if (text.length < 8) return { ok: false, why: 'empty' };
-  if (needsHim(text)) return { ok: false, why: 'needs-him' };
-  if (!candidate.substrate) return { ok: false, why: 'no-substrate' };
-  if (past.some(project => sameIdea(project.text, text) >= SAME_IDEA)) return { ok: false, why: 'duplicate' };
-  if (Math.abs(candidate.hardness - standing) > 1) return { ok: false, why: 'out-of-reach' };
-  return { ok: true };
+  return corePolicySync<ReturnType<typeof admits>>('projects.admits',[candidate,past,standing]);
 }
 
 // -- which one she works on --------------------------------------------------
@@ -289,13 +244,7 @@ export function admits(candidate: Candidate, past: Project[], standing: number):
  * she keeps at things, but not so reliably that she is a rota.
  */
 export function pickProject(projects: Project[], interest?: string, random: () => number = Math.random): Project | null {
-  if((true as boolean))return coreRandomPolicy<ReturnType<typeof pickProject>>('projects.pickProject',[projects,interest],random);
-  const active = activeIn(projects).filter(project => (interest ? project.interest === interest : true));
-  if (!active.length) return null;
-  const byNights = [...active].sort((a, b) => (b.nights ?? 0) - (a.nights ?? 0) || a.id.localeCompare(b.id));
-  if (byNights.length === 1 || random() < RETENTION) return byNights[0];
-  const rest = byNights.slice(1);
-  return rest[Math.floor(random() * rest.length)] ?? byNights[0];
+  return coreRandomPolicy<ReturnType<typeof pickProject>>('projects.pickProject',[projects,interest],random);
 }
 
 // -- what came of it ---------------------------------------------------------
@@ -304,35 +253,11 @@ export type AttemptVerdict = 'DID' | 'PART' | 'NO';
 
 /** The three-way read of what she is about to be asked. */
 export function judgeAttemptPrompt(): string {
-  if((true as boolean))return corePolicySync<ReturnType<typeof judgeAttemptPrompt>>('projects.judgeAttemptPrompt',[]);
-  return [
-    'Haru spent a night reading about something she is trying to do. You are deciding what she got out of it — not whether the writing is good, and not whether she enjoyed it.',
-    'You are given the thing she is trying, the step she was on tonight, and everything she actually read. Exactly one of:',
-    '',
-    'DID — what she read tells her how to do that step. She could go and do it now. The page answered the question she went in with.',
-    'PART — she is further on than she was, but the step is not done: the page covered some of it, or answered around it, or gave her the next thing to find out.',
-    'NO — nothing in what she read moves the step along. It was off the subject, or it was the same overview she already had, or it never got near the actual question.',
-    '',
-    'Judge the reading against the step, not against the want:',
-    'Step "work out which chords the verse uses" + a page listing the chords — DID.',
-    'Step "work out which chords the verse uses" + a page about the composer\'s career — NO.',
-    'Step "get past Elysium" + a guide covering the fight but not the build — PART.',
-    '',
-    'Answer with one word, DID or PART or NO, and nothing else.',
-  ].join('\n');
+  return corePolicySync<ReturnType<typeof judgeAttemptPrompt>>('projects.judgeAttemptPrompt',[]);
 }
 
 export function judgeAttemptInput(project: Project, reading: string): string {
-  if((true as boolean))return corePolicySync<ReturnType<typeof judgeAttemptInput>>('projects.judgeAttemptInput',[project,reading]);
-  return [
-    `She is trying to ${stripProject(project.text)}.`,
-    `Tonight's step: ${tidy(project.step ?? stripProject(project.text))}`,
-    '',
-    'What she read:',
-    clipped(reading, 4000),
-    '',
-    'DID or PART or NO?',
-  ].join('\n');
+  return corePolicySync<ReturnType<typeof judgeAttemptInput>>('projects.judgeAttemptInput',[project,reading]);
 }
 
 /**
@@ -342,22 +267,12 @@ export function judgeAttemptInput(project: Project, reading: string): string {
  * the caller falls back to the old coin rather than guessing.
  */
 export function readAttemptVerdict(answer: string): AttemptVerdict | null {
-  if((true as boolean))return corePolicySync<ReturnType<typeof readAttemptVerdict>>('projects.readAttemptVerdict',[answer]);
-  // Whole words only. `lastIndexOf('NO')` finds one inside CANNOT, KNOW and
-  // NOTHING, so "I cannot say" came back as a verdict of NO — which is the
-  // worst way for this to fail, because a judge that shrugs would have been
-  // counted as a judge that said the night was wasted.
-  const said = [...String(answer ?? '').toUpperCase().matchAll(/\b(DID|PART|NO)\b/g)].at(-1);
-  return said ? (said[1] as AttemptVerdict) : null;
+  return corePolicySync<ReturnType<typeof readAttemptVerdict>>('projects.readAttemptVerdict',[answer]);
 }
 
 /** What the verdict means for the night. `nothing` is only ever the fallback's doing. */
 export function settleFromRead(verdict: AttemptVerdict | null, fallback: Outcome): Outcome {
-  if((true as boolean))return corePolicySync<ReturnType<typeof settleFromRead>>('projects.settleFromRead',[verdict,fallback]);
-  if (verdict === 'DID') return 'did';
-  if (verdict === 'PART') return 'part';
-  if (verdict === 'NO') return 'no';
-  return fallback;
+  return corePolicySync<ReturnType<typeof settleFromRead>>('projects.settleFromRead',[verdict,fallback]);
 }
 
 // -- the state machine -------------------------------------------------------
@@ -372,39 +287,12 @@ export function settleFromRead(verdict: AttemptVerdict | null, fallback: Outcome
  * is the part that is allowed to hurt.
  */
 export function advanceProject(project: Project, attempt: Attempt, now: string): Worked {
-  if((true as boolean))return corePolicySync<ReturnType<typeof advanceProject>>('projects.advanceProject',[project,attempt,now]);
-  const had = asProject(project);
-  const attempts = [...had.attempts, attempt].slice(-ATTEMPTS_KEPT);
-  const nights = (had.nights ?? 0) + 1;
-  const note = attempt.note || had.note;
-  if (attempt.outcome === 'did') {
-    const landed = had.landed + 1;
-    // A step landing is not the want landing. The next one is named from
-    // scratch, which is what makes the thing take the weeks it should.
-    return landed >= STEPS_TO_FINISH
-      ? { ...had, attempts, nights, note, stuck: 0, landed, status: 'done' }
-      : { ...had, attempts, nights, note, stuck: 0, landed, step: undefined, status: 'working' };
-  }
-  if (attempt.outcome === 'part') {
-    return { ...had, attempts, nights, note, stuck: 0, status: 'working' };
-  }
-  // A night she got nothing out of is not a night that beat her: she was
-  // distracted, which is its own kind of failure and does not count toward
-  // giving up on the thing.
-  if (attempt.outcome === 'nothing') {
-    return { ...had, attempts, nights, note, status: 'working' };
-  }
-  const stuck = had.stuck + 1;
-  if (stuck >= STUCK_SHELVES) {
-    return { ...had, attempts, nights, note, stuck, status: 'shelved', shelved: { at: now, because: tidy(attempt.note ?? '') || 'it would not move' } };
-  }
-  return { ...had, attempts, nights, note, stuck, status: 'working' };
+  return corePolicySync<ReturnType<typeof advanceProject>>('projects.advanceProject',[project,attempt,now]);
 }
 
 /** Whether this attempt is the one that should cost her something (feelings.ts `broke`). */
 export function nowItStings(before: Project, after: Project): boolean {
-  if((true as boolean))return corePolicySync<ReturnType<typeof nowItStings>>('projects.nowItStings',[before,after]);
-  return (after.stuck ?? 0) >= STUCK_SHELVES && (before.stuck ?? 0) < STUCK_SHELVES;
+  return corePolicySync<ReturnType<typeof nowItStings>>('projects.nowItStings',[before,after]);
 }
 
 // -- generation --------------------------------------------------------------
@@ -428,39 +316,22 @@ function seeded(parent: Project, text: string, now: string, bornOf: BornOf, hard
 
 /** One she took on herself, at the rung she is standing on. */
 export function hersOwn(interest: string | undefined, text: string, now: string, hardness: number): Project {
-  if((true as boolean))return corePolicySync<ReturnType<typeof hersOwn>>('projects.hersOwn',[interest===undefined?{$undefined:true}:interest,text,now,hardness,Math.random().toString(36).slice(2,10)]);
-  return {
-    id: Math.random().toString(36).slice(2, 10),
-    interest,
-    text: stripProject(text),
-    since: now.slice(0, 10),
-    nights: 0,
-    status: 'declared',
-    hardness: clamp(Math.round(hardness), HARDNESS.min, HARDNESS.max),
-    bornOf: 'her',
-    substrate: 'read',
-    attempts: [],
-    stuck: 0,
-  };
+  return corePolicySync<ReturnType<typeof hersOwn>>('projects.hersOwn',[interest===undefined?{$undefined:true}:interest,text,now,hardness,Math.random().toString(36).slice(2,10)]);
 }
 
 /** The harder version of a thing she can now do. */
 export function childOf(parent: Project, text: string, now: string): Project {
-  if((true as boolean))return corePolicySync<ReturnType<typeof childOf>>('projects.childOf',[parent,text,now,Math.random().toString(36).slice(2,10)]);
-  return seeded(parent, text, now, 'child', (parent.hardness ?? HARDNESS.min) + 1);
+  return corePolicySync<ReturnType<typeof childOf>>('projects.childOf',[parent,text,now,Math.random().toString(36).slice(2,10)]);
 }
 
 /** And the way in she should have taken, after the second time the same rung beat her. */
 export function siblingOf(parent: Project, text: string, now: string): Project {
-  if((true as boolean))return corePolicySync<ReturnType<typeof siblingOf>>('projects.siblingOf',[parent,text,now,Math.random().toString(36).slice(2,10)]);
-  return seeded(parent, text, now, 'sibling', (parent.hardness ?? HARDNESS.min) - 1);
+  return corePolicySync<ReturnType<typeof siblingOf>>('projects.siblingOf',[parent,text,now,Math.random().toString(36).slice(2,10)]);
 }
 
 /** Whether a shelve is the second one at this rung, which is what asks for an easier way in. */
 export function beatenTwiceAt(projects: Project[], project: Project): boolean {
-  if((true as boolean))return corePolicySync<ReturnType<typeof beatenTwiceAt>>('projects.beatenTwiceAt',[projects,project]);
-  const rung = project.hardness ?? HARDNESS.min;
-  return projects.filter(other => other.status === 'shelved' && other.interest === project.interest && (other.hardness ?? HARDNESS.min) === rung).length >= 2;
+  return corePolicySync<ReturnType<typeof beatenTwiceAt>>('projects.beatenTwiceAt',[projects,project]);
 }
 
 /**
@@ -471,17 +342,11 @@ export function beatenTwiceAt(projects: Project[], project: Project): boolean {
  * feature does — going back, months later, to the one she gave up on.
  */
 export function dueForRevisit(projects: Project[], nowMs: number): Project | null {
-  if((true as boolean))return corePolicySync<ReturnType<typeof dueForRevisit>>('projects.dueForRevisit',[projects,nowMs]);
-  return projects
-    .filter(project => project.status === 'shelved' && project.shelved)
-    .filter(project => nowMs - Date.parse(project.shelved!.at) >= REVISIT_DAYS * DAY_MS)
-    .filter(project => standingIn(projects, project.interest) > (project.hardness ?? HARDNESS.min))
-    .sort((a, b) => Date.parse(a.shelved!.at) - Date.parse(b.shelved!.at))[0] ?? null;
+  return corePolicySync<ReturnType<typeof dueForRevisit>>('projects.dueForRevisit',[projects,nowMs]);
 }
 
 export function revisit(project: Project, now: string): Worked {
-  if((true as boolean))return corePolicySync<ReturnType<typeof revisit>>('projects.revisit',[project,now]);
-  return { ...asProject(project), status: 'working', bornOf: 'revisit', stuck: 0, shelved: undefined, step: undefined, since: now.slice(0, 10) };
+  return corePolicySync<ReturnType<typeof revisit>>('projects.revisit',[project,now]);
 }
 
 /**
@@ -490,38 +355,23 @@ export function revisit(project: Project, now: string): Worked {
  * what they were, and gives the block something to say that is not a boast.
  */
 export function staleSpawns(projects: Project[], nowMs: number): Project[] {
-  if((true as boolean))return corePolicySync<ReturnType<typeof staleSpawns>>('projects.staleSpawns',[projects,nowMs]);
-  return projects.filter(project => project.status === 'declared'
-    && project.bornOf !== 'taste'
-    && (project.nights ?? 0) === 0
-    && nowMs - Date.parse(`${project.since}T00:00:00.000Z`) >= SPAWN_STALE_DAYS * DAY_MS);
+  return corePolicySync<ReturnType<typeof staleSpawns>>('projects.staleSpawns',[projects,nowMs]);
 }
 
 export function keepProjects(projects: Project[]): Project[] {
-  if((true as boolean))return corePolicySync<ReturnType<typeof keepProjects>>('projects.keepProjects',[projects]);
-  return projects.slice(-PROJECTS_KEPT);
+  return corePolicySync<ReturnType<typeof keepProjects>>('projects.keepProjects',[projects]);
 }
 
 // -- what she is told about it ----------------------------------------------
 
 /** The search for a night on a project: the step, not the whole ambition. */
 export function projectQuery(project: Project): string {
-  if((true as boolean))return corePolicySync<ReturnType<typeof projectQuery>>('projects.projectQuery',[project]);
-  const step = tidy(project.step ?? '');
-  return step ? `how to ${stripProject(step)}` : `how to ${stripProject(project.text)}`;
+  return corePolicySync<ReturnType<typeof projectQuery>>('projects.projectQuery',[project]);
 }
 
 /** Asked, before she goes looking, what she is actually trying tonight. */
 export function stepInstruction(project: Project, recent: Attempt[]): string {
-  if((true as boolean))return corePolicySync<ReturnType<typeof stepInstruction>>('projects.stepInstruction',[project,recent]);
-  const been = recent.slice(-3).map(attempt => `- ${attempt.step} — ${attempt.outcome === 'no' ? 'got nowhere' : attempt.outcome === 'part' ? 'got part of the way' : 'done'}`).join('\n');
-  return [
-    `You are trying to ${stripProject(project.text)}. Tonight you are going to go and read about it.`,
-    been ? `What you have already tried:\n${been}` : '',
-    'Say the one thing you are trying to work out tonight. Small enough that a night of reading could actually settle it, and different from what you have already tried.',
-    'It has to be something you can do on your own, at three in the morning, with nothing but what you can read. Not asking anyone, not waiting for anyone, not doing it with anyone.',
-    'Answer with the step itself and nothing else: one short line, no quotation marks, no preamble, no explanation.',
-  ].filter(Boolean).join(' ');
+  return corePolicySync<ReturnType<typeof stepInstruction>>('projects.stepInstruction',[project,recent]);
 }
 
 const OUTCOME_CUE: Record<Outcome, string> = {
@@ -533,50 +383,17 @@ const OUTCOME_CUE: Record<Outcome, string> = {
 
 /** Handed to her once the reading for a night on a project is in front of her. */
 export function projectInstruction(project: Project, outcome: Outcome, found: string): string {
-  if((true as boolean))return corePolicySync<ReturnType<typeof projectInstruction>>('projects.projectInstruction',[project,outcome,found]);
-  const step = tidy(project.step ?? '');
-  return [
-    `You wanted to ${stripProject(project.text)}. Tonight was your ${ordinal((project.nights ?? 0) + 1)} night on it${step ? `, and what you were trying was: ${step}` : ''}.`,
-    found,
-    OUTCOME_CUE[outcome],
-    'Write one or two lines about it, as yourself, in the first person and the past tense. Have an opinion. It is allowed to be a poor one.',
-    'Only what is above. You read about it tonight; that is the only thing you did. Do not add a fact you happen to remember and do not invent a detail to make it a better story.',
-    'No preamble, no addressing them, no questions. This is a note to yourself.',
-  ].join('\n');
+  return corePolicySync<ReturnType<typeof projectInstruction>>('projects.projectInstruction',[project,outcome,found]);
 }
 
 /** And what she is asked once one of them lands, or once one of them has beaten her twice. */
 export function spawnInstruction(project: Project, kind: 'child' | 'sibling'): string {
-  if((true as boolean))return corePolicySync<ReturnType<typeof spawnInstruction>>('projects.spawnInstruction',[project,kind]);
-  const said = tidy(project.note ?? '');
-  return kind === 'child'
-    ? [
-      `You set out to ${stripProject(project.text)}, and you can do it now.`,
-      said ? `What you said about it: ${said}` : '',
-      'Say the next thing you want to do with it — the harder version, the one that only makes sense now that the first one is behind you.',
-      'It has to be yours to do alone, with reading. Not asking anyone, not doing it with anyone, not waiting on anyone.',
-      'Answer with the want itself and nothing else: one short line, starting with "to", no quotation marks, no preamble.',
-    ].filter(Boolean).join(' ')
-    : [
-      `You set out to ${stripProject(project.text)} and it has beaten you twice now.`,
-      said ? `The last thing you said about it: ${said}` : '',
-      'Say the smaller thing you should have started with instead — the way in, the part of it you could actually get hold of.',
-      'It has to be yours to do alone, with reading. Not asking anyone, not doing it with anyone, not waiting on anyone.',
-      'Answer with the want itself and nothing else: one short line, starting with "to", no quotation marks, no preamble.',
-    ].filter(Boolean).join(' ');
+  return corePolicySync<ReturnType<typeof spawnInstruction>>('projects.spawnInstruction',[project,kind]);
 }
 
 /** And what she is asked when she has nothing of her own on the go at all. */
 export function newProjectInstruction(interest: string, stance: string, past: string[]): string {
-  if((true as boolean))return corePolicySync<ReturnType<typeof newProjectInstruction>>('projects.newProjectInstruction',[interest,stance,past]);
-  const already = past.slice(-8).map(text => `"${clipped(text, 70)}"`).join(', ');
-  return [
-    `You have nothing of your own on the go. ${interest} is one of your things${stance ? `, and what you make of it is: ${clipped(stance, 300)}` : ''}.`,
-    'Say one thing you want to be able to do with it — something you cannot do yet and could work at, a night at a time, on your own.',
-    already ? `Not these, they are yours already: ${already}.` : '',
-    'It has to be yours to do alone, with reading. Not asking anyone, not doing it with anyone, not waiting on anyone.',
-    'Answer with the want itself and nothing else: one short line, starting with "to", no quotation marks, no preamble.',
-  ].filter(Boolean).join(' ');
+  return corePolicySync<ReturnType<typeof newProjectInstruction>>('projects.newProjectInstruction',[interest,stance,past]);
 }
 
 function ordinal(n: number): string {
@@ -621,37 +438,5 @@ function fitLines(lines: string[], limit: number): string[] {
  * takes the fact that something beat her.
  */
 export function projectsNote(projects: Project[], nowMs: number): string {
-  if((true as boolean))return corePolicySync<ReturnType<typeof projectsNote>>('projects.projectsNote',[projects,nowMs]);
-  if((true as boolean))return corePolicySync<string>('own-time.projectsNote',[projects,nowMs]);
-  const lines: string[] = [];
-  const gone = projects.filter(project => project.status === 'shelved' && project.shelved)
-    .sort((a, b) => Date.parse(b.shelved!.at) - Date.parse(a.shelved!.at))[0];
-  if (gone && nowMs - Date.parse(gone.shelved!.at) < 7 * DAY_MS) {
-    lines.push(`- You gave up on ${clipped(stripProject(gone.text), TEXT_CHARS)} after ${gone.nights} nights: ${clipped(gone.shelved!.because, NOTE_CHARS)}. It is still sore.`);
-  }
-  const working = activeIn(projects)
-    .filter(project => (project.nights ?? 0) > 0)
-    .sort((a, b) => (b.nights ?? 0) - (a.nights ?? 0))
-    .slice(0, PROJECTS_SHOWN);
-  for (const project of working) {
-    const said = clipped(stripProject(project.text), TEXT_CHARS);
-    const bit = project.interest ? `${project.interest}: ${said}` : said;
-    const rung = RUNGS[clamp(project.hardness ?? HARDNESS.min, HARDNESS.min, HARDNESS.max)];
-    const landed = project.landed ?? 0;
-    const far = landed ? `, ${landed} of ${STEPS_TO_FINISH} of it done` : '';
-    const at = (rung ? `${rung}, night ${project.nights}` : `night ${project.nights}`) + far;
-    const last = project.attempts?.at(-1);
-    // The step and how it went say more than the note does, and say it about
-    // tonight; the note is what is left when she has not named a step yet,
-    // which is every record that predates any of this.
-    const tail = project.step
-      ? ` On: ${clipped(project.step, STEP_CHARS)}${last ? ` — ${LAST[last.outcome]}` : ''}.`
-      : project.note ? ` — ${clipped(project.note, NOTE_CHARS)}.` : '';
-    lines.push(`- ${bit} (${at})${tail}`);
-  }
-  const back = projects.filter(project => project.bornOf === 'revisit' && isActive(project))[0];
-  if (back) lines.push(`- You went back to ${clipped(stripProject(back.text), TEXT_CHARS)}, which beat you once before.`);
-  const kept = fitLines(lines, PROJECTS_CHARS);
-  if (!kept.length) return '';
-  return `Things you are trying to do, on your own time:\n${kept.join('\n')}`;
+  return corePolicySync<ReturnType<typeof projectsNote>>('projects.projectsNote',[projects,nowMs]);
 }

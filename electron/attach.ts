@@ -33,14 +33,7 @@ const VIDEO = /\.(mp4|mkv|mov|avi|webm|wmv|flv|m4v|mpe?g|ts)$/i;
 const TEXT = /\.(txt|md|markdown|csv|tsv|json|jsonc|ya?ml|toml|ini|cfg|conf|log|xml|html?|css|scss|js|jsx|ts|tsx|py|rb|go|rs|java|c|h|cpp|hpp|cs|sh|ps1|sql|srt|vtt|ass)$/i;
 
 export function classify(file: string): FileKind {
-  if((true as boolean))return attachmentPolicy('classify',[file]);
-  const name = file ?? '';
-  if (DOCUMENT.test(name)) return 'document';
-  if (IMAGE.test(name)) return 'image';
-  if (AUDIO.test(name)) return 'audio';
-  if (VIDEO.test(name)) return 'video';
-  if (TEXT.test(name)) return 'text';
-  return 'unreadable';
+  return attachmentPolicy('classify',[file]);
 }
 
 /** Every extension the picker should offer, in the order the dialog lists them. */
@@ -78,22 +71,7 @@ export function findFfmpeg(exists = fs.existsSync, env = process.env): { ffmpeg:
 }
 
 function run(file: string, args: string[], timeoutMs = 120_000): Promise<string> {
-  if((true as boolean))return coreMediaRun(file,args,timeoutMs);
-  return new Promise((resolve, reject) => {
-    const child = spawn(file, args, { windowsHide: true });
-    let out = '', err = '';
-    const timer = setTimeout(() => { child.kill(); reject(new Error('ffmpeg took too long')); }, timeoutMs);
-    child.stdout.on('data', chunk => { out += chunk; });
-    child.stderr.on('data', chunk => { err += chunk; });
-    child.on('error', error => { clearTimeout(timer); reject(error); });
-    child.on('close', code => {
-      clearTimeout(timer);
-      // ffmpeg writes everything to stderr, including success. Only the exit
-      // code says whether it worked.
-      if (code === 0) resolve(out || err);
-      else reject(new Error(err.trim().split('\n').slice(-2).join(' ').slice(0, 200) || `ffmpeg exited ${code}`));
-    });
-  });
+  return coreMediaRun(file,args,timeoutMs);
 }
 
 export function scratchDir(): string {
@@ -136,24 +114,7 @@ export const FRAMES = 4;
  * same and describes the video instead of its intro.
  */
 export async function extractFrames(file: string, tools: { ffmpeg: string; ffprobe: string }, count = FRAMES): Promise<string[]> {
-  if((true as boolean))return coreExtractFrames(file,tools,count,{duration,dir:scratchDir,run});
-  const length = await duration(file, tools);
-  const dir = scratchDir();
-  const stamp = Date.now();
-  const shots: string[] = [];
-  for (let i = 0; i < count; i++) {
-    // Offset into each slice rather than at its edge, so a hard cut on the
-    // boundary does not give a half-rendered frame.
-    const at = length > 0 ? (length * (i + 0.5)) / count : i;
-    const out = path.join(dir, `frame-${stamp}-${i}.jpg`);
-    try {
-      // -ss before -i seeks by keyframe, which is approximate and enormously
-      // faster than decoding to the timestamp.
-      await run(tools.ffmpeg, ['-y', '-ss', at.toFixed(2), '-i', file, '-frames:v', '1', '-vf', 'scale=896:-2', '-q:v', '4', out], 60_000);
-      if (fs.existsSync(out) && fs.statSync(out).size > 0) shots.push(out);
-    } catch { /* a frame that will not decode is not worth failing the file for */ }
-  }
-  return shots;
+  return coreExtractFrames(file,tools,count,{duration,dir:scratchDir,run});
 }
 
 // --- text -------------------------------------------------------------------
@@ -162,13 +123,7 @@ export async function extractFrames(file: string, tools: { ffmpeg: string; ffpro
 export const MAX_TEXT = 12_000;
 
 export function readText(file: string): string {
-  if((true as boolean)){const bytes=fs.readFileSync(file),result=attachmentPolicy('text',[bytes.toString('utf8'),bytes.subarray(0,1024).includes(0)]);if(result.error)throw Error(result.error);return result.text;}
-  const raw = fs.readFileSync(file);
-  // A file claiming to be text that is full of zero bytes is not text, whatever
-  // its extension says.
-  if (raw.subarray(0, 1024).includes(0)) throw new Error('that looks like a binary file rather than text');
-  const text = raw.toString('utf8');
-  return text.length > MAX_TEXT ? `${text.slice(0, MAX_TEXT)}\n…(${text.length - MAX_TEXT} more characters not shown)` : text;
+  {const bytes=fs.readFileSync(file),result=attachmentPolicy('text',[bytes.toString('utf8'),bytes.subarray(0,1024).includes(0)]);if(result.error)throw Error(result.error);return result.text;}
 }
 
 /** Tidies up the frames and wavs afterwards. Best effort; the OS clears tmp anyway. */

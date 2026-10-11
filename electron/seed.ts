@@ -25,22 +25,7 @@ const FIRST_SENTENCE = /^([\s\S]{0,80}?[.!?…])(\s+|$)/u;
 export const SEEDED_REPLIES = 6;
 
 export function seedEmoji<T extends Turn>(conversation: T[], count = SEEDED_REPLIES): T[] {
-  if((true as boolean))return corePolicySync('conversation-inputs.seedEmoji',[conversation,count]);
-
-  const out = conversation.map(turn => ({ ...turn }));
-  let touched = 0;
-  for (let at = out.length - 1; at >= 0 && touched < count; at--) {
-    const turn = out[at];
-    if (turn.role !== 'assistant' || typeof turn.content !== 'string' || !turn.content.trim()) continue;
-    touched++;
-    if (ANY_EMOJI.test(turn.content)) continue;
-    const emoji = HERS[at % HERS.length];
-    const first = turn.content.match(FIRST_SENTENCE);
-    turn.content = first
-      ? `${first[1]} ${emoji} ${turn.content.slice(first[0].length)}`.trim()
-      : `${emoji} ${turn.content}`;
-  }
-  return out;
+  return corePolicySync('conversation-inputs.seedEmoji',[conversation,count]);
 }
 
 /**

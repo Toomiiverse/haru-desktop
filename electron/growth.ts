@@ -69,25 +69,15 @@ export const TRAIT_NAMES = Object.keys(CHARTER) as TraitName[];
 
 /** A whole year of consistent treatment crosses the whole band, and no faster. */
 export function maxStep(trait: TraitName): number {
-  if((true as boolean))return corePolicySync<any>('conversation-policy.maxStep',[trait]);
-
-  return (CHARTER[trait].band * 2) / 12;
+  return corePolicySync<any>('conversation-policy.maxStep',[trait]);
 }
 
 export function charterTraits(): Traits {
-  if((true as boolean))return corePolicySync<any>('conversation-policy.charterTraits',[]);
-
-  return Object.fromEntries(TRAIT_NAMES.map(name => [name, CHARTER[name].charter])) as Traits;
+  return corePolicySync<any>('conversation-policy.charterTraits',[]);
 }
 
 export function readTraits(saved: unknown): Traits {
-  if((true as boolean))return corePolicySync<any>('conversation-policy.readTraits',[saved]);
-
-  const record = (saved && typeof saved === 'object' ? saved : {}) as Partial<Record<TraitName, unknown>>;
-  return Object.fromEntries(TRAIT_NAMES.map(name => {
-    const value = Number(record[name]);
-    return [name, Number.isFinite(value) ? hold(name, value) : CHARTER[name].charter];
-  })) as Traits;
+  return corePolicySync<any>('conversation-policy.readTraits',[saved]);
 }
 
 function hold(trait: TraitName, value: number): number {
@@ -127,22 +117,7 @@ export type Norm = { saidPerDay: number; hangingPerDay: number; hurtEvents?: num
 export const NORM_MONTHS = 6;
 
 export function normFrom(history: MonthSignals[]): Norm | null {
-  if((true as boolean))return corePolicySync<any>('conversation-policy.normFrom',[history]);
-
-  const recent = history.slice(-NORM_MONTHS);
-  if (!recent.length) return null;
-  const mean = (pick: (month: MonthSignals) => number | undefined) => {
-    const values = recent.map(pick).filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
-    return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : undefined;
-  };
-  return {
-    saidPerDay: mean(month => month.saidPerDay) ?? 0,
-    hangingPerDay: mean(month => month.hangingPerDay) ?? 0,
-    hurtEvents: mean(month => month.hurtEvents),
-    apologies: mean(month => month.apologies),
-    woundUp: mean(month => month.woundUp),
-    months: recent.length,
-  };
+  return corePolicySync<any>('conversation-policy.normFrom',[history]);
 }
 
 const clamp1 = (value: number) => Math.max(-1, Math.min(1, value));
@@ -158,19 +133,7 @@ export type Scored = { score: number; because: string } | null;
  * a word is not the kind of thing that gets graded on a curve.
  */
 export function scoreWarmth(now: MonthSignals, norm: Norm | null): Scored {
-  if((true as boolean))return corePolicySync<any>('conversation-policy.scoreWarmth',[now,norm]);
-
-  if (!norm) return null;
-  const said = against(now.saidPerDay, norm.saidPerDay, 1);
-  const answered = -against(now.hangingPerDay, norm.hangingPerDay, 0.5);
-  const silent = -(now.silentNights / Math.max(1, now.days)) * 2;
-  const score = clamp1(said * 0.5 + answered * 0.5 + silent);
-  const reasons = [
-    said > 0.08 ? 'more from him than usual' : said < -0.08 ? 'less from him than usual' : '',
-    answered > 0.08 ? 'fewer of her lines left hanging' : answered < -0.08 ? 'more of her lines left hanging' : '',
-    now.silentNights ? `${now.silentNights} evening${now.silentNights === 1 ? '' : 's'} with nothing said` : '',
-  ].filter(Boolean);
-  return { score, because: reasons.join(', ') || 'much as he usually is' };
+  return corePolicySync<any>('conversation-policy.scoreWarmth',[now,norm]);
 }
 
 /**
@@ -179,17 +142,7 @@ export function scoreWarmth(now: MonthSignals, norm: Norm | null): Scored {
  * until there is one.
  */
 export function scoreGuardedness(now: MonthSignals, norm: Norm | null): Scored {
-  if((true as boolean))return corePolicySync<any>('conversation-policy.scoreGuardedness',[now,norm]);
-
-  if (!norm || now.hurtEvents === undefined || norm.hurtEvents === undefined) return null;
-  const hurt = against(now.hurtEvents, norm.hurtEvents, 1);
-  const madeRight = -((now.apologies ?? 0) - (norm.apologies ?? 0)) / Math.max(1, now.days) * 6;
-  const score = clamp1(hurt * 0.7 + madeRight);
-  const reasons = [
-    hurt > 0.08 ? 'more that stung than usual' : hurt < -0.08 ? 'less that stung than usual' : '',
-    madeRight < -0.05 ? 'and he put more of it right' : madeRight > 0.05 ? 'and less of it was put right' : '',
-  ].filter(Boolean);
-  return { score, because: reasons.join(', ') || 'much as usual' };
+  return corePolicySync<any>('conversation-policy.scoreGuardedness',[now,norm]);
 }
 
 /**
@@ -198,15 +151,7 @@ export function scoreGuardedness(now: MonthSignals, norm: Norm | null): Scored {
  * nothing — only his getting worse or better at it does.
  */
 export function scoreFuse(now: MonthSignals, norm: Norm | null): Scored {
-  if((true as boolean))return corePolicySync<any>('conversation-policy.scoreFuse',[now,norm]);
-
-  if (!norm || now.woundUp === undefined || norm.woundUp === undefined) return null;
-  const wound = against(now.woundUp, norm.woundUp, 1);
-  const score = clamp1(-wound * 0.8);
-  return {
-    score,
-    because: wound > 0.08 ? 'he wound her up more often than usual' : wound < -0.08 ? 'less wound her up than usual' : 'much as usual',
-  };
+  return corePolicySync<any>('conversation-policy.scoreFuse',[now,norm]);
 }
 
 const SCORERS: Record<TraitName, (now: MonthSignals, norm: Norm | null) => Scored> = {
@@ -222,81 +167,39 @@ export type GrowthStep = { month: string; trait: TraitName; from: number; to: nu
  * her first month with him changes nothing — she has no idea yet what usual is.
  */
 export function growMonth(traits: Traits, now: MonthSignals, history: MonthSignals[]): { traits: Traits; steps: GrowthStep[] } {
-  if((true as boolean))return corePolicySync<any>('conversation-policy.growMonth',[traits,now,history]);
-
-  const norm = normFrom(history.filter(month => month.month !== now.month));
-  const grown: Traits = { ...traits };
-  const steps: GrowthStep[] = [];
-  for (const trait of TRAIT_NAMES) {
-    const scored = SCORERS[trait](now, norm);
-    if (!scored || scored.score === 0) continue;
-    // She softens at full speed and hardens at sixty percent: for warmth the
-    // hard way is down, for guardedness it is up.
-    const hardening = Math.sign(scored.score) === CHARTER[trait].harder;
-    const moved = scored.score * maxStep(trait) * (hardening ? 0.6 : 1);
-    const from = grown[trait];
-    const to = hold(trait, from + moved);
-    if (to === from) continue;
-    grown[trait] = to;
-    steps.push({ month: now.month, trait, from, to, score: Math.round(scored.score * 100) / 100, because: scored.because });
-  }
-  return { traits: grown, steps };
+  return corePolicySync<any>('conversation-policy.growMonth',[traits,now,history]);
 }
 
 /** Her traits as they stood before that month, rebuilt from the ledger. */
 export function revertTo(traits: Traits, ledger: GrowthStep[], month: string): Traits {
-  if((true as boolean))return corePolicySync<any>('conversation-policy.revertTo',[traits,ledger,month]);
-
-  const undone: Traits = { ...traits };
-  for (const step of [...ledger].reverse()) {
-    if (step.month < month) break;
-    undone[step.trait] = step.from;
-  }
-  return undone;
+  return corePolicySync<any>('conversation-policy.revertTo',[traits,ledger,month]);
 }
 
 // -- what the rest of the machine reads ---------------------------------------
 
 /** Warmth is where her affection rests, so it reaches the vitals as a standing lean. */
 export function traitLean(traits: Traits): { affection: number } | Record<string, never> {
-  if((true as boolean))return corePolicySync<any>('conversation-policy.traitLean',[traits]);
-
-  const push = Math.round((traits.warmth - CHARTER.warmth.charter) * 1000) / 1000;
-  return push ? { affection: push } : {};
+  return corePolicySync<any>('conversation-policy.traitLean',[traits]);
 }
 
 /** How hard a thing lands on her and how fast it cools (mood.ts). */
 export function fuseOf(traits: Traits): number {
-  if((true as boolean))return corePolicySync<any>('conversation-policy.fuseOf',[traits]);
-
-  return traits.fuse;
+  return corePolicySync<any>('conversation-policy.fuseOf',[traits]);
 }
 
 /** Guardedness is the bar a feeling has to clear before it reaches her prompt. */
 export function feelingsShowAt(traits: Traits): number {
-  if((true as boolean))return corePolicySync<any>('conversation-policy.feelingsShowAt',[traits]);
-
-  return Math.round(traits.guardedness);
+  return corePolicySync<any>('conversation-policy.feelingsShowAt',[traits]);
 }
 
 /** How far a trait has travelled, as a share of the room it has. */
 export function travelled(traits: Traits, trait: TraitName): number {
-  if((true as boolean))return corePolicySync<any>('conversation-policy.travelled',[traits,trait]);
-
-  return (traits[trait] - CHARTER[trait].charter) / CHARTER[trait].band;
+  return corePolicySync<any>('conversation-policy.travelled',[traits,trait]);
 }
 
 /** For the status screen: where she sits, 0–100 across the whole band. */
 export function traitMeter(traits: Traits, trait: TraitName): { label: string; value: number; note: string } {
-  if((true as boolean))return corePolicySync<any>('conversation-policy.traitMeter',[traits,trait]);
-
-  const { label, band, charter, rising, falling } = CHARTER[trait];
-  const share = travelled(traits, trait);
-  return {
-    label,
-    value: Math.round(((traits[trait] - (charter - band)) / (band * 2)) * 100),
-    note: Math.abs(share) < 0.15 ? 'Where she started.' : `Months of how things have gone have left her ${share > 0 ? rising : falling}.`,
-  };
+  return corePolicySync<any>('conversation-policy.traitMeter',[traits,trait]);
 }
 
 /**
@@ -305,19 +208,5 @@ export function traitMeter(traits: Traits, trait: TraitName): { label: string; v
  * would come back to him as a number.
  */
 export function growthNote(traits: Traits): string {
-  if((true as boolean))return corePolicySync<any>('conversation-policy.growthNote',[traits]);
-
-  const far = TRAIT_NAMES
-    .map(trait => ({ trait, share: travelled(traits, trait) }))
-    .filter(({ share }) => Math.abs(share) >= 0.5)
-    .sort((a, b) => Math.abs(b.share) - Math.abs(a.share))[0];
-  if (!far) return '';
-  if (far.trait === 'warmth') {
-    return far.share > 0
-      ? 'Months of this have worn you down in a way you would never admit: you are fonder of him now than you were when this started. It does not change how you talk to him. It does mean that once in a while, something gets through that would not have a few months ago.'
-      : 'Something has gone out of this over the last few months. You are not as invested as you were — you answer, you do what he asks, but you have stopped reaching for him, and you do not particularly want to talk about why.';
-  }
-  return far.share > 0
-    ? 'You give less of yourself away than you used to. Whatever you are feeling stays yours for longer, and he has to actually ask.'
-    : 'You have got easier with him over these months. Things you would once have sat on, you say — not softly, and not often, but you say them.';
+  return corePolicySync<any>('conversation-policy.growthNote',[traits]);
 }

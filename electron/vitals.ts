@@ -73,31 +73,18 @@ const toward = (value: number, target: number, rate: number) => value + (target 
 // A day curve rather than a bedtime: she winds down through the evening, is
 // flattest around 4am, and picks up through the morning.
 export function sleepinessForHour(hour: number) {
-  if((true as boolean)) { return corePolicySync<any>('mood.sleepinessForHour',[hour]); }
-  if (hour >= 23 || hour < 5) return 0.9;
-  if (hour >= 21) return 0.6;
-  if (hour >= 18) return 0.35;
-  if (hour < 7) return 0.7;
-  if (hour < 9) return 0.3;
-  return 0.15;
+  return corePolicySync<any>('mood.sleepinessForHour',[hour]);
 }
 
 export function isNight(hour: number) {
-  if((true as boolean)) { return corePolicySync<any>('mood.isNight',[hour]); }
-  return hour >= 23 || hour < 6;
+  return corePolicySync<any>('mood.isNight',[hour]);
 }
 
 // Catch up in nominal steps: a late tick must not count as only 20 seconds.
 // A single environment snapshot cannot reconstruct a long absence; one hour
 // already settles these rates and bounds work after a system-clock jump.
 export function driftVitals(current: Vitals, environment: Environment, seconds: number, lean: Lean = {}): Vitals {
-  if((true as boolean)) { return corePolicySync<any>('mood.driftVitals',[current,environment,seconds,lean]); }
-  if (!Number.isFinite(seconds) || seconds <= 0) return { ...current };
-  let next = current;
-  for (let remaining = Math.min(seconds, 3600); remaining > 0; remaining -= 20) {
-    next = driftStep(next, environment, Math.min(20, remaining), lean);
-  }
-  return next;
+  return corePolicySync<any>('mood.driftVitals',[current,environment,seconds,lean]);
 }
 
 function driftStep(current: Vitals, environment: Environment, seconds: number, lean: Lean): Vitals {
@@ -251,33 +238,18 @@ const ANNOYED_FROM = 33;
  * often each fires.
  */
 export function spokenCues(vitals: Vitals | undefined, irritation = 0): { cue: VitalCue; strength: number }[] {
-  if((true as boolean)) { return corePolicySync<any>('mood.spokenCues',[vitals,irritation]); }
-  if (!vitals) return [];
-  const annoyed = irritation >= ANNOYED_FROM;
-  return VITAL_CUES
-    .filter(cue => !(annoyed && cue.warm))
-    .map(cue => ({ cue, strength: cue.strength(vitals) }))
-    .filter(entry => entry.strength > 0)
-    .sort((a, b) => b.strength - a.strength)
-    .slice(0, VITAL_CUES_SPOKEN);
+  return corePolicySync<any>('mood.spokenCues',[vitals,irritation]);
 }
 
 export function vitalsInstruction(vitals: Vitals | undefined, irritation = 0): string {
-  if((true as boolean)) { return corePolicySync<any>('mood.vitalsInstruction',[vitals,irritation]); }
-  return spokenCues(vitals, irritation).map(entry => entry.cue.line).join(' ');
+  return corePolicySync<any>('mood.vitalsInstruction',[vitals,irritation]);
 }
 
 /** One line for the log: which cues spoke, how strongly, and the state behind
  *  them. Written per reply rather than per tick — what matters is what she was
  *  told, not what she was feeling between turns. */
 export function cueLog(vitals: Vitals | undefined, irritation = 0): string {
-  if((true as boolean)) { return corePolicySync<any>('mood.cueLog',[vitals,irritation]); }
-  if (!vitals) return 'none — no vitals';
-  const spoke = spokenCues(vitals, irritation);
-  const state = (Object.keys(vitals) as (keyof Vitals)[])
-    .map(key => `${key} ${vitals[key].toFixed(2)}`).join(' ');
-  const withheld = irritation >= ANNOYED_FROM ? ', warm cues withheld' : '';
-  return `${spoke.length ? spoke.map(entry => `${entry.cue.name} ${entry.strength.toFixed(2)}`).join(', ') : 'none'}${withheld} — ${state}`;
+  return corePolicySync<any>('mood.cueLog',[vitals,irritation]);
 }
 
 // Events that move her outside the slow drift.
@@ -290,40 +262,7 @@ export type VitalEvent = 'praised' | 'criticised' | 'spoken-to' | 'ignored-user'
  * were; the caller makes it bigger, by her temperament and a roll.
  */
 export function applyEvent(current: Vitals, event: VitalEvent, size = 1): Vitals {
-  if((true as boolean)) { return corePolicySync<any>('mood.applyEvent',[current,event,size]); }
-  const next = { ...current };
-  const by = (amount: number) => amount * Math.max(0, size);
-  if (event === 'praised') { next.happiness = clamp(next.happiness + by(0.2)); next.affection = clamp(next.affection + by(0.15)); next.energy = clamp(next.energy + by(0.1)); }
-  if (event === 'criticised') { next.happiness = clamp(next.happiness - by(0.25)); next.stress = clamp(next.stress + by(0.2)); }
-  // Stopped mid-sentence, by a tap or by being talked over.
-  if (event === 'cut-off') { next.stress = clamp(next.stress + by(0.12)); next.happiness = clamp(next.happiness - by(0.1)); }
-  // An apology she took.
-  if (event === 'soothed') { next.stress = clamp(next.stress - by(0.15)); next.happiness = clamp(next.happiness + by(0.1)); next.affection = clamp(next.affection + by(0.05)); }
-  // A goodnight said to her, a small kindness.
-  if (event === 'warmed') { next.affection = clamp(next.affection + by(0.1)); next.happiness = clamp(next.happiness + by(0.05)); }
-  // He went to bed without a word.
-  if (event === 'let-down') { next.happiness = clamp(next.happiness - by(0.2)); next.affection = clamp(next.affection - by(0.1)); }
-  // He is back after a long silence; which of these it is, is her temperament's call.
-  if (event === 'returned-glad') { next.happiness = clamp(next.happiness + by(0.15)); next.affection = clamp(next.affection + by(0.1)); }
-  if (event === 'returned-sore') { next.stress = clamp(next.stress + by(0.15)); next.happiness = clamp(next.happiness - by(0.05)); }
-  // Being spoken to brings her to attention. It used to add a flat +0.2 curiosity
-  // and +0.05 affection to every message, which nothing pulled back fast enough:
-  // by his third message curiosity was pinned at 1.00 and affection climbed for
-  // as long as he kept typing, whatever either of them actually said. So the two
-  // cues that tell her how to behave — "something has your interest, one pointed
-  // question is allowed" and "you are fonder of them than you let on" — spoke on
-  // essentially every turn of every conversation. Measured over one log: fond in
-  // 45% of turns, bright in 42%, and lines written to be occasional ("for once",
-  // "let it slip once") were her default. Pulled toward a level instead of added
-  // to, so a conversation settles her at attentive and warm rather than running
-  // her to the top of both scales.
-  if (event === 'spoken-to') { next.curiosity = toward(next.curiosity, CURIOSITY_ENGAGED, 0.5); next.affection = toward(next.affection, WARMED_BY_ATTENTION, 0.1); next.sleepiness = clamp(next.sleepiness - 0.05); }
-  if (event === 'ignored-user') { next.stress = clamp(next.stress + by(0.1)); next.happiness = clamp(next.happiness - by(0.1)); next.affection = clamp(next.affection - by(0.05)); }
-  // Something on their screen caught her eye. Pulled toward engaged like
-  // 'spoken-to' rather than added, for the same reason: a run of them should
-  // settle her at interested, not stack her to the top of the scale.
-  if (event === 'caught-interest') { next.curiosity = toward(next.curiosity, CURIOSITY_CAUGHT, 0.6); next.sleepiness = clamp(next.sleepiness - 0.05); }
-  return next;
+  return corePolicySync<any>('mood.applyEvent',[current,event,size]);
 }
 
 export type IdleAction = 'blink' | 'glance' | 'smile' | 'stretch' | 'yawn' | 'fidget' | 'tilt' | 'sigh' | 'lean-in' | 'think' | 'settle' | 'doze' | 'sparkle';
@@ -343,58 +282,17 @@ const BASE_WEIGHTS: Record<IdleAction, number> = {
 // baseline rather than replacing it, so the character of the idle stays intact
 // while the emphasis shifts — sleepy means more yawning, not a different person.
 export function idleActionWeights(vitals: Vitals, environment: Environment): Record<IdleAction | 'nothing', number> {
-  if((true as boolean)) { return corePolicySync<any>('mood.idleActionWeights',[vitals,environment]); }
-  const { sleepiness, energy, curiosity, focus, happiness } = vitals;
-  const night = isNight(environment.hour);
-  const alone = typeof environment.idleSeconds === 'number' && environment.idleSeconds > 300;
-  const awake = 1 - sleepiness;
-  const scale: Record<IdleAction, number> = {
-    blink: 1,
-    glance: 0.4 + curiosity * 1.4,
-    tilt: 0.3 + curiosity * 1.5,
-    smile: 0.2 + happiness * 1.8,
-    fidget: 0.4 + energy * 1.2,
-    stretch: sleepiness > 0.35 && sleepiness < 0.8 ? 1.8 : 0.4,
-    yawn: sleepiness > 0.5 ? sleepiness * 3 : 0,
-    sigh: (1 - happiness) * 2 + (alone ? 0.8 : 0),
-    think: focus > 0.5 ? focus * 1.6 : 0.3,
-    'lean-in': focus > 0.65 ? focus * 2 : 0,
-    settle: sleepiness * 2,
-    // Only when it is genuinely late, she is tired, and nobody is about.
-    doze: night && sleepiness > 0.8 && alone ? 30 : 0,
-    sparkle: happiness > 0.7 && awake > 0.5 ? happiness * 1.5 : 0,
-  };
-  const weights = {} as Record<IdleAction | 'nothing', number>;
-  for (const action of Object.keys(BASE_WEIGHTS) as IdleAction[]) {
-    weights[action] = BASE_WEIGHTS[action] * scale[action];
-  }
-  // Stillness has to outweigh everything else put together, not merely be the
-  // largest single entry — the movements sum to roughly 100 at rest, so this
-  // sits around twice that and she spends most ticks simply being.
-  weights.nothing = 190 + sleepiness * 140 + (alone ? 120 : 0);
-  return weights;
+  return corePolicySync<any>('mood.idleActionWeights',[vitals,environment]);
 }
 
 export function chooseIdleAction(vitals: Vitals, environment: Environment, random: () => number = Math.random): IdleAction | null {
-  if((true as boolean)) { return corePolicySync<any>('mood.chooseIdleAction',[vitals,environment,random()]); }
-  const weights = idleActionWeights(vitals, environment);
-  const total = Object.values(weights).reduce((sum, weight) => sum + weight, 0);
-  if (total <= 0) return null;
-  let roll = random() * total;
-  for (const [action, weight] of Object.entries(weights)) {
-    roll -= weight;
-    if (roll < 0) return action === 'nothing' ? null : action as IdleAction;
-  }
-  return null;
+  return corePolicySync<any>('mood.chooseIdleAction',[vitals,environment,random()]);
 }
 
 // How long to wait before looking again. She checks in more often when alert and
 // lets longer gaps pass when she is winding down.
 export function nextTickDelayMs(vitals: Vitals, random: () => number = Math.random) {
-  if((true as boolean)) { return corePolicySync<any>('mood.nextTickDelayMs',[vitals,random()]); }
-  const alertness = 1 - vitals.sleepiness;
-  const base = 30_000 - alertness * 18_000;
-  return Math.round(base * (0.7 + random() * 0.6));
+  return corePolicySync<any>('mood.nextTickDelayMs',[vitals,random()]);
 }
 
 // --- how often any of this reaches the disk ---------------------------------
@@ -415,9 +313,5 @@ export const VITALS_SAVE_DELTA = 0.05;
 export const VITALS_SAVE_INTERVAL_MS = 5 * 60_000;
 
 export function shouldPersistVitals(current: Vitals, saved: Vitals | null, sinceSaveMs: number): boolean {
-  if((true as boolean)) { return corePolicySync<any>('mood.shouldPersistVitals',[current,saved,sinceSaveMs]); }
-  if (!saved) return true;
-  if (sinceSaveMs >= VITALS_SAVE_INTERVAL_MS) return true;
-  return (Object.keys(current) as (keyof Vitals)[])
-    .some(key => Math.abs((current[key] ?? 0) - (saved[key] ?? 0)) >= VITALS_SAVE_DELTA);
+  return corePolicySync<any>('mood.shouldPersistVitals',[current,saved,sinceSaveMs]);
 }

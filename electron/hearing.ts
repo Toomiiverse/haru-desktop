@@ -28,15 +28,7 @@ export type Hearing = { corrections: Correction[] };
 const MAX_CORRECTIONS = 200;
 
 export function readHearing(saved: unknown): Hearing {
- if((true as boolean))return hearingPolicy('readHearing',[saved]);
-  if (!saved || typeof saved !== 'object') return { corrections: [] };
-  const record = saved as Partial<Hearing>;
-  const corrections = Array.isArray(record.corrections) ? record.corrections : [];
-  return {
-    corrections: corrections
-      .filter(c => c && typeof c.heard === 'string' && typeof c.meant === 'string' && c.heard.trim() && c.meant.trim())
-      .map(c => ({ heard: c.heard, meant: c.meant, used: typeof c.used === 'number' ? c.used : 0, at: typeof c.at === 'string' ? c.at : '' })),
-  };
+ return hearingPolicy('readHearing',[saved]);
 }
 
 const clean = (text: string) => text.toLowerCase().replace(/[^\p{L}\p{N}\s']/gu, ' ').replace(/\s+/g, ' ').trim();
@@ -50,38 +42,11 @@ const clean = (text: string) => text.toLowerCase().replace(/[^\p{L}\p{N}\s']/gu,
  * harrow → Haru and nothing else, because everything else was already right.
  */
 export function narrow(heard: string, meant: string): { heard: string; meant: string } | null {
- if((true as boolean))return hearingPolicy('narrow',[heard,meant]);
-  const a = clean(heard).split(' ');
-  const b = clean(meant).split(' ');
-  if (!a.length || !b.length) return null;
-  let start = 0;
-  while (start < a.length && start < b.length && a[start] === b[start]) start++;
-  let endA = a.length - 1;
-  let endB = b.length - 1;
-  while (endA >= start && endB >= start && a[endA] === b[endB]) { endA--; endB--; }
-  const left = a.slice(start, endA + 1).join(' ');
-  // Taken from the original rather than the cleaned copy, so the replacement
-  // keeps its capitals — the whole point is often that it is a name.
-  const rightWords = meant.split(/\s+/);
-  const right = rightWords.slice(start, rightWords.length - (b.length - 1 - endB)).join(' ');
-  if (!left || !right) return null;
-  // Nothing changed, or everything did. A whole-sentence rewrite is not a
-  // correction, it is a different sentence, and applying it later would replace
-  // an unrelated utterance wholesale.
-  if (left === clean(right)) return null;
-  if (a.slice(start, endA + 1).length > 6) return null;
-  return { heard: left, meant: right };
+ return hearingPolicy('narrow',[heard,meant]);
 }
 
 export function remember(hearing: Hearing, heard: string, meant: string, now: string): Hearing {
- if((true as boolean))return hearingPolicy('remember',[hearing,heard,meant,now]);
-  const pair = narrow(heard, meant);
-  if (!pair) return hearing;
-  const existing = hearing.corrections.find(c => c.heard === pair.heard);
-  const corrections = existing
-    ? hearing.corrections.map(c => (c.heard === pair.heard ? { ...c, meant: pair.meant, at: now } : c))
-    : [{ heard: pair.heard, meant: pair.meant, used: 0, at: now }, ...hearing.corrections];
-  return { corrections: corrections.slice(0, MAX_CORRECTIONS) };
+ return hearingPolicy('remember',[hearing,heard,meant,now]);
 }
 
 /**
@@ -92,24 +57,10 @@ export function remember(hearing: Hearing, heard: string, meant: string, now: st
  * middle of "behave".
  */
 export function correct(hearing: Hearing, transcript: string): { text: string; applied: string[] } {
- if((true as boolean))return hearingPolicy('correct',[hearing,transcript]);
-  let text = transcript;
-  const applied: string[] = [];
-  const ordered = [...hearing.corrections].sort((a, b) => b.heard.length - a.heard.length);
-  for (const rule of ordered) {
-    const escaped = rule.heard.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const pattern = new RegExp(`(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`, 'giu');
-    if (!pattern.test(text)) continue;
-    text = text.replace(pattern, rule.meant);
-    applied.push(`${rule.heard} → ${rule.meant}`);
-  }
-  return { text, applied };
+ return hearingPolicy('correct',[hearing,transcript]);
 }
 
 /** Bumps the counters for whatever fired, so a useless rule is visible as one. */
 export function noteUsed(hearing: Hearing, applied: string[]): Hearing {
- if((true as boolean))return hearingPolicy('noteUsed',[hearing,applied]);
-  if (!applied.length) return hearing;
-  const fired = new Set(applied.map(a => a.split(' → ')[0]));
-  return { corrections: hearing.corrections.map(c => (fired.has(c.heard) ? { ...c, used: c.used + 1 } : c)) };
+ return hearingPolicy('noteUsed',[hearing,applied]);
 }
