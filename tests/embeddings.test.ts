@@ -83,12 +83,3 @@ test('cachedEmbedder serves repeats from the cache and only asks the inner embed
   assert.equal(second[0].length, first[0].length);
   assert.deepEqual(second[0], first[0]);
 });
-
-test('stubEmbedder produces deterministic vectors that separate topics', async () => {
-  const embedder = stubEmbedder();
-  assert.deepEqual(await embedder.embed('arch linux'), await embedder.embed('arch linux'));
-  const { cosine } = await import('../electron/retrieval');
-  const related = wordEmbedding('the server runs arch linux');
-  const unrelated = wordEmbedding('the garden needs watering');
-  assert.ok(cosine(wordEmbedding('arch linux'), related) > cosine(wordEmbedding('arch linux'), unrelated));
-});

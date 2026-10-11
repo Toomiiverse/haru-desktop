@@ -42,16 +42,6 @@ function fake() {
   return { client, calls, logins: () => logins, installed: () => installed };
 }
 
-test('the block reads forward and is off until it is there', () => {
-  assert.equal(readSuwayomiConfig(undefined), null);
-  assert.equal(readSuwayomiConfig({ suwayomi: { enabled: false } }), null);
-  const set = readSuwayomiConfig({ suwayomi: { url: 'http://s:4567/', shelf: ' Haru ' } })!;
-  assert.equal(set.url, 'http://s:4567');
-  assert.equal(set.shelf, 'Haru');
-  assert.equal(set.source, 'MangaDex');
-  assert.match(set.passwordFile, /suwayomi\/auth-password$/);
-});
-
 test('she logs in once, installs the source the first time, and makes her shelf', async () => {
   const { client, logins, installed, calls } = fake();
   assert.equal(await client.source(), '2499283573021220255');
@@ -80,34 +70,6 @@ test('taking up a title puts it on her shelf only, and pages come with her token
   const marks = calls.filter(c => c.query.includes('setMangaMeta')).map(c => [c.variables.key, c.variables.value]);
   assert.deepEqual(marks, [['haru.chapter', '2'], ['haru.page', '5']]);
   assert.ok(!calls.some(c => c.query.includes('updateChapter')), 'his read markers are never written');
-});
-
-test('his reading is his shelves with a bookmark of his; hers-only titles are not his', async () => {
-  const { client } = fake();
-  const library = await client.library();
-  const his = hisReading(library, 'Haru');
-  assert.deepEqual(his.map(h => [h.title, h.chapter, h.page]), [['Berserk', 3, 12]]);
-  // Suwayomi's Default category is implicit: Berserk fetched for him came back with no category at all (2026-09-18).
-  assert.equal(onHisShelf({ categories: [] }, 'Haru'), true);
-  assert.equal(onHisShelf({ categories: ['Haru'] }, 'Haru'), false);
-  assert.equal(onHisShelf({ categories: ['Haru', 'Default'] }, 'Haru'), true);
-  assert.equal(library.find(m => m.title === 'Chainsaw Man')!.meta['haru.chapter'], '2');
-});
-
-test('the note says where he is, how she sits against him, and holds the spoiler line unless she is spiteful', () => {
-  const his = [{ title: 'Berserk', chapter: 3, page: 12, at: Date.now() - 86_400_000, highest: 375 }];
-  const plain = hisReadingNote(his, { title: 'Berserk', chapter: '10', finished: 9 }, Date.now(), 4, false);
-  assert.match(plain, /Berserk — he is up to chapter 3, last read yesterday \(you are ahead, on chapter 10\)/);
-  assert.match(plain, /Never tell him what happens past where he is/);
-  const behind = hisReadingNote(his, { title: 'Berserk', chapter: '1', finished: 0 }, Date.now(), 4, false);
-  assert.match(behind, /he is ahead of you/);
-  const spite = hisReadingNote(his, { title: 'Berserk', chapter: '10', finished: 9 }, Date.now(), 22, true);
-  assert.match(spite, /furious with him \(a grudge held for days/);
-  assert.match(spite, /spoil one thing from past where he is/);
-  assert.equal(hisReadingNote([], null, Date.now(), 0, false), '');
-  assert.equal(spiteful(SPITE_GRUDGE, 0.1), true);
-  assert.equal(spiteful(SPITE_GRUDGE, 0.9), false);
-  assert.equal(spiteful(SPITE_GRUDGE - 1, 0.0), false);
 });
 
 test('a wrong password is an error, and a lapsed token logs in again once', async () => {

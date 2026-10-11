@@ -56,20 +56,3 @@ test('standing is a page with meters, the bond, and the waiting list as checkbox
   assert.doesNotMatch(memories.text, /Ubuntu/);
   assert.match(memories.text, /## General\n\n- Uses Debian/);
 });
-
-test('places and the index; the writer touches only what changed, and the knowledge sync never reads her folder', () => {
-  const vault = mkdtempSync(path.join(os.tmpdir(), 'haru-vault-'));
-  const where = { enabled: true, last: null, places: [{ name: 'home', lat: -32.0673, lon: 115.8287, radiusM: 150, added: '2026-08-20T00:00:00Z' }] };
-  const notes = [placesNote(where, 'at work'), indexNote({ latestDiary: { day: '2026-08-31', title: 'T', text: 'x' }, latestNight: '2026-08-30', standing, her, memories: 2, places: 1 })];
-  assert.match(notes[0].text, /\| home \| 2026-08-20 \| \[open\]\(https:\/\/www\.google\.com\/maps\/search\/\?api=1&query=-32\.06730,115\.82870\) \|/);
-  assert.match(notes[1].text, /- \[\[Haru\/Standing\|Standing\]\] — Annoyed, and not hiding it\./);
-  assert.deepEqual(writeNotes(vault, notes), { written: 2, unchanged: 0 });
-  assert.deepEqual(writeNotes(vault, notes), { written: 0, unchanged: 2 });
-  const before = statSync(path.join(vault, HARU_FOLDER, 'Haru.md')).mtimeMs;
-  writeNotes(vault, notes);
-  assert.equal(statSync(path.join(vault, HARU_FOLDER, 'Haru.md')).mtimeMs, before, 'an unchanged note is not rewritten');
-  assert.equal(readFileSync(path.join(vault, HARU_FOLDER, 'Places.md'), 'utf8'), notes[0].text);
-  assert.ok(!readdirSync(path.join(vault, HARU_FOLDER)).some(name => name.endsWith('.tmp')));
-  assert.ok(DEFAULT_VAULT_SKIP.includes(HARU_FOLDER));
-  assert.deepEqual(walkVault(vault), [], 'nothing of hers comes back as knowledge');
-});

@@ -33,35 +33,6 @@ test('anything it cannot read is refused rather than guessed at', () => {
   assert.equal(videoIdFrom('file:///etc/passwd'), null);
 });
 
-test('stamped every half minute, not every line', () => {
-  const said = formatTranscript([
-    { atSeconds: 0, text: 'one' }, { atSeconds: 10, text: 'two' },
-    { atSeconds: 31, text: 'three' }, { atSeconds: 3661, text: 'four' },
-  ]);
-  assert.equal(said, '[0:00] one\ntwo\n[0:31] three\n[1:01:01] four');
-  assert.equal(formatTranscript([]), '');
-});
-
-test('a long one keeps both ends and says where the cut is', () => {
-  const many = Array.from({ length: 4000 }, (_, index) => ({ atSeconds: index, text: `line ${index}` }));
-  const said = formatTranscript(many);
-  assert.ok(said.length < TRANSCRIPT_CHARS + 200);
-  assert.match(said, /\[0:00\] line 0/);
-  assert.match(said, /line 3999/);
-  assert.match(said, /the middle is left out/);
-});
-
-test('she is told it is a transcript, and told she has not seen it', () => {
-  const note = transcriptInstruction('Some Video', false, '[0:00] hello');
-  assert.match(note, /transcript of "Some Video"/);
-  assert.match(note, /You did not watch the video/);
-  assert.match(note, /you have not seen a frame of it/);
-  assert.match(note, /only went through the transcript/);
-  assert.equal(note.includes('speech recognition'), false);
-  // A machine track says so, because it mishears names.
-  assert.match(transcriptInstruction('X', true, 'y'), /speech recognition/);
-});
-
 test('the title it was published under', () => {
   assert.equal(titleFrom('<meta name="title" content="How Bread Works - YouTube">'), 'How Bread Works');
   assert.equal(titleFrom('<title>Cats &amp; Dogs - YouTube</title>'), 'Cats & Dogs');

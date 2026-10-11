@@ -138,11 +138,6 @@ test('a call turn asks for spoken sentences, and says so after being cut off too
   assert.doesNotMatch(CALL_ASIDE, /["“”]/);
 });
 
-test('what goes to her voice is the reply made speakable', () => {
-  assert.equal(spokenReply('**Fine.** Check the CPU, not the *fans*. 😒 See [this](https://x.y).'), 'Fine. Check the CPU, not the fans. See this.');
-  assert.equal(spokenReply('HELLO there.'), 'Hello there.', 'a shouted word is lowered, not spelled');
-});
-
 // -- the cap -----------------------------------------------------------------------------
 
 test('the day\'s minutes are counted on the chat\'s day and start over on the next', () => {

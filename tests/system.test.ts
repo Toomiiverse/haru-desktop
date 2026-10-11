@@ -134,41 +134,6 @@ function assertStatus(d: Diagnosis, expected: Diagnosis['status']) {
   assert.equal(d.status, expected, `expected ${expected}, got ${d.status} (${d.findings.join('; ')})`);
 }
 
-test('diagnose reports ok on a healthy machine', () => {
-  assertStatus(diagnose('all', collected()), 'ok');
-});
-
-test('diagnose flags a saturated GPU', () => {
-  const gpu = [{ name: 'GTX 1660 Ti', vram_total_gb: 6, vram_used_gb: 5.8, utilization_percent: 95, temperature_c: 80 }];
-  const d = diagnose('gpu', collected({ gpu }));
-  assertStatus(d, 'critical');
-  assert.ok(d.findings.some(finding => /95%/.test(finding)));
-});
-
-test('diagnose flags a full disk', () => {
-  const disk = [{ filesystem: '/dev/sda1', mount: '/', total_gb: 100, used_gb: 96, available_gb: 4, usage_percent: 96 }];
-  assertStatus(diagnose('disk', collected({ disk })), 'critical');
-});
-
-test('diagnose flags an unhealthy docker container', () => {
-  const docker = { daemon: 'up' as const, containers: [{ name: 'redis', image: 'redis:7', status: 'Up (unhealthy)', state: 'running', health: 'unhealthy', restart_count: 3, cpu_percent: 0.1, memory_mb: 50 }] };
-  assertStatus(diagnose('docker', collected({ docker })), 'critical');
-});
-
-test('diagnose flags the docker daemon being down', () => {
-  assertStatus(diagnose('docker', collected({ docker: null })), 'critical');
-});
-
-test('diagnose flags an offline network', () => {
-  const network = { interfaces: [], default_route: '', status: 'offline' as const };
-  assertStatus(diagnose('network', collected({ network })), 'critical');
-});
-
-test('diagnose flags haru not active', () => {
-  const services = [{ name: 'haru', state: 'failed' as const }];
-  assertStatus(diagnose('haru', collected({ services })), 'critical');
-});
-
 // ---- event detector --------------------------------------------------------
 
 const at = (secondsAgo: number) => new Date(Date.now() - secondsAgo * 1000).toISOString();

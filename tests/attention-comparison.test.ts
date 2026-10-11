@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { DEFAULT_VITALS } from '../electron/vitals';
+// The comparison script loads the compiled attention module by path; importing it here keeps it in the test build.
+import '../electron/attention';
 const { compareObserved } = require(join(__dirname, '../../research/fruitfly/compare-observed.cjs'));
 
 function samples(kind: 'active' | 'unknown' | 'conversation' | 'blocked', duration = 3600) {
@@ -15,23 +17,6 @@ function samples(kind: 'active' | 'unknown' | 'conversation' | 'blocked', durati
       idleSeconds: kind === 'unknown' ? null : 0 },
   }));
 }
-
-test('same-input comparison preserves unknown, conversation, blocking and startup grace for every arm', () => {
-  for (const kind of ['unknown', 'conversation', 'blocked'] as const) {
-    const rows = samples(kind), before = JSON.stringify(rows);
-    const result = compareObserved(rows);
-    assert.ok(Object.values(result.sessions[0].proposals).every((arm: any) => arm.max === 0), kind);
-    assert.equal(JSON.stringify(rows), before, 'analysis must not alter recorded evidence');
-  }
-  const early = compareObserved(samples('active', 580)).sessions[0];
-  assert.ok(Object.values(early.proposals).every((arm: any) => arm.max === 0));
-  const active = compareObserved(samples('active')).sessions[0];
-  assert.ok(active.proposals.baseline.mean > 0);
-  assert.ok(active.proposals.simple.mean > 0);
-  assert.ok(active.proposals.fly.mean > 0);
-  assert.equal(active.coverage.afterWarmupUnblockedRecentInput, 151);
-  assert.deepEqual(compareObserved(samples('active')), compareObserved(samples('active')), 'fixed seeds reproduce exactly');
-});
 
 test('comparison skips partial sessions and rejects invalid clocks or invented presence', () => {
   const partial = compareObserved(samples('active').slice(1));

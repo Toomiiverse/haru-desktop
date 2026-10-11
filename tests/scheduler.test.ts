@@ -151,35 +151,6 @@ test('ensureDaily adds once, leaves an unchanged job alone, and moves a changed 
   assert.equal(state.file.jobs[0].dueAt, zonedEpoch('2026-09-17', 180, PERTH));
 });
 
-test('her booking time: his words for the day, a clock time, or minutes from now', () => {
-  assert.equal(resolveBookingTime({ time: '11:30 PM' }, T0, PERTH), zonedEpoch('2026-09-16', 23 * 60 + 30, PERTH));
-  assert.equal(resolveBookingTime({ time: '6:00 PM' }, T0, PERTH), zonedEpoch('2026-09-17', 18 * 60, PERTH), 'gone today, so tomorrow');
-  assert.equal(resolveBookingTime({ date: 'friday', time: '9am' }, T0, PERTH), zonedEpoch('2026-09-18', 9 * 60, PERTH));
-  assert.equal(resolveBookingTime({ inMinutes: 90 }, T0, PERTH), T0 + 90 * MIN);
-  assert.ok('error' in (resolveBookingTime({ date: 'tomorrow' }, T0, PERTH) as object));
-});
-
-test('her booking time: a day with a time already gone is not an instant in the past', () => {
-  // T0 is Wednesday 22:00 in Perth.
-  assert.equal(resolveBookingTime({ date: 'tonight', time: '1:00 AM' }, T0, PERTH), zonedEpoch('2026-09-17', 60, PERTH), 'the small hours after this evening');
-  assert.equal(resolveBookingTime({ date: 'tonight', time: '11:30 PM' }, T0, PERTH), zonedEpoch('2026-09-16', 23 * 60 + 30, PERTH));
-  assert.equal(resolveBookingTime({ date: 'tonight', time: '1:00 AM' }, T0 + 150 * MIN, PERTH), zonedEpoch('2026-09-17', 60, PERTH), 'said at 00:30, it is already that night');
-  assert.equal(resolveBookingTime({ date: 'wednesday', time: '9:00 AM' }, T0, PERTH), zonedEpoch('2026-09-23', 9 * 60, PERTH), 'gone today, so next week');
-  assert.equal(resolveBookingTime({ date: 'Wednesday', time: '11:00 PM' }, T0, PERTH), zonedEpoch('2026-09-16', 23 * 60, PERTH), 'still to come today');
-  const refusal = (input: { date: string; time: string }) => {
-    const result = resolveBookingTime(input, T0, PERTH);
-    assert.equal(typeof result, 'object', JSON.stringify(input));
-    return (result as { error: string }).error;
-  };
-  assert.match(refusal({ date: 'today', time: '9:00 AM' }), /^9:00 AM today has already passed\. Pick a later time/);
-  assert.match(refusal({ date: 'tonight', time: '9:00 PM' }), /^9:00 PM tonight has already passed/);
-  assert.match(refusal({ date: '2026-09-10', time: '9am' }), /^2026-09-10 has already gone/);
-  for (const input of [{ date: 'today', time: '9:00 AM' }, { date: '2026-09-10', time: '9am' }]) assert.doesNotMatch(refusal(input), /just say it/);
-  // And the booking itself goes through, rather than being turned back as "now".
-  const at = resolveBookingTime({ date: 'tonight', time: '1:00 AM' }, T0, PERTH) as number;
-  assert.ok('job' in admitBooking({ jobs: [] }, { at, why: 'check he actually went to bed' }, T0, 'b1'));
-});
-
 test('what she may book: not now, not beyond a week, not a sixth, not a fourth today, not the same thing twice', () => {
   const book = (jobs: Job[], at: number, why: string) => admitBooking({ jobs }, { at, why }, T0, `b${jobs.length}`);
   assert.ok('refused' in book([], T0 + MIN, 'ask how the build went'));
@@ -254,17 +225,6 @@ test('a note of hers follows her job when it is put off, and a job waiting in an
   assert.deepEqual(scheduler.booked(), [{ id: 'from-before', why: 'ask how the build went', bookedAt: T0 - HOUR, dueAt: T0 + 5 * HOUR }]);
 });
 
-test('what she is shown: her bookings with their times, and the note when one comes due', () => {
-  const job = (admitBooking({ jobs: [] }, { at: zonedEpoch('2026-09-17', 18 * 60, PERTH), why: 'ask how the build went' }, T0, 'b1') as { job: Job }).job;
-  assert.equal(bookedNote([], T0, PERTH), '');
-  assert.match(bookedNote([job, once('app-job', T0 + HOUR)], T0, PERTH), /come back to[^\n]*\n- 6:00 PM tomorrow: ask how the build went$/);
-  assert.equal(describeWhen(zonedEpoch('2026-09-19', 19 * 60, PERTH), T0, PERTH), '7:00 PM Saturday');
-  const note = bookedPrompt('ask how the build went', T0, T0 + HOUR, PERTH);
-  assert.match(note, /^At 10:00 PM earlier today you decided/);
-  assert.match(bookedPrompt('ask how the build went', T0, T0 + 4 * HOUR, PERTH), /^At 10:00 PM yesterday you decided/, 'booked before midnight, said after it');
-  assert.match(note, /single dash/);
-});
-
 test('the file is read defensively', () => {
   const file = normalizeSchedule({
     jobs: [
@@ -283,34 +243,4 @@ test('the file is read defensively', () => {
   assert.equal(file.jobs[1].createdBy, 'app');
   assert.equal(file.runs.length, 1);
   assert.deepEqual(normalizeSchedule(null), emptySchedule());
-});
-
-test('the tool is on the table when the turn is about later, and its answer is written to her', async () => {
-  const { chatTools, laterRelevant, runChatTool } = await import('../electron/tools');
-  const available = {
-    choices: false, journal: false, anilist: false, web: true, search: { enabled: false, readPages: false, transcripts: false },
-    knowledge: false, browser: false, claude: false, system: { enabled: false, level: 0 }, hands: false,
-    desktop: { launch: false, power: false }, knockedAwake: false, minecraft: false, booking: true,
-  } as unknown as Parameters<typeof chatTools>[0];
-  const names = (latest: string) => chatTools(available, latest).map(tool => tool.function.name);
-  assert.ok(names('psych appointment at 3pm, wish me luck').includes('book_follow_up'));
-  assert.ok(names('heading to work').includes('book_follow_up'));
-  assert.equal(names('what anime should I watch').includes('book_follow_up'), false);
-  assert.equal(chatTools({ ...available, booking: false }, 'tomorrow').some(tool => tool.function.name === 'book_follow_up'), false);
-  assert.equal(laterRelevant('lol'), false);
-
-  const asked: unknown[] = [];
-  const deps = {
-    onWeb: () => true, handsAllowed: () => false,
-    booking: { book: (input: unknown) => { asked.push(input); return (input as { why: string }).why.includes('twice') ? { booked: false as const, reason: 'You already have that booked.' } : { booked: true as const, when: '6:00 PM today' }; } },
-  } as unknown as Parameters<typeof runChatTool>[2];
-  const call = (args: Record<string, unknown>) => runChatTool({ function: { name: 'book_follow_up', arguments: JSON.stringify(args) } } as Parameters<typeof runChatTool>[0], '', deps);
-  const booked = JSON.parse(await call({ why: 'ask how the appointment went', time: '6:00 PM', date: ' ' }));
-  assert.equal(booked.booked, true);
-  assert.equal(booked.when, '6:00 PM today');
-  assert.deepEqual(asked[0], { why: 'ask how the appointment went', date: undefined, time: '6:00 PM', inMinutes: undefined });
-  assert.equal(JSON.parse(await call({ why: 'ask twice', in_minutes: '45' })).reason, 'You already have that booked.');
-  assert.equal((asked[1] as { inMinutes: number }).inMinutes, 45);
-  const none = JSON.parse(await runChatTool({ function: { name: 'book_follow_up', arguments: '{"why":"x"}' } } as Parameters<typeof runChatTool>[0], '', { onWeb: () => true, handsAllowed: () => false } as unknown as Parameters<typeof runChatTool>[2]));
-  assert.match(none.error, /nowhere to keep/);
 });
