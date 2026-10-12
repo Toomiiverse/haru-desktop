@@ -109,7 +109,9 @@ import { readCallConfig, pickFiller } from './call';
 import { openLocalCall, withoutWavHeader, oneChunk, wavSampleRate } from './localcall';
 import { openEviSession } from './evibridge';
 import { setDefaultAutoSelectFamilyAttemptTimeout } from 'node:net';
-import { readBrowserControlConfig } from './browserctl';
+import { cdpBrowser, readBrowserControlConfig, type Browser } from './browserctl';
+import { playwrightArgs, playwrightBrowser, type PlaywrightBrowser } from './playwright';
+import { startGuardProxy } from './webguard';
 import { listSessions, openSession, readClaudeCodeConfig, readOpenedSessions, resolveSessionDir, sessionName, SESSIONS_KEPT as CLAUDE_SESSIONS_KEPT, stopSession, type SessionHost } from './claudesession';
 import { ShellGate, SERVER_NOTE, denied, ledgerEntry, readShellConfig, runCommand } from './shell';
 import { PokemonLink, PLAY_RULES as POKEMON_PLAY_RULES, afterTurn, describeGame, newSitting, parseMove, readPokemonConfig, runNote, sittingSummary, whyNotStart as whyNotStartPokemon, whyStop as whyStopPokemon, type GameState, type Moment as PokemonMoment, type Sitting } from './pokemon';
@@ -6018,6 +6020,65 @@ function withoutStaleDenials<T extends { role: string; content: string }>(messag
   return messages.filter(message => !(message.role === 'assistant' && DENIAL.test(message.content)));
 }
 
+/** Her own browser (playwright.ts), made on first use and kept: it carries the page she is on. */
+let ownBrowser: PlaywrightBrowser | null = null;
+
+/** Where Playwright writes the screenshots and snapshots it takes; cleared of anything older than a day at each start. */
+function browserOutputDir(): string {
+  const dir = path.join(app.getPath('userData'), 'browser-shots');
+  mkdirSync(dir, { recursive: true });
+  const cutoff = Date.now() - 24 * 60 * 60_000;
+  try {
+    for (const name of readdirSync(dir)) {
+      const file = path.join(dir, name);
+      if (statSync(file).mtimeMs < cutoff) rmSync(file, { force: true });
+    }
+  } catch { /* a folder she cannot tidy is still a folder she can write to */ }
+  return dir;
+}
+
+/**
+ * Her browser, as the tools see it (browserctl.ts), or null when switched off.
+ *
+ * The desk's Chrome is a fresh handle each time: it is a window on his screen,
+ * and the tab it drives is whichever is in front. Her own is a process, kept
+ * across calls so the page she opened is still the page she follows a link on.
+ * It is started with a bare environment — none of her keys — as the node this
+ * process already is (ELECTRON_RUN_AS_NODE), and every request it makes goes
+ * through the guard proxy (webguard.ts).
+ */
+function herBrowser(): Browser | null {
+  const config = readBrowserControlConfig(store.get('browser'));
+  if (!config.enabled) return null;
+  if (config.backend === 'chrome') return cdpBrowser(config.port, net.fetch as Parameters<typeof cdpBrowser>[1]);
+  if (!ownBrowser) {
+    ownBrowser = playwrightBrowser({
+      startProxy: () => startGuardProxy({ log: line => console.log(line) }),
+      spawn: proxyPort => {
+        const cli = require.resolve('@playwright/mcp/cli.js');
+        const env: NodeJS.ProcessEnv = {
+          PATH: process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin',
+          HOME: process.env.HOME ?? app.getPath('home'),
+          USER: process.env.USER ?? '',
+          LANG: 'C.UTF-8',
+          TMPDIR: app.getPath('temp'),
+          ELECTRON_RUN_AS_NODE: '1',
+          ...(process.env.PLAYWRIGHT_BROWSERS_PATH ? { PLAYWRIGHT_BROWSERS_PATH: process.env.PLAYWRIGHT_BROWSERS_PATH } : {}),
+        };
+        const child = spawn(process.execPath, playwrightArgs(cli, config, proxyPort, browserOutputDir()), { env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+        child.stderr?.on('data', (chunk: Buffer) => {
+          const line = String(chunk).trim();
+          if (line) console.log(`[browser] ${line.slice(0, 300)}`);
+        });
+        return child;
+      },
+      log: line => console.log(line),
+      warn: line => console.warn(line),
+    });
+  }
+  return ownBrowser;
+}
+
 /** What is switched on right now, for chatTools to draw the table from. */
 function availableTools(turn: TurnContext): ToolAvailability {
   const search = readSearchConfig(store.get('search'));
@@ -6032,6 +6093,7 @@ function availableTools(turn: TurnContext): ToolAvailability {
     search: { enabled: search.enabled, readPages: search.readPages, transcripts: transcriptsAvailable() },
     knowledge: getKnowledgeConfig().enabled,
     browser: readBrowserControlConfig(store.get('browser')).enabled,
+    ownBrowser: readBrowserControlConfig(store.get('browser')).backend === 'playwright',
     claude: readClaudeCodeConfig(store.get('claudeCode')).enabled,
     downloads: downloadsLink() !== null,
     shell: shellLink() !== null,
@@ -6222,11 +6284,10 @@ function toolDeps(turn: TurnContext): ToolDeps {
     lastSearchQuery: turn.lastSearchQuery,
     rememberSearch: turn.rememberSearch,
     runSystemCommand,
-    browserPort: () => readBrowserControlConfig(store.get('browser')).port,
-    browserShotDir: () => {
-      const saved = store.get('screenshots') as { folder?: string } | undefined;
-      return typeof saved?.folder === 'string' && saved.folder ? saved.folder : path.join(app.getPath('userData'), 'browser-shots');
-    },
+    // Her browser (browserctl.ts): her own, or the desk's Chrome.
+    browser: herBrowser(),
+    pageWasRead: turn.pageWasRead,
+    addPicture: turn.addPicture,
     // Her body in the game. Captured at call time, so a link that is stopped
     // between turns is seen as gone rather than reached through a dead handle.
     minecraft: minecraft ? {
@@ -6384,6 +6445,8 @@ function requireKeyFor(endpoint: string, provider: Provider) {
  * have to know or care which provider answered.
  */
 type PostOptions = { tools?: boolean;
+  /** Only these tools, of the turn's table — her browser alone, once a page is in the reply (toolloop.ts BROWSE_TOOLS). */
+  only?: readonly string[];
   /** A table laid by the caller — her own pass — instead of the one the turn would be given. */
   table?: ChatTool[]; temperature?: number; format?: unknown; maxTokens?: number; onChunk?: (text: string) => void;
   /** Only an explicit chat turn can offer tools; background composers have none. */
@@ -6400,11 +6463,14 @@ type PostOptions = { tools?: boolean;
 const heldTools = { day: '', names: new Set<string>() };
 
 /** The table for a hosted request: laid for this message, then held steady for the day so the prompt cache survives. */
-function hostedTools(conversation: { role?: string; content?: string }[], turn: TurnContext): ChatTool[] {
+function hostedTools(conversation: { role?: string; content?: string }[], turn: TurnContext, only?: readonly string[]): ChatTool[] {
   const day = localDateKey(zonedNow(CHAT_TIMEZONE));
   if (heldTools.day !== day) { heldTools.day = day; heldTools.names = new Set(); }
   const available = availableTools(turn);
-  return steadyTable(chatTools(available, latestUserText(conversation)), chatTools(available), heldTools.names);
+  const table = steadyTable(chatTools(available, latestUserText(conversation)), chatTools(available), heldTools.names);
+  // Narrowed after the day's table is held, so a browse round does not shrink
+  // what tomorrow's first turn is offered.
+  return only ? table.filter(tool => only.includes(tool.function.name)) : table;
 }
 
 /** The last thing the user actually said — what the tool table should be laid for. */
@@ -6415,12 +6481,13 @@ function latestUserText(conversation: { role?: string; content?: string }[]): st
   return '';
 }
 
-async function openAIPost(conversation: OllamaMessage[], config: ProviderConfig, { tools = true, temperature = config.temperature, format, maxTokens, onChunk, signal, cacheKey, turn }: PostOptions = {}) {
+async function openAIPost(conversation: OllamaMessage[], config: ProviderConfig, { tools = true, only, temperature = config.temperature, format, maxTokens, onChunk, signal, cacheKey, turn }: PostOptions = {}) {
   requireKeyFor(config.endpoint, (config.provider as Provider) ?? 'openai');
   const body = toOpenAIBody({
     model: config.model,
     conversation,
-    tools: tools && turn && !turn.pageWasRead() && !toolless.has(config.model) ? hostedTools(conversation, turn) : undefined,
+    // A page read ends the tools, unless the loop has narrowed them to her browser (only).
+    tools: tools && turn && (!turn.pageWasRead() || only) && !toolless.has(config.model) ? hostedTools(conversation, turn, only) : undefined,
     temperature,
     maxTokens,
     json: Boolean(format),
@@ -6598,11 +6665,11 @@ function capacitySpill(config: ProviderConfig): ProviderConfig | null {
  * silently becoming eight times slower with no explanation, which reads as
  * something being wrong with her rather than with the pod.
  */
-async function ollamaPost(conversation: OllamaMessage[], config: ProviderConfig, { tools = true, table, temperature = config.temperature, format, maxTokens, onChunk, numCtx, turn }: PostOptions = {}) {
+async function ollamaPost(conversation: OllamaMessage[], config: ProviderConfig, { tools = true, only, table, temperature = config.temperature, format, maxTokens, onChunk, numCtx, turn }: PostOptions = {}) {
   if (desktopServer()) throw new Error('Chat is handled by the Haru server. Open Haru to continue there.');
   // One place, so chat, quips, openings and remarks all follow the same rule.
   config = modelForNow(config);
-  const options = { tools, table, temperature, format, maxTokens, onChunk, numCtx, turn };
+  const options = { tools, only, table, temperature, format, maxTokens, onChunk, numCtx, turn };
   const home = homeTwin(config);
   const address = trimEndpoint(config.endpoint);
 
@@ -6632,12 +6699,13 @@ async function ollamaPost(conversation: OllamaMessage[], config: ProviderConfig,
   }
 }
 
-async function sendToProvider(conversation: OllamaMessage[], config: ProviderConfig, { tools = true, table, temperature = config.temperature, format, maxTokens, onChunk, signal, cacheKey, numCtx, turn }: PostOptions = {}) {
+async function sendToProvider(conversation: OllamaMessage[], config: ProviderConfig, { tools = true, only, table, temperature = config.temperature, format, maxTokens, onChunk, signal, cacheKey, numCtx, turn }: PostOptions = {}) {
   // Routed here rather than at every call site: there are a dozen composers in
   // this file and none of them should know which provider is answering.
-  if (isOpenAIShaped(config.provider)) return openAIPost(conversation, config, { tools, temperature, format, maxTokens, onChunk, signal, cacheKey, turn });
+  if (isOpenAIShaped(config.provider)) return openAIPost(conversation, config, { tools, only, temperature, format, maxTokens, onChunk, signal, cacheKey, turn });
   const send = async (withTools: boolean, streaming: boolean, quiet = true) => {
-    const offered = table ?? (withTools && turn && !turn.pageWasRead() ? chatTools(availableTools(turn), latestUserText(conversation)) : []);
+    const laid = table ?? (withTools && turn && (!turn.pageWasRead() || only) ? chatTools(availableTools(turn), latestUserText(conversation)) : []);
+    const offered = only ? laid.filter(tool => only.includes(tool.function.name)) : laid;
     if (offered.length) {
       // The estimate is a rough chars/4 token count of the conversation being
       // sent — the tool round's prompt — so the real peak can be measured
@@ -8860,7 +8928,7 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
     // searched the web for the traffic, got three American states back, and
     // guessed — while the live number sat in the note beside his message.
     ...(directions?.route ? { maxRounds: 1 } : {}),
-    ask: async (sending, { tools }) => {
+    ask: async (sending, { tools, only }) => {
       // The conversation route: a deadline on the first word, and the local
       // model answering when it passes or the call fails — she must never go
       // quiet because a company did. A round already streaming is taken back
@@ -8884,7 +8952,7 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
           const onChunkSeen = roundOptions.onChunk ? (text: string) => { if (!firstWordAt) firstWordAt = Date.now(); roundOptions.onChunk!(text); } : undefined;
           try {
             onSending?.();
-            const request = sendToProvider(sending, config, { ...roundOptions, tools, cacheKey, ...(onChunkSeen ? { onChunk: onChunkSeen } : {}) });
+            const request = sendToProvider(sending, config, { ...roundOptions, tools, only, cacheKey, ...(onChunkSeen ? { onChunk: onChunkSeen } : {}) });
             const deadline = new Promise<never>((_, reject) => setTimeout(() => { if (!firstWordAt) reject(new Error(`no first word in ${HOSTED_FIRST_WORD_MS / 1000}s`)); }, HOSTED_FIRST_WORD_MS));
             const answer = await Promise.race([request, deadline]);
             console.log(`[ai] ${config.model} answered in ${Date.now() - startedAt}ms${firstWordAt ? ` (first word at ${firstWordAt - startedAt}ms)` : ''}${attempt ? ' (second try)' : ''}`);
@@ -8900,13 +8968,13 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
             if (/insufficient .*balance/i.test(error instanceof Error ? error.message : String(error))) void checkVeniceBalance('a refused turn');
             if (roundStreamed) { roundStreamed = ''; onChunkReset?.(); }
             spilledHome = true;
-            return ollamaPost(sending, home, { ...roundOptions, tools });
+            return ollamaPost(sending, home, { ...roundOptions, tools, only });
           }
         }
       }
       try {
         onSending?.();
-        return await ollamaPost(sending, config, { ...roundOptions, tools });
+        return await ollamaPost(sending, config, { ...roundOptions, tools, only });
       } catch (error) {
         // Only when nothing answered at all — a refused connection, a pod that
         // is off. A 400 or a 500 with a complaint in it is the local model
@@ -8918,7 +8986,7 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
         const spill = isAbsent(error) ? capacitySpill(config) : null;
         if (!spill) throw error;
         console.warn(`[ai] ${config.model} did not answer (${error instanceof Error ? error.message : String(error)}) — spilling this reply to ${spill.model}`);
-        return sendToProvider(sending, spill, { ...roundOptions, tools });
+        return sendToProvider(sending, spill, { ...roundOptions, tools, only });
       }
     },
     runTool: async call => {
@@ -8931,8 +8999,12 @@ async function ollamaChat(messages: { role: string; content: string; at?: string
       // conduct at all, so a claim about what she did had nothing behind it to
       // check and she supplied a reason instead (2026-09-08).
       noteDeed(tool, call, result);
-      return result;
+      // A screenshot she took rides beside the words, to be looked at (toolloop.ts).
+      const pictures = turn.takePictures();
+      return pictures.length ? { content: result, pictures } : result;
     },
+    // Her browser stays once a page is read — the one tool that does (toolloop.ts).
+    browseAfterRead: () => readBrowserControlConfig(store.get('browser')).enabled,
     // Read through rather than passed by value: runChatTool sets these while a
     // round is in flight, and a copy taken before the round would miss it.
     pageWasRead: turn.pageWasRead,
@@ -12642,7 +12714,7 @@ async function herHandsTick(): Promise<void> {
     const pokemon = pokemonDeps();
     const deps: ToolDeps = { ...base, pokemon: pokemon ? { ...pokemon, start: () => startPokemon('her') } : null };
     const { content, ran } = await runToolLoop(conversation as Parameters<typeof runToolLoop>[0], {
-      ask: (sending, { tools }) => ollamaPost(sending as Parameters<typeof ollamaPost>[0], config, { tools, turn, table: menu }),
+      ask: (sending, { tools, only }) => ollamaPost(sending as Parameters<typeof ollamaPost>[0], config, { tools, turn, table: only ? menu.filter(tool => only.includes(tool.function.name)) : menu }),
       runTool: async call => {
         const fn = (call as { function?: { name?: string; arguments?: unknown } }).function ?? {};
         const tool = fn.name ?? 'tool';
@@ -12654,8 +12726,10 @@ async function herHandsTick(): Promise<void> {
         }
         const result = await runChatTool(asked, '', deps);
         noteDeed(tool, call, result);
-        return result;
+        const pictures = turn.takePictures();
+        return pictures.length ? { content: result, pictures } : result;
       },
+      browseAfterRead: () => readBrowserControlConfig(store.get('browser')).enabled,
       pageWasRead: turn.pageWasRead, handsAllowed: turn.handsAllowed, withdrawHands: turn.withdrawHands,
       hasOpenTask: () => false, canSearch: () => false,
       log: line => console.log(line), warn: line => console.warn(line), maxRounds: 3,
@@ -16387,6 +16461,7 @@ app.on('before-quit', () => {
   try { helper?.stdin?.write('quit\n'); } catch (error) { noteCrash('telling the helper to quit', error); }
   try { helper?.kill(); } catch (error) { noteCrash('killing the helper', error); }
   try { stopMinecraft(); } catch (error) { noteCrash('closing the Minecraft link', error); }
+  void ownBrowser?.stop().catch(error => noteCrash('closing her browser', error));
   void stopWebDoor().catch(error => noteCrash('closing the web door', error));
 });
 

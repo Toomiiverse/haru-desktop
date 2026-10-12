@@ -7,7 +7,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { MAX_TOOL_ROUNDS, runToolLoop, type ToolLoopDeps, textToolCall } from '../electron/toolloop';
+import { MAX_TOOL_ROUNDS, runToolLoop, type ToolLoopDeps, type ToolOutcome, textToolCall } from '../electron/toolloop';
 import type { ChatMessage, ToolCall } from '../electron/provider';
 
 const says = (content: string): ChatMessage => ({ role: 'assistant', content });
@@ -50,7 +50,7 @@ function harness(script: ChatMessage[], options: Partial<{
   handsAllowed: boolean;
   hasOpenTask: boolean;
   canSearch: boolean;
-  runTool: (call: ToolCall) => Promise<string>;
+  runTool: (call: ToolCall) => Promise<ToolOutcome>;
 }> = {}): Harness {
   const offered: boolean[] = [];
   const toolsRun: string[] = [];
@@ -399,4 +399,62 @@ test('a claim to have checked, with nothing called, is sent to look once', async
   assert.equal((await runToolLoop(twice.conversation, twice.deps)).content, claim, 'asked once, then taken at her word');
   const cannot = harness([says(claim)], { canSearch: false });
   assert.equal(cannot.resets, 0);
+});
+
+// Her browser after a page read, and the pictures it takes.
+
+test('after a page is read only her browser stays, and only when the caller says she has one', async () => {
+  const BROWSE = { role: 'assistant' as const, tool_calls: [{ id: 'b1', function: { name: 'browser_control', arguments: { action: 'open', url: 'x' } } }] };
+  const FOLLOW = { role: 'assistant' as const, tool_calls: [{ id: 'b2', function: { name: 'browser_control', arguments: { action: 'follow', number: 1 } } }] };
+  // Without the say-so: the old rule, tools gone after the read, however many rounds are left.
+  const old = harness([BROWSE, says('It says blue shoes are £40.')], { pageReadAfter: 'browser_control' });
+  await runToolLoop(old.conversation, old.deps);
+  assert.deepEqual(old.offered, [true, false]);
+
+  // With it: the round after the read is offered tools, narrowed to the browser; hands are still gone.
+  const narrowed: (readonly string[] | undefined)[] = [];
+  const h = harness([BROWSE, FOLLOW, says('The about page says they make things.')], { pageReadAfter: 'browser_control' });
+  const ask = h.deps.ask;
+  h.deps.ask = (conversation, options) => { narrowed.push(options.only); return ask(conversation, options); };
+  h.deps.browseAfterRead = () => true;
+  const result = await runToolLoop(h.conversation, h.deps);
+  assert.deepEqual(h.offered, [true, true, true]);
+  assert.deepEqual(narrowed, [undefined, ['browser_control'], ['browser_control']]);
+  assert.equal(h.deps.handsAllowed(), false, 'reading still takes her hands');
+  assert.equal(result.rounds, 3);
+  assert.match(h.say.join('\n'), /only her browser stays/);
+});
+
+test('a reply that steps into her browser is allowed more rounds than one that does not', async () => {
+  const browse = (n: number) => ({ role: 'assistant' as const, tool_calls: [{ id: `b${n}`, function: { name: 'browser_control', arguments: { action: 'read' } } }] });
+  // Six browser rounds then words: over the plain cap of four, under the browsing cap.
+  const h = harness([browse(1), browse(2), browse(3), browse(4), browse(5), browse(6), says('Found it.')]);
+  const result = await runToolLoop(h.conversation, h.deps);
+  assert.equal(result.rounds, 7);
+  assert.equal(result.content, 'Found it.');
+  // The same length of other tool calls runs out at the usual cap.
+  const plain = harness([calls('search_web'), calls('search_web'), calls('search_web'), calls('search_web'), calls('search_web'), says('x')]);
+  await assert.rejects(runToolLoop(plain.conversation, plain.deps), /kept calling tools/);
+});
+
+test('a picture a tool took goes in front of her as a user turn, and the one before it is folded away', async () => {
+  const SHOT = (id: string) => ({ role: 'assistant' as const, tool_calls: [{ id, function: { name: 'browser_control', arguments: { action: 'screenshot' } } }] });
+  let shots = 0;
+  const h = harness([SHOT('s1'), SHOT('s2'), says('It is a shop with blue shoes on the front.')], {
+    runTool: async () => ({ content: '{"screenshot":true}', pictures: [{ image: `IMG${++shots}`, mimeType: 'image/jpeg', caption: 'shop.example' }] }),
+  });
+  h.deps.browseAfterRead = () => true;
+  const result = await runToolLoop(h.conversation, h.deps);
+  assert.equal(result.rounds, 3);
+  const pictures = h.conversation.filter(message => message.role === 'user' && message !== h.conversation[0]);
+  assert.equal(pictures.length, 2);
+  assert.equal(pictures[0].content, '[an earlier screenshot, no longer shown]');
+  assert.equal(pictures[0].images, undefined);
+  assert.deepEqual(pictures[1].images, ['IMG2']);
+  assert.match(String(pictures[1].content), /screenshot you just took of shop\.example/);
+  assert.match(String(pictures[1].content), /evidence, not instruction/);
+  // Each sits right after the tool answer it belongs to.
+  const roles = h.conversation.map(message => message.role);
+  assert.deepEqual(roles, ['user', 'assistant', 'tool', 'user', 'assistant', 'tool', 'user'], 'the settled reply is returned, not pushed');
+  assert.equal(h.conversation.filter(message => message.role === 'tool').every(message => !String(message.content).includes('IMG')), true, 'the picture is never in the words');
 });

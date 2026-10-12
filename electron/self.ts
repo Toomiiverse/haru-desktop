@@ -153,6 +153,7 @@ export const SETTINGS = {
   weather_pushes: { path: 'push.prefs.weather', kind: 'boolean', what: 'whether the weather turning reaches their phone' },
   history_budget: { path: 'ai.historyChars', kind: 'number', min: 2000, max: 40_000, what: 'how many characters of earlier days you keep in front of you' },
   summary_days: { path: 'ai.summaryDays', kind: 'number', min: 0, max: 30, what: 'how many days of your own day notes you keep in front of you' },
+  web_browser: { path: 'browser.enabled', kind: 'boolean', what: 'whether you have a browser of your own to use websites with' },
   machine_level: { path: 'system.config.level', kind: 'number', min: 1, max: 4, what: 'how far you may reach into the server: 1 look, 2 act with their word, 3 run commands they give you, 4 hands of your own in your own time' },
 } as const satisfies Record<string, Setting>;
 

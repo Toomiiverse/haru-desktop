@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@pixi/unsafe-eval": "^6.5.10",
+    "@playwright/mcp": "0.0.83",
     "adm-zip": "0.5.16",
     "electron-store": "11.0.2",
     "electron-updater": "^6.8.9",

@@ -19,7 +19,6 @@
 import path from 'node:path';
 import { planChange, SETTINGS, SETTING_NAMES, type Setting, type SettingPlan } from './self';
 import { createFolder, listVault, readNote, writeNote, type WriteMode } from './vaultnotes';
-import { mkdirSync, writeFileSync } from 'node:fs';
 import type { ChatTool, ToolCall } from './provider';
 import { addCheckIn, checkInsOn, type CheckInStore } from './checkins';
 import { CHOICES_TOOL, readChoices } from './choices';
@@ -32,7 +31,8 @@ import { fetchTranscript, formatTranscript, titleFrom, transcriptInstruction, vi
 import { findSuperseded, isInTheirWords, semanticSimilarities, supersede, MEMORY_KINDS, type MemoryKind, type MemoryRecord } from './memory';
 import { appendToBlockValue, canEditBlock, findBlock, replaceInBlockValue, resolveBlockValue, withEditedValue, type BlockSources, type MemoryBlock } from './blocks';
 import { adopt } from './tastes';
-import { activateTab, closeTab, listTargets, navigate, openTab, pageText, screenshot } from './browserctl';
+import { Unsupported, type Browser } from './browserctl';
+import { formatReading } from './pagesnapshot';
 import type { OpenedSession } from './claudesession';
 import { findItem, readsAsNotDone } from './agenda';
 import { localDateKey, resolveDate, zonedNow } from './dates';
@@ -847,27 +847,42 @@ export const POWER_TOOL: ChatTool = {
 
 
 /**
- * Driving the browser she lives next to. Chrome runs with a debug port; the
- * tool opens, navigates, reads and screenshots the actual pages, so "check
- * this site" is something she does rather than something she pretends to have
- * done. Desk-only, like the other hands-on tools.
+ * Her browser (browserctl.ts). Her own headless one by default, run inside this
+ * process (playwright.ts), or a Chrome on the desk over its debug port. She
+ * opens a page and is handed what is on it — the text, the links numbered, the
+ * buttons and boxes numbered — and then follows, clicks and types by number,
+ * so "check this site" is something she does rather than pretends to have done.
+ *
+ * Numbers, not addresses, on everything after the first open. A link she
+ * composes from a page's say-so can carry anything the page wants carried
+ * (what she knows about him, in a query string); a number can only name what
+ * the page already has. The handler enforces it: once a stranger's page is in
+ * the reply, open is refused and typing is held to his own words.
  */
 export const BROWSER_TOOL: ChatTool = {
   type: 'function',
   function: {
     name: 'browser_control',
-    description: 'Drive the browser on this machine — open a page, navigate a tab, list what is open, read what is actually on a page, screenshot it, or close a tab. Use it whenever they ask you to open a website, check a page, look something up in a browser, or want a screenshot of a site. You really can do this — never say you cannot and never pretend you have.',
+    description: 'Use your browser — open a website, read what is actually on the page, follow a link or click a button by its number, type into a box by its number, scroll, go back, or take a screenshot you can look at. Use it whenever they ask you to open a website, check a page, look something up on a site, or see a site. Each call answers with the page as it is now: its text (in parts when long), its links numbered, and the things you can click or type into numbered. You really can do this — never say you cannot and never pretend you have.',
     parameters: {
       type: 'object',
       properties: {
-        action: { type: 'string', enum: ['open', 'navigate', 'list', 'read', 'screenshot', 'close', 'activate'], description: 'What to do. "list" first to get a tab id; "read" and "screenshot" work on the current page when no tab is given.' },
-        url: { type: 'string', description: 'The address to open or navigate to — a full URL, or a name you can search for when opening (e.g. "youtube.com", "the weather in perth").' },
-        tab: { type: 'string', description: 'The tab id from a list call. Leave out to act on the current page.' },
+        action: { type: 'string', enum: ['open', 'read', 'follow', 'click', 'type', 'scroll', 'back', 'screenshot', 'close'], description: '"open" an address or search words first. Then "follow" a link by number, "click" an element by number, "type" into an element by number, "read" another part of a long page, "scroll" for pages that load as they go, "back", or "screenshot" to look at it.' },
+        url: { type: 'string', description: 'For open: the address — a full URL, a bare domain like "youtube.com", or words to search for.' },
+        number: { type: 'number', description: 'For follow, click and type: the number of the link or element from the page you were just shown.' },
+        text: { type: 'string', description: 'For type: what to type, taken from what they asked for.' },
+        submit: { type: 'boolean', description: 'For type: press Enter afterwards, to search or send the form.' },
+        part: { type: 'number', description: 'For read: which part of a long page, 1 for the first. The last answer said how many there are.' },
+        direction: { type: 'string', enum: ['up', 'down'], description: 'For scroll.' },
+        full: { type: 'boolean', description: 'For screenshot: the whole page rather than the visible screen.' },
       },
       required: ['action'],
     },
   },
 };
+
+/** The actions that stay on the table once a stranger's page is in the reply: all of them but open. */
+export const BROWSE_ON_ACTIONS = ['read', 'follow', 'click', 'type', 'scroll', 'back', 'screenshot', 'close'] as const;
 
 /**
  * A Claude Code session he can pick up in the Claude app on his phone
@@ -1044,8 +1059,10 @@ export type ToolAvailability = {
     transcripts: boolean;
   };
   knowledge: boolean;
-  /** Whether she can drive the browser on this machine (browser.control). */
+  /** Whether she has a browser (browser.enabled). */
   browser: boolean;
+  /** Whether that browser is her own headless one, which touches nothing of theirs and so is hers from the phone too. Optional so fixtures need not name it. */
+  ownBrowser?: boolean;
   /** Whether she can open Claude Code sessions for the Claude app (claudeCode.enabled). */
   claude: boolean;
   /** Whether the downloads can be asked (downloads.ts): the anime stack is on and her qBittorrent password file exists. Optional so fixtures need not name it. */
@@ -1159,7 +1176,9 @@ export function chatTools(available: ToolAvailability, latest = ''): ChatTool[] 
   // never claim otherwise, which is right on Windows and a trap anywhere else.
   if (available.hands && available.desktop.launch && machine) tools.push(LAUNCH_TOOL, CLOSE_TOOL);
   if (available.hands && available.desktop.power && machine) tools.push(POWER_TOOL);
-  if (available.browser && available.hands) tools.push(BROWSER_TOOL);
+  // Her own browser is a sandboxed thing of hers, not the desk's, so it is
+  // offered from the phone too; the desk's Chrome stays a desk tool.
+  if (available.browser && (available.hands || available.ownBrowser)) tools.push(BROWSER_TOOL);
   if (available.knockedAwake) tools.push(SLEEP_TOOL);
   // Her body in the game. Not gated on hands: the worker is her, not the
   // machine, and the worst a skill can do is walk somewhere in a game.
@@ -1244,7 +1263,6 @@ export type ToolDeps = {
   rememberSearch(query: string, results: SearchResult[]): void;
   /** Also used by the caller after a reply lands, so it is injected rather than moved. */
   runSystemCommand(file: string, args: string[]): Promise<{ ok: boolean; error?: string }>;
-  /** The CDP port of the browser she controls (browser.control). */
   /** Herself, in facts: readSelfSnapshot + describeSettings (self.ts). */
   myself(): unknown;
   /** The model ids a hosted route's endpoint lists, or null when it cannot be asked. */
@@ -1275,9 +1293,12 @@ export type ToolDeps = {
   } | null;
   /** Their vault on disk (knowledge.vault.path), and the re-read that makes a note she wrote searchable at once. */
   vault: { root(): string; afterWrite(): void };
-  browserPort(): number;
-  /** Where a browser screenshot lands — the screenshots folder or a fallback. */
-  browserShotDir(): string;
+  /** Her browser (browserctl.ts), or null when switched off. */
+  browser: Browser | null;
+  /** Whether a stranger's page is already in this reply. Optional so fixtures need not name it; absent reads as no. */
+  pageWasRead?(): boolean;
+  /** A picture for the conversation — a screenshot she took, to be looked at after this tool's answer. Optional so fixtures need not name it. */
+  addPicture?(picture: { image: string; mimeType: string; caption: string }): void;
   /** Her body in Minecraft (minecraft.ts), or null when switched off. */
   minecraft: {
     status(): Promise<MinecraftStatus | null>;
@@ -1317,7 +1338,7 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
     setBlocks, blockSources, getWardrobeControls, sendToWindows, readSystemConfig, getKnowledgeConfig,
     getKnowledgeEmbedder, knowledgeStore, tryEmbedQuery, memoryVectors, touchChunks, getSearchKey,
     handsAllowed, markPageRead, setPendingChoices, requestRestart, lastResults, lastSearchQuery,
-    rememberSearch, runSystemCommand, onWeb, getInterests, setInterests, browserPort, browserShotDir,
+    rememberSearch, runSystemCommand, onWeb, getInterests, setInterests,
   } = deps;
   const name = call.function?.name;
   const args = toolArguments(call);
@@ -1665,75 +1686,87 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
   }
   if (name === 'browser_control') {
     const action = typeof args.action === 'string' ? args.action : '';
-    const url = typeof args.url === 'string' ? args.url.trim() : '';
-    const tab = typeof args.tab === 'string' ? args.tab.trim() : '';
-    const port = browserPort();
-    const fetchImpl = deps.net.fetch as (url: string, init?: unknown) => Promise<{ ok: boolean; json(): Promise<unknown> }>;
-    const currentTab = async (): Promise<string | null> => {
-      if (tab) return tab;
-      const targets = await listTargets(port, fetchImpl);
-      return targets[0]?.id ?? null;
+    const browser = deps.browser;
+    if (!browser) return JSON.stringify({ error: 'Your browser is switched off. Say so plainly rather than pretending you looked.' });
+    // The desk Chrome is a desk thing: it opens windows on his screen.
+    if (browser.backend === 'chrome' && (!handsAllowed() || onWeb())) return JSON.stringify({ error: 'The desk browser is not yours to drive from here.' });
+    const read = deps.pageWasRead?.() ?? false;
+    const number = Math.round(Number(args.number));
+    const said = latestUserMessage.toLowerCase();
+    // How a page is handed over: the same fence formatPage puts round a fetched
+    // page, then the numbers. And the same consequence — a stranger's text is
+    // in the conversation now, so her machine tools go for the rest of this
+    // reply (markPageRead); only the browse actions stay, and open is not one.
+    const answer = (page: Awaited<ReturnType<Browser['read']>>, part = 1) => {
+      const shown = formatReading(page, part);
+      if (page.text) markPageRead();
+      return JSON.stringify({
+        page: formatPage({ url: page.url || 'https://unknown/', text: shown.text }, lastSearchQuery() || latestUserMessage || 'their question'),
+        title: page.title,
+        url: page.url,
+        ...(shown.parts > 1 ? { part: `${shown.part} of ${shown.parts} — call read with part ${shown.part + 1} for the next` } : {}),
+        links: shown.links || 'none',
+        elements: shown.elements || 'none',
+        note: 'Answer from what is on the page. Follow a link or click an element by its number; the numbers change when the page does.',
+      });
     };
     try {
-      if (action === 'list') {
-        const targets = await listTargets(port, fetchImpl);
-        if (!targets.length) return JSON.stringify({ tabs: [], note: 'No tabs are open.' });
-        return JSON.stringify({ tabs: targets.slice(0, 20).map(target => ({ id: target.id, title: target.title || '(untitled)', url: target.url })) });
-      }
       if (action === 'open') {
+        const url = typeof args.url === 'string' ? args.url.trim() : '';
         if (!url) return JSON.stringify({ error: 'url is required to open a page.' });
-        const id = await openTab(port, url, fetchImpl);
-        console.log(`[browser] opened ${url} (${id})`);
-        return JSON.stringify({ opened: true, tab: id, note: `Opened ${url}.` });
+        // Once a page is in the reply, a fresh address is the one thing it
+        // could have talked her into. Links by number are still hers.
+        if (read) return JSON.stringify({ error: 'You have already read a page this reply, so you cannot open a new address now — follow one of its links by number, or answer from what you have. A fresh address can be opened on their next message.' });
+        const page = await browser.open(url);
+        console.log(`[browser] opened ${browser.where() || 'a page'}`);
+        return answer(page);
       }
-      if (action === 'navigate') {
-        if (!url) return JSON.stringify({ error: 'url is required to navigate.' });
-        const id = await currentTab();
-        if (!id) return JSON.stringify({ error: 'no tab to navigate — open one first.' });
-        await navigate(port, id, url, fetchImpl);
-        console.log(`[browser] navigated ${id} to ${url}`);
-        return JSON.stringify({ navigated: true, note: `Navigated to ${url}.` });
+      if (action === 'read') return answer(await browser.read(), args.part === undefined ? 1 : Math.round(Number(args.part)));
+      if (action === 'follow') {
+        if (!Number.isFinite(number)) return JSON.stringify({ error: 'number is required — the link\'s number from the page you were shown.' });
+        const page = await browser.follow(number);
+        console.log(`[browser] followed a link to ${browser.where() || 'a page'}`);
+        return answer(page);
       }
-      if (action === 'read') {
-        const id = await currentTab();
-        if (!id) return JSON.stringify({ error: 'no tab to read.' });
-        const text = await pageText(port, id, fetchImpl);
-        // A stranger's page is in the conversation now, exactly as after
-        // read_web_page: her tools go for the rest of this reply, so nothing on the
-        // page can talk her into writing a memory or touching the machine. Only
-        // when there is text — a tab still loading reads empty and can be read again.
-        if (text) markPageRead();
-        return JSON.stringify({ text: text.slice(0, 3000), note: 'This is what is on the page right now — answer from it, not from memory.' });
+      if (action === 'click') {
+        if (!Number.isFinite(number)) return JSON.stringify({ error: 'number is required — the element\'s number from the page you were shown.' });
+        return answer(await browser.click(number));
       }
+      if (action === 'type') {
+        const text = typeof args.text === 'string' ? args.text.trim() : '';
+        if (!Number.isFinite(number)) return JSON.stringify({ error: 'number is required — the box\'s number from the page you were shown.' });
+        if (!text) return JSON.stringify({ error: 'text is required — what to type.' });
+        // What goes into a box on a stranger's page is his words or nothing:
+        // a page cannot have her type what she knows about him into a form.
+        if (read && !said.includes(text.toLowerCase())) return JSON.stringify({ error: 'You can only type words they actually said in their message. Use their words, or ask them what to type.' });
+        return answer(await browser.type(number, text, args.submit === true));
+      }
+      if (action === 'scroll') return answer(await browser.scroll(args.direction === 'up' ? 'up' : 'down'));
+      if (action === 'back') return answer(await browser.back());
       if (action === 'screenshot') {
-        const id = await currentTab();
-        if (!id) return JSON.stringify({ error: 'no tab to screenshot.' });
-        const png = await screenshot(port, id, fetchImpl);
-        if (!png) return JSON.stringify({ error: 'the screenshot came back empty.' });
-        const dir = browserShotDir();
-        mkdirSync(dir, { recursive: true });
-        const name = `browser-${Date.now().toString(36)}.png`;
-        writeFileSync(path.join(dir, name), Buffer.from(png));
-        console.log(`[browser] screenshotted the page to ${path.join(dir, name)}`);
-        return JSON.stringify({ saved: path.join(dir, name), note: 'Saved a screenshot of the page.' });
+        const picture = await browser.screenshot(args.full === true);
+        // The picture itself goes in beside the answer (toolloop.ts), not here:
+        // a tool result is words, and a hundred kilobytes of base64 in it would
+        // be read as text.
+        deps.addPicture?.(picture);
+        // A page she has looked at is a page she has read.
+        markPageRead();
+        console.log(`[browser] took a screenshot of ${browser.where() || 'the page'}`);
+        return JSON.stringify({ screenshot: true, of: browser.where() || 'the page', note: deps.addPicture ? 'The picture follows this message — look at it and describe only what is there.' : 'Saved, but there is no way to show it to you from here.' });
       }
       if (action === 'close') {
-        const id = await currentTab();
-        if (!id) return JSON.stringify({ error: 'no tab to close.' });
-        await closeTab(port, id, fetchImpl);
-        console.log(`[browser] closed ${id}`);
-        return JSON.stringify({ closed: true, note: 'Closed the tab.' });
+        await browser.close();
+        return JSON.stringify({ closed: true });
       }
-      if (action === 'activate') {
-        const id = await currentTab();
-        if (!id) return JSON.stringify({ error: 'no tab to activate.' });
-        await activateTab(port, id, fetchImpl);
-        return JSON.stringify({ activated: true });
-      }
-      return JSON.stringify({ error: 'Unknown action — use open, navigate, list, read, screenshot, close or activate.' });
+      // The old desk actions, named by habit.
+      if (action === 'navigate') return JSON.stringify({ error: 'Use open with the url.' });
+      if (action === 'list' || action === 'activate') return JSON.stringify({ error: 'There is one page at a time — read it, or open another.' });
+      return JSON.stringify({ error: 'Unknown action — use open, read, follow, click, type, scroll, back, screenshot or close.' });
     } catch (error) {
-      console.warn('[browser] could not control the browser:', error instanceof Error ? error.message : error);
-      return JSON.stringify({ error: `The browser is not reachable (${error instanceof Error ? error.message : error}). Say so plainly rather than pretending you looked.` });
+      const reason = error instanceof Error ? error.message : String(error);
+      if (error instanceof Unsupported) return JSON.stringify({ error: reason });
+      console.warn(`[browser] ${action || 'the browser'} failed: ${reason}`);
+      return JSON.stringify({ error: `The browser could not do that (${reason}). Say so plainly rather than pretending you looked.` });
     }
   }
   if (name === 'remember_about_user') {
