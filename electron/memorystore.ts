@@ -24,8 +24,8 @@ import {
   applyDecay, MEMORY_CAP, DEEP_RECALL_LIMIT, isExplicitRecall, isRecurring, isWorthRemembering, migrateMemories,
   pruneMemories, rememberInto, retrieveMemories, vectorSimilarity,
   type ForgettingEntry, type MemoryKind, type MemoryRecord, type MemorySource, type MonthNote,
-  type RetrievalFactors, type SessionSummary,
-, memoriesReader } from './memory';
+  type RetrievalFactors, type SessionSummary, memoriesReader,
+} from './memory';
 import { consolidateMemories, type ConsolidationChange } from './consolidation';
 import { mergeMemories, mergeDeletions, type MemoryDeletion, type MergeReport } from './memorysync';
 import { formatMemoryBlocks, type BlockSources, type MemoryBlock, type DerivedMemoryBlocks } from './blocks';
