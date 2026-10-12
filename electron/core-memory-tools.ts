@@ -19,7 +19,7 @@ export function runCoreMemoryTool(name:string,args:Record<string,unknown>,messag
   // ledger. There is no retry and no optimistic memory/cache publication.
   commitDayNightPlan(adapter.core,packet.plan,assertCurrent);
   assertCurrent();
-  const observed=corePolicySync<{result:unknown;events:string[]}>('memory-tools.confirm',[packet.state,{config:adapter.core.get('config',{}),memoryFile:adapter.core.get('memories')}]);
+  const observed=corePolicySync<{result:unknown;events:string[]}>('memory-tools.confirm',[packet.state,{config:adapter.core.docRef('config',{}),memoryFile:adapter.core.get('memories')}]);
   adapter.publish(observed.events);
   return observed.result;
 }
@@ -36,7 +36,7 @@ export function runCoreMemoryAdmin(action:string,args:Record<string,unknown>,ada
 /** Explicit reset only: mandatory backup, one native transaction, observed file receipts. */
 export function runCoreMemoryReset(body:boolean,at:string,adapter:{core:CoreStore;store:any;roots:{home:string;userData:string};publishSchedule:()=>void;renderGraph:(graph:any)=>string;exists:(file:string)=>boolean;move:(from:string,to:string)=>void;write:(file:string,text:string)=>void;join:(...parts:string[])=>string}){
   const assertCurrent=()=>activeTask.getStore()?.signal.throwIfAborted();assertCurrent();
-  const program=corePolicySync<any>('memory-admin.resetProgram',[body,at,adapter.core.get('config'),adapter.store.getSchedule()]);
+  const program=corePolicySync<any>('memory-admin.resetProgram',[body,at,adapter.core.docRef('config',{}),adapter.store.getSchedule()]);
   const backups=adapter.store.backup(program.reason);assertCurrent();
   const setters=new Set(['setMemories','setSessions','setMonthNotes','setForgettingLog','setFactGraph','setArchive','setKnowledge','setThoughts','setActivityLog','setSchedule']);
   adapter.store.transaction(()=>{

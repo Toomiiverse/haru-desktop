@@ -74,7 +74,7 @@ export function runCoreVaultMemories(vault:string,admit:import('./vaultmemories'
 export function retireCoreVaultMemories(vault:string,adapter:{core:import('./core-store').CoreStore;publish:(events:string[])=>void}){
  if(!vault)return;current();const pages:Record<string,unknown>={},observations:Record<string,unknown>={};
  for(const page of corePolicySync<string[]>('knowledge-vault.pages',[])){const file=path.join(vault,page);try{const data=readFileSync(file);pages[page]={ok:true,text:data.toString('utf8')};observations[file]=createHash('sha256').update(data).digest('hex');}catch{pages[page]={ok:false};}}
- const packet=corePolicySync<any>('knowledge-vault.retirePlan',[adapter.core.get('config'),adapter.core.get('memories'),pages,new Date().toISOString()]);
+ const packet=corePolicySync<any>('knowledge-vault.retirePlan',[adapter.core.docRef('config',{}),adapter.core.get('memories'),pages,new Date().toISOString()]);
  if(!packet.plan)return packet.result;
  const assertCurrent=()=>{current();for(const [file,hash]of Object.entries(observations)){if(fingerprint(file)?.hash!==hash)throw Error('core_knowledge_source_changed');}};
  require('./core-day-night').commitDayNightPlan(adapter.core,packet.plan,assertCurrent);

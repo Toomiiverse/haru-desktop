@@ -52,11 +52,11 @@ export function runChatRollover(core:CoreStore,key:string,dispatch:(command:any)
   if(packet.result)return packet.result;
   commitLifecyclePlan(core,packet.plan);
   for(const command of packet.commands){assertCurrent();dispatch(command);}
-  commitLifecyclePlan(core,corePolicySync('chat-lifecycle.rolloverFinish',[core.get('config',{}),packet.finish,readAsides()]));
+  commitLifecyclePlan(core,corePolicySync('chat-lifecycle.rolloverFinish',[core.docRef('config',{}),packet.finish,readAsides()]));
   dispatch({kind:'broadcast'});
 }
 export function runManualChat(core:CoreStore,key:string){
-  commitLifecyclePlan(core,corePolicySync('chat-lifecycle.manual',[core.get('config',{}),key,core.get('archive',{})[key]??null,new Date().toISOString()]));
+  commitLifecyclePlan(core,corePolicySync('chat-lifecycle.manual',[core.docRef('config',{}),key,core.get('archive',{})[key]??null,new Date().toISOString()]));
 }
 export function appendChatArchive(core:CoreStore,key:string,messages:unknown[]){
   commitLifecyclePlan(core,corePolicySync('chat-lifecycle.archiveAppend',[key,messages,core.get('archive',{})[key]??null]));

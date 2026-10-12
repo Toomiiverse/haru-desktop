@@ -893,7 +893,7 @@ async function formDayMemories(lines: string[], doing: string, day: string, conf
     forming=true;
     try{
       const success=await formFrom(lines,doing,day,config),core=remainingStore(app.getPath('userData'));
-      const outcome=corePolicySync<any>('chat-lifecycle.formFinish',[core.get('config',{}),day,messageCount,success,Object.fromEntries(formRetries),Date.now()]);
+      const outcome=corePolicySync<any>('chat-lifecycle.formFinish',[core.docRef('config',{}),day,messageCount,success,Object.fromEntries(formRetries),Date.now()]);
       if(outcome.plan)commitLifecyclePlan(core,outcome.plan);
       formRetries.clear();for(const [key,value] of Object.entries(outcome.retries))formRetries.set(key,value as {tries:number;until:number});
     }finally{forming=false;}return;
@@ -921,12 +921,12 @@ function noteFormingFailed(day: string): void {
 
 /** Days already read for memories, with how many messages they had: a day that has grown is read again. */
 function formedDays(): Record<string, number> {
-  return corePolicySync('chat-lifecycle.readFormed',[remainingStore(app.getPath('userData')).get('config',{})]);
+  return corePolicySync('chat-lifecycle.readFormed',[remainingStore(app.getPath('userData')).docRef('config',{})]);
 }
 
 function markFormed(day: string, messageCount: number): void {
   {
-    const core=remainingStore(app.getPath('userData'));commitLifecyclePlan(core,corePolicySync('chat-lifecycle.markFormed',[core.get('config',{}),day,messageCount]));return;
+    const core=remainingStore(app.getPath('userData'));commitLifecyclePlan(core,corePolicySync('chat-lifecycle.markFormed',[core.docRef('config',{}),day,messageCount]));return;
   }
 }
 
@@ -1004,7 +1004,7 @@ function pruneOldActivity() {
   // And what she made of them, on the same clock. The list is capped at 400 so
   // this was never a leak, but a caption whose picture and whose day are both
   // gone is a note about nothing.
-  if(ownedRetention){const core=remainingStore(app.getPath('userData'));const plan=corePolicySync<any>('chat-lifecycle.captionPlan',[core.get('config',{}),cutoff]);if(plan)commitLifecyclePlan(core,plan);return;}
+  if(ownedRetention){const core=remainingStore(app.getPath('userData'));const plan=corePolicySync<any>('chat-lifecycle.captionPlan',[core.docRef('config',{}),cutoff]);if(plan)commitLifecyclePlan(core,plan);return;}
   const captions = readCaptions(store.get('shots.captions'));
   const kept = forgetCaptions(captions, cutoff);
   if (kept.length !== captions.length) {
@@ -1593,11 +1593,11 @@ const UNPROMPTED_CONTEXT_TURNS = 10;
  * morning is its own kind of wrong.
  */
 function spokenOn(day: string, today: string): { role?: string; content?: string }[] {
-  return corePolicySync<any>('agenda-life.spokenOn',[ownedAgendaCore().get('config',{}),store.getArchive(),day,today]);
+  return corePolicySync<any>('agenda-life.spokenOn',[ownedAgendaCore().docRef('config',{}),store.getArchive(),day,today]);
 }
 
 function todaySoFar(limit = UNPROMPTED_CONTEXT_TURNS): string {
-  return corePolicySync<any>('agenda-life.todaySoFar',[ownedAgendaCore().get('config',{}),store.getArchive(),localDateKey(zonedNow(CHAT_TIMEZONE)),limit]);
+  return corePolicySync<any>('agenda-life.todaySoFar',[ownedAgendaCore().docRef('config',{}),store.getArchive(),localDateKey(zonedNow(CHAT_TIMEZONE)),limit]);
 }
 
 /**
@@ -3600,7 +3600,7 @@ function getMonthTally(): MonthTally {
 }
 
 function tallyMonth(what: 'hurt' | 'apology' | 'wound-up') {
-  conversationApply(corePolicySync<any>('conversation-program.growth',['tally',remainingStore(app.getPath('userData')).get('config',{}),{},currentChatDayKey(),what]));return;
+  conversationApply(corePolicySync<any>('conversation-program.growth',['tally',remainingStore(app.getPath('userData')).docRef('config',{}),{},currentChatDayKey(),what]));return;
 }
 
 /**
@@ -3618,7 +3618,7 @@ function monthSignals(month: string, tally?: MonthTally): MonthSignals | null {
  * so any of it can be put back (his call, 2026-09-19).
  */
 function growAtFold(month: string) {
-  conversationApply(corePolicySync<any>('conversation-program.growth',['fold',remainingStore(app.getPath('userData')).get('config',{}),store.getArchive(),currentChatDayKey(),month]));return;
+  conversationApply(corePolicySync<any>('conversation-program.growth',['fold',remainingStore(app.getPath('userData')).docRef('config',{}),store.getArchive(),currentChatDayKey(),month]));return;
 }
 
 /**
@@ -3626,12 +3626,12 @@ function growAtFold(month: string) {
  * Only what is worse than this counts against him (grudge.ts).
  */
 function ordinaryHanging(): number {
-  return corePolicySync<number>('conversation-program.ordinaryHanging',[remainingStore(app.getPath('userData')).get('config',{})]);
+  return corePolicySync<number>('conversation-program.ordinaryHanging',[remainingStore(app.getPath('userData')).docRef('config',{})]);
 }
 
 /** The months before growth existed, read off the archive once so she has a norm. */
 function backfillMonths() {
-  conversationApply(corePolicySync<any>('conversation-program.growth',['backfill',remainingStore(app.getPath('userData')).get('config',{}),store.getArchive(),currentChatDayKey()]));return;
+  conversationApply(corePolicySync<any>('conversation-program.growth',['backfill',remainingStore(app.getPath('userData')).docRef('config',{}),store.getArchive(),currentChatDayKey()]));return;
 }
 
 /**
@@ -3794,7 +3794,7 @@ const OPENING_MIN_GAP_MS = 20 * 60_000;
  * said unprompted — so an opening can be told what she has already raised.
  */
 function herLinesLastDay(nowMs: number): string[] {
-  return corePolicySync<string[]>('agenda-life.herLinesLastDay',[ownedAgendaCore().get('config',{}),store.getArchive(),getAsides(),currentChatDayKey(),nowMs]);
+  return corePolicySync<string[]>('agenda-life.herLinesLastDay',[ownedAgendaCore().docRef('config',{}),store.getArchive(),getAsides(),currentChatDayKey(),nowMs]);
 }
 
 /** The items an opening could lead with: not done, not past. Done and past
@@ -4770,7 +4770,7 @@ const STILL_MEANS_IT_MS = 30 * 60_000;
 const CONTEXT_TURNS = 8;
 
 function whatSheWasChasing(open: KeptItem[]): KeptItem | null {
-  return corePolicySync<KeptItem|null>('agenda-life.chase',[open,ownedAgendaCore().get('config',{}),getAsides(),Date.now()]);
+  return corePolicySync<KeptItem|null>('agenda-life.chase',[open,ownedAgendaCore().docRef('config',{}),getAsides(),Date.now()]);
 }
 
 /** What was moved this turn, so the prompt can say so rather than ask for it. */
@@ -4845,7 +4845,7 @@ async function askForJournal() {
  * call does nothing, which is the intent — see noticing.ts for the budget.
  */
 async function noticePage(page: NoticedPage) {
-  {const read=()=>({config:remainingStore(app.getPath('userData')).get('config',{}),day:localDateKey(zonedNow(CHAT_TIMEZONE)),now:Date.now(),lastInterjectionAt,journal:getJournal(),memories:getMemories(),sessions:getSessions(),profile:getProfile(),voice:getVoiceConfig(),search:readSearchConfig(store.get('search')),character:getActiveCharacter(),context:unpromptedContext()});const p=corePolicySync<any>('context-preparation.noticeStart',[page,read()]);if(p.action==='stop')return;applyRemainingPlan(remainingStore(app.getPath('userData')),p.plan);try{const m=await ollamaPost(p.request.messages,p.request.config,p.request.options);activeTask.getStore()?.signal.throwIfAborted();const result=corePolicySync<any>('context-preparation.noticeObserved',[p.state,m.content??'',read()]);if(result&&interject(result.line,{source:result.source}))void speak(result.line,classifyEmotion(result.line,result.provider));}catch(error){console.warn('[notice]',error instanceof Error?error.message:'failed');}return;}
+  {const read=()=>({config:remainingStore(app.getPath('userData')).docRef('config',{}),day:localDateKey(zonedNow(CHAT_TIMEZONE)),now:Date.now(),lastInterjectionAt,journal:getJournal(),memories:getMemories(),sessions:getSessions(),profile:getProfile(),voice:getVoiceConfig(),search:readSearchConfig(store.get('search')),character:getActiveCharacter(),context:unpromptedContext()});const p=corePolicySync<any>('context-preparation.noticeStart',[page,read()]);if(p.action==='stop')return;applyRemainingPlan(remainingStore(app.getPath('userData')),p.plan);try{const m=await ollamaPost(p.request.messages,p.request.config,p.request.options);activeTask.getStore()?.signal.throwIfAborted();const result=corePolicySync<any>('context-preparation.noticeObserved',[p.state,m.content??'',read()]);if(result&&interject(result.line,{source:result.source}))void speak(result.line,classifyEmotion(result.line,result.provider));}catch(error){console.warn('[notice]',error instanceof Error?error.message:'failed');}return;}
 }
 
 /**
@@ -5374,13 +5374,13 @@ const HOSTED_PARAGRAPHS = 4;
  */
 type RevoiceSetting = { every?: number; model?: string };
 function revoiceSetting(): Required<RevoiceSetting> {
-  return corePolicySync<any>('conversation-program.revoiceSetting',[remainingStore(app.getPath('userData')).get('config',{})]);
+  return corePolicySync<any>('conversation-program.revoiceSetting',[remainingStore(app.getPath('userData')).docRef('config',{})]);
 }
 function revoiceState() { return readRevoiceState(store.get('revoice')); }
 
 /** Their messages since the last pass, today and in the archive. */
 function messagesSinceRevoice(): number {
-  return corePolicySync<number>('conversation-program.messagesSinceRevoice',[remainingStore(app.getPath('userData')).get('config',{}),store.getArchive()]);
+  return corePolicySync<number>('conversation-program.messagesSinceRevoice',[remainingStore(app.getPath('userData')).docRef('config',{}),store.getArchive()]);
 }
 
 let revoicing = false;
@@ -6862,7 +6862,7 @@ async function nudgeForPhone(): Promise<{ line: string; about: string; eventId: 
  */
 async function settingSaid(text: string): Promise<{ reply: string; tier: 2 } | null> {
   {
-    const core=remainingStore(app.getPath('userData')),decision=corePolicySync<any>('self.spokenPlan',[text,core.get('config',{})]);
+    const core=remainingStore(app.getPath('userData')),decision=corePolicySync<any>('self.spokenPlan',[text,core.docRef('config',{})]);
     if(!decision)return null;
     if(decision.settingPlan)await applyPlanAtTheirWord(decision.settingPlan);
     return {reply:decision.reply,tier:decision.tier};
@@ -6871,7 +6871,7 @@ async function settingSaid(text: string): Promise<{ reply: string; tier: 2 } | n
 
 async function applyPlanAtTheirWord(plan: SettingPlan): Promise<{ ok: boolean; note: string }> {
   {
-    const core=remainingStore(app.getPath('userData')),decision=corePolicySync<any>('self.applyPlan',[core.get('config',{}),plan]);
+    const core=remainingStore(app.getPath('userData')),decision=corePolicySync<any>('self.applyPlan',[core.docRef('config',{}),plan]);
     store.backup(decision.backup);applyRemainingPlan(core,decision.plan);refreshConfigurationNote();return decision.result;
   }
 }
@@ -7771,7 +7771,7 @@ function owedOpeningNow(now: Date): DueOpening | null {
 const openingKey = (opening: DueOpening) => `${opening.when}:${opening.text.toLowerCase().replace(/[^a-z]+/g, '').slice(0, 40)}`;
 
 function markOpeningDone(opening: DueOpening, today: string): void {
-  {const c=remainingStore(app.getPath('userData'));applyRemainingPlan(c,corePolicySync('context-preparation.acceptOpening',[c.get('config',{}),opening,today]));return;}
+  {const c=remainingStore(app.getPath('userData'));applyRemainingPlan(c,corePolicySync('context-preparation.acceptOpening',[c.docRef('config',{}),opening,today]));return;}
 }
 
 function spontaneousNudgeCandidates(): NudgeCandidate[] {
@@ -8118,7 +8118,7 @@ async function proactiveTick() {
  */
 function remainingGrudge(mode:'tally'|'settle'|'morning'|'tell',day:string,heard:unknown){
   const now=zonedNow(CHAT_TIMEZONE),mood=getMood(),core=remainingStore(app.getPath('userData'));
-  const decision=corePolicySync<any>('grudge.transition',[mode,core.get('config',{}),mood,day,now.getHours()*60+now.getMinutes(),getAsides(),heard,Date.now(),ordinaryHanging(),null,IRRITATION_MAX]);
+  const decision=corePolicySync<any>('grudge.transition',[mode,core.docRef('config',{}),mood,day,now.getHours()*60+now.getMinutes(),getAsides(),heard,Date.now(),ordinaryHanging(),null,IRRITATION_MAX]);
   if(decision.plan){applyRemainingPlan(core,decision.plan);sendToWindows('mood:changed',getMood());}
   for(const event of decision.events){
     if(event.kind==='vitals')nudgeVitals(event.event);
@@ -8606,7 +8606,7 @@ let lastNightThingAt: number | null = null;
 const deedFeelings = new DeedFeelings();
 function noteDeed(tool: string, call: { function?: { arguments?: unknown } }, result: string): void {
   {
-    const core=remainingStore(app.getPath('userData')),decision=corePolicySync<any>('deeds.note',[core.get('config',{}),tool,call,result,new Date().toISOString()]);
+    const core=remainingStore(app.getPath('userData')),decision=corePolicySync<any>('deeds.note',[core.docRef('config',{}),tool,call,result,new Date().toISOString()]);
     if(decision.plan)applyRemainingPlan(core,decision.plan);
     for(const event of decision.events)feelNow(event);
     if(decision.deed)console.log(`[deed] you ${decision.deed.what}`);return;
@@ -9033,7 +9033,7 @@ function startProactive() {
 
 /** Restart discards pending messages and establishes a fresh event baseline. */
 function startPhoneOpportunities() {
-  {if(phoneNudgeTimer)return;const p=corePolicySync<any>('conversation-program.phoneInit',[remainingStore(app.getPath('userData')).get('config',{}),getAsides(),Date.now(),CHAT_TIMEZONE]);conversationApply(p);if(!corePeriodic){phoneNudgeTimer=setInterval(()=>{void checkPhoneOpportunities();},PHONE_SCAN_MS);void checkPhoneOpportunities();}return;}
+  {if(phoneNudgeTimer)return;const p=corePolicySync<any>('conversation-program.phoneInit',[remainingStore(app.getPath('userData')).docRef('config',{}),getAsides(),Date.now(),CHAT_TIMEZONE]);conversationApply(p);if(!corePeriodic){phoneNudgeTimer=setInterval(()=>{void checkPhoneOpportunities();},PHONE_SCAN_MS);void checkPhoneOpportunities();}return;}
 }
 
 /**
@@ -9205,7 +9205,7 @@ function webDeps(): WebDeps {
   };
   type WebTurnOptions = { requestId?: string; call?: boolean; callTrace?: { id: string; turn: number }; signal?: AbortSignal };
   const deps: WebDeps = {
-    funding: () => corePolicySync<any>('credit-guard.status', [remainingStore(app.getPath('userData')).get('config', {})]),
+    funding: () => corePolicySync<any>('credit-guard.status', [remainingStore(app.getPath('userData')).docRef('config', {})]),
     elsewhereKey: getVeniceKey,
     attentionInput: (source, report) => {
       const now = Date.now();
@@ -10146,7 +10146,7 @@ function saveReplyRating(id: string, reaction: 'up' | 'down' | null | undefined,
   if (!core) throw Error('core_reply_feedback_storage_required');
   const current = () => activeTask.getStore()?.signal.throwIfAborted();
   current();
-  const packet = corePolicySync<{ plan?: unknown; result?: ReplyRating | null }>('prompt-context.rateReply', [core.get('config', {}), { id, reaction, ...(note !== undefined ? { note } : {}), source, at: new Date().toISOString() }]);
+  const packet = corePolicySync<{ plan?: unknown; result?: ReplyRating | null }>('prompt-context.rateReply', [core.docRef('config', {}), { id, reaction, ...(note !== undefined ? { note } : {}), source, at: new Date().toISOString() }]);
   if (packet.plan) commitDayNightPlan(core, packet.plan, current);
   const result = packet.result;
   if (result?.entry) {
