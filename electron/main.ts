@@ -142,7 +142,6 @@ import { execFile, spawn } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import AdmZip from 'adm-zip';
 import { HaruStore } from './store';
-import { CoreWorkWorld, workWorldAssets } from './core-work-world';
 import { AttentionExperiment, readAttentionMode } from './attention';
 import { ActivityObservations, idleWithoutEyes, type ActivityObservation } from './activity-observation';
 import { ActivityReporter } from './activity-reporter';
@@ -3338,10 +3337,7 @@ const memoryStore = createMemoryStore({
     const interests = getInterests();
     return [
       nightsInstruction(nightsOn(getNights(), lastNightKey())),
-      // Right behind the night, not at the tail: the block is cut from the
-      // end when it is over budget, and this is the line that answers "what
-      // chapter are you up to".
-      workWorld.prompt(),
+      // 3510: her finished work reaches the prompt from the Core (prompt assembly), not from the retired work view.
       // His shelf beside hers: where he is up to, and the spoiler line (suwayomi.ts).
       hisReadingLine(),
       // What she did with her own hands lately (herhands.ts), so it is hers to bring up.
@@ -6824,7 +6820,6 @@ function nudgeBrain(): ProviderConfig | null {
   return corePolicySync<ProviderConfig|null>('projects.nudgeConfig',[store.get('ai.nudge'),null]);
 }
 
-const workWorld = new CoreWorkWorld();
 
 /**
  * What she would say first, unprompted, to someone holding their phone.
@@ -9207,7 +9202,6 @@ function webDeps(): WebDeps {
   type WebTurnOptions = { requestId?: string; call?: boolean; callTrace?: { id: string; turn: number }; signal?: AbortSignal };
   const deps: WebDeps = {
     funding: () => corePolicySync<any>('credit-guard.status', [remainingStore(app.getPath('userData')).get('config', {})]),
-    worldWork: workWorld,
     elsewhereKey: getVeniceKey,
     attentionInput: (source, report) => {
       const now = Date.now();
@@ -10333,9 +10327,6 @@ function registerApplicationChannels() {
   ipcMain.handle('settings:get', (_e, key) => store.get(key));
   ipcMain.handle('affect:status', () => readAffectSettings());
   ipcMain.handle('affect:settings', (_e, change: unknown) => saveAffectSettings(change));
-  ipcMain.handle('world:get', () => workWorld.get());
-  ipcMain.handle('world:detail', (_e, id: string, before?: number) => workWorld.detail(id, before));
-  ipcMain.handle('world:assets', () => workWorldAssets(app.getAppPath(), path.join(app.getAppPath(), 'build', 'emotions')));
   ipcMain.handle('world:command', () => { throw Error('The fictional simulation is archived.'); });
   ipcMain.handle('settings:set', (_e, key, value) => store.set(key, value));
   // Read back from Windows rather than from the store, so the panel shows what
@@ -11026,7 +11017,6 @@ function startNativePeriodicWork() {
             'check-ins': () => pullCheckIns().then(syncMemories),
             'memory-vectors': refreshMemoryVectors,
             'memory-sort': () => memoryStore.sortPending(),
-            'world': async () => { await workWorld.observe({ speaking: speakingNow, asleep: herAsleepNow() }); },
             'hands': herHandsTick,
             'thought': thoughtTick,
             'vault-sync': syncVaultAndRetire,

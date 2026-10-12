@@ -59,7 +59,6 @@ type VoiceConfig = { engine: string; voice: string; referenceText: string; endpo
 type SpeechClip = { turn: number; text: string; audio?: Uint8Array; mime?: string };
 
 contextBridge.exposeInMainWorld('haru', {
-  world: { get: () => ipcRenderer.invoke('world:get'), detail: (id: string, before?: number) => ipcRenderer.invoke('world:detail', id, before), assets: () => ipcRenderer.invoke('world:assets') },
   settings: { get: (key: string) => ipcRenderer.invoke('settings:get', key), set: (key: string, value: unknown) => ipcRenderer.invoke('settings:set', key, value) },
   affect: { status: () => ipcRenderer.invoke('affect:status'), save: (change: unknown) => ipcRenderer.invoke('affect:settings', change) },
   listen: {

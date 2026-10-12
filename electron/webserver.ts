@@ -43,7 +43,6 @@ import {
 } from './web';
 import { loginPage, appPage, serviceWorker } from './webpage';
 import { callCheckPage, callCheckWorklet, callCheckResults, readCallCheck, saveCallCheck } from './call-check';
-import { ELSEWHERE_FILES } from './elsewhere';
 import { readPushPrefs, type PushPrefs } from './push';
 import { isDeviceToken } from './apns';
 import { emotionFile } from './emotions';
@@ -57,7 +56,6 @@ export type WebDeps = {
   /** Core-authored status text; the web transport makes no credit or route decisions. */
   funding?(): { mode: string; notice: string; balanceUsd: number | null; fallbackBelowUsd: number };
   durableChat?: IntakeTransport;
-  worldWork?: { get(): unknown; detail(id: string, before?: number): unknown };
   elsewhereKey?(): string | undefined;
   /** Diagnostic input only; must not reset chat silence or trigger a nudge. */
   attentionInput?(source: string, report: ActivityReport): void;
@@ -1045,26 +1043,7 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: WebDeps) 
     return json(res, 200, { ok: true, at: saveCallCheck(checked).at });
   }
 
-  if (req.method === 'GET' && (path === '/api/world/work' || path.startsWith('/api/world/work/items/'))) {
-    if (!deps.worldWork) return json(res, 503, { error: 'Work activity is unavailable.' });
-    try {
-      if (path === '/api/world/work') return json(res, 200, await deps.worldWork.get());
-      const id = path.slice('/api/world/work/items/'.length), raw = url.searchParams.get('before');
-      if (!/^[a-zA-Z0-9_-]{1,100}$/.test(id) || raw !== null && (!/^\d{1,16}$/.test(raw) || !Number.isSafeInteger(Number(raw)) || Number(raw) < 1)) return json(res, 400, { error: 'Invalid work reference.' });
-      return json(res, 200, await deps.worldWork.detail(id, raw === null ? undefined : Number(raw)));
-    } catch { return json(res, 503, { error: 'Work activity could not be read.' }); }
-  }
-  if ((req.method === 'POST' && ['/api/world/control', '/api/elsewhere/dialogue'].includes(path)) || (req.method === 'GET' && path === '/api/world')) return json(res, 410, { error: 'The fictional simulation is archived. Open the work world.' });
-  if (req.method === 'GET' && ELSEWHERE_FILES.has(path)) {
-    if (!deps.worldWork) return json(res, 503, { error: 'Work activity is unavailable.' });
-    const [relative,type] = ELSEWHERE_FILES.get(path)!;
-    const file = fileAt(filePath.resolve(process.env.HARU_WORLD_ASSET_ROOT || filePath.join(process.cwd(),'elsewhere')),relative);
-    if (!file) return json(res,404,{error:'This neighborhood asset is not installed.'});
-    if (type === 'image/png') return sendFile(res,file,type);
-    // Self-contained on Haru: retain the local styles without requesting Google Fonts.
-    const body = readFileSync(file,'utf8').replace(/^@import url\([^\n]+\);\r?\n/, '');
-    return send(res,200,body,type);
-  }
+  if ((req.method === 'POST' && ['/api/world/control', '/api/elsewhere/dialogue'].includes(path)) || (req.method === 'GET' && (path === '/api/world' || path.startsWith('/api/world/work')))) return json(res, 410, { error: 'The fictional simulation is archived. Open the work world.' });
 
   // The stage's moving parts, all behind the login.
   if (req.method === 'GET' && path === '/api/model') {

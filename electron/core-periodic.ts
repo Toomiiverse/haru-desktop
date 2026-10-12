@@ -109,15 +109,5 @@ export function createCorePeriodic(options:Options) {
     tick,
     async drained(){await Promise.all([...running.values()]);},
     active:()=>running.size,
-    async worldReady():Promise<boolean> {
-      const grant=activeScheduledJob.getStore();
-      if(!started||!registered||grant?.kind!=='periodic:world'||grant.id!=='periodic:world')
-        throw Error('core_periodic_world_grant_required');
-      const reply=await send('world-attention',{token:grant.token});
-      const reasons=['ready','intake_paused','foreground','quiet_period','model_busy','admission_unavailable'];
-      if(typeof reply.allowed!=='boolean'||!reasons.includes(reply.reason)||reply.allowed!==(reply.reason==='ready'))
-        throw Error('core_periodic_world_attention_invalid');
-      return reply.allowed;
-    },
   };
 }
