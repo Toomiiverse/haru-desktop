@@ -560,6 +560,11 @@ export class HaruStore {
     return this.core ? this.core.transactionAsync(fn) : Promise.resolve(this.transaction(fn));
   }
 
+  /** The value now, the commit behind it (CoreStore.transactionBehind); plain transaction without a core. */
+  transactionBehind<T>(fn: () => T): T {
+    return this.core ? this.core.transactionBehind(fn) : this.transaction(fn);
+  }
+
   transaction<T>(fn: () => T): T {
     if (this.core) return this.core.transaction(fn);
     const snapshot = JSON.parse(JSON.stringify(this.electron.store)) as Record<string, unknown>;

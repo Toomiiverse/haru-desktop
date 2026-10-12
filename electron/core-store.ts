@@ -15,6 +15,14 @@ const registry=new Map<string,CoreStore>();
 export type DocRef={$doc:string;digest:string;body?:unknown};
 export function docDigest(value:unknown):string{return createHash('sha256').update(JSON.stringify(value)??'').digest('hex').slice(0,32);}
 export function isDigestRef(value:unknown):value is {$digest:string}{return !!value&&typeof value==='object'&&!Array.isArray(value)&&Object.keys(value as object).length===1&&typeof (value as {$digest?:unknown}).$digest==='string';}
+// 3480 write-behind: while an async commit is in flight a reader is served the state the commit is writing (the patched
+// documents) or the committed state (the others) instead of waiting ~70-120 ms for the disk; only a write, a schedule
+// read (rebaseSchedule compares whole snapshots) or a nameless fence still waits. The commit's patches ARE the next state:
+// a failed commit marks the store broken, after which nothing is served at all.
+export function pendingRead(patches:Record<string,unknown>|null,name:string|undefined):'fence'|'pending'|'committed'{
+ if(!patches||name===undefined||name==='schedule')return 'fence';
+ return Object.hasOwn(patches,name)?'pending':'committed';
+}
 export function sameDocument(current:unknown,expected:unknown):boolean{return isDigestRef(expected)?docDigest(current)===expected.$digest:JSON.stringify(current)===JSON.stringify(expected);}
 export function coreStoreOptions(env:NodeJS.ProcessEnv=process.env):CoreStoreOptions|undefined{
  if(env.HARU_CORE_STORAGE!=='on')return;
@@ -26,7 +34,7 @@ export class CoreStore {
  private worker:Worker;private buffer=new SharedArrayBuffer(64*1024*1024);private state!:Snapshot;private broken=false;
  private depth=0;private staged:Record<string,any>|null=null;private touched=new Set<string>();
  private captured:Record<string,any>|undefined;
- private pendingAsync=false;private asyncTail:Promise<unknown>=Promise.resolve();
+ private pendingAsync=false;private pendingPatches:Record<string,any>|null=null;private asyncTail:Promise<unknown>=Promise.resolve();
  private finishPendingCommit:(()=>any)|undefined;
  constructor(readonly options:CoreStoreOptions,userData:string){
   if(![options.root,options.db,options.node,userData].every(path.isAbsolute))throw Error('absolute_paths_required');
@@ -50,7 +58,8 @@ export class CoreStore {
   spanStatus='ok';return response.result;
   } finally {markTurn('storage_span',{step:method,durationMs:performance.now()-started,status:spanStatus});}
  }
- private refreshPending(){
+ private refreshPending(name?:string){
+  if(this.pendingAsync&&pendingRead(this.pendingPatches,name)!=='fence')return;
   if(this.pendingAsync){
    // Fence the complete commit, including known-conflict retries, before a
    // synchronous caller can observe or change its source documents.
@@ -101,19 +110,21 @@ export class CoreStore {
    return finish();
   }finally{markTurn('storage_span',{step:'asyncCommit',durationMs:performance.now()-started,status:this.broken?'error':'ok'});if(this.finishPendingCommit===finish)this.finishPendingCommit=undefined;this.worker.unref();}
  }
- get(name:string,fallback?:any):any{this.refreshPending();if(name==='schedule'&&(true as boolean)&&!this.touched.has('schedule')){this.rebaseSchedule();if(this.staged)this.staged.schedule=this.state.documents.schedule;}return structuredClone((this.staged??this.state.documents)[name]??fallback);}
+ /** The documents as a reader should see them now: the staged map inside a transaction, else the committed state with any in-flight commit's patches over it. */
+ private view(name:string):Record<string,any>{if(this.staged)return this.staged;return this.pendingAsync&&this.pendingPatches&&Object.hasOwn(this.pendingPatches,name)?{...this.state.documents,...this.pendingPatches}:this.state.documents;}
+ get(name:string,fallback?:any):any{this.refreshPending(name);if(name==='schedule'&&(true as boolean)&&!this.touched.has('schedule')){this.rebaseSchedule();if(this.staged)this.staged.schedule=this.state.documents.schedule;}return structuredClone(this.view(name)[name]??fallback);}
  /** Clone only the requested config branch. Copying all chat/configuration
   * for each scalar read dominates warm conversation preparation. The selected
   * value still cannot mutate authoritative or staged state without a commit. */
  getPath(name:string,parts:readonly string[],fallback?:any):any{
-  this.refreshPending();
-  let value=(this.staged??this.state.documents)[name];
+  this.refreshPending(name);
+  let value=this.view(name)[name];
   for(const part of parts){if(value==null||!Object.hasOwn(value,part))return fallback;value=value[part];}
   return value===undefined?fallback:structuredClone(value);
  }
  docRef(name:string,fallback?:any):DocRef{const body=this.get(name,fallback);return {$doc:name,digest:docDigest(body),body};}
  sameDoc(name:string,expected:unknown,fallback?:any):boolean{return sameDocument(this.get(name,fallback),expected);}
- has(name:string):boolean{this.refreshPending();return Object.hasOwn(this.staged??this.state.documents,name);}
+ has(name:string):boolean{this.refreshPending(name);return Object.hasOwn(this.view(name),name);}
  set(name:string,value:any):void{
   this.refreshPending();
   if(this.staged){this.staged[name]=structuredClone(value);this.touched.add(name);return;}
@@ -166,7 +177,7 @@ export class CoreStore {
    this.captured={};let value:T,patches:Record<string,any>;
    try{value=this.transaction(fn);patches=this.captured;}finally{this.captured=undefined;}
    if(!Object.keys(patches!).length)return value!;
-   const revision=this.state.revision;this.pendingAsync=true;
+   const revision=this.state.revision;this.pendingAsync=true;this.pendingPatches=patches!;
    try{
     const result=await this.callCommit({id:randomUUID(),baseRevision:revision,patches:patches!});
     if(result.currentRevision!==result.revision)throw Error('core_authority_revision_conflict');
@@ -174,11 +185,32 @@ export class CoreStore {
     // revision while this promise's continuation was waiting to run.
     if(this.state.revision<=result.revision)this.state={...this.state,revision:result.revision,documents:{...this.state.documents,...patches!}};
     return value!;
-   }catch(error){this.broken=true;throw error;}finally{this.pendingAsync=false;}
+   }catch(error){this.broken=true;throw error;}finally{this.pendingAsync=false;this.pendingPatches=null;}
   });
   this.asyncTail=operation.catch(()=>{});return operation;
  }
- sourceRevision():string{this.refreshPending();const d=this.staged??this.state.documents;return memorySourceRevision(d.config,d.memories,d.graph);}
+ /** 3480: the transaction's value now, the commit behind it. Readers see the new state at once (view); the next write waits
+  *  for the disk. A failed commit breaks the store as transactionAsync does, and is logged here because nobody awaits it. */
+ transactionBehind<T>(fn:()=>T):T{
+  if(this.depth)throw Error('core_async_transaction_cannot_nest');
+  if(!this.options.service&&!this.options.asyncTransactions)return this.transaction(fn);
+  this.refreshPending();
+  if(this.broken)throw Error('core_authority_unavailable');
+  this.captured={};let value:T,patches:Record<string,any>;
+  try{value=this.transaction(fn);patches=this.captured;}finally{this.captured=undefined;}
+  if(!Object.keys(patches!).length)return value!;
+  const revision=this.state.revision;this.pendingAsync=true;this.pendingPatches=patches!;
+  const operation=(async()=>{
+   try{
+    const result=await this.callCommit({id:randomUUID(),baseRevision:revision,patches:patches!});
+    if(result.currentRevision!==result.revision)throw Error('core_authority_revision_conflict');
+    if(this.state.revision<=result.revision)this.state={...this.state,revision:result.revision,documents:{...this.state.documents,...patches!}};
+   }catch(error){this.broken=true;console.error('[core-store] write-behind commit failed:',error instanceof Error?error.message:String(error));throw error;}
+   finally{this.pendingAsync=false;this.pendingPatches=null;}
+  })();
+  this.asyncTail=operation.catch(()=>{});return value!;
+ }
+ sourceRevision():string{this.refreshPending('config');this.refreshPending('memories');this.refreshPending('graph');const d=this.staged??(this.pendingAsync&&this.pendingPatches?{...this.state.documents,...this.pendingPatches}:this.state.documents);return memorySourceRevision(d.config,d.memories,d.graph);}
  health(){return this.call('health',{});}
  backup(reason:string):string{return this.call('backup',{reason});}
  clearExperiences(){this.transaction(()=>{const plan=corePolicySync<Record<string,unknown>>('memory-admin.assets',[Object.keys(this.staged!),this.get('dream-learning')]);for(const [key,value]of Object.entries(plan))this.set(key,value);});return;}

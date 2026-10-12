@@ -5531,9 +5531,10 @@ async function ollamaChatTurn(messages: { role: string; content: string; at?: st
   let fromSearch = false;
   const placeLookupPlan=(navigationPolicy('placeSearchStart',[latest,messages.at(-1)?.role??null,searchConfig]));
   const lookUp = placeLookupPlan?placeLookupPlan.query:(messages.at(-1)?.role === 'user' && searchConfig.enabled ? placeQuery(latest, searchConfig.place) : null);
-  // A standalone turn cannot enter the lookup awaits below; its reminder and
-  // mood writes can share one durable commit before provider work.
-  const batchReminderAcknowledgement = naturalConversationKind(latest) !== null && !lookUp;
+  // The reminder and mood writes share one commit before provider work (3480: every turn, not only a standalone one —
+  // the separate acknowledgement commit was ~80 ms a turn with reminders due). A place lookup awaits a search first,
+  // so its acknowledgement stays durable ahead of that wait.
+  const batchReminderAcknowledgement = !lookUp;
   if (!batchReminderAcknowledgement) acknowledgeReminders();
   if (lookUp && (true as boolean)) {
     const observed=await runCorePlaceSearch(placeLookupPlan,aside,{search:(query:string,options:any)=>searchWeb(query,options,net.fetch,getSearchKey()),format:(query:string,found:any)=>formatResults(query,found,false),current:()=>readSearchConfig(store.get('search'))});
@@ -5650,7 +5651,8 @@ async function ollamaChatTurn(messages: { role: string; content: string; at?: st
   if (readsAsDropIt(latest)) console.log(`[pushback] told to drop it (${pushback.count}/${PUSHBACK_LIMIT})${isSilenced(pushback, Date.now()) ? ' — dropping the subject entirely' : ''}`);
   nudgeVitals('spoken-to');
   // Feelings and mood are one interaction update, committed together before dispatch.
-  const mood = await store.transactionAsync(() => {
+  // 3480 write-behind: the mood is known now; the disk catches up while the prompt is prepared (~75-120 ms a turn).
+  const mood = store.transactionBehind(() => {
     if (batchReminderAcknowledgement) acknowledgeReminders();
     return advanceMood(latest, messages.slice(0, -1));
   });
