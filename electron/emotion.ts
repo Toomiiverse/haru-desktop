@@ -16,11 +16,11 @@ import { IRRITATION, EGO } from './mood';
 // and "neutral, worried" — none of which had anywhere to go. Those are not
 // exotic states for her: driving somebody at a task and being anxious about
 // them are most of what she does, and neither was expressible.
-export const EMOTIONS = ['neutral', 'happy', 'curious', 'smug', 'annoyed', 'bored', 'sleepy', 'surprised', 'affectionate', 'embarrassed', 'determined', 'worried'] as const;
+import { EMOTIONS, type EmotionName } from './emotion-names';
+export { EMOTIONS, type EmotionName };
 export const INTENTS = ['listen', 'explain', 'tease', 'dismiss', 'celebrate', 'soothe'] as const;
 export const FOCUSES = ['user', 'self', 'task', 'away'] as const;
 
-export type EmotionName = typeof EMOTIONS[number];
 
 /**
  * The face she pulls, chosen from what a model actually ships.

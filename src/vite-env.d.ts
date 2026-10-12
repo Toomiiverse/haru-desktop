@@ -9,6 +9,9 @@ interface Window {
     startup: { get(): Promise<{ autoStart: boolean; shortcut: boolean; packaged: boolean }>; setAutoStart(enabled: boolean): Promise<boolean>; createShortcut(): Promise<string> };
     updates: { get(): Promise<import('./types').UpdateReport>; onState(callback: (report: import('./types').UpdateReport) => void): () => void };
     listen: {
+      isActive(): Promise<boolean>;
+      setActive(active: boolean): Promise<void>;
+      onActive(callback: (active: boolean) => void): () => void;
       correct(heard: string, meant: string): Promise<number>;
       corrections(): Promise<{ heard: string; meant: string; used: number }[]>;
       forgetCorrection(heard: string): Promise<{ heard: string; meant: string; used: number }[]>;
@@ -58,6 +61,10 @@ interface Window {
       set(config: import('./types').AniListConfig): Promise<import('./types').AniListConfig>;
       test(): Promise<number>;
     };
+    usage: {
+      get(): Promise<import('./types').UsageRow[]>;
+      spend(force?: boolean): Promise<import('./types').ServiceSpend[]>;
+    };
     jellyfin: {
       status(): Promise<{ url: string; userId: string; hasKey: boolean }>;
       set(url: string, userId: string, apiKey: string): Promise<{ url: string; userId: string; hasKey: boolean }>;
@@ -75,7 +82,7 @@ interface Window {
       locate(): Promise<{ place: string; accuracy: number }>;
       test(): Promise<number>;
     };
-    chat: { getMessages(): Promise<import('./types').Message[]>; setMessages(messages: import('./types').Message[]): Promise<void>; getArchive(): Promise<Record<string, import('./types').Message[]>>; newConversation(): Promise<void>; opening(): Promise<string | null>; onReset(callback: () => void): () => void; onRatedFromPhone(callback: (turn: { id: string; reaction?: import('./types').Reaction; note?: string }) => void): () => void; onSaidFromPhone(callback: (turn: { reply: string; said: string }) => void): () => void; onPicture(callback: (picture: { id: string; name: string; saved: string; url: string; bytes: number; private: boolean }) => void): () => void; onInterject(callback: (line: string) => void): () => void; onVoiceFailed(callback: (why: string) => void): () => void; onFellBack(callback: (why: string) => void): () => void; onFromPhone(callback: (turn: { text: string; reply: string; ignored: boolean; retry?: boolean; attachments?: import('./types').Attachment[]; replyTo?: { id: string; excerpt: string } }) => void): () => void; onExpectReply(callback: () => void): () => void; expectAnswer(): Promise<void>; getAsides(): Promise<import('./types').Aside[]>; nudgeFeedback(id: string, choice: import('./types').NudgePreference | null): Promise<import('./types').Aside>; onAsidesChanged(callback: (asides: import('./types').Aside[]) => void): () => void; clearAsides(): Promise<import('./types').Aside[]>; onAside(callback: (aside: import('./types').Aside) => void): () => void; onAsidesCleared(callback: () => void): () => void };
+    chat: { getMessages(): Promise<import('./types').Message[]>; setMessages(messages: import('./types').Message[]): Promise<void>; getArchive(): Promise<Record<string, import('./types').Message[]>>; newConversation(): Promise<void>; opening(): Promise<string | null>; onReset(callback: () => void): () => void; onRatedFromPhone(callback: (turn: { id: string; reaction?: import('./types').Reaction; note?: string }) => void): () => void; onSaidFromPhone(callback: (turn: { reply: string; said: string }) => void): () => void; onPicture(callback: (picture: { id: string; name: string; saved: string; url: string; bytes: number; private: boolean }) => void): () => void; onInterject(callback: (line: string) => void): () => void; onVoiceFailed(callback: (why: string) => void): () => void; onFellBack(callback: (why: string) => void): () => void; onFromPhone(callback: (turn: { text: string; reply: string; ignored: boolean; retry?: boolean; attachments?: import('./types').Attachment[]; replyTo?: { id: string; excerpt: string } }) => void): () => void; onExpectReply(callback: () => void): () => void; expectAnswer(): Promise<void>; getAsides(): Promise<import('./types').Aside[]>; nudgeFeedback(id: string, choice: import('./types').NudgePreference | null): Promise<import('./types').Aside>; onAsidesChanged(callback: (asides: import('./types').Aside[]) => void): () => void; clearAsides(): Promise<import('./types').Aside[]>; getHeldBack(): Promise<import('./types').HeldBack[]>; onHeldBack(callback: (held: import('./types').HeldBack[]) => void): () => void; onAside(callback: (aside: import('./types').Aside) => void): () => void; onAsidesCleared(callback: () => void): () => void };
     ai: { send(messages: { role: string; content: string; at?: string; attachments?: import('./types').Attachment[] }[], config: import('./types').ProviderConfig): Promise<import('./types').ChatResult>; test(endpoint: string, provider?: string): Promise<string[]>; defaultEndpoint(provider: string): Promise<string>; verify(endpoint: string, provider: string, model: string): Promise<{ models: string[]; note: string }>; getEscalate(): Promise<{ enabled: boolean; minWords: number; provider: import('./types').ProviderConfig | null }>; setEscalate(setting: { enabled: boolean; minWords: number }, provider: import('./types').ProviderConfig | null): Promise<{ enabled: boolean; minWords: number; provider: import('./types').ProviderConfig | null }>; setKey(apiKey: string): Promise<boolean>; hasKey(): Promise<boolean>; setSelfHostedKey(apiKey: string): Promise<boolean>; hasSelfHostedKey(): Promise<boolean>; retort(disliked: string, config: import('./types').ProviderConfig): Promise<string>; gloat(praised: string, config: import('./types').ProviderConfig): Promise<string> };
     mood: { get(): Promise<import('./types').Mood>; react(reaction: import('./types').Reaction, id?: string): Promise<import('./types').Mood> };
     profile: { get(): Promise<import('./types').Profile>; set(profile: import('./types').Profile): Promise<import('./types').Profile> };
@@ -136,6 +143,12 @@ interface Window {
     live2d: { import(): Promise<Live2DModel | null>; get(): Promise<Live2DModel | null>; remove(): Promise<void>; onChange(callback: (model: Live2DModel | null) => void): () => void };
     life: { onTick(callback: (payload: import('./types').LifeTick) => void): () => void; onEmotion(callback: (beat: import('./types').Beat) => void): () => void };
     companion: {
+      placement(metrics: {seat:number;feet:number;head:number;halfWidth:number;reduced:boolean}): Promise<void>;
+      perchState(): Promise<import('../electron/perching').PerchState>;
+      dragging(active:boolean,drop?:boolean): Promise<void>;
+      pointerOver(over:boolean): Promise<void>;
+      onPerching(callback:(state:import('../electron/perching').PerchState)=>void):()=>void;
+      floatBy(dx: number, dy: number): Promise<void>;
       moveBy(dx: number, dy: number): Promise<void>;
       resizeBy(factor: number): Promise<void>;
       showMenu(): Promise<void>;

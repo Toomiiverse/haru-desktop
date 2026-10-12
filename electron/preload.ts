@@ -20,6 +20,7 @@ type Message = { id: string; role: 'user' | 'assistant'; content: string; time: 
 // belonged to the conversation, and giving it that shape is what let it be
 // appended to one. See electron/asides.ts.
 type Aside = { id: string; at: string; day: string; source: string; text: string; nudgeTopic?: string; nudgeFeedback?: 'more' | 'less' | 'discussed' };
+type HeldBack = { at: string; why: string; line: string };
 // A file that came with a message. A path rather than bytes — see electron/attachments.ts.
 type Attachment = { id: string; kind: string; name: string; saved: string; url: string; bytes: number };
 // What the app knows about its own next version. See electron/updates.ts.
@@ -54,7 +55,7 @@ type LifeTick = { vitals: Vitals; action: string | null; night: boolean };
 type Emotion = { emotion: string; confidence: number; energy: number; intent: string; focus: string };
 type Beat = { emotion: Emotion; gesture?: 'nod' | 'shake' | 'stare' };
 type VoiceReference = { clip: string; text: string };
-type WardrobeControl = { id: string; name: string; kind: 'toggle' | 'option' | 'pose'; max: number };
+type WardrobeControl = { id: string; name: string; kind: 'toggle' | 'option' | 'pose'; values: number[]; labels?: string[]; default?: number };
 type VoiceConfig = { engine: string; voice: string; referenceText: string; endpoint: string; language: string; speed: number; volume: number; emotionVoices: Record<string, VoiceReference> };
 type SpeechClip = { turn: number; text: string; audio?: Uint8Array; mime?: string };
 
@@ -62,6 +63,13 @@ contextBridge.exposeInMainWorld('haru', {
   world: { get: () => ipcRenderer.invoke('world:get'), detail: (id:string,before?:number) => ipcRenderer.invoke('world:detail',id,before), assets: () => ipcRenderer.invoke('world:assets') },
   settings: { get: (key: string) => ipcRenderer.invoke('settings:get', key), set: (key: string, value: unknown) => ipcRenderer.invoke('settings:set', key, value) },
   listen: {
+    isActive: () => ipcRenderer.invoke('listen:active:get') as Promise<boolean>,
+    setActive: (active: boolean) => ipcRenderer.invoke('listen:active:set', active) as Promise<void>,
+    onActive: (callback: (active: boolean) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, active: boolean) => callback(active);
+      ipcRenderer.on('listen:active', listener);
+      return () => ipcRenderer.removeListener('listen:active', listener);
+    },
     correct: (heard: string, meant: string) => ipcRenderer.invoke('listen:correct', heard, meant) as Promise<number>,
     corrections: () => ipcRenderer.invoke('listen:corrections') as Promise<{ heard: string; meant: string; used: number }[]>,
     forgetCorrection: (heard: string) => ipcRenderer.invoke('listen:forgetCorrection', heard) as Promise<{ heard: string; meant: string; used: number }[]>,
@@ -73,6 +81,10 @@ contextBridge.exposeInMainWorld('haru', {
       ipcRenderer.on('listen:changed', listener);
       return () => ipcRenderer.removeListener('listen:changed', listener);
     },
+  },
+  usage: {
+    get: () => ipcRenderer.invoke('usage:get'),
+    spend: (force?: boolean) => ipcRenderer.invoke('usage:spend', force),
   },
   jellyfin: {
     status: () => ipcRenderer.invoke('jellyfin:get'),
@@ -253,6 +265,14 @@ contextBridge.exposeInMainWorld('haru', {
     // store, kept out of the transcript on purpose — see electron/asides.ts.
     // Main owns the list, so the window asks for it and is told about additions
     // rather than holding a copy it has to save.
+    // The other half of the same question: what she nearly said, and why she
+    // did not. See holdBack in electron/main.ts.
+    getHeldBack: () => ipcRenderer.invoke('chat:getHeldBack') as Promise<HeldBack[]>,
+    onHeldBack: (callback: (held: HeldBack[]) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, held: HeldBack[]) => callback(held);
+      ipcRenderer.on('chat:heldBack', listener);
+      return () => ipcRenderer.removeListener('chat:heldBack', listener);
+    },
     getAsides: () => ipcRenderer.invoke('chat:getAsides') as Promise<Aside[]>,
     nudgeFeedback: (id: string, choice: 'more' | 'less' | 'discussed' | null) => ipcRenderer.invoke('chat:nudgeFeedback', id, choice) as Promise<Aside>,
     onAsidesChanged: (callback: (asides: Aside[]) => void) => {
@@ -434,6 +454,15 @@ contextBridge.exposeInMainWorld('haru', {
     },
   },
   companion: {
+    placement: (metrics: {seat:number;feet:number;head:number;halfWidth:number;reduced:boolean}) => ipcRenderer.invoke('companion:placement',metrics),
+    perchState: () => ipcRenderer.invoke('companion:perching') as Promise<import('./perching').PerchState>,
+    dragging: (active:boolean,drop=false) => ipcRenderer.invoke('companion:dragging',active,drop),
+    pointerOver: (over:boolean) => ipcRenderer.invoke('companion:pointerOver',over),
+    onPerching: (callback:(state:import('./perching').PerchState)=>void) => {
+      const listener=(_event:Electron.IpcRendererEvent,state:import('./perching').PerchState)=>callback(state);
+      ipcRenderer.on('companion:perching',listener);return ()=>ipcRenderer.removeListener('companion:perching',listener);
+    },
+    floatBy: (dx: number, dy: number) => ipcRenderer.invoke('companion:floatBy', dx, dy),
     moveBy: (dx: number, dy: number) => ipcRenderer.invoke('companion:moveBy', dx, dy),
     resizeBy: (factor: number) => ipcRenderer.invoke('companion:resizeBy', factor),
     showMenu: () => ipcRenderer.invoke('companion:showMenu'),

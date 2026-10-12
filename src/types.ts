@@ -46,6 +46,8 @@ export interface Message { id: string; role: Role; content: string; time: string
 export type AsideSource = 'screen' | 'screenshot' | 'activity' | 'fullscreen' | 'reminder' | 'idle' | 'journal' | 'page' | 'poke' | 'kept' | 'other';
 export type NudgePreference = 'more' | 'less' | 'discussed';
 export interface Aside { id: string; at: string; day: string; source: AsideSource; text: string; nudgeTopic?: string; nudgeFeedback?: NudgePreference; }
+/** A line she had ready and did not say. See electron/asides.ts. */
+export interface HeldBack { at: string; why: string; line: string; }
 /**
  * What the app knows about its own next version.
  *
@@ -62,7 +64,7 @@ export interface UpdateReport {
   standingDown?: string | null;
 }
 
-export interface ChatResult { content: string; ignored: boolean; irritation: number; ego: number; }
+export interface ChatResult { content: string; ignored: boolean; irritation: number; ego: number; messages?: Message[]; }
 export interface Mood { irritation: number; ego: number;
   /** On the mood a thumb hands back: whether she answers it out loud this time. Main's coin. */
   comeback?: boolean; }
@@ -123,7 +125,7 @@ export interface VoiceConfig { engine: VoiceEngine; voice: string; referenceText
 export interface SpeechClip { turn: number; text: string; audio?: Uint8Array; mime?: string; }
 // What she can change about how she looks. Discovered from the model's own
 // DisplayInfo rather than hardcoded — see electron/wardrobe.ts.
-export interface WardrobeControl { id: string; name: string; kind: 'toggle' | 'option' | 'pose'; values: number[]; }
+export interface WardrobeControl { id: string; name: string; kind: 'toggle' | 'option' | 'pose'; values: number[]; labels?: string[]; default?: number; }
 
 /** A phone or tablet that has been told to stay signed in. */
 export type WebDevice = { id: string; name: string; added: string; lastSeen: string };
@@ -138,4 +140,24 @@ export type WebStatus = {
   /** Why it is shut, when it is meant to be open. */
   trouble: string;
   devices: WebDevice[];
+};
+
+/** One service she has called, and how much of it. See electron/apiusage.ts. */
+export type UsageRow = { service: string; host: string; today: number; week: number; month: number; failed: number; last: string };
+
+/** A day's worth of one service, from electron/spend.ts. */
+export type DaySpend = { day: string; cost: number; tokens: number };
+
+/** What one service costs and what is left in it. `basis` is where the numbers came from. */
+export type ServiceSpend = {
+  service: string;
+  balance: { amount: number; unit: string; level: 'fine' | 'low' | 'empty' } | null;
+  calls: number;
+  days: DaySpend[];
+  today: number;
+  week: number;
+  month: number;
+  tokens: number;
+  basis: 'billed' | 'estimated' | 'balance' | 'calls';
+  note: string;
 };

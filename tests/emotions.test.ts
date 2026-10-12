@@ -18,13 +18,16 @@ test('every face has a file named for it and a label a screen reader can say', (
     assert.match(emotionConfig[face].label, /^Haru /);
     assert.equal(emotionConfig[face].transition, 'fade');
   }
-  assert.equal(HARU_EMOTIONS.length, 14);
+  assert.equal(HARU_EMOTIONS.length, 47);
 });
 
 test('the adapter takes the mood engine’s words, a face’s own name, or nonsense', () => {
-  assert.equal(adaptEmotion('determined'), 'excited');
+  assert.equal(adaptEmotion('determined'), 'determined');
   assert.equal(adaptEmotion('affectionate'), 'love');
-  assert.equal(adaptEmotion('worried'), 'sad');
+  assert.equal(adaptEmotion('worried'), 'concerned');
+  assert.equal(adaptEmotion('bored'), 'unimpressed');
+  assert.equal(adaptEmotion('skeptical'), 'skeptical');
+  assert.equal(adaptEmotion('wink'), 'wink');
   assert.equal(adaptEmotion('thinking'), 'thinking');
   assert.equal(adaptEmotion('confused'), 'confused');
   assert.equal(adaptEmotion('jubilant'), 'neutral');
@@ -60,7 +63,8 @@ test('she blinks on every face that has eyes to close', () => {
   assert.equal(emotionConfig.surprised.blink, false, 'no separable eyes');
   assert.equal(emotionConfig.sleepy.blink, false, 'already closed');
   assert.equal(emotionConfig.love.blink, false, 'hearts');
-  assert.equal(HARU_EMOTIONS.filter(face => emotionConfig[face].blink).length, 11);
+  assert.equal(emotionConfig.relieved.blink, false, 'relieved eyes are already closed');
+  assert.equal(HARU_EMOTIONS.filter(face => emotionConfig[face].blink).length, 39);
 });
 
 test('every face says how she holds herself, within reason; sleepy and sad droop', () => {

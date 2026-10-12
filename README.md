@@ -201,6 +201,38 @@ her with its source, its date and a confidence, and she is told to prefer the
 most recently updated source when they conflict — so a stale "the server runs
 Ubuntu" loses to a current "it runs Arch Linux" instead of arguing with it.
 
+## Her browser
+
+Off until `browser.enabled` is true. She has a browser of her own: Chromium,
+headless, run by [Playwright MCP](https://github.com/microsoft/playwright-mcp)
+as a child of her process, with no window and no port. She opens a page and is
+handed what is on it — the text, the links numbered, the buttons and boxes
+numbered — and then follows, clicks and types by number, scrolls, goes back,
+and takes screenshots she actually looks at. It works the same on the server as
+on the desk, and from the phone too; nothing about it needs a display.
+
+1. Once, on the machine: `npx playwright install chromium` fetches the browser
+   Playwright drives (about 150 MB, under `~/.cache/ms-playwright`). On a
+   server without the libraries it needs, `npx playwright install --with-deps
+   chromium`, or set `browser.executablePath` in `config.json` to a Chromium
+   already installed (`/usr/bin/chromium`, say).
+2. Switch it on: tell her "turn your web browser on" (the `web_browser`
+   setting, which she changes at your word like any other), or set
+   `"browser": { "enabled": true }` in `config.json` with her stopped.
+
+The browser is started on the first thing she asks of it and stopped after two
+idle minutes. Its profile lives in memory and is gone when it stops, so she is
+signed in to nothing. Every request it makes goes through a small proxy of hers
+that refuses this machine, the local network and the tailnet — so a page
+cannot point her browser at her own web client, the router or a Tailscale peer
+— and once a stranger's page is in a reply her machine tools are withdrawn for
+the rest of it, as they are after `read_web_page`; only the browser's own moves
+by number stay, and typing is held to words you actually said.
+
+A Chrome on the desk started with `--remote-debugging-port=9222` still works,
+with `"browser": { "enabled": true, "backend": "chrome" }`. It can open
+addresses, read text and take screenshots, but has no numbered links or boxes.
+
 ## Knowledge architecture
 
 - `electron/knowledge.ts`: the store — chunk and document records, categories,

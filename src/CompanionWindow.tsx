@@ -1,13 +1,19 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { StageFailureBoundary } from './components';
 import type { Live2DModelHandle } from './components/Live2DCanvas';
+import type { VRMHandle } from './components/VRMCanvas';
+import { SvgAvatarCanvas, type SvgAvatarHandle } from './components/SvgAvatarCanvas';
+import type { EarFeeling } from './companion/ears';
 import { ACTION_SHAPES, emotionHoldMs, expressionForEmotion, gazeForAction, GESTURE_DURATION_MS, resolveGaze, type ActionShape, type Gaze, type Gesture } from './companion/behaviour';
 import { POSES, POSE_TIMING, poseStrength } from './companion/pose';
 import { attachParameterLayer } from './companion/parameters';
 import { createVoicePlayer, type MouthReading, type VoicePlayer } from './companion/mouth';
 import { idleMotion } from './companion/idle';
+import { desktopAnchor } from './companion/placement';
+import { referenceClip } from './companion/referenceClips';
 import { randomWait } from './retorts';
 import type { Emotion, Vitals, VoiceConfig } from './types';
+import { speedFor } from '../electron/roam';
 
 // Only used until the first life tick arrives, a few seconds after launch.
 const RESTING_VITALS: Vitals = { energy: 0.6, happiness: 0.6, curiosity: 0.5, affection: 0.4, sleepiness: 0.2, stress: 0.2, focus: 0.5 };
@@ -85,6 +91,7 @@ async function reportParameterRanges(handle: Live2DModelHandle) {
   void window.haru?.wardrobe.reportRanges(ranges);
 }
 
+const VRMCanvas = lazy(() => import('./components/VRMCanvas').then(module => ({ default: module.VRMCanvas })));
 const Live2DCanvas = lazy(() => import('./components/Live2DCanvas').then(module => ({ default: module.Live2DCanvas })));
 
 /**
@@ -104,10 +111,77 @@ const Live2DCanvas = lazy(() => import('./components/Live2DCanvas').then(module 
 const DIALOGUE_MIN_HARU_WIDTH = 120;
 
 export function CompanionWindow() {
+  const [keyboardNavigation, setKeyboardNavigation] = useState(false);
+  useEffect(() => {
+    // Native window focus is not evidence that the user is navigating with a keyboard.
+    const keyboard = (event: KeyboardEvent) => { if (event.key === 'Tab') setKeyboardNavigation(true); };
+    const pointer = () => setKeyboardNavigation(false);
+    window.addEventListener('keydown', keyboard, true);
+    window.addEventListener('pointerdown', pointer, true);
+    window.addEventListener('blur', pointer);
+    return () => {
+      window.removeEventListener('keydown', keyboard, true);
+      window.removeEventListener('pointerdown', pointer, true);
+      window.removeEventListener('blur', pointer);
+    };
+  }, []);
   const [model, setModel] = useState<Live2DModel | null>(null);
   const [error, setError] = useState<string | null>(null);
   const dragging = useRef(false);
+  const flightSample = useRef<{ x: number; y: number; at: number } | null>(null);
+  const flightPending = useRef(false);
+  const home = useRef<{ x: number; y: number } | null>(null);
+  const engaged = useRef(false);
   const modelHandle = useRef<Live2DModelHandle | null>(null);
+  const vrmHandle = useRef<VRMHandle | null>(null);
+  const svgHandle = useRef<SvgAvatarHandle | null>(null);
+  // Her face on the desk, rather than a body in a room. The SVG stage is the
+  // default now; a saved 'model' switches back to the VRM or Live2D rig without
+  // touching the rest of the window. See components/SvgAvatarCanvas.tsx.
+  const [avatarKind, setAvatarKind] = useState<'svg' | 'model'>('svg');
+  useEffect(() => {
+    void window.haru?.settings.get('avatar.kind').then(saved => {
+      if (saved === 'model' || saved === 'svg') setAvatarKind(saved);
+    }).catch(() => { /* never set: the SVG face is the default and needs no rescue */ });
+  }, []);
+  const perch=useRef<import('../electron/perching').PerchState>({seated:false,jump:null});
+  const movedByHand=useRef(false);
+  const lastPointerOver=useRef<boolean|null>(null);
+  const reportPlacement=useCallback((metrics:{seat:number;feet:number;head:number;halfWidth:number;reduced:boolean})=>{void window.haru?.companion.placement(metrics);},[]);
+  useEffect(()=>{
+    if(!window.haru)return;let active=true,changed=false;
+    const off=window.haru.companion.onPerching(value=>{changed=true;perch.current=value;});
+    void window.haru.companion.perchState().then(value=>{if(active&&!changed)perch.current=value;});
+    return ()=>{active=false;off();};
+  },[]);
+  const vrmGaze = useRef({ x: 0, y: 0 });
+  const earFeeling = useRef<EarFeeling>({ emotion: 'neutral', strength: 0, listening: false, sleepiness: 0 });
+  const microphoneListening = useRef(false);
+  useEffect(() => {
+    if (!window.haru) return;
+    let active = true, changed = false;
+    const off = window.haru.listen.onActive(value => { changed = true; microphoneListening.current = value; });
+    void window.haru.listen.isActive().then(value => { if (active && !changed) microphoneListening.current = value; });
+    return () => { active = false; off(); };
+  }, []);
+  const handleVRMReady = useCallback((handle: VRMHandle | null) => {
+    vrmHandle.current = handle;lastPointerOver.current=null;
+    expressions.current = handle?.expressions ?? [];
+  }, []);
+  // The SVG face has no rig expression names to match against — her mood drives
+  // the face directly through the handle.
+  const handleSvgReady = useCallback((handle: SvgAvatarHandle | null) => {
+    svgHandle.current = handle;lastPointerOver.current=null;
+    expressions.current = [];
+  }, []);
+  const readVRM = useCallback(() => ({ mouth: voice.current?.read() ?? SILENT, gaze: vrmGaze.current, wardrobe: wardrobe.current, ears: earFeeling.current, seated:perch.current.seated, jump:perch.current.jump, fall:perch.current.fall, walking:walking.current, walkingSpeed:speedFor(life.current.vitals.energy), desktop:perch.current.desktop, engaged:engaged.current }), []);
+  const readSvg = () => {
+    const reading = readVRM(), focus = reading.desktop?.focus, body = reading.desktop?.avatar;
+    const gaze = focus && body && life.current.idleSeconds > 8 && !engaged.current
+      ? { x: (focus.x - body.x - body.width / 2) / body.width, y: (focus.y - body.y - body.height / 2) / body.height }
+      : { x: reading.gaze.x, y: -reading.gaze.y };
+    return { ...reading, gaze };
+  };
 
   const handleReady = useCallback((handle: Live2DModelHandle | null) => {
     modelHandle.current = handle;
@@ -135,7 +209,7 @@ export function CompanionWindow() {
   // screen over a model that loaded perfectly well.
   useEffect(() => { setError(null); }, [model?.url]);
 
-  useEffect(() => window.haru?.companion.onSetExpression(name => { modelHandle.current?.expression(name); }), []);
+  useEffect(() => window.haru?.companion.onSetExpression(name => { modelHandle.current?.expression(name); vrmHandle.current?.expression(name); svgHandle.current?.expression(name); }), []);
 
   // Held in a ref and read per frame rather than applied on change: expressions
   // rewrite these same parameters every frame, so a one-off write would be undone
@@ -143,9 +217,12 @@ export function CompanionWindow() {
   const wardrobe = useRef<Record<string, number>>({});
   useEffect(() => {
     if (!window.haru) return;
-    void window.haru.wardrobe.get().then(({ values }) => { wardrobe.current = values; });
-    return window.haru.wardrobe.onChange(values => { wardrobe.current = values; });
-  }, []);
+    let active = true;
+    wardrobe.current = {};
+    void window.haru.wardrobe.get().then(({ values }) => { if (active) wardrobe.current = values; });
+    const off = window.haru.wardrobe.onChange(values => { wardrobe.current = values; });
+    return () => { active = false; off(); };
+  }, [model?.url]);
 
   // Speech is owned by this window rather than the chat window so the mouth can
   // be driven from the audio itself. Built in an effect, not lazily during
@@ -240,7 +317,7 @@ export function CompanionWindow() {
   // Which way main is currently carrying the window, so the legs match the
   // actual movement rather than guessing at it from the window position.
   const walking = useRef(0);
-  useEffect(() => window.haru?.companion.onWalking(({ facing }) => { walking.current = facing; }), []);
+  useEffect(() => window.haru?.companion.onWalking(({ moving, facing }) => { walking.current = moving ? facing : 0; }), []);
 
   const cursor = useRef({ x: 0, y: 0 });
   // Where the screen is while something plays fullscreen on it. Held in a ref and
@@ -253,6 +330,14 @@ export function CompanionWindow() {
     const bounds = stage.current?.getBoundingClientRect();
     const width = bounds?.width || window.innerWidth;
     const height = bounds?.height || window.innerHeight;
+    if(vrmHandle.current || svgHandle.current) {
+      const hitTest = vrmHandle.current?.hitTest ?? svgHandle.current?.hitTest;
+      if (hitTest) {
+        const panel=document.querySelector('.companion-dialogue')?.getBoundingClientRect();
+        const over=dragging.current || !!(panel&&x>=panel.left&&x<=panel.right&&y>=panel.top&&y<=panel.bottom) || hitTest(x,y);
+        if(over!==lastPointerOver.current){lastPointerOver.current=over;void window.haru?.companion.pointerOver(over);}
+      }
+    }
     // Into the model's -1..1 focus space, clamped so a cursor far off-window
     // does not peg her eyes at the extreme.
     cursor.current = {
@@ -272,11 +357,17 @@ export function CompanionWindow() {
   const emotion = useRef<{ value: Emotion; until: number; holdMs: number } | null>(null);
   const gesture = useRef<{ name: Gesture; startedAt: number } | null>(null);
   useEffect(() => window.haru?.life.onEmotion(({ emotion: value, gesture: name }) => {
-    const holdMs = emotionHoldMs(value);
+    const expression = expressionForEmotion(value, expressions.current);
+    const holdMs = emotionHoldMs(value, expression);
     emotion.current = { value, until: performance.now() + holdMs, holdMs };
     if (name) gesture.current = { name, startedAt: performance.now() };
-    const expression = expressionForEmotion(value, expressions.current);
     if (expression) modelHandle.current?.expression(expression);
+    vrmHandle.current?.expression(expression);
+    const svgExpression = value.intent === 'tease' && (value.emotion === 'happy' || value.emotion === 'smug') ? 'wink'
+      : value.emotion === 'annoyed' && value.intent === 'explain' ? 'skeptical' : value.emotion;
+    svgHandle.current?.expression(svgExpression);
+    if (name) svgHandle.current?.play(name);
+    if (!referenceClip(expression)) vrmHandle.current?.play(value.emotion);
   }), []);
 
   // Without this she keeps whichever face she last pulled — one happy reply and
@@ -284,6 +375,8 @@ export function CompanionWindow() {
   const clearExpression = useCallback(() => {
     const manager = (modelHandle.current as unknown as { internalModel?: { motionManager?: { expressionManager?: { resetExpression?(): void } } } })?.internalModel?.motionManager?.expressionManager;
     manager?.resetExpression?.();
+    vrmHandle.current?.expression(null);
+    svgHandle.current?.expression(null);
   }, []);
 
   // Poses are held in a ref and read per frame by the parameter layer, rather
@@ -301,6 +394,7 @@ export function CompanionWindow() {
   }, []);
 
   const playPose = useCallback((name: string) => {
+    svgHandle.current?.play(name);
     if (!POSES[name]) return;
     // Restarting the same pose rather than stacking it, so a repeat reads as one
     // longer beat instead of doubling in strength.
@@ -315,6 +409,7 @@ export function CompanionWindow() {
   useEffect(() => window.haru?.life.onTick(({ vitals, action: name }) => {
     life.current = { ...life.current, vitals };
     if (name) playPose(name);
+    if (name && (!emotion.current || performance.now() >= emotion.current.until)) vrmHandle.current?.play(name);
     const shape = name ? ACTION_SHAPES[name] : undefined;
     if (shape) action.current = { shape, gaze: gazeForAction(shape), startedAt: performance.now() };
   }), [playPose]);
@@ -378,6 +473,13 @@ export function CompanionWindow() {
       smoothed.x += (target.x - smoothed.x) * 0.08;
       smoothed.y += (target.y - smoothed.y) * 0.08;
 
+      vrmGaze.current = { ...smoothed };
+      earFeeling.current = {
+        emotion: feeling?.value.emotion ?? 'neutral',
+        strength: emotionStrength * (feeling?.value.confidence ?? 1),
+        listening: microphoneListening.current,
+        sleepiness: life.current.vitals.sleepiness,
+      };
       if (!handle) return;
 
       // focus() wants stage pixels, so the normalised gaze is mapped back out.
@@ -413,12 +515,18 @@ export function CompanionWindow() {
   // Where the press began, so a click can be told from a drag on release. She is
   // dragged by her body, so every poke is also the start of a potential drag —
   // only a press that goes nowhere counts as having prodded her.
-  const press = useRef<{ x: number; y: number; at: number } | null>(null);
+  const press = useRef<{ x: number; y: number; lastX: number; lastY: number; pointerId: number; at: number } | null>(null);
+
+  useEffect(() => {
+    window.addEventListener('blur', cancelDrag);
+    return () => { window.removeEventListener('blur', cancelDrag); cancelDrag(); };
+  }, []);
 
   // The box at her feet. Open means she is waiting to be typed into; asking
   // means the question has gone and the answer has not come back yet, which on
   // a local model is two to six seconds and needs to look like something.
   const [asking, setAsking] = useState(false);
+  engaged.current = asking || !!caption;
   const [draft, setDraft] = useState('');
   const [waiting, setWaiting] = useState(false);
   // Picked once when the question goes out rather than per render, so it does not
@@ -492,6 +600,7 @@ export function CompanionWindow() {
     setChoices([]);
     setWaitingLine(randomWait());
     setWaiting(true);
+    svgHandle.current?.play('ear-twitch');
     try {
       // The reply itself arrives through the caption on its own — ollamaChat
       // speaks it and pushes it there. Only what she offered has to come back
@@ -508,33 +617,64 @@ export function CompanionWindow() {
     }
   }
 
+  function floatAcrossDesktop(x: number, y: number, moving: boolean) {
+    const at = performance.now(), previous = flightSample.current;
+    if (!moving || dragging.current || asking || caption || lastPointerOver.current) { flightSample.current = null; return; }
+    if (!previous || at - previous.at > 150) { flightSample.current = { x, y, at }; return; }
+    if (flightPending.current || at - previous.at < 32) return;
+    flightSample.current = { x, y, at };
+    const scene = perch.current.desktop, destination = scene && desktopAnchor(scene, home.current);
+    if (!scene || !destination) return;
+    const dx = destination.x - window.screenX, dy = destination.y - window.screenY;
+    if (Math.hypot(dx, dy) < 2) return;
+    const step = Math.min(1, (at - previous.at) / 180, 80 / Math.max(1, Math.hypot(dx, dy)));
+    const request = window.haru?.companion.floatBy?.(dx * step, dy * step);
+    if (request) { flightPending.current = true; void request.catch(() => {}).finally(() => { flightPending.current = false; }); }
+  }
   function onPointerDown(event: React.PointerEvent) {
-    if (event.button !== 0) return;
-    dragging.current = true;
-    press.current = { x: event.screenX, y: event.screenY, at: performance.now() };
-    (event.target as Element).setPointerCapture(event.pointerId);
+    if (event.button !== 0 || !event.isPrimary || dragging.current) return;
+    dragging.current = true;movedByHand.current=false;
+    press.current = { x: event.screenX, y: event.screenY, lastX: event.screenX, lastY: event.screenY, pointerId: event.pointerId, at: performance.now() };
+    svgHandle.current?.drag({ x: event.screenX, y: event.screenY });
+    event.currentTarget.setPointerCapture(event.pointerId);
   }
   function onPointerMove(event: React.PointerEvent) {
-    if (!dragging.current) return;
-    window.haru?.companion.moveBy(event.movementX, event.movementY);
+    if (!dragging.current || !press.current || event.pointerId !== press.current.pointerId) return;
+    if(!movedByHand.current) {
+      if(Math.hypot(event.screenX-press.current.x,event.screenY-press.current.y)<5)return;
+      movedByHand.current=true;void window.haru?.companion.dragging(true);
+    }
+    svgHandle.current?.drag({ x: event.screenX, y: event.screenY });
+    window.haru?.companion.moveBy(event.screenX - press.current.lastX, event.screenY - press.current.lastY);
+    press.current.lastX = event.screenX; press.current.lastY = event.screenY;
   }
   function onPointerUp(event: React.PointerEvent) {
+    if (!press.current || event.pointerId !== press.current.pointerId) return;
     dragging.current = false;
-    (event.target as Element).releasePointerCapture(event.pointerId);
+    svgHandle.current?.drag(null);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
     const started = press.current;
     press.current = null;
+    if(movedByHand.current){home.current={x:window.screenX,y:window.screenY};movedByHand.current=false;void window.haru?.companion.dragging(false,true);return;}
     if (!started) return;
     // Generous on distance and time: dragging a small window by hand always
     // wobbles a few pixels, and treating that as a poke would have her complain
     // every time she was moved.
     const moved = Math.hypot(event.screenX - started.x, event.screenY - started.y);
     if (moved < 5 && performance.now() - started.at < 500) {
-      // A click on her is a summons now, not a prod. Prodding is what clicking
-      // her while the box is already open means — which keeps the flinching and
-      // the escalation without asking anyone to learn a second gesture.
-      if (asking) void window.haru?.companion.poke('poke');
-      else void window.haru?.companion.open().then(() => { setAsking(true); setTimeout(() => box.current?.focus(), 0); });
+      reactToTap();
     }
+  }
+  function reactToTap() {
+    svgHandle.current?.tap();
+    if (asking) { if (!svgHandle.current) void window.haru?.companion.poke('poke'); }
+    else void window.haru?.companion.open().then(() => { setAsking(true); setTimeout(() => box.current?.focus(), 0); });
+  }
+  function cancelDrag() {
+    if(!dragging.current)return;
+    dragging.current=false;press.current=null;movedByHand.current=false;
+    svgHandle.current?.drag(null);
+    void window.haru?.companion.dragging(false);
   }
   function onContextMenu(event: React.MouseEvent) {
     event.preventDefault();
@@ -547,20 +687,24 @@ export function CompanionWindow() {
     window.haru?.companion.resizeBy(event.deltaY < 0 ? 1.06 : 0.94);
   }
 
-  if (!model) return null;
+  if (avatarKind === 'model' && !model) return null;
   return (
-    <div className="companion-stage">
-      <StageFailureBoundary onError={setError}>
+    <div className="companion-stage" data-keyboard-navigation={keyboardNavigation || undefined}>
+      {avatarKind === 'svg'
+        ? <SvgAvatarCanvas onFloat={floatAcrossDesktop} onError={setError} onReady={handleSvgReady} onFit={onFit} read={readSvg} />
+        : <StageFailureBoundary key={model!.url} onError={setError}>
         <Suspense fallback={null}>
-          <Live2DCanvas source={model.url} onError={setError} onReady={handleReady} onFit={onFit} />
+          {model!.path.toLowerCase().endsWith('.vrm')
+            ? <VRMCanvas source={model!.url} onError={setError} onReady={handleVRMReady} onFit={onFit} onPlacement={reportPlacement} read={readVRM} />
+            : <Live2DCanvas source={model!.url} onError={setError} onReady={handleReady} onFit={onFit} />}
         </Suspense>
-      </StageFailureBoundary>
+      </StageFailureBoundary>}
       {/* Everything that reacts to a pointer lives on this, not on the stage, so
           the transparent margin around her no longer drags or pokes her. Note
           that those clicks are inert rather than passed through: the window still
           swallows them at the OS level, and letting them reach the desktop behind
           would need setIgnoreMouseEvents on the window itself. */}
-      <div className="companion-hitbox" onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onContextMenu={onContextMenu} onWheel={onWheel}/>
+      <div className="companion-hitbox" role="button" tabIndex={0} aria-label="Haru: click to react, drag to move" onKeyDown={event => { if (!event.repeat && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); reactToTap(); } }} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={cancelDrag} onLostPointerCapture={cancelDrag} onContextMenu={onContextMenu} onWheel={onWheel}/>
       {/* The full line is rendered underneath at zero opacity so the bubble is
           already its final size on the first character — without it the box
           grows line by line as she types and shoves itself around the screen. */}

@@ -1,4 +1,5 @@
 import type { SearchResult } from './search';
+import type { Picture } from './browserctl';
 
 /** State owned by one reply, including all of its tool rounds and retries.
  * Concurrent desk, phone and call replies must never change one another's
@@ -14,6 +15,7 @@ export function createTurnContext({ hands = false, web = false, choices = false 
   let restart = false;
   let searchQuery = '';
   let searchResults: SearchResult[] = [];
+  let pictures: Picture[] = [];
 
   return {
     handsAllowed: () => allowed,
@@ -36,6 +38,10 @@ export function createTurnContext({ hands = false, web = false, choices = false 
     },
     lastSearchQuery: () => searchQuery,
     lastResults: () => searchResults.map(result => ({ ...result })),
+    // Pictures a tool took during a round — a screenshot of a page — waiting to
+    // be put in front of the model after that round's answers (toolloop.ts).
+    addPicture: (picture: Picture) => { pictures.push(picture); },
+    takePictures: () => { const taken = pictures; pictures = []; return taken; },
   };
 }
 

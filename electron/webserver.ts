@@ -336,6 +336,7 @@ function fileWithin(root: string, requested: string): string | null {
  * licence anticipating exactly this.
  */
 const LIB_FILES: Record<string, string> = {
+  '/lib/haru-avatar.js': 'haru-avatar.js',
   '/lib/pixi.js': 'pixi.min.js',
   '/lib/noeval.js': 'pixi-unsafe-eval.min.js',
   '/lib/live2d.js': 'live2d.cubism4.min.js',

@@ -10,6 +10,7 @@
 // gets audio, never an endpoint or a key.
 
 import { net } from 'electron';
+import { trackedFetch } from './apiusage';
 import { readFile } from 'node:fs/promises';
 import { basename } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -356,7 +357,7 @@ export function streamedSentences(buffer: string): { sentences: string[]; rest: 
 }
 
 async function post(url: string, body: unknown, auth: Record<string, string> = {}) {
-  const response = await net.fetch(url, {
+  const response = await trackedFetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...auth },
     body: JSON.stringify(body),

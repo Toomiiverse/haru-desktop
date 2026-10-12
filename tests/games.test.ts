@@ -57,3 +57,12 @@ test('the welcome names the game and how often, and hands over what she remember
   assert.match(prompt, /it is a gacha/);
   assert.match(welcomePrompt('New Game', 1, '', true), /never seen them play it/);
 });
+
+test('fullscreen promotes an unknown process to a game, with its spaces back — but never a film player', async () => {
+  const { promotedByFullscreen } = await import('../electron/activity');
+  assert.deepEqual(promotedByFullscreen({ kind: 'other', label: 'ZenlessZoneZero' }, 'ZenlessZoneZero'), { kind: 'gaming', label: 'Zenless Zone Zero' });
+  assert.deepEqual(promotedByFullscreen({ kind: 'other', label: 'film.mkv - VLC media player' }, 'vlc'), { kind: 'other', label: 'film.mkv - VLC media player' });
+  assert.deepEqual(promotedByFullscreen({ kind: 'watching', label: 'a video' }, 'chrome'), { kind: 'watching', label: 'a video' });
+  assert.equal(promotedByFullscreen({ kind: 'other', label: 'Claude' }, 'claude').kind, 'other');
+  assert.equal(promotedByFullscreen({ kind: 'other', label: 'Some Long Article' }, 'chrome').kind, 'other');
+});
