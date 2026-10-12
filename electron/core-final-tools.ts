@@ -5,6 +5,7 @@ import {activeTask} from './task-controller';
 import type {ToolDeps} from './tools';
 import {runCoreAgendaTool} from './core-agenda-tool';
 import {runCoreBrowserTool} from './core-browser-tool';
+import {readBrowserControlConfig} from './browserctl';
 import {runCoreSettingTool} from './core-remaining';
 import {zonedNow,localDateKey} from './dates';
 import * as desktop from './desktop';
@@ -38,7 +39,7 @@ export async function runCoreFinalTool(name:string|undefined,args:Record<string,
  const owned=async(c:any)=>{
   if(c.domain==='user-records'){if((!deps.userRecord))throw Error('owned_records_required');return JSON.stringify(deps.userRecord(c.tool==='note_check_in'?'tool.noteCheckin':'tool.saveJournal',c.args))}
   if(c.domain==='self'){if((!deps.policyConfig))throw Error('owned_settings_required');return JSON.stringify(await runCoreSettingTool(c.args,deps.policyConfig,deps))}
-  if(c.domain==='browser-tool'){return JSON.stringify(await runCoreBrowserTool(c.args,{port:deps.browserPort(),fetch:deps.net.fetch as any,shotDir:deps.browserShotDir,markPageRead:deps.markPageRead}))}
+  if(c.domain==='browser-tool'){return JSON.stringify(await runCoreBrowserTool(c.args,{port:deps.browserPort(),fetch:deps.net.fetch as any,shotDir:deps.browserShotDir,markPageRead:deps.markPageRead,config:readBrowserControlConfig(deps.store.get('browser')),said:typeof c.latest==='string'?c.latest:''}))}
   if(c.domain==='agenda-tool'){return runCoreAgendaTool(c.tool,c.args,c.latest,zonedNow(deps.CHAT_TIMEZONE),deps)}
   throw Error('final_tool_delegate_protocol');
  };

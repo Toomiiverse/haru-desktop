@@ -3846,6 +3846,8 @@ function availableTools(turn: TurnContext): ToolAvailability {
     search: { enabled: search.enabled, readPages: search.readPages, transcripts: transcriptsAvailable() },
     knowledge: getKnowledgeConfig().enabled,
     browser: readBrowserControlConfig(store.get('browser')).enabled,
+    // A fact for Core's tool menu: which browser that is.
+    browserBackend: readBrowserControlConfig(store.get('browser')).backend,
     claude: readClaudeCodeConfig(store.get('claudeCode')).enabled,
     downloads: downloadsLink() !== null,
     shell: shellLink() !== null,

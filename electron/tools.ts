@@ -40,7 +40,7 @@ import { fetchTranscript, formatTranscript, titleFrom, transcriptInstruction, vi
 import { findSuperseded, isInTheirWords, semanticSimilarities, supersede, MEMORY_KINDS, type MemoryKind, type MemoryRecord } from './memory';
 import { appendToBlockValue, canEditBlock, findBlock, replaceInBlockValue, resolveBlockValue, withEditedValue, type BlockSources, type MemoryBlock } from './blocks';
 import { adopt } from './tastes';
-import { activateTab, closeTab, listTargets, navigate, openTab, pageText, screenshot } from './browserctl';
+import { activateTab, closeTab, listTargets, navigate, openTab, pageText, screenshot, readBrowserControlConfig } from './browserctl';
 import type { OpenedSession } from './claudesession';
 import { findItem, readsAsNotDone } from './agenda';
 import { localDateKey, resolveDate, zonedNow } from './dates';
@@ -986,6 +986,8 @@ export type ToolAvailability = {
   knowledge: boolean;
   /** Whether she can drive the browser on this machine (browser.control). */
   browser: boolean;
+  /** Which browser is configured (browserctl.ts); Core's tool menu decides what that offers. */
+  browserBackend?: 'playwright' | 'chrome';
   /** Whether she can open Claude Code sessions for the Claude app (claudeCode.enabled). */
   claude: boolean;
   /** Whether the downloads can be asked (downloads.ts): the anime stack is on and her qBittorrent password file exists. Optional so fixtures need not name it. */
@@ -1484,7 +1486,7 @@ export async function runChatTool(call: ToolCall, latestUserMessage: string, dep
     }
   }
   if (name === 'browser_control') {
-    return JSON.stringify(await runCoreBrowserTool(args,{port:browserPort(),fetch:deps.net.fetch as Parameters<typeof runCoreBrowserTool>[1]['fetch'],shotDir:browserShotDir,markPageRead}));
+    return JSON.stringify(await runCoreBrowserTool(args,{port:browserPort(),fetch:deps.net.fetch as Parameters<typeof runCoreBrowserTool>[1]['fetch'],shotDir:browserShotDir,markPageRead,config:readBrowserControlConfig(deps.store.get('browser')),said:latestUserMessage}));
   }
   if (name === 'remember_about_user') {
     const fact = typeof args.fact === 'string' ? args.fact.trim() : '';
