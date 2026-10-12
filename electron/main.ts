@@ -5741,8 +5741,8 @@ async function ollamaChatTurn(messages: { role: string; content: string; at?: st
   // The maps buttons the app put under her earlier words are stored in the
   // message and are not hers to see: shown one, she wrote one, coordinates
   // and all, in place of a reply.
-  const vetted = messages.map(message => (message.attachments?.length ? { ...message, attachments: ourFiles(message.attachments) } : message))
-    .map(message => (navigationPolicy<typeof message>('historyMessage',[message])));
+  // 3290: one call for the whole history, not one per message (98 round trips on a 2026-10-12 turn).
+  const vetted = navigationPolicy<typeof messages>('historyMessages',[messages.map(message => (message.attachments?.length ? { ...message, attachments: ourFiles(message.attachments) } : message))]);
   const inPlay = attachmentsInPlay(vetted, Date.now());
   const carried = [...inPlay.values()].flat();
   // Only what arrived with this message decides where it is answered. A

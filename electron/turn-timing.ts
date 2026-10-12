@@ -42,6 +42,8 @@ export function timingFor(id: string, sink: (event: TimingEvent) => void = defau
     } catch { /* diagnostics must never change delivery or task settlement */ }
   };
 }
+/** The active turn, as an identity token for per-turn caches (core-policy-sync); undefined outside a turn. */
+export function currentTurn(): unknown { return context.getStore(); }
 export function markTurn(stage: TurnStage, fields?: Fields) {
   const current = context.getStore();
   if (current?.active) current.mark(stage,fields,current.phase);

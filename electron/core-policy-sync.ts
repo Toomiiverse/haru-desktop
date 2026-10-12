@@ -3,13 +3,18 @@ import {Worker} from 'node:worker_threads';
 import {randomUUID} from 'node:crypto';
 import {readFileSync} from 'node:fs';
 import path from 'node:path';
-import {markTurn} from './turn-timing';
+import {markTurn,currentTurn} from './turn-timing';
 import {coreServiceOptions} from './core-service-client';
 const LIMIT=2097152;
 let worker:Worker|undefined;
 // One caller blocks synchronously until the worker has completed its write.
 // Reuse that worker's transport buffers, never its decisions or authority.
 let buffers=new Map<number,SharedArrayBuffer>();
+// 3290: within one turn these pure getters are asked again and again with the same value (mood.normalize and readSlate 18
+// times each on 2026-10-12, 600+ round trips per turn in all); the answer is kept for the turn, serialised so no caller
+// shares an object with another. A new turn starts a new memo; outside a turn nothing is kept.
+export const MEMO_OPS=new Set(['mood.normalize','memory-admin.readSlate','memory-tools.normalizeFile','agenda-life.get','conversation-program.todaysExamples']);
+let memoTurn:unknown=null;let memo=new Map<string,string>();
 // Date carries the local fields the caller observed, including zonedNow's
 // shifted date. ISO serialization alone would change sleep-window semantics.
 function wire(value:unknown):unknown {
@@ -34,7 +39,10 @@ export function corePolicySync<T>(operation:string,args:unknown[]):T {
  // A failed call is never replayed. A later fresh snapshot may open a new
  // transport worker; it still has to receive a fresh Core decision.
  const transport=worker;
- const packet={version:1,requestId:randomUUID(),owner:coreAdapterOwner(),nowMs:Date.now(),operation,args:wire(args)};
+ const wired=wire(args);const turn=MEMO_OPS.has(operation)?currentTurn():undefined;
+ const key=turn?operation+'\0'+JSON.stringify(wired):null;
+ if(key){if(memoTurn!==turn){memoTurn=turn;memo=new Map();}const hit=memo.get(key);if(hit!==undefined){status='ok';return JSON.parse(hit) as T;}}
+ const packet={version:1,requestId:randomUUID(),owner:coreAdapterOwner(),nowMs:Date.now(),operation,args:wired};
  const encoded=JSON.stringify(packet);
  const limit=(/^knowledge-(index|flow|chunks|vault)\./.test(operation))?8388608:LIMIT;
  if(Buffer.byteLength(encoded)>limit)throw Error('core_policy_payload_too_large');
@@ -51,6 +59,7 @@ export function corePolicySync<T>(operation:string,args:unknown[]):T {
  if(value.version!==1||value.requestId!==packet.requestId||value.operation!==operation||value.executes!==false
    ||JSON.stringify(value.owner)!==JSON.stringify(packet.owner)||typeof value.policyEpoch!=='string'
    ||!Object.hasOwn(value,'result')||Date.now()-packet.nowMs>1500)throw Error('core_policy_protocol_error');
+ if(key)memo.set(key,JSON.stringify(value.result));
  status='ok';return value.result as T;
  } finally {markTurn('policy_span',{operation,durationMs:performance.now()-started,status});}
 }
